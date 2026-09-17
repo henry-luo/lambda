@@ -18,23 +18,19 @@ extern __thread EvalContext* context;
 
 // JSCUO9: the class index selects a slot from gc_object_zone.c's table
 // (16, 32, 48, 64, 96, 128, 256, 384), so this constant, not sizeof, is what
-// the allocator honours. It was 7 — the 384 B slot — which the record needed
-// at 328 B when item 4 began but not afterwards: every shrink down to 216 B
-// kept handing out 384 B slots. Class 5 is the 128 B slot, and the record now
-// measures exactly 128, so a function value occupies a third of what it did.
-// Keep this constant and the assert below moving together.
-#define JS_FUNCTION_SIZE_CLASS 5
-static_assert(sizeof(JsFunction) <= 128,
+// the allocator honours. JsFunction now physically inherits Function's
+// Lambda-specific tail; the shared object measures 160 B and therefore needs
+// the 256 B slot. Keep this constant and the assert below moving together.
+#define JS_FUNCTION_SIZE_CLASS 6
+static_assert(sizeof(JsFunction) <= 256,
               "JsFunction must fit its GC object-zone size class");
 
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
-    // Source-class capabilities extend the callable carrier beyond the old
-    // 256-byte class; keep the GC allocation class explicit with the layout.
+    // Keep the GC allocation class explicit with the inherited record layout.
     JsFunction* fn = (JsFunction*)heap_calloc_class(
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    js_function_init_abi(fn);
     return fn;
 }
 
@@ -410,6 +406,7 @@ JsCallableCode* js_fn_code_ensure(JsFunction* fn) {
     if (!fn->code) {
         fn->code = (JsCallableCode*)js_fn_payload_calloc(fn, sizeof(JsCallableCode));
         if (!fn->code) return NULL;
+        js_callable_code_init_definition(fn->code, NULL, NULL, 0);
         fn->code->module_state_id = UINT32_MAX;
         fn->code->formal_length = -1;
         fn->code->body_kind = JS_FUNCTION_BODY_CODE;
@@ -452,9 +449,9 @@ static JsCallableCode* js_callable_code_prepare_unique(JsFunction* fn,
     if (fn && fn->code && fn->code->interned) js_callable_code_detach(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return NULL;
+    js_callable_code_init_definition(code, NULL, NULL, param_count);
     code->func_ptr = func_ptr;
     code->runtime_context = runtime_context;
-    code->param_count = param_count;
     code->module_state_id = module_state_id;
     code->formal_length = -1;
     code->body_kind = JS_FUNCTION_BODY_CODE;
@@ -759,10 +756,9 @@ static JsFunction* js_alloc_function_storage(bool gc_backed) {
 }
 
 static void js_function_init_common(JsFunction* fn) {
-    fn->type_id = LMD_TYPE_FUNC;
-    // D6.2.2v2: every callable wrapper uses the canonical layout marker;
-    // legacy arity/target decoding otherwise silently drops compiled args.
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    // D6.2.2v2: every callable wrapper has the shared layout marker before
+    // any JS-only capability or property state is published.
+    js_function_init_abi(fn);
     fn->prototype = ItemNull;
 }
 
@@ -823,11 +819,10 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     js_function_init_common(fn);
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
-    ast->definition = js_script_ast_definition_ensure(script, function);
-    if (!ast->definition) return ItemError;
-    JsCallableCode* code = js_script_ast_definition_code_ensure(ast->definition,
+    JsCallableCode* code = js_script_ast_callable_ensure(script, function,
         param_count, lambda_active_module_state_id());
     if (!code) return ItemError;
+    ast->definition = code;
     // definition metadata is installed directly, with no per-value temporary.
     fn->code = code;
     ast->env = environment;
@@ -1531,7 +1526,8 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     if (!env || !context || !context->heap || !context->heap->gc ||
             !gc_is_managed(context->heap->gc, env)) return;
     gc_header_t* header = gc_get_header(env);
-    if (!gc_environment_is_item_slots(header) || header->alloc_size == 0) return;
+    if (gc_environment_layout_kind(header) != GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS ||
+            header->alloc_size == 0) return;
     int64_t count = (int64_t)(header->alloc_size / (2 * sizeof(Item)));
     // Generator environments mix boxed Items with raw state/spill words. Only
     // tagged pointers into the active number stack are valid scalar Items;
@@ -1705,6 +1701,9 @@ static void js_set_function_name_from_property_key_impl(Item fn_item, Item key_i
                                                         int64_t prefix_kind,
                                                         bool only_if_anonymous) {
     Item prop_key = js_to_property_key(key_item);
+    // Function-name display consumes a Symbol's diagnostic spelling; it is
+    // not a property lookup and therefore does not expose the storage key.
+    prop_key = js_property_storage_key(prop_key);
     if (get_type_id(prop_key) != LMD_TYPE_STRING) return;
     String* key = it2s(prop_key);
     if (!key) return;

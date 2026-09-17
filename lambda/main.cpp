@@ -789,8 +789,34 @@ static void lambda_report_interp_run(void) {
     fflush(stderr);
 }
 
+static void lambda_report_memory_stats(const char* phase) {
+    const char* requested = shell_getenv("LAMBDA_MEMORY_STATS");
+    if (!requested || !requested[0] || strcmp(requested, "0") == 0) return;
+    if (memtrack_get_mode() != MEMTRACK_MODE_STATS) {
+        log_notice("lambda-memory-stats: phase=%s requires MEMTRACK_MODE=STATS",
+            phase ? phase : "unknown");
+        return;
+    }
+
+    MemtrackStats stats = {};
+    memtrack_get_stats(&stats);
+    log_notice("lambda-memory-stats: phase=%s current=%zu peak=%zu allocs=%zu frees=%zu",
+        phase ? phase : "unknown", stats.current_bytes, stats.peak_bytes,
+        stats.total_allocs, stats.total_frees);
+    for (int i = 0; i < MEM_CAT_COUNT; i++) {
+        const MemtrackCategoryStats* category = &stats.categories[i];
+        if (category->peak_bytes == 0) continue;
+        log_notice("lambda-memory-stats: category=%s current=%zu peak=%zu allocs=%zu",
+            memtrack_category_names[i], category->current_bytes,
+            category->peak_bytes, category->total_allocs);
+    }
+}
+
 static int lambda_main_finish(int ret_code) {
     lambda_report_interp_run();
+    // Capture post-execution ownership before common teardown erases the peak's
+    // live categories; this is opt-in diagnostic telemetry, not policy.
+    lambda_report_memory_stats("execution-complete");
     clipboard_store_shutdown();
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
@@ -2290,13 +2316,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
     log_debug("initializing memory tracker");
     // Check environment variable for debug mode
     const char* memtrack_env = shell_getenv("MEMTRACK_MODE");
-    // Tracked modes register every allocation in a process-global map under a
-    // mutex, so the cost is per-allocation and unbounded in hot code. That is a
-    // diagnostic, not a runtime service: once pools stopped owning their own
-    // backing memory, pool_alloc began routing each allocation through this
-    // registry and the default turned into a ~5x tax on allocation-heavy work.
-    // Keep the leak/stat reporting on for debug builds, off for release, and
-    // let MEMTRACK_MODE override either way.
+    // DEBUG records every allocation in a process-global registry under a
+    // mutex; STATS keeps only atomic counters and an inline free header.
+    // Both are diagnostic modes, not runtime services, so release stays OFF
+    // unless MEMTRACK_MODE explicitly requests instrumentation.
 #ifdef NDEBUG
     MemtrackMode mode = MEMTRACK_MODE_OFF;
 #else

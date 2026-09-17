@@ -125,6 +125,8 @@ typedef struct RuntimeResourceTable {
     int active_count;
 } RuntimeResourceTable;
 
+typedef struct EvalContext EvalContext;
+
 void runtime_job_queue_init(RuntimeJobQueue* queue, Item* storage_owner);
 bool runtime_job_queue_push(RuntimeJobQueue* queue, const RuntimeJob* job);
 bool runtime_job_queue_pop(RuntimeJobQueue* queue, RuntimeJob* job);
@@ -149,6 +151,10 @@ const RuntimeResourceDescriptor* runtime_resource_descriptor_from_legacy_name(
     const char* name);
 void runtime_resource_table_init(RuntimeResourceTable* table, Context* owner,
                                  const char* name);
+// One context-wide table spans JS, DOM and Jube resource owners. The capsule
+// directory owns construction and teardown; callers never borrow JS state.
+RuntimeResourceTable* runtime_resource_table_context(EvalContext* owner);
+RuntimeResourceTable* runtime_resource_table_context_ensure(EvalContext* owner);
 void runtime_resource_table_clear(RuntimeResourceTable* table);
 void runtime_resource_table_destroy(RuntimeResourceTable* table);
 uint32_t runtime_resource_table_add(RuntimeResourceTable* table, Item value,

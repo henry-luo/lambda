@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<body>
+  <p id="current-script-result">pending</p>
+  <script id="executing-script" data-probe="classic">
+    const executing = document.currentScript;
+    if (!executing || executing.id !== "executing-script" ||
+        executing.getAttribute("data-probe") !== "classic") {
+      throw new Error("document.currentScript did not expose the executing script");
+    }
+    document.getElementById("current-script-result").textContent = "current-script-classic";
+  </script>
+</body>
+</html>

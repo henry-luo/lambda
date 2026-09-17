@@ -147,6 +147,10 @@ ShapeEntry* shape_builder_finalize(ShapeBuilder* builder) {
     log_debug("shape_builder_finalize: finalizing %zu fields, is_element=%d",
         builder->field_count, builder->is_element);
 
+    // An empty field list is the canonical shape after the final attribute or
+    // map field is deleted; NULL represents that valid shape.
+    if (builder->field_count == 0) return nullptr;
+
     // The pool API takes parallel name/TypeId arrays (D3.4.2 identity); project
     // the drafts onto short-lived arena arrays.
     const char** names = nullptr;

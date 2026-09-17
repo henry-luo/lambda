@@ -1193,6 +1193,28 @@ TEST(JsOpt, StaticPrimitiveObjectLiteralUsesCompactInitializer) {
     expect_trace_off_same("static_primitive_object_literal", source, output);
 }
 
+TEST(JsOpt, StaticCompositeLiteralRecipePreservesFreshNestedValues) {
+    const char* source =
+        "function makeValue() {\n"
+        "  return { nested: { list: [1, , 3], marker: 'first', marker: 'last' }, ready: true };\n"
+        "}\n"
+        "var first = makeValue(); var second = makeValue();\n"
+        "first.nested.list[0] = 9; first.nested.marker = 'changed';\n"
+        "if (second === first || second.nested === first.nested ||\n"
+        "    second.nested.list[0] !== 1 || (1 in second.nested.list) ||\n"
+        "    second.nested.list[2] !== 3 || second.nested.marker !== 'last' ||\n"
+        "    Object.keys(second).join(',') !== 'nested,ready')\n"
+        "  throw new Error('static composite literal recipe changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("static_composite_literal_recipe", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    expect_trace_off_same("static_composite_literal_recipe", source, output);
+}
+
 TEST(JsOpt, ConstructorAssignedFieldsUseGuardedLayout) {
     const char* source =
         "class ConstructorAssignedPlan {\n"

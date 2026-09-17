@@ -1,4 +1,5 @@
 #include "async.h"
+#include "context_capsule.h"
 
 #include "transpiler.hpp"
 #include "lambda-root-frame.hpp"
@@ -243,6 +244,40 @@ extern "C" void runtime_resource_table_init(RuntimeResourceTable* table,
     if (!table) return;
     memset(table, 0, sizeof(*table));
     root_vector_init(&table->owner_values, owner, name);
+}
+
+static void* runtime_resource_table_context_construct(EvalContext* owner) {
+    RuntimeResourceTable* table = (RuntimeResourceTable*)mem_calloc(1,
+        sizeof(RuntimeResourceTable), MEM_CAT_EVAL);
+    if (!table) return NULL;
+    runtime_resource_table_init(table, (Context*)owner, "runtime resources");
+    return table;
+}
+
+static void runtime_resource_table_context_destroy(void* capsule) {
+    RuntimeResourceTable* table = (RuntimeResourceTable*)capsule;
+    if (!table) return;
+    runtime_resource_table_destroy(table);
+    mem_free(table);
+}
+
+static const ContextCapsuleOps runtime_resource_table_context_ops = {
+    "runtime-resources", CONTEXT_CAPSULE_LIFETIME_CONTEXT, 0,
+    runtime_resource_table_context_construct, NULL,
+    runtime_resource_table_context_destroy,
+};
+
+extern "C" RuntimeResourceTable* runtime_resource_table_context(
+        EvalContext* owner) {
+    return owner ? (RuntimeResourceTable*)context_capsule(owner,
+        CONTEXT_CAPSULE_RUNTIME_RESOURCES) : NULL;
+}
+
+extern "C" RuntimeResourceTable* runtime_resource_table_context_ensure(
+        EvalContext* owner) {
+    return owner ? (RuntimeResourceTable*)context_capsule_ensure(owner,
+        CONTEXT_CAPSULE_RUNTIME_RESOURCES,
+        &runtime_resource_table_context_ops) : NULL;
 }
 
 static RuntimeResourceSlot* runtime_resource_table_slot(

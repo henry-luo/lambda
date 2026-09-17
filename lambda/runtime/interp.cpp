@@ -2011,10 +2011,10 @@ static Function* interp_make_method_closure(Script* module,
     fn.get()->closure_field_count = 1;
     fn.get()->entry_abi = FN_ENTRY_ABI_LAMBDA_INTERPRETED;
     fn.get()->def = method->ast_def;
+    fn.get()->def_module = definition_module;
     // Imported nominal methods retain an AST pointer into their declaring
     // Script. Reusing the caller's module here reads unrelated slab slots and
     // makes field-dependent bodies observe zero/null instead of the receiver.
-    fn.get()->def_module = definition_module;
     fn.get()->method = method;
     fn.get()->runtime_context = (Context*)context;
     lambda_function_set_type(fn.get(), method->fn_type);

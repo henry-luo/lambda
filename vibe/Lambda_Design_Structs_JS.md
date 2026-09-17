@@ -1,5 +1,18 @@
 # Lambda Design: LambdaJS Struct Authority
 
+> **Last census/source audit:** 2026-09-17, tree `b085bbb18` plus the completed
+> JSCU45–JSCU57 working-tree changes below.
+> **Status.** The initial consolidation, §20 follow-up and §21 Phase 3 are
+> implemented after the completed TypedArray cleanup and callable-base follow-up.
+> **JSCU57 is complete:** LambdaJS uses the core `Symbol` carrier directly;
+> `NameId` is retained only for the temporary property-key compatibility route.
+> Appendix B distinguishes current evidence from the historical measurements.
+> The clean refreshed `js-rt` census has **457 definitions: 324 structs,
+> 5 classes, 3 unions and 125 enums**; all 547 configured translation units
+> parsed. The private MVP runtime is preserved as a debug-only POC, including
+> its tests, benchmark evidence and design records; its private ABI is not a
+> Lambda interop path.
+>
 > **Scope.** The single design record for LambdaJS data-structure ownership:
 > which concept owns which runtime structure, and which duplicate structures are
 > retired. It merges the former `Lambda_Design_Structs_JS2.md` (shared
@@ -8,36 +21,43 @@
 >
 > **Ledger.** `JSCU1–JSCU8` (census and rules) stay in
 > [`Lambda_Proposal_JS_Struct_Clean_Up.md`](Lambda_Proposal_JS_Struct_Clean_Up.md).
-> This document owns **JSCU9–JSCU44** and the open items **JSCUO1–JSCUO7**.
+> This document owns **JSCU9–JSCU57**, including completed §20 and §21 work,
+> and
+> **JSCUO1–JSCUO9** (including resolved items).
 >
-> **Authority.** **D1.3**, **D1.5**, **D1.8–D1.9**, **D2.4.1–D2.4.3**,
-> **D3.3.2v2–D3.3.4**, **D3.4.1–D3.4.8**, **D4.6.1v2**, **D5.1–D5.4**,
+> **Authority.** **D1.2v2**, **D1.3v3**, **D1.5v2**, **D1.8–D1.9**,
+> **D2.4.1–D2.4.3**, **D2.6.1v3**, **D2.6.6v2**,
+> **D3.3.2v2**, **D3.3.3v3**, **D3.3.4**, **D3.4.1–D3.4.8**, **D4.6.1v3**, **D5.1–D5.4**,
 > **D6.2.1–D6.2.3v2**, **D7.4.1v2**, **D8.2.3–D8.2.6**, **D8.3.1–D8.3.4**,
 > **D8.4.1v2–D8.4.3v2**, **D8.6.1–D8.6.4v2**. These rulings implement existing
-> contracts; none revises a language ruling, authorizes a new value layout, or
-> changes a formal-spec ratchet. Cite `D#` first per CLAUDE.md rule 17; a `JSCU`
-> id only for a point no `D#` covers.
+> contracts. **JSCU57 lands the shared `Symbol` representation:** it retains
+> the current JS `NameId` property route only as compatibility under
+> **D4.6.1v3**. **D8.2.5v2**
+> governs fact placement; §9 has been corrected to match it. Cite `D#` first
+> per CLAUDE.md rule 17; a `JSCU` id only for a point no `D#` covers.
 >
 > **Reading order.** §1–§5 are the four structures that carry the most weight
 > plus two banked fixes. §8 is the one-concept-one-structure rule and its
 > consequences. §9–§18 are the shared Lambda/JS optimization structures.
 > §19 states the boundaries none of it crosses. §7 is the open list.
-> Implementation status and history are in **Appendix B**, deliberately brief —
-> the body describes the design as it now stands, not how it got there.
+> For the next consolidation, start with **Appendix B's 2026-09-17 census
+> and §20**; the earlier dated snapshots explain the initial work.
+> Implementation status and history are in **Appendix B**. Earlier source
+> snapshots are explicitly historical; proposed follow-up work is marked.
 
 ## 0. Why these structures, and why in this order
 
-These are the structures whose ownership was least settled, ordered by what
-each one unblocks. The census that selected them is in Appendix B; the numbers
-there have since moved, and several of the structures named have shrunk by
-orders of magnitude.
+The table and landing order in this section describe the **initial selection
+on 2026-09-07**, not the current backlog. Several structures have since shrunk
+by orders of magnitude. Appendix B now contains both the historical baseline
+and a fresh census; §20 uses the latter to select the next work.
 
 | # | Item | Parent stage | Why it is first-tier | Formal ruling it implements |
 |---|------|--------------|----------------------|-----------------------------|
 | 1 | Suspension state owns itself: generators and async frames become GC-owned carriers; a JS activation is a task; the Lambda frame joins the same carrier | P3, §6.1–6.2 | 76 % of the context struct, a slot-recycling identity hazard, two hard functional caps, and 2,049 permanent roots registered before any script runs | D5.1.1v2, D5.1.3, D4.3.3, D6.3.1 |
 | 2 | One rooted vector in the runtime; JS root ranges, reset registry and per-range epochs are deleted | P1, §5 | 19 rooted-state subclasses, 44 epoch fields, 62 direct root registrations, a 64-entry reset registry with a hand-coded exemption; the runtime already has a third private copy of the same shape | D5.1.1v2, D5.4.2 |
 | 3 | One capsule table on `EvalContext`; `JsRuntimeState` becomes a directory; DOM state becomes a peer, not a child, of JS | P2, §4 | Seventeen ad-hoc `void*` capsules across `EvalContext` and `JsRuntimeState`, three copies of the ensure-function shape, two manual lifecycle fan-outs; DOM state that Lambda `import dom` also drives is reachable only through the JS capsule | D5.4.2, D5.4.3, D5.4.4 |
-| 4 | One `FunctionCode` / value split shared by `Function` and `JsFunction` | P6, §8 + Lambda parent §6.3 | Two 4-byte-magic-distinguished layouts under one `TypeId`, two tracers, two `runtime_context` fields that SCU14/15 just made removable | D6.2.1, D6.2.2v2, D5.4.1 |
+| 4 | `Function` is the direct Lambda base of `JsFunction` | P6, §8 + Lambda parent §6.3 | The full carrier is physically shared; only ABI fields are semantically common today, and tail reuse needs an ownership/GC audit | D6.2.1–D6.2.3v2, D5.4.1 |
 | 5 | Two banked fixes: `ParsedRequest` becomes spans; crypto handles use the Jube rid table | P5, §7.1, §7.4 | An 815 KB automatic variable per HTTP request; four 4,096-pointer tables next to a rid table that already exists | D1.9, D7.4.1v2 |
 
 Recommended landing order is **5, 1, 2, 3, 4**: the two cheap isolated
@@ -78,7 +98,10 @@ the context that created it. Parent §5.1 names `JsPromise` as the positive
 example: a GC-owned VMap that owns its result and reactions with no
 context-wide capacity.
 
-### 1.2 What the tree actually does
+### 1.2 Historical source snapshot — before the initial consolidation
+
+The following evidence is from 2026-09-07; the generator/async index tables
+described here are gone. Current implementation status is in Appendix B.
 
 - `JsRuntimeState::generators[JS_MAX_GENERATORS]`
   (`lambda/js/js_runtime_state.hpp:953`) holds every
@@ -203,7 +226,12 @@ API and never reproduce its capacity, root-registration, epoch, counter and
 cleanup machinery. Parent JSCU4: never a reallocating buffer whose Items
 move.
 
-### 2.2 What the tree actually does
+### 2.2 Historical source snapshot — before the initial consolidation
+
+The following evidence is from 2026-09-07. `JsRootRange` and the reset registry
+are gone; at that point the surviving `JsRootedState` was a one-field
+`RootVector` wrapper. It was retired on 2026-09-17 by direct `RootVector`
+extension in its state owners (JSCU48).
 
 The runtime already offers everything except the vector:
 
@@ -360,7 +388,10 @@ D5.4.4: frozen registries stay global; one event loop per context; no lock
 or atomic on a repeated path. Parent JSCU5: reset is lifecycle, not a
 clearing checklist.
 
-### 3.2 What the tree actually does
+### 3.2 Historical source snapshot — before the initial consolidation
+
+The following evidence predates `ContextCapsuleDirectory`; Appendix B records
+which nested JS ownership still remains.
 
 - `EvalContext` (`lambda/lambda-data.hpp:105–140`) already carries four
   capsules by hand: `render_map_state`, `template_state_store`,
@@ -535,6 +566,16 @@ clearing checklist.
 
 ## 4. One `FunctionCode` / value split shared by both languages
 
+**Completion note — 2026-09-17, revised by JSCU56.** `JsFunction` now directly
+extends Lambda `Function`; there is no standalone callable-header record.
+`Function` owns the common ABI and explicitly labels its current tail as
+Lambda-specific. This deliberately increases a `JsFunction` to 160 B (the
+256 B GC slot), in exchange for one physical callable carrier at the interop
+boundary. The next step is not to equate same-shaped tail fields: it must prove
+matching ownership, GC and call semantics before reusing a Lambda-tail field.
+`TypeFunc` and `FnAnalysis` remain the common definition-analysis owners
+(D6.2.1–D6.2.3v2, D8.2.3).
+
 ### 4.1 What the rulings already say
 
 D6.2.1: a function value is a GC object carrying its entry pointers, its
@@ -548,7 +589,12 @@ parent §6.3: `FunctionCode` / `FunctionValue`, "per-function
 universal; it must not be removed earlier." It is universal as of
 2026-09-07.
 
-### 4.2 What the tree actually does
+### 4.2 Historical source snapshot — before the initial consolidation
+
+The following sizes and offset inventory are historical. Before JSCU56,
+`JsFunction` was 96 B and `entry_abi` identified its independent layout; use
+the live `Function` ABI assertions and JSCU56 layout helper when planning
+another ABI change.
 
 - `Function` (`lambda/lambda.h:1336`, 72 B) and `JsFunction`
   (`lambda/js/js_function.hpp`, 328 B) carry `LMD_TYPE_FUNC`; only callable
@@ -1038,9 +1084,11 @@ array sized `JS_OBSERVER_CAP * JS_OBSERVER_TARGET_CAP`, and XHR's send path had 
 change.** The observer crash was caught by the UI fixtures, not by any JS or GC
 gate.
 
-`JsMirTranspiler` (30,840 B, 106 members) is a separate target and has grown
-since the parent proposal. The largest remaining record in the tree is
-`NodeRuntimeSession` at 805,648 B.
+Those large compiler/session measurements are historical. The 2026-09-17
+census has `JsMirTranspiler` at **672 B** and `NodeRuntimeSession` at **128 B**;
+neither is now a dominant slab. `JsDomCollectionRuntimeState` has also retired:
+live collections use `VArray` with the **24 B `DomCollectionVArray`** payload
+and a kind discriminator (D7.4.5v2).
 
 **JSCUO5 (original) — web-object fixed capacities are now the dominant pressure.** The
 2026-09-08 census puts the three DOM web-object states at the top of the tree:
@@ -1077,30 +1125,22 @@ explicit decision rather than being folded into the next slice.
   and XHR turn tokens today assume `js_active_runtime_state`. The Lambda
   DOM package (`lambda/dom`) is the test case: a Lambda page with a
   `ResizeObserver` and no script.
-- **JSCUO4 — Three 512-entry closure snapshot forms.**
-  `JsMirTranspiler::last_closure_*` (`js_mir_context.hpp:480`),
-  `JsMirLastClosureSnapshot` (`js_mir_internal.hpp:110`) and
-  `JsMirBranchState` (`js_mir_expression_lowering.cpp:6342`) copy the same
-  arrays; one dynamic tracker with a mark/rollback checkpoint replaces
-  them. Waits on the Lambda parent's SCUO4 so the two transpiler splits
-  land together.
-- **JSCUO5 — Observer, live-collection and XHR caps.** After item 3 makes
-  them capsules: object-owned `JsObserver` with dynamic targets, one tagged
-  `JsLiveCollectionRegistry` for the four 4,096-entry tables
-  (`lambda/dom/dom.cpp:1970`), object-owned `JsXhrRequest`
-  (`dom_xhr.cpp:67`). Parent §6.3, §6.4, §7.2 apply unchanged; D7.4.5v2's
-  live `VArray` stays a later stage.
-- **JSCUO6 — Inventory of generated-code readers of `JsFunction` offsets.**
-  Two pins are asserted (`func_ptr` at 8, `bound_this_store` at 48) and no
-  emitter spells `offsetof(JsFunction`; the readers are the generated call
-  and construct entries. Before item 4 moves a field, list every reader in
-  a static-assert block beside the layout, the way `LambdaGcFunctionLayout`
-  pins `Function`.
-- **JSCUO7 — Eval journal frame caps.** `JS_EVAL_*_MAX` (`:756–778`) size
-  both the Item lanes (item 2 migrates them) and the semantic frame marks
-  and flags. The frames become `ArrayList`s beside the vectors under
-  JSCU13; whether a direct-eval nesting depth remains a checked policy
-  limit is decided when the journals move.
+- **JSCUO4 — resolved structurally, verified 2026-09-17.** The fixed
+  closure snapshots have been replaced by `JsClosureTracker` and the 16 B
+  `JsClosureCheckpoint` journal mark. `JsMirBranchState` retains a cursor,
+  scope transaction and checkpoint, not another 512-entry capture array.
+- **JSCUO5 — caps resolved; live VArray now present.** Observer/XHR state
+  remains dynamic; `DomCollectionVArray` replaces the old live-array registry
+  under D7.4.5v2. The older measurements above explain the original work.
+- **JSCUO6 — inventory landed; refresh it for every new ABI change.** The
+  live inventory/assertions are in `js_function.hpp`. The old `func_ptr`
+  and `bound_this_store` locations are no longer current pins; `type_id`,
+  `entry_abi` and the common flags-prefix relationship remain asserted.
+- **JSCUO7 — journal capacity migration landed, verified 2026-09-17.**
+  `JsEvalBindingJournal`, `JsEvalPrivateJournal` and `JsEvalLocalState` use
+  `RootVector` Item lanes with `ArrayList` bindings/frame marks. The former
+  `JS_EVAL_*_MAX` declarations are gone; this finding makes no new ruling
+  about a language-level eval nesting policy.
 
 ---
 
@@ -1133,7 +1173,11 @@ semantics; AST and MIR semantic walkers; transient property descriptors and
 stored accessor cells; and operation-specific native request payloads. JSCU8,
 D6.2.2v2, D6.3.1 and D8.1.3v10 require those distinctions.
 
-### 8.2 Post-round-1 tree census
+### 8.2 Historical post-round-1 census — 2026-09-09
+
+This snapshot is retained as the evidence for JSCU27–JSCU35. Its sizes,
+ownership-directory inventory and root-range residue are not current claims;
+see Appendix B for the 2026-09-17 refresh.
 
 The 2026-09-09 current-tree layout probe changes the target. The first round
 removed the dominant generator/async/web slabs and reduced `JsFunction`, but
@@ -1157,7 +1201,7 @@ second `module_states[]` directory. `JsRuntimeState` then acts as a third
 directory and manually allocates/frees its records. That is one context-state
 concept with three ownership mechanisms, contrary to D5.4.2–D5.4.4.
 
-Root ownership has the same residue. `JsRootRange`, `JsRootedState`,
+Root ownership had the same residue. `JsRootRange`, `JsRootedState`,
 `JsNamespaceState`, the 64-entry reset registry and the hand-written
 `JS_RUNTIME_ROOT_STORAGE` count catalog coexist with `RootVector`. The source
 already records the failure mode: a range beginning at a derived field left
@@ -1355,8 +1399,8 @@ property operation first resolves its `ShapeEntry`, tests
 `JSPD_DELETED`, then interprets `JSPD_IS_ACCESSOR` only inside the JS property
 kernel. Thus a deleted accessor cannot accidentally invoke its getter.
 
-The same rule applies to ordinary object maps, an Array's named-property
-companion map, and a Function's property map. Indexed Array element storage is
+The same rule applies to ordinary object maps, an Array's inherited `Map`
+attribute face (D2.6.6v2), and a Function's property map. Indexed Array element storage is
 not an accessor lane and remains owned by the Array implementation.
 
 **Ownership and publication.** `ShapeEntry::accessor` is mutable per object,
@@ -1493,8 +1537,9 @@ and capsule-construction census recorded beside the old/new values.
 
 ## 9. JSCU36 — Shared operation facts, consumed once
 
-**Proposal.** Store representation and access-planning facts in the existing
-indexed compilation unit and function analysis. Define a shared operation-plan
+**Proposal, updated for D8.2.5v2 (2026-09-17).** Use the existing indexed
+compilation unit for identities and graph relations, AST-owned types for
+effective contracts, and `FnAnalysis` for function facts. Define a shared operation-plan
 contract used by both lowerings. Materialize a separate record only when it
 eliminates existing duplicated state or repeated analysis.
 
@@ -1502,9 +1547,10 @@ Four authorities remain distinct under **D2.4.1**:
 
 | Fact | Owner and lifetime | Mutation/publication rule |
 |---|---|---|
-| Source contract | Retained AST/type owner | Never rewritten by a speculative access plan |
-| Candidate shape, numeric range, use/def and effect evidence | ID-keyed analysis in the compilation unit | Produced by declared passes; invalidated when their input facts change |
-| Selected operation and representation | Function/node planning side tables | Sealed for the lowering that consumes them |
+| Declared and effective contract, const result | Declaring node / `AstNode.type` and its retained type owner | No inferred-type copy in an ID-keyed per-node fact table |
+| Graph identities and use/def relations | `AstIndex`; function capture/effect evidence in `FnAnalysis` | Produced by declared passes; graph indexes do not become a second type authority |
+| Type-wide optimization evidence | Lazy side record reached through `Type*` | Describes the type only; never attach a node-specific candidate to shared `TYPE_ANY` |
+| Selected operation and representation | Function plan and transient lowering plan referencing canonical owners | Site-specific plans are consumed during lowering, not persisted as per-node fact tables |
 | Register, root home and scalar provenance | `MirValue` / emitter | Changes only through emitter conversion, call and ownership operations |
 
 The logical access-plan fields are: operation kind, receiver/key/value node
@@ -1527,7 +1573,7 @@ possible; ambiguous cases use the generic path. New multiversion function
 specialization is not implied (**D8.3.1**, **D8.4.1v2**).
 
 The pass manager declares which facts each stage requires and produces
-(**D8.2.5**). A backend scope-map rebuild must not lose a shape fact; late MIR
+(**D8.2.5v2**). A backend scope-map rebuild must not lose a shape fact; late MIR
 lowering must not repair binding. Missing facts select a generic operation.
 
 **What this retires:** independent JS/Lambda candidate walks and redundant
@@ -1654,7 +1700,7 @@ the destination owner; JS preserves object identity. Those policies cannot be
 hidden inside a universal `set` function. Physical storage and scalar rehoming
 can still be shared once the destination is established.
 
-Named keys remain `NameId`s (**D3.4.4v2**, **D4.6.1v2**). Recipe field order and
+Named keys remain `NameId`s (**D3.4.4v2**, **D4.6.1v3**). Recipe field order and
 `slot_entries` accelerate lookup but do not replace the normative shape chain.
 The initial implementation needs one guarded candidate and one fallback, with
 no mutable per-site state, code patching, feedback vector or method cache
@@ -1852,10 +1898,12 @@ new root-vector implementation is introduced.
 
 ## 15. JSCU33(A) continuation — Share definition facts, retain instance owners
 
-`JsCallableCode` now separates metadata from `JsFunction`, but
-`js_fn_code_ensure` commonly allocates a record for each function value. Moving
-fields behind a pointer has not by itself established one code record per
-static definition.
+**Current source status (2026-09-17).** `js_fn_code_ensure` remains a unique-code
+fallback, but GC-owned MIR closures now use `js_callable_code_intern`, and AST
+closures share Script-owned `JsAstDefinition::code`. Definition sharing has
+therefore progressed beyond a per-value pointer split. The remaining gap is
+the absent common Lambda/JS code record and the instance-owned fields still
+inside `JsCallableCode`; do not count the existing interning as future work.
 
 Complete the existing JSCU33(A) proposal with an explicit ownership split:
 
@@ -2119,6 +2167,474 @@ dual-function specialization policy. Remaining capsule/resource/realm cleanup
 continues under JSCU27–JSCU35 and can proceed independently.
 
 
+## 20. Follow-up proposal — common carriers and common consumers
+
+**Status: implemented, 2026-09-17; JSCU45–JSCU50.** This round completed the
+remaining direct reuse, common runtime-carrier, shared-analysis and JS-family
+merges. A full qualified census at **2026-09-17T06:45:46Z** reports **279 named
+main-runtime struct/class definitions** (285 struct/class rows, including
+anonymous compatibility records) and **462 `js-rt` definitions**. Its largest
+concentrations remain `js_runtime_state.hpp`, `js_runtime.cpp`,
+`js_mir_context.hpp`, `js_globals.cpp`, and `js_interp.cpp`; those counts are
+review prompts, not automatic deletion targets.
+
+### 20.1 JSCU45 — Prefer an existing Lambda value and its operations
+
+The proposed order is **direct reuse → extend the existing Lambda record →
+one common tagged record → a justified language-specific record**. A typedef
+to an existing type is direct reuse and creates no runtime translation; a
+renamed copy is not reuse. An extension owns only additional facts and uses
+the base's allocation/access/trace contract. When neither language has a
+suitable carrier, extract one only with both real clients (D8.2.3).
+
+| Concept | Current physical sharing | Next action and shared operations |
+|---|---|---|
+| Value, text and BigInt storage | Main JS already uses `Item`, `String` and `Decimal` with its BigInt storage kind | Keep shared ownership and primitive storage operations; preserve JS conversion and identity rules (D1.2v2, D2.4.3) |
+| Object, array, numeric array, element | `Map`, `Array`, `ArrayNum`, `Element` already share the Map attribute prefix | Use the same `TypeMap`/`ShapeEntry` lookup, layout and admitted slot operations; retain JS property admission (D2.6.6v2, D3.4.7–D3.4.8) |
+| Callable | `JsFunction : Function` directly reuses the Lambda callable carrier | `function_init_abi`/`function_has_abi` initialize and discriminate both runtimes; the inherited Lambda tail stays semantically private pending an ownership/GC audit (D6.2.1–D6.2.3v2) |
+| Captured environment | Raw capture slots and `JsInterpEnv` use `GcEnvironmentStorage` | `gc_environment_calloc`, descriptor-based clone/read/store and one generic trace visitor; semantic capture policy stays with the profile (D5.1.3, D6.2.3v2) |
+| Suspended activation | `DurableActivation` is the common base of JS generator/async state and `LambdaAsyncFrame` | Explicit resume kind, state and durable slot/extent; scheduler roots and JS promise/delegation facts remain policy tails (D5.1.1v2, D6.3.1) |
+| Bytes and numeric views | `ByteStorage`, `ByteBufferHandle` and `ArrayNum` already exist; `JsArrayBuffer` wraps only a handle | Reuse handle directly; complete the shared view contract and admitted numeric kernels (D2.6.1v3, D2.6.4v3) |
+| AST, binding and type facts | JS aliases core nodes, `NameScope`, `NameEntry`, `Type*`, `Script` and `FnAnalysis` | AST builder publishes expression contracts; MIR consumes them and publishes full return contracts on `FnAnalysis` (D8.2.4–D8.2.6) |
+| DOM/native projections | `VMap`, `VArray` and `DomCollectionVArray` already provide shared host carriers | Reuse these directly at host boundaries and keep resource identity in `RuntimeResourceTable` (D7.4.1v2, D7.4.5v2) |
+
+Sharing representation removes *representation-induced* translation. It does
+not erase an actual semantic boundary. A Lambda value snapshot and a mutable
+JS alias may still require an explicit ownership operation; JS accessors and
+proxies still require their property protocol. A plain shared `Map*` does not
+authorize calling a raw Lambda field load on a JS accessor (D3.4.8), and a
+JS `Symbol()` is not Lambda's textual `Symbol` (D4.6.1v3; S2.4.3v3).
+
+There is also a second JS runtime in the census: **MVP contributes 34 structs
+and 3 enums**. `MvpValue`, `MvpHeap`, `MvpRootFrame`, `MvpString`, `MvpArray`,
+`MvpObject`, `MvpMap` and `MvpFunction` duplicate physical concepts deliberately
+behind a private ABI. D1.2v2/D1.3v3 permit that boundary; they do not make its
+values interchangeable with `Item`. The current benchmark scope excludes
+modules/DOM/async. The previous bundled Item-alignment experiment was abandoned
+after regression; its history is in
+[`JS_MVP_Runtime.md` §7](jube/JS_MVP_Runtime.md#7-abandoned-v2-item-alignment-experiment).
+
+For the requested runtime interoperability, make **the shared-Item LambdaJS
+runtime the consolidation target**. Keep MVP in the reported totals and reuse
+its applicable substrate/leaf algorithms. The private value ABI remains a
+separately measured POC boundary: do not claim that a cast, wrapper rename, or
+byte-copy bridge achieves shared runtime identity. This proposal does not
+supersede the private-ABI ruling or restore the abandoned experiment.
+
+### 20.2 JSCU46 — Finish callable, environment and suspension ownership
+
+**Callable base first — landed, revised by JSCU56.** `JsFunction : Function`
+is now the Lambda-owned common callable carrier; `FunctionHeader` and its
+prefix macro are retired. All normal Lambda, Jube-host-adapter and JS factories
+initialize the direct base through `function_init_abi`, and capability checks
+use `function_has_abi`. The common `type_id`, `arity`, closure-count,
+`entry_abi` and flags ABI remains at the first eight bytes. JS MIR reads that
+ABI from `Function`; its JS-tail offsets come from a C++17 layout helper because
+a data-bearing derived record is intentionally not standard-layout.
+
+`Function` explicitly marks `fn_type`, native entry, capture environment,
+name, runtime context, definition/module and method fields as its
+**Lambda-specific tail**. `JsFunction` physically carries that storage but does
+not reinterpret it as its property, call/construct, code or environment state.
+This is direct representation reuse, not a claim that the two function
+semantics have already merged. The documented future work is to unify a tail
+field only after proving its ownership, GC tracing/finalization and call
+contracts match (D5.1–D5.4, D6.2.1–D6.2.3v2, D8.2.3).
+
+The direct base deliberately changes `JsFunction` from 96 B to 160 B and moves
+it from the 128 B to the 256 B GC object slot. That cost is accepted for the
+requested interop carrier; it must not be hidden by a second header or a
+translating wrapper. `TypeFunc`/`FnAnalysis` remain the shared analysis owners,
+while JS call and construct entries retain their language-specific operand
+contracts (D6.2.2v2).
+
+The JSCU52 direct-field consolidation keeps JS definition and realm facts in
+`JsCallableCode`: definition/module/parameter and JavaScript-static facts,
+compiled pointer/context/module-slab facts, and weak-cache membership have one
+shared JS code owner. AST closures and MIR values retain their separate value
+lifetimes, so no cross-runtime `CallableArtifact` is introduced (D8.2.3–D8.2.4).
+
+No consumer may reinterpret a Lambda-specific `Function` tail as a JS tail.
+Preserve the MIR, GC and host-reader inventories, and keep JS function-object
+identity distinct from Lambda definition/capture equality (D6.2.1–D6.2.3v2;
+S5.5.1).
+
+**Environment storage — landed.** `GcEnvironmentStorage` describes Item
+lanes, paired scalar lanes, retained Item cells and an optional outer link.
+`gc_environment_calloc` selects an explicit raw-slot or lexical layout;
+`heap_calloc_closure_env` and `js_interp_env_create` are its two real clients.
+`JsInterpEnv` supplies only its lexical extension through the descriptor.
+
+`gc_environment_storage_read`, `gc_environment_storage_store`,
+`gc_environment_storage_copy_owned_slots` and
+`gc_environment_storage_visit` now implement the common access, clone and
+trace protocol. The collector builds a descriptor for either layout instead of
+duplicating walks; raw MIR words remain in its unscanned companion extent.
+Compiler bindings stay `NameEntry`/slot identities, while the JS extension
+retains arguments/private/eval/lexical-`this` cells. Lambda snapshots and JS
+mutable captures remain different policies over that same ownership contract
+(D6.2.3v2; S9.1.4).
+
+**Suspension — landed.** `DurableActivation` is now the Lambda runtime base
+of `LambdaAsyncFrame`, `JsSuspendedActivation`, generator state and async
+context state. It owns the resume kind/state and the durable environment/spill
+pointer plus logical extent. Its visitor marks a JS GC environment only for
+the JS variants; Lambda continues exact task-root registration for its native
+spill tail. Reset/init are common operations. Task fault scopes, root-range
+capacity, generator delegation, Promise edges and interpreted replay remain
+explicit tails. This preserves the distinct scheduler/readiness policies and
+does not merge a Promise with an activation (D5.1.1v2, D5.1.3, D6.3.1).
+
+**Map extensions use Map's contract.** Nine named records separately spell
+`Map base` plus a native payload: proxy, generator, regexp, iterator, async
+frame, ArrayBuffer, DataView, TypedArray and collection carriers. They already
+extend Lambda, which is preferable to unrelated JS objects. First share
+allocation/publication and precise payload trace/finalize plumbing using the
+existing `map_kind`/immutable metadata authority. Use direct `VMap` for an
+actual virtual host projection; keep shaped Maps on the shaped path. Only
+remove a carrier wrapper where direct reuse preserves its exact payload size,
+alignment and access contract. An 80 B typed-array wrapper must not grow to
+the 240 B generator maximum just to put all payloads in one union. No nine-type
+removal is credited before that layout work is demonstrated (D3.4.7, D4.3.3).
+
+### 20.3 JSCU47 — Share analysis functions by removing their alternate inputs
+
+The repository already has the type structures needed for this work. Adding
+`JsTypeInfo` or another per-node type table would make it worse. The concrete
+remaining duplication is in consumers: `jm_get_effective_type` recursively
+classifies AST syntax and consults backend binding rows; `jm_infer_return_type`
+performs a separate bounded TypeId join, despite both languages having
+`AstNode.type`, `TypeFunc`, `FnAnalysis` and shared type-contract helpers.
+
+| Existing common owner | Shared consumer to use/extend | Duplicate to retire or reduce |
+|---|---|---|
+| `AstNode.type`; declarations' annotation fields | Full `Type*` expression/result joins, `lambda_type_union_normalized`, nullable normalization | Backend re-inference in `jm_get_effective_type`; lossy TypeId-only joins |
+| `NameEntry`, `NameScope`, indexed binding identity | Binding lookup, use/def, capture discovery and invalidation | `JsMirBindingRef` copies of name/node/var-kind where recoverable from the binding |
+| `FnAnalysis`, `FnVariantAnalysis`, `FnReturnAnalysis` | Parameter evidence, return joins, effects and entry planning | Persistent JS return/parameter facts that merely project an existing variant result |
+| `Type*`, `LaneStorageDesc`, `ValueRep` | `lambda_canonical_rep`, `lambda_type_lane_storage_desc`, descriptor-aware load/store planning | Per-language guesses from TypeId or MIR register class |
+| `MirConstructionPlan`, `MirFieldAccessPlan`, `MirShapeCandidateProfile` | The existing candidate traversal and admitted construction/field lowering | `JsMirLiteralShapePlan`/`JsMirStaticShapeField` only where they repeat canonical shape facts |
+| `Script`, `AstIndex`, `LangProfile`, pass manager | One core child/identity walk and typed analysis schedule | Private core-child descriptions and repeated semantic-fact scans |
+
+**Implemented consumption.** `jm_get_effective_type` no longer recursively
+reclassifies JS literals, operators or conditionals: it first consumes the
+AST-published `Type*`, then only handles binding/callee facts unavailable to
+the AST owner. Return collection publishes the full joined `Type*` contract on
+the shared `FnAnalysis::js_return_contract`, using
+`lambda_type_union_normalized`; `js_return_type` is now only its compact native
+lane projection. This removes the alternate TypeId-only return producer.
+
+Operator-result rules stay profile-specific: JS `+`, `undefined`, BigInt,
+coercion, accessor effects and mutable aliases differ from Lambda. Share the
+worklist/traversal, type-set operations, full-contract representation selection
+and effect propagation; ask the profile for the semantic transfer rule. JS's
+lenient diagnostics must remain lenient (D3.3.1v2). The current primitive
+representation of JS BigInt does not prove a decimal arithmetic contract.
+
+Publish durable inferred results on the AST and function owners, then make MIR
+and AST execution consume them. Keep type-wide optional optimization facts on
+the lazy `Type` side record; retain site-specific selection only in transient
+lowering plans. A shared `TYPE_ANY` may not acquire one expression's shape or
+range fact (D8.2.5v2). Full-contract narrowing and invalidation still obey
+D3.3.3v3–D3.3.4. This is why sharing the data alone is insufficient: the
+migration is complete only when the alternate inference producer is deleted.
+
+Many JS AST names already alias core types. The five scope-bearing extensions
+`JsIfNode`, `JsClassNode`, `JsCatchNode`, `JsSwitchNode`, `JsForOfNode` are
+reasonable examples of the second preference: the base carries common edges,
+the extension adds lexical-scope facts. Do not inflate every core node or
+introduce tree rewriting merely to delete these names (D8.2.2). Template,
+regex and `with` constructs can keep extensions while their shared traversal
+and binding functions converge.
+
+### 20.4 JSCU48 — Direct reuse and thin-wrapper removal
+
+These are bounded candidates, each with a known existing owner/mechanism.
+They can precede the larger callable migration.
+
+| Current records | Proposed reuse | Net named-definition reduction across the repository |
+|---|---|---:|
+| ~~`JsArrayBuffer { ByteBufferHandle handle; }`~~ | **Landed 2026-09-17:** direct `ByteBufferHandle` typedef; JS API functions and the Map carrier retain the language boundary | 1 |
+| ~~`JsDataView` containing only `JsArrayBufferView` and TypedArray's anonymous compatibility overlay~~ | **Landed 2026-09-17:** DataView is a direct alias; **JSCU51 landed 2026-09-17:** TypedArray stores one named `JsArrayBufferView base` and all view accesses use it | 2 |
+| ~~`JsRootedState { RootVector roots; }`~~ | **Landed 2026-09-17:** its 12 state owners extend `RootVector` directly; their fixed Item spans still bind through the same root-vector visitor | 1 |
+| ~~Regex `PtrVec` and its private grow helper~~ | **Landed 2026-09-17:** parser-local `ArrayList` owns pointer ordering/growth; the Pool still owns every AST node and allocation failure returns the existing compile fallback | 1 |
+| ~~Identical `JsCommonAstBuild` / `JsCommonMirBuild`~~ | **Landed 2026-09-17:** Lambda-owned `InputScriptBuildScope`, with one claim/reset/complete path and the existing `InputScriptBuildKind` | 1 |
+| ~~`RxRange`, `CodePointRange`, `JsRegexRange`~~ | **Landed 2026-09-17:** direct `CodePointInterval` reuse in the backtracking parser, generated-property wrapper and runtime property tables; `codepoint_interval_contains` is the common membership operation | 2 |
+
+The interval row reconciles endpoint signedness at its boundaries and rejects
+negative property cursors before conversion; the common type serves actual
+regex clients, not a runtime Lambda `Range` value with unrelated
+container/iteration fields. The source-cache row shares
+begin/complete/cleanup around `InputScriptBuildClaim`, while AST and MIR
+artifact publication remain distinct kinds. Neither row authorizes editing
+vendored regex engines.
+
+For byte views, keep `JsTypedArray` as an extension only for element kind,
+Node Buffer brand and its derived `ArrayNum` view. The buffer handle is the
+authority for detach/resize/generation; offsets and tracking length describe
+the view; the `ArrayNum` descriptor is refreshed from those facts, not a second
+source of truth. Share byte ownership and admitted element-access kernels,
+while retaining DataView endianness, typed-array coercion and shared-buffer
+rules. `Binary` is an immutable storage span, not a substitute for a mutable
+ArrayBuffer handle (D2.6.1v3, D2.6.4v3).
+
+Retiring `JsRootedState` saves a definition, not memory: each real owner now
+extends the same Lambda root carrier with unchanged storage. The substantive
+continuation is to migrate singleton-only records to `JsRealmSlots` and put
+actual service state in the existing capsule directory, with its correct
+lifetime. `JsRuntimeState` still owns `resources`, `promises`, `modules`,
+`eval` and other subsystems, so JSCU27 has unfinished work. Moving those fields
+out of JS should expose direct Lambda consumers and remove manual teardown
+fan-outs, not create a parallel `RuntimeState` directory (D5.4.2–D5.4.4).
+
+### 20.5 JSCU49 — Merge related JS variants with a kind
+
+Use a kind where one family has one owner and lifecycle. Common fields appear
+once; variant fields use an appropriately sized tail/union. Reuse an existing
+discriminator before introducing another.
+
+| Family and evidence | Proposed common record and shared functions | Required distinction | Net named-definition reduction |
+|---|---|---|---:|
+| ~~`CtorSnapshot`, `IntrinsicFunctionSnapshot` and `GlobalBuiltinFunctionSnapshot`~~ | **Landed 2026-09-17:** compact `JsFunctionSnapshot` property-state base; `JsPrototypeFunctionSnapshot` extends it only where prototype state is required. Shared clear/capture/restore code and direct `JsFunction` use replace the former alias | Prototype optionality; preserve observable function and Map addresses | 1 |
+| ~~`JsClassMethodEntry`, `JsStaticFieldEntry`, `JsInstanceFieldEntry`~~ | **Landed 2026-09-17:** direct flat `JsClassMember` row with its existing kind; common traversal/key planning consumes the row | Method/accessor/static-field/instance-field/static-block evaluation and order | 3 |
+| ~~Four interpreter continuation records~~ | **Landed 2026-09-17:** `JsInterpContinuation` with loop/list/try/array-binding kind, shared allocation, attachment, tracing and release | Resume phase, IteratorClose, pending completion and lexical environment | 3 |
+| ~~`JsInterpImportBinding` / `JsInterpExportBinding`~~ | **Landed 2026-09-17:** one `JsInterpModuleBinding` row with import/export kind, namespace flag and star flag; script state, allocation and traversal use the common type directly | Live binding cells, namespace behavior, star ambiguity and TDZ | 1 |
+| ~~`JsSymbolEntry` / `JsSymbolDesc` / `JsSymbolRecord`~~ | **Landed 2026-09-17:** one core `Symbol`, carried as an `LMD_TYPE_SYMBOL` Item. Its `kind` selects Lambda textual or JS unique-undescribed/unique/registered/well-known behavior; the union retains `ns` for Lambda and `name_id` for JS compatibility. JS spelling lives in `Symbol::chars[]`; indexes point directly to `Symbol*` | `Symbol()` freshness, absent versus empty description, `Symbol.for` identity, existing `NameId` property routing and registry lifetime | 1 |
+
+For continuations, eliminate the four independent ownership/tracing walks
+without forcing a new universal evaluator. A maximum-sized union is acceptable
+only after measuring allocation classes and peak suspended memory; use compact
+kind-sized storage if it would inflate common list continuations. Keep native
+raw fields out of the traced Item lane. Generator and async resume policies
+remain distinct even when they use the same record (D5.1.3, D8.1.3v11).
+
+The landed callable snapshots deliberately use a compact base plus extension,
+not a captured-fields union: global functions do not pay constructor/intrinsic
+prototype storage, while all three former records share their property-map
+snapshot operations. No discriminator is needed because the static owner
+already determines whether prototype state exists.
+
+### 20.5.1 JSCU57 — One core Symbol carrier
+
+JS Symbols move from the reserved negative-`int` encoding to pointer-backed
+`LMD_TYPE_SYMBOL` Items. `Symbol` owns its spelling directly; it has no
+`NameRef` field and no JS numeric identity field:
+
+```cpp
+typedef uint8_t SymbolKind;
+
+enum {
+    SYMBOL_LAMBDA_NAME = 0,
+    SYMBOL_JS_UNIQUE_UNDESCRIBED,
+    SYMBOL_JS_UNIQUE,
+    SYMBOL_JS_REGISTERED,
+    SYMBOL_JS_WELL_KNOWN,
+};
+
+struct Symbol {
+    uint32_t len;
+    SymbolKind kind;
+    uint8_t reserved[3];
+    union {
+        Target* ns;      // Lambda textual-symbol namespace
+        NameId name_id;  // temporary JS property-key compatibility
+    };
+    char chars[];
+};
+```
+
+`kind` occupies the existing alignment gap, so the `Symbol` header remains
+16 bytes. `SYMBOL_LAMBDA_NAME` retains the existing `ns` and content contract.
+For every JS kind, `ns` is inactive, `chars[]` stores the description or
+registry spelling, and `name_id` preserves the current shape/property path.
+The `NameRef` used to mint that `NameId` is construction-only; it is not an
+edge owned by `Symbol`.
+
+The pointer is the identity of a JS Symbol value. Thus `Symbol()` and
+`Symbol("")` each allocate a distinct core `Symbol`, even though both have
+`len == 0`; their kinds retain absent versus empty description. `Symbol.for`
+uses a content index whose value is `Symbol*`, and each well-known Symbol has
+one cached `Symbol*`. There is no `JsSymbolRecord`, no `next_symbol_id`, and no
+numeric `Item` encoding. A `NameId` remains only as the temporary property-key
+compatibility route; it is not the JS Symbol's value identity.
+
+Shared helpers must take `kind`, not merely `LMD_TYPE_SYMBOL`: Lambda textual
+symbols retain their solid-name and content rules (S2.2.2, S2.4.3v3), while JS
+kinds use pointer identity for JS equality, hashing and property-key recovery.
+D4.6.1v3 distinguishes JS pointer value identity from the retained `NameId`
+property identity. The migration must update the common hash/equality and MIR
+symbol paths as one operation, rather than introduce a second JS-only
+comparison helper.
+
+The retained `NameId` keeps existing shapes, transitions and enumeration on
+their current compatibility route. Future work may determine whether Lambda
+textual symbols also carry an identity; that decision is explicitly out of
+scope for JSCU57.
+
+Do **not** union independent optional function capabilities: a bound/class/AST/
+eval-origin payload combination can coexist. Similarly, `JsPropertyDescriptor`
+is a transient requested operation, while `JsAccessorCell` is stored GC
+metadata (D3.4.8); their similar Item fields do not make them one object.
+`JsMirReference` holds MIR operands and `JsInterpReference` holds rooted runtime
+homes; share property-lane rules, not these phase-specific carriers.
+
+### 20.6 JSCU50 — Delivery order and proof of reduction
+
+1. The final `--full` census uses the unchanged configuration and has no
+   declaration error; the stale `static js_make_iter_result` declaration was
+   deleted in favor of its public C-linkage declaration.
+2. Direct aliases/wrappers are complete, including the shared code-point
+   interval. Each old type/helper path is deleted or an explicit compatibility
+   alias to the same physical carrier, never a translating wrapper.
+3. MIR consumes `AstNode.type` and `FnAnalysis` full contracts. The remaining
+   profile transfer rules are intentional JS semantic facts, not a second
+   generic type producer.
+4. `Function`, `GcEnvironmentStorage` and `DurableActivation` are the
+   three shared runtime carriers. Focused mutable-closure, callback, forced-GC,
+   generator/finally, async-iterator-close, class and symbol tests exercise
+   their boundary behavior.
+5. All bounded JSCU49 families use one record/kind. Opaque Map carriers remain
+   direct Lambda `Map` extensions where their payload contracts differ; MVP
+   retains its separately measured private POC ABI.
+
+The two candidate tables account for **17 named-record retirements** in their
+bounded families (7 direct-reuse, 10 variant-merging). JSCU51 additionally
+retires two anonymous overlay definitions. The final total is not the candidate
+arithmetic: explicit shared carriers, enums and anonymous variant payloads are
+reported too. At that Phase 3 checkpoint, the configured `js-rt` population
+was **466 → 462** definitions; main LambdaJS was **405 → 401** despite the finished
+typed-analysis/support declarations. This is an
+honest reduction in JS-specific duplicates, not a claim that raw total count
+alone measures runtime cost or that a definition was hidden by relocation.
+
+Acceptance has three independent dimensions:
+
+- **Representation:** both languages hold the same admitted carrier/owner
+  without field-by-field translation. Record conversion allocations and bytes
+  at interop boundaries, including strings, arrays, maps, closures and views;
+  account separately for copies required by language semantics.
+- **Shared operations:** name two actual clients of each extracted helper;
+  delete the previous allocator/tracer/type-analysis/cleanup implementation.
+  Moving a JS-only routine into `lambda/runtime/` is not evidence of reuse.
+- **Total cost:** report named/all-definition counts, object-size classes,
+  per-value allocation counts and retained/eager memory. Apply existing
+  release runtime/compiler benchmarks and D8.6.1/D8.6.4v2 gates; struct count
+  alone does not prove a smaller or faster runtime.
+
+Behavioral gates exercise the reason for each merge: cross-language
+closure lifetime and returned errors; captured mutation versus snapshots;
+suspension/finally/IteratorClose; duplicate-key/order/accessor behavior;
+buffer alias/detach/resize; symbol descriptions beyond 128 bytes; and heap
+replacement. The relevant focused Lambda/JS and precise forced-GC tests pass;
+this work does not alter the Test262 harness.
+
+## 21. Phase 3 — callable artifacts and realm services
+
+**Status: implemented, 2026-09-17; JSCU51–JSCU55.** Phase 3 extracts only a
+real common owner or service. It does not merge records merely because they
+have pointer-shaped fields, and it does not create an implicit private-ABI to
+`Item` translation path.
+
+### 21.1 JSCU51 — one physical ArrayBuffer-view base
+
+**Landed.** `JsTypedArray` now contains a named `JsArrayBufferView base`; the
+anonymous union that re-declared `buffer`, `buffer_item`, byte offset, byte
+length and length-tracking is gone. TypedArray allocation, detach, resize,
+Atomics, GC tracing, Jube binary projection and DOM clipboard paths all read
+the same `base` fields as the DataView contract. The carrier size is unchanged;
+the retirement removes an anonymous compatibility record and its false second
+ownership surface. This follows D2.6.1v3/D2.6.4v3: byte ownership and view
+bounds are shared, while TypedArray element coercion and DataView endianness
+remain language operations.
+
+### 21.2 JSCU52 — split callable artifact from realm instantiation
+
+**Landed, revised.** No cross-runtime `CallableArtifact` wrapper is retained.
+`Function` directly owns `def` and `def_module`; its existing `arity` remains
+the Lambda parameter count. `JsCallableCode` directly owns the corresponding
+JS definition/module/parameter fields, JavaScript-static facts (source,
+intrinsic class, formal length and body facts), and realm-bound compiled
+pointer/context/module-slab/weak-cache facts. `JsFunction` still owns
+observable properties, `[[Call]]`/`[[Construct]]`, environment and semantic
+payloads.
+
+The Script AST map now owns one canonical `JsCallableCode` artifact per indexed
+function; each AST closure points to it. This retires `JsAstDefinition`, which
+duplicated its `AstFuncNode`, `JsScript` and code pointer. The canonical JS code
+record grows 64→80 B because it owns the definition facts, but it replaces the
+former 64 B code plus 32 B AST-definition pair with one 80 B artifact.
+`Function` remains 72 B with its fields direct. MIR interning, dynamic
+functions and pool-backed AST code keep their separate realm/value lifetimes.
+`JsFunction` directly extends `Function`; the inherited Lambda-specific tail
+is reserved for future semantic unification rather than treated as JS state.
+
+`JsCallableDefinitions.SharesAstDefinitionWithoutSharingCaptures` verifies one
+code definition/module for distinct closure environments; the weak-table
+teardown test verifies live MIR functions retain their realm code after the
+weak owner disappears. This is D6.2.1–D6.2.3v2 and D8.2.3: share immutable
+definition identity, never JS call/construct semantics, and do not introduce a
+wrapper where the physical ABI is not shared.
+
+### 21.3 JSCU53 — promote only real realm services to common capsules
+
+**Landed.** `RuntimeResourceTable` had four real clients: JS timers/process
+IPC, DOM fetch, Jube Node sessions and runner cleanup. It is now a
+`CONTEXT_CAPSULE_RUNTIME_RESOURCES` service constructed, rooted, cleared and
+destroyed by `async.cpp`; clients obtain it through the context rather than
+borrowing `JsRuntimeState`. `JsRuntimeState` no longer embeds the table and is
+**3,176→3,088 B** in the qualified census. The capsule directory destroys JS
+state before the resource service, while normal runner teardown still clears
+resources before context destruction.
+
+`JsRuntimeResources.SharesOneContextCapsuleAcrossHostOwners` proves that the
+JS and common callers receive one table, retain a rooted resource, remove it,
+and cleanly destroy the owning runtime. No generic `RuntimeState` was added and
+no JS-only cache moved. This enforces D5.4.2–D5.4.4 and D7.4.1v2.
+
+### 21.4 JSCU54 — prove compiler mirrors redundant before retirement
+
+**Completed by retained-owner decision.** `JsMirBindingRef` still bridges a
+cross-AST preamble through resolved `NameEntry`, defining node and persistent
+name fallback. `JsMirLiteralShapePlan` and `JsMirStaticShapeField` build a
+source recipe before core `MirConstructionPlan` can describe an already
+resolved `TypeMap`. The source audit found no second core/Lambda client for any
+of those missing facts. They are therefore not mirrors and remain JS lowering
+temporaries; moving them to `lambda/runtime` would manufacture a false shared
+owner, violating D8.2.3. A future deletion requires an actual second client and
+recovery of every field from the canonical owner under D8.2.4–D8.2.6.
+
+### 21.5 JSCU55 — preserve the private MVP POC boundary
+
+**Revised, 2026-09-17.** The separate debug-only MVP runtime remains intact:
+10,329 source LOC across eight files, its 741-line test binary, private
+benchmark engine, manifests, reporting and isolation scripts, acceptance
+artifacts, and POC design records. The debug build exposes `--runtime=mvp` and
+`--js-runtime=mvp`; the release configuration deliberately excludes the POC.
+This preserves a useful future experiment without making it part of the
+production LambdaJS runtime.
+
+No bridge, cast or byte-copy translation is introduced. D1.2v2/D1.3v3 permit a
+language-private ABI when needed; they do not make it interchangeable with
+`Item`. `MvpValue` therefore remains entirely inside the POC, with no claimed
+shared struct owner or implicit interop conversion.
+
+**Phase 3 acceptance.** With the POC restored, the Phase 3 full qualified
+census was **2,979→2,978** records and `js-rt` was **462→461**. JSCU56 then
+retired `FunctionHeader` and its anonymous compatibility records while making
+`JsFunction` extend `Function`; the current full census is **2,973** records
+and **459 `js-rt`** definitions. The 37 restored MVP rows preserve the POC;
+direct-field cleanup and direct callable reuse leave 34 more records than the
+retirement snapshot. The remaining work is assessed by ownership and shared
+operations, not by deleting the POC.
+The full JS runtime suite passed **451/451** and the AST/MIR callable,
+weak-code-table, resource-capsule and retained TypedArray suite passed
+**138/138**. The restored MVP target builds and passes **51/51** tests, and its
+debug CLI selector accepts execution. The prior large-source `lib_fast_diff`
+compiler crash also completes under AddressSanitizer after JS consumes Lambda's
+shared concrete-shape discriminator rather than casting a compact descriptor as
+a `TypeMap`. JSCU54 is closed by evidence that no shared replacement exists,
+rather than a renamed struct. No Phase 3 item claims completion from naming
+alone.
+
 ## Appendix A — Implementation notes (brief)
 
 - **Item 1 carrier form.** Keep `Map base` first so every existing
@@ -2157,33 +2673,123 @@ continues under JSCU27–JSCU35 and can proceed independently.
 
 ## Appendix B — Implementation status and history (brief)
 
-The body states the settled design. This appendix records only what is landed,
-what is not, and the few history notes that still explain a decision. Detailed
-per-batch ledgers live in the git history of this file and in `vibe/impl/`.
+This appendix records source evidence, not new conformance rulings. The final
+2026-09-17 refresh ran the census after every JSCU45–JSCU57 source change and
+ran focused ownership/behavioral gates. It did not rerun historical broad
+performance benchmarks.
 
-### Landed
+### Current census — 2026-09-17
+
+Command: `make struct-census ARGS=--full`, with the unchanged
+`utils/struct_census.config.json`, macOS C++17/debug preprocessing, at tree
+`b085bbb18` plus the working-tree JSCU45–JSCU57 changes. Generated at
+**2026-09-17T13:41:59Z**. Reports:
+[`struct_census.csv`](meta/ds/struct_census.csv) and
+[`struct_census.json`](meta/ds/struct_census.json).
+
+**547 TUs, 2,973 definitions** span the configured source trees. The Phase 3
+baseline was 547 TUs, 2,979 definitions and 462 `js-rt` definitions; current
+`js-rt` is **457**. JSCU57 removes the JS-owned `JsSymbolRecord` and its kind
+enum; direct core `Symbol` indexes use generic `HashMap` callbacks rather than
+introducing JS map-policy structs. The restored MVP POC contributes 37 private rows relative
+to the retirement snapshot, while direct-field cleanup plus direct `Function`
+reuse removes the callable wrappers/header records. That restoration preserves
+future experimental value; it is not a claim that its private concepts are
+shared LambdaJS types.
+
+| Census population | Structs | Classes | Unions | Enums | All definitions |
+|---|---:|---:|---:|---:|---:|
+| Main LambdaJS, excluding parser and TypeScript | 311 | 5 | 3 | 114 | 433 |
+| JS parser | 9 | 0 | 0 | 10 | 19 |
+| TypeScript | 4 | 0 | 0 | 1 | 5 |
+| **`js-rt` total** | **324** | **5** | **3** | **125** | **457** |
+
+The phase removes `CallableArtifact`, `JsCallableArtifact`, `JsCallableRealm`,
+`JsAstDefinition` and `FunctionHeader`; it makes `JsFunction : Function`, keeps
+Lambda `Function` definition fields and JS `JsCallableCode` fields direct, and
+preserves all 37 MVP rows as a private POC boundary. The former
+`js_make_iter_result` linkage conflict remains fixed, so all configured
+translation units are represented. These are more useful consolidation
+denominators than treating every enum and anonymous compatibility overlay as a
+distinct runtime concept.
+
+The census excludes `lambda/module/**`, function-local declarations and
+unreferenced headers. `lambda/dom/**` is currently reported as **unmapped**,
+not `js-rt`. Definitions that disappear from a report can have been moved,
+excluded or become unreachable from scanned TUs; removal credit requires
+checking the source. For example, `JsObjectPairTraversal` still exists in
+`js_object_pair_traversal.hpp` but is absent from the fresh report. `sizeof`
+sums are not live-memory totals: inheritance, inline children, heap payloads,
+instance counts and lazy allocation make that interpretation invalid.
+
+| Structure | Prior recorded value | Current | What the measurement means |
+|---|---:|---:|---|
+| `JsRuntimeState` | 3,176 B | **3,080 B** | Resource service left JS semantic state for its shared context capsule; direct symbol indexes replace the numeric-ID registry |
+| `JsExecutionState` | 232 B | **224 B** | Call activation owner, not the whole realm footprint |
+| `JsFunction` | 88 B | **160 B** | Directly extends the 72 B Lambda `Function`; the object uses the 256 B GC slot until a tail field can be semantically unified |
+| `Function` | 72 B | **72 B** | Lambda callable keeps direct definition and module fields |
+| `Symbol` | 16 B | **16 B** | Core carrier: Lambda uses `ns`; JS uses `kind`, `name_id` compatibility and trailing spelling |
+| `JsCallableCode` + `JsAstDefinition` | 64 B + 32 B | **80 B** | One Script-owned JS code record replaces the duplicate AST definition row without nested wrappers |
+| `GcEnvironmentStorage` | — | **56 B** | Stack descriptor shared by raw capture and JS lexical allocation/clone/trace paths |
+| `DurableActivation` | — | **32 B** | Shared base of Lambda and JS suspended activations; scheduler/Promise facts remain tails |
+| `LambdaAsyncFrame` | 72 B | **96 B** | Pays for the common durable base while retaining exact task-root spill policy |
+| `JsSuspendedActivation` | 128 B | **128 B** | Inherits the common durable base with no size increase |
+| `JsFuncCollected` | 96 B | **96 B** | Semantic facts largely delegated to `FnAnalysis` |
+| `JsMirTranspiler` | 688 B | **672 B** | Initial multi-kilobyte snapshot problem removed |
+| `JsMirFunctionEmitter` | 1,592 B | **1,616 B** | Shared emitter plus JS-local cursor/cache state |
+| `JsStringCacheState` | 5,448 B | **17,736 B** | Main JS's largest record; 1,024-entry ASCII substring Items + hashes added |
+| `JsPrototypeSnapshotState` | 11,496 B | **11,496 B** | One shared function snapshot base plus prototype extension; static footprint unchanged |
+| `NodeRuntimeSession` | 128 B | **128 B** | The old 805,648 B inline session slab is gone |
+
+The largest JS parser records are `JsParser` **29,360 B** and `JsParserProbe`
+**29,440 B**; the latter embeds the former. Their label-depth array is a
+parser-state issue, not a language-interoperability carrier. The cache's
+bounded retention and the parser's checked depth policy require separate
+analysis; a large size alone is not proof of a duplicate struct.
+
+### Implemented structures and remaining gaps
 
 | ruling | outcome |
 |---|---|
-| JSCU9–JSCU11, JSCU32 | suspension state owns its carrier; `JsSuspendedActivation` is the common durable prefix |
+| JSCU9–JSCU11; JSCU32(B) | Generator and async frame Items own their state; fixed tables are gone. `JsSuspendedActivation` inherits the shared 32 B `DurableActivation` base without changing its 128 B size |
 | JSCU12 | `RootVector` is the one growable, address-stable, precisely scanned Item collection |
 | JSCU13 | POD metadata never shares scanned storage; it lives in a parallel ordinary array |
 | JSCU14(b) | the four JS LIFO item stacks became `RootVector`s. The `JsItemStack` facade over them was **retired 2026-09-11**: with-scope, its last non-trivial client, moved to §18's chain, and the remaining clients hold a `RootVector` directly |
 | JSCU16 | one owner per compiled unit (MIR context + source buffer) in a dynamic store |
-| JSCU27–JSCU31, JSCU34–JSCU35 | context capsule directory, call activation, realm slots, job envelope, resource table, view authority, compiler mechanisms |
-| JSCU29(A) partial | realm slots reserved before an allocation can publish; the broader migration is open |
+| JSCU27 partial | `EvalContext` owns `ContextCapsuleDirectory`, including JS/Node/DOM peers. `JsRuntimeState` still embeds/points to subsystem owners; the complete execution-only remainder and `NODE_SESSION` lifetime are not implemented |
+| JSCU28 | `JsCallActivation` and `JsExecutionState` exist; JS call/construct retains explicit capabilities |
+| JSCU29 partial | `JsRealmSlots` and `JsGlobalEnvironment` exist; the old root-range/reset registry and `JsRootedState` wrapper are gone. Fixed rooted Item fields and nested owners remain |
+| JSCU30–JSCU31; JSCU53 | Shared `RuntimeJob`, `RuntimeJobQueue`, `RuntimeResourceTable` and rooted slot helpers exist. The resource table is now a context capsule shared by JS, DOM, Jube and runner cleanup; JS-only task policy remains local |
+| JSCU32(A); JSCU46 | `GcEnvironmentStorage` plus `gc_environment_calloc` make raw Item/tail and `JsInterpEnv` layout kinds explicit. Common descriptor access/copy/visitor operations replace duplicate tracing; lexical policy is a JS extension |
+| JSCU33(A); JSCU46; JSCU52 | MIR code interning and Script-owned AST code sharing exist. `Function` and `JsCallableCode` keep their own direct definition/module fields; JS code/cache facts remain direct fields of the shared JS code record under D6.2.1–D6.2.3v2 |
+| JSCU33(B) | `JsAccessorCell` is distinct GC descriptor metadata under D3.4.8 |
+| JSCU34; JSCU51 | DataView is a direct `JsArrayBufferView` alias and TypedArray embeds the same named `base`; the anonymous source-compatibility overlay is retired |
+| JSCU35; JSCU49 | Shared name cache/cursor, dynamic closure checkpoint and one flat ordered `JsClassMember` exist; the three named member payload layouts are retired |
 | JSCU44 | per-activation `with` chain; `JsWithScopeState` deleted |
+| JSCU47 | `jm_get_effective_type` consumes AST-published contracts; full return contracts are joined on `FnAnalysis` and compact native return lanes project from that owner |
+| JSCU48 | `JsCommonAstBuild`, `JsCommonMirBuild`, `JsRootedState`, regex `PtrVec`, `RxRange`, `CodePointRange` and physical `JsRegexRange` are retired. `InputScriptBuildScope`, byte/view direct aliases, direct `RootVector` bases, `ArrayList`, and `CodePointInterval` provide the shared replacements |
+| JSCU49 | Callable snapshots/`JsCtor`, import/export plans, three class member payload rows and four continuation records are retired. The replacement records use direct common bases or explicit kinds and shared lifecycle operations |
+| JSCU50 | Clean full census, source-level retirement checks, shared-operation evidence and focused behavior/forced-GC gates are recorded in §20 and this appendix |
+| JSCU54 | `JsMirBindingRef`, `JsMirLiteralShapePlan` and `JsMirStaticShapeField` remain JS lowering facts: no second client can recover their pre-resolution data from core plans |
+| JSCU55 (revised) | The MVP source/runtime, tests, selector, benchmark engine and private acceptance artifacts are preserved as a debug-only private-ABI POC; no `MvpValue`–`Item` bridge or shared owner is claimed |
+| JSCU56 | `JsFunction : Function` replaces `FunctionHeader`; `Function` marks its inherited tail Lambda-specific, and each later tail merge requires matching ownership, GC and call contracts |
+| JSCU57 | Core `Symbol` is the direct `LMD_TYPE_SYMBOL` carrier for JS values; `JsSymbolRecord`, the negative-int encoding and numeric identity are retired together, while the union's JS `NameId` preserves the existing property route pending the later Lambda-name decision |
 
-### Not implemented
+### Outstanding or only partly implemented
 
 - **JSCU25** (JS async activation as a weakly registered `LambdaTask`) is
   ratified but not built; readiness stays with the microtask queue. **D6.3.1**
   records this.
-- **JSCU26** (the Lambda frame on the same carrier) likewise. **D5.1.1v2**
-  records both, with the `generators[4096]` / `async_contexts[256]` index tables
-  still in place.
-- **JSCU36–JSCU43** are proposals. Task order and source anchors are in
-  Appendix C.
+- **JSCU36–JSCU43** are not collectively complete. There are now shared
+  `MirConstructionPlan`, `MirFieldAccessPlan`, `MirShapeCandidateProfile` and
+  candidate traversal helpers in `mir_shape_candidates.hpp`, consumed by both
+  lowerings. JS native completion code also uses the shared emitter's error
+  return register. These are landed pieces, not evidence that all acceptance
+  gates in §17 have passed. Appendix C remains the dependency sketch.
+- **JSCU45–JSCU57 (§20–§21)** are complete. Their deliberate boundaries (JS
+  readiness/microtask policy, callable property tails, JS-only lowering facts,
+  payload-specific `Map` extensions and the preserved private MVP POC) are not
+  residual duplicate representations.
 
 ### Census at ratification (2026-09-07, superseded)
 
@@ -2247,9 +2853,9 @@ under `vibe/impl` after the proposal is taken up.
 | [Formal Design](../doc/Lambda_Formal_Design.md) | Ownership, representations, shapes, calls, shared compiler and ratchets |
 | [Formal Semantics](../doc/Lambda_Formal_Semantics.md) | Truthiness, contracts, capture and mutation behavior |
 | [Runtime struct design](Lambda_Design_Structs.md) | Shared storage descriptor and ABI authority, SCU7–SCU17 |
-| [JS predecessor](Lambda_Design_Structs_JS.md) | JSCU9–JSCU35, especially §8.13–§8.14 landed/residual work |
+| [Initial JS consolidation](Lambda_Design_Structs_JS.md) | JSCU9–JSCU35; current landed/residual status in Appendix B |
 | [JS compiler unification](Lambda_Design_JS_Unified.md) | Existing shared indexed compiler and demand-driven lowering |
-| [Tune10](jube/JS_Tune10_Fast_Paths.md) | Numeric-key recovery and §12 literal-shape support; early status paragraphs are historical |
+| [Tune10](<jube/JS_Tune10_Fast_Paths (done).md>) | Numeric-key recovery and §12 literal-shape support; early status paragraphs are historical |
 | [AST core](../lambda/runtime/ast-core.hpp) | `FnAnalysis`, `FnVariantAnalysis`, `FnReturnAnalysis`, indexed identities |
 | [Shared emitter](../lambda/runtime/mir_emitter_shared.hpp) | `MirValue`, `MirCallResult`, `MirFunctionPlan`, profiles and root finalization |
 | [Lambda MIR lowering](../lambda/runtime/transpile-mir.cpp) | `mir_expr_candidate_shape`, `mir_module_unique_shape_for_field`, guarded reads/writes |
@@ -2264,7 +2870,16 @@ under `vibe/impl` after the proposal is taken up.
 | [Array view](../lambda/js/js_typed_array.h) | Shared ArrayBuffer-view state for DataView and typed arrays |
 | [Helper catalog](../lambda/runtime/sys_func_registry.c) | Collection/reentry/completion contracts and runtime import ABI |
 | [Callable layout](../lambda/js/js_function.hpp) | `JsCallableCode`, value state and optional semantic payloads |
-| [Callable allocation](../lambda/js/js_runtime_function.cpp) | Current per-value code allocation and retained owners |
+| [Callable allocation](../lambda/js/js_runtime_function.cpp) | `js_callable_code_intern`, unique-code fallback and retained owners |
+| [Source-cache build scope](../lambda/input/input-script-cache.h) | `InputScriptBuildScope` and its shared claim/reset/complete operations; `JsScript : Script` |
+| [Environment contract](../lambda/runtime/gc_environment.h) | `GcEnvironmentStorage` descriptor and common access/copy/visitor operations |
+| [Environment tracing](../lambda/runtime/gc/gc_heap.c) | `GC_TYPE_ENVIRONMENT` descriptor construction and one generic visitor |
+| [Owned closure storage](../lambda/runtime/lambda-mem.cpp) | `heap_calloc_closure_env` through `gc_environment_calloc` |
+| [Durable activation](../lambda/runtime/durable_activation.hpp) | shared kind/state/slot-extent carrier for Lambda and JS suspension |
+| [Type operations](../lambda/runtime/type_contract.hpp) | Full-contract joins, canonical representation and lane descriptors |
+| [Callable snapshots and symbols](../lambda/js/js_globals.cpp) | `JsFunctionSnapshot`, `JsPrototypeFunctionSnapshot`; JSCU57 uses core `Symbol` directly and routes property compatibility through `NameId` |
+| [JS continuations](../lambda/js/js_interp.cpp) | tagged `JsInterpContinuation` and shared tracing/release paths |
+| [Shared bytes](../lib/byte_storage.h) | `ByteStorage`, `ByteBufferHandle`, `ByteSpan` and ownership operations |
 
 ## Appendix D — Questions to resolve during implementation review
 
@@ -2272,8 +2887,9 @@ These are scoped design choices for the proposed work, not new issue IDs or
 exceptions to formal rules. Record actual discovered defects in the existing
 central issue ledger.
 
-* Which existing indexed table should own the access-plan projection with the
-  least duplicated storage? Choose after enumerating both clients' consumers.
+* Which canonical AST/type/function owner supplies each access-plan input,
+  and which selections can stay transient during lowering? D8.2.5v2 forbids
+  introducing a persistent per-node fact table for these projections.
 * Which shape fields are immutable across admitted in-place initialization,
   and which require a storage guard? Settle this from the canonical transition
   contract before baking native loads.
@@ -2293,3 +2909,17 @@ If implementation exposes a need to change a formal ruling—rather than fill an
 implementation gap—bring that specific change for review and update both the
 formal spec and working design after ratification. This draft itself makes no
 such ruling change.
+
+## Appendix E — Superseded proposal wording
+
+The 2026-09-17 audit aligns §9 with the already-ratified **D8.2.5v2**; it does
+not revise the formal ruling. The replaced placement proposal is retained here:
+
+- ~~Candidate shape, numeric range, use/def and effect evidence share ID-keyed
+  analysis in the compilation unit; selected operation and representation live
+  in function/node planning side tables.~~ Replaced by AST-owned effective
+  types, function-owned facts, graph indexes, type-wide optional optimization
+  facts and transient lowering plans as specified in §9 and §20.3.
+- ~~Implementation review should select an indexed table to own the access-plan
+  projection.~~ Replaced by the canonical-owner/transient-plan question in
+  Appendix D. An ID is an identity, not authority to add a per-node fact store.

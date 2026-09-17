@@ -154,6 +154,10 @@ void* dom_create_backed_element_bridge(void* document, const char* tag);
 // Document behind a node wrapper or the document proxy (ESO93). Returns DomDocument*.
 void* dom_document_from_item(Item item);
 
+// The script runner changes this only for the dynamic extent of a classic
+// script evaluation. Returns the previous element for nested evaluations.
+void* dom_document_swap_current_script(void* document, void* script_element);
+
 // Acquiring a document needs the engine's loader, which lives in the radiant
 // target above this one, so loading is split at the seam: the engine parses and
 // answers a DomDocument*, and the core wraps it as a node. Splitting it this way

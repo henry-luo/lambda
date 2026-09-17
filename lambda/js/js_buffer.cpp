@@ -113,7 +113,7 @@ static Item buffer_to_bigint_value(Item value, Item* out_bigint) {
 
     TypeId value_type = get_type_id(value);
     // buffer's BigInt write APIs require a BigInt value; generic ToBigInt would wrongly accept strings/booleans.
-    if (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (value_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
     } else {
         return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
@@ -2466,4 +2466,3 @@ extern "C" void js_reset_buffer_module(void) {
     if (namespace_slot) *namespace_slot = (Item){0};
     if (prototype_slot) *prototype_slot = (Item){0};
 }
-

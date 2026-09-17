@@ -73,6 +73,16 @@ typedef enum InputScriptBuildClaim {
     INPUT_SCRIPT_BUILD_POISONED,
 } InputScriptBuildClaim;
 
+// A single-flight owner holds this only between an artifact's build claim and
+// publication. The cache owns both the scope and lease protocols for AST and
+// MIR artifacts, so their clients share one carrier and completion path.
+typedef struct InputScriptBuildScope {
+    InputCacheScope* scope;
+    InputScriptLease* lease;
+    InputScriptBuildClaim state;
+    InputScriptBuildKind kind;
+} InputScriptBuildScope;
+
 typedef struct InputScriptCacheStats {
     uint64_t source_lookups;
     uint64_t source_hits;
@@ -180,6 +190,12 @@ InputScriptBuildClaim input_script_cache_claim_build(InputScriptLease* lease,
     InputScriptBuildKind kind);
 void input_script_cache_complete_build(InputScriptLease* lease,
     InputScriptBuildKind kind, bool published, bool poison);
+void input_script_build_scope_reset(InputScriptBuildScope* build);
+InputScriptBuildClaim input_script_build_scope_begin(InputScriptBuildScope* build,
+    InputScriptCache* cache, const InputScriptRequest* request,
+    InputScriptBuildKind kind);
+void input_script_build_scope_complete(InputScriptBuildScope* build,
+    bool published, bool poison);
 
 void input_script_cache_mark_module_hit(InputScriptCache* cache);
 void input_script_cache_mark_dependency_invalidation(InputScriptCache* cache);

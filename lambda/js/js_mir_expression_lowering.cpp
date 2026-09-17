@@ -156,6 +156,15 @@ static void jm_emit_assignment_var_writeback(JsMirTranspiler* mt,
         jm_write_last_closure_capture_if_matching(mt, var->binding, value,
             var->type_id);
     }
+    if (mt->module_consts && jm_current_function_is_iife_body(mt)) {
+        JsModuleConstEntry* mc = jm_find_module_const_by_binding(mt,
+            var->binding);
+        if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) {
+            // Direct-IIFE references load this live slot, so assignments through
+            // a retained local mirror must update it before the next reference.
+            jm_store_module_var(mt, (uint32_t)mc->int_val, value);
+        }
+    }
     int api = jm_arguments_param_index(mt, vname, var);
     if (api >= 0) jm_arguments_writeback_param(mt, api, value);
 }
@@ -609,9 +618,9 @@ static bool jm_class_declares_private_name(JsClassEntry* ce, const char* suffix,
     if (!ce || !suffix || suffix_len <= 0) return false;
     for (int i = 0; i < ce->member_count; i++) {
         JsClassMember* member = &ce->members[i];
-        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
-            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
-            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->name
+            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->name
+            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->name
             : NULL;
         if (jm_private_name_suffix_eq(name, suffix, suffix_len)) return true;
     }
@@ -797,11 +806,11 @@ static TypeMap* jm_class_instance_shape_for_class(JsMirTranspiler* mt,
 
 static bool jm_class_private_instance_method_seen(JsClassEntry* ce,
         int member_index) {
-    JsClassMethodEntry* method = jm_class_member_method(ce, member_index);
+    JsClassMember* method = jm_class_member_method(ce, member_index);
     if (!method || method->is_static || method->is_constructor || !method->name ||
             !jm_is_private_name(method->name)) return false;
     for (int previous_index = 0; previous_index < member_index; previous_index++) {
-        JsClassMethodEntry* previous = jm_class_member_method(ce, previous_index);
+        JsClassMember* previous = jm_class_member_method(ce, previous_index);
         if (!previous || previous->is_static || previous->is_constructor ||
                 !previous->name || !jm_is_private_name(previous->name)) continue;
         if (previous->name->len == method->name->len &&
@@ -829,7 +838,7 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
         if (member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD) metadata_count++;
         if (member->kind == JS_CLASS_MEMBER_METHOD &&
                 !jm_class_private_instance_method_seen(ce, member_index)) {
-            JsClassMethodEntry* method = &member->as.method;
+            JsClassMember* method = member;
             if (!method->is_static && !method->is_constructor && method->name &&
                     jm_is_private_name(method->name)) metadata_count++;
         }
@@ -847,7 +856,7 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
     for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsClassMember* member = &ce->members[member_index];
         if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
-        JsInstanceFieldEntry* inf = &member->as.instance_field;
+        JsClassMember* inf = member;
         String* source_name = inf->computed
             ? name_pool_create_len(mt->tp->name_pool, "__computed_class_field__", 24)
             : jm_class_private_name(mt, ce, inf->name);
@@ -891,7 +900,7 @@ void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_ob
     for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsClassMember* member = &ce->members[member_index];
         if (member->kind != JS_CLASS_MEMBER_METHOD) continue;
-        JsClassMethodEntry* me = &member->as.method;
+        JsClassMember* me = member;
         if (me->is_static || me->is_constructor || !me->name || !jm_is_private_name(me->name)) continue;
         if (jm_class_private_instance_method_seen(ce, member_index)) continue;
         String* method_name = jm_class_private_name(mt, ce, me->name);
@@ -915,7 +924,7 @@ void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
     for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsClassMember* member = &ce->members[member_index];
         if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
-        JsInstanceFieldEntry* inf = &member->as.instance_field;
+        JsClassMember* inf = member;
         if (inf->computed && inf->key_module_var_index >= 0) {
             MIR_reg_t key = jm_load_module_var(mt, (uint32_t)inf->key_module_var_index);
             jm_call_void_3(mt, "js_set_class_instance_field_metadata_key",
@@ -971,13 +980,13 @@ void jm_emit_class_computed_field_module_keys(JsMirTranspiler* mt,
     for (int member_index = 0; member_index < ce->member_count; member_index++) {
         JsClassMember* member = &ce->members[member_index];
         if (member->kind == JS_CLASS_MEMBER_STATIC_FIELD) {
-            JsStaticFieldEntry* sf = &member->as.static_field;
+            JsClassMember* sf = member;
             if (sf->computed && sf->key_expr && sf->key_module_var_index >= 0) {
                 jm_emit_class_computed_field_module_key(mt, cls_obj, sf->key_expr,
                     sf->key_module_var_index, true);
             }
         } else if (member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD) {
-            JsInstanceFieldEntry* inf = &member->as.instance_field;
+            JsClassMember* inf = member;
             if (inf->computed && inf->key_expr && inf->key_module_var_index >= 0) {
                 jm_emit_class_computed_field_module_key(mt, cls_obj, inf->key_expr,
                     inf->key_module_var_index, false);
@@ -1027,7 +1036,7 @@ static bool jm_class_has_instance_elements(JsClassEntry* ce) {
         JsClassMember* member = &ce->members[member_index];
         if (member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD) return true;
         if (member->kind != JS_CLASS_MEMBER_METHOD) continue;
-        JsClassMethodEntry* method = &member->as.method;
+        JsClassMember* method = member;
         if (!method->is_static && !method->is_constructor && method->name &&
             jm_is_private_name(method->name)) return true;
     }
@@ -2112,9 +2121,9 @@ static bool jm_emit_eval_private_env_push(JsMirTranspiler* mt) {
     bool has_private = false;
     for (int i = 0; i < ce->member_count && !has_private; i++) {
         JsClassMember* member = &ce->members[i];
-        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
-            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
-            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->name
+            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->name
+            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->name
             : NULL;
         has_private = jm_is_private_name(name);
     }
@@ -2123,9 +2132,9 @@ static bool jm_emit_eval_private_env_push(JsMirTranspiler* mt) {
     jm_call_void_0(mt, "js_eval_private_push_frame");
     for (int i = 0; i < ce->member_count; i++) {
         JsClassMember* member = &ce->members[i];
-        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->as.method.name
-            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->as.static_field.name
-            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->as.instance_field.name
+        String* name = member->kind == JS_CLASS_MEMBER_METHOD ? member->name
+            : member->kind == JS_CLASS_MEMBER_STATIC_FIELD ? member->name
+            : member->kind == JS_CLASS_MEMBER_INSTANCE_FIELD ? member->name
             : NULL;
         jm_emit_eval_private_bind_name(mt, ce, name);
     }
@@ -2810,8 +2819,14 @@ struct JsMirStaticShapeField {
     TypeId type_id;
 };
 
+static bool jm_static_literal_storage_is_current_realm() {
+    // D5.4.3: cached compile-only MIR cannot retain compiler-realm pointers.
+    return !g_jm_preamble_compile_only;
+}
+
 static TypeMap* jm_build_static_shape(JsMirTranspiler* mt,
         const JsMirStaticShapeField* fields, int field_count) {
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !fields || field_count <= 0 || field_count > 16 ||
             !js_input || !js_input->pool) return NULL;
 
@@ -3002,7 +3017,7 @@ static bool jm_current_function_has_instance_this(JsMirTranspiler* mt) {
     if (!mt || !mt->current_class || !mt->current_fc) return false;
     for (int member_index = 0; member_index < mt->current_class->member_count;
             member_index++) {
-        JsClassMethodEntry* method = jm_class_member_method(mt->current_class,
+        JsClassMember* method = jm_class_member_method(mt->current_class,
             member_index);
         if (method && method->fc == mt->current_fc) return !method->is_static;
     }
@@ -3013,7 +3028,7 @@ static bool jm_current_function_is_instance_constructor(JsMirTranspiler* mt) {
     if (!mt || !mt->current_class || !mt->current_fc) return false;
     for (int member_index = 0; member_index < mt->current_class->member_count;
             member_index++) {
-        JsClassMethodEntry* method = jm_class_member_method(mt->current_class,
+        JsClassMember* method = jm_class_member_method(mt->current_class,
             member_index);
         if (method && method->fc == mt->current_fc) return method->is_constructor;
     }
@@ -3041,7 +3056,7 @@ static int jm_class_shape_static_field_use_count(JsMirTranspiler* mt,
     int static_field_uses = 0;
     for (int member_index = 0; member_index < entry->member_count;
             member_index++) {
-        JsClassMethodEntry* method = jm_class_member_method(entry, member_index);
+        JsClassMember* method = jm_class_member_method(entry, member_index);
         if (!method || method->is_static || !method->fc || !method->fc->node) {
             continue;
         }
@@ -3133,7 +3148,7 @@ static TypeMap* jm_class_instance_shape_for_class(JsMirTranspiler* mt,
             member_index++) {
         JsClassMember* member = &entry->members[member_index];
         if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
-        JsInstanceFieldEntry* field = &member->as.instance_field;
+        JsClassMember* field = member;
         TypeId type_id = field->initializer
             ? jm_get_effective_type(mt, field->initializer) : LMD_TYPE_ANY;
         if (field_count == 16 || field->computed || !field->name ||
@@ -6916,10 +6931,10 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                 if (mt->current_class && mt->current_class->superclass) {
                     // Look up method in parent class chain
                     JsClassEntry* parent = mt->current_class->superclass;
-                    JsClassMethodEntry* found_method = NULL;
+                    JsClassMember* found_method = NULL;
                     while (parent && !found_method) {
                         for (int i = 0; i < parent->member_count; i++) {
-                            JsClassMethodEntry* me = jm_class_member_method(parent, i);
+                            JsClassMember* me = jm_class_member_method(parent, i);
                             if (!me) continue;
                             if (me->name && prop->name &&
                                 me->name->len == prop->name->len &&
@@ -6973,7 +6988,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                 bool super_computed_handled = false;
                 if (mt->current_class && mt->current_class->superclass && m->property) {
                     JsClassEntry* parent = mt->current_class->superclass;
-                    JsClassMethodEntry* found_method = NULL;
+                    JsClassMember* found_method = NULL;
                     // Get the identifier name of the key expression (e.g. "$finalize")
                     String* key_id_name = NULL;
                     if (m->property->node_type == AST_NODE_IDENT) {
@@ -6990,7 +7005,7 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                         // identifier has the same name as key_id_name
                         while (parent && !found_method) {
                             for (int i = 0; i < parent->member_count; i++) {
-                                JsClassMethodEntry* me = jm_class_member_method(parent, i);
+                                JsClassMember* me = jm_class_member_method(parent, i);
                                 if (!me) continue;
                                 if (!me->computed || me->is_constructor || me->is_static) continue;
                                 if (!me->key_expr) continue;
@@ -7653,6 +7668,7 @@ MIR_reg_t jm_transpile_member_as_number(JsMirTranspiler* mt, JsMemberNode* membe
 
 static Item* jm_static_inline_number_array_items(JsMirTranspiler* mt,
         JsArrayNode* array) {
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !mt->tp || !array || array->length <= 0 ||
             !js_input || !js_input->pool) return NULL;
 
@@ -7737,9 +7753,142 @@ static char* jm_static_literal_copy(JsMirTranspiler* mt, String* source) {
     return copy;
 }
 
+static bool jm_static_literal_recipe_set_literal(JsMirTranspiler* mt,
+        JsLiteralNode* literal, JsStaticLiteralRecipe* recipe) {
+    if (!mt || !literal || !recipe) return false;
+    switch (literal->literal_type) {
+    case AST_LITERAL_NUMBER: {
+        if (literal->is_bigint ||
+                !jm_float_const_is_inline(literal->value.number_value)) {
+            return false;
+        }
+        double value = literal->value.number_value;
+        uint64_t bits;
+        __builtin_memcpy(&bits, &value, sizeof(bits));
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = value == 0.0
+            ? ITEM_FLOAT_P0 | (bits >> 63) : bits;
+        return true;
+    }
+    case AST_LITERAL_STRING:
+        if (!literal->value.string_value) return false;
+        recipe->string_chars = jm_static_literal_copy(mt,
+            literal->value.string_value);
+        if (!recipe->string_chars) return false;
+        recipe->string_len = (int)literal->value.string_value->len;
+        recipe->kind = JS_STATIC_LITERAL_STRING;
+        return true;
+    case AST_LITERAL_BOOLEAN:
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = literal->value.boolean_value ? ITEM_TRUE : ITEM_FALSE;
+        return true;
+    case AST_LITERAL_NULL:
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = ITEM_NULL;
+        return true;
+    case AST_LITERAL_UNDEFINED:
+        recipe->kind = JS_STATIC_LITERAL_IMMEDIATE;
+        recipe->immediate = ITEM_JS_UNDEFINED;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool jm_static_literal_recipe_set_node(JsMirTranspiler* mt,
+        JsAstNode* node, JsStaticLiteralRecipe* recipe) {
+    if (!mt || !node || !recipe || !js_input || !js_input->pool) return false;
+    if (node->node_type == AST_NODE_LITERAL) {
+        return jm_static_literal_recipe_set_literal(mt, (JsLiteralNode*)node, recipe);
+    }
+    if (node->node_type == AST_NODE_ARRAY) {
+        JsArrayNode* array = (JsArrayNode*)node;
+        if (array->length < 0) return false;
+        recipe->kind = JS_STATIC_LITERAL_ARRAY;
+        recipe->length = array->length;
+        if (array->length == 0) return true;
+        JsStaticLiteralRecipe* children = (JsStaticLiteralRecipe*)pool_calloc(
+            js_input->pool, (size_t)array->length * sizeof(JsStaticLiteralRecipe));
+        if (!children) return false;
+        int index = 0;
+        for (JsAstNode* element = array->elements; element; element = element->next) {
+            if (index >= array->length) return false;
+            if (element->node_type == AST_NODE_NULL) {
+                children[index].kind = JS_STATIC_LITERAL_HOLE;
+            } else if (!jm_static_literal_recipe_set_node(mt, element,
+                    &children[index])) {
+                return false;
+            }
+            index++;
+        }
+        if (index != array->length) return false;
+        recipe->children = children;
+        return true;
+    }
+    if (node->node_type == AST_NODE_MAP) {
+        JsObjectNode* object = (JsObjectNode*)node;
+        int count = 0;
+        for (JsAstNode* property_node = object->properties; property_node;
+                property_node = property_node->next) {
+            if (property_node->node_type != AST_NODE_PROPERTY || count == INT_MAX) {
+                return false;
+            }
+            JsPropertyNode* property = (JsPropertyNode*)property_node;
+            String* name = jm_literal_property_name(property);
+            if (!name || (name->len == 9 && memcmp(name->chars, "__proto__", 9) == 0) ||
+                    !property->value) {
+                return false;
+            }
+            count++;
+        }
+        recipe->kind = JS_STATIC_LITERAL_OBJECT;
+        recipe->length = count;
+        if (count == 0) return true;
+        JsStaticLiteralRecipe* children = (JsStaticLiteralRecipe*)pool_calloc(
+            js_input->pool, (size_t)count * sizeof(JsStaticLiteralRecipe));
+        if (!children) return false;
+        int index = 0;
+        for (JsAstNode* property_node = object->properties; property_node;
+                property_node = property_node->next, index++) {
+            JsPropertyNode* property = (JsPropertyNode*)property_node;
+            String* name = jm_literal_property_name(property);
+            children[index].key_chars = jm_static_literal_copy(mt, name);
+            children[index].key_len = (int)name->len;
+            if (!children[index].key_chars || !jm_static_literal_recipe_set_node(mt,
+                    property->value, &children[index])) {
+                return false;
+            }
+        }
+        recipe->children = children;
+        return true;
+    }
+    return false;
+}
+
+static JsStaticLiteralRecipe* jm_static_composite_literal_recipe(
+        JsMirTranspiler* mt, JsAstNode* node) {
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
+    if (!mt || !node || !js_input || !js_input->pool) return NULL;
+    JsStaticLiteralRecipe* recipe = (JsStaticLiteralRecipe*)pool_calloc(
+        js_input->pool, sizeof(JsStaticLiteralRecipe));
+    if (!recipe || !jm_static_literal_recipe_set_node(mt, node, recipe)) return NULL;
+    if ((recipe->kind != JS_STATIC_LITERAL_ARRAY &&
+            recipe->kind != JS_STATIC_LITERAL_OBJECT) || !recipe->children) {
+        return NULL;
+    }
+    for (int index = 0; index < recipe->length; index++) {
+        JsStaticLiteralKind kind = (JsStaticLiteralKind)recipe->children[index].kind;
+        if (kind == JS_STATIC_LITERAL_ARRAY || kind == JS_STATIC_LITERAL_OBJECT) {
+            return recipe;
+        }
+    }
+    return NULL;
+}
+
 static JsStaticObjectProperty* jm_static_primitive_object_properties(
         JsMirTranspiler* mt, JsObjectNode* object, int* out_length) {
     if (out_length) *out_length = 0;
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !object || !js_input || !js_input->pool) return NULL;
 
     int count = 0;
@@ -7797,10 +7946,16 @@ static MirValue jm_emit_array_value(JsMirTranspiler* mt,
     MIR_reg_t array;
     Item* static_items = has_spread
         ? NULL : jm_static_inline_number_array_items(mt, arr);
+    JsStaticLiteralRecipe* static_recipe = static_items || has_spread ? NULL
+        : jm_static_composite_literal_recipe(mt, (JsAstNode*)arr);
     if (static_items) {
         array = jm_call_2(mt, "js_array_new_from_static_items", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_items),
             MIR_T_I64, MIR_new_int_op(mt->ctx, arr->length));
+    } else if (static_recipe) {
+        array = jm_call_1(mt, "js_static_literal_from_recipe", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_recipe));
+        jm_emit_error_lane_propagate_check(mt);
     } else if (has_spread) {
         // Use empty array + push for arrays with spread
         array = jm_call_1(mt, "js_array_new", MIR_T_I64,
@@ -7927,6 +8082,15 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
             MIR_T_I64, MIR_new_int_op(mt->ctx,
                 (int64_t)(uintptr_t)static_properties),
             MIR_T_I64, MIR_new_int_op(mt->ctx, static_property_count));
+        jm_emit_error_lane_propagate_check(mt);
+        return jm_expression_value(mt, (JsAstNode*)obj, object, LMD_TYPE_MAP,
+            VALUE_REP_ITEM);
+    }
+    JsStaticLiteralRecipe* static_recipe = jm_static_composite_literal_recipe(mt,
+        (JsAstNode*)obj);
+    if (static_recipe) {
+        MIR_reg_t object = jm_call_1(mt, "js_static_literal_from_recipe", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_recipe));
         jm_emit_error_lane_propagate_check(mt);
         return jm_expression_value(mt, (JsAstNode*)obj, object, LMD_TYPE_MAP,
             VALUE_REP_ITEM);
@@ -9235,7 +9399,7 @@ static MirValue jm_transpile_call_value(JsMirTranspiler* mt,
 // _simple: no private-home enter/leave, unlike the same-named 4-arg emitter
 // in js_mir_statement_lowering.cpp
 void jm_emit_class_static_named_field(JsMirTranspiler* mt,
-        MIR_reg_t cls_obj, JsStaticFieldEntry* sf, MIR_reg_t value) {
+        MIR_reg_t cls_obj, JsClassMember* sf, MIR_reg_t value) {
     if (!sf || !sf->name) return;
     MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
     jm_callr_void_2(mt, "js_set_function_name_if_anonymous", value, fn_name);

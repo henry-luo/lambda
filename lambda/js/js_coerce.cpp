@@ -31,9 +31,7 @@ static inline Item k_to_string(void) {
 }
 
 static inline bool is_object_value(Item value) {
-    TypeId t = get_type_id(value);
-    return t == LMD_TYPE_MAP || js_is_js_array(value) ||
-           t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT;
+    return js_is_object_value(value);
 }
 
 static inline bool js_coerce_is_bigint(Item value) {
@@ -58,7 +56,8 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
     if (vt == LMD_TYPE_MAP) {
         bool own_pv = false;
         Item pv = js_map_shape_lookup_ext(value.map, "__primitiveValue__", 18, &own_pv);
-        bool pv_is_symbol = get_type_id(pv) == LMD_TYPE_INT && it2i(pv) <= -(int64_t)JS_SYMBOL_BASE;
+        bool pv_is_symbol = get_type_id(pv) == LMD_TYPE_SYMBOL &&
+            symbol_has_js_identity(pv.get_safe_symbol());
         if (own_pv && !js_coerce_is_bigint(pv) && !pv_is_symbol) {
             bool has_vo = false, has_ts = false, has_tp = false;
             js_map_shape_lookup_ext(value.map, "valueOf", 7, &has_vo);

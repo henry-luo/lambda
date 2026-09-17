@@ -248,6 +248,7 @@ const char radiant_dom_interface_decl[] =
     "    origin: string,\n"
     "    location: any,\n"
     "    document: any,\n"
+    "    to_string: fn() string,\n"
     "    ready_state: string,\n"
     "    fonts: any,\n"
     "    compat_mode: string,\n"
@@ -1413,6 +1414,13 @@ RADIANT_DOC_GET_FN(radiant_doc_get_active_element, "activeElement")
 RADIANT_DOC_GET_FN(radiant_doc_get_forms, "forms")
 RADIANT_DOC_SET_FN(radiant_doc_set_design_mode, "designMode")
 
+static int radiant_doc_call_to_string(Item receiver, Item* args, int argc, Item* out) {
+    (void)args;
+    (void)argc;
+    // Location is this document wrapper, so its string form is the URL.
+    return radiant_dom_document_host_get_property(receiver, radiant_dom_doc_key("href"), out);
+}
+
 RADIANT_DOC_CALL_FN(radiant_doc_call_assign, RADIANT_DOCUMENT_ASSIGN)
 RADIANT_DOC_CALL_FN(radiant_doc_call_replace, RADIANT_DOCUMENT_REPLACE)
 RADIANT_DOC_CALL_FN(radiant_doc_call_reload, RADIANT_DOCUMENT_RELOAD)
@@ -1481,6 +1489,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_FIELD("origin", NULL, radiant_doc_get_origin),
     DOC_FIELD("location", NULL, radiant_doc_get_location),
     DOC_FIELD("document", NULL, radiant_doc_get_document),
+    DOC_METHOD("to_string", "toString", radiant_doc_call_to_string),
     DOC_FIELD("ready_state", "readyState", radiant_doc_get_ready_state),
     DOC_FIELD("fonts", NULL, radiant_doc_get_fonts),
     DOC_FIELD("compat_mode", "compatMode", radiant_doc_get_compat_mode),

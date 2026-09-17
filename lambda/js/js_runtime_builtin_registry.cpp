@@ -282,8 +282,8 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
     }
     const char* display_name = js_builtin_method_spec_display_name(spec);
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_abi(fn);
     js_function_init_native_module_scope(fn);
-    fn->type_id = LMD_TYPE_FUNC;
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->param_count = spec->param_count;

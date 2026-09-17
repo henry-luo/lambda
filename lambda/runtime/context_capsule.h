@@ -48,6 +48,9 @@ typedef enum ContextCapsuleId {
     CONTEXT_CAPSULE_RENDER_MAP,
     CONTEXT_CAPSULE_TEMPLATE_STATE,
     CONTEXT_CAPSULE_NODE_RUNTIME,
+    // Native resource identity is shared by JS, DOM and Jube owners. It is a
+    // peer of their capsules, not a field of the JS semantic realm state.
+    CONTEXT_CAPSULE_RUNTIME_RESOURCES,
     CONTEXT_CAPSULE_JS_RUNTIME,
     CONTEXT_CAPSULE_COUNT
 } ContextCapsuleId;

@@ -244,8 +244,8 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     if (map->type_id != LMD_TYPE_MAP) return;
     if (map->map_kind == MAP_KIND_TYPED_ARRAY) {
         JsTypedArray* ta = gc_typed_array_from_map(map);
-        if (ta && ta->buffer_item) {
-            gc_mark_item(gc, ta->buffer_item);
+        if (ta && ta->base.buffer_item) {
+            gc_mark_item(gc, ta->base.buffer_item);
         }
         if (ta && ta->view) {
             gc_mark_object_ptr(gc, ta->view);
@@ -267,8 +267,7 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
 
 static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_native) {
     if (!ab || gc_native_seen_seen_or_add(seen_native, ab)) return;
-    byte_buffer_destroy(&ab->handle);
-    mem_free(ab);
+    js_arraybuffer_destroy(ab);
 }
 
 static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_native) {
@@ -616,6 +615,21 @@ extern "C" void heap_gc_collect(void) {
     lambda_side_stack_decommit_unused();
 }
 
+extern "C" void* heap_gc_external_preflight(size_t bytes, int kind) {
+    if (!context || !context->heap || !context->heap->gc) return NULL;
+    gc_heap_t* gc = context->heap->gc;
+    gc_external_preflight(gc, bytes, kind);
+    return gc;
+}
+
+extern "C" void heap_gc_external_record_alloc(void* owner, size_t bytes, int kind) {
+    gc_external_record_alloc((gc_heap_t*)owner, bytes, kind);
+}
+
+extern "C" void heap_gc_external_record_release(void* owner, size_t bytes, int kind) {
+    gc_external_record_release((gc_heap_t*)owner, bytes, kind);
+}
+
 // register an external root slot (e.g., BSS global address)
 extern "C" bool heap_try_register_gc_root(uint64_t* slot) {
     if (!context || !context->heap || !context->heap->gc || !slot) return false;
@@ -790,7 +804,8 @@ extern "C" void* heap_calloc_closure_env(size_t size) {
     if (size > SIZE_MAX / 2) return NULL;
     // Closure slots own a parallel scalar tail so captured wide numbers never
     // retain pointers into a completed invocation's number frame.
-    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_ENVIRONMENT);
+    return gc_environment_calloc(context->heap->gc, size * 2,
+        GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS);
 }
 
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed
@@ -979,6 +994,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len) {
     }
     Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + len + 1, LMD_TYPE_SYMBOL);
     sym->len = len;
+    sym->kind = SYMBOL_LAMBDA_NAME;
     sym->ns = nullptr;
     str_copy(sym->chars, len + 1, symbol, len);
     return sym;

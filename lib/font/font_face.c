@@ -46,6 +46,7 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
     entry->weight = desc->weight;
     entry->slant  = desc->slant;
     entry->loaded_handle = NULL;
+    entry->load_failed = false;
 
     // copy sources
     if (desc->source_count > 0 && desc->sources) {
@@ -234,6 +235,7 @@ int font_face_list(FontContext* ctx, const char* family,
 static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* entry,
                                         float size_px) {
     if (!ctx || !entry) return NULL;
+    if (entry->load_failed) return NULL;
 
     float pixel_ratio = ctx->config.pixel_ratio;
     float physical_size = size_px * pixel_ratio;
@@ -301,6 +303,9 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
         log_debug("font_face: source %d failed for '%s': %s", i, entry->family, src_path);
     }
 
+    // Sources are immutable for a document, so do not retry a failed list on
+    // every text measurement pass.
+    ((FontFaceEntry*)entry)->load_failed = true;
     log_error("font_face: all sources failed for '%s'", entry->family);
     return NULL;
 }

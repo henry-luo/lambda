@@ -117,38 +117,14 @@ static bool js_mir_lease_hold_scope(JsMirLeaseSession* session, InputCacheScope*
 
 static InputScriptBuildClaim js_common_mir_cache_begin_build(
         InputScriptCache* cache, const InputScriptRequest* request,
-        JsCommonMirBuild* build) {
-    if (!build) return INPUT_SCRIPT_BUILD_BYPASS;
-    memset(build, 0, sizeof(*build));
-    build->state = INPUT_SCRIPT_BUILD_BYPASS;
-    if (!cache || !request) return build->state;
-    InputCacheScope* scope = input_script_cache_open_scope(cache);
-    if (!scope) return build->state;
-    InputScriptLease* lease = input_script_cache_acquire(scope, request);
-    if (!lease) {
-        input_script_cache_close_scope(scope);
-        return build->state;
-    }
-    build->state = input_script_cache_claim_build(lease, INPUT_SCRIPT_BUILD_MIR);
-    if (build->state == INPUT_SCRIPT_BUILD_OWNER) {
-        build->scope = scope;
-        build->lease = lease;
-        return build->state;
-    }
-    input_script_cache_close_scope(scope);
-    return build->state;
+        InputScriptBuildScope* build) {
+    return input_script_build_scope_begin(build, cache, request,
+        INPUT_SCRIPT_BUILD_MIR);
 }
 
-static void js_common_mir_cache_complete_build(JsCommonMirBuild* build,
+static void js_common_mir_cache_complete_build(InputScriptBuildScope* build,
         bool published, bool poison) {
-    if (!build) return;
-    if (build->state == INPUT_SCRIPT_BUILD_OWNER && build->lease) {
-        input_script_cache_complete_build(build->lease, INPUT_SCRIPT_BUILD_MIR,
-            published, poison);
-    }
-    if (build->scope) input_script_cache_close_scope(build->scope);
-    memset(build, 0, sizeof(*build));
-    build->state = INPUT_SCRIPT_BUILD_BYPASS;
+    input_script_build_scope_complete(build, published, poison);
 }
 
 JsMirLeaseSession* js_mir_lease_session_create(void) {
@@ -238,14 +214,14 @@ const JsPreambleState* js_mir_lease_session_lookup(
 InputScriptBuildClaim js_mir_lease_session_begin_build(
         JsMirLeaseSession* session, bool preamble_mode, const char* source,
         size_t source_len, const char* filename,
-        const JsPreambleState* preamble, JsCommonMirBuild* build) {
+        const JsPreambleState* preamble, InputScriptBuildScope* build) {
     InputScriptRequest request = js_mir_lease_request(preamble_mode, source,
         source_len, filename, preamble);
     return js_common_mir_cache_begin_build(session ? session->script_cache : NULL,
         &request, build);
 }
 
-void js_mir_lease_session_complete_build(JsCommonMirBuild* build,
+void js_mir_lease_session_complete_build(InputScriptBuildScope* build,
         bool published, bool poison) {
     js_common_mir_cache_complete_build(build, published, poison);
 }
@@ -300,7 +276,7 @@ const JsPreambleState* js_mir_lease_session_adopt(
 }
 
 const JsPreambleState* js_mir_lease_session_adopt_build(
-        JsMirLeaseSession* session, JsCommonMirBuild* build,
+        JsMirLeaseSession* session, InputScriptBuildScope* build,
         JsPreambleState* compiled_state) {
     if (!session || !build || build->state != INPUT_SCRIPT_BUILD_OWNER ||
             !build->scope || !build->lease || !compiled_state ||
@@ -346,8 +322,10 @@ static InputScriptRequest js_module_mir_request(const char* source,
     request.identity = filename ? filename : "<module>";
     request.source = source ? source : "";
     request.source_length = source ? source_len : 0;
-    request.source_kind = filename && filename[0] != '<'
-        ? INPUT_SCRIPT_SOURCE_FILE : INPUT_SCRIPT_SOURCE_INLINE;
+    request.source_kind = js_path_is_http_url(filename)
+        ? INPUT_SCRIPT_SOURCE_URL
+        : (filename && filename[0] != '<'
+            ? INPUT_SCRIPT_SOURCE_FILE : INPUT_SCRIPT_SOURCE_INLINE);
     request.language = "javascript";
     request.profile = "js-mir-module";
     request.parser_abi = "js-direct-parser-v1";
@@ -429,13 +407,13 @@ const JsModuleMirArtifact* js_module_mir_cache_lookup(const char* source,
 }
 
 InputScriptBuildClaim js_module_mir_cache_begin_build(const char* source,
-        size_t source_len, const char* filename, JsCommonMirBuild* build) {
+        size_t source_len, const char* filename, InputScriptBuildScope* build) {
     InputScriptCache* cache = input_manager_global_script_cache();
     InputScriptRequest request = js_module_mir_request(source, source_len, filename);
     return js_common_mir_cache_begin_build(cache, &request, build);
 }
 
-void js_module_mir_cache_complete_build(JsCommonMirBuild* build,
+void js_module_mir_cache_complete_build(InputScriptBuildScope* build,
         bool published, bool poison) {
     js_common_mir_cache_complete_build(build, published, poison);
 }
@@ -511,7 +489,7 @@ const JsModuleMirArtifact* js_module_mir_cache_adopt(const char* source,
 }
 
 const JsModuleMirArtifact* js_module_mir_cache_adopt_build(
-        JsCommonMirBuild* build, JsModuleMirArtifact* compiled,
+        InputScriptBuildScope* build, JsModuleMirArtifact* compiled,
         InputCacheScope** out_scope) {
     if (!out_scope) return nullptr;
     *out_scope = nullptr;

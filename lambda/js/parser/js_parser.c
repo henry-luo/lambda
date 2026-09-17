@@ -46,7 +46,7 @@ typedef struct JsParser {
     bool type_stop_at_arrow;
     bool stop_for_in_of;
     bool assignment_target_pattern;
-    bool probing_assignment_member_base;
+    bool suppress_assignment_pattern_probes;
     bool in_ts_namespace;
     uint8_t pending_parameter_accessibility;
     bool pending_parameter_readonly;
@@ -1343,11 +1343,14 @@ static bool js_parser_parser_has_async_arrow(JsParser* parser) {
 }
 
 static bool js_parser_parser_has_assignment_pattern(JsParser* parser) {
-    if (!parser || parser->probing_assignment_member_base ||
+    if (!parser || parser->suppress_assignment_pattern_probes ||
             (parser->current.kind != JS_TOK_LBRACKET &&
             parser->current.kind != JS_TOK_LBRACE)) return false;
     JsParserProbe probe;
     js_parser_parser_probe_begin(parser, &probe);
+    // A candidate pattern may contain arbitrary default expressions. Do not
+    // recursively probe their literals before the outer '=' is known.
+    parser->suppress_assignment_pattern_probes = true;
     parser->assignment_target_pattern = true;
     bool valid = js_parser_parse_pattern(parser, NULL, NULL) &&
         parser->current.kind == JS_TOK_EQUAL;
@@ -1460,9 +1463,9 @@ static bool js_parser_parser_has_assignment_member_target(JsParser* parser) {
             parser->current.kind != JS_TOK_LBRACKET)) return false;
     JsParserProbe probe;
     js_parser_parser_probe_begin(parser, &probe);
-    // The member base is an expression. Suppress nested assignment-pattern
-    // probes so ordinary nested literals are not recursively reparsed.
-    parser->probing_assignment_member_base = true;
+    // The member base is an expression. Suppress nested probes while checking
+    // whether its trailing property access can form an assignment target.
+    parser->suppress_assignment_pattern_probes = true;
     SourceSpan base_span;
     bool valid = js_parser_parse_primary(parser, &base_span) &&
         (parser->current.kind == JS_TOK_DOT ||
@@ -2166,8 +2169,10 @@ static bool js_parser_parse_expression(JsParser* parser, int min_bp, SourceSpan*
             return false;
         }
         left = js_parser_span_from_start((JsToken){.span = left}, parser->previous.span);
+        // This path follows an already-reduced contextual identifier such as
+        // `of`; retain it as the arrow parameter together with the body.
         if (!js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
-                JS_REDUCTION_ARROW, left, arrow, arrow, 0, 1)) {
+                JS_REDUCTION_ARROW, left, arrow, arrow, 0, 2)) {
             js_parser_parser_leave(parser);
             return false;
         }

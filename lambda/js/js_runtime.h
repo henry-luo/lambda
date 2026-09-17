@@ -30,6 +30,11 @@ typedef Item (*JsNativeSpan)(Item*, int);
 typedef Item (*JsNativeThisSpan)(Item, Item*, int);
 typedef Item (*JsNativeCallBody)(Item, Item, Item*, int, uint64_t*);
 typedef Item (*JsNativeConstructBody)(Item, Item*, int, Item, uint64_t*);
+typedef void (*JsDocumentSourceLoadObserver)(size_t source_length);
+
+// Radiant registers this only while a document watchdog is active. Module
+// loading reports recursively acquired source so its budget covers the graph.
+void js_set_document_source_load_observer(JsDocumentSourceLoadObserver observer);
 
 void js_map_promote_descriptor_kind(Map* m);
 
@@ -77,8 +82,9 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
     (*index)++;
     return c;
 }
-// Converts a well-known Symbol numeric ID to its generated realm-local ref.
-// Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
+// Maps a well-known Symbol catalog selector to its stable NameId compatibility
+// record, or to the cached core Symbol value. Property storage converts the
+// latter only at the NameId boundary; callers otherwise retain JS identity.
 NameId js_well_known_symbol_name_id(int64_t symbol_id);
 Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
@@ -262,6 +268,28 @@ typedef struct JsStaticObjectProperty {
 
 Item js_object_new_from_static_properties(const JsStaticObjectProperty* properties,
     int length);
+// A recursive compiler-owned literal recipe. It represents only side-effect-free
+// literal syntax, while every invocation materializes a fresh JS value graph.
+typedef enum JsStaticLiteralKind {
+    JS_STATIC_LITERAL_IMMEDIATE = 0,
+    JS_STATIC_LITERAL_STRING,
+    JS_STATIC_LITERAL_ARRAY,
+    JS_STATIC_LITERAL_OBJECT,
+    JS_STATIC_LITERAL_HOLE
+} JsStaticLiteralKind;
+
+typedef struct JsStaticLiteralRecipe {
+    const char* key_chars;
+    const char* string_chars;
+    const struct JsStaticLiteralRecipe* children;
+    uint64_t immediate;
+    int key_len;
+    int string_len;
+    int length;
+    uint8_t kind;
+} JsStaticLiteralRecipe;
+
+Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recipe);
 // An array's companion property map is created on first use — index accessors,
 // non-index keys and attribute bits all live there. Callers that are about to
 // write must go through this; a bare js_array_props() read can be NULL.
@@ -1054,9 +1082,9 @@ Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
 
 // Symbol API
-// Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).
-// Base must be beyond int32 range to avoid collision with bitwise op results.
-#define JS_SYMBOL_BASE (1LL << 40)
+// JS Symbols use the core pointer-backed LMD_TYPE_SYMBOL representation.
+// SYMBOL_JS_* kinds retain JS identity while SYMBOL_LAMBDA_NAME stays a
+// separate Lambda textual-symbol contract.
 
 Item js_symbol_create(Item description);
 Item js_symbol_for(Item key);

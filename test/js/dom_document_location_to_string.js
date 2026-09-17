@@ -1,0 +1,12 @@
+console.log(document.location === document);
+console.log(Object.getPrototypeOf(Document.prototype) === Node.prototype);
+console.log(Object.getPrototypeOf(Node.prototype) === Object.prototype);
+console.log(typeof Node.prototype.toString);
+console.log(typeof Document.prototype.toString);
+console.log(typeof document.location.toString);
+console.log(document.location.toString() === document.URL);
+console.log(typeof document.valueOf);
+console.log(document.valueOf() === document);
+console.log(typeof document.referrer);
+console.log(document.referrer === "");
+console.log(document.referrer.indexOf("https://") === -1);

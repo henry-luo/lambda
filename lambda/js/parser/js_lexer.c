@@ -296,8 +296,12 @@ static bool js_lexer_skip_extras(JsLexer* lexer, bool* line_terminator_out) {
             }
             continue;
         }
-        if (js_lexer_peek(lexer, 0) == '-' && js_lexer_peek(lexer, 1) == '-' &&
+        if ((lexer->offset == 0 || line_terminator) &&
+                js_lexer_peek(lexer, 0) == '-' &&
+                js_lexer_peek(lexer, 1) == '-' &&
                 js_lexer_peek(lexer, 2) == '>') {
+            // Annex B HTML-close comments only start a source line; `-->=`
+            // in minified code is postfix decrement followed by comparison.
             js_lexer_advance_byte(lexer);
             js_lexer_advance_byte(lexer);
             js_lexer_advance_byte(lexer);

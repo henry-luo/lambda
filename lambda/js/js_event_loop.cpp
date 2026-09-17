@@ -357,7 +357,7 @@ typedef struct JsTimerHandle {
     bool       virtual_refed;
 } JsTimerHandle;
 
-#define timer_resources (js_runtime_state.resources)
+#define timer_resources (*js_runtime_resource_table())
 #define timer_handle_count runtime_resource_table_active_count_owned(\
     &timer_resources, js_runtime_state.event_loop)
 #define timer_slot_count runtime_resource_table_slot_count(&timer_resources)

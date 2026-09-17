@@ -1,13 +1,13 @@
 # LambdaJS — Standard Built-in Library
 
-> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-17
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document is the catalog of standard built-in objects and their semantics: the spec-table built-in registry, Object/Reflect, the Symbol builtin and well-known symbols, JSON, Math/Number, Date, String prototype methods (survey), the Map/Set/WeakMap/WeakSet collection family, Proxy & Reflect, BigInt, the global functions, template literals, and `globalThis`.
 >
 > **Primary sources:** `lambda/js/js_builtin_catalog.def` (single target/binding/global catalog), `lambda/js/js_builtin_catalog.hpp` (typed generated records), `lambda/js/js_runtime_builtin_registry.cpp` (validation, realm identity, installation), `lambda/js/js_globals.cpp` (Object/JSON/Symbol/Date/globalThis/global functions/template raw), `lambda/js/js_runtime.cpp` (typed intrinsic bodies, collections, Proxy traps, Math/JSON object getters, `$262`, WeakRef), `lambda/js/js_coerce.cpp` (`ToPrimitive`).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against symbol names.
 >
-> **Coordination:** property/prototype/descriptor mechanics and observable member `Get -> Call` are owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md); this doc links rather than re-deriving them. Symbol *key-encoding* (`__sym_N`) lives in JS_06 §9. TypedArrays/ArrayBuffer/DataView/Atomics are [JS_12](JS_12_TypedArrays.md); RegExp is [JS_11](JS_11_RegExp.md) — both linked, not covered here.
+> **Coordination:** property/prototype/descriptor mechanics and observable member `Get -> Call` are owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md); this doc links rather than re-deriving them. Symbol property routing lives in JS_06 §9. TypedArrays/ArrayBuffer/DataView/Atomics are [JS_12](JS_12_TypedArrays.md); RegExp is [JS_11](JS_11_RegExp.md) — both linked, not covered here.
 
 ---
 
@@ -45,13 +45,17 @@ Runtime property misses never consult this catalog and never fabricate methods. 
 
 ## 4. Symbol (builtin object & well-known symbols)
 
-A JS Symbol *value* is a negative INT (`-(id + JS_SYMBOL_BASE)`; `js_make_symbol_item`, `js_globals.cpp:16585`); the *property-key* encoding to `__sym_N` strings is JS_06 §9. This section covers the `Symbol` builtin object.
+A JS Symbol *value* is a pointer-backed core `Symbol` carried by
+`LMD_TYPE_SYMBOL`; its `SYMBOL_JS_*` kind determines unique, registered, or
+well-known behavior. The pointer is its value identity, and the temporary
+`NameId` reaches the existing property route only at a property boundary
+(**D4.6.1v3**). This section covers the `Symbol` builtin object.
 
-- **Well-known symbols** use fixed ids 1–13: `iterator=1`, `toPrimitive=2`, `hasInstance=3`, `toStringTag=4`, `asyncIterator=5`, `species=6`, `match=7`, `replace=8`, `search=9`, `split=10`, `unscopables=11`, `isConcatSpreadable=12`, `matchAll=13` (`#define`s at `js_globals.cpp:16552`). `js_populate_symbol_ctor` (`:16603`) installs them as non-writable/non-enumerable/non-configurable own properties of the `Symbol` constructor per ES §19.4.2.
+- **Well-known symbols** use a fixed catalog selector to cache one direct `Symbol*` per realm: `iterator`, `toPrimitive`, `hasInstance`, `toStringTag`, `asyncIterator`, `species`, `match`, `replace`, `search`, `split`, `unscopables`, `isConcatSpreadable`, `matchAll`, `asyncDispose`, and `dispose`. `js_populate_symbol_ctor` installs their direct Symbol Items as non-writable/non-enumerable/non-configurable own properties of the `Symbol` constructor per ES §19.4.2.
 - **Symbol prototype** and static bindings use the corresponding `JS_BUILTIN_OWNER_SYMBOL_*` catalog owners.
-- **Global symbol registry** for `Symbol.for`/`Symbol.keyFor` is a string-keyed `HashMap` of `JsSymbolEntry {char key[128]; uint64_t symbol_id;}` (`:16517`), with ids issued from `js_symbol_next_id` starting at 100 (`:16522`) so they never collide with the reserved 1–99 range. `js_symbol_for` (`:16657`) interns; descriptions are tracked in a parallel `js_symbol_desc_registry` (`:16532`).
+- **Global symbol registry** for `Symbol.for`/`Symbol.keyFor` is a text index whose entries point directly to registered core `Symbol` allocations. It preserves all key bytes and returns the cached pointer for a repeated key; unique symbols are never text-interned. There is no `JsSymbolEntry`, numeric Symbol id, or parallel description registry.
 
-`Symbol.toStringTag` is consumed throughout: namespace objects stamp `__sym_4` to "JSON"/"CSS"/etc. (`js_runtime.cpp:25072`, `:25106`), and collection prototypes set it to "Map"/"Set"/… (`:4325`).
+`Symbol.toStringTag` is consumed throughout: namespace objects and collection prototypes store it through the shared direct Symbol/NameId property route.
 
 ---
 

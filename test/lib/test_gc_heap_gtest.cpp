@@ -1227,6 +1227,23 @@ TEST_F(GCHeapTest, NoGcScopeSupportsBalancedNesting) {
 }
 #endif
 
+TEST_F(GCHeapTest, ScopeCheckpointRestoresAbandonedScopes) {
+    gc_scope_checkpoint_t checkpoint = gc_scope_checkpoint_capture(gc);
+    gc_defer_collection_begin(gc);
+    gc_defer_collection_begin(gc);
+#ifndef NDEBUG
+    gc_no_gc_scope_begin(gc);
+    gc_no_gc_scope_begin(gc);
+#endif
+
+    EXPECT_TRUE(gc_scope_checkpoint_restore(gc, &checkpoint));
+    EXPECT_EQ(gc->defer_collection_depth, 0);
+#ifndef NDEBUG
+    EXPECT_EQ(gc->no_gc_scope_depth, 0);
+#endif
+    EXPECT_NE(gc_heap_alloc(gc, 16, LMD_TYPE_STRING), nullptr);
+}
+
 TEST_F(GCHeapTest, UnregisterRoot) {
     uint64_t slot1 = 0, slot2 = 0, slot3 = 0;
     gc_register_root(gc, &slot1);
@@ -1583,6 +1600,63 @@ TEST_F(GCHeapTest, AutoTriggerCallback) {
     // this alloc causes the threshold check → triggers callback
     gc_data_alloc(gc, 16);
     EXPECT_GE(trigger_count, 1);
+}
+
+TEST_F(GCHeapTest, ExternalPayloadPressureTracksPhysicalLifetime) {
+    trigger_count = 0;
+    gc_set_collect_callback(gc, test_collect_callback);
+
+    gc_external_record_alloc(gc, 128, GC_EXTERNAL_KIND_ARRAYBUFFER);
+    gc_external_stats_t allocated = gc_heap_get_external_stats(gc);
+    EXPECT_EQ(allocated.live_bytes, 128u);
+    EXPECT_EQ(allocated.live_by_kind[GC_EXTERNAL_KIND_ARRAYBUFFER], 128u);
+    EXPECT_EQ(allocated.allocation_count, 1u);
+
+    gc_external_preflight(gc, GC_EXTERNAL_PRESSURE_THRESHOLD - 128,
+        GC_EXTERNAL_KIND_ARRAYBUFFER);
+    EXPECT_EQ(trigger_count, 1);
+    gc_external_stats_t pressured = gc_heap_get_external_stats(gc);
+    EXPECT_EQ(pressured.pressure_collections, 1u);
+
+    gc_collect(gc, NULL, 0);
+    gc_external_stats_t collected = gc_heap_get_external_stats(gc);
+    EXPECT_EQ(collected.bytes_since_collection, 0u);
+
+    gc_external_record_release(gc, 128, GC_EXTERNAL_KIND_ARRAYBUFFER);
+    gc_external_stats_t released = gc_heap_get_external_stats(gc);
+    EXPECT_EQ(released.live_bytes, 0u);
+    EXPECT_EQ(released.live_by_kind[GC_EXTERNAL_KIND_ARRAYBUFFER], 0u);
+    EXPECT_EQ(released.release_count, 1u);
+}
+
+TEST_F(GCHeapTest, FullTenuredCompactionReleasesDeadPromotedBuffers) {
+    const int64_t capacity = (int64_t)(GC_TENURED_FULL_COMPACT_THRESHOLD /
+        (2 * sizeof(uint64_t)));
+    ASSERT_GT(capacity, 0);
+    uint64_t root = 0;
+    gc_register_root(gc, &root);
+
+    void* first = make_list(1, capacity);
+    root = list_item(first);
+    gc_collect(gc, NULL, 0);
+    EXPECT_EQ(gc_data_zone_used(gc->tenured_data),
+        (size_t)capacity * sizeof(uint64_t));
+
+    void* second = make_list(1, capacity);
+    root = list_item(second);
+    gc_collect(gc, NULL, 0);
+
+    void* third = make_list(1, capacity);
+    root = list_item(third);
+    gc_collect(gc, NULL, 0);
+
+    gc_tune_stats_t stats = gc_heap_get_tune_stats(gc);
+    EXPECT_EQ(stats.full_data_compactions, 1u);
+    EXPECT_GE(stats.full_data_bytes_released,
+        (size_t)GC_TENURED_FULL_COMPACT_THRESHOLD);
+    EXPECT_LT(gc_data_zone_used(gc->tenured_data),
+        (size_t)GC_TENURED_FULL_COMPACT_THRESHOLD);
+    gc_unregister_root(gc, &root);
 }
 
 TEST_F(GCHeapTest, ForcedScheduleCoversEveryPublicAllocationPath) {

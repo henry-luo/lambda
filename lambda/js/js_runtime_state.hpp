@@ -9,6 +9,7 @@
 #include "js_builtin_catalog.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
+#include "../runtime/durable_activation.hpp"
 #include "../runtime/runtime-state.h"
 #include "../runtime/async.h"
 #include "../runtime/root_vector.h"
@@ -20,10 +21,7 @@ struct JsFunction;
 struct JsCallableCode;
 struct JsRuntimeState;
 struct JsInterpEnv;
-struct JsInterpGeneratorLoopContinuation;
-struct JsInterpGeneratorListContinuation;
-struct JsInterpTryContinuation;
-struct JsInterpGeneratorArrayBindingContinuation;
+struct JsInterpContinuation;
 struct AstNode;
 struct DomDocument;
 struct DomElement;
@@ -113,14 +111,6 @@ struct JsRegexpLastMatch {
     int group_count = 0;
     int match_start = 0;
     int match_end = 0;
-};
-
-// All context-owned caches expose the same precise root owner; keeping that
-// invariant in one base state prevents realm subsystems from drifting into
-// ad-hoc GC registration fields. RootVector also supports fixed contiguous
-// spans for legacy semantic records, so there is one root carrier (D5.3).
-struct JsRootedState {
-    RootVector roots = {};
 };
 
 // Fixed realm singleton/cache values converge here. Callers reserve the
@@ -298,7 +288,7 @@ struct JsTlsNativeState {
     JsTlsSecureContextOwner* secure_context_owners = NULL;
 };
 
-struct JsStreamState : JsRootedState {
+struct JsStreamState : RootVector {
     Item namespace_object = {};
     Item key_on = {}; Item key_emit = {}; Item key_push = {}; Item key_write = {};
     Item key_end = {}; Item key_pipe = {}; Item key_read = {}; Item key_destroy = {};
@@ -347,7 +337,7 @@ struct JsNodeTestHookLedger {
 // assert and node:test retain namespace identity, hook closures, and mock
 // call records. They are realm values, so this fixed context slab keeps their
 // repeated test-runner access direct and isolated.
-struct JsAssertState : JsRootedState {
+struct JsAssertState : RootVector {
     Item namespace_object = {};
     Item internal_errors_namespace = {};
     Item internal_myers_diff_namespace = {};
@@ -388,7 +378,7 @@ struct JsHostHooksState {
 
 // Clipboard wrappers and the active synthetic drag session are realm state;
 // the platform clipboard store itself remains an external service boundary.
-struct JsClipboardState : JsRootedState {
+struct JsClipboardState : RootVector {
     Item blob_prototype = {};
     Item file_prototype = {};
     Item clipboard_item_prototype = {};
@@ -401,11 +391,12 @@ struct JsClipboardState : JsRootedState {
 
 // DOM singleton wrappers are per browsing context. The native document itself
 // is owned by Radiant; this range owns only JS heap values that reference it.
-struct JsDomState : JsRootedState {
+struct JsDomState : RootVector {
     Item implementation = {};
     Item default_view = {};
     Item title = {};
     Item fonts = {};
+    Item cookie = {};
     bool design_mode = false;
     DomElement* active_element = NULL;
     DomDocument* current_document = NULL;
@@ -445,7 +436,7 @@ enum { JS_ASCII_SUBSTRING_CACHE_CAPACITY = 1024 };
 
 // All realm-owned string fast paths share one contiguous Item range. The
 // finite byte/code-point tables cache value domains; they are not registries.
-struct JsStringCacheState : JsRootedState {
+struct JsStringCacheState : RootVector {
     Item last_four_byte_escape = {};
     Item percent_prefixes[16] = {};
     Item percent_bytes[256] = {};
@@ -561,7 +552,7 @@ struct JsTest262AgentReport {
     int waiter_id = 0;
 };
 
-struct JsTest262AgentState : JsRootedState {
+struct JsTest262AgentState : RootVector {
     Item object = {};
     // Agent slots contain only callback identities; report rows carry the
     // paired waiter metadata with their one rooted report value.
@@ -577,7 +568,7 @@ struct JsTest262AgentState : JsRootedState {
 
 // Node process state is realm-local apart from the operating-system process.
 // The one dynamic listener map is the authority for every process event.
-struct JsProcessState : JsRootedState {
+struct JsProcessState : RootVector {
     Item argv = {};
     Item exec_argv = {};
     Item object = {};
@@ -629,12 +620,13 @@ struct JsRuntimeOperationState {
     // RegExp instances share one fixed own-property layout.  It belongs to the
     // active Input pool and is cleared with the other regex pool-backed caches.
     void* regex_instance_shape = NULL;
-    uint64_t next_symbol_id = 100;
+    // Both maps borrow one core Symbol allocation per entry; their ownership
+    // remains the active realm Input/NamePool until batch reset.
     HashMap* symbol_registry = NULL;
-    HashMap* symbol_description_registry = NULL;
+    HashMap* symbol_name_index = NULL;
 };
 
-struct JsAsyncHooksState : JsRootedState {
+struct JsAsyncHooksState : RootVector {
     Item root_resource = {};
     Item current_resource = {};
     // Hook and deferred-destroy collections outlive native calls, so each
@@ -669,7 +661,7 @@ struct JsPromise : VMap {
     int64_t unhandled_epoch = 0;
 };
 
-struct JsPromiseRuntimeState : JsRootedState {
+struct JsPromiseRuntimeState : RootVector {
     RuntimeJobQueue unhandled_queue = {};
     // Keep the three GC-visible owner slots contiguous; the deque control
     // record is native metadata and must never be scanned as an Item range.
@@ -715,7 +707,7 @@ struct JsModuleRuntimeState {
     bool internal_test_binding_warning_scheduled = false;
 };
 
-struct JsClusterState : JsRootedState {
+struct JsClusterState : RootVector {
     Item primary_options = {};
     int64_t next_worker_id = 1;
     bool namespace_is_worker = false;
@@ -739,13 +731,9 @@ struct JsPerformanceState {
 // The common durable part of generator and async execution. It owns exactly
 // the outliving activation edges; each state machine keeps its own semantic
 // tail (D5.1.1v2, D6.2.2v2; JSCU32).
-struct JsSuspendedActivation {
-    TypeId type_id = LMD_TYPE_MAP;
+struct JsSuspendedActivation : DurableActivation {
     Context* runtime_context = NULL;
     void* state_fn = NULL;
-    Item* env = NULL;
-    int env_size = 0;
-    int64_t state = 0;
     Item ast_function = {};
     Item ast_arguments = {};
     JsInterpEnv* ast_function_env = NULL;
@@ -753,7 +741,7 @@ struct JsSuspendedActivation {
     // Generator yields and async awaits replay through the same Item ledger.
     Item ast_replay_values = {};
     int64_t ast_replay_skip = 0;
-    JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
+    JsInterpContinuation* ast_loop_continuations = NULL;
     bool ast_initialized = false;
     // JSCU44: `with` scopes open at the suspension point. They outlive the
     // native activation, so they spill here as a captured env and are entered
@@ -774,12 +762,12 @@ struct JsGeneratorStateRecord : JsSuspendedActivation {
     Item ast_this = {};
     // Terminal-yield loop continuations keep AST generators resumable without
     // replaying completed iterations on every next().
-    JsInterpGeneratorListContinuation* ast_list_continuation = NULL;
+    JsInterpContinuation* ast_list_continuation = NULL;
     // A destructuring target can suspend after IteratorStep. Retain its
     // iterator/value cursor so replay does not advance the iterator twice.
-    JsInterpGeneratorArrayBindingContinuation* ast_array_binding_continuations = NULL;
+    JsInterpContinuation* ast_array_binding_continuations = NULL;
     // A catch/finally clause that suspends must not replay the try's block.
-    JsInterpTryContinuation* ast_try_continuations = NULL;
+    JsInterpContinuation* ast_try_continuations = NULL;
     // Retain an injected throw/return while a finally block yields before it
     // can finish propagating that abrupt completion.
     int64_t ast_pending_resume_yield = 0;
@@ -795,9 +783,9 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     // re-enters the awaiting statement instead of replaying the completed
     // statements of each enclosing block/loop body. This replaces the single
     // `ast_resume_statement` pointer, which could only name the innermost list.
-    JsInterpGeneratorListContinuation* ast_list_continuation = NULL;
+    JsInterpContinuation* ast_list_continuation = NULL;
     // A catch/finally clause that suspends must not replay the try's block.
-    JsInterpTryContinuation* ast_try_continuations = NULL;
+    JsInterpContinuation* ast_try_continuations = NULL;
 };
 
 // JSCU44: the `with` activation boundary. `storage` is caller-owned POD (a
@@ -945,7 +933,7 @@ struct JsExecutionState {
 
 // Await's result handoff is the one realm-owned async Item that outlives the
 // native suspend check; activations themselves are GC-owned frame carriers.
-struct JsAsyncAwaitState : JsRootedState {
+struct JsAsyncAwaitState : RootVector {
     Item resolved_value = {};
 };
 
@@ -991,9 +979,6 @@ struct JsRuntimeState {
     bool strict_mode = false;
     JsEvalState eval = {};
     JsEventLoopState* event_loop = NULL;   // JSCU16: allocated with the realm, not embedded
-    // The sole generation-checked native-resource registry for this context.
-    // Timer and Node/Jube records use distinct lifecycle-owner keys within it.
-    RuntimeResourceTable resources = {};
     // JSCU44: the `with` chain is two facts, not a subsystem. The head is the
     // innermost frame (NULL = no with-scope in scope); the flag says whether the
     // head frame's trailing memo cells hold a live binding. Scope objects live
@@ -1067,6 +1052,10 @@ struct JsRuntimeState {
 extern __thread JsRuntimeState* js_active_runtime_state;
 static inline JsRuntimeState* js_runtime_state_for(EvalContext* owner) {
     return owner ? (JsRuntimeState*)context_capsule(owner, CONTEXT_CAPSULE_JS_RUNTIME) : NULL;
+}
+
+static inline RuntimeResourceTable* js_runtime_resource_table(void) {
+    return runtime_resource_table_context(context);
 }
 
 static inline JsCallActivation* js_call_activation_current(void) {

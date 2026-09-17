@@ -136,7 +136,10 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
         Symbol* item_sym = (Symbol*)item.symbol_ptr;
         Symbol* pattern_sym = (Symbol*)pattern.symbol_ptr;
         if (item_sym == pattern_sym) return true;
-        if (!item_sym || !pattern_sym || item_sym->ns != pattern_sym->ns || item_sym->len != pattern_sym->len) return false;
+        if (!item_sym || !pattern_sym || symbol_has_js_identity(item_sym) ||
+                symbol_has_js_identity(pattern_sym) ||
+                symbol_lambda_namespace(item_sym) != symbol_lambda_namespace(pattern_sym) ||
+                item_sym->len != pattern_sym->len) return false;
         return item_sym->len == 0 || memcmp(item_sym->chars, pattern_sym->chars, item_sym->len) == 0;
     }
     default:

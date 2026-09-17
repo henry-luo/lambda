@@ -80,8 +80,12 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
     ReplacedIntrinsicFacts facts = {};
     if (!block) return facts;
 
-    facts.width = block->width > 0.0f ? block->width : 0.0f;
-    facts.height = block->height > 0.0f ? block->height : 0.0f;
+    // ViewBlock stores used border-box geometry. Replaced intrinsic facts are
+    // content-box dimensions, so a later intrinsic query never counts chrome twice.
+    facts.width = block->width > 0.0f
+        ? layout_content_size_from_border_box(block, block->width, true) : 0.0f;
+    facts.height = block->height > 0.0f
+        ? layout_content_size_from_border_box(block, block->height, false) : 0.0f;
     if (block->tag() == MARKUP_NAME_IMG && lycon && block->is_element()) {
         layout_ensure_replaced_image_surface(
             lycon, block, block->as_element());
@@ -145,15 +149,15 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
         }
     }
 
-    if (facts.width <= 0.0f || facts.height <= 0.0f) {
-        float default_width = 0.0f;
-        float default_height = 0.0f;
-        if (layout_replaced_default_size(block->tag(), &default_width,
-                &default_height)) {
-            facts.has_default_size = true;
-            if (facts.width <= 0.0f) facts.width = default_width;
-            if (facts.height <= 0.0f) facts.height = default_height;
-        }
+    float default_width = 0.0f;
+    float default_height = 0.0f;
+    if (layout_replaced_default_size(block->tag(), &default_width,
+            &default_height)) {
+        // Keep fallback provenance after a prior layout populated used axes.
+        // Intrinsic sizing must still use the fallback contribution on relayout.
+        facts.has_default_size = true;
+        if (facts.width <= 0.0f) facts.width = default_width;
+        if (facts.height <= 0.0f) facts.height = default_height;
     }
     return facts;
 }

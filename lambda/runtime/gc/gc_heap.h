@@ -18,6 +18,8 @@
 #ifndef GC_HEAP_H
 #define GC_HEAP_H
 
+#include "../gc_environment.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -83,6 +85,17 @@ typedef void (*gc_collect_callback_t)(void);
  * this hook remains data-first for the generic runtime/test bridge.
  */
 typedef struct gc_heap gc_heap_t;  // forward declaration for function pointer types
+
+// A non-local recovery resumes outside the C++ scopes that temporarily defer
+// collection or assert a no-GC section. Preserve their entry depths so the
+// landing can restore the enclosing execution boundary exactly.
+typedef struct gc_scope_checkpoint {
+    gc_heap_t* heap;
+    int defer_collection_depth;
+#ifndef NDEBUG
+    int no_gc_scope_depth;
+#endif
+} gc_scope_checkpoint_t;
 typedef void (*gc_vmap_trace_fn)(void* data, gc_heap_t* gc);
 
 /**
@@ -134,6 +147,31 @@ int  gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr);
 // visible to the same collector so short-lived lexical environments do not
 // grow the object zone without reaching a data-zone allocation safepoint.
 #define GC_OBJECT_HEAP_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 4)
+
+// Native payloads owned by GC-traced wrappers are not in either GC zone. Keep
+// their pressure explicit so a stream of dead ArrayBuffers cannot wait for an
+// unrelated object or data allocation before reaching a collection boundary.
+#define GC_EXTERNAL_PRESSURE_THRESHOLD GC_DATA_ZONE_THRESHOLD
+#define GC_TENURED_FULL_COMPACT_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 2)
+#define GC_EXTERNAL_KIND_COUNT 4
+
+typedef enum gc_external_kind {
+    GC_EXTERNAL_KIND_ARRAYBUFFER = 0,
+    GC_EXTERNAL_KIND_JS_DENSE_ARRAY = 1,
+    GC_EXTERNAL_KIND_BINARY = 2,
+    GC_EXTERNAL_KIND_OTHER = 3
+} gc_external_kind_t;
+
+typedef struct gc_external_stats {
+    size_t live_bytes;
+    size_t peak_bytes;
+    size_t bytes_since_collection;
+    size_t live_by_kind[GC_EXTERNAL_KIND_COUNT];
+    size_t peak_by_kind[GC_EXTERNAL_KIND_COUNT];
+    uint64_t allocation_count;
+    uint64_t release_count;
+    uint64_t pressure_collections;
+} gc_external_stats_t;
 
 // Initial registered root slot capacity; grows dynamically as needed.
 #define GC_ROOT_SLOTS_INITIAL 256
@@ -187,6 +225,8 @@ typedef struct gc_tune_stats {
     size_t   large_peak_count;      // peak live large-object count
     uint64_t mark_collections;      // collections whose mark phase was timed
     uint64_t mark_nanos;            // cumulative mark-phase wall time (ns)
+    uint64_t full_data_compactions; // successful tenured-zone evacuations
+    size_t   full_data_bytes_released; // retired tenured bytes returned to VM
 } gc_tune_stats_t;
 
 /**
@@ -333,12 +373,48 @@ typedef struct gc_heap {
     void* mem_node;                 // MemContext registration node (NULL if untracked)
 
     gc_tune_stats_t tune;           // performance counters (see gc_tune_stats_t)
+    gc_external_stats_t external;   // native payload pressure (not a liveness registry)
 } gc_heap_t;
+
+static inline gc_scope_checkpoint_t gc_scope_checkpoint_capture(gc_heap_t* gc) {
+    gc_scope_checkpoint_t checkpoint = {0};
+    if (!gc) return checkpoint;
+    checkpoint.heap = gc;
+    checkpoint.defer_collection_depth = gc->defer_collection_depth;
+#ifndef NDEBUG
+    checkpoint.no_gc_scope_depth = gc->no_gc_scope_depth;
+#endif
+    return checkpoint;
+}
+
+static inline bool gc_scope_checkpoint_restore(
+        gc_heap_t* gc, const gc_scope_checkpoint_t* checkpoint) {
+    if (!checkpoint || !checkpoint->heap) return true;
+    if (!gc || gc != checkpoint->heap) return false;
+    // A non-local landing skipped scope destructors, so restore the depths
+    // captured at the boundary before its cleanup path can allocate.
+    gc->defer_collection_depth = checkpoint->defer_collection_depth;
+#ifndef NDEBUG
+    gc->no_gc_scope_depth = checkpoint->no_gc_scope_depth;
+#endif
+    return true;
+}
 
 /**
  * Snapshot the tuning counters for this heap. Safe to call at any time.
  */
 gc_tune_stats_t gc_heap_get_tune_stats(const gc_heap_t* gc);
+
+// Snapshot counters for native payloads whose lifetime is owned by a
+// GC-traced wrapper. These counters never determine reachability.
+gc_external_stats_t gc_heap_get_external_stats(const gc_heap_t* gc);
+
+// A caller invokes preflight before a legal MAY_GC native allocation, then
+// records the successfully allocated payload. Release follows the physical
+// payload lifetime and never starts a collection. `kind` is gc_external_kind_t.
+void gc_external_preflight(gc_heap_t* gc, size_t bytes, int kind);
+void gc_external_record_alloc(gc_heap_t* gc, size_t bytes, int kind);
+void gc_external_record_release(gc_heap_t* gc, size_t bytes, int kind);
 
 /**
  * Create a new GC heap with VM-owned zones and direct memtrack metadata.
@@ -573,22 +649,15 @@ static inline gc_header_t* gc_get_header(void* ptr) {
     return ((gc_header_t*)ptr) - 1;
 }
 
-static inline int gc_environment_is_interpreter(const gc_header_t* header) {
+static inline GcEnvironmentLayoutKind gc_environment_layout_kind(
+        const gc_header_t* header) {
     return header && header->type_tag == GC_TYPE_ENVIRONMENT &&
-        (header->gc_flags & GC_FLAG_ENV_INTERP) != 0;
+        (header->gc_flags & GC_FLAG_ENV_INTERP) != 0
+        ? GC_ENVIRONMENT_LAYOUT_LEXICAL : GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS;
 }
 
-static inline int gc_environment_is_item_slots(const gc_header_t* header) {
-    return header && header->type_tag == GC_TYPE_ENVIRONMENT &&
-        !gc_environment_is_interpreter(header);
-}
-
-static inline void gc_environment_set_interpreter(void* environment) {
-    gc_header_t* header = gc_get_header(environment);
-    if (header && header->type_tag == GC_TYPE_ENVIRONMENT) {
-        header->gc_flags |= GC_FLAG_ENV_INTERP;
-    }
-}
+void* gc_environment_calloc(gc_heap_t* gc, size_t size,
+                            GcEnvironmentLayoutKind layout_kind);
 
 #ifdef __cplusplus
 }

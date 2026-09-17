@@ -5,6 +5,7 @@
 #include "../module/node_core/node_runtime_state.hpp"
 #include "../module/node_core/node_trace_events.hpp"
 #undef js_input
+#include "../input/input.hpp"
 #include "../input/input-script-cache.h"
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
@@ -56,9 +57,15 @@ static Item js_require_module_not_found(const char* specifier) {
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
 static JsMirPhaseTiming g_document_js_mir_phase_timing;
 static bool g_document_js_mir_phase_timing_active = false;
+static thread_local JsDocumentSourceLoadObserver g_document_source_load_observer = NULL;
 static bool js_ast_is_es_module(JsAstNode* ast);
 static bool js_test262_source_has_build_string_helper(const char* source,
     size_t source_len, const char* filename);
+
+extern "C" void js_set_document_source_load_observer(
+        JsDocumentSourceLoadObserver observer) {
+    g_document_source_load_observer = observer;
+}
 
 Item js_mir_execute_compiled_entry(void* entry_func) {
     if (!entry_func || !context) return ItemError;
@@ -166,7 +173,7 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
 static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
         char* owned_source, const char* js_source, size_t js_source_len,
         const char* filename, uint64_t* result_home, bool test262_native_harness,
-        JsCommonAstBuild* cache_build) {
+        InputScriptBuildScope* cache_build) {
     // The AST tier owns the retained JsScript, but uses the same source parse,
     // early-error pass, Runtime catalog, and EvalContext setup as MIR lowering.
     jm_clear_active_js_transpile(tp, NULL, NULL);
@@ -180,6 +187,17 @@ static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
     js_common_ast_cache_complete_build(cache_build, published, false);
     return js_mir_execute_retained_ast_script(runtime, script, owned_source,
         js_source, js_source_len, filename, result_home, test262_native_harness);
+}
+
+Item js_mir_execute_ast_module(Runtime* runtime, JsTranspiler* tp,
+        const char* filename) {
+    // Module imports are a nested turn, so do not run the outer script-turn
+    // lifecycle while selecting the AST executor for a large document module.
+    if (!runtime || !tp) return ItemError;
+    jm_clear_active_js_transpile(tp, NULL, NULL);
+    JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+    if (!script) return ItemError;
+    return js_interp_execute_es_module_script(runtime, script, NULL);
 }
 
 bool js_activate_runtime_name_pool(void) {
@@ -728,7 +746,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         js_source_len += (size_t)off;
     }
 
-    JsCommonAstBuild ast_cache_build = {};
+    InputScriptBuildScope ast_cache_build = {};
     if (js_ast_interpreter_requested()) {
         JsScript* cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
             filename, typescript_profile, typescript_profile);
@@ -790,7 +808,16 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Parse JavaScript source
     long phase_start = js_mir_phase_now_us();
     if (!js_transpiler_parse_c(tp, js_source, js_source_len, JS_PARSE_AUTO)) {
-        log_error("js-mir: parse failed");
+        int64_t error_row = 0;
+        int64_t error_col = 0;
+        char error_message[128];
+        if (js_transpiler_parse_error_get(tp, &error_row, &error_col,
+                error_message, sizeof(error_message))) {
+            log_error("js-mir: parse failed at %lld:%lld: %s",
+                (long long)error_row, (long long)error_col, error_message);
+        } else {
+            log_error("js-mir: parse failed");
+        }
         js_common_ast_cache_complete_build(&ast_cache_build, false, false);
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
@@ -1543,11 +1570,12 @@ char* js_load_script_source_from_cache(const char* path,
     if (out_length) *out_length = 0;
     if (!path || !path[0]) return NULL;
 
-    char* canonical = file_realpath(path);
+    bool is_http = js_path_is_http_url(path);
+    char* canonical = is_http ? NULL : file_realpath(path);
     const char* identity = canonical ? canonical : path;
     InputScriptRequest request = {};
     request.identity = identity;
-    request.source_kind = INPUT_SCRIPT_SOURCE_FILE;
+    request.source_kind = is_http ? INPUT_SCRIPT_SOURCE_URL : INPUT_SCRIPT_SOURCE_FILE;
     request.language = "javascript";
     request.profile = profile ? profile : "js-module";
     request.parser_abi = "js-direct-parser-v1";
@@ -1563,11 +1591,28 @@ char* js_load_script_source_from_cache(const char* path,
     request.optimize_level = g_js_mir_optimize_level;
     request.module_mode = module_mode;
 
-    char* source = input_script_cache_copy_file_source(
-        input_manager_global_script_cache(), &request, path, out_length);
+    char* source = NULL;
+    if (is_http) {
+        // Browser module imports resolve to remote URLs; retain their downloaded
+        // snapshot in the common script cache before parsing the dependency.
+        size_t source_length = 0;
+        char* downloaded = download_http_content_cached(path, &source_length,
+            "./temp/cache");
+        if (downloaded) {
+            source = input_script_cache_copy_source(
+                input_manager_global_script_cache(), &request, downloaded,
+                source_length, out_length);
+            mem_free(downloaded);
+        }
+    } else {
+        source = input_script_cache_copy_file_source(
+            input_manager_global_script_cache(), &request, path, out_length);
+    }
     if (canonical) mem_free(canonical);
     if (!source) {
-        log_error("js-script-cache: failed to acquire file %s", path);
+        log_error("js-script-cache: failed to acquire source %s", path);
+    } else if (g_document_source_load_observer && out_length) {
+        g_document_source_load_observer(*out_length);
     }
     return source;
 }

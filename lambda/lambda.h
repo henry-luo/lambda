@@ -133,6 +133,14 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
+// Name identity is used by the core property path and by the temporary JS
+// Symbol compatibility arm below. The full NamePool API remains in
+// core/name_identity.h.
+#ifndef LAMBDA_NAME_ID_DEFINED
+#define LAMBDA_NAME_ID_DEFINED
+typedef uint32_t NameId;
+#endif
+
 // Pointer-backed semantic values keep their raw pointer carrier when nullable;
 // zero is the lane spelling of null. Numeric/wide scalar tags are deliberately
 // excluded because their pointer payloads have distinct ownership rules.
@@ -891,11 +899,40 @@ LAMBDA_STATIC_ASSERT(offsetof(String, chars) == 5, "String chars ABI must remain
 
 typedef struct Target Target;  // forward declaration for Symbol.ns
 
+typedef uint8_t SymbolKind;
+enum SymbolKindValue {
+    SYMBOL_LAMBDA_NAME = 0,
+    SYMBOL_JS_UNIQUE_UNDESCRIBED,
+    SYMBOL_JS_UNIQUE,
+    SYMBOL_JS_REGISTERED,
+    SYMBOL_JS_WELL_KNOWN,
+};
+
 typedef struct Symbol {
-    uint32_t len;       // symbol name length
-    Target* ns;         // namespace target (NULL for unqualified symbols)
-    char chars[];       // symbol name characters
+    uint32_t len;       // symbol spelling or JS description length
+    SymbolKind kind;    // Lambda textual name or JS Symbol semantic variant
+    uint8_t reserved[3];
+    union {
+        Target* ns;      // active for SYMBOL_LAMBDA_NAME
+        NameId name_id;  // active for JS kinds during property-path migration
+    };
+    char chars[];       // symbol spelling or JS description/registry key
 } Symbol;
+LAMBDA_STATIC_ASSERT(sizeof(Symbol) == 16, "Symbol header ABI must remain 16 bytes");
+LAMBDA_STATIC_ASSERT(offsetof(Symbol, chars) == 16, "Symbol chars ABI must remain byte 16");
+
+static inline bool symbol_is_lambda_name(const Symbol* symbol) {
+    return symbol && symbol->kind == SYMBOL_LAMBDA_NAME;
+}
+
+static inline bool symbol_has_js_identity(const Symbol* symbol) {
+    return symbol && symbol->kind != SYMBOL_LAMBDA_NAME;
+}
+
+static inline Target* symbol_lambda_namespace(const Symbol* symbol) {
+    return symbol_is_lambda_name(symbol) ? symbol->ns : NULL;
+}
+
 enum BinaryFlags {
     BINARY_FLAG_NONE = 0,
     BINARY_FLAG_INLINE = 1u << 0,
@@ -1455,16 +1492,15 @@ enum {
 // Function as first-class value
 // Supports both direct function references and closures
 struct Function {
-    uint8_t type_id;
-    uint8_t arity;               // number of parameters (0-255)
-    uint8_t closure_field_count;  // number of Item fields in closure_env (0 if not a closure)
-    FunctionEntryAbi entry_abi;  // FunctionEntryAbi; checked before ptr dispatch
+    // common callable ABI, inherited by JsFunction. Generated code and GC read
+    // type_id at byte 0, closure_field_count at byte 2, and entry_abi at byte 3.
+    TypeId type_id;
+    uint8_t arity;
+    uint8_t closure_field_count;
+    FunctionEntryAbi entry_abi;
     union {
-        uint32_t flags;          // whole-word initialization/copy only
+        uint32_t flags;
         struct {
-            // Retired with the aggregate return record (SCU17). The bit stays
-            // reserved so the positions generated code bakes in for the
-            // fields below hold.
             uint32_t reserved_bit_ret_item : 1;
             uint32_t has_kwargs : 1;
             uint32_t is_generator : 1;
@@ -1476,6 +1512,10 @@ struct Function {
             uint32_t reserved_flags : 23;
         };
     };
+
+    // Lambda-specific tail. JsFunction inherits this storage today; future
+    // tail unification must prove matching ownership, GC and call semantics
+    // before reusing any field rather than treating same-shaped fields alike.
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
@@ -1483,7 +1523,7 @@ struct Function {
     struct Context* runtime_context; // owner passed through generated calls
     // Trailing only: generated code pokes type_id at offset 0 and
     // closure_field_count at offset 2, so no field may shift.
-    // AST definition site (AstFuncNode*) — the T0 body plus, with `module`,
+    // AST definition site (AstFuncNode*) — the T0 body plus, with `def_module`,
     // the (module, node) identity D6.2.1/S5.5.1 already require. NULL for
     // natively-compiled and foreign entries.
     const void* def;
@@ -1502,6 +1542,22 @@ LAMBDA_STATIC_ASSERT(offsetof(Function, closure_field_count) ==
                      "Function closure count must match the GC ABI");
 LAMBDA_STATIC_ASSERT(offsetof(Function, closure_env) == LAMBDA_GC_OFF_FUNCTION_CLOSURE_ENV,
                      "Function closure environment must match the GC ABI");
+
+static inline void function_init_abi(Function* function, TypeId type_id,
+                                     FunctionEntryAbi entry_abi) {
+    if (!function) return;
+    function->type_id = type_id;
+    function->arity = 0;
+    function->closure_field_count = 0;
+    function->entry_abi = entry_abi;
+    function->flags = 0;
+}
+
+static inline bool function_has_abi(const Function* function,
+                                    FunctionEntryAbi entry_abi) {
+    return function && function->type_id == LMD_TYPE_FUNC &&
+        function->entry_abi == entry_abi;
+}
 
 // Dynamic function invocation for first-class functions
 Item fn_call(Function* fn, List* args);
@@ -1577,6 +1633,16 @@ void lambda_function_set_type(Function* fn, void* fn_type);
 // Memory allocation for closure environments
 typedef struct Context Context;
 
+// Scoped GC guards are lexical in normal execution, but recovery landings
+// must restore the depths recorded before a non-local jump bypasses them.
+typedef struct LambdaGcScopeCheckpoint {
+    void* heap;
+    int defer_collection_depth;
+#ifndef NDEBUG
+    int no_gc_scope_depth;
+#endif
+} LambdaGcScopeCheckpoint;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1598,6 +1664,8 @@ void heap_no_gc_scope_begin(void);
 void heap_no_gc_scope_end(void);
 void heap_gc_defer_collection_begin(void);
 void heap_gc_defer_collection_end(void);
+LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void);
+bool lambda_gc_scope_checkpoint_restore(const LambdaGcScopeCheckpoint* checkpoint);
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings
@@ -2027,8 +2095,8 @@ static inline double lambda_float_lane_to_double(uint64_t bits) {
 // FLOAT -- it is the decoder dispatch, and every site that reads an Item
 // relies on it to pick the right lane. The C16 ruling that `type(nan) == int`
 // is a SURFACE claim, applied in fn_type()/item_static_type_for_is() only.
-// Conflating the two routes nan into integer decoders (LambdaJS alone has 423
-// such sites, e.g. js_is_symbol()'s `it2i(v) <= -JS_SYMBOL_BASE`).
+// Conflating the two routes nan into integer decoders (LambdaJS has many
+// number-coercion call sites, while hosted JS Symbols are pointer-backed).
 static inline bool lambda_item_is_merged_poison(uint64_t bits) {
     return (bits & ITEM_DBL_MASK) && LAMBDA_ITEM_IS_IEEE_SPECIAL(bits);
 }

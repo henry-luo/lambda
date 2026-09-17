@@ -62,6 +62,8 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../input/css/css_style_node.hpp"
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
+#include "../network/cookie_jar.h"
+#include "../network/public_suffix.h"
 #include "../io/input-allocation-context.h"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
@@ -229,7 +231,8 @@ struct JsWebAnimationHost {
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
-JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.dom.roots)))
+#define js_document_cookie_value (js_runtime_state.dom.cookie)
+JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.dom)))
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
 #define js_document_active_element (js_runtime_state.dom.active_element)
@@ -434,6 +437,18 @@ static bool dom_removal_merges_table_fixup_runs(DomElement* parent,
     return previous_cells && next_cells;
 }
 
+static bool dom_child_is_nested_in_table_fixup(DomElement* parent,
+                                                DomNode* child) {
+    for (DomNode* ancestor = child ? child->parent : nullptr;
+         ancestor && ancestor != static_cast<DomNode*>(parent);
+         ancestor = ancestor->parent) {
+        if (ancestor->is_element() && ancestor->as_element()->is_table_fixup()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static DomElement* dom_prepare_children_for_mutation(DomElement* parent,
                                                         DomNode* changed_child = nullptr) {
     DomNode* source_parent = dom_mutation_source_parent(
@@ -442,16 +457,18 @@ static DomElement* dom_prepare_children_for_mutation(DomElement* parent,
     DomElement* source_element = source_parent->as_element();
     bool changes_table_structure = !changed_child || !changed_child->is_element();
     bool merges_table_fixup_runs = false;
+    bool child_is_nested_in_table_fixup = dom_child_is_nested_in_table_fixup(
+        source_element, changed_child);
     if (changed_child && changed_child->is_element()) {
         DisplayValue display = resolve_display_value((void*)changed_child);
         changes_table_structure = is_table_internal_display(display.inner);
         merges_table_fixup_runs = dom_removal_merges_table_fixup_runs(
             source_element, changed_child);
     }
-    if (changes_table_structure || merges_table_fixup_runs) {
-        // table-internal removal changes the fixup input; rebuild the generated
-        // boxes so the next layout sees the authored table structure. Removing
-        // a separator between two cell-only runs has the same effect.
+    if (changes_table_structure || merges_table_fixup_runs ||
+        child_is_nested_in_table_fixup) {
+        // A source child may sit below a retained table wrapper. Unwrap before
+        // mutating so DOM removal addresses the authored parent, not the box.
         layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
     }
     return source_element;
@@ -1076,6 +1093,7 @@ extern "C" void dom_batch_reset() {
     js_document_design_mode = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
+    js_document_cookie_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     dom_events_reset();
     js_xhr_reset();
@@ -1727,6 +1745,15 @@ extern "C" void dom_set_document(void* dom_doc) {
 JS_FORWARD_EXPRESSION(void*, dom_get_document, (void),
     js_active_runtime_state ? (void*)_js_current_document : nullptr)
 
+extern "C" void* dom_document_swap_current_script(void* document,
+                                                    void* script_element) {
+    DomDocument* doc = (DomDocument*)document;
+    if (!doc) return nullptr;
+    DomElement* previous = doc->js.current_script;
+    doc->js.current_script = (DomElement*)script_element;
+    return previous;
+}
+
 extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
@@ -1850,6 +1877,7 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"form", "HTMLFormElement"},
     {"img", "HTMLImageElement"},
     {"input", "HTMLInputElement"},
+    {"link", "HTMLLinkElement"},
     {"option", "HTMLOptionElement"},
     {"select", "HTMLSelectElement"},
     {"textarea", "HTMLTextAreaElement"},
@@ -2645,6 +2673,28 @@ extern "C" Item js_get_document_object_value() {
 JS_FORWARD_ITEM(dom_document_proxy_get_property, (Item prop_name),
     dom_document_get_property, (prop_name))
 
+static Item dom_document_set_domain(DomDocument* document, Item value) {
+    Item domain_value = js_to_string(value);
+    if (item_is_error(domain_value)) return domain_value;
+    const char* requested = fn_to_cstr(domain_value);
+    const char* host = document && document->url
+        ? url_get_hostname(document->url) : nullptr;
+    if (!document || !document->document_pool || !requested ||
+            !cookie_domain_matches(host, requested) ||
+            is_public_suffix(requested[0] == '.' ? requested + 1 : requested)) {
+        return js_throw_named_error_text("SecurityError",
+            "document.domain must be a registrable suffix of the current host");
+    }
+
+    const char* normalized = requested[0] == '.' ? requested + 1 : requested;
+    document->document_domain = pool_strdup(document->document_pool, normalized);
+    if (!document->document_domain) {
+        return js_throw_named_error_text("InvalidStateError",
+            "document.domain allocation failed");
+    }
+    return value;
+}
+
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of dom_realm_set to avoid
 // infinite recursion (dom_realm_set dispatches back here for DOM resources).
@@ -2672,6 +2722,17 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
         if (strcmp(prop, "fonts") == 0) {
             js_document_fonts_value = value;
             return value;
+        }
+        if (strcmp(prop, "cookie") == 0) {
+            Item cookie_value = js_to_string(value);
+            if (item_is_error(cookie_value)) return cookie_value;
+            js_document_cookie_value = cookie_value;
+            return value;
+        }
+        if (strcmp(prop, "domain") == 0) {
+            DomDocument* document = _js_current_document
+                ? _js_current_document : _js_main_document;
+            return dom_document_set_domain(document, value);
         }
         if (strcmp(prop, "designMode") == 0) {
             const char* mode = dom_to_attr_cstr(value);
@@ -2975,8 +3036,18 @@ static Item dom_owner_document_from_node(DomNode* node) {
     return js_get_document_object_value();
 }
 
-static Item dom_parent_element_or_null(DomNode* node) {
+static DomNode* dom_script_visible_parent(DomNode* node) {
     DomNode* parent = node ? node->parent : nullptr;
+    // CSS Tables fixup boxes participate in layout but are not DOM ancestors.
+    // Script-visible parent traversal must continue at the authored table node.
+    while (parent && parent->is_element() && parent->as_element()->is_table_fixup()) {
+        parent = parent->parent;
+    }
+    return parent;
+}
+
+static Item dom_parent_element_or_null(DomNode* node) {
+    DomNode* parent = dom_script_visible_parent(node);
     if (parent && parent->is_element()) {
         DomElement* elem = parent->as_element();
         // Document and fragment nodes reuse DomElement storage but cannot be
@@ -2993,7 +3064,7 @@ static Item doc_to_proxy_item(DomDocument* doc);
 extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value);
 
 static Item dom_parent_node_or_null(DomNode* node) {
-    DomNode* parent = node ? node->parent : nullptr;
+    DomNode* parent = dom_script_visible_parent(node);
     if (parent) return dom_wrap_element((void*)parent);
     // The document element has no DomNode parent, but per DOM 4.4 its parent is
     // the Document. Answer the document node, so a walk upward terminates at the
@@ -6201,6 +6272,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(CONTENT_EDITABLE,          "contentEditable") \
     X(CONTENT_TYPE,              "contentType") \
     X(CONTENT_WINDOW,            "contentWindow") \
+    X(CURRENT_SCRIPT,            "currentScript") \
     X(DATA,                      "data") \
     X(DATASET,                   "dataset") \
     X(DEFAULT_CHECKED,           "defaultChecked") \
@@ -6281,12 +6353,15 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(READ_ONLY,                 "readOnly") \
     X(READONLY,                  "readonly") \
     X(READY_STATE,               "readyState") \
+    X(REFERRER,                  "referrer") \
     X(REQUIRED,                  "required") \
     X(ROWS,                      "rows") \
+    X(SCRIPTS,                   "scripts") \
     X(SCROLL_HEIGHT,             "scrollHeight") \
     X(SCROLL_LEFT,               "scrollLeft") \
     X(SCROLL_TOP,                "scrollTop") \
     X(SCROLL_WIDTH,              "scrollWidth") \
+    X(SCROLLING_ELEMENT,         "scrollingElement") \
     X(SELECT,                    "select") \
     X(SELECTED,                  "selected") \
     X(SELECTED_INDEX,            "selectedIndex") \
@@ -6377,6 +6452,11 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
 
     // documentElement — the root <html> element
     if (prop_id == JS_DOM_PROP_DOCUMENT_ELEMENT) {
+        return root ? dom_wrap_element(root) : ItemNull;
+    }
+
+    // CSSOM View: a standards-mode HTML document scrolls through its root.
+    if (prop_id == JS_DOM_PROP_SCROLLING_ELEMENT) {
         return root ? dom_wrap_element(root) : ItemNull;
     }
 
@@ -6486,10 +6566,40 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
         return js_name_item("CSS1Compat");
     }
 
+    // Direct document loads have no initiating page. The Web API exposes that
+    // state as an empty string so scripts can safely use string methods.
+    if (prop_id == JS_DOM_PROP_REFERRER) {
+        return js_name_item("");
+    }
+
+    // Document.cookie is scoped to this browsing context's session state.
+    if (strcmp(prop, "cookie") == 0) {
+        return get_type_id(js_document_cookie_value) == LMD_TYPE_STRING
+            ? js_document_cookie_value : js_name_item("");
+    }
+
+    if (strcmp(prop, "domain") == 0) {
+        const char* domain = doc->document_domain ? doc->document_domain
+            : url_get_hostname(doc->url);
+        return js_name_item(domain ? domain : "");
+    }
+
     // F-1: document.forms — array of all <form> elements in the document.
     if (prop_id == JS_DOM_PROP_FORMS) {
         DomDocument* doc = doc_arg;
         return dom_live_document_forms_bridge((void*)doc);
+    }
+
+    // HTMLDocument.scripts is a live HTMLCollection in document order.
+    if (prop_id == JS_DOM_PROP_SCRIPTS) {
+        return dom_live_document_get_elements_by_tag_name_bridge(doc,
+            js_name_item("script", 6));
+    }
+
+    // HTML exposes the presently executing classic script only while its
+    // source runs. Module and event-handler execution intentionally return null.
+    if (prop_id == JS_DOM_PROP_CURRENT_SCRIPT) {
+        return doc->js.current_script ? dom_wrap_element(doc->js.current_script) : ItemNull;
     }
 
     // characterSet / charset
@@ -9227,6 +9337,12 @@ extern "C" Item dom_fp_outer_html(Item n) {
     return dom_serialized_item(sb);
 }
 
+static bool dom_is_root_scroll_target(const DomElement* elem) {
+    return elem && elem->tag_name &&
+        (str_icmp_cstr(elem->tag_name, "html") == 0 ||
+         str_icmp_cstr(elem->tag_name, "body") == 0);
+}
+
 extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
 
@@ -9618,6 +9734,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // scrollTop / scrollLeft — current scroll position
     if (prop_id == JS_DOM_PROP_SCROLL_TOP) {
+        if (dom_is_root_scroll_target(elem) && elem->doc) {
+            // Viewport writes defer range clamping to layout but remain
+            // synchronously observable through the document's scroll root.
+            return (Item){.item = i2it((int64_t)elem->doc->pending_viewport_scroll_y)};
+        }
         if (elem->scroller && elem->scroll()->pane) {
             return (Item){.item = i2it((int64_t)elem->scroll()->pane->v_scroll_position)};
         }
@@ -9627,6 +9748,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it(0)};
     }
     if (prop_id == JS_DOM_PROP_SCROLL_LEFT) {
+        if (dom_is_root_scroll_target(elem) && elem->doc) {
+            return (Item){.item = i2it((int64_t)elem->doc->pending_viewport_scroll_x)};
+        }
         if (elem->scroller && elem->scroll()->pane) {
             return (Item){.item = i2it((int64_t)elem->scroll()->pane->h_scroll_position)};
         }
@@ -10403,9 +10527,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         float scroll_value = item_to_scroll_value(value);
 
         bool is_vertical = prop_id == JS_DOM_PROP_SCROLL_TOP;
-        bool is_root_scroll_target =
-            (elem->tag_name && (str_icmp_cstr(elem->tag_name, "html") == 0 ||
-                                str_icmp_cstr(elem->tag_name, "body") == 0));
+        bool is_root_scroll_target = dom_is_root_scroll_target(elem);
 
         if (is_root_scroll_target && elem->doc) {
             // A pending viewport request has no signed element range yet;

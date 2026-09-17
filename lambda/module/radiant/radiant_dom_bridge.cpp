@@ -2946,6 +2946,14 @@ static Item radiant_dom_foreign_get_computed_style(Item elem_item, Item pseudo_i
     return ItemNull;
 }
 
+static int radiant_dom_document_dynamic_get_result(Item value, Item* out) {
+    // An absent dynamic property must continue to the prototype chain; claiming
+    // it as undefined masks Object methods on the document/location alias.
+    if (value.item == ITEM_JS_UNDEFINED) return 0;
+    *out = value;
+    return 1;
+}
+
 RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item key, Item* out) {
     if (!out) return 0;
     void* foreign_doc = dom_get_foreign_doc(object);
@@ -2969,9 +2977,9 @@ RADIANT_C_API int radiant_dom_foreign_document_get_property(Item object, Item ke
     // foreign document proxies use the normal document table with a temporary
     // active-document swap; otherwise reads accidentally target the main doc.
     void* prev = dom_swap_active_document(foreign_doc);
-    *out = dom_document_proxy_get_property(key);
+    Item value = dom_document_proxy_get_property(key);
     dom_restore_active_document(prev);
-    return 1;
+    return radiant_dom_document_dynamic_get_result(value, out);
 }
 
 RADIANT_C_API int radiant_dom_foreign_document_set_property(Item object,
@@ -3014,12 +3022,11 @@ RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, 
     void* doc_for_get = radiant_dom_doc_from_wrapper(object);
     if (doc_for_get) {
         void* prev = dom_swap_active_document(doc_for_get);
-        *out = dom_document_proxy_get_property(key);
+        Item value = dom_document_proxy_get_property(key);
         dom_restore_active_document(prev);
-        return 1;
+        return radiant_dom_document_dynamic_get_result(value, out);
     }
-    *out = dom_document_proxy_get_property(key);
-    return 1;
+    return radiant_dom_document_dynamic_get_result(dom_document_proxy_get_property(key), out);
 }
 
 RADIANT_C_API int radiant_dom_document_host_set_property(Item object,

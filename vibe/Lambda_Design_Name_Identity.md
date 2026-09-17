@@ -475,7 +475,7 @@ use NameId; arbitrary Mark fields retain the byte-comparison seam.
 | `js_property_get` special names | ~dozens of length-guarded strncmp per access (js_runtime.cpp:4334–5590) | `key == js_wk.length`, where `js_wk` resolves generated NameIds once at runtime initialization |
 | String/Number/Array/Math method routing | name-string chains, ~45 branches (`js_string_method` js_runtime.cpp:22877); id path round-trips id→name→chain +alloc (js_runtime.cpp:10556) | `switch (builtin_id)` jump table end-to-end (W1) |
 | Dynamic `new ctor(...)` | ~60-arm name chain + `"bound "` strip (js_runtime.cpp:2216) | `fn->ctor_id` int dispatch (W2) |
-| Symbol keys | Symbol Item converted to user-spellable `__sym_N` String | semantic Symbol registry returns a unique/singleton SYMBOL PropertyKeyRef; `"__sym_N"` remains an unrelated STRING key |
+| Symbol keys | Symbol Item converted to user-spellable `__sym_N` String | a hosted JS Symbol stays a direct core `Symbol*` at observable boundaries; only storage resolves its temporary `NameId` to the established unique NamePool key, while `Symbol::chars[]` remains its spelling (D4.6.1v3) |
 | Private keys | `__private_<class-index>_` spelling + prefix parsing/brand checks | runtime private environment supplies a unique PRIVATE PropertyKeyRef; repeated class evaluation receives fresh refs |
 | Array-index key classification | per-access numeric-string parse | NameMeta returns cached `array_index` or sentinel; TypedArray canonical-numeric classification stays separate |
 | HTML/SVG tag routing in Radiant | handwritten `HTM_TAG_*` enum plus duplicated tag-name table/hashmap | generated `MARKUP_NAME_*` stored in `DomElement::tag_id`; direct NameId compare |

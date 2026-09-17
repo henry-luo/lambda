@@ -20,6 +20,7 @@
 #include "concurrency.h"
 #include "module_registry.h"
 #include "../jube/jube_registry.h"
+#include "../jube/jube_interface.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_transpiler.hpp"
@@ -2627,7 +2628,7 @@ void runtime_cleanup(Runtime* runtime) {
         if (js_runtime_state_for(cleanup_context)) {
             // Cancel host tasks while their roots and native owners are still
             // valid; scheduler teardown only drains their inert completions.
-            runtime_resource_table_clear(&js_runtime_state.resources);
+            runtime_resource_table_clear(js_runtime_resource_table());
         }
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);
@@ -2649,6 +2650,12 @@ void runtime_cleanup(Runtime* runtime) {
         // Intrinsic cache entries own native precise-root slots outside the GC
         // pool; release them while their heap is current and before leak accounting.
         if (js_runtime_state_for(cleanup_context)) js_intrinsic_state_teardown();
+
+        // Jube module globals and interface records are process-global, but
+        // their namespace, prototype, and method roots belong to this heap.
+        // Reset both before this Runtime is retired.
+        jube_modules_runtime_reset();
+        jube_interface_runtime_reset();
 
         // Jube modules may cache heap-owned callbacks across repeated page
         // interactions; release those roots before this heap disappears.

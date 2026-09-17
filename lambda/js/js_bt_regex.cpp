@@ -10,9 +10,11 @@
 #include <climits>
 #include "js_bt_regex.h"
 #include "../../lib/log.h"
+#include "../../lib/arraylist.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
 #include "../../lib/utf.h"
+#include "../core/codepoint_interval.h"
 #include "js_regex_generated_properties.h"
 #include "js_regex_wrapper.h"   // JsRegexScratch (LR09-30)
 #include <utf8proc.h>
@@ -38,10 +40,8 @@ enum RxType {
     RX_QUANT,       // quantified atom
 };
 
-struct RxRange { uint32_t lo, hi; };
-
 struct RxClass {
-    RxRange* ranges;
+    CodePointInterval* ranges;
     int range_count;
     bool negated;
 };
@@ -198,7 +198,7 @@ static inline bool bt_char_eq(uint32_t a, uint32_t b, bool icase) {
 
 static bool bt_class_contains_raw(const RxClass* cls, uint32_t cp) {
     for (int i = 0; i < cls->range_count; i++) {
-        if (cp >= cls->ranges[i].lo && cp <= cls->ranges[i].hi) return true;
+        if (codepoint_interval_contains(&cls->ranges[i], cp)) return true;
     }
     return false;
 }
@@ -216,15 +216,6 @@ static bool bt_class_match(const RxClass* cls, uint32_t cp, bool icase) {
 // Parser
 // ---------------------------------------------------------------------------
 
-struct PtrVec { void** data; int count; int cap; };
-static void pv_push(PtrVec* v, void* p) {
-    if (v->count == v->cap) {
-        v->cap = v->cap ? v->cap * 2 : 4;
-        v->data = (void**)mem_realloc(v->data, (size_t)v->cap * sizeof(void*), MEM_CAT_PARSER);
-    }
-    v->data[v->count++] = p;
-}
-
 struct Parser {
     const char* p;
     int len;
@@ -237,6 +228,18 @@ struct Parser {
     int total_groups;        // total capturing groups (from pre-pass)
     bool error;
 };
+
+// Parser-local lists have no ownership of AST nodes; ArrayList supplies their
+// only grow/failure contract while the Pool remains the AST lifetime owner.
+static ArrayList* bt_parser_list_new(Parser* ps) {
+    ArrayList* values = arraylist_new(4);
+    if (!values) ps->error = true;
+    return values;
+}
+
+static void bt_parser_list_append(Parser* ps, ArrayList* values, void* value) {
+    if (!values || !arraylist_append(values, value)) ps->error = true;
+}
 
 static void* bt_alloc(Parser* ps, size_t n) { return pool_calloc(ps->pool, n); }
 
@@ -335,10 +338,10 @@ static bool parse_control_escape(Parser* ps, uint32_t* out) {
 // Returns whether the shorthand is itself "negated" (\D \W \S). For simplicity we
 // represent negated shorthands by adding their positive ranges and a separate
 // negated class node; but within a [...] we expand to explicit ranges.
-static void add_shorthand_ranges(PtrVec* ranges, char kind, Parser* ps) {
+static void add_shorthand_ranges(ArrayList* ranges, char kind, Parser* ps) {
     auto add = [&](uint32_t lo, uint32_t hi) {
-        RxRange* r = (RxRange*)bt_alloc(ps, sizeof(RxRange));
-        r->lo = lo; r->hi = hi; pv_push(ranges, r);
+        CodePointInterval* r = (CodePointInterval*)bt_alloc(ps, sizeof(CodePointInterval));
+        r->first = lo; r->last = hi; bt_parser_list_append(ps, ranges, r);
     };
     switch (kind) {
         case 'd': add('0','9'); break;
@@ -353,17 +356,22 @@ static void add_shorthand_ranges(PtrVec* ranges, char kind, Parser* ps) {
 
 // Build a standalone class node for a top-level shorthand \d \D \w \W \s \S.
 static RxNode* shorthand_class(Parser* ps, char kind) {
-    PtrVec ranges = {0,0,0};
+    ArrayList* ranges = bt_parser_list_new(ps);
+    if (!ranges) return NULL;
     char lower = (kind >= 'A' && kind <= 'Z') ? kind + 32 : kind;
     bool negated = (kind >= 'A' && kind <= 'Z');
-    add_shorthand_ranges(&ranges, lower, ps);
+    add_shorthand_ranges(ranges, lower, ps);
+    if (ps->error) { arraylist_free(ranges); return NULL; }
     RxNode* n = new_node(ps, RX_CLASS);
     RxClass* cls = (RxClass*)bt_alloc(ps, sizeof(RxClass));
-    cls->range_count = ranges.count;
-    cls->ranges = (RxRange*)bt_alloc(ps, sizeof(RxRange) * (ranges.count ? ranges.count : 1));
-    for (int i = 0; i < ranges.count; i++) cls->ranges[i] = *(RxRange*)ranges.data[i];
+    cls->range_count = arraylist_length(ranges);
+    cls->ranges = (CodePointInterval*)bt_alloc(ps, sizeof(CodePointInterval) *
+        (cls->range_count ? cls->range_count : 1));
+    for (int i = 0; i < cls->range_count; i++) {
+        cls->ranges[i] = *(CodePointInterval*)arraylist_get(ranges, i);
+    }
     cls->negated = negated;
-    mem_free(ranges.data);
+    arraylist_free(ranges);
     n->cls = cls;
     return n;
 }
@@ -382,10 +390,10 @@ static RxNode* property_class(Parser* ps, const char* name, int name_len, bool n
     RxNode* n = new_node(ps, RX_CLASS);
     RxClass* cls = (RxClass*)bt_alloc(ps, sizeof(RxClass));
     cls->range_count = count;
-    cls->ranges = (RxRange*)bt_alloc(ps, sizeof(RxRange) * count);
+    cls->ranges = (CodePointInterval*)bt_alloc(ps, sizeof(CodePointInterval) * count);
     for (int i = 0; i < count; i++) {
-        cls->ranges[i].lo = (uint32_t)pairs[i * 2];
-        cls->ranges[i].hi = (uint32_t)pairs[i * 2 + 1];
+        cls->ranges[i].first = (uint32_t)pairs[i * 2];
+        cls->ranges[i].last = (uint32_t)pairs[i * 2 + 1];
     }
     cls->negated = negated;
     mem_free(pairs);
@@ -398,19 +406,20 @@ static RxNode* parse_class(Parser* ps) {
     ps->pos++; // [
     bool negated = false;
     if (ps->pos < ps->len && ps->p[ps->pos] == '^') { negated = true; ps->pos++; }
-    PtrVec ranges = {0,0,0};
+    ArrayList* ranges = bt_parser_list_new(ps);
+    if (!ranges) return NULL;
     auto add_range = [&](uint32_t lo, uint32_t hi) {
-        RxRange* r = (RxRange*)bt_alloc(ps, sizeof(RxRange));
-        r->lo = lo; r->hi = hi; pv_push(&ranges, r);
+        CodePointInterval* r = (CodePointInterval*)bt_alloc(ps, sizeof(CodePointInterval));
+        r->first = lo; r->last = hi; bt_parser_list_append(ps, ranges, r);
     };
     // returns codepoint, sets is_class if it was a shorthand (already added to ranges)
-    while (ps->pos < ps->len && ps->p[ps->pos] != ']') {
+    while (!ps->error && ps->pos < ps->len && ps->p[ps->pos] != ']') {
         uint32_t lo; bool lo_is_shorthand = false;
         if (ps->p[ps->pos] == '\\' && ps->pos + 1 < ps->len) {
             ps->pos++;
             char e = ps->p[ps->pos];
             switch (e) {
-                case 'd': case 'w': case 's': add_shorthand_ranges(&ranges, e, ps); ps->pos++; lo_is_shorthand = true; break;
+                case 'd': case 'w': case 's': add_shorthand_ranges(ranges, e, ps); ps->pos++; lo_is_shorthand = true; break;
                 case 'D': add_range(0, '0'-1); add_range('9'+1, 0x10FFFF); ps->pos++; lo_is_shorthand = true; break;
                 case 'W': add_range(0, '0'-1); add_range('9'+1,'A'-1); add_range('Z'+1,'_'-1); add_range('_'+1,'a'-1); add_range('z'+1,0x10FFFF); ps->pos++; lo_is_shorthand = true; break;
                 case 'S': add_range(0,0x08); add_range(0x0E,0x1F); add_range(0x21,0x9F); add_range(0xA1,0x167F); add_range(0x1681,0x1FFF); add_range(0x200B,0x2027); add_range(0x202A,0x202E); add_range(0x2030,0x205E); add_range(0x2060,0x2FFF); add_range(0x3001,0xFEFE); add_range(0xFF00,0x10FFFF); ps->pos++; lo_is_shorthand = true; break;
@@ -421,8 +430,8 @@ static RxNode* parse_class(Parser* ps) {
                 case 'f': lo = '\f'; ps->pos++; break;
                 case 'v': lo = '\v'; ps->pos++; break;
                 case '0': lo = 0; ps->pos++; break;
-                case 'x': { ps->pos++; bool ok; lo = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; mem_free(ranges.data); return NULL; } break; }
-                case 'u': { ps->pos++; bool ok; lo = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; mem_free(ranges.data); return NULL; } break; }
+                case 'x': { ps->pos++; bool ok; lo = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
+                case 'u': { ps->pos++; bool ok; lo = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
                 case 'c': { ps->pos++; if (!parse_control_escape(ps, &lo)) lo = 'c'; break; }
                 default: lo = (unsigned char)e; ps->pos++; break;
             }
@@ -446,29 +455,36 @@ static RxNode* parse_class(Parser* ps) {
                     case 'f': hi='\f'; ps->pos++; break;
                     case 'v': hi='\v'; ps->pos++; break;
                     case '0': hi=0; ps->pos++; break;
-                    case 'x': { ps->pos++; bool ok; hi = parse_hex_escape(ps,&ok); if(!ok){ps->error=true;mem_free(ranges.data);return NULL;} break; }
-                    case 'u': { ps->pos++; bool ok; hi = parse_unicode_escape(ps,&ok); if(!ok){ps->error=true;mem_free(ranges.data);return NULL;} break; }
+                    case 'x': { ps->pos++; bool ok; hi = parse_hex_escape(ps,&ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
+                    case 'u': { ps->pos++; bool ok; hi = parse_unicode_escape(ps,&ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
                     case 'c': { ps->pos++; if (!parse_control_escape(ps, &hi)) hi = 'c'; break; }
                     default: hi=(unsigned char)e; ps->pos++; break;
                 }
             } else {
                 int adv = bt_utf8_decode(ps->p, ps->len, ps->pos, &hi); ps->pos += adv;
             }
-            if (hi < lo) { ps->error = true; mem_free(ranges.data); return NULL; }
+            if (hi < lo) { ps->error = true; arraylist_free(ranges); return NULL; }
             add_range(lo, hi);
         } else {
             add_range(lo, lo);
         }
     }
-    if (ps->pos >= ps->len || ps->p[ps->pos] != ']') { ps->error = true; mem_free(ranges.data); return NULL; }
+    if (ps->error || ps->pos >= ps->len || ps->p[ps->pos] != ']') {
+        ps->error = true;
+        arraylist_free(ranges);
+        return NULL;
+    }
     ps->pos++; // ]
     RxNode* n = new_node(ps, RX_CLASS);
     RxClass* cls = (RxClass*)bt_alloc(ps, sizeof(RxClass));
-    cls->range_count = ranges.count;
-    cls->ranges = (RxRange*)bt_alloc(ps, sizeof(RxRange) * (ranges.count ? ranges.count : 1));
-    for (int i = 0; i < ranges.count; i++) cls->ranges[i] = *(RxRange*)ranges.data[i];
+    cls->range_count = arraylist_length(ranges);
+    cls->ranges = (CodePointInterval*)bt_alloc(ps, sizeof(CodePointInterval) *
+        (cls->range_count ? cls->range_count : 1));
+    for (int i = 0; i < cls->range_count; i++) {
+        cls->ranges[i] = *(CodePointInterval*)arraylist_get(ranges, i);
+    }
     cls->negated = negated;
-    mem_free(ranges.data);
+    arraylist_free(ranges);
     n->cls = cls;
     return n;
 }
@@ -677,43 +693,52 @@ static RxNode* parse_term(Parser* ps) {
 }
 
 static RxSeq* parse_alternative(Parser* ps) {
-    PtrVec items = {0,0,0};
-    while (ps->pos < ps->len && ps->p[ps->pos] != '|' && ps->p[ps->pos] != ')') {
+    ArrayList* items = bt_parser_list_new(ps);
+    if (!items) return NULL;
+    while (!ps->error && ps->pos < ps->len && ps->p[ps->pos] != '|' && ps->p[ps->pos] != ')') {
         RxNode* t = parse_term(ps);
-        if (ps->error) { mem_free(items.data); return NULL; }
+        if (ps->error) { arraylist_free(items); return NULL; }
         if (!t) break;
-        pv_push(&items, t);
+        bt_parser_list_append(ps, items, t);
     }
+    if (ps->error) { arraylist_free(items); return NULL; }
     RxSeq* seq = (RxSeq*)bt_alloc(ps, sizeof(RxSeq));
-    seq->count = items.count;
-    seq->items = (RxNode**)bt_alloc(ps, sizeof(RxNode*) * (items.count ? items.count : 1));
-    for (int i = 0; i < items.count; i++) seq->items[i] = (RxNode*)items.data[i];
-    mem_free(items.data);
+    seq->count = arraylist_length(items);
+    seq->items = (RxNode**)bt_alloc(ps, sizeof(RxNode*) *
+        (seq->count ? seq->count : 1));
+    for (int i = 0; i < seq->count; i++) {
+        seq->items[i] = (RxNode*)arraylist_get(items, i);
+    }
+    arraylist_free(items);
     return seq;
 }
 
 static RxDisj* parse_disjunction(Parser* ps) {
-    PtrVec alts = {0,0,0};
+    ArrayList* alts = bt_parser_list_new(ps);
+    if (!alts) return NULL;
     RxSeq* a = parse_alternative(ps);
-    if (ps->error) { mem_free(alts.data); return NULL; }
-    pv_push(&alts, a);
+    if (ps->error) { arraylist_free(alts); return NULL; }
+    bt_parser_list_append(ps, alts, a);
+    if (ps->error) { arraylist_free(alts); return NULL; }
     while (ps->pos < ps->len && ps->p[ps->pos] == '|') {
         ps->pos++; // |
         RxSeq* b = parse_alternative(ps);
-        if (ps->error) { mem_free(alts.data); return NULL; }
-        pv_push(&alts, b);
+        if (ps->error) { arraylist_free(alts); return NULL; }
+        bt_parser_list_append(ps, alts, b);
+        if (ps->error) { arraylist_free(alts); return NULL; }
     }
     RxDisj* d = (RxDisj*)bt_alloc(ps, sizeof(RxDisj));
-    d->count = alts.count;
-    d->alts = (RxSeq**)bt_alloc(ps, sizeof(RxSeq*) * alts.count);
-    for (int i = 0; i < alts.count; i++) d->alts[i] = (RxSeq*)alts.data[i];
-    mem_free(alts.data);
+    d->count = arraylist_length(alts);
+    d->alts = (RxSeq**)bt_alloc(ps, sizeof(RxSeq*) * d->count);
+    for (int i = 0; i < d->count; i++) d->alts[i] = (RxSeq*)arraylist_get(alts, i);
+    arraylist_free(alts);
     return d;
 }
 
 // Pre-pass: count capturing groups and collect named-group indices.
 static int collect_groups(const char* p, int len, Pool* pool, JsBtNamed** out_named, int* out_named_count) {
-    PtrVec names = {0,0,0};
+    ArrayList* names = arraylist_new(4);
+    if (!names) return -1;
     int count = 0;
     bool in_class = false;
     for (int i = 0; i < len; i++) {
@@ -735,7 +760,7 @@ static int collect_groups(const char* p, int len, Pool* pool, JsBtNamed** out_na
                     memcpy(nc, p + ns, nl);
                     JsBtNamed* nm = (JsBtNamed*)pool_calloc(pool, sizeof(JsBtNamed));
                     nm->name = nc; nm->name_len = nl; nm->index = count;
-                    pv_push(&names, nm);
+                    if (!arraylist_append(names, nm)) { arraylist_free(names); return -1; }
                 } else if (i + 2 < len && p[i+2] == 'P' && i + 3 < len && p[i+3] == '<') {
                     int ns = i + 4;
                     int j = ns; while (j < len && p[j] != '>') j++;
@@ -745,7 +770,7 @@ static int collect_groups(const char* p, int len, Pool* pool, JsBtNamed** out_na
                     memcpy(nc, p + ns, nl);
                     JsBtNamed* nm = (JsBtNamed*)pool_calloc(pool, sizeof(JsBtNamed));
                     nm->name = nc; nm->name_len = nl; nm->index = count;
-                    pv_push(&names, nm);
+                    if (!arraylist_append(names, nm)) { arraylist_free(names); return -1; }
                 }
                 // else non-capturing / lookaround
             } else {
@@ -754,12 +779,15 @@ static int collect_groups(const char* p, int len, Pool* pool, JsBtNamed** out_na
         }
     }
     JsBtNamed* arr = NULL;
-    if (names.count) {
-        arr = (JsBtNamed*)pool_calloc(pool, sizeof(JsBtNamed) * names.count);
-        for (int i = 0; i < names.count; i++) arr[i] = *(JsBtNamed*)names.data[i];
+    int named_count = arraylist_length(names);
+    if (named_count) {
+        arr = (JsBtNamed*)pool_calloc(pool, sizeof(JsBtNamed) * named_count);
+        for (int i = 0; i < named_count; i++) {
+            arr[i] = *(JsBtNamed*)arraylist_get(names, i);
+        }
     }
-    mem_free(names.data);
-    *out_named = arr; *out_named_count = names.count;
+    arraylist_free(names);
+    *out_named = arr; *out_named_count = named_count;
     return count;
 }
 
@@ -1110,6 +1138,7 @@ extern "C" JsBtRegex* js_bt_compile(const char* pattern, int pattern_len, JsBtFl
     bt->pool = pool;
     bt->flags = flags;
     bt->group_count = collect_groups(pattern, pattern_len, pool, &bt->named, &bt->named_count);
+    if (bt->group_count < 0) return NULL;
 
     Parser ps; memset(&ps, 0, sizeof(ps));
     ps.p = pattern; ps.len = pattern_len; ps.pos = 0; ps.pool = pool; ps.flags = flags;

@@ -18,6 +18,11 @@ extern unsigned int g_js_mir_optimize_level;
 #define JM_LARGE_FUNC_INSN_THRESHOLD 10000
 extern "C" void ensure_jit_imports_initialized(void);
 
+static inline bool js_path_is_http_url(const char* path) {
+    return path && (strncmp(path, "http://", 7) == 0 ||
+        strncmp(path, "https://", 8) == 0);
+}
+
 bool jm_float_const_is_inline(double value);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 
@@ -721,7 +726,7 @@ int jm_capture_env_slot(FnCapture* capture, int dense_slot);
 void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     MIR_reg_t key, MIR_reg_t value, bool private_brand);
 void jm_emit_class_static_named_field(JsMirTranspiler* mt, MIR_reg_t cls_obj,
-    JsStaticFieldEntry* sf, MIR_reg_t value);
+    JsClassMember* sf, MIR_reg_t value);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 // JS side of the shared structural lowering hooks installed on MirEmitter.
@@ -739,7 +744,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node);
 void jm_scope_env_reload_vars(JsMirTranspiler* mt);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt);
-void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
+void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsClassMember* sf);
 void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce, JsAstNode* block);
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
@@ -792,6 +797,8 @@ bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+Item js_mir_execute_ast_module(Runtime* runtime, JsTranspiler* tp,
+    const char* filename);
 char* js_load_script_source_from_cache(const char* path,
                                        const char* profile,
                                        const char* execution_mode,

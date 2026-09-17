@@ -370,7 +370,6 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         js_event_loop_state_destroy(state->event_loop);
         mem_free(state->event_loop);
     }
-    runtime_resource_table_destroy(&state->resources);
     if (state->console.labels) {
         for (int i = 0; i < state->console.labels->length; i++) {
             JsConsoleLabel* label = (JsConsoleLabel*)arraylist_get(
@@ -552,8 +551,11 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         js_runtime_state_free_records(state);
         return false;
     }
-    runtime_resource_table_init(&state->resources, context,
-        "JS runtime resources");
+    if (!runtime_resource_table_context_ensure((EvalContext*)context)) {
+        log_error("js-runtime-state: failed to initialize resource service");
+        js_runtime_state_free_records(state);
+        return false;
+    }
     js_realm_slots_init(&state->realm_slots, (Context*)context);
     root_vector_init(&state->regexp_last_match.values, (Context*)context,
         "JS RegExp last match");
@@ -583,6 +585,10 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         }
         if (!js_runtime_state_alloc_records(state)) {
             context_capsule_drop(runtime_context, CONTEXT_CAPSULE_JS_RUNTIME);
+            // The resource service is established during record allocation,
+            // before this runtime state becomes usable by another client.
+            context_capsule_drop(runtime_context,
+                CONTEXT_CAPSULE_RUNTIME_RESOURCES);
             return false;
         }
         state->heap_epoch = 1;
@@ -606,7 +612,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         runtime_job_queue_init(&state->promises.unhandled_queue,
             &state->promises.unhandled_storage);
         state->event_loop->next_id = 1;
-        state->operations.next_symbol_id = 100;
         state->string_caches->last_from_char_code_cp = -1;
         state->string_caches->ascii_chars_epoch = ~0ULL;
         state->stream.default_byte_hwm = 16 * 1024;
@@ -759,8 +764,8 @@ void js_runtime_state_destroy_context(void) {
     if (state->operations.symbol_registry) {
         hashmap_free(state->operations.symbol_registry);
     }
-    if (state->operations.symbol_description_registry) {
-        hashmap_free(state->operations.symbol_description_registry);
+    if (state->operations.symbol_name_index) {
+        hashmap_free(state->operations.symbol_name_index);
     }
     // Promise carriers are GC-owned; context teardown only drops queue and
     // async owners before the heap itself is released.
@@ -786,39 +791,39 @@ typedef void (*JsRuntimeRootVectorVisitor)(RootVector* roots, Item* slots,
 static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
         JsRuntimeRootVectorVisitor visit, void* data) {
     if (!state || !visit) return;
-    visit(&state->stream.roots, &state->stream.namespace_object, 45,
+    visit(&state->stream, &state->stream.namespace_object, 45,
         "stream keys, prototypes, and namespaces", data);
-    visit(&state->clipboard.roots, &state->clipboard.blob_prototype, 7,
+    visit(&state->clipboard, &state->clipboard.blob_prototype, 7,
         "clipboard prototypes and drag session", data);
-    visit(&state->dom.roots, &state->dom.implementation, 4,
+    visit(&state->dom, &state->dom.implementation, 5,
         "DOM singleton wrappers", data);
     if (state->string_caches) {
-        visit(&state->string_caches->roots,
+        visit(state->string_caches,
             &state->string_caches->last_four_byte_escape,
             662 + JS_ASCII_SUBSTRING_CACHE_CAPACITY,
             "realm string caches", data);
     }
     if (state->assert) {
-        visit(&state->assert->roots, &state->assert->namespace_object, 5,
+        visit(state->assert, &state->assert->namespace_object, 5,
             "assert namespaces and cached keys", data);
     }
     if (state->test262_agent) {
-        visit(&state->test262_agent->roots, &state->test262_agent->object, 1,
+        visit(state->test262_agent, &state->test262_agent->object, 1,
             "Test262 agent object", data);
     }
     if (state->process) {
-        visit(&state->process->roots, &state->process->argv, 5,
+        visit(state->process, &state->process->argv, 5,
             "process realm state", data);
     }
-    visit(&state->promises.roots, &state->promises.unhandled_storage, 3,
+    visit(&state->promises, &state->promises.unhandled_storage, 3,
         "Promise unhandled queue and domain state", data);
-    visit(&state->cluster.roots, &state->cluster.primary_options, 1,
+    visit(&state->cluster, &state->cluster.primary_options, 1,
         "cluster primary options", data);
     // the retired throw slot must not leave the following runtime IDs in the root span.
-    visit(&state->async_await.roots, &state->async_await.resolved_value, 1,
+    visit(&state->async_await, &state->async_await.resolved_value, 1,
         "async await result handoff", data);
     if (state->async_hooks) {
-        visit(&state->async_hooks->roots, &state->async_hooks->root_resource, 2,
+        visit(state->async_hooks, &state->async_hooks->root_resource, 2,
             "async hooks current resources", data);
     }
     visit(&state->event_loop_queue_roots, state->event_loop->queue_storage, 3,
@@ -962,7 +967,7 @@ static void js_runtime_state_clear_root_vector(RootVector* roots, Item*,
     bool retain_cluster_primary_options = options_data &&
         *(const bool*)options_data;
     if (retain_cluster_primary_options &&
-            roots == &js_runtime_state.cluster.roots) {
+            roots == &js_runtime_state.cluster) {
         return;
     }
     root_vector_clear_external(roots);
@@ -1409,17 +1414,11 @@ extern "C" NameId js_well_known_symbol_name_id(int64_t symbol_id) {
     }
 }
 
-extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
-    if (!js_active_runtime_state) return ItemNull;
-    NameId key_id = js_well_known_symbol_name_id(symbol_id);
-    if (key_id == NAME_ID_NONE) return ItemNull;
-    NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL, key_id);
-    return key ? (Item){.item = s2it(key)} : ItemNull;
-}
-
 // ES2020 §7.1.14 ToPropertyKey(argument)
-// ToPrimitive(string hint), then Symbols → their unique NameRecord key,
-// strings → as-is, others → ToString.
+// ToPrimitive(string hint), then Symbols remain Symbols, strings remain
+// strings, and every other primitive goes through ToString.  Ordinary
+// property storage lowers hosted Symbols to their compatibility NameId only at
+// the shape/slot boundary.
 static Item js_canonical_property_string(Item value) {
     if (get_type_id(value) != LMD_TYPE_STRING) return value;
     String* string_value = it2s(value);
@@ -1436,7 +1435,7 @@ static Item js_canonical_property_string(Item value) {
 
 extern "C" Item js_to_property_key(Item key) {
     if (js_key_is_symbol(key)) {
-        return js_symbol_to_key(key);
+        return key;
     }
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_STRING) {
@@ -1449,7 +1448,7 @@ extern "C" Item js_to_property_key(Item key) {
         return js_canonical_property_string(js_name_item("undefined", 9));
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY || kt == LMD_TYPE_ELEMENT || kt == LMD_TYPE_FUNC) {
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_primitive(key, JS_HINT_STRING));
-        if (js_key_is_symbol(key)) return js_symbol_to_key(key);
+        if (js_key_is_symbol(key)) return key;
         kt = get_type_id(key);
         if (kt == LMD_TYPE_STRING) {
             return js_canonical_property_string(key);

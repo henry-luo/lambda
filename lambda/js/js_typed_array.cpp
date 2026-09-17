@@ -63,12 +63,10 @@ static Item js_dataview_to_bigint_value(Item value, Item* out_bigint) {
     }
 
     if (value_type == LMD_TYPE_INT) {
-        int64_t int_value = it2i(value);
-        if (int_value <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
-        } else {
-            return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-        }
+        return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
+    }
+    if (value_type == LMD_TYPE_SYMBOL) {
+        return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
     }
     if (value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
@@ -93,8 +91,7 @@ static Item js_dataview_to_index(Item value, int* out_index) {
         return js_status_ok();
     }
     TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_SYMBOL ||
-        (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (value_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(num, js_to_number(value));
@@ -114,8 +111,7 @@ static Item js_dataview_to_index(Item value, int* out_index) {
 
 static Item js_dataview_to_number_value(Item value, double* out_number) {
     TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_SYMBOL ||
-        (value_type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (value_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(num, js_to_number(value));
@@ -270,13 +266,13 @@ static int js_typed_array_current_length(JsTypedArray* ta) {
 static int js_typed_array_current_byte_offset(JsTypedArray* ta) {
     if (!ta) return 0;
     int byte_offset = js_typed_array_stored_byte_offset(ta);
-    if (!ta->buffer) return byte_offset;
+    if (!ta->base.buffer) return byte_offset;
     return js_arraybuffer_view_is_out_of_bounds(&ta->base) ? 0 : byte_offset;
 }
 
 static void* js_typed_array_current_data(JsTypedArray* ta) {
     if (!ta) return NULL;
-    if (!ta->buffer) return ta->view ? ta->view->data : NULL;
+    if (!ta->base.buffer) return ta->view ? ta->view->data : NULL;
     if (js_typed_array_current_byte_length(ta) == 0) return NULL;
     return ta->view ? array_num_resolve_data(ta->view, false) : NULL;
 }
@@ -441,8 +437,7 @@ static Item js_to_index_i64(Item value, int64_t* out_index,
         *out_index = 0;
         return js_status_ok();
     }
-    if (type == LMD_TYPE_SYMBOL ||
-        (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE)) {
+    if (type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     JS_ASSIGN_OR_RETURN(num, js_to_number(value));
@@ -508,10 +503,10 @@ static Item js_validate_atomic_typed_array(Item typed_array, bool require_shared
     if (!ta) {
         return js_throw_type_error("Atomics operation requires a TypedArray");
     }
-    if (require_shared && !js_arraybuffer_shared(ta->buffer)) {
+    if (require_shared && !js_arraybuffer_shared(ta->base.buffer)) {
         return js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
     }
-    if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
+    if (ta->base.buffer && js_arraybuffer_detached(ta->base.buffer)) {
         return js_throw_type_error(require_shared ? "Atomics operation requires a non-detached SharedArrayBuffer" :
                                            "Atomics operation requires a non-detached ArrayBuffer");
     }
@@ -852,7 +847,7 @@ static int js_atomics_record_waiter(JsArrayBuffer* buffer, int index, int agent_
 }
 
 static bool js_atomics_report_has_wait_suffix(Item report_string) {
-    if (get_type_id(report_string) != LMD_TYPE_STRING && get_type_id(report_string) != LMD_TYPE_SYMBOL) return false;
+    if (get_type_id(report_string) != LMD_TYPE_STRING) return false;
     String* report = it2s(report_string);
     if (!report) return false;
     if (report->len >= 2 && memcmp(report->chars + report->len - 2, "ok", 2) == 0) return true;
@@ -984,7 +979,7 @@ extern "C" void js_atomics_agent_leaving(int agent_slot) {
         old_value = __atomic_fetch_or(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
         return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
     case JS_ATOMICS_OP_STORE: \
-        if (!agent_spin_assist && js_arraybuffer_shared(ta->buffer) && converted_value == (C_TYPE)0 && js_atomics_has_pending_waiter_for_buffer(ta->buffer)) { \
+        if (!agent_spin_assist && js_arraybuffer_shared(ta->base.buffer) && converted_value == (C_TYPE)0 && js_atomics_has_pending_waiter_for_buffer(ta->base.buffer)) { \
             __atomic_store_n(element_ptr, (C_TYPE)1, __ATOMIC_SEQ_CST); \
         } else { \
             __atomic_store_n(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
@@ -1016,7 +1011,7 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
     JS_ASSIGN_OR_RETURN_INTO(validation, js_atomics_validate_index(ta, index_item, &index));
     void* data = js_typed_array_current_data(ta);
     if (!data) return js_throw_range_error("Invalid atomic access index");
-    bool agent_spin_assist = js_arraybuffer_shared(ta->buffer) && js_262_agent_current_slot_for_atomics() >= 0;
+    bool agent_spin_assist = js_arraybuffer_shared(ta->base.buffer) && js_262_agent_current_slot_for_atomics() >= 0;
 
     uint64_t value_bits = 0;
     uint64_t replacement_bits = 0;
@@ -1108,7 +1103,7 @@ extern "C" Item js_atomics_wait(Item typed_array, Item index_item, Item expected
         return js_atomics_wait_result("timed-out", 9);
     }
 
-    int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
+    int waiter_id = js_atomics_record_waiter(inputs.ta->base.buffer, inputs.index, agent_slot,
         inputs.timeout_number, inputs.has_timeout, ItemNull);
     if (waiter_id == 0) return js_throw_type_error("Atomics.wait waiter capacity exceeded");
     if (inputs.has_timeout && inputs.timeout_number <= 200.0) {
@@ -1129,7 +1124,7 @@ extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item ex
 
     int agent_slot = js_262_agent_current_slot_for_atomics();
     if (agent_slot >= 0) {
-        int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
+    int waiter_id = js_atomics_record_waiter(inputs.ta->base.buffer, inputs.index, agent_slot,
             inputs.timeout_number, inputs.has_timeout, ItemNull);
         if (waiter_id == 0) return js_throw_type_error("Atomics.waitAsync waiter capacity exceeded");
         // Test262 agents run on a virtual clock. Match the synchronous
@@ -1146,7 +1141,7 @@ extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item ex
     JS_ASSIGN_OR_RETURN(promise, js_promise_create_pending());
     if (get_type_id(promise) != LMD_TYPE_MAP) return ItemNull;
 
-    int waiter_id = js_atomics_record_waiter(inputs.ta->buffer, inputs.index, agent_slot,
+        int waiter_id = js_atomics_record_waiter(inputs.ta->base.buffer, inputs.index, agent_slot,
         inputs.timeout_number, inputs.has_timeout, promise);
     if (waiter_id == 0) return js_throw_type_error("Atomics.waitAsync waiter capacity exceeded");
 
@@ -1168,7 +1163,7 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
         if (std::isnan(count_number) || count_number <= 0.0) notify_count = 0;
         else if (std::isfinite(count_number) && count_number < (double)INT_MAX) notify_count = (int)std::trunc(count_number);
     }
-    if (!js_arraybuffer_shared(ta->buffer)) {
+    if (!js_arraybuffer_shared(ta->base.buffer)) {
         return (Item){.item = i2it(0)};
     }
     js_atomics_resolve_due_waiters();
@@ -1179,7 +1174,7 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
         JsAtomicsWaiter* waiter = (JsAtomicsWaiter*)
             js_atomics_waiter_rows->data[i];
         if (!waiter->used || waiter->status != JS_ATOMICS_WAITER_PENDING) continue;
-        if (waiter->buffer != ta->buffer || waiter->index != index) continue;
+        if (waiter->buffer != ta->base.buffer || waiter->index != index) continue;
         js_atomics_set_waiter_status(waiter, JS_ATOMICS_WAITER_OK);
         notified++;
     }
@@ -1208,15 +1203,58 @@ extern "C" const char* js_typed_array_type_name(Item val) {
 
 static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m);
 
-static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
+// The charge follows the refcounted allocation, not its ArrayBuffer wrapper:
+// Binary snapshots may retain a buffer after JS detaches or finalizes it.
+static void js_arraybuffer_release_owned_storage(void* data, size_t capacity,
+        void* context) {
+    heap_gc_external_record_release(context, capacity,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+    mem_free(data);
+}
+
+static void js_arraybuffer_charge_new_storage(ByteStorage* storage, void* owner) {
+    if (!storage) return;
+    storage->release_data = js_arraybuffer_release_owned_storage;
+    storage->release_context = owner;
+    heap_gc_external_record_alloc(owner, storage->capacity,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+}
+
+uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab) {
+    if (!ab) return NULL;
+    ByteStorage* previous = ab->storage;
+    uint8_t* data = byte_buffer_prepare_write(ab);
+    if (data && ab->storage != previous) {
+        // COW callers hold only the native handle here, so this post-allocation
+        // charge must not collect. The next rooted allocation preflight pays
+        // the pressure debt before another external allocation is made.
+        void* owner = heap_gc_external_preflight(0, HEAP_GC_EXTERNAL_ARRAYBUFFER);
+        js_arraybuffer_charge_new_storage(ab->storage, owner);
+    }
+    return data;
+}
+
+static JsArrayBuffer* js_arraybuffer_alloc_with_options(int byte_length,
+        int max_byte_length, uint32_t flags) {
+    if (byte_length < 0 || max_byte_length < byte_length) return NULL;
+    // This is a MAY_GC construction boundary: no JS value exists yet, so the
+    // preflight may collect without leaving an unrooted guest value behind.
+    void* external_owner = heap_gc_external_preflight((size_t)byte_length,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!ab) return NULL;
-    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)byte_length,
-            BYTE_BUFFER_FLAG_NONE, MEM_CAT_JS_RUNTIME)) {
+    if (!byte_buffer_init(ab, (size_t)byte_length, (size_t)max_byte_length,
+            flags, MEM_CAT_JS_RUNTIME)) {
         mem_free(ab);
         return NULL;
     }
+    js_arraybuffer_charge_new_storage(ab->storage, external_owner);
     return ab;
+}
+
+static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
+    return js_arraybuffer_alloc_with_options(byte_length, byte_length,
+        BYTE_BUFFER_FLAG_NONE);
 }
 
 static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
@@ -1224,13 +1262,20 @@ static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
     if (!storage || byte_length > INT_MAX) return NULL;
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!ab) return NULL;
-    if (!byte_buffer_init_storage(&ab->handle, storage, storage_offset, byte_length,
+    if (!byte_buffer_init_storage(ab, storage, storage_offset, byte_length,
             byte_length, BYTE_BUFFER_FLAG_NONE, MEM_CAT_JS_RUNTIME)) {
         mem_free(ab);
         return NULL;
     }
     return ab;
 }
+
+extern "C" void js_arraybuffer_destroy(JsArrayBuffer* ab) {
+    if (!ab) return;
+    byte_buffer_destroy(ab);
+    mem_free(ab);
+}
+
 
 static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
     RootFrame roots(3);
@@ -1277,8 +1322,9 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     if (byte_length < 0) byte_length = 0;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
     if (!ab) return ItemError;
-
-    return js_arraybuffer_wrap_item(ab);
+    Item result = js_arraybuffer_wrap_item(ab);
+    if (!js_is_arraybuffer(result)) js_arraybuffer_destroy(ab);
+    return result;
 }
 
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
@@ -1328,28 +1374,14 @@ static Item js_arraybuffer_allocate_constructed(
         return js_throw_range_error(shared
             ? "Invalid shared array buffer maxByteLength" : "Invalid array buffer maxByteLength");
     }
-    JsArrayBuffer* ab;
-    if (shared) {
-        ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-        if (ab) {
-            uint32_t flags = BYTE_BUFFER_FLAG_SHARED;
-            if (options->resizable) flags |= BYTE_BUFFER_FLAG_RESIZABLE;
-            if (!byte_buffer_init(&ab->handle, (size_t)options->byte_length,
-                    (size_t)options->max_byte_length, flags, MEM_CAT_JS_RUNTIME)) {
-                mem_free(ab);
-                ab = NULL;
-            }
-        }
-    } else {
-        ab = js_arraybuffer_alloc((int)options->byte_length);
-    }
+    uint32_t flags = shared ? BYTE_BUFFER_FLAG_SHARED : BYTE_BUFFER_FLAG_NONE;
+    if (options->resizable) flags |= BYTE_BUFFER_FLAG_RESIZABLE;
+    JsArrayBuffer* ab = js_arraybuffer_alloc_with_options((int)options->byte_length,
+        (int)options->max_byte_length, flags);
     if (!ab) return ItemError;
     Item result = js_arraybuffer_wrap_item_with_prototype(
         ab, prototype, use_provided_prototype);
-    if (!shared && js_is_arraybuffer(result)) {
-        ab->handle.max_byte_length = (size_t)options->max_byte_length;
-        if (options->resizable) ab->handle.flags |= BYTE_BUFFER_FLAG_RESIZABLE;
-    }
+    if (!js_is_arraybuffer(result)) js_arraybuffer_destroy(ab);
     return result;
 }
 
@@ -1447,7 +1479,9 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
         return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
     }
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    RootFrame roots(1);
+    Rooted<Item> buffer_root(roots, val);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     // Js54 P6: spec §25.1.5.2 has just one detach check, AFTER ToIntegerOrInfinity.
     // If the buffer is already detached at entry, the coercion still runs (and
     // can have side effects); we throw afterwards. Test:
@@ -1456,9 +1490,19 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("ArrayBuffer is not resizable");
     int new_length = 0;
     JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     if (new_length > js_arraybuffer_max_length(ab)) return js_throw_range_error("Invalid array buffer length");
-    if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
+    void* external_owner = heap_gc_external_preflight((size_t)new_length,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+    ByteStorage* previous = ab->storage;
+    if (!byte_buffer_resize(ab, (size_t)new_length)) return ItemError;
+    if (ab->storage != previous) {
+        js_arraybuffer_charge_new_storage(ab->storage, external_owner);
+    }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -1472,7 +1516,9 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
     if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
         return js_throw_type_error("ArrayBuffer.prototype.transfer requires a non-shared ArrayBuffer receiver");
     }
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    RootFrame roots(1);
+    Rooted<Item> buffer_root(roots, val);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     // Per spec: validate detached AFTER coercing newLength so the valueOf side
     // effect runs first when applicable.
@@ -1482,8 +1528,9 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         new_length = js_arraybuffer_length(ab);
     } else {
         JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
-        if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     }
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
 
     // Determine resizable / maxByteLength for the new buffer.
     bool new_resizable;
@@ -1499,19 +1546,24 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         return js_throw_range_error("Invalid array buffer length");
     }
 
+    void* external_owner = heap_gc_external_preflight((size_t)new_length,
+        HEAP_GC_EXTERNAL_ARRAYBUFFER);
+    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+
     JsArrayBuffer* nab = (JsArrayBuffer*)mem_calloc(1, sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!nab) return ItemError;
-    if (!byte_buffer_transfer(&ab->handle, &nab->handle, (size_t)new_length,
+    if (!byte_buffer_transfer(ab, nab, (size_t)new_length,
             to_fixed_length)) {
         mem_free(nab);
         return ItemError;
     }
+    js_arraybuffer_charge_new_storage(nab->storage, external_owner);
     // The stable source handle is detached by transfer, so all extant views
     // invalidate through its generation instead of retaining a freed pointer.
     Item result = js_arraybuffer_wrap(nab);
     if (!js_is_arraybuffer(result)) {
-        byte_buffer_destroy(&nab->handle);
-        mem_free(nab);
+        js_arraybuffer_destroy(nab);
     }
     return result;
 }
@@ -1632,7 +1684,7 @@ extern "C" void js_arraybuffer_detach(Item val) {
     if (!js_is_arraybuffer(val)) return;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return;
-    byte_buffer_detach(&ab->handle);
+    byte_buffer_detach(ab);
 }
 
 // Check if an ArrayBuffer is detached
@@ -1657,7 +1709,9 @@ extern "C" bool js_is_sharedarraybuffer(Item val) {
 extern "C" Item js_sharedarraybuffer_operation(Item sab,
         JsSharedArrayBufferOperation operation, Item* args, int argc) {
     if (!js_is_sharedarraybuffer(sab)) return js_throw_type_error("SharedArrayBuffer method requires a SharedArrayBuffer receiver");
-    JsArrayBuffer* ab = js_get_arraybuffer_ptr(sab.map);
+    RootFrame roots(1);
+    Rooted<Item> buffer_root(roots, sab);
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
 
     // slice(begin, end)
@@ -1681,7 +1735,11 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
         if (end < begin) end = begin;
         int new_len = end - begin;
 
-        return js_arraybuffer_slice_species(sab, ab, begin, new_len, true);
+        ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+        if (!ab || js_arraybuffer_detached(ab)) {
+            return js_throw_type_error("SharedArrayBuffer is detached");
+        }
+        return js_arraybuffer_slice_species(buffer_root.get(), ab, begin, new_len, true);
     }
 
     if (operation == JS_SHARED_ARRAY_BUFFER_GROW) {
@@ -1689,13 +1747,24 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
         Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
         int new_length = 0;
         JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length"));
+        ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+        if (!ab || js_arraybuffer_detached(ab)) {
+            return js_throw_type_error("SharedArrayBuffer is detached");
+        }
         int current_length = js_arraybuffer_length(ab);
         if (new_length < current_length || new_length > js_arraybuffer_max_length(ab)) {
             return js_throw_range_error("Invalid shared array buffer length");
         }
-        if (new_length != current_length &&
-            !byte_buffer_resize(&ab->handle, (size_t)new_length)) {
-            return ItemError;
+        if (new_length != current_length) {
+            void* external_owner = heap_gc_external_preflight((size_t)new_length,
+                HEAP_GC_EXTERNAL_ARRAYBUFFER);
+            ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+            if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("SharedArrayBuffer is detached");
+            ByteStorage* previous = ab->storage;
+            if (!byte_buffer_resize(ab, (size_t)new_length)) return ItemError;
+            if (ab->storage != previous) {
+                js_arraybuffer_charge_new_storage(ab->storage, external_owner);
+            }
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
@@ -1737,9 +1806,9 @@ static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
     map->data_cap = 0;
     JsTypedArray* typed_array = &carrier->payload;
     typed_array->element_type = element_type;
-    typed_array->buffer = js_get_arraybuffer_ptr(buffer_item.map);
-    typed_array->buffer_item = buffer_item.item;
-    typed_array->length_tracking = length_tracking;
+    typed_array->base.buffer = js_get_arraybuffer_ptr(buffer_item.map);
+    typed_array->base.buffer_item = buffer_item.item;
+    typed_array->base.length_tracking = length_tracking;
     typed_array->is_buffer = false;
     typed_array->view = NULL;
     return (Item){.map = map};
@@ -1751,28 +1820,32 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     int elem_size = js_typed_array_element_size(arr_type);
     int byte_length = length * elem_size;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
+    if (!ab) return ItemError;
     RootFrame roots(3);
     Rooted<Item> buffer_root(roots, js_arraybuffer_wrap(ab));
     Rooted<Item> view_root(roots, ItemNull);
-    if (!js_is_arraybuffer(buffer_root.get())) return ItemNull;
+    if (!js_is_arraybuffer(buffer_root.get())) {
+        js_arraybuffer_destroy(ab);
+        return ItemNull;
+    }
     Rooted<Item> carrier_root(roots, js_typed_array_alloc_carrier(
         arr_type, buffer_root.get(), false));
     if (!js_is_typed_array(carrier_root.get())) return ItemNull;
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     view_root.set((Item){.array_num = array_num_new_buffer_view(
-        (Container*)buffer_root.get().map, &ab->handle,
+        (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), 0, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
     // D5.3.3: the view allocation can collect before the typed-array carrier
     // reaches its caller, so both the carrier and backing buffer stay rooted.
     JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    ta->buffer = ab;
+    ta->base.buffer = ab;
     ta->base.byte_offset = 0;
     ta->base.byte_length = byte_length;
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
-    ta->buffer_item = buffer_root.get().item;
+    ta->base.buffer_item = buffer_root.get().item;
     return carrier_root.get();
 }
 
@@ -1802,8 +1875,7 @@ extern "C" Item js_typed_array_from_binary(Binary* bin) {
         if (!ab) return ItemError;
         Item buffer_item = js_arraybuffer_wrap(ab);
         if (!js_is_arraybuffer(buffer_item)) {
-            byte_buffer_destroy(&ab->handle);
-            mem_free(ab);
+            js_arraybuffer_destroy(ab);
             return ItemError;
         }
         // Binary retains the allocation while the stable handle is the sole
@@ -1831,7 +1903,7 @@ extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
     if (byte_length == 0) return ItemNull;
     void* data = js_typed_array_current_data(ta);
     if (!data) return ItemError;
-    ByteBufferHandle* handle = ta->buffer ? &ta->buffer->handle : NULL;
+    ByteBufferHandle* handle = ta->base.buffer;
     Binary* bin = NULL;
     if (handle && handle->storage && !byte_buffer_is_shared(handle)) {
         size_t view_offset = (size_t)js_typed_array_current_byte_offset(ta);
@@ -1850,18 +1922,18 @@ extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
 }
 
 extern "C" Item binary_from_dataview(JsDataView* dv) {
-    if (!dv || !dv->base.buffer || js_arraybuffer_view_is_out_of_bounds(&dv->base)) {
+    if (!dv || !dv->buffer || js_arraybuffer_view_is_out_of_bounds(dv)) {
         return ItemError;
     }
-    int byte_length = js_arraybuffer_view_current_byte_length(&dv->base);
+    int byte_length = js_arraybuffer_view_current_byte_length(dv);
     if (byte_length == 0) return ItemNull;
-    const char* data = (const char*)js_arraybuffer_data_const(dv->base.buffer) +
-        dv->base.byte_offset;
-    ByteBufferHandle* handle = &dv->base.buffer->handle;
+    const char* data = (const char*)js_arraybuffer_data_const(dv->buffer) +
+        dv->byte_offset;
+    ByteBufferHandle* handle = dv->buffer;
     Binary* bin = NULL;
     if (!byte_buffer_is_shared(handle) && handle->storage) {
         bin = heap_binary_from_storage(handle->storage,
-            handle->storage_offset + (size_t)dv->base.byte_offset,
+            handle->storage_offset + (size_t)dv->byte_offset,
             (size_t)byte_length, str_is_ascii(data, (size_t)byte_length));
     } else {
         // DataView over SharedArrayBuffer must also snapshot mutable bytes.
@@ -1926,19 +1998,19 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
     view_root.set((Item){.array_num = array_num_new_buffer_view(
-        (Container*)buffer_root.get().map, &ab->handle,
+        (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), byte_offset, length, true)});
     if (get_type_id(view_root.get()) != LMD_TYPE_ARRAY_NUM) return ItemNull;
     // D5.3.3: refresh every interior pointer from its exact root after the
     // view allocation; forced collections may relocate either carrier.
     JsTypedArray* ta = js_get_typed_array_ptr(carrier_root.get().map);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    ta->buffer = ab;
+    ta->base.buffer = ab;
     ta->base.byte_offset = byte_offset;
     ta->base.byte_length = byte_length;
     ta->view = view_root.get().array_num;
     js_typed_array_refresh_arraynum_view(ta);
-    ta->buffer_item = buffer_root.get().item;
+    ta->base.buffer_item = buffer_root.get().item;
     return carrier_root.get();
 }
 
@@ -2108,10 +2180,8 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
         return result;
     }
 
-    // Symbol/BigInt cannot be converted to number (ES spec: ToIndex → ToNumber throws)
-    // JS symbols are encoded as negative ints (LMD_TYPE_INT with value <= -(1LL << 40))
-    if (arg_type == LMD_TYPE_SYMBOL || 
-        (arg_type == LMD_TYPE_INT && it2i(arg) <= -(int64_t)(1LL << 40))) {
+    // Symbol/BigInt cannot be converted to number (ES spec: ToIndex → ToNumber throws).
+    if (arg_type == LMD_TYPE_SYMBOL) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
 
@@ -2230,11 +2300,7 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
         } else {
             // ToBigInt rejects Number/null/undefined per spec
             if (vt == LMD_TYPE_INT) {
-                int64_t iv = it2i(value);
-                if (iv > -(int64_t)JS_SYMBOL_BASE) {
-                    return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-                }
-                // Symbol → handled by ctor (throws)
+                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             } else if (vt == LMD_TYPE_FLOAT) {
                 return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
             } else if (vt == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
@@ -2261,11 +2327,7 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
     if (value.item == ITEM_JS_UNDEFINED) {
         num_val = NAN;
     } else if (vtype == LMD_TYPE_INT) {
-        // Check for Symbol (encoded as negative int <= -JS_SYMBOL_BASE)
         int64_t iv = it2i(value);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_type_error("Cannot convert a Symbol value to a number");
-        }
         num_val = (double)iv;
     } else if (vtype == LMD_TYPE_FLOAT) {
         num_val = it2d(value);
@@ -2665,7 +2727,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end,
     int new_length = end - start;
     JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(ta_item, new_length));
     if (new_length > 0 && !array_semantics) {
-        if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
+        if (ta->base.buffer && js_arraybuffer_detached(ta->base.buffer)) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
         }
         if (js_typed_array_is_out_of_bounds(ta)) {
@@ -2684,7 +2746,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end,
         char* src_data = (char*)js_typed_array_current_data(ta);
         char* dst_data = (char*)js_typed_array_prepare_write(rta);
         int src_start = start * elem_size;
-        if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
+        if (src_data && dst_data && ta->base.buffer && rta->base.buffer && ta->base.buffer == rta->base.buffer) {
             // same-buffer species results must follow the spec's forward byte copy.
             for (int i = 0; i < count_bytes; i++) {
                 int src_index = src_start + i;
@@ -2729,10 +2791,10 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
     int byte_offset = js_typed_array_stored_byte_offset(ta);
     int available_len = js_typed_array_stored_length(ta);
     int begin_byte_offset = byte_offset + start * elem_size;
-    bool result_length_tracking = ta->buffer && ta->length_tracking && end_is_default;
+    bool result_length_tracking = ta->base.buffer && ta->base.length_tracking && end_is_default;
 
-    if (ta->buffer && !js_arraybuffer_detached(ta->buffer)) {
-        int buffer_length = js_arraybuffer_length(ta->buffer);
+    if (ta->base.buffer && !js_arraybuffer_detached(ta->base.buffer)) {
+        int buffer_length = js_arraybuffer_length(ta->base.buffer);
         int available_bytes = buffer_length - byte_offset;
         if (available_bytes < 0) available_bytes = 0;
         available_len = available_bytes / elem_size;
@@ -2748,9 +2810,9 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
     int new_length = result_length_tracking ? available_len - start : end - start;
     if (new_length < 0) new_length = 0;
 
-    if (!ta->buffer_item || !ta->buffer) return js_throw_type_error("TypedArray has no backing ArrayBuffer");
+    if (!ta->base.buffer_item || !ta->base.buffer) return js_throw_type_error("TypedArray has no backing ArrayBuffer");
     return js_typed_array_species_create_from_buffer(
-        ta_item, (Item){.item = ta->buffer_item}, byte_offset + start * elem_size,
+        ta_item, (Item){.item = ta->base.buffer_item}, byte_offset + start * elem_size,
         new_length, result_length_tracking);
 }
 
@@ -2857,11 +2919,11 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     buffer = buffer_root.get();
     ab = js_get_arraybuffer_ptr(buffer.map);
     if (!ab) return ItemNull;
-    dv->base.buffer = ab;
-    dv->base.byte_offset = byte_offset;
-    dv->base.byte_length = byte_length;
-    dv->base.buffer_item = buffer.item;
-    dv->base.length_tracking = length_tracking;
+    dv->buffer = ab;
+    dv->byte_offset = byte_offset;
+    dv->byte_length = byte_length;
+    dv->buffer_item = buffer.item;
+    dv->length_tracking = length_tracking;
 
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
@@ -2885,14 +2947,14 @@ JS_FORWARD_ITEM(js_dataview_construct, (Item buffer, Item offset_item,         I
 // buffers. For non-length-tracking views the stored byte_length is authoritative;
 // for length-tracking views we re-derive from the buffer's current size.
 static inline int dv_current_byte_length(JsDataView* dv) {
-    return dv ? js_arraybuffer_view_current_byte_length(&dv->base) : 0;
+    return dv ? js_arraybuffer_view_current_byte_length(dv) : 0;
 }
 
 // Js54 P2: a DataView is out-of-bounds when the buffer is detached, or when the
 // recorded view window no longer fits (resize shrank the buffer below
 // byte_offset + byte_length, or below byte_offset for length-tracking views).
 static inline bool dv_is_out_of_bounds(JsDataView* dv) {
-    return dv && js_arraybuffer_view_is_out_of_bounds(&dv->base);
+    return dv && js_arraybuffer_view_is_out_of_bounds(dv);
 }
 
 // Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.

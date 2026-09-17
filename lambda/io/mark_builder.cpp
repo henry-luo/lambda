@@ -128,6 +128,7 @@ Symbol* MarkBuilder::createSymbol(const char* symbol, size_t len) {
     if (!symbol || len == 0) return nullptr;
     Symbol* sym = (Symbol*)arena_alloc(arena_, sizeof(Symbol) + len + 1);
     sym->len = len;
+    sym->kind = SYMBOL_LAMBDA_NAME;
     sym->ns = nullptr;
     str_copy(sym->chars, len + 1, symbol, len);
     return sym;

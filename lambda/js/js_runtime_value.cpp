@@ -157,9 +157,6 @@ extern "C" Item js_to_number(Item value) {
     }
 
     case LMD_TYPE_INT:
-        if (js_is_symbol(value)) {
-            return js_throw_type_error("Cannot convert a Symbol value to a number");
-        }
         return js_make_number((double)it2i(value));
     case LMD_TYPE_FLOAT:
         return value;
@@ -296,6 +293,9 @@ extern "C" Item js_to_number(Item value) {
     case LMD_TYPE_UINT64:
         return js_throw_type_error("Cannot convert a BigInt value to a number");
 
+    case LMD_TYPE_SYMBOL:
+        return js_throw_type_error("Cannot convert a Symbol value to a number");
+
     default:
         // J39-1b: route object operands through the unified js_to_primitive
         // kernel (ES §7.1.1). Returned primitive is then re-coerced via ToNumber.
@@ -314,9 +314,8 @@ extern "C" Item js_to_number(Item value) {
                 }
             }
             JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value, JS_HINT_NUMBER));
-            TypeId rt = get_type_id(prim);
             // ES spec: ToNumber(symbol) throws TypeError
-            if (rt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) {
+            if (js_is_symbol(prim)) {
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             }
             return js_to_number(prim);
@@ -340,9 +339,8 @@ extern "C" Item js_to_numeric(Item value) {
         if (_dec && _dec->storage_kind == DECIMAL_BIGINT) return value;
     }
     if (js_is_native_bigint_egress(value)) return js_native_bigint_to_bigint(value);
-    // ES spec: Symbol → TypeError in ToNumeric (§7.1.3)
-    // Symbols are encoded as LMD_TYPE_INT with value <= -(int64_t)JS_SYMBOL_BASE
-    if (type == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    // ES spec: Symbol → TypeError in ToNumeric (§7.1.3).
+    if (js_is_symbol(value)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     // ToPrimitive for objects (hint: number) — ES spec §7.1.3
@@ -350,9 +348,8 @@ extern "C" Item js_to_numeric(Item value) {
         type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT) {
         // J39-1b: route through unified js_to_primitive (ES §7.1.1).
         JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value, JS_HINT_NUMBER));
-        TypeId rt = get_type_id(prim);
         // ES spec: ToNumeric(symbol) throws TypeError
-        if (rt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) {
+        if (js_is_symbol(prim)) {
             return js_throw_type_error("Cannot convert a Symbol value to a number");
         }
         return js_to_numeric(prim);
@@ -548,14 +545,13 @@ extern "C" Item js_to_string(Item value) {
 
     case LMD_TYPE_INT: {
         int64_t v = it2i(value);
-        // Symbols cannot be implicitly converted to string (ES spec 7.1.12)
-        if (v <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_type_error("Cannot convert a Symbol value to a string");
-        }
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%lld", (long long)v);
         return js_make_string(buffer);
     }
+
+    case LMD_TYPE_SYMBOL:
+        return js_throw_type_error("Cannot convert a Symbol value to a string");
 
     case LMD_TYPE_INT64:
     case LMD_TYPE_UINT64: {
@@ -782,6 +778,16 @@ extern "C" Item js_to_string(Item value) {
         return js_to_string(prim);
     }
     default:
+        // Virtual DOM values are JavaScript objects too. Their host-provided
+        // stringifier must participate in ToPrimitive rather than falling
+        // straight through to Object's diagnostic tag.
+        if (js_is_object_value(value)) {
+            JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value, JS_HINT_STRING));
+            if (js_is_object_value(prim)) {
+                return js_throw_type_error("Cannot convert object to primitive value");
+            }
+            return js_to_string(prim);
+        }
         return js_make_string("[object Object]");
     }
 }
@@ -863,15 +869,14 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
         if (type_str[1] == 'u') {
             // "number"
             if (js_number_like_type(type)) {
-                return js_key_is_symbol(value) ? 0 : 1;
+                return 1;
             }
             return 0;
         }
         return 0;
     case 's':
         if (type_str[1] == 't') return (type == LMD_TYPE_STRING) ? 1 : 0;  // "string"
-        if (type_str[1] == 'y') return (type == LMD_TYPE_SYMBOL ||         // "symbol"
-            ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && js_key_is_symbol(value))) ? 1 : 0;
+        if (type_str[1] == 'y') return js_is_symbol(value) ? 1 : 0;  // "symbol"
         return 0;
     case 'b':
         if (type_str[1] == 'o') return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
@@ -898,8 +903,8 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
         }
         if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
             type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
-            type == LMD_TYPE_SYMBOL) return 0;
-        if (js_number_like_type(type) && !js_key_is_symbol(value)) return 0;
+            js_is_symbol(value)) return 0;
+        if (js_number_like_type(type)) return 0;
         return 1;  // arrays, elements, etc. are "object"
     case 'f':
         // "function"
@@ -997,7 +1002,6 @@ bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negat
     TypeId key_type = get_type_id(key);
     if (key_type == LMD_TYPE_INT) {
         int64_t iv = it2i(key);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) return false;
         if (numeric_index) *numeric_index = (double)iv;
         return true;
     }
@@ -1235,7 +1239,7 @@ extern "C" uint64_t js_get_heap_epoch();
 
 static bool js_string_concat_caches_ensure_roots(void) {
     return js_active_runtime_state && js_root_vector_ensure_registered(
-        &js_runtime_state.string_caches->roots);
+        js_runtime_state.string_caches);
 }
 
 static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
@@ -1956,10 +1960,6 @@ extern "C" Item js_bigint_constructor(Item value) {
     }
     if (vt == LMD_TYPE_INT) {
         int64_t iv = it2i(value);
-        // Check for symbol encoded as negative int
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_type_error("Cannot convert a Symbol value to a BigInt");
-        }
         return bigint_from_int64(iv);
     }
     // undefined, null, object, etc. → TypeError
@@ -2031,7 +2031,7 @@ JS_FORWARD_ITEM(js_bigint_as_uint_n, (Item bits_item, Item bigint_item), js_bigi
 
 extern "C" Item js_unary_plus(Item operand) {
     // ES spec: ToNumber(Symbol) throws TypeError
-    if (get_type_id(operand) == LMD_TYPE_INT && it2i(operand) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(operand)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     return js_to_number(operand);
@@ -2045,7 +2045,7 @@ extern "C" Item js_unary_minus(Item operand) {
         return bigint_neg(operand);
     }
     // ES spec: ToNumber(Symbol) throws TypeError
-    if (get_type_id(operand) == LMD_TYPE_INT && it2i(operand) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(operand)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     Item num = js_to_number(operand);
@@ -2054,11 +2054,6 @@ extern "C" Item js_unary_minus(Item operand) {
         return js_make_number(-0.0);
     }
     Item result = fn_neg(num);
-    // After negation, check if the result is an int in the symbol collision range.
-    // If so, promote to float to avoid being misidentified as a symbol.
-    if (get_type_id(result) == LMD_TYPE_INT && it2i(result) <= -(int64_t)JS_SYMBOL_BASE) {
-        return js_make_number((double)it2i(result));
-    }
     return result;
 }
 
@@ -2079,7 +2074,7 @@ extern "C" Item js_typeof(Item value) {
     case LMD_TYPE_INT:
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_NUM_SIZED:
-        result = js_key_is_symbol(value) ? "symbol" : "number";
+        result = "number";
         break;
     case LMD_TYPE_INT64:
     case LMD_TYPE_UINT64:
@@ -2092,7 +2087,7 @@ extern "C" Item js_typeof(Item value) {
         result = "string";
         break;
     case LMD_TYPE_SYMBOL:
-        result = "symbol";
+        result = js_is_symbol(value) ? "symbol" : "object";
         break;
     case LMD_TYPE_FUNC:
         result = "function";
