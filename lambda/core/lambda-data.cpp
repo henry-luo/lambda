@@ -1378,8 +1378,9 @@ ConstItem Map::get(const Item key) const {
         // strings don't have namespace
     } else if (key._type_id == LMD_TYPE_SYMBOL) {
         Symbol* sym = (Symbol*)key.symbol_ptr;
+        if (!symbol_is_lambda_name(sym)) return null_result;
         key_str = sym->chars;
-        key_ns = sym->ns;
+        key_ns = symbol_lambda_namespace(sym);
     } else {
         log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return null_result;  // only string or symbol keys are supported
@@ -1440,8 +1441,9 @@ ConstItem Element::get_attr(const Item key) const {
         // strings don't have namespace
     } else if (key._type_id == LMD_TYPE_SYMBOL) {
         Symbol* sym = (Symbol*)key.symbol_ptr;
+        if (!symbol_is_lambda_name(sym)) return null_result;
         key_str = sym->chars;
-        key_ns = sym->ns;
+        key_ns = symbol_lambda_namespace(sym);
     } else {
         return null_result;  // only string or symbol keys are supported
     }

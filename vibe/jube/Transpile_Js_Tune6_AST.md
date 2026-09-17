@@ -4,6 +4,14 @@ Date: 2026-06-06
 Status: proposal (rev 3 — benchmark landed, priorities corrected by data)
 Scope: JavaScript transpile latency, generated MIR volume, and cold third-party library startup
 
+**Execution-policy notice (USER, 2026-09-16):** the MIR-interpreter recommendations
+below are historical and superseded by **D8.1.3v11** and
+[JS Tune13](JS_Tune13.md). LambdaJS's interpreter is its AST backend; selected
+MIR units must execute generated native code, including large/document scripts.
+The recorded measurements remain historical evidence of compiler costs, not
+authority to retain a MIR-interpreter threshold or diagnostic option. Runtime
+removal is planned, not claimed implemented by this notice.
+
 ## Revision history
 
 - rev 1: initial proposal.

@@ -108,7 +108,7 @@ A plain `ArrayBuffer(length)` runs through `js_arraybuffer_construct_resizable` 
 
 **transfer.** `ArrayBuffer.prototype.transfer(newLength?)` and `transferToFixedLength(newLength?)` use `byte_buffer_transfer`. An unchanged-length transfer can move the handle reference; a changed length allocates/copies before committing. The source is then detached by clearing its handle reference and advancing its generation. `transfer` preserves resizability only when the source was resizable, while `transferToFixedLength` always produces a fixed destination; fixed sources never expose a stale source maximum as destination `maxByteLength`.
 
-**species** for buffer methods reads `constructor[@@species]` (`__sym_6`) and validates the returned object is a same-or-larger non-detached buffer (`slice` path `:1812`; SharedArrayBuffer path `:2017`).
+**species** for buffer methods reads `constructor[@@species]` through the cached direct `Symbol.species` property route and validates the returned object is a same-or-larger non-detached buffer (`slice` path `:1812`; SharedArrayBuffer path `:2017`).
 
 ---
 

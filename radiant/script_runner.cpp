@@ -1503,7 +1503,7 @@ static Item execute_cached_external_classic(Runtime* runtime,
         else timing->cache_misses++;
     }
 
-    JsCommonMirBuild cache_build = {};
+    InputScriptBuildScope cache_build = {};
     if (!cached) {
         InputScriptBuildClaim claim = js_mir_lease_session_begin_build(
             s_js_mir_lease_session, false, source, source_len, filename,
@@ -1954,7 +1954,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 #endif
     const char* preamble_filename = "<document-preamble>";
     const JsPreambleState* cached_preamble = nullptr;
-    JsCommonMirBuild preamble_build = {};
+    InputScriptBuildScope preamble_build = {};
     if (s_js_mir_lease_session && !s_retain_js_state && !runtime->js_ast_backend) {
         if (timing) timing->cache_lookups++;
         cached_preamble = js_mir_lease_session_lookup(

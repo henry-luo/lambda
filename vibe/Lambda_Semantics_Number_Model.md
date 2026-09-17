@@ -290,7 +290,7 @@ Never returned: `number` (union), `f64`/`i64`/`u64` (aliases), tier names. Array
 
 ### 5.1 Inside LambdaJS: number ≡ `float`, uniformly
 
-JS number *is* binary64; the mapping is exact by construction (NaN, ±Infinity, −0 included). **Compact-int packing is removed from `js_make_number`** — with it go the integer fast path, the `-0` special case, and the `JS_SYMBOL_BASE` guard (symbols keep the packed encoding; numbers never use it). The obligation that "every JS-visible surface keys on value, never representation" — the discipline that produced the `v18p` −0 bug and the Stage-4C int-vs-float inference family — is dissolved rather than policed.
+JS number *is* binary64; the mapping is exact by construction (NaN, ±Infinity, −0 included). **Compact-int packing is removed from `js_make_number`** — with it go the integer fast path and the `-0` special case. JS Symbols are independently pointer-backed `LMD_TYPE_SYMBOL` Items, not a numeric exclusion from the number lane (D4.6.1v3). The obligation that "every JS-visible surface keys on value, never representation" — the discipline that produced the `v18p` −0 bug and the Stage-4C int-vs-float inference family — is dissolved rather than policed.
 
 **Perf plan, eyes open:** JS Number uses Lambda's canonical float encoding.
 Most doubles are self-tagged in the `Item`; out-of-band transient values use an
@@ -368,7 +368,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 
 | # | Item | Status | Violates |
 |---|---|---|---|
-| 1 | `js_make_number` compact-int packing + `-0` special case + `JS_SYMBOL_BASE` guard (`js_runtime_value.cpp:1071`) | **Fixed in current tree:** `js_make_number` always emits the canonical `LMD_TYPE_FLOAT` representation. | §5.1 |
+| 1 | `js_make_number` compact-int packing + `-0` special case + Symbol-range guard | **Fixed in current tree:** `js_make_number` always emits the canonical `LMD_TYPE_FLOAT` representation; Symbols use the independent pointer-backed `LMD_TYPE_SYMBOL` carrier. | §5.1, D4.6.1v3 |
 | 2 | Dual double lane tags `ELEM_FLOAT`/`ELEM_FLOAT64`: the dead-but-armed **truncation landmine** in `print.cpp:23` (`read_compact_elem` FLOAT64 → `i2it`), the JS seam (`Float64Array` → `ELEM_FLOAT64` vs inference → `ELEM_FLOAT`), reductions routing FLOAT64 via the generic slow path (`lambda-eval-num.cpp:1385`), `validate_pattern.cpp:111` collapsing both to one leaf | **Fixed:** `ELEM_FLOAT64` is the single canonical double lane at `0x10`; `ELEM_FLOAT` is only a source-compatibility alias, the retired `0xC0` slot has size `0`, JS `Float64Array` and `[float]` inference produce the same lane, and the duplicate slow/dead branches are removed. | §3.5 |
 | 3 | A distinct static type object for the `f64` alias | **Fixed:** `f64` input canonicalizes directly to `float` literals/type refs; the duplicate static alias objects are removed. | §3.2 |
 | 4 | Any `type()` path reporting `"f64"` (the superseded draft direction) | **Fixed:** `type(1.0f64)` reports `float`; `f64` is a source alias only and has no separate runtime TypeId, as required by S2.1.1. | §4 |

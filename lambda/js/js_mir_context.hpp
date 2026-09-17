@@ -331,42 +331,9 @@ static void __attribute__((unused)) jm_ensure_captures_capacity(JsFuncCollected*
                sizeof(FnCapture));
 }
 
-// Class method info for transpiler
-struct JsClassMethodEntry {
-    String* name;                   // method name
-    JsFuncCollected* fc;            // collected function entry
-    int param_count;
-    bool is_constructor;
-    bool is_static;
-    bool is_getter;                 // getter method (get size() { ... })
-    bool is_setter;                 // setter method (set value(v) { ... })
-    bool computed;                  // computed property name ([expr])
-    JsAstNode* key_expr;            // original key AST node (for computed keys)
-};
-
-// Static field entry for class
-struct JsStaticFieldEntry {
-    String* name;                   // field name (NULL if computed)
-    JsAstNode* key_expr;            // key expression for computed fields
-    JsAstNode* initializer;         // initializer expression
-    int module_var_index;           // index into js_module_vars[] (-1 for computed)
-    int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)
-    bool computed;                  // whether this is a computed property name
-};
-
-// Instance field entry for class (non-static field initializers)
-struct JsInstanceFieldEntry {
-    String* name;                   // source field name (#name if private, NULL if computed)
-    JsAstNode* key_expr;            // key expression for computed fields
-    JsAstNode* initializer;         // initializer expression (NULL if no initializer)
-    JsFuncCollected* initializer_fc; // internal per-instance initializer capability
-    int key_module_var_index;       // class-evaluation computed key slot (-1 if not computed)
-    bool computed;                  // whether this is a computed property name
-};
-
 // Every class body member has one stable, source-ordered compiler record.
-// Lowering selects the applicable kind instead of reconstructing order from
-// four parallel arrays.
+// Lowering selects its kind-specific fields instead of reconstructing order
+// from parallel method/field arrays.
 enum JsClassMemberKind {
     JS_CLASS_MEMBER_METHOD,
     JS_CLASS_MEMBER_STATIC_FIELD,
@@ -376,12 +343,20 @@ enum JsClassMemberKind {
 
 struct JsClassMember {
     JsClassMemberKind kind;
-    union {
-        JsClassMethodEntry method;
-        JsStaticFieldEntry static_field;
-        JsInstanceFieldEntry instance_field;
-        JsAstNode* static_block;
-    } as;
+    String* name;                    // method/field spelling; NULL for computed
+    JsFuncCollected* fc;             // method callable capability
+    JsAstNode* key_expr;             // computed property key
+    JsAstNode* initializer;          // field initializer expression
+    JsFuncCollected* initializer_fc; // instance-field initializer capability
+    JsAstNode* static_block;         // static-block body
+    int param_count;
+    int module_var_index;             // static-field value slot
+    int key_module_var_index;         // computed field key slot
+    bool is_constructor;
+    bool is_static;
+    bool is_getter;
+    bool is_setter;
+    bool computed;
 };
 
 // Class info for transpiler
@@ -392,7 +367,7 @@ struct JsClassEntry {
     JsClassMember* members;              // exact-sized, source-ordered compile-lifetime table
     int member_capacity;
     int member_count;
-    JsClassMethodEntry* constructor;     // points into members[].as.method or NULL
+    JsClassMember* constructor;          // points into members[] or NULL
     JsClassEntry* superclass;            // resolved parent class entry or NULL
     TypeMap* instance_shape;             // immutable public-field construction recipe
     bool instance_shape_planned;         // prevents repeated negative shape scans
@@ -401,11 +376,11 @@ struct JsClassEntry {
     int inner_module_var_index;          // immutable class-name binding inside class scope
 };
 
-static inline JsClassMethodEntry* jm_class_member_method(JsClassEntry* entry,
+static inline JsClassMember* jm_class_member_method(JsClassEntry* entry,
         int member_index) {
     if (!entry || member_index < 0 || member_index >= entry->member_count ||
             entry->members[member_index].kind != JS_CLASS_MEMBER_METHOD) return NULL;
-    return &entry->members[member_index].as.method;
+    return &entry->members[member_index];
 }
 
 // Try/catch context for handling return-in-try and exception flow

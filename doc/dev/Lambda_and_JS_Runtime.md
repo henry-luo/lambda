@@ -1,6 +1,6 @@
 # Lambda & LambdaJS Runtime — Combined Design Summary
 
-> **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-17
 
 > **One runtime, two languages.** Lambda Script (pure-functional, `.ls`) and LambdaJS (the embedded JavaScript engine, `.js`) are not two VMs with a bridge — they are two front-ends over a **single shared substrate**: the same tagged `Item` value, the same GC heap and pools, the same MIR JIT, the same input parsers/formatters, and the same Radiant DOM. They interop at runtime with **zero marshalling**: a value produced by one is directly readable by the other. This document is the concise map of that design — for developers, and for loading into AI-model context. Details live in the two detailed-design sets: **[LR_00 (Lambda core)](lambda/LR_00_Overview.md)** and **[JS_00 (LambdaJS)](js/JS_00_Overview.md)**.
 
@@ -16,7 +16,7 @@ Every runtime value in both languages is one 64-bit word (`lambda.h`). The **hig
 - **Tagged-reference scalars** — high byte = tag, low 56 bits = a payload address. `INT64`/`UINT64` and rare out-of-band `FLOAT` point to activation/caller homes or destination-owned words, with a counted GC fallback only for ownerless persistence. Other pointer scalars use GC, pool, or Input-arena ownership as appropriate; dynamic `DTIME` is GC-owned and static parser-built `DTIME` is Input-arena-owned.
 - **Containers** — the word *is* the pointer (high byte 0); the `TypeId` is the first field of the pointee. All extend `struct Container`: `RANGE`, `ARRAY`, `ARRAY_NUM` (raw numeric vectors), `MAP`, `VMAP`, `ELEMENT`, `OBJECT`, `FUNC`, `TYPE`.
 
-`get_type_id(Item)` dispatches all variants uniformly. Packing macros: `i2it`/`d2it`/`s2it`/`l2it`/… JS-specific encodings ride on the same scheme: `undefined` = distinct `LMD_TYPE_UNDEFINED` tag; TDZ = undefined-tag|1; JS Symbols = negative int56 beyond `-JS_SYMBOL_BASE` (2^40); BigInt = `DECIMAL` with a marker; array-hole and iterator-done sentinels use unused tags `0x7E`/`0x7F`.
+`get_type_id(Item)` dispatches all variants uniformly. Packing macros: `i2it`/`d2it`/`s2it`/`l2it`/… JS-specific encodings ride on the same scheme: `undefined` = distinct `LMD_TYPE_UNDEFINED` tag; TDZ = undefined-tag|1; JS Symbols = pointer-backed `LMD_TYPE_SYMBOL` values. `Symbol.kind` separates Lambda textual symbols from JS unique/registered/well-known variants; a JS `Symbol*` is value identity while its temporary `NameId` preserves property routing (D4.6.1v3). BigInt = `DECIMAL` with a marker; array-hole and iterator-done sentinels use unused tags `0x7E`/`0x7F`.
 
 **Maps/objects share one shape system**: a `Map` points to a `TypeMap` (shape) whose `ShapeEntry` chain + `slot_entries[]` array + inline FNV-1a hash lay out a packed `data` buffer. `Element` is simultaneously a list of children and a map of attributes — the document node type every input parser produces. ([JS_06](js/JS_06_Objects_Properties_Prototypes.md), [LR_03](lambda/LR_03_Value_and_Type_Model.md))
 
@@ -71,7 +71,7 @@ The two runtimes are documented together because the interop is structural, not 
 
 ### Invariants both engines must preserve (the interop contract)
 
-- **Item ABI**: high-byte tag layout, the safe-band `int` bound inside its 56-bit payload, `NUM_SIZED` packing, canonical float encoding, the `JS_SYMBOL_BASE` boundary, and the `0x7E`/`0x7F` sentinels are shared constants — changing any requires auditing both engines, the GC, and all parsers/formatters.
+- **Item ABI**: high-byte tag layout, the safe-band `int` bound inside its 56-bit payload, `NUM_SIZED` packing, canonical float encoding, the pointer-backed `Symbol` kind/union contract, and the `0x7E`/`0x7F` sentinels are shared constants — changing any requires auditing both engines, the GC, and all parsers/formatters (D4.6.1v3).
 - **Containers start with `TypeId`** (the `Container` header), and object structs are **non-moving** — JIT code and pools may hold raw pointers.
 - **Data-zone pointers relocate**: any *naked* pointer into the data zone (boxed numerics, hoisted buffer pointers) must be reachable through a precise, writable root across allocations.
 - **Names are interned once**: never compare key strings by content when a pooled `String*` identity comparison is available; never mutate a pooled string.

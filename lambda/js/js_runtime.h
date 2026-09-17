@@ -82,8 +82,9 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
     (*index)++;
     return c;
 }
-// Converts a well-known Symbol numeric ID to its generated realm-local ref.
-// Internal runtime code uses this instead of diagnostic "__sym_N" spellings.
+// Maps a well-known Symbol catalog selector to its stable NameId compatibility
+// record, or to the cached core Symbol value. Property storage converts the
+// latter only at the NameId boundary; callers otherwise retain JS identity.
 NameId js_well_known_symbol_name_id(int64_t symbol_id);
 Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
@@ -248,6 +249,47 @@ struct TypeMap;
 Item js_new_object(void);
 Item js_new_object_with_typemap(struct TypeMap* tm);
 Item js_new_literal_object_with_typemap(struct TypeMap* tm);
+// A compiler-owned primitive object-literal recipe.  The recipe outlives the
+// MIR code that references it; every invocation still creates fresh strings
+// and a fresh ordinary object.
+typedef enum JsStaticObjectValueKind {
+    JS_STATIC_OBJECT_VALUE_IMMEDIATE = 0,
+    JS_STATIC_OBJECT_VALUE_STRING
+} JsStaticObjectValueKind;
+
+typedef struct JsStaticObjectProperty {
+    const char* key_chars;
+    const char* string_chars;
+    uint64_t immediate;
+    int key_len;
+    int string_len;
+    uint8_t value_kind;
+} JsStaticObjectProperty;
+
+Item js_object_new_from_static_properties(const JsStaticObjectProperty* properties,
+    int length);
+// A recursive compiler-owned literal recipe. It represents only side-effect-free
+// literal syntax, while every invocation materializes a fresh JS value graph.
+typedef enum JsStaticLiteralKind {
+    JS_STATIC_LITERAL_IMMEDIATE = 0,
+    JS_STATIC_LITERAL_STRING,
+    JS_STATIC_LITERAL_ARRAY,
+    JS_STATIC_LITERAL_OBJECT,
+    JS_STATIC_LITERAL_HOLE
+} JsStaticLiteralKind;
+
+typedef struct JsStaticLiteralRecipe {
+    const char* key_chars;
+    const char* string_chars;
+    const struct JsStaticLiteralRecipe* children;
+    uint64_t immediate;
+    int key_len;
+    int string_len;
+    int length;
+    uint8_t kind;
+} JsStaticLiteralRecipe;
+
+Item js_static_literal_from_recipe(const JsStaticLiteralRecipe* recipe);
 // An array's companion property map is created on first use — index accessors,
 // non-index keys and attribute bits all live there. Callers that are about to
 // write must go through this; a bare js_array_props() read can be NULL.
@@ -304,6 +346,9 @@ Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
 // =============================================================================
 
 Item js_array_new(int length);
+// Build a fresh dense array from compiler-owned inline Number Items. The
+// description is immutable; the returned array and its elements stay ordinary.
+Item js_array_new_from_static_items(const Item* items, int length);
 // Preserve array-literal elisions as absent indexed properties.
 Item js_array_hole(void);
 // Allocate an array with an explicit immutable JS class carrier for branded
@@ -323,6 +368,9 @@ bool js_array_try_get_existing_own_dense_no_gc(Item array, int64_t index,
                                                Item* out_value);
 bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t index,
                                                Item value);
+// Stores an already-native Number only into an existing ordinary packed slot.
+// False keeps the caller on the full Set continuation.
+bool js_array_set_existing_number_no_gc(Item array, double index, double value);
 // Returns a boolean Set completion for the narrow ordinary-array index fast
 // path, or ItemNull when descriptor/prototype/exotic checks require fallback.
 Item js_elements_set_int_completion(Item array, int64_t index, Item value);
@@ -356,6 +404,17 @@ Item js_new_function_mir(void* func_ptr, int param_count);
 Item js_new_distinct_function_mir(void* func_ptr, int param_count);
 Item js_new_method_function_mir(void* func_ptr, int param_count);
 Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size);
+// Compiler-only factories defer capability/metadata publication until the
+// adjacent js_finalize_function transaction supplies definition-site facts.
+Item js_new_function_mir_pending(void* func_ptr, int param_count);
+Item js_new_distinct_function_mir_pending(void* func_ptr, int param_count);
+Item js_new_closure_mir_pending(void* func_ptr, int param_count, Item* env,
+                                int env_size);
+// Compiler-pending functions preserve ordinary name/length descriptors while
+// avoiding their backing-map allocation until an observable operation needs it.
+bool js_function_materialize_lazy_metadata_property(Item function, Item key);
+void js_function_materialize_all_lazy_metadata_properties(Item function);
+bool js_function_has_lazy_metadata_property(Item function, Item key);
 // JC15: pack actuals [start, argc) into a rest array; `args` stays caller-rooted.
 Item js_args_rest_array(Item* args, int64_t start, int64_t argc);
 struct AstFuncNode;
@@ -412,6 +471,8 @@ enum {
     JS_FUNC_INIT_READS_NEW_TARGET = 1u << 9,
     JS_FUNC_INIT_MIR_CONTEXT_ABI = 1u << 10,
     JS_FUNC_INIT_CLASS_FIELD_INITIALIZER = 1u << 11,
+    JS_FUNC_INIT_USES_ARGUMENTS = 1u << 12,
+    JS_FUNC_INIT_DIRECT_EVAL = 1u << 13,
 };
 void js_finalize_function(Item fn_item, const char* name_chars,
                           const char* source_chars, uint64_t span_lengths,
@@ -1021,9 +1082,9 @@ Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
 
 // Symbol API
-// Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).
-// Base must be beyond int32 range to avoid collision with bitwise op results.
-#define JS_SYMBOL_BASE (1LL << 40)
+// JS Symbols use the core pointer-backed LMD_TYPE_SYMBOL representation.
+// SYMBOL_JS_* kinds retain JS identity while SYMBOL_LAMBDA_NAME stays a
+// separate Lambda textual-symbol contract.
 
 Item js_symbol_create(Item description);
 Item js_symbol_for(Item key);
@@ -1322,7 +1383,7 @@ Item js_offscreen_canvas_new(Item width, Item height);
 void js_canvas_ctx_set_font(Item ctx_obj, Item font_val);
 bool js_canvas_property_set_intercept(Item obj, Item key, Item value);
 void js_canvas_cleanup(void);
-bool js_array_runtime_items_release(Item* items);
+bool js_array_runtime_items_release(Array* owner);
 void js_array_runtime_items_cleanup_all(void);
 
 // Runtime entry points shared by the JIT import registry and JS subsystems.

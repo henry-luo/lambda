@@ -1,4 +1,5 @@
 #include "concurrency.h"
+#include "durable_activation.hpp"
 
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
@@ -78,15 +79,12 @@ typedef struct LambdaTaskObserver {
     struct LambdaTaskObserver* next;
 } LambdaTaskObserver;
 
-struct LambdaAsyncFrame {
+struct LambdaAsyncFrame : DurableActivation {
     LambdaTask* task;
-    int state;
     int fault_target_state;
     Item fault_item;
     LambdaTaskScope* fault_scope_base;
-    Item* slots;
     uint8_t* slot_is_item;
-    int slot_count;
     int slot_capacity;
     LambdaAsyncFrame* next;
     LambdaTaskScope* scope_base;
@@ -225,7 +223,7 @@ static void task_handle_trace(void* data, gc_heap_t* gc) {
 
 static void async_frame_reset_from(LambdaAsyncFrame* frame) {
     while (frame) {
-        frame->state = 0;
+        durable_activation_reset(frame);
         frame->fault_target_state = 0;
         owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
         frame->fault_scope_base = NULL;
@@ -1155,6 +1153,8 @@ extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity)
         frame = (LambdaAsyncFrame*)mem_calloc(1, sizeof(LambdaAsyncFrame), MEM_CAT_EVAL);
         if (!frame) return NULL;
         created = true;
+        durable_activation_init(frame, LMD_TYPE_RAW_POINTER,
+            DURABLE_ACTIVATION_LAMBDA_ASYNC);
         frame->task = task;
         frame->fault_item = ItemNull;
         frame->scope_base = task->scope_top;

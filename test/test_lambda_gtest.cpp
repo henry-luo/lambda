@@ -297,6 +297,11 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt"},
     {"test/lambda/proc/cow_rmw_sibling_borrow.ls", "test/lambda/proc/cow_rmw_sibling_borrow.txt"},
     {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt"},
+    // Tune28: D4.4.6 place-copy marks and CW36 branch store-backs
+    {"test/lambda/proc/cow_place_copy_place_written.ls",
+     "test/lambda/proc/cow_place_copy_place_written.txt"},
+    {"test/lambda/proc/cow_rmw_branch_store_back.ls",
+     "test/lambda/proc/cow_rmw_branch_store_back.txt"},
     {"test/lambda/proc/tune27_nullable_lane_store.ls", "test/lambda/proc/tune27_nullable_lane_store.txt"},
     {"test/lambda/proc/tune27_fixed_path_store.ls", "test/lambda/proc/tune27_fixed_path_store.txt"},
     {"test/lambda/proc/tune27_loop_accumulator.ls", "test/lambda/proc/tune27_loop_accumulator.txt"},

@@ -357,7 +357,7 @@ typedef struct JsTimerHandle {
     bool       virtual_refed;
 } JsTimerHandle;
 
-#define timer_resources (js_runtime_state.resources)
+#define timer_resources (*js_runtime_resource_table())
 #define timer_handle_count runtime_resource_table_active_count_owned(\
     &timer_resources, js_runtime_state.event_loop)
 #define timer_slot_count runtime_resource_table_slot_count(&timer_resources)
@@ -1371,6 +1371,17 @@ JS_FORWARD_ITEM(js_setTimeout_promise, (Item delay, Item value, Item options), j
 extern "C" Item js_setTimeout_promisified(Item delay, Item value) {
     Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     return js_setTimeout_promise(delay, value, undef);
+}
+
+extern "C" void js_timer_install_promisify_custom(Item function) {
+    if (get_type_id(function) != LMD_TYPE_FUNC) return;
+    RootFrame roots(3);
+    Rooted<Item> function_root(roots, function);
+    Rooted<Item> symbol_root(roots, js_symbol_for(
+        js_name_item("nodejs.util.promisify.custom", 27)));
+    Rooted<Item> custom_root(roots, js_new_native_function(js_setTimeout_promisified));
+    // The utility module and node-core share the registry symbol identity.
+    js_set_key_default(function_root.get(), symbol_root.get(), custom_root.get());
 }
 
 extern "C" Item js_setImmediate_promise(Item value, Item options) {

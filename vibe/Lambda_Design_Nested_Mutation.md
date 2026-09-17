@@ -400,6 +400,15 @@ now marks, which is the required semantics, not a lost optimization. The
 monotonic bit (D4.4.1) is untouched; a scoped/counted mark stays the recorded
 follow-up if the static rule proves too conservative on a measured row.
 
+*Conformance follow-up (T28-8, same day).* Condition 1's oracle did not look
+inside `var`/`let` initializers, returns, blocks or several composites, so
+`let old = r.kid; var z = mutate(r)` still printed the new value; it now does.
+The decision also moved from FUNCTION_END to `lambda_ast_finalize_script`, so a
+`var` pass to a procedure defined later in the module (or to the procedure
+itself) is seen as a write. The oracle no longer counts a non-procedure system
+function or a known plain `pn` parameter as a writer (S9.1.3); the net copy
+census is flat or lower on every measured row (Tune28 §9.16).
+
 ---
 
 ## 5. Alternatives considered

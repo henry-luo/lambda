@@ -2757,14 +2757,14 @@ static Item crypto_item_to_integer(Item item, const char* name, int* out_value) 
     double value = 0.0;
     if (type == LMD_TYPE_INT) {
         int64_t iv = it2i(item);
-        if (iv <= -(int64_t)JS_SYMBOL_BASE) {
-            return js_throw_invalid_arg_type(name, "number", item);
-        }
         if (iv < -2147483648LL || iv > 2147483647LL) {
             return js_throw_out_of_range(name, ">= -2147483648 && <= 2147483647", item);
         }
         *out_value = (int)iv;
         return js_status_ok();
+    }
+    if (type == LMD_TYPE_SYMBOL) {
+        return js_throw_invalid_arg_type(name, "number", item);
     }
     if (type == LMD_TYPE_INT64) {
         int64_t iv = it2l(item);

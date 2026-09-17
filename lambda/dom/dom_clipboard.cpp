@@ -75,7 +75,7 @@ JS_FORWARD_STATIC_VOID( js_clipboard_set_method, (Item object, const char* name,
 #define g_file_list_proto (js_runtime_state.clipboard.file_list_prototype)
 #define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
 #define g_clipboard_generation (js_runtime_state.clipboard.generation)
-JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard.roots)))
+JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard)))
 
 static void attach_known_prototype(Item obj, Item proto) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return;
@@ -122,7 +122,7 @@ static bool blob_part_has_shared_backing(Item part) {
     }
     if (js_is_typed_array(part)) {
         JsTypedArray* ta = js_get_typed_array_ptr(part.map);
-        if (ta && js_arraybuffer_shared(ta->buffer)) return true;
+        if (ta && js_arraybuffer_shared(ta->base.buffer)) return true;
     }
     if (js_is_dataview(part)) {
         JsDataView* dv = js_get_dataview_ptr(part);

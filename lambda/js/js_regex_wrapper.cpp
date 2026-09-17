@@ -12,6 +12,7 @@
  * both engines size transient capture data from the pattern dynamically.
  */
 #include "js_regex_wrapper.h"
+#include "../core/codepoint_interval.h"
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -86,62 +87,60 @@ static int count_capture_groups(const std::string& pat) {
 //   - emit `(?:str1|str2|[ranges])` if strings present, else `[ranges]`.
 // ============================================================================
 
-struct CodePointRange { int lo; int hi; };
-
 struct CodePointRanges {
-    std::vector<CodePointRange> r;  // sorted, non-overlapping
+    std::vector<CodePointInterval> r;  // sorted, non-overlapping
     void add(int lo, int hi) {
         if (lo > hi) std::swap(lo, hi);
         // insert at the right spot, merging overlaps.
-        std::vector<CodePointRange> out;
+        std::vector<CodePointInterval> out;
         out.reserve(r.size() + 1);
         bool placed = false;
         for (auto& rr : r) {
             if (placed) { out.push_back(rr); continue; }
-            if (rr.hi < lo - 1) { out.push_back(rr); continue; }
-            if (rr.lo > hi + 1) {
-                out.push_back({lo, hi});
+            if ((int)rr.last < lo - 1) { out.push_back(rr); continue; }
+            if ((int)rr.first > hi + 1) {
+                out.push_back({(uint32_t)lo, (uint32_t)hi});
                 out.push_back(rr);
                 placed = true;
                 continue;
             }
             // overlap or touch — extend
-            lo = std::min(lo, rr.lo);
-            hi = std::max(hi, rr.hi);
+            lo = std::min(lo, (int)rr.first);
+            hi = std::max(hi, (int)rr.last);
         }
-        if (!placed) out.push_back({lo, hi});
+        if (!placed) out.push_back({(uint32_t)lo, (uint32_t)hi});
         r = std::move(out);
     }
     void add_char(int c) { add(c, c); }
     void union_with(const CodePointRanges& other) {
-        for (auto& rr : other.r) add(rr.lo, rr.hi);
+        for (auto& rr : other.r) add(rr.first, rr.last);
     }
     void intersect_with(const CodePointRanges& other) {
-        std::vector<CodePointRange> out;
+        std::vector<CodePointInterval> out;
         size_t i = 0, j = 0;
         while (i < r.size() && j < other.r.size()) {
-            int lo = std::max(r[i].lo, other.r[j].lo);
-            int hi = std::min(r[i].hi, other.r[j].hi);
-            if (lo <= hi) out.push_back({lo, hi});
-            if (r[i].hi < other.r[j].hi) i++; else j++;
+            int lo = std::max((int)r[i].first, (int)other.r[j].first);
+            int hi = std::min((int)r[i].last, (int)other.r[j].last);
+            if (lo <= hi) out.push_back({(uint32_t)lo, (uint32_t)hi});
+            if (r[i].last < other.r[j].last) i++; else j++;
         }
         r = std::move(out);
     }
     void difference_with(const CodePointRanges& other) {
-        std::vector<CodePointRange> out;
+        std::vector<CodePointInterval> out;
         for (auto& rr : r) {
-            int lo = rr.lo, hi = rr.hi;
+            int lo = rr.first, hi = rr.last;
             // subtract each other-range that overlaps
             for (auto& orr : other.r) {
-                if (orr.hi < lo || orr.lo > hi) continue;
-                if (orr.lo <= lo && orr.hi >= hi) { lo = hi + 1; break; }
-                if (orr.lo <= lo) { lo = orr.hi + 1; continue; }
-                if (orr.hi >= hi) { hi = orr.lo - 1; continue; }
-                // strict interior split: emit [lo, orr.lo-1] and continue with [orr.hi+1, hi]
-                out.push_back({lo, orr.lo - 1});
-                lo = orr.hi + 1;
+                if ((int)orr.last < lo || (int)orr.first > hi) continue;
+                if ((int)orr.first <= lo && (int)orr.last >= hi) { lo = hi + 1; break; }
+                if ((int)orr.first <= lo) { lo = (int)orr.last + 1; continue; }
+                if ((int)orr.last >= hi) { hi = (int)orr.first - 1; continue; }
+                // strict interior split: emit [lo, orr.first-1] and continue with [orr.last+1, hi]
+                out.push_back({(uint32_t)lo, orr.first - 1});
+                lo = (int)orr.last + 1;
             }
-            if (lo <= hi) out.push_back({lo, hi});
+            if (lo <= hi) out.push_back({(uint32_t)lo, (uint32_t)hi});
         }
         r = std::move(out);
     }
@@ -171,12 +170,12 @@ static std::string v_ranges_to_class(const CodePointRanges& set, bool negated) {
     s.push_back('[');
     if (negated) s.push_back('^');
     for (auto& rr : set.r) {
-        if (rr.lo == rr.hi) {
-            v_append_class_char(s, rr.lo);
+        if (rr.first == rr.last) {
+            v_append_class_char(s, rr.first);
         } else {
-            v_append_class_char(s, rr.lo);
+            v_append_class_char(s, rr.first);
             s.push_back('-');
-            v_append_class_char(s, rr.hi);
+            v_append_class_char(s, rr.last);
         }
     }
     s.push_back(']');

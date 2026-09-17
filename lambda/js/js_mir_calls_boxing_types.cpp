@@ -195,20 +195,21 @@ MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_new_reg_op(mt->ctx, callee), MIR_new_int_op(mt->ctx, 0)));
     MIR_reg_t type_id = jm_new_reg(mt, "dyn_type", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, type_id),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(JsFunction, type_id),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(Function, type_id),
             callee, 0, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, type_id), MIR_new_int_op(mt->ctx, LMD_TYPE_FUNC)));
     MIR_reg_t entry_abi = jm_new_reg(mt, "dyn_abi", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, entry_abi),
-        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(JsFunction, entry_abi),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, (MIR_disp_t)offsetof(Function, entry_abi),
             callee, 0, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, miss),
         MIR_new_reg_op(mt->ctx, entry_abi),
         MIR_new_int_op(mt->ctx, FN_ENTRY_ABI_JS_FUNCTION)));
     MIR_reg_t target = jm_new_reg(mt, "dyn_target", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, target),
-        MIR_new_mem_op(mt->ctx, MIR_T_P, (MIR_disp_t)offsetof(JsFunction, invoke),
+        MIR_new_mem_op(mt->ctx, MIR_T_P,
+            (MIR_disp_t)js_function_offset(&JsFunction::invoke),
             callee, 0, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, call),
         MIR_new_reg_op(mt->ctx, target), MIR_new_int_op(mt->ctx, 0)));
@@ -831,6 +832,8 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     if (JM_JS_FACT(fc, is_strict)) flags |= JS_FUNC_INIT_STRICT;
     if (JM_JS_FACT(fc, uses_with)) flags |= JS_FUNC_INIT_USES_WITH;
     flags |= JS_FUNC_INIT_ANALYSIS_KNOWN;
+    if (JM_JS_FACT(fc, uses_arguments)) flags |= JS_FUNC_INIT_USES_ARGUMENTS;
+    if (JM_JS_FACT(fc, has_direct_eval)) flags |= JS_FUNC_INIT_DIRECT_EVAL;
     if (JM_JS_FACT(fc, observes_this)) flags |= JS_FUNC_INIT_READS_THIS;
     if (JM_JS_FACT(fc, observes_new_target)) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
     if (JM_JS_FACT(fc, is_class_field_initializer)) {
@@ -992,225 +995,82 @@ JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn)
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
 // LMD_TYPE_ANY → unknown (must use boxed path)
+static TypeId jm_published_ast_type(const JsAstNode* node) {
+    return node && node->type ? node->type->type_id : LMD_TYPE_ANY;
+}
+
+// The AST builder owns all profile transfer rules. MIR only adds facts that
+// depend on the current binding or a collected callee (D8.2.4-D8.2.6).
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return LMD_TYPE_ANY;
+    TypeId published = jm_published_ast_type(node);
+    if (published != LMD_TYPE_ANY) return published;
 
     switch (node->node_type) {
-    case AST_NODE_LITERAL: {
-        JsLiteralNode* lit = (JsLiteralNode*)node;
-        switch (lit->literal_type) {
-        case AST_LITERAL_NUMBER: {
-            if (lit->is_bigint) return LMD_TYPE_DECIMAL;
-            return LMD_TYPE_FLOAT;
-        }
-        case AST_LITERAL_BOOLEAN:  return LMD_TYPE_BOOL;
-        case AST_LITERAL_STRING:   return LMD_TYPE_STRING;
-        case AST_LITERAL_NULL:     return LMD_TYPE_NULL;
-        case AST_LITERAL_UNDEFINED: return LMD_TYPE_UNDEFINED;
-        default:
-            // shared AST tags include frontend-specific Python literals; JS treats unknown tags as dynamic.
-            return LMD_TYPE_ANY;
-        }
-    }
-
     case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var) return var->type_id;
-        // P5: Check module-level variable type for arithmetic type inference.
-        // When a MODVAR was initialized with a numeric literal, modvar_type is set
-        // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
-        if (mt->module_consts) {
-            JsModuleConstEntry* mv_mc = jm_find_module_const_by_binding(mt,
+        if (mt && mt->module_consts) {
+            JsModuleConstEntry* module_value = jm_find_module_const_by_binding(mt,
                 id->entry);
-            if (mv_mc && mv_mc->const_type == MCONST_MODVAR &&
-                (mv_mc->modvar_type == LMD_TYPE_INT || mv_mc->modvar_type == LMD_TYPE_FLOAT))
-                return mv_mc->modvar_type;
-        }
-        return LMD_TYPE_ANY;
-    }
-
-    case AST_NODE_BINARY: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        // comparison operators always return bool
-        switch (bin->op) {
-        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
-        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
-        case OPERATOR_JS_INSTANCEOF: case OPERATOR_IN:
-            return LMD_TYPE_BOOL;
-        default: break;
-        }
-        // arithmetic operators: propagate types
-        TypeId left_t  = jm_get_effective_type(mt, bin->left);
-        TypeId right_t = jm_get_effective_type(mt, bin->right);
-        switch (bin->op) {
-        case OPERATOR_ADD:
-            // if either is string, result is string (JS concatenation)
-            if (left_t == LMD_TYPE_STRING || right_t == LMD_TYPE_STRING)
-                return LMD_TYPE_STRING;
-            // Unknown operands can become strings through ToPrimitive, so `+`
-            // is numeric only when both sides are statically numeric.
-            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
-                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
-                return LMD_TYPE_FLOAT;
-            return LMD_TYPE_ANY;
-        case OPERATOR_SUB: case OPERATOR_MUL:
-            if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
-                return LMD_TYPE_FLOAT;
-            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
-                return LMD_TYPE_FLOAT;
-            return LMD_TYPE_ANY;
-        case OPERATOR_JS_EXP:
-            // pow() always returns double
-            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
-                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
-                return LMD_TYPE_FLOAT;
-            return LMD_TYPE_ANY;
-        case OPERATOR_DIV:
-            // JS division always produces float (7/2 == 3.5)
-            if (left_t == LMD_TYPE_INT && right_t == LMD_TYPE_INT)
-                return LMD_TYPE_FLOAT;
-            if (left_t == LMD_TYPE_FLOAT || right_t == LMD_TYPE_FLOAT)
-                return LMD_TYPE_FLOAT;
-            return LMD_TYPE_ANY;
-        case OPERATOR_MOD:
-            // modulo uses fmod() → always returns float (handles x%0 → NaN)
-            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
-                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
-                return LMD_TYPE_FLOAT;
-            return LMD_TYPE_ANY;
-        case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR: case OPERATOR_JS_BIT_XOR:
-        case OPERATOR_JS_LSHIFT: case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:
-            // bigint bitwise/shift operators return BigInt, so only Number-proven operands may use the Number result type.
-            if ((left_t == LMD_TYPE_INT || left_t == LMD_TYPE_FLOAT) &&
-                (right_t == LMD_TYPE_INT || right_t == LMD_TYPE_FLOAT))
-                return LMD_TYPE_FLOAT;
-            return LMD_TYPE_ANY;
-        case OPERATOR_AND: case OPERATOR_OR:
-            return LMD_TYPE_ANY;  // logical AND/OR return one of the operands
-        default:
-            return LMD_TYPE_ANY;
-        }
-    }
-
-    case AST_NODE_UNARY: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        switch (un->op) {
-        case OPERATOR_NOT:    return LMD_TYPE_BOOL;
-        case OPERATOR_JS_TYPEOF: return LMD_TYPE_STRING;
-        case OPERATOR_JS_BIT_NOT: return LMD_TYPE_FLOAT;
-        case OPERATOR_POS: case OPERATOR_ADD: {
-            TypeId t = jm_get_effective_type(mt, un->operand);
-            if (t == LMD_TYPE_FLOAT || t == LMD_TYPE_INT) return t;
-            return LMD_TYPE_ANY;
-        }
-        case OPERATOR_NEG: case OPERATOR_SUB: {
-            TypeId t = jm_get_effective_type(mt, un->operand);
-            if (t == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-            if (t == LMD_TYPE_INT) {
-                if (un->operand && un->operand->node_type == AST_NODE_LITERAL) {
-                    JsLiteralNode* lit = (JsLiteralNode*)un->operand;
-                    if (lit->literal_type == AST_LITERAL_NUMBER && lit->value.number_value == 0.0)
-                        return LMD_TYPE_FLOAT;
-                    return LMD_TYPE_INT;
-                }
-                return LMD_TYPE_ANY;
+            if (module_value && module_value->const_type == MCONST_MODVAR &&
+                    (module_value->modvar_type == LMD_TYPE_INT ||
+                     module_value->modvar_type == LMD_TYPE_FLOAT)) {
+                return module_value->modvar_type;
             }
-            return LMD_TYPE_ANY;
         }
-        case OPERATOR_JS_INCREMENT: case OPERATOR_JS_DECREMENT: {
-            if (!un->operand) return LMD_TYPE_ANY;
-            TypeId t = jm_get_effective_type(mt, un->operand);
-            if (t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT) return t;
-            return LMD_TYPE_ANY;
-        }
-        default: return LMD_TYPE_ANY;
-        }
-    }
-
-    case AST_NODE_ASSIGN: {
-        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
-        if (asgn->op == OPERATOR_ASSIGN)
-            return jm_get_effective_type(mt, asgn->right);
-        // compound assignment: depends on operator and operand types
         return LMD_TYPE_ANY;
     }
-
-    case AST_NODE_CONDITIONAL_EXPR: {
-        JsConditionalNode* cond = (JsConditionalNode*)node;
-        TypeId t1 = jm_get_effective_type(mt, cond->consequent);
-        TypeId t2 = jm_get_effective_type(mt, cond->alternate);
-        if (t1 == t2) return t1;
-        return LMD_TYPE_ANY;
-    }
-
-    case AST_NODE_SEQ: {
-        // v11: comma operator returns type of last expression
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        JsAstNode* child = seq->expressions;
-        JsAstNode* last = NULL;
-        while (child) { last = child; child = child->next; }
-        return last ? jm_get_effective_type(mt, last) : LMD_TYPE_ANY;
-    }
-
     case AST_NODE_CALL_EXPR: {
         JsCallNode* call = (JsCallNode*)node;
         if (call->callee && call->callee->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-            if (id->name && id->name->len == 6 && strncmp(id->name->chars, "String", 6) == 0)
+            if (id->name && id->name->len == 6 &&
+                    strncmp(id->name->chars, "String", 6) == 0) {
                 return LMD_TYPE_STRING;
+            }
         }
-        // Phase 4: If callee resolves to a function with a native version
-        // and all arg types match, the call returns the function's return type
-        JsFuncCollected* fc = jm_resolve_native_call(mt, call);
-        if (fc && jm_call_result_uses_native_register(mt, call, fc)) return JM_JS_FACT(fc, return_type);
-        // Phase 3.5: return type from any collected function (not just native-eligible)
-        // Skip generators — they return iterator objects, not the inferred return type
-        {
-            JsFuncCollected* any_fc = jm_find_collected_func_for_call(mt, call);
-            if (any_fc && JM_JS_FACT(any_fc, return_type) != LMD_TYPE_ANY
-                && jm_call_result_uses_native_register(mt, call, any_fc)
-                && any_fc->node && !any_fc->node->is_generator && !any_fc->node->is_async)
-                return JM_JS_FACT(any_fc, return_type);
+        JsFuncCollected* native = jm_resolve_native_call(mt, call);
+        if (native && jm_call_result_uses_native_register(mt, call, native)) {
+            return JM_JS_FACT(native, return_type);
+        }
+        JsFuncCollected* collected = jm_find_collected_func_for_call(mt, call);
+        if (collected && jm_call_result_uses_native_register(mt, call, collected) &&
+                collected->node && !collected->node->is_generator &&
+                !collected->node->is_async) {
+            return JM_JS_FACT(collected, return_type);
         }
         return LMD_TYPE_ANY;
     }
-
     case AST_NODE_MEMBER_EXPR: {
-        JsMemberNode* mem = (JsMemberNode*)node;
-        // .length returns INT only for known arrays, strings, and functions
-        if (!mem->computed && mem->property &&
-            mem->property->node_type == AST_NODE_IDENT) {
-            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-            if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "length", 6) == 0) {
-                // Only infer INT for known types where .length is guaranteed numeric
-                TypeId obj_t = jm_get_effective_type(mt, mem->object);
-                if (obj_t == LMD_TYPE_ARRAY || obj_t == LMD_TYPE_STRING)
-                    return LMD_TYPE_INT;
-                // For functions, .length is param_count (INT)
-                if (obj_t == LMD_TYPE_FUNC)
-                    return LMD_TYPE_INT;
-                // Unknown object type — .length can be anything (e.g., {length: {toString: fn}})
-                return LMD_TYPE_ANY;
-            }
-
-            // P3.4: TypeMap shape lookup — if the object has a full_type (TypeMap from TS interface),
-            // look up the property name in the ShapeEntry chain to find the field type.
-            Type* obj_full = jm_get_full_type(mt, mem->object);
-            if (obj_full && obj_full->type_id == LMD_TYPE_MAP) {
-                TypeMap* tm = (TypeMap*)obj_full;
-                for (ShapeEntry* se = tm->shape; se; se = se->next) {
-                    if (se->name && se->name->str && se->name->length == prop->name->len &&
-                        memcmp(se->name->str, prop->name->chars, prop->name->len) == 0) {
-                        if (se->type) return se->type->type_id;
-                    }
+        JsMemberNode* member = (JsMemberNode*)node;
+        Type* object_type = member->object ? member->object->type : NULL;
+        if (!member->computed && object_type &&
+                object_type->type_id == LMD_TYPE_MAP &&
+                lambda_type_is_concrete_attr_shape(object_type) && member->property &&
+                member->property->node_type == AST_NODE_IDENT) {
+            JsIdentifierNode* property = (JsIdentifierNode*)member->property;
+            for (ShapeEntry* field = ((TypeMap*)object_type)->shape; field;
+                    field = field->next) {
+                if (field->name && field->name->str &&
+                        field->name->length == property->name->len &&
+                        memcmp(field->name->str, property->name->chars,
+                            property->name->len) == 0 && field->type) {
+                    return field->type->type_id;
                 }
             }
-
         }
         return LMD_TYPE_ANY;
     }
-
+    case AST_NODE_SEQ: {
+        JsAstNode* last = NULL;
+        for (JsAstNode* child = ((JsSequenceNode*)node)->expressions; child;
+                child = child->next) {
+            last = child;
+        }
+        return jm_get_effective_type(mt, last);
+    }
     default:
         return LMD_TYPE_ANY;
     }

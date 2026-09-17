@@ -91,6 +91,18 @@ static Item js_get_profiled_buffer_namespace(void) {
     return jube_node_core_module_enabled() ? js_get_buffer_namespace() : ItemNull;
 }
 
+static Item js_get_profiled_process_object(void) {
+    if (!jube_node_core_module_enabled()) return js_get_process_object_value();
+    Item process_namespace = ItemNull;
+    // node-core extends the host-owned process object during its runtime attach.
+    // Resolve its public namespace before publishing the lazy global so callers
+    // cannot observe the unextended process surface in an enabled profile.
+    if (jube_specifier_resolve("process", &process_namespace) == JUBE_SPECIFIER_RESOLVED) {
+        return process_namespace;
+    }
+    return js_get_process_object_value();
+}
+
 struct JsLazyGlobalSpec {
     const char* name;
     size_t name_length;
@@ -99,7 +111,7 @@ struct JsLazyGlobalSpec {
 };
 
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
-    {"process", 7, js_get_process_object_value, false},
+    {"process", 7, js_get_profiled_process_object, false},
     {"Buffer", 6, js_get_profiled_buffer_namespace, true},
     {"crypto", 6, js_get_jube_crypto_namespace, false},
     {"Math", 4, js_get_math_object_value, false},
@@ -918,8 +930,8 @@ static Item js_define_property_apply_validated_descriptor(Item obj, Item name,
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
     JS_RETURN_IF_ERROR(js_require_object_type(obj, "defineProperty"));
     if (obj.item == 0) return obj;
-    // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey)
-    // Symbols stay as internal __sym_N keys; others coerced to string.
+    // v18m: coerce property name to property key (ES2020 §7.1.14 ToPropertyKey).
+    // A Symbol takes its transitional NameId property route; others coerce to string.
     TypeId name_type = get_type_id(name);
     if (name_type != LMD_TYPE_STRING) {
         name = js_to_property_key(name);
@@ -1888,11 +1900,11 @@ extern "C" Item js_date_new_from(Item value) {
             // Non-Date object: ToPrimitive(value, default) per ES spec §21.4.2.
             // J39-1b: route through unified js_to_primitive (ES §7.1.1).
             JS_ASSIGN_OR_RETURN(prim, js_to_primitive(value_root.get(), JS_HINT_DEFAULT));
-            TypeId pt = get_type_id(prim);
             // Symbol results → throw TypeError
-            if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
+            if (js_is_symbol(prim)) {
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             }
+            TypeId pt = get_type_id(prim);
             // Dispatch on ToPrimitive result type
             if (pt == LMD_TYPE_STRING) {
                 // Re-enter Date constructor with the string
@@ -2119,7 +2131,7 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_ipc_write_callbacks (js_process_state->ipc_write_callbacks)
 #define js_process_ipc_lines (js_process_state->ipc_lines)
 JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void),
-    (js_process_state && js_root_vector_ensure_registered(&js_process_state->roots)))
+    (js_process_state && js_root_vector_ensure_registered(js_process_state)))
 
 // root-range cleanup clears expired realm cache slots to zero, while an
 // explicit realm reset uses ItemNull; neither value is a JS object.
@@ -2247,7 +2259,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     if (method_id >= 40) {
         if (method_id == 51) { // setYear — Annex B
             // ES spec: ToNumber(symbol) throws TypeError
-            if (get_type_id(arg0) == LMD_TYPE_INT && it2i(arg0) <= -(int64_t)JS_SYMBOL_BASE) {
+            if (js_is_symbol(arg0)) {
                 return js_throw_type_error("Cannot convert a Symbol value to a number");
             }
             double y = NAN;
@@ -3129,7 +3141,7 @@ static void js_process_ipc_resource_close(void* user);
 
 JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
     (js_process_state && js_process_state->ipc_resource_id != 0)
-        ? (uv_pipe_t*)runtime_resource_table_user_data(&js_runtime_state.resources,
+        ? (uv_pipe_t*)runtime_resource_table_user_data(js_runtime_resource_table(),
             js_process_state->ipc_resource_id) : NULL)
 #define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
 
@@ -3205,7 +3217,7 @@ static void js_process_ipc_close_cb(uv_handle_t* handle) {
     if (js_process_state && js_process_state->ipc_resource_id != 0) {
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+        runtime_resource_table_forget_owned(js_runtime_resource_table(),
             js_process_state, resource_id);
     }
     js_process_ipc_exit(&scope);
@@ -3430,7 +3442,7 @@ static void js_process_ipc_init_from_env(void) {
     const RuntimeResourceDescriptor* descriptor =
         runtime_resource_descriptor_from_legacy_name("ProcessIpc");
     js_process_state->ipc_resource_id = runtime_resource_table_add_owned(
-        &js_runtime_state.resources, js_process_state, js_process_object,
+        js_runtime_resource_table(), js_process_state, js_process_object,
         descriptor, js_process_ipc_resource_close, pipe, true);
     if (js_process_state->ipc_resource_id == 0) {
         mem_free(pipe);
@@ -3441,7 +3453,7 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: failed to allocate message framer");
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+        runtime_resource_table_forget_owned(js_runtime_resource_table(),
             js_process_state, resource_id);
         mem_free(pipe);
         return;
@@ -3453,7 +3465,7 @@ static void js_process_ipc_init_from_env(void) {
         log_error("process_ipc: failed to open fd %d: %s", fd, uv_strerror(r));
         uint32_t resource_id = js_process_state->ipc_resource_id;
         js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(&js_runtime_state.resources,
+        runtime_resource_table_forget_owned(js_runtime_resource_table(),
             js_process_state, resource_id);
         line_framer_destroy(&js_process_ipc_lines);
         mem_free(pipe);
@@ -3988,7 +4000,7 @@ extern "C" Item js_parseFloat(Item str_item) {
 
 static Item js_prepare_number_predicate(Item value, Item* number) {
     // ES numeric predicates reject Symbols before invoking ToNumber.
-    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(value)) {
         return js_throw_type_error("Cannot convert a Symbol value to a number");
     }
     *number = js_to_number(value);
@@ -4605,7 +4617,7 @@ extern "C" uint64_t js_get_heap_epoch();
 
 static bool js_global_string_caches_ensure_roots(void) {
     if (!js_active_runtime_state) return false;
-    RootVector* roots = &js_runtime_state.string_caches->roots;
+    RootVector* roots = js_runtime_state.string_caches;
     return js_root_vector_ensure_registered(roots);
 }
 
@@ -5662,6 +5674,8 @@ extern "C" Item js_in(Item key, Item object) {
         && type != LMD_TYPE_ELEMENT && !is_virtual_container_type_id(type)) {
         return js_throw_type_error("Cannot use 'in' operator to search for a property in a non-object");
     }
+    Item observable_symbol_key = key;
+    bool has_symbol_key = js_key_is_symbol(key);
     if (get_type_id(key) == LMD_TYPE_STRING &&
         property_key_requires_identity(it2s(key)) &&
         property_key_kind(it2s(key)) == NAME_KEY_PRIVATE) {
@@ -5698,11 +5712,11 @@ extern "C" Item js_in(Item key, Item object) {
                 return (Item){.item = b2it(true)};
             }
         }
-        return js_in_prototype_chain(object, key);
+        return js_in_prototype_chain(object,
+            has_symbol_key ? observable_symbol_key : key);
     }
-    // Symbol values arrive as compact runtime ids, while property storage uses
-    // their canonical NamePool records.  Convert before ordinary lookup so
-    // `symbol in object` cannot fall back to diagnostic spelling.
+    // Ordinary storage uses the NameId compatibility route. Preserve the
+    // direct Symbol for a Proxy reached later on the prototype chain.
     Item exotic_result = ItemNull;
     if (js_dispatch_property_op(JS_EXOTIC_HAS_PROPERTY, object, 0, key,
             object, ItemNull, ItemNull, false, &exotic_result)) return exotic_result;
@@ -5752,7 +5766,8 @@ extern "C" Item js_in(Item key, Item object) {
             // 3. walk the heterogeneous prototype chain without invoking
             // getters. %Function.prototype% is a FUNC carrier, so a MAP-only
             // loop made class constructors fail ordinary HasProperty.
-            return js_in_prototype_chain(object, key);
+            return js_in_prototype_chain(object,
+                has_symbol_key ? observable_symbol_key : key);
         } else {
             // non-string key: fall back to map_get
             Item result = map_get(object.map, key);
@@ -5996,7 +6011,7 @@ extern "C" Item js_get_prototype_of(Item object) {
     if (ot == LMD_TYPE_STRING) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_STRING);
     }
-    if (ot == LMD_TYPE_INT && it2i(object) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_is_symbol(object)) {
         return js_get_intrinsic_prototype_for_class(JS_CLASS_SYMBOL);
     }
     if (ot == LMD_TYPE_INT || ot == LMD_TYPE_FLOAT) {
@@ -7265,6 +7280,17 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 return js_property_descriptor_from_pd(&pd);
             }
         }
+        if (js_function_materialize_lazy_metadata_property(
+                object_root.get(), name_root.get())) {
+            obj = object_root.get();
+            name = name_root.get();
+            name_str = it2s(name);
+            JsPropertyDescriptor pd = {};
+            if (name_str && js_get_own_property_descriptor(obj,
+                    name_str->chars, (int)name_str->len, &pd)) {
+                return js_property_descriptor_from_pd(&pd);
+            }
+        }
         if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0) {
             if (!js_function_has_own_prototype(obj)) return make_js_undefined();
             JS_ASSIGN_OR_RETURN(materialized, js_get_key_default(obj, name));
@@ -7839,6 +7865,14 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     name_root.set(name);
     obj = object_root.get();
     descriptor = descriptor_root.get();
+    if (get_type_id(obj) == LMD_TYPE_FUNC) {
+        // DefineOwnProperty can create a user field without passing through
+        // ordinary Set; preserve function metadata's creation order first.
+        js_function_materialize_all_lazy_metadata_properties(object_root.get());
+        obj = object_root.get();
+        name = name_root.get();
+        descriptor = descriptor_root.get();
+    }
     bool regexp_virtual_define = false;
     String* regexp_define_name = NULL;
     if (get_type_id(obj) == LMD_TYPE_MAP && js_class_id(obj) == JS_CLASS_REGEXP &&
@@ -8256,8 +8290,14 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     }
     if (type == LMD_TYPE_FUNC) {
         JsFuncProps* fn_props = (JsFuncProps*)object.function;
-        if (js_function_has_own_prototype(object)) {
-            JS_ASSIGN_OR_RETURN(materialized, js_get_name_key(object, "prototype", 9));
+        js_function_materialize_all_lazy_metadata_properties(
+            object_root.get());
+        fn_props = (JsFuncProps*)object_root.get().function;
+        // Reflection observes the ordinary length/name descriptors before the
+        // lazily created constructor prototype, preserving their key order.
+        if (js_function_has_own_prototype(object_root.get())) {
+            JS_ASSIGN_OR_RETURN(materialized, js_get_name_key(
+                object_root.get(), "prototype", 9));
         }
         // D6.2.2v2: FUNC OwnPropertyKeys is the ordinary key order of its
         // backing shape; length, name, prototype, statics, and user fields do
@@ -8986,21 +9026,95 @@ extern "C" Item js_for_in_keys(Item object) {
     return result_root.get();
 }
 
-// True when the POD descriptor kernel can speak for this object/key pair.
-// It reads plain shape storage only, and reports `false` both for "absent" and
-// for "cannot describe" (array dense slots, unmaterialized FUNC prototype,
-// string-exotic indices) — so callers may only trust a `true` return. Classes
-// whose object-form descriptor overrides shape storage are excluded: String
-// wrappers synthesize length/indices from __primitiveValue__, RegExp suppresses
-// virtual flag properties, Error overrides `stack`'s enumerability, and
-// `__proto__` is not an own property at all.
-static bool js_pod_descriptor_applies(Item object, Item key) {
-    if (get_type_id(object) != LMD_TYPE_MAP) return false;
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+typedef enum JsOwnEnumerability {
+    JS_OWN_ENUMERABILITY_UNSUPPORTED,
+    JS_OWN_ENUMERABILITY_ABSENT,
+    JS_OWN_ENUMERABILITY_PRESENT,
+} JsOwnEnumerability;
+
+// Reads the same companion/shape authority used by descriptor construction,
+// but avoids creating a descriptor object when callers only need one bit.
+// Arrays are admitted only when their dense storage is ordinary; arguments,
+// numeric arrays, proxies, and class-specific virtual properties retain the
+// complete descriptor path below.
+static JsOwnEnumerability js_own_enumerability_inspect(Item object, Item key,
+        bool* out_enumerable) {
+    if (out_enumerable) *out_enumerable = false;
+    if (get_type_id(key) != LMD_TYPE_STRING || js_is_proxy(object)) {
+        return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+    }
+    String* name = it2s(key);
+    if (!name || name->len > (uint32_t)INT_MAX) {
+        return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+    }
+
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_ARRAY && !js_is_arguments_exotic_array(object)) {
+        if (name->len == 6 && memcmp(name->chars, "length", 6) == 0) {
+            return JS_OWN_ENUMERABILITY_PRESENT;
+        }
+        uint32_t index = 0;
+        Array* array = object.array;
+        if (js_property_key_to_array_index(key, &index)) {
+            // A non-dense index can be sparse or companion-owned. Let the
+            // complete descriptor path distinguish those observable cases.
+            if (!array || (int64_t)index >= array->length ||
+                    (int64_t)index >= container_dense_capacity(array) ||
+                    !array->items ||
+                    array->items[index].item == JS_DELETED_SENTINEL_VAL) {
+                return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+            }
+            ShapeEntry* entry = js_find_shape_entry(object, name->chars,
+                (int)name->len);
+            // An accessor can shadow a dense index, so its public descriptor
+            // must remain the authority for the enumerability decision.
+            if (entry && jspd_is_accessor(entry)) {
+                return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+            }
+            if (out_enumerable) {
+                *out_enumerable = js_props_query_enumerable(
+                    js_array_props(array), entry, name->chars, (int)name->len);
+            }
+            return JS_OWN_ENUMERABILITY_PRESENT;
+        }
+
+        if (!array || !js_array_has_props(array)) {
+            return JS_OWN_ENUMERABILITY_ABSENT;
+        }
+        Item props = (Item){.map = js_array_props(array)};
+        ShapeEntry* entry = NULL;
+        JsShapeSlotStatus status = js_own_shape_slot_status(props,
+            name->chars, (int)name->len, NULL, &entry);
+        if (status == JS_SHAPE_SLOT_ACCESSOR) {
+            return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+        }
+        if (status != JS_SHAPE_SLOT_DATA) {
+            return JS_OWN_ENUMERABILITY_ABSENT;
+        }
+        if (out_enumerable) {
+            *out_enumerable = js_props_query_enumerable(
+                props.map, entry, name->chars, (int)name->len);
+        }
+        return JS_OWN_ENUMERABILITY_PRESENT;
+    }
+
+    if (type != LMD_TYPE_MAP) return JS_OWN_ENUMERABILITY_UNSUPPORTED;
     JsClass cls = js_class_id(object);
-    if (cls == JS_CLASS_STRING || cls == JS_CLASS_ERROR || cls == JS_CLASS_REGEXP) return false;
-    String* ks = it2s(key);
-    return !(ks->len == 9 && memcmp(ks->chars, "__proto__", 9) == 0);
+    if (cls == JS_CLASS_STRING || cls == JS_CLASS_ERROR ||
+            cls == JS_CLASS_REGEXP || cls == JS_CLASS_TYPED_ARRAY ||
+            (name->len == 9 && memcmp(name->chars, "__proto__", 9) == 0)) {
+        return JS_OWN_ENUMERABILITY_UNSUPPORTED;
+    }
+    JsPropertyDescriptor descriptor = {};
+    if (!js_get_own_property_descriptor(object, name->chars,
+            (int)name->len, &descriptor)) {
+        return JS_OWN_ENUMERABILITY_ABSENT;
+    }
+    if (out_enumerable) {
+        *out_enumerable = (descriptor.flags & JS_PD_HAS_ENUMERABLE)
+            ? (descriptor.flags & JS_PD_ENUMERABLE) != 0 : true;
+    }
+    return JS_OWN_ENUMERABILITY_PRESENT;
 }
 
 extern "C" bool js_for_in_key_is_live(Item object, Item key) {
@@ -9035,18 +9149,25 @@ extern "C" bool js_for_in_key_is_live(Item object, Item key) {
             !is_virtual_container_type_id(current_type)) {
             break;
         }
-        // Shape-flag shortcut: allocating a descriptor Map per prototype level
-        // to read one bit dominated for-in (measured ~1.8us/key vs 455ns for
-        // Object.keys). Only a definite `true` from the POD kernel is usable.
-        if (js_pod_descriptor_applies(current_root.get(), key_root.get())) {
-            String* ks = it2s(key_root.get());
-            JsPropertyDescriptor pd;
-            if (js_get_own_property_descriptor(current_root.get(), ks->chars,
-                    (int)ks->len, &pd)) {
-                return (pd.flags & JS_PD_HAS_ENUMERABLE)
-                    ? (pd.flags & JS_PD_ENUMERABLE) != 0 : true;
-            }
+        // Inspect ordinary shape/companion storage before materializing a JS
+        // descriptor Map. An absent own key must continue to the prototype.
+        bool enumerable = false;
+        JsOwnEnumerability inspection = js_own_enumerability_inspect(
+            current_root.get(), key_root.get(), &enumerable);
+        if (inspection == JS_OWN_ENUMERABILITY_PRESENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            return enumerable;
         }
+        if (inspection == JS_OWN_ENUMERABILITY_ABSENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            current_root.set(js_get_prototype(current_root.get()));
+            depth++;
+            continue;
+        }
+        js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
         desc_root.set(js_object_get_own_property_descriptor(
             current_root.get(), key_root.get()));
         if (item_is_error(desc_root.get())) return false;
@@ -9119,7 +9240,7 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
 
 extern "C" Item js_to_string_val(Item value) {
     // String(Symbol()) is allowed — explicit conversion (ES spec 19.1.1)
-    if (get_type_id(value) == LMD_TYPE_INT && it2i(value) <= -(int64_t)JS_SYMBOL_BASE) {
+    if (js_key_is_symbol(value)) {
         return js_symbol_to_string(value);
     }
     return js_to_string(value);
@@ -9137,21 +9258,20 @@ static Item js_object_collect_enumerable_own(Item object, bool entries) {
     for (int i = 0; i < len; i++) {
         Item key = js_elements_get(keys, (Item){.item = i2it(i)});
         if (js_key_is_symbol_c(key)) continue;
-        // Shape-flag shortcut, same rationale as for-in above: this ran once
-        // per key and dominated Object.values/entries.
-        bool pod_enumerable = false, pod_answered = false;
-        if (js_pod_descriptor_applies(object, key)) {
-            String* ks = it2s(key);
-            JsPropertyDescriptor pd;
-            if (js_get_own_property_descriptor(object, ks->chars, (int)ks->len, &pd)) {
-                pod_answered = true;
-                pod_enumerable = (pd.flags & JS_PD_HAS_ENUMERABLE)
-                    ? (pd.flags & JS_PD_ENUMERABLE) != 0 : true;
-            }
-        }
-        if (pod_answered) {
-            if (!pod_enumerable) continue;
+        bool enumerable = false;
+        JsOwnEnumerability inspection = js_own_enumerability_inspect(object,
+            key, &enumerable);
+        if (inspection == JS_OWN_ENUMERABILITY_PRESENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            if (!enumerable) continue;
+        } else if (inspection == JS_OWN_ENUMERABILITY_ABSENT) {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            continue;
         } else {
+            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
             JS_ASSIGN_OR_RETURN(desc, js_object_get_own_property_descriptor(object, key));
             if (get_type_id(desc) != LMD_TYPE_MAP) continue;
             bool en_found = false;
@@ -9199,7 +9319,11 @@ static Item js_object_values_or_entries(Item object, bool entries) {
     if (type == LMD_TYPE_STRING) {
         return js_object_collect_string_own(object, entries);
     }
-    if (type != LMD_TYPE_MAP && (!entries || type != LMD_TYPE_FUNC))
+    // Arrays expose ordinary own keys through Reflect.ownKeys just like Maps;
+    // returning early here skipped Object.values(array) before its descriptors
+    // could be inspected.
+    if (type != LMD_TYPE_MAP && !js_is_js_array(object) &&
+            type != LMD_TYPE_FUNC)
         return js_array_new(0);
     return js_object_collect_enumerable_own(object, entries);
 }
@@ -9312,8 +9436,8 @@ static Item js_group_by_object_find(Item result, Item key) {
 JS_FORWARD_STATIC_ITEM(js_group_by_object_put, (Item result, Item key, Item group),
     js_set_key_default, (result, key, group))
 
-// Stage A1: ToPropertyKey per spec — a Symbol returned by the callback must
-// yield a property key (__sym_N), not throw via js_to_string.
+// Stage A1: ToPropertyKey per spec — a Symbol returned by the callback takes
+// its NameId property route rather than throwing via js_to_string.
 static Item js_group_by_object_key(Item raw_key) {
     JS_ASSIGN_OR_RETURN(key, js_to_property_key(raw_key));
     return get_type_id(key) == LMD_TYPE_STRING ? key : ItemNull;
@@ -10623,6 +10747,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             return (Item){.item = b2it(status == JS_SHAPE_SLOT_DATA ||
                 status == JS_SHAPE_SLOT_ACCESSOR)};
         }
+        if (!identity_key && js_function_has_lazy_metadata_property(obj, k)) {
+            return (Item){.item = b2it(true)};
+        }
         return (Item){.item = b2it(false)};
     }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
@@ -10748,7 +10875,7 @@ static Item js_object_set_integrity(Item obj, bool frozen) {
     // backed TA detection via js_is_typed_array + the buffer handle flags.
     if (frozen && js_is_typed_array(object_root.get())) {
         JsTypedArray* ta = js_get_typed_array_ptr(object_root.get().map);
-        if (ta && js_arraybuffer_resizable(ta->buffer)) {
+        if (ta && js_arraybuffer_resizable(ta->base.buffer)) {
             return js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
         }
     }
@@ -10959,7 +11086,6 @@ extern "C" Item js_object_is_extensible(Item obj) {
 extern "C" Item js_number_is_integer(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -10972,7 +11098,6 @@ extern "C" Item js_number_is_integer(Item value) {
 extern "C" Item js_number_is_finite(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         return (Item){.item = b2it(true)};
     }
     if (type == LMD_TYPE_FLOAT) {
@@ -10993,7 +11118,6 @@ extern "C" Item js_number_is_nan(Item value) {
 extern "C" Item js_number_is_safe_integer(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) {
-        if (it2i(value) <= -(int64_t)JS_SYMBOL_BASE) return (Item){.item = b2it(false)};
         int64_t v = it2i(value);
         return (Item){.item = b2it(v >= -9007199254740991LL && v <= 9007199254740991LL)};
     }
@@ -11734,7 +11858,7 @@ extern "C" Item js_json_parse_full(Item str_item, Item reviver) {
 // Circular reference detection for JSON.stringify
 #define JSON_STRINGIFY_MAX_DEPTH 1024
 
-// Forward declaration: check if an Item is a JS Symbol (encoded as negative int)
+// Forward declaration: check whether an Item is a hosted pointer-backed JS Symbol.
 static bool js_is_symbol_item(Item item);
 
 static Item js_stringify_value(StrBuf* sb, Item value, Item replacer, Item replacer_array,
@@ -12315,6 +12439,12 @@ static Item js_delete_string_exotic_property(Item obj, Item key,
 
 static Item js_delete_function_property(Item obj, Item key) {
     JsFuncProps* fn = (JsFuncProps*)obj.function;
+    if (fn && (fn->flags & JS_FUNC_FLAG_LAZY_METADATA) != 0) {
+        // A tombstone can later be re-added, so it needs the same prefix as an
+        // eagerly finalized function before it changes ordinary key order.
+        js_function_materialize_all_lazy_metadata_properties(obj);
+        fn = (JsFuncProps*)obj.function;
+    }
     // Ensure properties_map exists
     if (fn->properties_map.item == 0) {
         fn->properties_map = js_new_object();
@@ -12489,7 +12619,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
     if (js_array_has_props(arr)) {
         Map* pm = js_array_props(arr);
         Item pm_item = (Item){.map = pm};
-        // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
+        // Stage A1: ToPropertyKey so Symbol NameId routes and FLOAT keys
         // are canonicalized identically to define-property time.
         Item k = js_to_property_key(key);
         if (get_type_id(k) == LMD_TYPE_STRING) {
@@ -14454,6 +14584,10 @@ extern "C" void js_with_activation_leave(JsWithFrame* saved_head) {
 
 JS_FORWARD_EXPRESSION(int64_t, js_with_depth_active, (void), js_with_stack_depth > 0 ? 1 : 0)
 
+static Item js_with_unscopables_symbol(void) {
+    return js_symbol_well_known(js_name_item("unscopables", 11));
+}
+
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
@@ -14467,7 +14601,7 @@ static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
             }
             if (it2b(in_result)) {
                 // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
-                Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))}; // Symbol.unscopables
+                Item unscopables_sym = js_with_unscopables_symbol();
                 Item unscopables = js_get_key_default(scope_obj, unscopables_sym);
                 if (item_is_error(unscopables)) {
                     *found = true;
@@ -14534,7 +14668,7 @@ extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
 static Item js_with_binding_is_visible(Item key, Item scope_obj) {
     JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
     if (!it2b(in_result)) return (Item){.item = b2it(false)};
-    Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+    Item unscopables_sym = js_with_unscopables_symbol();
     JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
     if (get_type_id(unscopables) == LMD_TYPE_MAP) {
         JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
@@ -14850,7 +14984,7 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
                 }
                 JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
                 if (it2b(in_result)) {
-                    Item unscopables_sym = (Item){.item = i2it(-(int64_t)(11 + JS_SYMBOL_BASE))};
+                    Item unscopables_sym = js_with_unscopables_symbol();
                     JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
                     if (get_type_id(unscopables) == LMD_TYPE_MAP) {
                         JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
@@ -15776,9 +15910,8 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
     // D6.2.2v2: publish the catalog-selected direct capability before the
     // function becomes observable; global IDs no longer select behavior at call time.
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
+    js_function_init_abi(fn);
     js_function_init_native_module_scope(fn);
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = NULL;
@@ -15893,7 +16026,7 @@ extern "C" void js_intrinsic_state_teardown() {
 void js_ctor_cache_reset() {
     // If snapshot is valid, the harness preamble has already cached references to
     // the constructor Items in its module-vars. Zeroing the cache would force
-    // re-creation of NEW JsCtor objects on next access, breaking identity with
+    // re-creation of new JsFunction objects on next access, breaking identity with
     // the harness-cached references. Skip the reset; snapshot/restore handles state.
     if (js_proto_snapshot_is_valid()) return;
     if (!js_realm_intrinsic_slots_ensure_roots()) return;
@@ -16000,8 +16133,6 @@ Item js_intrinsic_ctor_placeholder_call_body(Item callee, Item this_value,
 #undef JS_DEFINE_HOST_CTOR_BODY_1
 #undef JS_DEFINE_HOST_CTOR_BODY_0
 
-using JsCtor = JsFunction;
-
 // Reset constructor prototype objects between batch tests.
 //
 // Strategy: snapshot+restore (preserves Map* identity across batch tests).
@@ -16040,35 +16171,24 @@ struct MapSnapshot {
     uint8_t  flags;      // packed Map flags at the snapshot boundary
 };
 
-struct CtorSnapshot {
-    JsCtor* ctor;
-    Item    prototype;        // Item value (preserved)
-    Item    properties_map;   // Item value (preserved)
-    MapSnapshot proto_map;    // contents snapshot of prototype Map (if it is a Map)
-    MapSnapshot props_map;    // contents snapshot of properties_map Map (if it is a Map)
-    bool    valid;
-};
-
-struct GlobalBuiltinFunctionSnapshot {
+// Global catalog functions only need their own property map. Constructors and
+// intrinsic methods extend this compact common carrier with prototype state.
+struct JsFunctionSnapshot {
     JsFunction* function;
     Item        properties_map;   // Item value (preserved)
     MapSnapshot props_map;        // contents snapshot of properties_map Map
     bool        valid;
 };
 
-struct IntrinsicFunctionSnapshot {
-    JsFunction* function;
+struct JsPrototypeFunctionSnapshot : JsFunctionSnapshot {
     Item        prototype;        // Item value (preserved)
-    Item        properties_map;   // Item value (preserved)
     MapSnapshot proto_map;        // contents snapshot of function.prototype
-    MapSnapshot props_map;        // contents snapshot of function properties
-    bool        valid;
 };
 
 struct JsPrototypeSnapshotState {
-    CtorSnapshot ctor_snapshots[JS_CTOR_MAX] = {};
-    GlobalBuiltinFunctionSnapshot global_builtin_fn_snapshots[JS_BUILTIN_GLOBAL_MAX] = {};
-    IntrinsicFunctionSnapshot* intrinsic_function_snapshots = NULL;
+    JsPrototypeFunctionSnapshot ctor_snapshots[JS_CTOR_MAX] = {};
+    JsFunctionSnapshot global_builtin_fn_snapshots[JS_BUILTIN_GLOBAL_MAX] = {};
+    JsPrototypeFunctionSnapshot* intrinsic_function_snapshots = NULL;
     int intrinsic_function_snapshot_count = 0;
     int intrinsic_function_snapshot_capacity = 0;
     MapSnapshot typed_array_base_proto_snap = {};
@@ -16132,7 +16252,7 @@ static void js_proto_snapshot_visit_intrinsic_function_root_slots(
         JsPrototypeSnapshotState* state, JsSnapshotRootSlotOp op) {
     if (!state || !op) return;
     for (int i = 0; i < state->intrinsic_function_snapshot_capacity; i++) {
-        IntrinsicFunctionSnapshot* snap =
+        JsPrototypeFunctionSnapshot* snap =
             &state->intrinsic_function_snapshots[i];
         op(&snap->prototype.item);
         op(&snap->properties_map.item);
@@ -16292,6 +16412,68 @@ static void js_proto_restore_map(const MapSnapshot* snap) {
     }
 }
 
+static void js_proto_snapshot_clear_function(JsFunctionSnapshot* snap) {
+    if (!snap) return;
+    snap->function = NULL;
+    snap->properties_map = (Item){0};
+    snap->valid = false;
+    js_proto_snapshot_clear_map(&snap->props_map);
+}
+
+static void js_proto_snapshot_capture_function(JsFunctionSnapshot* snap,
+        JsFunction* function) {
+    if (!snap || !function) return;
+    snap->function = function;
+    snap->properties_map = function->properties_map;
+    snap->valid = true;
+    if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&snap->props_map, function->properties_map.map);
+    }
+}
+
+static void js_proto_snapshot_restore_function(const JsFunctionSnapshot* snap) {
+    if (!snap || !snap->valid || !snap->function) return;
+    snap->function->properties_map = snap->properties_map;
+    if (snap->props_map.m) js_proto_restore_map(&snap->props_map);
+}
+
+static void js_proto_snapshot_clear_prototype_function(
+        JsPrototypeFunctionSnapshot* snap) {
+    if (!snap) return;
+    js_proto_snapshot_clear_function(snap);
+    snap->prototype = (Item){0};
+    js_proto_snapshot_clear_map(&snap->proto_map);
+}
+
+static void js_proto_snapshot_capture_prototype_function(
+        JsPrototypeFunctionSnapshot* snap, JsFunction* function) {
+    if (!snap || !function) return;
+    js_proto_snapshot_capture_function(snap, function);
+    snap->prototype = function->prototype;
+    if (get_type_id(function->prototype) == LMD_TYPE_MAP) {
+        js_proto_snapshot_map(&snap->proto_map, function->prototype.map);
+    } else if (get_type_id(function->prototype) == LMD_TYPE_FUNC) {
+        // %Function.prototype% is callable; its observable own state lives in
+        // the function properties map rather than in a standalone Map.
+        JsFunction* prototype_function =
+            (JsFunction*)function->prototype.function;
+        if (prototype_function &&
+                get_type_id(prototype_function->properties_map) == LMD_TYPE_MAP) {
+            js_proto_snapshot_map(&snap->proto_map,
+                prototype_function->properties_map.map);
+        }
+    }
+}
+
+static void js_proto_snapshot_restore_prototype_function(
+        const JsPrototypeFunctionSnapshot* snap) {
+    if (!snap || !snap->valid || !snap->function) return;
+    snap->function->prototype = snap->prototype;
+    snap->function->properties_map = snap->properties_map;
+    if (snap->proto_map.m) js_proto_restore_map(&snap->proto_map);
+    if (snap->props_map.m) js_proto_restore_map(&snap->props_map);
+}
+
 typedef void (*JsSnapshotMapVisitor)(MapSnapshot* snap, void* data);
 
 static void js_proto_snapshot_visit_intrinsic_source_maps(
@@ -16325,14 +16507,9 @@ static void js_proto_snapshot_clear_intrinsic_function_snapshots(
         JsPrototypeSnapshotState* state) {
     if (!state) return;
     for (int i = 0; i < state->intrinsic_function_snapshot_capacity; i++) {
-        IntrinsicFunctionSnapshot* snap =
+        JsPrototypeFunctionSnapshot* snap =
             &state->intrinsic_function_snapshots[i];
-        snap->function = NULL;
-        snap->prototype = (Item){0};
-        snap->properties_map = (Item){0};
-        snap->valid = false;
-        js_proto_snapshot_clear_map(&snap->proto_map);
-        js_proto_snapshot_clear_map(&snap->props_map);
+        js_proto_snapshot_clear_prototype_function(snap);
     }
     state->intrinsic_function_snapshot_count = 0;
 }
@@ -16342,9 +16519,9 @@ static bool js_proto_snapshot_reserve_intrinsic_functions(
     if (!state || capacity <= state->intrinsic_function_snapshot_capacity) {
         return true;
     }
-    IntrinsicFunctionSnapshot* snapshots =
-        (IntrinsicFunctionSnapshot*)mem_calloc((size_t)capacity,
-            sizeof(IntrinsicFunctionSnapshot), MEM_CAT_JS_RUNTIME);
+    JsPrototypeFunctionSnapshot* snapshots =
+        (JsPrototypeFunctionSnapshot*)mem_calloc((size_t)capacity,
+            sizeof(JsPrototypeFunctionSnapshot), MEM_CAT_JS_RUNTIME);
     if (!snapshots) {
         log_error("prototype-snapshot: failed to reserve intrinsic function snapshots");
         return false;
@@ -16382,7 +16559,7 @@ static void js_proto_snapshot_add_intrinsic_function(
 
     RootFrame roots(1);
     Rooted<Item> function_root(roots, function_item);
-    IntrinsicFunctionSnapshot* snap =
+    JsPrototypeFunctionSnapshot* snap =
         &state->intrinsic_function_snapshots[
             state->intrinsic_function_snapshot_count++];
     JsFunction* function = (JsFunction*)function_root.get().function;
@@ -16390,23 +16567,7 @@ static void js_proto_snapshot_add_intrinsic_function(
         state->intrinsic_function_snapshot_count--;
         return;
     }
-    snap->prototype = function->prototype;
-    snap->properties_map = function->properties_map;
-    snap->valid = true;
-    if (get_type_id(function->prototype) == LMD_TYPE_MAP) {
-        js_proto_snapshot_map(&snap->proto_map, function->prototype.map);
-    } else if (get_type_id(function->prototype) == LMD_TYPE_FUNC) {
-        JsFunction* prototype_function =
-            (JsFunction*)function->prototype.function;
-        if (prototype_function &&
-                get_type_id(prototype_function->properties_map) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&snap->proto_map,
-                prototype_function->properties_map.map);
-        }
-    }
-    if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
-        js_proto_snapshot_map(&snap->props_map, function->properties_map.map);
-    }
+    js_proto_snapshot_capture_prototype_function(snap, function);
     // Built-in method functions remain reachable through a pristine prototype
     // map. Their own descriptor maps must also reset, or a prior test's
     // `delete method.length` leaks into the next hot-batch realm (D6.2.2v2).
@@ -16457,7 +16618,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
     Map* map = js_obj_underlying_map(object);
     if (!map) return false;
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        const CtorSnapshot* snap = &state->ctor_snapshots[i];
+        const JsPrototypeFunctionSnapshot* snap = &state->ctor_snapshots[i];
         if (snap->valid &&
                 (js_proto_snapshot_map_requires_typemap_detach(&snap->proto_map, map) ||
                  js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map))) {
@@ -16465,7 +16626,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
         }
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        const GlobalBuiltinFunctionSnapshot* snap =
+        const JsFunctionSnapshot* snap =
             &state->global_builtin_fn_snapshots[i];
         if (snap->valid &&
                 js_proto_snapshot_map_requires_typemap_detach(&snap->props_map, map)) {
@@ -16473,7 +16634,7 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
         }
     }
     for (int i = 0; i < state->intrinsic_function_snapshot_count; i++) {
-        const IntrinsicFunctionSnapshot* snap =
+        const JsPrototypeFunctionSnapshot* snap =
             &state->intrinsic_function_snapshots[i];
         if (snap->valid &&
                 (js_proto_snapshot_map_requires_typemap_detach(&snap->proto_map, map) ||
@@ -16500,52 +16661,22 @@ static void js_proto_snapshot_take_locked() {
     js_proto_snapshot_clear_intrinsic_function_snapshots(
         js_proto_snapshot_state());
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        CtorSnapshot* s = &js_ctor_snapshots[i];
-        s->valid = false;
-        js_proto_snapshot_clear_map(&s->proto_map);
-        js_proto_snapshot_clear_map(&s->props_map);
+        JsPrototypeFunctionSnapshot* s = &js_ctor_snapshots[i];
+        js_proto_snapshot_clear_prototype_function(s);
         Item ci = js_constructor_cache_at(i);
         if (ci.item == 0 || ci.item == ItemNull.item) continue;
-        JsCtor* ctor = (JsCtor*)ci.function;
+        JsFunction* ctor = (JsFunction*)ci.function;
         if (!ctor) continue;
-        s->ctor = ctor;
-        s->prototype = ctor->prototype;
-        s->properties_map = ctor->properties_map;
-        s->valid = true;
-        if (ctor->prototype.item != 0 && get_type_id(ctor->prototype) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&s->proto_map, ctor->prototype.map);
-        } else if (ctor->prototype.item != 0 &&
-                get_type_id(ctor->prototype) == LMD_TYPE_FUNC) {
-            // %Function.prototype% is a callable object. Its observable own
-            // state lives in the function properties map, so snapshot that
-            // backing map just as ordinary intrinsic prototype maps.
-            JsFunction* prototype_function =
-                (JsFunction*)ctor->prototype.function;
-            if (prototype_function &&
-                    get_type_id(prototype_function->properties_map) ==
-                        LMD_TYPE_MAP) {
-                js_proto_snapshot_map(&s->proto_map,
-                    prototype_function->properties_map.map);
-            }
-        }
-        if (ctor->properties_map.item != 0 && get_type_id(ctor->properties_map) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&s->props_map, ctor->properties_map.map);
-        }
+        js_proto_snapshot_capture_prototype_function(s, ctor);
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
-        s->valid = false;
-        js_proto_snapshot_clear_map(&s->props_map);
+        JsFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
+        js_proto_snapshot_clear_function(s);
         Item function_item = global_builtin_fn_cache_at(i);
         if (get_type_id(function_item) != LMD_TYPE_FUNC) continue;
         JsFunction* function = (JsFunction*)function_item.function;
         if (!function) continue;
-        s->function = function;
-        s->properties_map = function->properties_map;
-        s->valid = true;
-        if (get_type_id(function->properties_map) == LMD_TYPE_MAP) {
-            js_proto_snapshot_map(&s->props_map, function->properties_map.map);
-        }
+        js_proto_snapshot_capture_function(s, function);
     }
     // %TypedArray% intrinsic + its prototype + per-type prototypes
     js_typed_array_base_snap = js_typed_array_base;
@@ -16568,31 +16699,21 @@ static void js_proto_snapshot_take_locked() {
 
 static void js_proto_snapshot_restore_locked() {
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        CtorSnapshot* s = &js_ctor_snapshots[i];
-        if (!s->valid) continue;
-        JsCtor* ctor = s->ctor;
-        ctor->prototype = s->prototype;
-        ctor->properties_map = s->properties_map;
-        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
-        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+        JsPrototypeFunctionSnapshot* s = &js_ctor_snapshots[i];
+        js_proto_snapshot_restore_prototype_function(s);
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        GlobalBuiltinFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
-        if (!s->valid || !s->function) continue;
+        JsFunctionSnapshot* s = &js_global_builtin_fn_snapshots[i];
         // Global catalog functions survive hot reset for identity. Their own
         // maps must therefore be restored too: a test-local delete of
         // encodeURI.length otherwise poisons the next test (D6.2.2v2).
-        s->function->properties_map = s->properties_map;
-        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+        js_proto_snapshot_restore_function(s);
     }
     JsPrototypeSnapshotState* state = js_proto_snapshot_state();
     for (int i = 0; state && i < state->intrinsic_function_snapshot_count; i++) {
-        IntrinsicFunctionSnapshot* s = &state->intrinsic_function_snapshots[i];
-        if (!s->valid || !s->function) continue;
-        s->function->prototype = s->prototype;
-        s->function->properties_map = s->properties_map;
-        if (s->proto_map.m) js_proto_restore_map(&s->proto_map);
-        if (s->props_map.m) js_proto_restore_map(&s->props_map);
+        JsPrototypeFunctionSnapshot* s =
+            &state->intrinsic_function_snapshots[i];
+        js_proto_snapshot_restore_prototype_function(s);
     }
     js_typed_array_base = js_typed_array_base_snap;
     js_typed_array_base_proto = js_typed_array_base_proto_item_snap;
@@ -16632,17 +16753,10 @@ extern "C" void js_proto_snapshot_invalidate() {
     js_proto_snapshot_valid = false;
     js_intrinsic_proto_cache_reset();
     for (int i = 0; i < JS_CTOR_MAX; i++) {
-        js_ctor_snapshots[i].valid = false;
-        js_ctor_snapshots[i].prototype = (Item){0};
-        js_ctor_snapshots[i].properties_map = (Item){0};
-        js_proto_snapshot_clear_map(&js_ctor_snapshots[i].proto_map);
-        js_proto_snapshot_clear_map(&js_ctor_snapshots[i].props_map);
+        js_proto_snapshot_clear_prototype_function(&js_ctor_snapshots[i]);
     }
     for (int i = 0; i < JS_BUILTIN_GLOBAL_MAX; i++) {
-        js_global_builtin_fn_snapshots[i].valid = false;
-        js_global_builtin_fn_snapshots[i].properties_map = (Item){0};
-        js_proto_snapshot_clear_map(
-            &js_global_builtin_fn_snapshots[i].props_map);
+        js_proto_snapshot_clear_function(&js_global_builtin_fn_snapshots[i]);
     }
     js_proto_snapshot_clear_intrinsic_function_snapshots(
         js_proto_snapshot_state());
@@ -16668,8 +16782,7 @@ extern "C" Item js_get_typed_array_base() {
     if (js_typed_array_base.item != 0) return js_typed_array_base;
     // Create the %TypedArray% intrinsic function object
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    js_function_init_abi(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     code->func_ptr = (void*)js_ctor_placeholder;
@@ -16888,9 +17001,8 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
     js_intrinsic_state.initialization_depth++;
     // Allocate directly because intrinsic constructor identity is binding-owned;
     // the shared placeholder body is not a valid cache identity.
-    JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    js_function_init_abi(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return ItemError;
     const JsIntrinsicTargetSpec* target =
@@ -16944,7 +17056,7 @@ static Item js_create_constructor(const JsBuiltinGlobalSpec* spec) {
         }
         // .constructor on prototype points back to the function.
         js_set_name_key(proto_root.get(), "constructor", 11, fn_item);
-        JsCtor* event_ctor = (JsCtor*)fn_item.function;
+        JsFunction* event_ctor = (JsFunction*)fn_item.function;
         event_ctor->prototype = proto_root.get();
         // Constructors are pool-owned and invisible to precise GC; their
         // lazily built Event prototype therefore needs an explicit root slot.
@@ -16994,7 +17106,7 @@ static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out
 
 static Item js_get_constructor_intrinsic_prototype(Item ctor) {
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
-    JsCtor* fn = (JsCtor*)ctor.function;
+    JsFunction* fn = (JsFunction*)ctor.function;
     if (fn && (get_type_id(fn->prototype) == LMD_TYPE_MAP ||
             get_type_id(fn->prototype) == LMD_TYPE_FUNC)) return fn->prototype;
     Item proto = js_get_name_id(ctor, JS_NAME_PROTOTYPE);
@@ -17069,7 +17181,9 @@ static void js_intrinsic_invalidate_class(int class_id, Item key) {
         js_intrinsic_next_mutation_version();
     if (class_id != (int)JS_CLASS_ARRAY) return;
 
-    if (key.item == js_well_known_symbol_key(1).item) {
+    NameId key_name_id = js_key_is_symbol(key) ? js_symbol_name_id(key)
+        : (get_type_id(key) == LMD_TYPE_STRING ? property_key_id(it2s(key)) : NAME_ID_NONE);
+    if (key_name_id == js_well_known_symbol_name_id(1)) {
         g_array_sym_iter_ever_set = 1;
     }
 }
@@ -17156,34 +17270,51 @@ extern "C" void js_intrinsic_note_prototype_mutation(Item object) {
 // =============================================================================
 
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_typed.hpp"
 
-// symbol registry entry for Symbol.for() / Symbol.keyFor()
-struct JsSymbolEntry {
-    char key[128];
-    uint64_t symbol_id;
-    NameId name_id;
-};
+#define js_symbol_registry (js_runtime_state.operations.symbol_registry)
+#define js_symbol_name_index (js_runtime_state.operations.symbol_name_index)
 
-#define js_symbol_next_id (js_runtime_state.operations.next_symbol_id)
-#define js_symbol_registry (js_runtime_state.operations.symbol_registry)  // string key -> JsSymbolEntry
+// Indexes are access paths to core Symbols, never a second JS-owned record.
+static Symbol* js_symbol_index_entry(const void* entry) {
+    return entry ? *(Symbol* const*)entry : NULL;
+}
 
-// symbol description registry: maps symbol_id -> description string
-struct JsSymbolDesc {
-    uint64_t symbol_id;
-    char desc[128];
-    int desc_len;    // -1 means no description (Symbol() with no arg)
-    NameId name_id;
-};
+static uint64_t js_symbol_name_index_hash(const void* entry,
+        uint64_t seed0, uint64_t seed1) {
+    Symbol* symbol = js_symbol_index_entry(entry);
+    NameId name_id = symbol ? symbol->name_id : NAME_ID_NONE;
+    return hashmap_hash_bytes(&name_id, sizeof(name_id), seed0, seed1);
+}
 
-#define js_symbol_desc_registry (js_runtime_state.operations.symbol_description_registry)
+static int js_symbol_name_index_compare(const void* first, const void* second,
+        void* udata) {
+    (void)udata;
+    Symbol* first_symbol = js_symbol_index_entry(first);
+    Symbol* second_symbol = js_symbol_index_entry(second);
+    return first_symbol && second_symbol &&
+        first_symbol->name_id == second_symbol->name_id ? 0 : 1;
+}
 
-typedef TypedHashMap<JsSymbolDesc,
-    HashMapIntegralMemberKeyOps<JsSymbolDesc, &JsSymbolDesc::symbol_id>> JsSymbolDescMap;
+static uint64_t js_symbol_text_index_hash(const void* entry,
+        uint64_t seed0, uint64_t seed1) {
+    Symbol* symbol = js_symbol_index_entry(entry);
+    return symbol ? hashmap_hash_lenstr(symbol->chars, symbol->len, seed0, seed1) : 0;
+}
 
-static void js_symbol_desc_init() {
-    if (!js_symbol_desc_registry) {
-        js_symbol_desc_registry = JsSymbolDescMap::create(16);
+static int js_symbol_text_index_compare(const void* first, const void* second,
+        void* udata) {
+    (void)udata;
+    Symbol* first_symbol = js_symbol_index_entry(first);
+    Symbol* second_symbol = js_symbol_index_entry(second);
+    if (!first_symbol || !second_symbol) return 1;
+    return hashmap_compare_lenstr(first_symbol->chars, first_symbol->len,
+        second_symbol->chars, second_symbol->len);
+}
+
+static void js_symbol_name_index_init() {
+    if (!js_symbol_name_index) {
+        js_symbol_name_index = hashmap_new(sizeof(Symbol*), 16, 0, 0,
+            js_symbol_name_index_hash, js_symbol_name_index_compare, NULL, NULL);
     }
 }
 
@@ -17204,44 +17335,39 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_ASYNC_DISPOSE 14
 #define JS_SYMBOL_ID_DISPOSE       15
 
-typedef TypedHashMap<JsSymbolEntry,
-    HashMapCStrMemberKeyOps<JsSymbolEntry, &JsSymbolEntry::key>> JsSymbolEntryMap;
-
-static void js_symbol_init_registry() {
+static void js_symbol_text_index_init() {
     if (!js_symbol_registry) {
-        js_symbol_registry = JsSymbolEntryMap::create(16);
+        js_symbol_registry = hashmap_new(sizeof(Symbol*), 16, 0, 0,
+            js_symbol_text_index_hash, js_symbol_text_index_compare, NULL, NULL);
     }
 }
 
 extern "C" void js_symbol_registry_batch_reset(void) {
     if (!js_active_runtime_state) return;
-    // Dynamic Symbol records own unique NamePool keys, so a realm reset must
-    // discard both registries before their backing pool is released.
+    // Indexes borrow Symbols and NamePool records from the active realm Input.
+    // Drop them before that Input releases either owner.
     if (js_symbol_registry) {
-        JsSymbolEntryMap::destroy(js_symbol_registry);
+        hashmap_free(js_symbol_registry);
         js_symbol_registry = NULL;
     }
-    if (js_symbol_desc_registry) {
-        JsSymbolDescMap::destroy(js_symbol_desc_registry);
-        js_symbol_desc_registry = NULL;
+    if (js_symbol_name_index) {
+        hashmap_free(js_symbol_name_index);
+        js_symbol_name_index = NULL;
     }
-    js_symbol_next_id = 100;
 }
 
-// create Item encoding for a symbol: use LMD_TYPE_INT with a high-bit marker
-// symbol items are encoded as negative ints that won't collide with normal ints
-// encode as an int with a special range: -(id + JS_SYMBOL_BASE)
-JS_FORWARD_STATIC_EXPRESSION(Item, js_make_symbol_item, (uint64_t id),
-    (Item){.item = i2it(-(int64_t)(id + JS_SYMBOL_BASE))})
+JS_FORWARD_STATIC_EXPRESSION(Item, js_make_symbol_item, (Symbol* symbol),
+    (Item){.item = y2it(symbol)})
 
 static bool js_is_symbol_item(Item item) {
-    if (get_type_id(item) != LMD_TYPE_INT) return false;
-    int64_t v = it2i(item);
-    return v <= -(int64_t)JS_SYMBOL_BASE;
+    if (get_type_id(item) != LMD_TYPE_SYMBOL) return false;
+    Symbol* symbol = item.get_safe_symbol();
+    return symbol && symbol->kind != SYMBOL_LAMBDA_NAME;
 }
 
-JS_FORWARD_STATIC_EXPRESSION(uint64_t, js_symbol_item_id, (Item item),
-    (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE)))
+static Symbol* js_symbol_item_ptr(Item item) {
+    return js_is_symbol_item(item) ? item.get_safe_symbol() : NULL;
+}
 
 struct JsWellKnownSymbolSpec {
     const char* name;
@@ -17272,61 +17398,95 @@ static const JsWellKnownSymbolSpec* js_well_known_symbol_spec(uint64_t id) {
     return &js_well_known_symbol_specs[id - JS_SYMBOL_ID_ITERATOR];
 }
 
+static Symbol* js_symbol_alloc(SymbolKind kind, NameId name_id,
+        const char* chars, uint32_t len) {
+    if (!js_input || !js_input->pool || (len > 0 && !chars)) return NULL;
+    Symbol* symbol = (Symbol*)pool_calloc(js_input->pool, sizeof(Symbol) + len + 1);
+    if (!symbol) return NULL;
+    symbol->len = len;
+    symbol->kind = kind;
+    symbol->name_id = name_id;
+    if (len > 0) memcpy(symbol->chars, chars, len);
+    symbol->chars[len] = '\0';
+    return symbol;
+}
+
+static NameId js_symbol_create_name_id(const char* chars, uint32_t len) {
+    NameRef name = context && context->name_pool
+        ? name_pool_create_unique_symbol(context->name_pool, {chars, len}) : NULL;
+    return name_ref_id(name);
+}
+
+static Symbol* js_symbol_lookup_name_id(NameId name_id) {
+    if (name_id == NAME_ID_NONE || !js_symbol_name_index) return NULL;
+    Symbol lookup = {};
+    lookup.name_id = name_id;
+    Symbol* lookup_ptr = &lookup;
+    const Symbol* const* found = (const Symbol* const*)hashmap_get(
+        js_symbol_name_index, &lookup_ptr);
+    return found ? (Symbol*)*found : NULL;
+}
+
+static bool js_symbol_index(Symbol* symbol) {
+    if (!symbol || symbol->name_id == NAME_ID_NONE) return false;
+    js_symbol_name_index_init();
+    if (!js_symbol_name_index) return false;
+    const Symbol* const* existing = (const Symbol* const*)hashmap_get(
+        js_symbol_name_index, &symbol);
+    if (existing) return *existing == symbol;
+    // hashmap_set returns NULL when it inserts a new entry; only its OOM flag
+    // distinguishes that successful insertion from allocation failure.
+    (void)hashmap_set(js_symbol_name_index, &symbol);
+    return !hashmap_oom(js_symbol_name_index);
+}
+
+static bool js_symbol_registry_index(Symbol* symbol) {
+    if (!symbol || !js_symbol_registry) return false;
+    const Symbol* const* existing = (const Symbol* const*)hashmap_get(
+        js_symbol_registry, &symbol);
+    if (existing) return *existing == symbol;
+    (void)hashmap_set(js_symbol_registry, &symbol);
+    return !hashmap_oom(js_symbol_registry);
+}
+
+static Symbol* js_well_known_symbol(uint64_t id) {
+    const JsWellKnownSymbolSpec* spec = js_well_known_symbol_spec(id);
+    NameId name_id = spec ? js_well_known_symbol_name_id((int64_t)id) : NAME_ID_NONE;
+    if (!spec || name_id == NAME_ID_NONE) return NULL;
+    Symbol* symbol = js_symbol_lookup_name_id(name_id);
+    if (symbol) return symbol;
+
+    char chars[64];
+    int len = snprintf(chars, sizeof(chars), "Symbol.%s", spec->name);
+    if (len < 0 || len >= (int)sizeof(chars)) return NULL;
+    symbol = js_symbol_alloc(SYMBOL_JS_WELL_KNOWN, name_id, chars, (uint32_t)len);
+    return js_symbol_index(symbol) ? symbol : NULL;
+}
+
+extern "C" Item js_well_known_symbol_key(int64_t symbol_id) {
+    if (!js_active_runtime_state) return ItemNull;
+    Symbol* symbol = js_well_known_symbol((uint64_t)symbol_id);
+    return symbol ? js_make_symbol_item(symbol) : ItemNull;
+}
+
 extern "C" NameId js_symbol_name_id(Item sym) {
-    if (!js_is_symbol_item(sym)) return NAME_ID_NONE;
-    if (!js_runtime_state_for(context)) return NAME_ID_NONE;
-    uint64_t id = js_symbol_item_id(sym);
-    NameId well_known = js_well_known_symbol_name_id((int64_t)id);
-    if (well_known != NAME_ID_NONE) return well_known;
-    if (js_symbol_desc_registry) {
-        JsSymbolDesc lookup = {};
-        lookup.symbol_id = id;
-        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
-        if (found) return found->name_id;
-    }
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* entry = NULL;
-        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolEntry* found = (JsSymbolEntry*)entry;
-            if (found->symbol_id == id) return found->name_id;
-        }
-    }
-    return NAME_ID_NONE;
+    Symbol* symbol = js_symbol_item_ptr(sym);
+    return symbol ? symbol->name_id : NAME_ID_NONE;
 }
 
 static bool js_name_id_to_symbol(NameId name_id, Item* out_symbol) {
     if (name_id == NAME_ID_NONE || !out_symbol) return false;
-    for (uint64_t id = JS_SYMBOL_ID_ITERATOR; id <= JS_SYMBOL_ID_DISPOSE; id++) {
-        Item symbol = js_make_symbol_item(id);
-        if (js_symbol_name_id(symbol) == name_id) {
-            *out_symbol = symbol;
-            return true;
+    Symbol* symbol = js_symbol_lookup_name_id(name_id);
+    if (!symbol) {
+        for (uint64_t id = JS_SYMBOL_ID_ITERATOR; id <= JS_SYMBOL_ID_DISPOSE; id++) {
+            if (js_well_known_symbol_name_id((int64_t)id) != name_id) continue;
+            symbol = js_well_known_symbol(id);
+            break;
         }
     }
-    if (js_symbol_desc_registry) {
-        size_t iter = 0;
-        void* raw = NULL;
-        while (hashmap_iter(js_symbol_desc_registry, &iter, &raw)) {
-            JsSymbolDesc* entry = (JsSymbolDesc*)raw;
-            if (entry->name_id == name_id) {
-                *out_symbol = js_make_symbol_item(entry->symbol_id);
-                return true;
-            }
-        }
-    }
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* raw = NULL;
-        while (hashmap_iter(js_symbol_registry, &iter, &raw)) {
-            JsSymbolEntry* entry = (JsSymbolEntry*)raw;
-            if (entry->name_id == name_id) {
-                *out_symbol = js_make_symbol_item(entry->symbol_id);
-                return true;
-            }
-        }
-    }
-    return false;
+    if (!symbol) return false;
+    *out_symbol = js_make_symbol_item(symbol);
+    return true;
 }
 
 // Populate Symbol constructor with well-known symbol properties
@@ -17337,7 +17497,7 @@ static void js_populate_symbol_ctor(Item fn_item) {
             sizeof(js_well_known_symbol_specs[0]); i++) {
         const JsWellKnownSymbolSpec* spec = &js_well_known_symbol_specs[i];
         Item key = js_name_item(spec->name, spec->name_len);
-        Item value = js_make_symbol_item(spec->symbol_id);
+        Item value = js_make_symbol_item(js_well_known_symbol(spec->symbol_id));
         js_func_init_property(fn_item, key, value);
         js_mark_non_enumerable(fn_item, key);
         js_mark_non_writable(fn_item, key);
@@ -17355,164 +17515,99 @@ extern "C" Item js_symbol_create(Item description) {
         // user-thrown value and leave a registry entry behind.
         if (item_is_error(string_root.get())) return string_root.get();
     }
-    uint64_t id = js_symbol_next_id++;
-    Item sym = js_make_symbol_item(id);
-
-    // store description for Symbol.prototype.description
-    js_symbol_desc_init();
-    JsSymbolDesc entry;
-    entry.symbol_id = id;
-    if (description.item == ITEM_NULL || description.item == ITEM_JS_UNDEFINED) {
-        entry.desc[0] = '\0';
-        entry.desc_len = -1;  // no description
-    } else {
-        String* s = it2s(string_root.get());
-        if (s) {
-            int len = s->len < 127 ? (int)s->len : 127;
-            str_copy(entry.desc, sizeof(entry.desc), s->chars, len);
-            entry.desc_len = len;
-        } else {
-            entry.desc[0] = '\0';
-            entry.desc_len = -1;
-        }
-    }
-    String* name_record = context && context->name_pool
-        ? name_pool_create_unique_symbol(context->name_pool, {entry.desc,
-            entry.desc_len >= 0 ? (size_t)entry.desc_len : 0})
-        : NULL;
-    entry.name_id = name_ref_id(name_record);
-    if (entry.name_id == NAME_ID_NONE) {
+    bool has_description = description_root.get().item != ITEM_NULL &&
+        description_root.get().item != ITEM_JS_UNDEFINED;
+    String* description_text = has_description ? it2s(string_root.get()) : NULL;
+    const char* chars = description_text ? description_text->chars : "";
+    uint32_t len = description_text ? description_text->len : 0;
+    NameId name_id = js_symbol_create_name_id(chars, len);
+    if (name_id == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate symbol property key");
     }
-    JsSymbolDescMap::set(js_symbol_desc_registry, entry);
-
-    return sym;
+    SymbolKind kind = has_description ? SYMBOL_JS_UNIQUE :
+        SYMBOL_JS_UNIQUE_UNDESCRIBED;
+    Symbol* symbol = js_symbol_alloc(kind, name_id, chars, len);
+    if (!js_symbol_index(symbol)) {
+        return js_throw_type_error("failed to allocate symbol value");
+    }
+    return js_make_symbol_item(symbol);
 }
 
 extern "C" Item js_symbol_for(Item key) {
     JS_ROOTS(roots, key_root, key, string_root, js_to_string(key_root.get()));
     if (item_is_error(string_root.get())) return string_root.get();
-    js_symbol_init_registry();
+    js_symbol_text_index_init();
     String* s = it2s(string_root.get());
     if (!s) return js_symbol_create(key_root.get());
 
-    JsSymbolEntry lookup;
-    int klen = s->len < 127 ? (int)s->len : 127;
-    str_copy(lookup.key, sizeof(lookup.key), s->chars, klen);
+    size_t iter = 0;
+    void* raw = NULL;
+    while (hashmap_iter(js_symbol_registry, &iter, &raw)) {
+        Symbol* symbol = *(Symbol**)raw;
+        if (symbol && hashmap_compare_lenstr(symbol->chars, symbol->len,
+                s->chars, s->len) == 0) {
+            return js_make_symbol_item(symbol);
+        }
+    }
 
-    JsSymbolEntry* found = JsSymbolEntryMap::get(js_symbol_registry, lookup);
-    if (found) return js_make_symbol_item(found->symbol_id);
-
-    // create new entry
-    lookup.symbol_id = js_symbol_next_id++;
-    String* name_record = context && context->name_pool
-        ? name_pool_create_unique_symbol(context->name_pool, {lookup.key, (size_t)klen})
-        : NULL;
-    lookup.name_id = name_ref_id(name_record);
-    if (lookup.name_id == NAME_ID_NONE) {
+    // Registered keys preserve every byte; truncation would merge distinct
+    // Symbol.for keys and violate their process-wide identity contract.
+    NameId name_id = js_symbol_create_name_id(s->chars, s->len);
+    if (name_id == NAME_ID_NONE) {
         return js_throw_type_error("failed to allocate registry symbol property key");
     }
-    JsSymbolEntryMap::set(js_symbol_registry, lookup);
-    return js_make_symbol_item(lookup.symbol_id);
+    Symbol* symbol = js_symbol_alloc(SYMBOL_JS_REGISTERED, name_id,
+        s->chars, s->len);
+    if (!js_symbol_index(symbol) || !js_symbol_registry_index(symbol)) {
+        return js_throw_type_error("failed to allocate registry symbol value");
+    }
+    return js_make_symbol_item(symbol);
 }
 
 extern "C" Item js_symbol_key_for(Item sym) {
     if (!js_is_symbol_item(sym))
         return js_throw_type_error("Symbol.keyFor requires a Symbol argument");
-    js_symbol_init_registry();
-    uint64_t id = js_symbol_item_id(sym);
-
-    // linear scan — symbol registry is small
+    js_symbol_text_index_init();
+    Symbol* symbol = js_symbol_item_ptr(sym);
+    // linear scan — the registry is small and entries directly own no record.
     size_t iter = 0;
     void* entry;
     while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-        JsSymbolEntry* e = (JsSymbolEntry*)entry;
-        if (e->symbol_id == id) {
-            return js_name_item(e->key, strlen(e->key));
+        Symbol* registered = *(Symbol**)entry;
+        if (registered == symbol) {
+            return js_name_item(registered->chars, registered->len);
         }
     }
     return make_js_undefined();  // not in global registry → undefined per spec
+}
+
+static Item js_symbol_render(const Symbol* symbol) {
+    if (!symbol || symbol->kind == SYMBOL_JS_UNIQUE_UNDESCRIBED) {
+        return js_name_item("Symbol()", 8);
+    }
+    StrBuf* buffer = strbuf_new_cap((size_t)symbol->len + 8);
+    if (!buffer) return ItemError;
+    strbuf_append_str(buffer, "Symbol(");
+    strbuf_append_str_n(buffer, symbol->chars, symbol->len);
+    strbuf_append_char(buffer, ')');
+    return js_strbuf_take_item(buffer);
 }
 
 extern "C" Item js_symbol_to_string(Item sym) {
     if (!js_is_symbol_item(sym)) {
         return js_name_item("Symbol()", 8);
     }
-    // check global registry for description
-    uint64_t id = js_symbol_item_id(sym);
-
-    const JsWellKnownSymbolSpec* spec = js_well_known_symbol_spec(id);
-    if (spec) {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "Symbol(Symbol.%s)", spec->name);
-        return js_name_item(buf, strlen(buf));
-    }
-
-    // check registry
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* entry;
-        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolEntry* e = (JsSymbolEntry*)entry;
-            if (e->symbol_id == id) {
-                char buf[160];
-                snprintf(buf, sizeof(buf), "Symbol(%s)", e->key);
-                return js_name_item(buf, strlen(buf));
-            }
-        }
-    }
-
-    // check description registry
-    if (js_symbol_desc_registry) {
-        JsSymbolDesc lookup;
-        lookup.symbol_id = id;
-        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
-        if (found && found->desc_len >= 0) {
-            char buf[160];
-            snprintf(buf, sizeof(buf), "Symbol(%s)", found->desc);
-            return js_name_item(buf, strlen(buf));
-        }
-    }
-
-    return js_name_item("Symbol()", 8);
+    return js_symbol_render(js_symbol_item_ptr(sym));
 }
 
 // Return the description of a symbol, or undefined if none
 extern "C" Item js_symbol_get_description(Item sym) {
     if (!js_is_symbol_item(sym)) return make_js_undefined();
-    uint64_t id = js_symbol_item_id(sym);
-
-    const JsWellKnownSymbolSpec* spec = js_well_known_symbol_spec(id);
-    if (spec) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "Symbol.%s", spec->name);
-        return js_name_item(buf, strlen(buf));
+    Symbol* symbol = js_symbol_item_ptr(sym);
+    if (!symbol || symbol->kind == SYMBOL_JS_UNIQUE_UNDESCRIBED) {
+        return make_js_undefined();
     }
-
-    // check Symbol.for() registry
-    if (js_symbol_registry) {
-        size_t iter = 0;
-        void* entry;
-        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
-            JsSymbolEntry* e = (JsSymbolEntry*)entry;
-            if (e->symbol_id == id) {
-                return js_name_item(e->key, strlen(e->key));
-            }
-        }
-    }
-
-    // check description registry
-    if (js_symbol_desc_registry) {
-        JsSymbolDesc lookup;
-        lookup.symbol_id = id;
-        JsSymbolDesc* found = JsSymbolDescMap::get(js_symbol_desc_registry, lookup);
-        if (found) {
-            if (found->desc_len < 0) return make_js_undefined();  // Symbol() with no arg
-            return js_name_item(found->desc, found->desc_len);
-        }
-    }
-
-    return make_js_undefined();
+    return js_name_item(symbol->chars, symbol->len);
 }
 
 // Return a well-known symbol by its property name on the Symbol constructor.
@@ -17531,9 +17626,9 @@ extern "C" Item js_symbol_well_known(Item name) {
         for (size_t i = 0; i < sizeof(js_well_known_symbol_specs) /
                 sizeof(js_well_known_symbol_specs[0]); i++) {
             const JsWellKnownSymbolSpec* spec = &js_well_known_symbol_specs[i];
-            if (s->len == spec->name_len && strncmp(s->chars, spec->name,
+            if (s->len == (uint32_t)spec->name_len && strncmp(s->chars, spec->name,
                     spec->name_len) == 0) {
-                return js_make_symbol_item(spec->symbol_id);
+                return js_make_symbol_item(js_well_known_symbol(spec->symbol_id));
             }
         }
     }
@@ -17758,26 +17853,26 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_web_stream_item_is_true, (Item item),
 static bool js_readable_stream_view_is_detached(Item view) {
     if (!js_is_typed_array(view)) return true;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    return !ta || !ta->buffer || js_arraybuffer_detached(ta->buffer) ||
+    return !ta || !ta->base.buffer || js_arraybuffer_detached(ta->base.buffer) ||
            js_typed_array_is_out_of_bounds_item(view);
 }
 
 static void js_readable_stream_detach_byob_view(Item view) {
     if (!js_is_typed_array(view)) return;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return;
-    if (ta->buffer_item) {
-        js_arraybuffer_detach((Item){.item = ta->buffer_item});
+    if (!ta || !ta->base.buffer || js_arraybuffer_detached(ta->base.buffer)) return;
+    if (ta->base.buffer_item) {
+        js_arraybuffer_detach((Item){.item = ta->base.buffer_item});
     } else {
-        byte_buffer_detach(&ta->buffer->handle);
+        byte_buffer_detach(ta->base.buffer);
     }
 }
 
 static int js_readable_stream_view_buffer_length(Item view) {
     if (!js_is_typed_array(view)) return -1;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return -1;
-    return js_arraybuffer_length(ta->buffer);
+    if (!ta || !ta->base.buffer || js_arraybuffer_detached(ta->base.buffer)) return -1;
+    return js_arraybuffer_length(ta->base.buffer);
 }
 
 static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item view) {

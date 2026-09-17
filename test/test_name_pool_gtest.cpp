@@ -79,6 +79,27 @@ TEST_F(NamePoolTest, NameRecordClassifiesArrayIndexesAndUniqueKeys) {
     name_pool_release(name_pool);
 }
 
+TEST_F(NamePoolTest, OrdinaryNameClassificationPreservesHashAndKeyFacts) {
+    const char* index_text = "4294967294";
+    NameClassification index = name_classify_ordinary(index_text, 10);
+    EXPECT_EQ(index.hash, hash_fnv1a_32(index_text, 10));
+    EXPECT_EQ(index.array_index, 0xFFFFFFFEu);
+    EXPECT_EQ(index.is_ascii, 1u);
+
+    const char* overflow_text = "4294967295";
+    NameClassification overflow = name_classify_ordinary(overflow_text, 10);
+    EXPECT_EQ(overflow.hash, hash_fnv1a_32(overflow_text, 10));
+    EXPECT_EQ(overflow.array_index, NAME_ARRAY_INDEX_NONE);
+
+    const char non_ascii_text[] = {'a', (char)0xc3, (char)0xa9};
+    NameClassification non_ascii = name_classify_ordinary(non_ascii_text,
+        sizeof(non_ascii_text));
+    EXPECT_EQ(non_ascii.hash, hash_fnv1a_32(non_ascii_text,
+        sizeof(non_ascii_text)));
+    EXPECT_EQ(non_ascii.array_index, NAME_ARRAY_INDEX_NONE);
+    EXPECT_EQ(non_ascii.is_ascii, 0u);
+}
+
 TEST_F(NamePoolTest, GeneratedNamesArePinnedAndSharedAcrossPools) {
     NamePool* first_pool = name_pool_create(pool, nullptr);
     NamePool* second_pool = name_pool_create(pool, nullptr);
@@ -225,6 +246,9 @@ TEST_F(NamePoolTest, ParentInheritance) {
 
     EXPECT_EQ(found_person, schema_name1);
     EXPECT_EQ(found_address, schema_name2);
+    EXPECT_EQ(name_pool_create_name(doc_pool, "Person"), schema_name1);
+    EXPECT_EQ(name_pool_create_name(doc_pool, "div"),
+        well_known_name_ref(MARKUP_NAME_DIV));
 
     // Names not in parent should return nullptr
     String* not_found = name_pool_lookup(doc_pool, "Unknown");

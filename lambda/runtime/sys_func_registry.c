@@ -79,6 +79,13 @@ extern Item js_check_class_prototype_parent(Item prototype);
 // super() for native parent constructors: merges returned object's own props onto `this`
 extern Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
 extern Item js_super_apply_native(Item callee, Item this_val, Item args_array);
+extern Item js_array_new_from_static_items(const Item* items, int length);
+struct JsStaticObjectProperty;
+extern Item js_object_new_from_static_properties(
+    const struct JsStaticObjectProperty* properties, int length);
+struct JsStaticLiteralRecipe;
+extern Item js_static_literal_from_recipe(
+    const struct JsStaticLiteralRecipe* recipe);
 extern Item js_super_bind_this(Item this_val, Item construct_result);
 extern Item js_get_super_this_value(void);
 extern Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
@@ -1675,7 +1682,11 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_IMPORT_ARGS_BORROWED_AUDITED |
+      // D7.2.1 scopes nested module activation, while linked entries are
+      // append-only. An existing index therefore identifies the same NameId
+      // throughout a generated function's effect-bounded loop.
+      JIT_IMPORT_LOOP_STABLE_SCALAR,
       // Name-id lookup only reads the active module table and cannot publish
       // an error carrier, so its raw scalar result preserves the lane.
       JIT_EXCEPTION_PRESERVES}},
@@ -2147,6 +2158,22 @@ JitImport jit_runtime_imports[] = {
     {"js_set_key_policy", FPTR(js_set_key_policy)},
     {"js_private_property_set", FPTR(js_private_property_set)},
     {"js_create_data_property", FPTR(js_create_data_property)},
+    // Recipes contain only realm-owned bytes and immediate Items.  The helper
+    // allocates fresh observable strings and an ordinary object for each call.
+    {"js_object_new_from_static_properties", FPTR(js_object_new_from_static_properties),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
+    {"js_static_literal_from_recipe", FPTR(js_static_literal_from_recipe),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
     {"js_get_reference", FPTR(js_get_reference)},
     {"js_get_name_id", FPTR(js_get_name_id),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM}},
@@ -2161,6 +2188,16 @@ JitImport jit_runtime_imports[] = {
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
     {"js_array_new", FPTR(js_array_new)},
+    // Compiler-owned values are inline Numbers; construction allocates the
+    // fresh array but neither re-enters JS nor borrows a GC-visible payload.
+    {"js_array_new_from_static_items", FPTR(js_array_new_from_static_items),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
     {"js_build_arguments_object", FPTR(js_build_arguments_object)},
     {"js_set_arguments_info", FPTR(js_set_arguments_info), JIT_IMPORT_VOID_PRESERVES},
@@ -2190,6 +2227,9 @@ JitImport jit_runtime_imports[] = {
     {"js_new_distinct_function_mir", FPTR(js_new_distinct_function_mir)},
     {"js_new_method_function_mir", FPTR(js_new_method_function_mir)},
     {"js_new_closure_mir", FPTR(js_new_closure_mir)},
+    {"js_new_function_mir_pending", FPTR(js_new_function_mir_pending)},
+    {"js_new_distinct_function_mir_pending", FPTR(js_new_distinct_function_mir_pending)},
+    {"js_new_closure_mir_pending", FPTR(js_new_closure_mir_pending)},
     // JC15: rest-formal packing for generated span entries.
     {"js_args_rest_array", FPTR(js_args_rest_array)},
     {"js_alloc_env", FPTR(js_alloc_env)},
@@ -2305,6 +2345,17 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_elements_set_int_completion", FPTR(js_elements_set_int_completion)},
+    {"js_array_set_existing_number_no_gc", FPTR(js_array_set_existing_number_no_gc),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED)}},
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
     {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
@@ -2559,6 +2610,22 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_get", FPTR(js_typed_array_get)},
     {"js_typed_array_set", FPTR(js_typed_array_set)},
     {"js_typed_array_set_numeric_key", FPTR(js_typed_array_set_numeric_key)},
+    // This direct Number store can allocate a copy-on-write backing buffer,
+    // but cannot run guest code or publish an error Item. Keep its receiver
+    // rooted across the call and preserve the native Number ABI lanes.
+    {"js_typed_array_set_number_if_kind", FPTR(js_typed_array_set_number_if_kind),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(3, JIT_ARG_BORROWED)}},
     {"js_typed_array_length", FPTR(js_typed_array_length), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     // T12-5: length and backing storage stay per-access because resize/detach
     // can change both. Element kind is fixed for a typed-array identity, so
@@ -2573,6 +2640,19 @@ JitImport jit_runtime_imports[] = {
     {"js_is_typed_array", FPTR(js_is_typed_array), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_get_typed_array_ptr", FPTR(js_get_typed_array_ptr)},
     {"js_typed_array_current_data_ptr", FPTR(js_typed_array_current_data_ptr)},
+    // One no-GC leaf validates kind, live bounds, and the current backing
+    // pointer. Its raw result is consumed immediately before any safepoint.
+    {"js_typed_array_data_at_if_kind", FPTR(js_typed_array_data_at_if_kind),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED)}},
     {"js_typed_array_prepare_write_ptr", FPTR(js_typed_array_prepare_write_ptr)},
     {"js_typed_array_construct", FPTR(js_typed_array_construct)},
     {"js_arraybuffer_construct_resizable", FPTR(js_arraybuffer_construct_resizable)},
@@ -3528,6 +3608,13 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // reads the rooted receiver's immutable view descriptor; detached or
         // resized storage changes length/data, never the element kind.
         "js_typed_array_element_type",
+        // This read snapshot performs only class/view validation and a live
+        // ArrayNum refresh before returning a pointer consumed by the next
+        // generated load. It cannot allocate or dispatch guest code.
+        "js_typed_array_data_at_if_kind",
+        // This existing-slot write excludes growth, holes, scalar homes, and
+        // descriptor overlays before mutating direct packed storage.
+        "js_array_set_existing_number_no_gc",
         "js_async_iterator_close_needs_await",
         "fn_min2_u",
         "fn_max2_u",

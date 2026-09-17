@@ -2,6 +2,7 @@
  * JavaScript runtime function object wrappers for Lambda.
  */
 #include "js_runtime_internal.hpp"
+#include "js_exec_profile.h"
 #include "js_ast.hpp"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/memtrack.h"
@@ -17,23 +18,19 @@ extern __thread EvalContext* context;
 
 // JSCUO9: the class index selects a slot from gc_object_zone.c's table
 // (16, 32, 48, 64, 96, 128, 256, 384), so this constant, not sizeof, is what
-// the allocator honours. It was 7 — the 384 B slot — which the record needed
-// at 328 B when item 4 began but not afterwards: every shrink down to 216 B
-// kept handing out 384 B slots. Class 5 is the 128 B slot, and the record now
-// measures exactly 128, so a function value occupies a third of what it did.
-// Keep this constant and the assert below moving together.
-#define JS_FUNCTION_SIZE_CLASS 5
-static_assert(sizeof(JsFunction) <= 128,
+// the allocator honours. JsFunction now physically inherits Function's
+// Lambda-specific tail; the shared object measures 160 B and therefore needs
+// the 256 B slot. Keep this constant and the assert below moving together.
+#define JS_FUNCTION_SIZE_CLASS 6
+static_assert(sizeof(JsFunction) <= 256,
               "JsFunction must fit its GC object-zone size class");
 
 extern "C" JsFunction* js_alloc_gc_function_object(void) {
-    // Source-class capabilities extend the callable carrier beyond the old
-    // 256-byte class; keep the GC allocation class explicit with the layout.
+    // Keep the GC allocation class explicit with the inherited record layout.
     JsFunction* fn = (JsFunction*)heap_calloc_class(
         sizeof(JsFunction), LMD_TYPE_FUNC, JS_FUNCTION_SIZE_CLASS);
     if (!fn) return NULL;
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    js_function_init_abi(fn);
     return fn;
 }
 
@@ -70,6 +67,105 @@ static void js_function_store_metadata_property(JsFunction* fn,
     js_func_init_property(function_root.get(), key_root.get(), value_root.get());
     js_mark_non_writable(function_root.get(), key_root.get());
     js_mark_non_enumerable(function_root.get(), key_root.get());
+}
+
+static JsShapeSlotStatus js_function_metadata_property_status(JsFunction* fn,
+        const char* name, int name_length) {
+    if (!fn || get_type_id(fn->properties_map) != LMD_TYPE_MAP) {
+        return JS_SHAPE_SLOT_ABSENT;
+    }
+    return js_own_shape_slot_status(fn->properties_map, name, name_length,
+        NULL, NULL);
+}
+
+static bool js_function_metadata_key(Item key, const char** out_name,
+        int* out_name_length) {
+    if (out_name) *out_name = NULL;
+    if (out_name_length) *out_name_length = 0;
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* string_key = it2s(key);
+    if (!string_key) return false;
+    if (string_key->len == 4 && memcmp(string_key->chars, "name", 4) == 0) {
+        if (out_name) *out_name = "name";
+        if (out_name_length) *out_name_length = 4;
+        return true;
+    }
+    if (string_key->len == 6 && memcmp(string_key->chars, "length", 6) == 0) {
+        if (out_name) *out_name = "length";
+        if (out_name_length) *out_name_length = 6;
+        return true;
+    }
+    return false;
+}
+
+static bool js_function_metadata_status_is_present(JsShapeSlotStatus status) {
+    return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
+}
+
+static bool js_function_metadata_property_is_materialized(JsFunction* fn,
+        const char* name, int name_length) {
+    return js_function_metadata_status_is_present(
+        js_function_metadata_property_status(fn, name, name_length));
+}
+
+static void js_function_materialize_metadata_property(JsFunction* fn,
+        const char* name, int name_length) {
+    if (!fn || js_function_metadata_property_status(fn, name, name_length) !=
+            JS_SHAPE_SLOT_ABSENT) return;
+    if (name_length == 4) {
+        Item name_value = (Item){.item = s2it(fn->name
+            ? fn->name : heap_create_name("", 0))};
+        js_function_store_metadata_property(fn, "name", 4, name_value);
+        return;
+    }
+    js_function_store_metadata_property(fn, "length", 6,
+        (Item){.item = i2it(js_function_metadata_length(fn))});
+}
+
+extern "C" bool js_function_materialize_lazy_metadata_property(Item function,
+        Item key) {
+    RootFrame roots(2);
+    Rooted<Item> function_root(roots, function);
+    Rooted<Item> key_root(roots, key);
+    if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)function_root.get().function;
+    if (!fn || (fn->flags & JS_FUNC_FLAG_LAZY_METADATA) == 0) return false;
+    const char* name = NULL;
+    int name_length = 0;
+    if (!js_function_metadata_key(key_root.get(), &name, &name_length)) return false;
+    // A first direct metadata observation must publish the same length/name
+    // order as an eagerly finalized ordinary function.
+    js_function_materialize_metadata_property(fn, "length", 6);
+    fn = (JsFunction*)function_root.get().function;
+    js_function_materialize_metadata_property(fn, "name", 4);
+    fn = (JsFunction*)function_root.get().function;
+    return js_function_metadata_property_is_materialized(fn, name, name_length);
+}
+
+extern "C" void js_function_materialize_all_lazy_metadata_properties(
+        Item function) {
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots, function);
+    if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)function_root.get().function;
+    if (!fn || (fn->flags & JS_FUNC_FLAG_LAZY_METADATA) == 0) return;
+    // Ordinary function own-key order starts with length then name. Keep that
+    // order when reflection, rather than a direct read, first materializes it.
+    js_function_materialize_metadata_property(fn, "length", 6);
+    fn = (JsFunction*)function_root.get().function;
+    js_function_materialize_metadata_property(fn, "name", 4);
+}
+
+extern "C" bool js_function_has_lazy_metadata_property(Item function,
+        Item key) {
+    if (get_type_id(function) != LMD_TYPE_FUNC) return false;
+    JsFunction* fn = (JsFunction*)function.function;
+    if (!fn || (fn->flags & JS_FUNC_FLAG_LAZY_METADATA) == 0) return false;
+    const char* name = NULL;
+    int name_length = 0;
+    if (!js_function_metadata_key(key, &name, &name_length)) return false;
+    return js_function_metadata_property_status(fn, name, name_length) ==
+        JS_SHAPE_SLOT_ABSENT;
 }
 
 static void js_function_ensure_metadata_properties(JsFunction* fn) {
@@ -125,6 +221,10 @@ extern "C" bool js_function_has_own_prototype(Item function) {
 
 static void js_function_refresh_name_property(JsFunction* fn) {
     if (!fn) return;
+    if ((fn->flags & JS_FUNC_FLAG_LAZY_METADATA) != 0 &&
+            !js_function_metadata_property_is_materialized(fn, "name", 4)) {
+        return;
+    }
     RootFrame roots(1);
     Rooted<Item> function_root(roots,
         (Item){.function = (Function*)fn});
@@ -136,6 +236,10 @@ static void js_function_refresh_name_property(JsFunction* fn) {
 
 static void js_function_refresh_length_property(JsFunction* fn) {
     if (!fn) return;
+    if ((fn->flags & JS_FUNC_FLAG_LAZY_METADATA) != 0 &&
+            !js_function_metadata_property_is_materialized(fn, "length", 6)) {
+        return;
+    }
     js_function_store_metadata_property(fn, "length", 6,
         (Item){.item = i2it(js_function_metadata_length(fn))});
 }
@@ -159,6 +263,25 @@ static void js_function_register_pool_pointer_roots(JsFunction* fn) {
     }
 }
 
+static bool js_function_has_mir_light_contract(const JsFunction* fn) {
+    if (!fn || !js_fn_is_js_layout(fn) || !js_fn_func_ptr(fn) ||
+            js_fn_body_kind(fn) != JS_FUNCTION_BODY_CODE ||
+            js_fn_eval_initializer_context(fn)) {
+        return false;
+    }
+    uint32_t required = JS_FUNC_FLAG_ANALYSIS_KNOWN | JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+    uint32_t excluded = JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN |
+        JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_DERIVED_CTOR | JS_FUNC_FLAG_USES_WITH |
+        JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_TYPED_ARRAY_METHOD |
+        JS_FUNC_FLAG_CLASS_CONSTRUCTOR | JS_FUNC_FLAG_METHOD |
+        JS_FUNC_FLAG_READS_THIS | JS_FUNC_FLAG_READS_NEW_TARGET |
+        JS_FUNC_FLAG_USES_ARGUMENTS | JS_FUNC_FLAG_DIRECT_EVAL;
+    Item home_class = js_fn_home_class(fn);
+    return (fn->flags & required) == required && (fn->flags & excluded) == 0 &&
+        (home_class.item == 0 || home_class.item == ItemNull.item ||
+         get_type_id(home_class) == LMD_TYPE_UNDEFINED);
+}
+
 void js_function_finalize_capabilities(JsFunction* fn) {
     if (!fn) return;
     js_function_register_pool_pointer_roots(fn);
@@ -166,7 +289,9 @@ void js_function_finalize_capabilities(JsFunction* fn) {
     // D6.2.2v2 requires one writer for published executable capabilities;
     // metadata mutation must re-finalize before the value is republished.
     fn->invoke = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
-        ? js_call_entry_bound : js_call_entry_generic;
+        ? js_call_entry_bound
+        : (js_function_has_mir_light_contract(fn)
+            ? js_call_entry_mir_light : js_call_entry_generic);
     fn->body = js_function_select_body_entry(fn);
     fn->construct = NULL;
     bool syntax_forbids_construct = (fn->flags & (JS_FUNC_FLAG_ARROW |
@@ -184,7 +309,12 @@ void js_function_finalize_capabilities(JsFunction* fn) {
             js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST)) {
         fn->construct = js_construct_entry_ordinary;
     }
-    js_function_ensure_metadata_properties(fn);
+    if ((fn->flags & JS_FUNC_FLAG_LAZY_METADATA) != 0) {
+        js_opt_trace_record(JS_OPT_MIR_LAZY_FUNCTION_METADATA,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    } else {
+        js_function_ensure_metadata_properties(fn);
+    }
 }
 
 static JsFunctionPayload* js_fn_payload_ensure(JsFunction* fn);
@@ -276,6 +406,7 @@ JsCallableCode* js_fn_code_ensure(JsFunction* fn) {
     if (!fn->code) {
         fn->code = (JsCallableCode*)js_fn_payload_calloc(fn, sizeof(JsCallableCode));
         if (!fn->code) return NULL;
+        js_callable_code_init_definition(fn->code, NULL, NULL, 0);
         fn->code->module_state_id = UINT32_MAX;
         fn->code->formal_length = -1;
         fn->code->body_kind = JS_FUNCTION_BODY_CODE;
@@ -318,9 +449,9 @@ static JsCallableCode* js_callable_code_prepare_unique(JsFunction* fn,
     if (fn && fn->code && fn->code->interned) js_callable_code_detach(fn);
     JsCallableCode* code = js_fn_code_ensure(fn);
     if (!code) return NULL;
+    js_callable_code_init_definition(code, NULL, NULL, param_count);
     code->func_ptr = func_ptr;
     code->runtime_context = runtime_context;
-    code->param_count = param_count;
     code->module_state_id = module_state_id;
     code->formal_length = -1;
     code->body_kind = JS_FUNCTION_BODY_CODE;
@@ -625,15 +756,14 @@ static JsFunction* js_alloc_function_storage(bool gc_backed) {
 }
 
 static void js_function_init_common(JsFunction* fn) {
-    fn->type_id = LMD_TYPE_FUNC;
-    // D6.2.2v2: every callable wrapper uses the canonical layout marker;
-    // legacy arity/target decoding otherwise silently drops compiled args.
-    fn->entry_abi = FN_ENTRY_ABI_JS_FUNCTION;
+    // D6.2.2v2: every callable wrapper has the shared layout marker before
+    // any JS-only capability or property state is published.
+    js_function_init_abi(fn);
     fn->prototype = ItemNull;
 }
 
 static Item js_new_function_impl(void* func_ptr, int param_count,
-        bool mir_context_abi) {
+        bool mir_context_abi, bool publish_capabilities) {
     Context* runtime = mir_context_abi ? (Context*)context : NULL;
     if (mir_context_abi && !runtime) {
         log_error("js-new-function: compiled wrapper missing context owner");
@@ -669,9 +799,10 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
-    // A fresh wrapper has no analysis yet, so this stamps the generic entry;
-    // finalization reclassifies once the compiler's facts are applied.
-    js_function_finalize_capabilities(fn);
+    // Compiler-owned construction publishes its definition facts in the
+    // adjacent js_finalize_function transaction. Runtime callers still need a
+    // complete callable before this factory returns.
+    if (publish_capabilities) js_function_finalize_capabilities(fn);
     if (!has_with_env && !suppress_cache) js_func_cache_insert(cache_key, fn);
     return (Item){.function = (Function*)fn};
 }
@@ -688,11 +819,10 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     js_function_init_common(fn);
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
-    ast->definition = js_script_ast_definition_ensure(script, function);
-    if (!ast->definition) return ItemError;
-    JsCallableCode* code = js_script_ast_definition_code_ensure(ast->definition,
+    JsCallableCode* code = js_script_ast_callable_ensure(script, function,
         param_count, lambda_active_module_state_id());
     if (!code) return ItemError;
+    ast->definition = code;
     // definition metadata is installed directly, with no per-value temporary.
     fn->code = code;
     ast->env = environment;
@@ -1218,14 +1348,37 @@ JS_NATIVE_ENV_ARITIES(JS_DEFINE_NATIVE_ENV_SCHEDULER)
 #undef JS_DEFINE_NATIVE_ENV_SCHEDULER
 #undef JS_NATIVE_ENV_ARITIES
 
-JS_FORWARD_ITEM(js_new_function_mir, (void* func_ptr, int param_count), js_new_function_impl, (func_ptr, param_count, true))
+JS_FORWARD_ITEM(js_new_function_mir, (void* func_ptr, int param_count),
+    js_new_function_impl, (func_ptr, param_count, true, true))
+extern "C" Item js_new_function_mir_pending(void* func_ptr, int param_count) {
+    js_opt_trace_record(JS_OPT_MIR_DEFERRED_FUNCTION_FINALIZE,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    Item result = js_new_function_impl(func_ptr, param_count, true, false);
+    if (get_type_id(result) == LMD_TYPE_FUNC) {
+        ((JsFunction*)result.function)->flags |= JS_FUNC_FLAG_LAZY_METADATA;
+    }
+    return result;
+}
 
 extern "C" Item js_new_distinct_function_mir(void* func_ptr, int param_count) {
     // D6.2.2v2: evaluating a function expression creates a fresh callable;
     // the MIR-pointer cache is only valid for a stable binding materialization.
     js_func_cache_suppress_push();
-    Item result = js_new_function_impl(func_ptr, param_count, true);
+    Item result = js_new_function_impl(func_ptr, param_count, true, true);
     js_func_cache_suppress_pop();
+    return result;
+}
+
+extern "C" Item js_new_distinct_function_mir_pending(void* func_ptr,
+        int param_count) {
+    js_opt_trace_record(JS_OPT_MIR_DEFERRED_FUNCTION_FINALIZE,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    js_func_cache_suppress_push();
+    Item result = js_new_function_impl(func_ptr, param_count, true, false);
+    js_func_cache_suppress_pop();
+    if (get_type_id(result) == LMD_TYPE_FUNC) {
+        ((JsFunction*)result.function)->flags |= JS_FUNC_FLAG_LAZY_METADATA;
+    }
     return result;
 }
 
@@ -1271,7 +1424,7 @@ JS_FORWARD_ITEM(js_new_method_function_mir, (void* func_ptr, int param_count), j
 
 // Create a closure (function with captured environment)
 static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
-        int env_size, bool mir_context_abi) {
+        int env_size, bool mir_context_abi, bool publish_capabilities) {
     Context* runtime = mir_context_abi ? (Context*)context : NULL;
     if (mir_context_abi && !runtime) {
         log_error("js-new-closure: compiled wrapper missing context owner");
@@ -1299,10 +1452,23 @@ static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
     fn->home_global = js_get_global_this();
     js_env_rehome_scalars(fn->env);
     js_function_capture_with_env(fn);
-    js_function_finalize_capabilities(fn);
+    if (publish_capabilities) js_function_finalize_capabilities(fn);
     return (Item){.function = (Function*)fn};
 }
-JS_FORWARD_ITEM(js_new_closure_mir, (void* func_ptr, int param_count,         Item* env, int env_size), js_new_closure_impl, (func_ptr, param_count, env, env_size, true))
+JS_FORWARD_ITEM(js_new_closure_mir, (void* func_ptr, int param_count,
+        Item* env, int env_size), js_new_closure_impl,
+    (func_ptr, param_count, env, env_size, true, true))
+extern "C" Item js_new_closure_mir_pending(void* func_ptr, int param_count,
+        Item* env, int env_size) {
+    js_opt_trace_record(JS_OPT_MIR_DEFERRED_FUNCTION_FINALIZE,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    Item result = js_new_closure_impl(func_ptr, param_count, env, env_size,
+        true, false);
+    if (get_type_id(result) == LMD_TYPE_FUNC) {
+        ((JsFunction*)result.function)->flags |= JS_FUNC_FLAG_LAZY_METADATA;
+    }
+    return result;
+}
 
 // Set the ES spec formal .length for a function (params before first default, excl rest)
 extern "C" void js_set_formal_length(Item fn_item, int length) {
@@ -1360,7 +1526,8 @@ extern "C" void js_env_rehome_scalars(Item* env) {
     if (!env || !context || !context->heap || !context->heap->gc ||
             !gc_is_managed(context->heap->gc, env)) return;
     gc_header_t* header = gc_get_header(env);
-    if (!gc_environment_is_item_slots(header) || header->alloc_size == 0) return;
+    if (gc_environment_layout_kind(header) != GC_ENVIRONMENT_LAYOUT_ITEM_SLOTS ||
+            header->alloc_size == 0) return;
     int64_t count = (int64_t)(header->alloc_size / (2 * sizeof(Item)));
     // Generator environments mix boxed Items with raw state/spill words. Only
     // tagged pointers into the active number stack are valid scalar Items;
@@ -1423,6 +1590,8 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
     if (init_flags & JS_FUNC_INIT_STRICT) fn->flags |= JS_FUNC_FLAG_STRICT;
     if (init_flags & JS_FUNC_INIT_USES_WITH) fn->flags |= JS_FUNC_FLAG_USES_WITH;
     if (init_flags & JS_FUNC_INIT_ANALYSIS_KNOWN) fn->flags |= JS_FUNC_FLAG_ANALYSIS_KNOWN;
+    if (init_flags & JS_FUNC_INIT_USES_ARGUMENTS) fn->flags |= JS_FUNC_FLAG_USES_ARGUMENTS;
+    if (init_flags & JS_FUNC_INIT_DIRECT_EVAL) fn->flags |= JS_FUNC_FLAG_DIRECT_EVAL;
     if (init_flags & JS_FUNC_INIT_READS_THIS) fn->flags |= JS_FUNC_FLAG_READS_THIS;
     if (init_flags & JS_FUNC_INIT_READS_NEW_TARGET) fn->flags |= JS_FUNC_FLAG_READS_NEW_TARGET;
     if (init_flags & JS_FUNC_INIT_MIR_CONTEXT_ABI) fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;

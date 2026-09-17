@@ -1811,6 +1811,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     }
 
     sym->len = name_len;
+    sym->kind = SYMBOL_LAMBDA_NAME;
     sym->ns = ns_target;
     str_copy(sym->chars, name_len + 1, name_str, name_len);
 

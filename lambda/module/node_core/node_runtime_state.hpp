@@ -13,7 +13,7 @@ struct JsCjsState {
     RootVector module_stack = {};
 };
 
-struct JsDiagnosticsChannelState : JsRootedState {
+struct JsDiagnosticsChannelState : RootVector {
     Item namespace_object = {};
     // Each entry is a GC-owned [name, channel] pair. Keeping the pair in one
     // record prevents independently sized name/channel root arrays.

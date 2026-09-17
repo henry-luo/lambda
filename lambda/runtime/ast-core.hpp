@@ -399,6 +399,12 @@ struct NameEntry {
     // store-back skips its capture mark (the handle is dead there). Decided
     // once at FUNCTION_END (lambda_ast_lower_rmw_borrows).
     bool cow_borrow_lowered;
+    // T28-7: a local bound to `fill(N, v)` or an N-item scalar array literal,
+    // never rebound, resized (push/splice) or passed where a callee could
+    // resize it, holds an array of exactly `fixed_array_length` elements
+    // everywhere it is visible. Decided once at script finalize.
+    bool has_fixed_array_length;
+    int64_t fixed_array_length;
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
@@ -864,6 +870,16 @@ static inline bool ast_is_direct_numeric_mask_assignment(AstNode* node) {
 // `(expr)` wrappers carry no semantics; every consumer wants the inner node.
 static inline AstNode* ast_unwrap_primary(AstNode* node) {
     while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    return node;
+}
+
+// Like ast_unwrap_primary, but a primary that carries its value itself (a
+// literal: `expr` is NULL) is returned instead of NULL.
+static inline AstNode* ast_unwrap_primary_to_leaf(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
         node = ((AstPrimaryNode*)node)->expr;
     }
     return node;
@@ -1411,6 +1427,9 @@ typedef struct FnAnalysis {
     bool js_native_numeric_proven;
     bool js_has_numeric_local_facts;
     NativeReturnKind js_native_return_kind;
+    // Profile inference keeps its full result contract on the shared function
+    // owner; the compact TypeId below is only its native-lane projection.
+    Type* js_return_contract;
     TypeId js_return_type;
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;

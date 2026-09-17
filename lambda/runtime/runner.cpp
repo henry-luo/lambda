@@ -2628,7 +2628,7 @@ void runtime_cleanup(Runtime* runtime) {
         if (js_runtime_state_for(cleanup_context)) {
             // Cancel host tasks while their roots and native owners are still
             // valid; scheduler teardown only drains their inert completions.
-            runtime_resource_table_clear(&js_runtime_state.resources);
+            runtime_resource_table_clear(js_runtime_resource_table());
         }
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);

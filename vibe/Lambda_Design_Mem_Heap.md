@@ -1,8 +1,8 @@
 # Lambda Heap Memory Management Design
 
 **Status**: Four-mechanism architecture implemented (rpmalloc removed); Pool v2 core implementation landed; §9 remediation and MP-15..MP-18 implementation pending
-**Version**: 2.10.0
-**Date**: 2026-08-11
+**Version**: 2.10.1
+**Date**: 2026-09-17
 **Scope**: **Native heap-based memory management only** — how heap bytes are obtained, owned, shared, and released across Lambda and Radiant. Stack-based memory management (the native C stack, the runtime's side/number stacks, rooting frames, and stack-disciplined value storage) is **out of scope**: see [Lambda_Design_Stack_Frame.md](./Lambda_Design_Stack_Frame.md), [Lambda_Design_Stack_Rooting.md](./Lambda_Design_Stack_Rooting.md), and [Formal Design D5](../doc/Lambda_Formal_Design.md#d5-execution-state-stacks-and-rooting). (ScratchArena, §4.2, remains in scope: its *discipline* is stack-like but its storage is heap-owned arena blocks.)
 **Related**: [Formal Design D4](../doc/Lambda_Formal_Design.md#d4-memory-management), [Memory Context](./Memory_Context.md), [Memory Model](./Lambda_Design_Memory_Model.md), [GC2](./Lambda_Garbage_Collector2.md)
 
@@ -57,6 +57,12 @@ and randomized alloc/free/realloc-model tests. The boundary validator now
 accepts a valid payload pointer in the final header-sized window of committed
 storage; `pool_block_range_valid` remains the authority for the complete block
 span. These tests exercise the D4.2.5v2 registry-free block path directly.
+**Revision 2.11** (2026-09-17): D4.2.5v3 replaces the formerly roadmap-like
+raw-allocation wording with an explicit application-level prohibition:
+outside the memory-management implementations under `lib/`, code must never
+call libc `malloc`/`calloc`/`realloc`/`free` directly. It selects the matching
+`memtrack` API or an owning GC/Arena/Pool API; only `lib/` implementations of
+those APIs may call libc directly. The source audit enforces this boundary.
 **Revision 2.4** (2026-08-10): §5.7 call-site census added (54 pools, ~46 are
 arena candidates); MP-19 string-builder two-case model (§2.3) and MP-20
 NamePool/ShapePool are arena users (§4.3); R4b census-driven reclassification.
@@ -75,11 +81,13 @@ no free-floating call sites, enforced by source audit.
 Heap data is kept in exactly four ways. No fifth mechanism may be introduced
 without a new design ruling.
 
-1. **Tracked raw allocation** — `malloc`/`calloc`/`free` through the hardened
-   `memtrack` API, for singular, explicitly owned buffers (§2). Roadmap
-   (MP-18, §2.5): this surface splits into `stack_alloc`/`stack_free` for
-   function-scoped temporaries plus manager-internal use — no free-floating
-   raw call sites remain.
+1. **Tracked raw allocation** — singular, explicitly owned buffers use the
+   hardened `memtrack` APIs (`mem_alloc`/`mem_calloc`/`mem_realloc`/
+   `mem_free`) (§2). Outside the memory-management implementations under
+   `lib/`, code never calls libc `malloc`/`calloc`/`realloc`/`free` directly;
+   it selects this API or an owning allocator API. The raw surface later splits
+   into `stack_alloc`/`stack_free` for function-scoped temporaries plus
+   manager-internal use (MP-18, §2.5).
 2. **GC heap** — the script runtimes' collector-owned storage (§3;
    D4.3.1–D4.3.2).
 3. **Arena** — **sequential allocation, batch free**, in two variants:
@@ -1344,7 +1352,7 @@ Revision 2.6 updates the formal memory rulings to **spec 1.11.0** (2026-08-11):
    individual free.
 2. **D4.2.1v3** separates direct raw memtrack allocations from Pool extent
    allocation; Pool user blocks are not `memtrack_pool_*` allocations.
-3. **D4.2.5v2** states that Pool block operations are registry-free and
+3. **D4.2.5v3** states that Pool block operations are registry-free and
    mutex-free on the single-writer hot path; diagnostics and accounting occur
    at extent/context boundaries.
 
@@ -1372,7 +1380,7 @@ context/ref-count/STATS follow-ups.
 MP-1..MP-11 are the accepted revision-1.0 decisions; MP-12..MP-21 are the
 revision-2.x rulings. MP-21 is the 2026-08-11 correction of the transitional
 owner-group implementation. The memory decisions are formalized in Formal
-Design 1.13.0 (D4.1.1v2, D4.1.4v4, D4.2.1v3, D4.2.3, D4.2.4, D4.2.5v2,
+Design 9.0.1 (D4.1.1v2, D4.1.4v4, D4.2.1v3, D4.2.3, D4.2.4, D4.2.5v3,
 D4.5.1v3).
 
 | ID | Decision | Formal basis |
@@ -1390,14 +1398,14 @@ D4.5.1v3).
 | **MP-11** | All backends obey the common edge contract (§8). | D4.2.1–D4.2.2 |
 | **MP-12** | The four-mechanism model (§1.1: raw-tracked / GC / arena / pool) is the governing memory-mechanism taxonomy. | D4.1.1v2, D4.1.4 |
 | **MP-13** | Tracked-mode policy: release default OFF; STATS is counters-only; allocation-level records exist only in DEBUG. | D4.2.5 |
-| **MP-14** | The Pool hot path is registry-free and mutex-free: fixed-header recovery plus Pool-owned free-list operations; no pointer hashmap or allocated-block index. Diagnostic registries are DEBUG-only and never the ownership mechanism. | D4.2.5v2; §5.2 |
+| **MP-14** | The Pool hot path is registry-free and mutex-free: fixed-header recovery plus Pool-owned free-list operations; no pointer hashmap or allocated-block index. Diagnostic registries are DEBUG-only and never the ownership mechanism. | D4.2.5v3; §5.2 |
 | **MP-15** | Semantic split: arena = sequential allocation + batch free only, where batch free has exactly two variants — whole-arena (reset/destroy) and tail-region (mark/rewind, the sidecar-stack pattern); pool = individual allocation + individual free. A non-tail-free need reclassifies the site, never adds free lists to arena. | D4.1.4v4, D4.5.1v3; §1.2, §4.1 |
 | **MP-16** | Every arena and pool is bound at creation to a `MemContext` owner context (document/input, parse, eval, validation, layout/render, JIT, session); no free-floating allocators. | D4.2.3 |
 | **MP-17** | Shared arenas/pools carry an allocator-level atomic `ref_count` (acquire/release; destroy at zero; reset requires exclusivity). Mutation remains single-writer; the count is the only cross-thread-mutable allocator field. | D4.2.4, D4.1.2 |
-| **MP-18** | Roadmap: the raw memtrack surface splits into `stack_alloc`/`stack_free` (function-scoped LIFO temporaries, heap-backed by a thread-confined sidecar stack) and manager-internal use; no free-floating `malloc`/`calloc`/`free` remains in application code, enforced by source audit. | D4.2.5; §2.5 |
+| **MP-18** | Outside the memory-management implementations under `lib/`, application code must never call libc `malloc`/`calloc`/`realloc`/`free` directly: it uses the matching `memtrack` API or an owning allocator API. The raw memtrack surface later splits into `stack_alloc`/`stack_free` (function-scoped LIFO temporaries, heap-backed by a thread-confined sidecar stack) and manager-internal use; source audit enforces the prohibition. | D4.2.5v3; §2.5 |
 | **MP-19** | String builders have two legitimate cases: standalone (`StrBuf`, raw memtrack) and owner-backed (`StringBuf`, allocated from the destination pool/arena so the finished string needs no copy). Owner-backed splits by growth mechanism: **pool-backed grows by `realloc`** (buffer may move; no ordering discipline), **arena-backed grows by tail extension** (buffer stays put; requires the string to own the arena tail — formatters fit cleanly, parsers must avoid interleaving node allocation), with grow-and-abandon or size-then-build as the fallbacks when it cannot. Never build standalone and copy into an owner merely for API convenience. | D4.1.4; §2.3 |
 | **MP-20** | NamePool and ShapePool are append-only interning stores with no eviction: their entry storage is an **arena**, not a pool. They remain distinct semantic owners and `MemContext` nodes; only the backing mechanism changes. | D4.1.1v2, D4.1.4; §4.3 |
-| **MP-21** | Pool v2 owns growth extents and subdivides them into boundary-tagged variable-size blocks. The optional initial reservation is clamped to 1 KiB and rounded to `1 KiB * 2^n`; each later reservation doubles, reservations below 4 KiB use the context/memtrack block path, and reservations at/above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB, required block bytes)`, page-rounded. Segregated free lists index free blocks by span; allocation splits, free coalesces, realloc may resize in place, reset rebuilds extent-wide free blocks, and no user allocation calls `mem_alloc_loc`/`mem_free_loc`. | D4.1.4v4, D4.2.1v3, D4.2.5v2; §5 |
+| **MP-21** | Pool v2 owns growth extents and subdivides them into boundary-tagged variable-size blocks. The optional initial reservation is clamped to 1 KiB and rounded to `1 KiB * 2^n`; each later reservation doubles, reservations below 4 KiB use the context/memtrack block path, and reservations at/above 4 KiB use page-backed VM. Each VM commit starts at `max(4 KiB, required block bytes)`, page-rounded. Segregated free lists index free blocks by span; allocation splits, free coalesces, realloc may resize in place, reset rebuilds extent-wide free blocks, and no user allocation calls `mem_alloc_loc`/`mem_free_loc`. | D4.1.4v4, D4.2.1v3, D4.2.5v3; §5 |
 
 ---
 
@@ -1511,8 +1519,8 @@ Revision 2.0 — done when:
 - Context-binding audit complete: every `arena_create`/`pool_create` names its
   owner context (MP-16), and the shared-allocator census (§15 Q7) classifies
   every sharer as immortal or ref-counted (MP-17).
-- Formal D4 reconciliation merged (spec 1.13.0, 2026-08-11): D4.1.1v2,
-  D4.1.4v4, D4.2.1v3, D4.2.3–D4.2.5v2, D4.5.1v3. ✅ for the design;
+- Formal D4 reconciliation merged (spec 9.0.1, 2026-09-17): D4.1.1v2,
+  D4.1.4v4, D4.2.1v3, D4.2.3–D4.2.5v3, D4.5.1v3. ✅ for the design;
   Pool v2 core implementation ✅ (R7); thread/lifetime/STATS follow-ups remain.
 
 At that point Lambda owns only the policies unique to Lambda: GC allocation,

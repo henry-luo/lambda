@@ -6,14 +6,16 @@ static bool js_regex_match_property_name(const char* name, int len, const char* 
     return (int)strlen(target) == len && strncmp(name, target, len) == 0;
 }
 
-bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
+bool js_regex_sorted_range_contains(const CodePointInterval* ranges, int count, int cp) {
+    if (cp < 0) return false;
+    uint32_t codepoint = (uint32_t)cp;
     int lo = 0;
     int hi = count - 1;
     while (lo <= hi) {
         int mid = lo + ((hi - lo) / 2);
-        if (cp < ranges[mid].first) {
+        if (codepoint < ranges[mid].first) {
             hi = mid - 1;
-        } else if (cp > ranges[mid].last) {
+        } else if (codepoint > ranges[mid].last) {
             lo = mid + 1;
         } else {
             return true;
@@ -24,16 +26,18 @@ bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int c
 
 // UNUSED_FUNCTION_OK: called from the generated js_regex_generated_property_tables.inc,
 // which the unused-function lint does not scan (*.inc extension).
-static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, int count, int cp, int* cursor) {
+static bool js_regex_sorted_range_contains_cursor(const CodePointInterval* ranges, int count, int cp, int* cursor) {
+    if (cp < 0) return false;
+    uint32_t codepoint = (uint32_t)cp;
     if (count <= 0) return false;
     int c = *cursor;
     if (c >= 0 && c < count) {
-        if (cp >= ranges[c].first && cp <= ranges[c].last) return true;
-        if (cp > ranges[c].last) {
+        if (codepoint_interval_contains(&ranges[c], codepoint)) return true;
+        if (codepoint > ranges[c].last) {
             int next = c + 1;
             if (next < count) {
-                if (cp < ranges[next].first) { *cursor = c; return false; }
-                if (cp <= ranges[next].last) { *cursor = next; return true; }
+                if (codepoint < ranges[next].first) { *cursor = c; return false; }
+                if (codepoint <= ranges[next].last) { *cursor = next; return true; }
             } else {
                 *cursor = c; return false;
             }
@@ -41,8 +45,8 @@ static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, in
             int hi = count - 1;
             while (lo <= hi) {
                 int mid = lo + ((hi - lo) / 2);
-                if (cp < ranges[mid].first) hi = mid - 1;
-                else if (cp > ranges[mid].last) lo = mid + 1;
+                if (codepoint < ranges[mid].first) hi = mid - 1;
+                else if (codepoint > ranges[mid].last) lo = mid + 1;
                 else { *cursor = mid; return true; }
             }
             *cursor = hi >= 0 ? hi : 0;
@@ -52,8 +56,8 @@ static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, in
         int hi = c - 1;
         while (lo <= hi) {
             int mid = lo + ((hi - lo) / 2);
-            if (cp < ranges[mid].first) hi = mid - 1;
-            else if (cp > ranges[mid].last) lo = mid + 1;
+            if (codepoint < ranges[mid].first) hi = mid - 1;
+            else if (codepoint > ranges[mid].last) lo = mid + 1;
             else { *cursor = mid; return true; }
         }
         *cursor = hi >= 0 ? hi : 0;
@@ -63,8 +67,8 @@ static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, in
     int hi = count - 1;
     while (lo <= hi) {
         int mid = lo + ((hi - lo) / 2);
-        if (cp < ranges[mid].first) hi = mid - 1;
-        else if (cp > ranges[mid].last) lo = mid + 1;
+        if (codepoint < ranges[mid].first) hi = mid - 1;
+        else if (codepoint > ranges[mid].last) lo = mid + 1;
         else { *cursor = mid; return true; }
     }
     *cursor = hi >= 0 ? hi : 0;
@@ -113,7 +117,7 @@ extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int nam
 // the generated RegExp tables are pinned to older property data.
 // The linked utf8proc data also predates Unicode 17, so keep the generated
 // Unicode 17 identifier delta here until the system Unicode data is upgraded.
-static const JsRegexRange js_unicode_id_start_unicode17_additions[] = {
+static const CodePointInterval js_unicode_id_start_unicode17_additions[] = {
     {0x00088F, 0x00088F}, {0x000C5C, 0x000C5C}, {0x000CDC, 0x000CDC},
     {0x00A7CE, 0x00A7CF}, {0x00A7D2, 0x00A7D2}, {0x00A7D4, 0x00A7D4},
     {0x00A7F1, 0x00A7F1}, {0x010940, 0x010959}, {0x010EC5, 0x010EC7},
@@ -125,7 +129,7 @@ static const JsRegexRange js_unicode_id_start_unicode17_additions[] = {
     {0x0323B0, 0x033479}
 };
 
-static const JsRegexRange js_unicode_id_continue_unicode17_additions[] = {
+static const CodePointInterval js_unicode_id_continue_unicode17_additions[] = {
     {0x001ACF, 0x001ACF}, {0x001ADD, 0x001ADD}, {0x001AE0, 0x001AEB},
     {0x010EFA, 0x010EFB}, {0x011B60, 0x011B67}, {0x011DE0, 0x011DE9},
     {0x01E6E3, 0x01E6E3}, {0x01E6E6, 0x01E6E6}, {0x01E6EE, 0x01E6EF},

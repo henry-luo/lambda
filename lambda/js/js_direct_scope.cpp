@@ -31,7 +31,7 @@ static void direct_predeclare_scope(JsTranspiler* tp, JsAstNode* node);
 static void direct_link_interp_import_binding(JsTranspiler* tp,
         String* source, String* local_name, NameEntry* entry) {
     if (!tp || !source || !local_name || !entry) return;
-    for (JsInterpImportBinding* binding = tp->interp_imports; binding;
+    for (JsInterpModuleBinding* binding = tp->interp_imports; binding;
             binding = binding->next) {
         // Both fields are parser-owned name-pool identities, not spellings.
         if (binding->source == source && binding->local_name == local_name) {

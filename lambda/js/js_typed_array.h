@@ -50,32 +50,29 @@ int js_typed_array_element_size(JsTypedArrayType type);
 const char* js_typed_array_type_name_from_type(JsTypedArrayType type);
 bool js_typed_array_is_integer_type(JsTypedArrayType type);
 
-// ArrayBuffer identity stays stable while its handle replaces storage on
-// resize, detach, transfer, and copy-on-write.
-typedef struct JsArrayBuffer {
-    ByteBufferHandle handle;
-} JsArrayBuffer;
+// ArrayBuffer identity stays stable while this shared handle replaces storage
+// on resize, detach, transfer, and copy-on-write. JS owns the Map carrier;
+// ByteBufferHandle owns the native buffer state directly.
+typedef ByteBufferHandle JsArrayBuffer;
 
 static inline const uint8_t* js_arraybuffer_data_const(const JsArrayBuffer* ab) {
-    return ab ? byte_buffer_data_const(&ab->handle) : NULL;
+    return ab ? byte_buffer_data_const(ab) : NULL;
 }
-static inline uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab) {
-    return ab ? byte_buffer_prepare_write(&ab->handle) : NULL;
-}
+uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab);
 static inline int js_arraybuffer_length(const JsArrayBuffer* ab) {
-    return ab ? (int)ab->handle.byte_length : 0;
+    return ab ? (int)ab->byte_length : 0;
 }
 static inline int js_arraybuffer_max_length(const JsArrayBuffer* ab) {
-    return ab ? (int)ab->handle.max_byte_length : 0;
+    return ab ? (int)ab->max_byte_length : 0;
 }
 static inline bool js_arraybuffer_detached(const JsArrayBuffer* ab) {
-    return !ab || byte_buffer_is_detached(&ab->handle);
+    return !ab || byte_buffer_is_detached(ab);
 }
 static inline bool js_arraybuffer_shared(const JsArrayBuffer* ab) {
-    return ab && byte_buffer_is_shared(&ab->handle);
+    return ab && byte_buffer_is_shared(ab);
 }
 static inline bool js_arraybuffer_resizable(const JsArrayBuffer* ab) {
-    return ab && byte_buffer_is_resizable(&ab->handle);
+    return ab && byte_buffer_is_resizable(ab);
 }
 
 // The one authority for every ArrayBuffer view. DataView and TypedArray keep
@@ -105,32 +102,14 @@ static inline bool js_arraybuffer_view_is_out_of_bounds(const JsArrayBufferView*
     return !view->length_tracking && available < view->byte_length;
 }
 
-// Legacy member spellings are an overlay, not a second stored record. They
-// keep host modules source-compatible while their reads move to `base`.
-typedef struct JsDataView {
-    union {
-        JsArrayBufferView base;
-        struct {
-            JsArrayBuffer* buffer;
-            uint64_t buffer_item;
-            int byte_offset;
-            int byte_length;
-            bool length_tracking;
-        };
-    };
-} JsDataView;
+// DataView has no native facts beyond the common buffer-view contract. Keep
+// its JS API name as a direct alias so its carrier stores one shared record.
+typedef JsArrayBufferView JsDataView;
 
 typedef struct JsTypedArray {
-    union {
-        JsArrayBufferView base;
-        struct {
-            JsArrayBuffer* buffer;
-            uint64_t buffer_item;
-            int byte_offset;
-            int byte_length;
-            bool length_tracking;
-        };
-    };
+    // Typed arrays extend the one view contract; no anonymous field overlay
+    // may become a second source of buffer ownership or bounds facts.
+    JsArrayBufferView base;
     JsTypedArrayType element_type;   // typed-array element kind
     bool is_buffer;                  // true only for Node Buffer instances backed by Uint8Array storage
     ArrayNum* view;                  // ArrayNum descriptor over the same non-moving byte storage
@@ -163,6 +142,10 @@ Item js_typed_array_set(Item ta, Item index, Item value);
 Item js_typed_array_set_numeric(Item ta, double index, bool is_negative_zero,
                                 Item value);
 Item js_typed_array_set_numeric_key(Item ta, double index, Item value);
+// Completes only a proven Number write to the selected ordinary typed-array
+// kind. A false result leaves the caller to perform the complete JS Set.
+bool js_typed_array_set_number_if_kind(Item ta, double index,
+                                       int expected_type, double value);
 int  js_typed_array_length(Item ta);
 int  js_typed_array_element_type(Item ta);
 int  js_typed_array_byte_length(Item ta);
@@ -174,6 +157,10 @@ Item js_typed_array_fill(Item ta, Item value, int start, int end,
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
 void* js_typed_array_current_data_ptr(Item ta_item);
+// Returns a current data pointer only after validating the receiver, exact
+// element kind, and live bounds for one immediate physical read.
+void* js_typed_array_data_at_if_kind(Item ta_item, int expected_type,
+                                     int64_t index);
 void* js_typed_array_prepare_write_ptr(Item ta_item);
 bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
@@ -190,6 +177,7 @@ Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_construct_resizable_target(Item length_arg,
     Item options_arg, Item new_target);
 Item js_arraybuffer_wrap(JsArrayBuffer* ab);
+void js_arraybuffer_destroy(JsArrayBuffer* ab);
 bool js_is_arraybuffer(Item val);
 JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val);
 int  js_arraybuffer_byte_length(Item val);

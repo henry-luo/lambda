@@ -4,6 +4,7 @@
 // stays C-compatible because the collector traces the raw record directly.
 
 #include <stdint.h>
+#include "../runtime/gc_environment.h"
 
 struct NameScope;
 
@@ -31,3 +32,35 @@ typedef struct JsInterpEnv {
     uint8_t reserved[2];
     uint64_t slots[1];
 } JsInterpEnv;
+
+// JS adds lexical metadata to the common durable Item/scalar slot storage.
+// The five Item words are deliberately contiguous so the generic visitor can
+// trace them with the same contract it uses for ordinary capture slots.
+static inline void js_interp_env_storage(JsInterpEnv* env,
+        GcEnvironmentStorage* storage) {
+    if (!storage) return;
+    if (!env) {
+        // keep the common access helpers safe for absent lexical parents.
+        gc_environment_storage_init(storage, GC_ENVIRONMENT_LAYOUT_LEXICAL,
+            NULL, NULL, 0, NULL, NULL, 0);
+        return;
+    }
+    Item* slots = (Item*)(void*)env->slots;
+    gc_environment_storage_init(storage, GC_ENVIRONMENT_LAYOUT_LEXICAL, slots,
+        env->slots + env->slot_count, env->slot_count, env->outer,
+        (Item*)(void*)&env->arguments_object, 5);
+}
+
+static inline Item js_interp_env_slot_read(JsInterpEnv* env, uint32_t slot,
+        bool immortal) {
+    GcEnvironmentStorage storage;
+    js_interp_env_storage(env, &storage);
+    return gc_environment_storage_read(&storage, slot, immortal);
+}
+
+static inline void js_interp_env_slot_store(JsInterpEnv* env, uint32_t slot,
+        Item value) {
+    GcEnvironmentStorage storage;
+    js_interp_env_storage(env, &storage);
+    gc_environment_storage_store(&storage, slot, value);
+}

@@ -55,6 +55,18 @@ void heap_gc_defer_collection_end(void);
 LambdaGcScopeCheckpoint lambda_gc_scope_checkpoint_capture(void);
 bool lambda_gc_scope_checkpoint_restore(const LambdaGcScopeCheckpoint* checkpoint);
 
+// Native payloads owned by GC-traced wrappers use these counters for pressure
+// only. The opaque owner is valid until that wrapper's finalizer releases it.
+typedef enum HeapGcExternalKind {
+    HEAP_GC_EXTERNAL_ARRAYBUFFER = 0,
+    HEAP_GC_EXTERNAL_JS_DENSE_ARRAY = 1,
+    HEAP_GC_EXTERNAL_BINARY = 2,
+    HEAP_GC_EXTERNAL_OTHER = 3
+} HeapGcExternalKind;
+void* heap_gc_external_preflight(size_t bytes, int kind);
+void heap_gc_external_record_alloc(void* owner, size_t bytes, int kind);
+void heap_gc_external_record_release(void* owner, size_t bytes, int kind);
+
 #ifdef __cplusplus
 }
 #endif

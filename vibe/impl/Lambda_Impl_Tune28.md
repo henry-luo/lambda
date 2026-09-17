@@ -691,8 +691,9 @@ re-measure the row on a quiet host before recording any figure for it.
 | T28-3 `cow_prepare_write` fast path | **skipped**: 1.1% of richards (§9.9) |
 | T28-4 binder-walk short-circuit + key-load inline | landed (§9.10): prettier 0.896 |
 | T28-5 memchr `split` + string admission fast path | landed (§9.11): three_way_merge ~0.78, log_pipeline ~0.76–0.89 |
-| T28-7 emission diet | not started |
-| T28-8 / CW36 store-back | built, **reverted** (§9.14): b5 write-detection defect; blocked on a sound share bit, now provided by CW24v3 |
+| T28-7 emission diet | **landed** (§9.17): `run_cube` 17,329 -> 9,655 (target met; cube3d2 wall -46%); `c_choose_method` 2,739 -> 1,997 (target 1,200 not met: per-access record/array layout proofs, N2/N3) |
+| T28-8 / CW36 store-back | **landed** (§9.16) after a revert (§9.14); splay2 map copies 826k→683k, residue is rotation captures of the caller's `var` root (needs a call-site move convention) |
+| D4.4.6 write oracle | conformance fix (§9.16): declarations/returns/blocks now seen; pure builtins and known plain `pn` params no longer writers; decisions run at script finalize |
 | CW24v3 / D4.4.6 place-copy static mark rule | landed (§9.15), working tree, fixture `cow_place_copy_place_written`; closes the S9.1.2 alias leak present since ≤Result42 |
 | open question | why typed code emits ~33M runtime `string` checks |
 
@@ -1294,3 +1295,251 @@ rows, closing the S9.1.2 alias leak.
 
 **Unblocked.** T28-8 (CW36) can resume on a sound share bit, with its own
 write-detection defect (§9.14, b5) corrected first.
+
+
+### 9.16 T28-8 (CW36) — branch store-backs LANDED, with three prerequisite fixes
+
+**The walk.** Where the straight-line CW34/CW35 rules decline, `rmw_branch_local`
+(`build_ast.cpp`) walks the handle's statement list path by path with two
+facts, LIVE (the handle may still hold the unmarked leaf) and DIRTY (it may
+have written that leaf without storing it back). The root may be observed only
+when the path is not DIRTY and, if LIVE, no write through the handle can
+follow. A return, or the end of the bind's list, refuses on DIRTY. A store-back
+clears both; it is final (`cow_borrow_release`, capture skipped) only when
+nothing after it names the handle, otherwise it keeps its capture and the
+share-mark makes later writes copy (D4.4.4v3 condition 4). `if` arms join by
+union. Loops naming the handle refuse, a plain rebind of the handle refuses,
+`h = p(h)` with `h` at a `var` position is a write, and a mutated place copy
+bound from the handle is a write at its bind (it may itself borrow). This time
+writes are detected with the shared oracle, `ast_body_may_write_entry`, plus
+that nested-bind rule. The §9.14 build had used the move scan, which misses a
+write *through* the handle (b5).
+
+**First finding: the splay handles were never candidates.** Instrumenting the
+candidate check showed `splay_node`'s four `branch` handles reported
+`place_copy_mutated = 0`, although each is passed to `splay_node` by `var`.
+A call whose callee has no published signature skips build-time argument
+validation, and so skips the `var`-pass note. `TypeFunc` parameters are
+filled after the body, so this covers both a procedure calling itself and a
+procedure defined later. `splay`'s own `root`, passed to the later
+`splay_node`, had the same gap. Fix: `place_copy_var_call_cb` records `var`
+passes from the callee's parameter nodes. The CW24v3/CW34/CW36 decisions moved
+from FUNCTION_END to `lambda_ast_finalize_script`, which every build path runs
+(runner, REPL, validator, AST dump) once all signatures exist. The CW24
+diagnostic queue is untouched.
+
+**Second finding: a D4.4.6 hole, through the same oracle.** The oracle did not
+descend into `var`/`let` initializers, returns, blocks, `if` expressions in
+conditional form, map/element items, pipes, handlers or `start`. So on v20:
+
+```lambda
+pn f(var r: R) {
+    let old = r.kid
+    var z = mutate(r)     // writes r.kid.n = 7
+    print(old.n)          // printed 7; S9.1.2 requires 3
+}
+```
+
+The JIT's read-only alias check (`mir_alias_is_readonly_borrow`) uses the same
+oracle, so it had the same exposure. The oracle now covers those nodes.
+
+**Third finding: seeing declarations exposed two over-approximations.** With
+only the coverage fix, cd2 array copies rose 239,862 → 256,855, havlak2
+35,130 → 45,541 (arrays) and 58,612 → 72,250 (maps), and deltablue2 67,420 →
+70,380. A per-change switch build attributed all of it to the oracle, and a
+trace of its new hits named the statements: `var tail_index = len(keys) - 1`
+(every system function counted as a writer) and
+`var sat = c_is_satisfied(w, c)` (every plain `pn` parameter counted, under a
+comment "until CW29 lands"). A non-procedure system function is pure; the
+mutating builtins (`push`, `splice`) are procedures. A known plain parameter's
+writes stay in the callee (S9.1.3, CW29 snapshots there). A procedure whose
+parameter list is not built yet stays a writer, because its `var` check was
+skipped too.
+
+**Copy census (`COW_EXEC_PROFILE`, JIT), v20 → v23.**
+
+| row | kind | copies v20 | copies v23 | bytes v20 | bytes v23 |
+|---|---|---|---|---|---|
+| splay2 | map | 825,642 | 682,847 | 53.7 MB | 44.4 MB |
+| havlak2 | array | 35,130 | 29,926 | 4.57 MB | 4.04 MB |
+| havlak2 | map | 58,612 | 48,174 | 3.64 MB | 3.14 MB |
+| deltablue2 | array[num] | 67,420 | 38,880 | 10.4 MB | 3.40 MB |
+| cd2 | array | 239,862 | 239,663 | 87.6 MB | 87.5 MB |
+| richards2 | all | identical | identical | | |
+
+`splay_node` now binds all six handles as borrows, where v20 bound none.
+
+**Why splay is not near zero.** The proposal expected the store-back shape to
+be the whole cost; it is about a sixth. The rest comes from the rotations:
+`rotate_right` does `left.right = node`, storing the caller's `var` root into
+a child. That store must capture, because the caller's variable still holds the
+same object until its `node = rotate_right(node)` overwrites it. The
+next descent through that node then copies it. Removing the capture needs a
+call-site convention, something like "this call's result overwrites the `var`
+argument's home, so the callee may move the argument out". That is a new shape
+with its own analysis on both sides of the call, so it is recorded here rather
+than built under CW36.
+
+**Correctness evidence.** The probe table (`temp/t28/cw36b/EXPECTED.txt`,
+31 scripts × 3 tiers = 93 cells) covers the §9.14 probes, the CW24v3 probes,
+the new reductions, a recursive `var` pass and the declaration write. v23
+passes 93/93, and again under `LAMBDA_GC_FORCE_EVERY=1` with
+`LAMBDA_GC_POISON_FREED=1`. v20 fails exactly the declaration-write cells.
+New fixture `test/lambda/proc/cow_rmw_branch_store_back.ls` covers the splay
+rotation, both arms with a snapshot between the store-backs, a path without a
+store-back, an alias taken before the bind, a read between write and
+store-back, the caller's view, an error exit after a handle write, the
+declaration write and a forward `var` call. It is pinned with
+`cow_place_copy_place_written` in the tier-parity list of
+`test_lambda_gtest.cpp`.
+
+**Timing (JIT, min of N, same-HEAD control).** The control is the v23 source
+with the three changes switched off by environment (it reproduces v20's census
+exactly). The machine carried four unrelated test processes at ~100% CPU, so
+only rows that agree in both orders are read as results.
+
+| row | N | control first | v23 first | reading |
+|---|---|---|---|---|
+| awfy deltablue2 | 9 | 0.932 | 0.907 | ~8% faster |
+| awfy havlak2 | 9 | 1.008 | 0.981 | neutral |
+| jetstream splay2 | 9 | 1.040 | 1.000 | neutral to 4% slower |
+| jetstream deltablue2 | 5 | 1.039 | 1.013 | neutral |
+| awfy cd2 | 5 | 0.995 | 1.002 | neutral |
+| awfy richards2 | 5 | 1.012 | 1.002 | neutral |
+
+(Ratios are v23/control; the second column is inverted from the raw run.)
+splay2 does not speed up although 143k map copies disappear: its six borrowed
+binds now run the spine test and every store through a borrowed handle
+consults the share bit, so unique-mutation checks rose 613k → 756k. The
+rotation captures above are the lever left for that row.
+
+**Gates (v23, and again on the final v24 source, a no-behavior refactor that
+reuses `direct_pn_callee`).** MIR emission 142/142; ratchet 19/19 after two
+re-baselines -- `lambda_tune4_callsite_inference` +8 (the oracle now sees
+`return f(a, b)` through a function value, so `apply2` snapshots its plain
+parameters at entry, as the bare-statement form already did) and
+`lambda_corpus_deltablue` -176, already present at v20 from §9.7; runtime
+924/924 including the tier-parity test; `test_lambda_opt_gtest` 24/24;
+benchmark corpus against v20: 151 identical, the same four self-timing
+`ls_micro` rows differ. `make build-test` exits non-zero on this checkout
+because three unrelated test executables fail to link the Node trace-events
+module from the latest upstream merge.
+
+
+
+### 9.17 T28-7 — emission diet for record and array bodies (LANDED, partly)
+
+Targets from §6: `run_cube` ≤ 10,000 instructions, `c_choose_method` ≤ 1,200.
+Instruction counts use the MT7 counter (every tab-led line except `local` and
+`endfunc`).
+
+| function | Result45 | v24 (start) | T28-7 |
+|---|---|---|---|
+| cube3d2 `run_cube` | 15.5k | 17,329 | **9,655** |
+| cube3d2 module | | 22,528 | 14,487 |
+| deltablue2 `c_choose_method` | 3,334 | 2,739 | 1,997 |
+| deltablue2 module | | 28,626 | 24,703 |
+
+`run_cube` meets its target. `c_choose_method` is 40% below Result45 but not at
+1,200; the remainder is listed at the end.
+
+Each change is generic; none names a benchmark.
+
+1. **A literal `return` kept procedures off the native return lane.**
+   `function_body_result_expr` unwrapped `return 0` with `ast_unwrap_primary`,
+   which answers NULL for a childless literal primary, so "no body" denied every
+   procedure ending in a literal return its native lane. `s_stronger(a: int,
+   b: int) int` returned a boxed Item, boxed its own `1`/`0` with runtime band
+   tests, and made every caller compare through `fn_eq`. A new shared
+   `ast_unwrap_primary_to_leaf` (ast-core.hpp) replaces five inline copies of the
+   leaf-preserving loop (rule 13) and fixes this site.
+2. **Fixed-length array locals.** An index store never grows an array
+   (`fn_array_set` raises past the end), so only a rebind, `push`/`splice`, a
+   `var` pass, an unknown callee or a method receiver can change a local's
+   length. `lambda_ast_note_fixed_array_lengths` (script finalize) records
+   `NameEntry::fixed_array_length` for locals bound to `fill(N, v)` with a
+   constant N or to an N-item scalar literal, and drops it on any of those
+   uses. `walk_lambda_ast` now also visits loop init/update clauses, blocks,
+   `seq` and conditional expressions, which that invalidation scan needs.
+3. **Index proofs in the typed read and store emitters.** `mir_index_proof`
+   returns none / non-negative / in-bounds (with the constant when the
+   interval is one point). In bounds, a read skips its length load, both tests
+   and its out-of-bounds arm; a store skips its bounds test and emits its cold
+   arm only if some other guard can still reach it; a constant index becomes a
+   load displacement. `mir_index_expr_nonnegative` now consults the interval
+   oracle first -- a literal index was a childless primary it reported as
+   unknown, so `qv[32]` kept a negative-index test.
+4. **Int values with a proven interval skip the store's lane validity test**,
+   which was the only branch to the cold arm of `line_drawn[k] = 1`.
+5. **One-call boxing in cold arms.** `emit_box_cold_scalar` spells int and float
+   boxing as `int2it_lane` / `push_d` (which is `flt2it`), instead of the
+   ~10-instruction inline encoders, on store miss arms.
+6. **`jmp L` followed only by labels up to `L` is removed** at Lambda function
+   finalize (`mir_prune_jumps_to_next_label`). Emitters close arms that way
+   whenever a later arm turns out empty; `run_cube` had 165. No code records a
+   jump's address.
+7. **Int equality against a proven in-band operand is a raw compare.** The
+   float arm exists because raw equality is wrong when both sides are
+   sentinels; a sentinel against an in-band value compares unequal either way.
+   The non-null equality path likewise drops its NaN tests when one side is
+   proven.
+8. **An int lane entering a plain `int` parameter checks only for null.**
+   `int` admits +/-inf and NaN (verified on both tiers), so the box, generic
+   check call, error test and unbox (~30 instructions per argument) become one
+   `beq` to a deferred terminal rejection with the same E201 text.
+9. **The typed record path store keeps int values and index keys native** on
+   its hot arm and boxes them only on the cold arm (an int Item never
+   allocates, so no root is needed).
+10. **An index product with an operand already inside [0, 2^26) skips that
+    operand's compare**, so `i * 4` costs one unsigned compare.
+
+**Output identity.** The benchmark corpus is identical to v24 except the four
+`ls_micro` rows that print their own timings; the CW36 probe table passes 93/93
+on the new build, and targeted probes (out-of-bounds store errors, arrays
+resized through `push` or a `var` callee, rebinds) match v24 on all tiers.
+
+**Fixtures.** Four MIR fixtures pinned shapes this track removes by design:
+`tune22_int_lane_equality` (a literal operand no longer needs the float arm --
+the float arm is now pinned with two nullable reads, and a literal case forbids
+it), `tune16_proved_float_store` and `tune13_array_lane` (literal indices into
+fixed-length locals have no cold store -- they now use parameter indices),
+`tune26_same_owner_store` (the literal `flags[0]` lost its negative test), and
+`r37_literal_index_product` (one compare instead of add + compare). New fixture
+`tune28_fixed_length_index` pins the proven stores and the `push` counter-case.
+
+**What keeps `c_choose_method` above 1,200.** Each `w.cons[cid].field` read is
+still ~50 instructions: the `cons` field load with its zero-slot null arm, the
+per-access `Constraint?[]` layout guard (N2), a bounds test, the element's
+`item_at` miss arm with spills, then the element's own null and shape tests.
+Each store is similar. Removing them needs the record-layout proofs of N2/N3
+(one layout proof per body, a raw record ABI), not emission trimming. The
+zero-slot arm on a non-null container field was left alone: nothing yet proves
+a declared non-null container slot can never hold a zero word (partially
+built records, host-built maps), and a wrong guess there is a crash, not a
+lost optimization.
+
+**Timing (JIT exec, min of 5, both orders; t7/v24).** The machine carried four
+unrelated test processes at ~100% CPU.
+
+| row | v24 first | t7 first | reading |
+|---|---|---|---|
+| awfy deltablue2 | 0.913 | 0.935 | ~7% faster |
+| awfy mandelbrot2 | 0.961 | 0.943 | ~5% faster |
+| awfy richards2 | 0.958 | 0.976 | ~3% faster |
+| jetstream navier_stokes2 | 0.969 | 0.981 | ~2% faster |
+| awfy havlak2 | 1.000 | 0.970 | neutral |
+| jetstream deltablue2 | 1.018 | 0.954 | neutral |
+| jetstream nbody2 | 0.784 | 0.988 | noise |
+| beng spectralnorm2 (min of 15) | 1.076 | 1.001 | noise: 2.8 ms, and the hot loop's only change is removed instructions |
+
+**Wall time, cube3d2 (compile + run, min of 9).** This is the row whose cost is
+compilation (§6 "Deferred"): JIT 341-347 ms -> 181-186 ms, auto 347-353 ms ->
+186-198 ms, about 46% faster end to end.
+
+**Gates (final source).** MIR emission 143/143 (four fixtures re-pinned as
+above, one new); ratchet 19/19 after locking in 23 shrunk metrics across 11
+probes (largest: cube3d module 22,528 -> 14,487, jetstream deltablue
+`choose_method` 1,823 -> 1,563, prettier module 16,376 -> 16,268; none grew);
+runtime 924/924 including tier parity; `test_lambda_opt_gtest` 24/24;
+`test_lambda_proc_gtest` 6/6; benchmark corpus identical to v24 except the four
+self-timing rows; CW36 probe table 93/93.

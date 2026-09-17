@@ -833,8 +833,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
 
-    JsMirMainFunc js_main_fn = js_mir_link_main(ctx, g_mir_interp_mode != 0,
-        MIR_set_gen_interface);
+    JsMirMainFunc js_main_fn = js_mir_link_main(ctx, MIR_set_gen_interface);
 
     if (!js_main_fn) {
         log_error("js-new-function: failed to find js_main");
@@ -1731,7 +1730,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemNull;
         }
 
-        JsMirMainFunc js_main_fn = js_mir_link_main(eval_ctx, g_mir_interp_mode != 0,
+        JsMirMainFunc js_main_fn = js_mir_link_main(eval_ctx,
             MIR_set_gen_interface);
 
         if (!js_main_fn) {

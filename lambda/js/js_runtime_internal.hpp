@@ -59,6 +59,8 @@ JsBodyEntry js_function_select_body_entry(const JsFunction* fn);
 // stamps this when no narrower finalized protocol covers the function.
 Item js_call_entry_generic(Item fn_item, Item this_val, Item* args, int argc,
         uint64_t* result_home, bool args_prerooted);
+Item js_call_entry_mir_light(Item fn_item, Item this_val, Item* args, int argc,
+        uint64_t* result_home, bool args_prerooted);
 Item js_call_entry_bound(Item fn_item, Item this_val, Item* args, int argc,
         uint64_t* result_home, bool args_prerooted);
 Item js_construct_entry_ordinary(Item fn_item, Item* args, int argc,
@@ -174,9 +176,8 @@ bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
 bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op);
 
 static inline bool js_is_symbol(Item v) {
-    if (get_type_id(v) == LMD_TYPE_SYMBOL) return true;
-    if (get_type_id(v) != LMD_TYPE_INT) return false;
-    return it2i(v) <= -(int64_t)JS_SYMBOL_BASE;
+    return get_type_id(v) == LMD_TYPE_SYMBOL &&
+        symbol_has_js_identity(v.get_safe_symbol());
 }
 
 static inline bool js_is_bigint(Item v) {
@@ -223,8 +224,8 @@ static inline bool js_is_deleted_sentinel(Item val) {
 }
 
 static inline bool js_key_is_symbol(Item key) {
-    if (get_type_id(key) != LMD_TYPE_INT) return false;
-    return it2i(key) <= -(int64_t)JS_SYMBOL_BASE;
+    Symbol* symbol = get_type_id(key) == LMD_TYPE_SYMBOL ? key.get_safe_symbol() : NULL;
+    return symbol && symbol->kind != SYMBOL_LAMBDA_NAME;
 }
 
 extern "C" NameId js_symbol_name_id(Item sym);
@@ -232,13 +233,13 @@ extern "C" NameId js_symbol_name_id(Item sym);
 static inline Item js_symbol_to_key(Item sym) {
     NameId semantic_id = js_symbol_name_id(sym);
     if (semantic_id != NAME_ID_NONE) {
-        // Every Symbol has a registered semantic NameRecord.  Property
-        // identity may never depend on the historical diagnostic encoding.
+        // Every JS Symbol retains the transitional NameId property route.
+        // Value identity stays on its core Symbol pointer.
         NameRef semantic_key = name_pool_resolve_id(
             context ? context->name_pool : NULL, semantic_id);
         if (semantic_key) return (Item){.item = s2it(semantic_key)};
     }
-    // An encoded Symbol without a registered NameRecord is invalid runtime
+    // A Symbol without a registered NameId is invalid runtime
     // state; manufacturing a printable string here would alias a user key.
     return ItemNull;
 }

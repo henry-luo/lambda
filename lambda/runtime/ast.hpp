@@ -401,14 +401,21 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             AstNamedNode* param = callee ? callee->param : NULL;
             bool callee_is_proc = callee &&
                 ((AstNode*)callee)->node_type == AST_NODE_PROC;
+            // a system function that is not a procedure is pure (the fn/pn
+            // split); the mutating builtins (push, splice) are procedures
+            SysFuncInfo* sys = callee_node && callee_node->node_type == AST_NODE_SYS_FUNC
+                ? ((AstSysFuncNode*)callee_node)->fn_info : NULL;
+            bool pure_sys = sys && !sys->is_proc;
             for (AstNode* arg = call->argument; arg; arg = arg->next) {
                 AstIdentNode* arg_root = ast_compound_root_ident(arg);
-                if (arg_root && arg_root->entry == root) {
+                if (arg_root && arg_root->entry == root && !pure_sys) {
                     TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
-                    // unknown callee (builtins: push/splice/pop), a `var`
-                    // borrow, or -- until CW29 lands -- any plain `pn`
-                    // parameter (write-through ABI) may all mutate the root
-                    if (!callee || (pt && pt->is_var_param) || callee_is_proc) {
+                    // an unknown callee, a `var` borrow, or a procedure whose
+                    // parameter list is not built yet (a later definition)
+                    // may mutate the root. A known plain `pn` parameter
+                    // cannot: its writes are local to the callee (S9.1.3,
+                    // CW29 snapshots it there).
+                    if (!callee || (pt && pt->is_var_param) || (callee_is_proc && !pt)) {
                         return true;
                     }
                 }
@@ -473,6 +480,61 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             if (field->computed && ast_body_may_write_entry(field->field, root, include_rebind)) return true;
             break;
         }
+        // Declarations, returns and the remaining composites can hide a write
+        // in an initializer or operand (`var z = mutate(r)`). Missing them let
+        // a D4.4.6 place copy and a JIT read-only alias skip their snapshot.
+        case AST_NODE_VAR_STAM:
+        case AST_NODE_LET_STAM:
+        case AST_NODE_PUB_STAM:
+            if (ast_body_may_write_entry(((AstVarDeclNode*)stmt)->declare, root, include_rebind)) return true;
+            break;
+        case AST_NODE_VARIABLE_DECLARATOR:
+            if (ast_body_may_write_entry(((AstDeclaratorNode*)stmt)->init, root, include_rebind)) return true;
+            break;
+        case AST_NODE_RETURN_STAM:
+            if (ast_body_may_write_entry(((AstReturnNode*)stmt)->value, root, include_rebind)) return true;
+            break;
+        case AST_NODE_RAISE_STAM:
+        case AST_NODE_RAISE_EXPR:
+            if (ast_body_may_write_entry(((AstRaiseNode*)stmt)->value, root, include_rebind)) return true;
+            break;
+        case AST_NODE_BLOCK:
+            if (ast_body_may_write_entry(((AstBlockNode*)stmt)->statements, root, include_rebind)) return true;
+            break;
+        case AST_NODE_SEQ:
+        case AST_NODE_MAP:
+        case AST_NODE_ELEMENT:
+            if (ast_body_may_write_entry(((AstArrayNode*)stmt)->item, root, include_rebind)) return true;
+            break;
+        case AST_NODE_CONDITIONAL_EXPR: {
+            AstIfNode* cond_node = (AstIfNode*)stmt;
+            if (ast_body_may_write_entry(cond_node->cond, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(cond_node->then, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(cond_node->otherwise, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_KEY_EXPR:
+        case AST_NODE_NAMED_ARG:
+            if (ast_body_may_write_entry(((AstNamedNode*)stmt)->as, root, include_rebind)) return true;
+            break;
+        case AST_NODE_SPREAD:
+            if (ast_body_may_write_entry(((AstUnaryNode*)stmt)->operand, root, include_rebind)) return true;
+            break;
+        case AST_NODE_PIPE:
+            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->left, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->right, root, include_rebind)) return true;
+            break;
+        case AST_NODE_HANDLER_EXPR:
+        case AST_NODE_HANDLER_STAM: {
+            AstHandlerNode* handler = (AstHandlerNode*)stmt;
+            if (ast_body_may_write_entry(handler->operand, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(handler->body, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(handler->value_body, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_START:
+            if (ast_body_may_write_entry((AstNode*)((AstStartNode*)stmt)->call, root, include_rebind)) return true;
+            break;
         default:
             break;
         }

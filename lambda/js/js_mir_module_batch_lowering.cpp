@@ -860,8 +860,7 @@ void jm_cleanup_deferred_mir() {
         if (!artifact) continue;
         // Deferred eval units use the same JIT generator as ordinary units;
         // finishing only MIR leaves the generator arena and native code live.
-        jit_cleanup_mode((MIR_context_t)artifact->mir_context,
-            !g_mir_interp_mode);
+        jit_cleanup_mode((MIR_context_t)artifact->mir_context, 1);
         if (artifact->source_owner) mem_free(artifact->source_owner);
     }
     js_code_store_clear_rows(store);
@@ -1862,7 +1861,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
-            JsStaticFieldEntry* sf = &member->as.static_field;
+            JsClassMember* sf = member;
             if (sf->name && ce->name) {
                 sf->module_var_index = mt->module_var_count;
                 // Register as module const for ClassName.fieldName access pattern
@@ -1883,7 +1882,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_STATIC_FIELD) continue;
-            JsStaticFieldEntry* sf = &member->as.static_field;
+            JsClassMember* sf = member;
             if (sf->computed && sf->key_expr) {
                 sf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: static field computed key slot class=%.*s field=%d module_var[%d]",
@@ -1894,7 +1893,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
             JsClassMember* member = &ce->members[member_index];
             if (member->kind != JS_CLASS_MEMBER_INSTANCE_FIELD) continue;
-            JsInstanceFieldEntry* inf = &member->as.instance_field;
+            JsClassMember* inf = member;
             if (inf->computed && inf->key_expr) {
                 inf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: instance field computed key slot class=%.*s field=%d module_var[%d]",
@@ -1916,7 +1915,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
             method_count, (void*)ce->constructor);
         for (int member_index = 0; member_index < ce->member_count; member_index++) {
-            JsClassMethodEntry* me = jm_class_member_method(ce, member_index);
+            JsClassMember* me = jm_class_member_method(ce, member_index);
             if (!me) continue;
             log_debug("js-mir:   member[%d]: '%.*s' static=%d ctor=%d",
                 member_index, me->name ? (int)me->name->len : 0, me->name ? me->name->chars : "(null)",
@@ -3282,7 +3281,7 @@ static int js_mir_lower(void* opaque) {
                     if (JM_JS_FACT(fc, has_rest_param)) pc = -pc;  // negative signals rest params
                     const char* vname = jm_var_name(fn->name);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function_mir", MIR_T_I64,
+                    MIR_reg_t fn_item = jm_call_2(mt, "js_new_function_mir_pending", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
                     // Keep hoisted declarations on the same atomic metadata path as
@@ -3435,7 +3434,7 @@ static int js_mir_lower(void* opaque) {
                             }
                         }
                     }
-                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure_mir", MIR_T_I64,
+                    MIR_reg_t fn_item = jm_call_4(mt, "js_new_closure_mir_pending", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
@@ -3876,7 +3875,7 @@ static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
 
 class JsModuleMirBuildScope {
 public:
-    JsCommonMirBuild build = {};
+    InputScriptBuildScope build = {};
     bool published = false;
 
     ~JsModuleMirBuildScope() {
@@ -4183,9 +4182,11 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
+    // JS MIR always owns a native context; another language's diagnostic
+    // interpreter mode must not suppress this document-size guard.
     bool document_ast_too_large = runtime->dom_doc != NULL &&
-        g_mir_interp_mode == 0 && mir_large_interp_enabled() &&
-        tp->ast_index.count > JM_RADIANT_AST_NODE_THRESHOLD;
+        mir_large_interp_enabled() &&
+        tp->ast_index.count > MIR_RADIANT_AST_NODE_THRESHOLD;
     if (document_ast_too_large) {
         // Static imports bypass the source-script compiler, so select its
         // established AST tier here before MIR lowering scales with the graph.
@@ -4322,8 +4323,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
-    JsMirMainFunc js_main = js_mir_link_main(ctx, g_mir_interp_mode,
-        MIR_set_gen_interface);
+    JsMirMainFunc js_main = js_mir_link_main(ctx, MIR_set_gen_interface);
 
     if (!js_main) {
         log_error("js-mir: module: failed to find js_main for '%s'", filename);

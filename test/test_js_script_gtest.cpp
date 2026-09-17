@@ -58,8 +58,15 @@ TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     JsFunction* a = (JsFunction*)first.function;
     JsFunction* b = (JsFunction*)second.function;
     EXPECT_NE(a, b);
+    EXPECT_EQ((void*)a, (void*)static_cast<Function*>(a));
+    EXPECT_TRUE(function_has_abi(static_cast<Function*>(a),
+        FN_ENTRY_ABI_JS_FUNCTION));
     EXPECT_EQ(a->code, b->code);
     EXPECT_EQ(js_fn_ast_definition(a), js_fn_ast_definition(b));
+    EXPECT_EQ(a->code->definition, js_fn_ast_definition(a)->definition);
+    EXPECT_EQ(a->code->definition_module,
+        js_fn_ast_definition(a)->definition_module);
+    EXPECT_EQ(a->code->param_count, js_fn_param_count(a));
     EXPECT_NE(js_fn_ast(a)->env, js_fn_ast(b)->env);
     EXPECT_EQ(js_call_function(first, ItemNull, NULL, 0).item, flt2it(1.0).item);
     EXPECT_EQ(js_call_function(second, ItemNull, NULL, 0).item, flt2it(2.0).item);
@@ -98,6 +105,40 @@ TEST(JsCallableDefinitions, LiveMirValuesSurviveWeakTableTeardown) {
         EXPECT_EQ(a->code->intern_table, nullptr);
         EXPECT_EQ(js_fn_param_count(a), 1);
     }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsRuntimeResources, SharesOneContextCapsuleAcrossHostOwners) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, source,
+        sizeof(source) - 1, "resource-capsule.js", NULL)));
+
+    EvalContext* owner = runtime.eval_context;
+    ASSERT_NE(owner, nullptr);
+    RuntimeResourceTable* resources = js_runtime_resource_table();
+    ASSERT_NE(resources, nullptr);
+    EXPECT_EQ(resources, context_capsule(owner,
+        CONTEXT_CAPSULE_RUNTIME_RESOURCES));
+
+    {
+        RootFrame roots(1);
+        Rooted<Item> resource_owner(roots, js_new_object());
+        const RuntimeResourceDescriptor* descriptor =
+            runtime_resource_descriptor_from_legacy_name("timer");
+        ASSERT_NE(descriptor, nullptr);
+        uint32_t id = runtime_resource_table_add(resources, resource_owner.get(),
+            descriptor, NULL, NULL, true);
+        ASSERT_NE(id, 0u);
+        EXPECT_EQ(runtime_resource_table_active_count(resources), 1);
+        EXPECT_EQ(runtime_resource_table_value(resources,
+            runtime_resource_table_entry(resources, id)).item,
+            resource_owner.get().item);
+        runtime_resource_table_remove(resources, id);
+        EXPECT_EQ(runtime_resource_table_active_count(resources), 0);
+    }
+
     runtime_cleanup(&runtime);
 }
 
@@ -405,7 +446,7 @@ struct JsCommonAstBuildWaiter {
     const char* source;
     size_t source_length;
     const char* reference;
-    JsCommonAstBuild build;
+    InputScriptBuildScope build;
 };
 
 static void* js_common_ast_build_waiter_main(void* opaque) {
@@ -427,9 +468,10 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
         ++cache_generation);
     const char source[] = "var answer = 21 * 2; answer;";
 
-    JsCommonAstBuild owner = {};
+    InputScriptBuildScope owner = {};
     ASSERT_EQ(js_common_ast_cache_begin_build(&owner, source,
         sizeof(source) - 1, reference, false, false), INPUT_SCRIPT_BUILD_OWNER);
+    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_AST);
 
     JsCommonAstBuildWaiter waiter = {source, sizeof(source) - 1, reference, {}};
     pthread_t worker = {};
@@ -470,6 +512,7 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
     EXPECT_TRUE(wait_observed);
     EXPECT_TRUE(published);
     EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    EXPECT_EQ(waiter.build.kind, INPUT_SCRIPT_BUILD_AST);
     js_common_ast_cache_complete_build(&waiter.build, false, false);
     runtime_cleanup(&runtime);
 
@@ -485,7 +528,7 @@ struct JsCommonMirBuildWaiter {
     const char* source;
     size_t source_length;
     const char* reference;
-    JsCommonMirBuild build;
+    InputScriptBuildScope build;
 };
 
 static void* js_common_mir_build_waiter_main(void* opaque) {
@@ -515,9 +558,10 @@ TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
         ++cache_generation);
     const char source[] = "var cachedAnswer = 42;";
 
-    JsCommonMirBuild owner = {};
+    InputScriptBuildScope owner = {};
     ASSERT_EQ(js_mir_lease_session_begin_build(session, true, source,
         sizeof(source) - 1, reference, NULL, &owner), INPUT_SCRIPT_BUILD_OWNER);
+    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_MIR);
 
     JsCommonMirBuildWaiter waiter = {false, session, source,
         sizeof(source) - 1, reference, {}};
@@ -555,6 +599,7 @@ TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
     EXPECT_TRUE(wait_observed);
     EXPECT_TRUE(published);
     EXPECT_EQ(waiter.build.state, INPUT_SCRIPT_BUILD_READY);
+    EXPECT_EQ(waiter.build.kind, INPUT_SCRIPT_BUILD_MIR);
     js_mir_lease_session_complete_build(&waiter.build, false, false);
     js_mir_lease_session_close(session);
     runtime_cleanup(&runtime);
@@ -577,9 +622,10 @@ TEST(JsInterpreter, SingleFlightsClosedModuleMirBuild) {
         ++cache_generation);
     const char source[] = "export const answer = 42;";
 
-    JsCommonMirBuild owner = {};
+    InputScriptBuildScope owner = {};
     ASSERT_EQ(js_module_mir_cache_begin_build(source, sizeof(source) - 1,
         reference, &owner), INPUT_SCRIPT_BUILD_OWNER);
+    EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_MIR);
 
     JsCommonMirBuildWaiter waiter = {true, NULL, source,
         sizeof(source) - 1, reference, {}};
@@ -2867,6 +2913,95 @@ TEST(JsInterpreter, InitializesComputedSymbolClassFields) {
     for (int index = 0; index < 10; index++) {
         EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true));
     }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesLongSymbolKeysAndDescriptions) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var prefix = 'x'.repeat(127); var first_key = prefix + 'a'; "
+        "var second_key = prefix + 'b'; var first = Symbol.for(first_key); "
+        "var second = Symbol.for(second_key); var described = Symbol(prefix + 'c'); "
+        "var empty = Symbol(''); var absent = Symbol(); var undefined_desc = Symbol(undefined); "
+        "[first !== second, Symbol.keyFor(first) === first_key, "
+        "Symbol.keyFor(second) === second_key, described.description === prefix + 'c', "
+        "described.toString() === 'Symbol(' + prefix + 'c)', empty.description === '', "
+        "absent.description === undefined, undefined_desc.description === undefined];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "long-symbol-records.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 8; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true))
+            << "long symbol record result index " << index;
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, UsesCoreSymbolsForJsValueIdentity) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var absent = Symbol(); var empty = Symbol(''); "
+        "var registered = Symbol.for('registry'); var local = Symbol('registry'); "
+        "var o = {}; o[absent] = 1; o[empty] = 2; "
+        "var seen = null; var has_seen = null; var proxy = new Proxy({}, { "
+        "get: function(target, key) { seen = key; return 0; }, "
+        "has: function(target, key) { has_seen = key; return true; } }); "
+        "proxy[absent]; "
+        "if (registered !== Symbol.for('registry') || local === registered || "
+        "Symbol.iterator !== Symbol.iterator || seen !== absent || "
+        "!(absent in Object.create(proxy)) || has_seen !== absent || "
+        "o[absent] !== 1 || o[empty] !== 2 || !(absent in o) || "
+        "Object.getOwnPropertySymbols(o).length !== 2) throw new Error(); "
+        "[absent, empty, registered, local, Symbol.iterator];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "core-symbol-identity.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item absent_item = js_elements_get_int(result, 0);
+    Item empty_item = js_elements_get_int(result, 1);
+    Item registered_item = js_elements_get_int(result, 2);
+    Item local_item = js_elements_get_int(result, 3);
+    Item iterator_item = js_elements_get_int(result, 4);
+    ASSERT_EQ(get_type_id(absent_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(empty_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(registered_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(local_item), LMD_TYPE_SYMBOL);
+    ASSERT_EQ(get_type_id(iterator_item), LMD_TYPE_SYMBOL);
+
+    Symbol* absent = absent_item.get_safe_symbol();
+    Symbol* empty = empty_item.get_safe_symbol();
+    Symbol* registered = registered_item.get_safe_symbol();
+    Symbol* local = local_item.get_safe_symbol();
+    Symbol* iterator = iterator_item.get_safe_symbol();
+    ASSERT_NE(absent, nullptr);
+    ASSERT_NE(empty, nullptr);
+    ASSERT_NE(registered, nullptr);
+    ASSERT_NE(local, nullptr);
+    ASSERT_NE(iterator, nullptr);
+    Item cached_iterator = js_well_known_symbol_key(1);
+    ASSERT_EQ(get_type_id(cached_iterator), LMD_TYPE_SYMBOL);
+    EXPECT_EQ(cached_iterator.item, iterator_item.item);
+    EXPECT_NE(absent, empty);
+    EXPECT_NE(registered, local);
+    EXPECT_EQ(absent->kind, SYMBOL_JS_UNIQUE_UNDESCRIBED);
+    EXPECT_EQ(empty->kind, SYMBOL_JS_UNIQUE);
+    EXPECT_EQ(registered->kind, SYMBOL_JS_REGISTERED);
+    EXPECT_EQ(local->kind, SYMBOL_JS_UNIQUE);
+    EXPECT_EQ(iterator->kind, SYMBOL_JS_WELL_KNOWN);
+    EXPECT_EQ(absent->len, 0u);
+    EXPECT_EQ(empty->len, 0u);
+    EXPECT_STREQ(registered->chars, "registry");
+    EXPECT_STREQ(local->chars, "registry");
+    EXPECT_STREQ(iterator->chars, "Symbol.iterator");
+    EXPECT_NE(absent->name_id, NAME_ID_NONE);
+    EXPECT_NE(iterator->name_id, NAME_ID_NONE);
 
     runtime_cleanup(&runtime);
 }

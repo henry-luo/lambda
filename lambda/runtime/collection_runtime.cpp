@@ -10,6 +10,7 @@
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
+extern "C" bool js_array_runtime_items_release(Array* owner);
 
 // These UI conversion helpers require the DOM representation and remain in the
 // runtime data implementation. Collection growth calls them only for an
@@ -28,6 +29,17 @@ static Arena* ui_collection_arena() {
         return input_allocation_context->arena;
     }
     return nullptr;
+}
+
+static void list_release_js_runtime_items(List* list) {
+    if (!list || list->type_id != LMD_TYPE_ARRAY ||
+            (list->reserved_state & CONTAINER_STATE_JS_RUNTIME_ITEMS) == 0) {
+        return;
+    }
+    // JS may hand a dense external buffer to generic collection growth. The
+    // copied replacement is GC-owned, so unlink and free the old buffer before
+    // publishing it rather than leaving a stale external owner record.
+    js_array_runtime_items_release((Array*)list);
 }
 
 static bool list_reserve_capacity(List* list, int64_t required_capacity,
@@ -57,9 +69,10 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
         if (old_items && previous_capacity > 0) {
             memcpy(new_items, old_items, (size_t)previous_capacity * slot_size);
         }
+        list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
+        list_release_js_runtime_items(list);
         list->items = new_items;
         list->capacity = new_capacity;
-        list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
         return true;
     }
 
@@ -75,9 +88,10 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
     if (old_items && previous_capacity > 0) {
         memcpy(new_items, old_items, (size_t)previous_capacity * slot_size);
     }
+    list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
+    list_release_js_runtime_items(list);
     list->items = new_items;
     list->capacity = new_capacity;
-    list_relocate_owned_tail(list, old_items, previous_capacity, new_items, new_capacity);
     return true;
 }
 
