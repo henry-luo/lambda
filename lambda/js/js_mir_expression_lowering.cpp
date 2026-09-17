@@ -2819,8 +2819,14 @@ struct JsMirStaticShapeField {
     TypeId type_id;
 };
 
+static bool jm_static_literal_storage_is_current_realm() {
+    // D5.4.3: cached compile-only MIR cannot retain compiler-realm pointers.
+    return !g_jm_preamble_compile_only;
+}
+
 static TypeMap* jm_build_static_shape(JsMirTranspiler* mt,
         const JsMirStaticShapeField* fields, int field_count) {
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !fields || field_count <= 0 || field_count > 16 ||
             !js_input || !js_input->pool) return NULL;
 
@@ -7662,6 +7668,7 @@ MIR_reg_t jm_transpile_member_as_number(JsMirTranspiler* mt, JsMemberNode* membe
 
 static Item* jm_static_inline_number_array_items(JsMirTranspiler* mt,
         JsArrayNode* array) {
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !mt->tp || !array || array->length <= 0 ||
             !js_input || !js_input->pool) return NULL;
 
@@ -7860,6 +7867,7 @@ static bool jm_static_literal_recipe_set_node(JsMirTranspiler* mt,
 
 static JsStaticLiteralRecipe* jm_static_composite_literal_recipe(
         JsMirTranspiler* mt, JsAstNode* node) {
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !node || !js_input || !js_input->pool) return NULL;
     JsStaticLiteralRecipe* recipe = (JsStaticLiteralRecipe*)pool_calloc(
         js_input->pool, sizeof(JsStaticLiteralRecipe));
@@ -7880,6 +7888,7 @@ static JsStaticLiteralRecipe* jm_static_composite_literal_recipe(
 static JsStaticObjectProperty* jm_static_primitive_object_properties(
         JsMirTranspiler* mt, JsObjectNode* object, int* out_length) {
     if (out_length) *out_length = 0;
+    if (!jm_static_literal_storage_is_current_realm()) return NULL;
     if (!mt || !object || !js_input || !js_input->pool) return NULL;
 
     int count = 0;
