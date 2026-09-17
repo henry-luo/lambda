@@ -52,6 +52,7 @@ struct RadiantOnlineViewResult {
     bool timed_out;
     bool exec_failed;
     bool output_alloc_failed;
+    uint64_t elapsed_ms;
     uint64_t memtrack_live_bytes;
     uint64_t memtrack_live_count;
     char output_path[256];
@@ -613,6 +614,13 @@ static int online_view_timeout_seconds() {
         ONLINE_VIEW_CLEANUP_GRACE_SECONDS;
 }
 
+static uint64_t online_view_now_ms() {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+    return (uint64_t)now.tv_sec * UINT64_C(1000) +
+        (uint64_t)(now.tv_nsec / 1000000);
+}
+
 static int online_view_exit_code(int status) {
     if (status == -1) return -1;
     if (WIFEXITED(status)) return WEXITSTATUS(status);
@@ -691,6 +699,7 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
     memset(result, 0, sizeof(*result));
     result->exit_code = -1;
     online_view_ensure_temp_dir();
+    uint64_t run_start_ms = online_view_now_ms();
 
     int log_written = snprintf(result->lambda_log_path, sizeof(result->lambda_log_path),
                                "./temp/test_radiant_online_view_%s_lambda.log",
@@ -732,9 +741,9 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
         setpgid(0, 0);
         setenv("VIEW_MEM_STAGES", "1", 1);
         setenv("LAMBDA_LOG_FILE", result->lambda_log_path, 1);
-        // Keep smoke-test diagnostics at warning/error level; per-node debug
-        // traces can make large real pages time out before layout finishes.
-        setenv("LAMBDA_LOG_LEVEL", "INFO", 1);
+        // Keep smoke-test milestones while suppressing per-node diagnostics
+        // that distort the load time of large real documents.
+        setenv("LAMBDA_LOG_LEVEL", "NOTICE", 1);
         execl(LAMBDA_EXE, LAMBDA_EXE, "view", view_case->url,
               "--event-file", event_path, "--headless", (char*)NULL);
         _exit(127);
@@ -785,6 +794,8 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
     int status = 0;
     waitpid(pid, &status, 0);
     if (!result->timed_out) result->exit_code = online_view_exit_code(status);
+    uint64_t run_end_ms = online_view_now_ms();
+    if (run_end_ms >= run_start_ms) result->elapsed_ms = run_end_ms - run_start_ms;
 
     result->memtrack_live_bytes = online_view_parse_tagged_uint64(
         result->output.data, "[MEMTRACK_LIVE]", "bytes=");
@@ -840,6 +851,11 @@ static void online_view_expect_case(size_t index) {
     const RadiantOnlineViewCase* view_case = &g_online_view_cases[index];
     ASSERT_TRUE(online_view_run_case(view_case, &result))
         << "failed to launch online view case " << view_case->label;
+
+    GTEST_LOG_(INFO) << "radiant-online-view: url=" << view_case->url
+        << " elapsed_ms=" << result.elapsed_ms
+        << " exit_code=" << result.exit_code
+        << " timed_out=" << (result.timed_out ? "true" : "false");
 
     EXPECT_FALSE(result.exec_failed) << "launch failed for " << view_case->url;
     EXPECT_FALSE(result.output_alloc_failed) << "failed to capture output for " << view_case->url;

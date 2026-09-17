@@ -22,6 +22,11 @@
 #include <math.h>
 #include <string.h>
 
+// ::marker uses the shared blk slot for MarkerProp rather than BlockProp.
+inline bool view_element_uses_marker_prop(const DomElement* element) {
+    return element && element->tag_name && strcmp(element->tag_name, "::marker") == 0;
+}
+
 // ===== computed CSS property access =====
 
 enum PropGroupKind : uint8_t {

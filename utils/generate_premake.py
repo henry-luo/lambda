@@ -2586,8 +2586,8 @@ class PremakeGenerator:
             for host_dependency in ('lambda-rt', 'radiant'):
                 if host_dependency not in dependencies:
                     dependencies.append(host_dependency)
-            if self.use_linux_config and 'node-core' not in dependencies:
-                # Linux runtime archives reference the trace-events provider;
+            if 'node-core' not in dependencies:
+                # The runtime references trace-events on every native platform;
                 # tests need the dynamic Node host that the CLI links at load time.
                 dependencies.append('node-core')
         configured_targets = {

@@ -90,6 +90,11 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         return false;
     }
     dom_set_document(doc);
+    DocState* state = (DocState*)doc->state;
+    // A host-loop turn is one browser task.  Defer debug state validation until
+    // its DOM mutations commit, otherwise a timer building a large subtree
+    // validates the entire interaction graph after every append.
+    state_begin_batch(state);
     // A native handler can enqueue a Promise callback after inserting its DOM
     // (Popper and virtual-list libraries do this). Commit that insertion before
     // flushing the callback so its geometry reads sample a frame boundary,
@@ -114,6 +119,7 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         js_event_loop_pump_nowait();
     }
     if (uicon) radiant_reconcile_dom_mutations(uicon, doc);
+    state_end_batch(state);
     input_context = saved_input_ctx;
     return pumped;
 }
@@ -1189,7 +1195,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                     resource_manager_set_wake_callback(doc->resource_manager,
                                                        network_wake_glfw, NULL);
                 }
-                log_info("view: network support initialized for HTTP document");
+                log_notice("view: network support initialized for HTTP document");
             }
         }
 
@@ -1209,7 +1215,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         // This starts async downloads for CSS, images, fonts early
         if (doc->resource_manager) {
             radiant_discover_document_resources(doc);
-            log_info("view: network resource discovery complete");
+            log_notice("view: network resource discovery complete");
 
             // Wait only for render-blocking CSS (up to 5 seconds); images,
             // fonts, and scripts continue asynchronously after first paint.
@@ -1235,7 +1241,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             int failed_resources = 0;
             resource_manager_get_stats(doc->resource_manager, &total_resources,
                                        &completed_resources, &failed_resources);
-            log_info("view: network resource stats total=%d completed=%d failed=%d",
+            log_notice("view: network resource stats total=%d completed=%d failed=%d",
                      total_resources, completed_resources, failed_resources);
             if (failed_resources > 0) {
                 log_error("view: network resource failures detected: %d of %d",

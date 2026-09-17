@@ -1,0 +1,4 @@
+https://example.com/guide?q=1
+https://example.com/guide?q=1
+https://example.com/guide?q=1
+false

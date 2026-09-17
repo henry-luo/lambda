@@ -406,6 +406,7 @@ struct JsDomState : JsRootedState {
     Item default_view = {};
     Item title = {};
     Item fonts = {};
+    Item cookie = {};
     bool design_mode = false;
     DomElement* active_element = NULL;
     DomDocument* current_document = NULL;

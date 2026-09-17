@@ -3013,6 +3013,9 @@ DisplayValue blockify_display(DisplayValue display) {
 
 static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node) {
     NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
+    if (dom_elem && dom_elem->is_parser_inserted_table_form()) {
+        return {CSS_VALUE_NONE, CSS_VALUE_NONE};
+    }
     if (css_is_mathml_element(dom_elem)) {
         return (dom_elem->tag_name && strcmp(dom_elem->tag_name, "math") == 0)
             ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_MATH}

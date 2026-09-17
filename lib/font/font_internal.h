@@ -249,6 +249,7 @@ typedef struct FontFaceEntry {
 
     // loaded handle (NULL until first load)
     FontHandle* loaded_handle;
+    bool        load_failed;            // every declared source failed in this document
 } FontFaceEntry;
 
 // ============================================================================

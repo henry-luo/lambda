@@ -1102,8 +1102,6 @@ static void prefetch_document_subresources(Element* html_root, const char* base_
     if (urls) mem_free(urls);
 }
 
-static DomElement* find_dom_element_for_source(DomElement* root, const Element* source);
-
 // load one linked stylesheet; document traversal owns source ordering.
 static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char* base_path,
                                    Pool* pool, CssStylesheet*** stylesheets,
@@ -1243,17 +1241,6 @@ static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char*
             }
 }
 
-static DomElement* find_dom_element_for_source(DomElement* root, const Element* source) {
-    if (!root || !source) return nullptr;
-    if (dom_element_render_source(root) == source) return root;
-    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
-        DomElement* found = find_dom_element_for_source(child->as_element(), source);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
 typedef struct InlineStyleTextChunk {
     const char* text;
     size_t length;
@@ -1306,7 +1293,7 @@ static void collect_stylesheets_in_document_order(Element* elem, DomElement* dom
             if (linked_count && *count > before) {
                 *linked_count += *count - before;
             }
-            DomElement* owner = find_dom_element_for_source(dom_root, elem);
+            DomElement* owner = dom_find_element_for_source(dom_root, elem);
             for (int i = before; i < *count; i++) {
                 (*stylesheets)[i]->owner_element = owner;
             }
@@ -1326,7 +1313,7 @@ static void collect_stylesheets_in_document_order(Element* elem, DomElement* dom
                         }
                     }
                     parse_inline_style_chunks(engine, chunks, chunk_count,
-                        find_dom_element_for_source(dom_root, elem), base_path, pool,
+                        dom_find_element_for_source(dom_root, elem), base_path, pool,
                         stylesheets, count, capacity);
                 }
             }

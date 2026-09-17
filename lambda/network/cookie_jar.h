@@ -42,6 +42,10 @@ typedef struct CookieJar {
     char* storage_path;   // persistent file path (e.g., "./temp/cookies.dat")
 } CookieJar;
 
+// RFC 6265 §5.1.3 domain-match, shared by cookie and legacy document-domain
+// validation so both browser-facing surfaces use the same host-boundary rule.
+bool cookie_domain_matches(const char* request_host, const char* cookie_domain);
+
 // Lifecycle
 CookieJar*  cookie_jar_create(const char* storage_path);
 void        cookie_jar_destroy(CookieJar* jar);

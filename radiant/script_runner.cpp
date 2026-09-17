@@ -33,6 +33,7 @@
 #include "../lambda/runtime/template_registry.h"
 #include "../lambda/runtime/concurrency.h"
 #include "../lambda/runtime/gc/gc_heap.h"
+#include "../lambda/runtime/side_stack.h"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -88,6 +89,8 @@ static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
 static struct sigaction js_exec_old_segv, js_exec_old_bus;
 static volatile sig_atomic_t js_exec_timed_out = 0;
+static size_t js_exec_watchdog_source_len = 0;
+static int js_exec_watchdog_budget_seconds = 0;
 
 // Per-document script timeout: covers parse/transpile plus execution.
 static struct sigaction js_exec_old_prof;
@@ -145,6 +148,26 @@ static void js_exec_watchdog_disarm(void) {
     memset(&timer, 0, sizeof(timer));
     setitimer(ITIMER_PROF, &timer, NULL);
     sigaction(SIGPROF, &js_exec_old_prof, NULL);
+}
+
+static void js_exec_watchdog_add_module_source(size_t source_length) {
+    if (!js_exec_guarded || source_length == 0) return;
+    if (source_length > SIZE_MAX - js_exec_watchdog_source_len) {
+        js_exec_watchdog_source_len = SIZE_MAX;
+    } else {
+        js_exec_watchdog_source_len += source_length;
+    }
+    int expanded_budget = radiant_script_exec_timeout_seconds(
+        js_exec_watchdog_source_len);
+    if (expanded_budget <= js_exec_watchdog_budget_seconds) return;
+
+    struct itimerval timer;
+    if (getitimer(ITIMER_PROF, &timer) != 0) return;
+    timer.it_value.tv_sec += expanded_budget - js_exec_watchdog_budget_seconds;
+    if (setitimer(ITIMER_PROF, &timer, NULL) != 0) return;
+    js_exec_watchdog_budget_seconds = expanded_budget;
+    log_info("script_runner_timeout: module graph %zu bytes gets %ds watchdog",
+        js_exec_watchdog_source_len, expanded_budget);
 }
 #endif  // !_WIN32
 
@@ -497,39 +520,6 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
  * @return               Allocated string with script content, or nullptr on failure.
  *                       Caller must free() the returned string.
  */
-static char* script_runner_admit_url_source(const char* resolved_url,
-                                            const char* source,
-                                            size_t source_length,
-                                            bool module_mode,
-                                            size_t* out_length) {
-    if (out_length) *out_length = 0;
-    if (!resolved_url || !resolved_url[0] || !source) return nullptr;
-
-    InputScriptRequest request = {};
-    request.identity = resolved_url;
-    request.source_kind = INPUT_SCRIPT_SOURCE_URL;
-    request.language = "javascript";
-    request.profile = "radiant-external";
-    request.parser_abi = "js-direct-parser-v1";
-    request.parse_flags = module_mode ? "module" : "classic";
-    request.resolution_base = resolved_url;
-    request.backend = "mir-direct";
-    request.execution_mode = module_mode ? "module" : "classic";
-    request.ast_abi = 1;
-    request.compiler_abi = 1;
-    request.interface_abi = jube_interface_registry_digest();
-    request.dependency_digest = jube_interface_registry_digest();
-    request.optimize_level = g_js_mir_optimize_level;
-    request.module_mode = module_mode;
-    InputScriptCache* cache = input_manager_global_script_cache();
-    InputScriptRequest source_request = request;
-    source_request.source = source;
-    source_request.source_length = source_length;
-    input_script_cache_invalidate(cache, &source_request);
-    return input_script_cache_copy_source(cache, &request, source, source_length,
-        out_length);
-}
-
 static char* load_script_content(const char* resolved_path, bool is_http,
                                  bool module_mode) {
     char* content = nullptr;
@@ -602,34 +592,16 @@ static char* load_script_content(const char* resolved_path, bool is_http,
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver-vendor.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
-    if (is_http) {
-        size_t content_size = 0;
-        content = download_http_content_cached(resolved_path, &content_size, "./temp/cache");
-        if (content) {
-            size_t admitted_length = 0;
-            char* admitted = script_runner_admit_url_source(
-                resolved_path, content, content_size, module_mode,
-                &admitted_length);
-            mem_free(content);
-            content = admitted;
-            if (content) {
-                log_debug("script_runner: admitted external URL script: %s (%zu bytes)",
-                          resolved_path, admitted_length);
-            }
-        } else {
-            log_warn("script_runner: optional external script unavailable: %s", resolved_path);
-        }
+    size_t source_length = 0;
+    content = js_load_script_source_from_cache(
+        resolved_path, "radiant-external",
+        module_mode ? "module" : "classic", module_mode, &source_length);
+    if (content) {
+        log_debug("script_runner: loaded external %s script from common cache: %s (%zu bytes)",
+                  is_http ? "URL" : "file", resolved_path, source_length);
     } else {
-        size_t source_length = 0;
-        content = js_load_script_source_from_cache(
-            resolved_path, "radiant-external",
-            module_mode ? "module" : "classic", module_mode, &source_length);
-        if (content) {
-            log_debug("script_runner: loaded external script from common cache: %s (%zu bytes)",
-                      resolved_path, source_length);
-        } else {
-            log_warn("script_runner: optional external script file unavailable: %s", resolved_path);
-        }
+        log_warn("script_runner: optional external %s script unavailable: %s",
+                 is_http ? "URL" : "file", resolved_path);
     }
     return content;
 }
@@ -1099,6 +1071,9 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "  languages: ['en-US', 'en'], maxTouchPoints: 1\n"
         "};\n"
         "navigator.sendBeacon = navigator.sendBeacon || function(){ return false; };\n"
+        // Java applets are unavailable in the embedded browser surface, but
+        // the legacy Navigator API must still be callable for feature probes.
+        "navigator.javaEnabled = navigator.javaEnabled || function(){ return false; };\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
         "document.hidden = false;\n"
@@ -1132,7 +1107,14 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
-        "var screen = undefined;\n"
+        // Screen dimensions derive from the document viewport; a synthetic
+        // undefined value made ordinary legacy feature probes crash.
+        "var screen = {\n"
+        "  width: document.documentElement ? document.documentElement.clientWidth : 0,\n"
+        "  height: document.documentElement ? document.documentElement.clientHeight : 0,\n"
+        "  availWidth: document.documentElement ? document.documentElement.clientWidth : 0,\n"
+        "  availHeight: document.documentElement ? document.documentElement.clientHeight : 0\n"
+        "};\n"
         "window.screen = screen;\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
         "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
@@ -1730,6 +1712,30 @@ static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
     return true;
 }
 
+class DocumentCurrentScriptScope {
+public:
+    DocumentCurrentScriptScope(Runtime* runtime, JsScriptTask* task)
+        : document(nullptr), previous(nullptr), active(false) {
+        if (!runtime || !task || task->kind != JS_SCRIPT_TASK_CLASSIC) return;
+        DomDocument* doc = (DomDocument*)runtime->dom_doc;
+        DomElement* script = doc
+            ? dom_find_element_for_source(doc->root, task->script_element) : nullptr;
+        if (!doc || !script) return;
+        document = doc;
+        previous = dom_document_swap_current_script(document, script);
+        active = true;
+    }
+
+    ~DocumentCurrentScriptScope() {
+        if (active) dom_document_swap_current_script(document, previous);
+    }
+
+private:
+    void* document;
+    void* previous;
+    bool active;
+};
+
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       JsPreambleState* preamble,
                                       const char* phase_name,
@@ -1791,6 +1797,7 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
 #endif
         uint64_t result_home = 0;
         Item result;
+        DocumentCurrentScriptScope current_script(runtime, task);
         if (task->kind == JS_SCRIPT_TASK_MODULE) {
             result = execute_js_module_source(
                 runtime, source, task->source_len, filename);
@@ -2288,6 +2295,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     js_exec_timed_out = 0;
     js_exec_guarded = 1;
     int timeout_seconds = radiant_script_exec_timeout_seconds(watchdog_source_len);
+    js_exec_watchdog_source_len = watchdog_source_len;
+    js_exec_watchdog_budget_seconds = timeout_seconds;
+    js_set_document_source_load_observer(js_exec_watchdog_add_module_source);
     if (timeout_seconds > RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS) {
         log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
                  watchdog_source_len, timeout_seconds);
@@ -2298,8 +2308,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #endif
 
     Item result = ItemNull;
-    JsPreambleState* preamble = nullptr;
+    // siglongjmp may land after this owner is assigned. Keep the pointer
+    // volatile so recovery can release the preamble state it bypassed.
+    JsPreambleState* volatile preamble = nullptr;
 #ifndef _WIN32
+    LambdaRecoveryCheckpoint recovery_checkpoint = lambda_recovery_checkpoint_capture();
     int jmp_val = sigsetjmp(js_exec_jmpbuf, 1);
     if (jmp_val == 0) {
 #else
@@ -2323,8 +2336,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
+	        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
 	    } else if (jmp_val == 2) {
-	        log_error("execute_document_scripts: JS execution timed out after %ds", timeout_seconds);
+	        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
+	        log_error("execute_document_scripts: JS execution timed out after %ds",
+                js_exec_watchdog_budget_seconds);
 	        result = ItemError;
 	        js_batch_cleanup_unsafe = 1;
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
@@ -2345,6 +2361,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	            preamble = nullptr;
 	        }
 	    } else {
+	        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
 	        log_error("execute_document_scripts: recovered from crash in JS JIT code");
 	        result = ItemError;
 	        // recovered JS crashes can leave timer/runtime state inconsistent; let
@@ -2371,6 +2388,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 #else
     }
 #endif
+    js_set_document_source_load_observer(NULL);
+
+    // A signal watchdog bypasses C++ scope destructors. Never let an aborted
+    // task expose a stale currentScript during later lifecycle callbacks.
+    dom_document_swap_current_script(dom_doc, nullptr);
 
     phase_start_us = timing ? time_now_us() : 0;
     // Keep the document's canonical context current through its initial task

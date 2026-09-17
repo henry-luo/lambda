@@ -13035,6 +13035,27 @@ extern "C" void js_set_window_event_global_value(Item value) {
     js_window_event_value = value;
 }
 
+static Item js_window_post_message_dispatch(Item env_item) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    return radiant_dom_window_dispatch_event(env[0]);
+}
+
+static Item js_window_post_message(Item message, Item target_origin,
+        Item transfer_or_options) {
+    RootFrame roots(3);
+    Rooted<Item> message_root(roots, message);
+    Rooted<Item> event_root(roots, js_create_event("message", false, false));
+    Rooted<Item> callback_root(roots, ItemNull);
+    // The single browsing context still queues same-window messages after the
+    // current task, matching the observable postMessage ordering contract.
+    js_set_key_cstr(event_root.get(), "data", message_root.get());
+    js_set_key_cstr(event_root.get(), "source", js_global_this_obj);
+    callback_root.set(js_new_native_closure(js_window_post_message_dispatch, 0,
+        js_alloc_env1(event_root.get()), 1));
+    js_setTimeout(callback_root.get(), (Item){.item = i2it(0)});
+    return make_js_undefined();
+}
+
 static void js_global_var_define_cache_reset() {
     if (!js_global_bindings_ensure_roots()) return;
     js_global_environment_remove_kind(js_global_environment_state,
@@ -14065,6 +14086,8 @@ extern "C" Item js_get_global_this() {
                 radiant_dom_window_remove_event_listener);
             js_install_native_method(js_global_this_obj, "dispatchEvent",
                 radiant_dom_window_dispatch_event);
+            js_install_native_method(js_global_this_obj, "postMessage",
+                js_window_post_message);
         }
 
         // D6.2.2v2: host constructors must publish [[Construct]] because `new`
@@ -17557,6 +17580,15 @@ static char* js_url_string_to_cstr(String* s) {
     return out;
 }
 
+static Item js_url_to_string(void) {
+    Item self = js_get_this();
+    if (get_type_id(self) != LMD_TYPE_MAP || js_class_id(self) != JS_CLASS_URL) {
+        return js_throw_type_error("URL.prototype.toString called on incompatible receiver");
+    }
+    Item href = js_get_key_cstr(self, "href");
+    return get_type_id(href) == LMD_TYPE_STRING ? href : ItemEmptyString;
+}
+
 static Item js_url_to_object(Url* url) {
     if (!url || !url->is_valid) {
         if (url) url_destroy(url);
@@ -17569,7 +17601,9 @@ static Item js_url_to_object(Url* url) {
         url_destroy(url);
         return ItemNull;
     }
-    Item obj = js_new_object_with_class(JS_CLASS_URL);
+    RootFrame roots(1);
+    Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_URL));
+    Item obj = object_root.get();
 
     // Helper macro to set a string property
     #define URL_SET_PROP(propname, getter) do { \
@@ -17612,6 +17646,10 @@ static Item js_url_to_object(Url* url) {
 
     #undef URL_SET_PROP
 
+    // URL string coercion is its serialized href, not Object's fallback tag.
+    js_install_native_method(object_root.get(), "toString", js_url_to_string);
+    js_mark_non_enumerable(object_root.get(), js_name_item("toString", 8));
+
     // searchParams — full URLSearchParams object
     {
         const char* search = url_get_search(url);
@@ -17625,13 +17663,15 @@ static Item js_url_to_object(Url* url) {
     }
 
     url_destroy(url);
-    return obj;
+    return object_root.get();
 }
 
 extern "C" Item js_url_construct(Item input) {
-    TypeId tid = get_type_id(input);
-    if (tid != LMD_TYPE_STRING) return ItemNull;
-    String* s = it2s(input);
+    RootFrame roots(2);
+    Rooted<Item> input_root(roots, input);
+    Rooted<Item> input_text_root(roots, js_to_string(input_root.get()));
+    if (item_is_error(input_text_root.get())) return input_text_root.get();
+    String* s = it2s(input_text_root.get());
     if (!s || s->len == 0) return ItemNull;
 
     char* input_str = js_url_string_to_cstr(s);
@@ -17644,16 +17684,26 @@ extern "C" Item js_url_construct(Item input) {
 extern "C" Item js_url_construct_with_base(Item input, Item base) {
     TypeId tid_base = get_type_id(base);
     if (tid_base != LMD_TYPE_STRING) {
-        return js_url_construct(input);
-    }
-    String* base_str = it2s(base);
-    if (!base_str || base_str->len == 0) {
-        return js_url_construct(input);
+        if (tid_base == LMD_TYPE_NULL || tid_base == LMD_TYPE_UNDEFINED) {
+            return js_url_construct(input);
+        }
     }
 
-    TypeId tid = get_type_id(input);
-    if (tid != LMD_TYPE_STRING) return ItemNull;
-    String* s = it2s(input);
+    RootFrame roots(4);
+    Rooted<Item> input_root(roots, input);
+    Rooted<Item> base_root(roots, base);
+    Rooted<Item> input_text_root(roots, js_to_string(input_root.get()));
+    if (item_is_error(input_text_root.get())) return input_text_root.get();
+
+    Rooted<Item> base_text_root(roots, js_to_string(base_root.get()));
+    if (item_is_error(base_text_root.get())) return base_text_root.get();
+
+    String* base_str = it2s(base_text_root.get());
+    if (!base_str || base_str->len == 0) {
+        return ItemNull;
+    }
+
+    String* s = it2s(input_text_root.get());
     if (!s) return ItemNull;
 
     char* base_cstr = js_url_string_to_cstr(base_str);

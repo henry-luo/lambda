@@ -8,6 +8,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/byte_builder.h"
 #include "input.hpp"
+#include "../network/http_client.h"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -25,7 +26,7 @@ typedef struct {
 static HttpConfig default_http_config = {
     .timeout_seconds = 30,
     .max_redirects = 5,
-    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0",
+    .user_agent = RADIANT_HTTP_CLIENT_USER_AGENT,
     .verify_ssl = true,
     .enable_compression = true
 };

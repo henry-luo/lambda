@@ -6234,6 +6234,15 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
             if (reason) *reason = "broad-mutation";
             return false;
         }
+        if (record->kind == DOM_JS_MUTATION_STYLE && record->target &&
+            record->target->is_element() &&
+            record->target->as_element()->has_attribute("popover")) {
+            // Top-layer membership changes a popover between out-of-flow and
+            // in-flow layout. A retained subtree reflow cannot recompute the
+            // surrounding margin-collapse and static-position context.
+            if (reason) *reason = "popover-state";
+            return false;
+        }
         if (dom_js_node_is_stylesheet_related(record->target) ||
             dom_js_node_is_stylesheet_related(record->parent)) {
             if (reason) *reason = "stylesheet-mutation";

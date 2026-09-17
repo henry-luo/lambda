@@ -63,6 +63,9 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "test/html/js_form_submit_url_ownership.html", nullptr, true},
     {"RadiantViewTest.LaysOutDenseCollapsedTable", "dense_collapsed_table",
      "test/html/dense_collapsed_table.html", nullptr, true},
+    {"RadiantViewTest.PreservesMarkerPropsDuringRetainedTableReflow",
+     "retained_table_marker_intrinsic", "test/html/retained_table_marker_intrinsic.html",
+     "test/html/retained_table_marker_intrinsic_events.json", true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -294,6 +297,30 @@ TEST(RadiantViewTest, PreservesDocumentUrlAcrossScriptFormSubmit) {
 
 TEST(RadiantViewTest, LaysOutDenseCollapsedTable) {
     test_radiant_view_expect_case(17);
+}
+
+TEST(RadiantViewTest, PreservesMarkerPropsDuringRetainedTableReflow) {
+    test_radiant_view_expect_case(18);
+}
+
+TEST(RadiantViewTest, ExposesCurrentScriptDuringClassicExecution) {
+    const char* page = "test/html/dom_document_current_script.html";
+    const char* output = "./temp/test_radiant_current_script.svg";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    const char* args[] = {
+        "./lambda.exe", "render", page, "-o", output, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    // The script turns this visible only after it verifies its own DOM identity.
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "current-script-classic"));
 }
 
 TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {

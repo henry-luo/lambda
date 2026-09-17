@@ -31,9 +31,7 @@ static inline Item k_to_string(void) {
 }
 
 static inline bool is_object_value(Item value) {
-    TypeId t = get_type_id(value);
-    return t == LMD_TYPE_MAP || js_is_js_array(value) ||
-           t == LMD_TYPE_FUNC || t == LMD_TYPE_ELEMENT;
+    return js_is_object_value(value);
 }
 
 static inline bool js_coerce_is_bigint(Item value) {

@@ -4,6 +4,7 @@
 
 #include <limits.h>
 #include "../../lib/file.h"
+#include "../../lib/url.h"
 #include "../runtime/lambda-error.h"
 #include "../jube/jube_registry.h"
 
@@ -889,9 +890,46 @@ static bool jm_path_is_lambda_source(const char* path) {
     return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
 }
 
+static bool jm_module_specifier_is_url_path(const char* specifier, int spec_len) {
+    if (!specifier || spec_len <= 0) return false;
+    return specifier[0] == '/' ||
+        (specifier[0] == '.' && spec_len >= 2 && specifier[1] == '/') ||
+        (specifier[0] == '.' && spec_len >= 3 && specifier[1] == '.' &&
+            specifier[2] == '/') ||
+        (spec_len >= 7 && strncmp(specifier, "http://", 7) == 0) ||
+        (spec_len >= 8 && strncmp(specifier, "https://", 8) == 0);
+}
+
+static bool jm_resolve_http_module_path(const char* base_file,
+        const char* specifier, int spec_len, char* out, int out_size) {
+    if (!js_path_is_http_url(base_file) ||
+            !jm_module_specifier_is_url_path(specifier, spec_len) ||
+            spec_len >= 2048) {
+        return false;
+    }
+
+    char specifier_text[2048];
+    snprintf(specifier_text, sizeof(specifier_text), "%.*s", spec_len, specifier);
+    Url* base_url = url_parse(base_file);
+    Url* resolved_url = base_url
+        ? url_parse_with_base(specifier_text, base_url) : NULL;
+    const char* href = resolved_url ? url_get_href(resolved_url) : NULL;
+    bool fits = href && (int)strlen(href) < out_size;
+    if (fits) {
+        // Browser modules resolve path and root-relative specifiers as URLs.
+        snprintf(out, out_size, "%s", href);
+    }
+    if (resolved_url) url_destroy(resolved_url);
+    if (base_url) url_destroy(base_url);
+    return fits;
+}
+
 // Resolve a module specifier relative to the importing file's directory
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size) {
+    if (jm_resolve_http_module_path(base_file, specifier, spec_len, out, out_size)) {
+        return;
+    }
     const char* last_slash = strrchr(base_file, '/');
     int dir_len = last_slash ? (int)(last_slash - base_file + 1) : 0;
 
@@ -4143,6 +4181,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
             runtime, context, true);
         js_tla_exit_module();
         return (Item){.item = ITEM_ERROR};
+    }
+
+    bool document_ast_too_large = runtime->dom_doc != NULL &&
+        g_mir_interp_mode == 0 && mir_large_interp_enabled() &&
+        tp->ast_index.count > JM_RADIANT_AST_NODE_THRESHOLD;
+    if (document_ast_too_large) {
+        // Static imports bypass the source-script compiler, so select its
+        // established AST tier here before MIR lowering scales with the graph.
+        log_info("js-mir: document module AST (%u nodes) uses AST executor",
+            tp->ast_index.count);
+        js_tla_exit_module();
+        return js_mir_execute_ast_module(runtime, tp, filename);
     }
 
     // Js57 P5: register the current module BEFORE jm_load_imports so the

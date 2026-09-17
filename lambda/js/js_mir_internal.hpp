@@ -25,6 +25,11 @@ extern int g_js_force_document_interp;
 extern "C" int g_mir_interp_mode;
 extern "C" void ensure_jit_imports_initialized(void);
 
+static inline bool js_path_is_http_url(const char* path) {
+    return path && (strncmp(path, "http://", 7) == 0 ||
+        strncmp(path, "https://", 8) == 0);
+}
+
 bool jm_float_const_is_inline(double value);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 
@@ -799,6 +804,8 @@ bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+Item js_mir_execute_ast_module(Runtime* runtime, JsTranspiler* tp,
+    const char* filename);
 char* js_load_script_source_from_cache(const char* path,
                                        const char* profile,
                                        const char* execution_mode,

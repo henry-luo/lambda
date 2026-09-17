@@ -14,6 +14,7 @@
 #include "jube_registry.h"
 #include "../lambda.hpp"
 #include "../js/js_runtime_internal.hpp"
+#include "../runtime/heap_api.h"
 #include "../runtime/lambda-number-runtime.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -55,6 +56,8 @@ struct JubeMemberRecord {
     bool const_is_str;
     Item method_fn;               // cached function object (lazy, GC-rooted)
     bool method_fn_rooted;
+    Context* method_root_owner;   // heap that owns the cached root
+    uint64_t method_root_generation;
 };
 
 typedef struct JubeTypeRecord {
@@ -68,6 +71,9 @@ typedef struct JubeTypeRecord {
     HashMap* index;               // content-hashed name -> one member record
     Item prototype;               // lazy per-type prototype object (GC-rooted)
     bool prototype_rooted;
+    bool prototype_absent;        // current realm intentionally has no prototype
+    Context* prototype_root_owner; // heap that owns the cached root
+    uint64_t prototype_root_generation;
 } JubeTypeRecord;
 
 typedef struct JubeTypeIndexEntry {
@@ -98,6 +104,42 @@ typedef TypedHashMap<JubeTypeIndexEntry,
 
 static Item jube_undefined_item(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
+}
+
+static bool jube_cached_generation_is_current(Context* owner, uint64_t generation) {
+    Context* active = (Context*)context;
+    return owner == active && generation != 0 &&
+        generation == heap_generation_for(active);
+}
+
+static bool jube_cached_root_is_current(bool rooted, Context* owner,
+                                        uint64_t generation) {
+    return rooted && jube_cached_generation_is_current(owner, generation);
+}
+
+static void jube_cached_root_drop(Item* item, bool* rooted, Context** owner,
+                                  uint64_t* generation) {
+    if (!item || !rooted || !owner || !generation) return;
+    if (*rooted && *owner && *generation != 0 &&
+            heap_generation_for(*owner) == *generation) {
+        heap_unregister_gc_root_for(*owner, &item->item);
+    }
+    *item = ItemNull;
+    *rooted = false;
+    *owner = NULL;
+    *generation = 0;
+}
+
+static bool jube_cached_root_register(Item* item, bool* rooted, Context** owner,
+                                      uint64_t* generation) {
+    Context* active = (Context*)context;
+    uint64_t active_generation = heap_generation_for(active);
+    if (!active || active_generation == 0 ||
+            !heap_register_gc_root_for(active, &item->item)) return false;
+    *rooted = true;
+    *owner = active;
+    *generation = active_generation;
+    return true;
 }
 
 static bool jube_item_key_chars(Item key, const char** chars, uint32_t* len) {
@@ -276,7 +318,15 @@ static Item jube_tramp_invoke(Item fn_item, Item this_value, Item* args,
 }
 
 static Item jube_member_js_method_item(JubeMemberRecord* rec) {
-    if (rec->method_fn_rooted) return rec->method_fn;
+    if (jube_cached_root_is_current(rec->method_fn_rooted,
+                                    rec->method_root_owner,
+                                    rec->method_root_generation)) {
+        return rec->method_fn;
+    }
+    // A runtime can replace its heap without reaching the normal reset hook.
+    // Drop the stale cache before publishing a function into the new realm.
+    jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
+                          &rec->method_root_owner, &rec->method_root_generation);
     const JubeHostAPI* host = jube_internal_host_api();
     int arity = rec->arity;
     if (arity < 0) arity = 0;
@@ -285,8 +335,12 @@ static Item jube_member_js_method_item(JubeMemberRecord* rec) {
         (uint64_t)(uintptr_t)rec, arity);
     host->script->set_function_name(fn_item, jube_name_item(rec->camel_name));
     rec->method_fn = fn_item;
-    host->gc->register_root(&rec->method_fn.item);
-    rec->method_fn_rooted = true;
+    if (!jube_cached_root_register(&rec->method_fn, &rec->method_fn_rooted,
+                                   &rec->method_root_owner,
+                                   &rec->method_root_generation)) {
+        rec->method_fn = ItemNull;
+        return (Item){.item = ITEM_ERROR};
+    }
     return rec->method_fn;
 }
 
@@ -555,7 +609,19 @@ static int jube_dispatch_set_record(Item receiver, JubeTypeRecord* trec,
 }
 
 static Item jube_type_prototype_for(JubeTypeRecord* trec) {
-    if (trec->prototype_rooted) return trec->prototype;
+    if (jube_cached_root_is_current(trec->prototype_rooted,
+                                    trec->prototype_root_owner,
+                                    trec->prototype_root_generation)) {
+        return trec->prototype;
+    }
+    if (trec->prototype_absent && jube_cached_generation_is_current(
+            trec->prototype_root_owner, trec->prototype_root_generation)) {
+        return ItemNull;
+    }
+    jube_cached_root_drop(&trec->prototype, &trec->prototype_rooted,
+                          &trec->prototype_root_owner,
+                          &trec->prototype_root_generation);
+    trec->prototype_absent = false;
     const JubeHostAPI* host = jube_internal_host_api();
     // adopt the module's existing prototype object when one is seeded, so
     // constructor .prototype identity (instanceof) survives the conversion.
@@ -565,7 +631,10 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
         trec->prototype = trec->binding->prototype_seed();
         if (get_type_id(trec->prototype) != LMD_TYPE_MAP) {
             trec->prototype = ItemNull;
-            trec->prototype_rooted = true;
+            trec->prototype_absent = true;
+            trec->prototype_root_owner = (Context*)context;
+            trec->prototype_root_generation =
+                heap_generation_for(trec->prototype_root_owner);
             return trec->prototype;
         }
     } else {
@@ -580,8 +649,12 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
             js_set_prototype(trec->prototype, parent);
         }
     }
-    host->gc->register_root(&trec->prototype.item);
-    trec->prototype_rooted = true;
+    if (!jube_cached_root_register(&trec->prototype, &trec->prototype_rooted,
+                                   &trec->prototype_root_owner,
+                                   &trec->prototype_root_generation)) {
+        trec->prototype = ItemNull;
+        return (Item){.item = ITEM_ERROR};
+    }
     // publish method function objects onto the prototype: scripts read them as
     // Range.prototype.setStart (IDL shape / .length probes), and instance reads
     // must return the identical Item (range.setStart === Range.prototype.setStart)
@@ -601,22 +674,18 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
 // and method items must drop so the next access rebuilds against the new
 // runtime's globals (roots unregister while the old heap is still alive).
 extern "C" void jube_interface_runtime_reset(void) {
-    const JubeHostAPI* host = jube_internal_host_api();
     for (int i = 0; i < s_type_record_count; i++) {
         JubeTypeRecord* trec = s_type_records[i];
         if (!trec) continue;
-        if (trec->prototype_rooted) {
-            host->gc->unregister_root(&trec->prototype.item);
-            trec->prototype = ItemNull;
-            trec->prototype_rooted = false;
-        }
+        jube_cached_root_drop(&trec->prototype, &trec->prototype_rooted,
+                              &trec->prototype_root_owner,
+                              &trec->prototype_root_generation);
+        trec->prototype_absent = false;
         for (int j = 0; j < trec->member_count; j++) {
             JubeMemberRecord* rec = &trec->members[j];
-            if (rec->method_fn_rooted) {
-                host->gc->unregister_root(&rec->method_fn.item);
-                rec->method_fn = ItemNull;
-                rec->method_fn_rooted = false;
-            }
+            jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
+                                  &rec->method_root_owner,
+                                  &rec->method_root_generation);
         }
     }
 }
@@ -1700,12 +1769,15 @@ static void jube_direct_sink_cleanup(JubeDirectSink* sink) {
 
 static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_roots) {
     if (!trec) return;
-    const JubeHostAPI* host = jube_internal_host_api();
-    if (unregister_roots && host && host->gc) {
-        if (trec->prototype_rooted) host->gc->unregister_root(&trec->prototype.item);
+    if (unregister_roots) {
+        jube_cached_root_drop(&trec->prototype, &trec->prototype_rooted,
+                              &trec->prototype_root_owner,
+                              &trec->prototype_root_generation);
         for (int j = 0; j < trec->member_count; j++) {
             JubeMemberRecord* rec = &trec->members[j];
-            if (rec->method_fn_rooted) host->gc->unregister_root(&rec->method_fn.item);
+            jube_cached_root_drop(&rec->method_fn, &rec->method_fn_rooted,
+                                  &rec->method_root_owner,
+                                  &rec->method_root_generation);
         }
     }
     // The index stores borrowed member-name pointers; release it before the

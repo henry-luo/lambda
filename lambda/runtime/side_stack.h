@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "../lambda.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,7 @@ typedef struct LambdaRecoveryCheckpoint {
     LambdaSideStackSnapshot side_stack;
     uint64_t mir_return_lane;
     uint64_t mir_bitcast_scratch;
+    LambdaGcScopeCheckpoint gc_scope;
     bool active;
 } LambdaRecoveryCheckpoint;
 

@@ -1227,6 +1227,23 @@ TEST_F(GCHeapTest, NoGcScopeSupportsBalancedNesting) {
 }
 #endif
 
+TEST_F(GCHeapTest, ScopeCheckpointRestoresAbandonedScopes) {
+    gc_scope_checkpoint_t checkpoint = gc_scope_checkpoint_capture(gc);
+    gc_defer_collection_begin(gc);
+    gc_defer_collection_begin(gc);
+#ifndef NDEBUG
+    gc_no_gc_scope_begin(gc);
+    gc_no_gc_scope_begin(gc);
+#endif
+
+    EXPECT_TRUE(gc_scope_checkpoint_restore(gc, &checkpoint));
+    EXPECT_EQ(gc->defer_collection_depth, 0);
+#ifndef NDEBUG
+    EXPECT_EQ(gc->no_gc_scope_depth, 0);
+#endif
+    EXPECT_NE(gc_heap_alloc(gc, 16, LMD_TYPE_STRING), nullptr);
+}
+
 TEST_F(GCHeapTest, UnregisterRoot) {
     uint64_t slot1 = 0, slot2 = 0, slot3 = 0;
     gc_register_root(gc, &slot1);

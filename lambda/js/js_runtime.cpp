@@ -11831,6 +11831,15 @@ Item js_intrinsic_array_of_body(Item callee, Item this_value, Item* args,
 Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
         Item* args, int argc, uint64_t* result_home) {
     Item this_val = this_value;
+    if (get_type_id(this_val) == LMD_TYPE_MAP &&
+            js_is_fixed_layout_iterator(this_val)) {
+        // Fixed-layout iterators expose this intrinsic through their prototype.
+        JS_ASSIGN_OR_RETURN(value, js_iterator_step(this_val));
+        if (value.item == JS_ITER_DONE_SENTINEL) {
+            return js_make_iter_result(make_js_undefined(), true);
+        }
+        return js_make_iter_result(value, false);
+    }
         // Array iterator .next() — this_val is the iterator object with __array__, __index__, __kind__
         if (get_type_id(this_val) != LMD_TYPE_MAP) {
             return js_throw_type_error("Array Iterator.prototype.next called on incompatible receiver");
@@ -17183,8 +17192,6 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     }
     bool route_to_bt = (special_property_kind == 0) &&
         route_analysis.reasons != JS_REGEX_SCANNER_REASON_NONE;
-    const char* bt_pattern = effective_pattern;
-    int bt_pattern_len = effective_pattern_len;
 
     // count capture groups for backreference validation (Annex B: \8/\9 identity escapes)
     int total_groups = 0;
@@ -17635,7 +17642,10 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
         btflags.dot_all = compile_info.dot_all;
         btflags.unicode = has_unicode;
         btflags.sticky = compile_info.sticky;
-        bt = js_bt_compile(bt_pattern, bt_pattern_len, btflags, js_input->pool);
+        // Shared preprocessing resolves Annex B decimal escapes before either
+        // matcher sees them, while retaining valid backreferences for this path.
+        bt = js_bt_compile(processed_pattern.c_str(), (int)processed_pattern.size(),
+            btflags, js_input->pool);
         if (!bt) {
             // A required backtracking pattern cannot fall through to RE2, which changes its captures.
             log_debug("js regex router: backtracker failed to compile a required pattern");

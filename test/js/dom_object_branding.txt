@@ -4,3 +4,6 @@
 true
 true
 true
+[object HTMLLinkElement]
+true
+true

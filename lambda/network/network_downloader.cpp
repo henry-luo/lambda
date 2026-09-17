@@ -2,6 +2,7 @@
 // Network download implementation using libcurl
 
 #include "network_downloader.h"
+#include "http_client.h"
 #include "network_resource_manager.h"
 #include "cookie_jar.h"
 #include "enhanced_file_cache.h"
@@ -207,7 +208,7 @@ bool network_download_resource(NetworkResource* res) {
     // Redirects and user agent
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Radiant/1.0 Lambda-Script");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, RADIANT_HTTP_CLIENT_USER_AGENT);
     
     // SSL verification (always enabled for production)
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);

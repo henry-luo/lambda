@@ -64,6 +64,40 @@ TEST(JsCParserLexer, UsesParserSelectedRegexGoal) {
     EXPECT_EQ(tokens[3].span.end_byte, 23u);
 }
 
+TEST(JsCParserLexer, SeparatesPostfixDecrementAndComparison) {
+    const char source[] = "a-->=0;";
+    ASSERT_EQ(strlen(source), 7u);
+    JsLexer lexer;
+    js_lexer_init(&lexer, source, strlen(source));
+    EXPECT_EQ(lexer.length, 7u);
+    JsToken identifier = js_lexer_next(&lexer);
+    EXPECT_EQ(identifier.kind, JS_TOK_IDENTIFIER);
+    EXPECT_EQ(identifier.span.end_byte, 1u);
+    EXPECT_EQ(lexer.offset, 1u);
+    EXPECT_EQ(lexer.length, 7u);
+    EXPECT_EQ(lexer.source[1], '-');
+    js_lexer_set_goal(&lexer, JS_LEX_DIV);
+    JsToken decrement = js_lexer_next(&lexer);
+    EXPECT_EQ(decrement.kind, JS_TOK_MINUS_MINUS);
+    js_lexer_set_goal(&lexer, JS_LEX_REGEXP);
+    JsToken comparison = js_lexer_next(&lexer);
+    EXPECT_EQ(comparison.kind, JS_TOK_GTE);
+    JsToken number = js_lexer_next(&lexer);
+    EXPECT_EQ(number.kind, JS_TOK_NUMBER);
+    js_lexer_set_goal(&lexer, JS_LEX_DIV);
+    JsToken semicolon = js_lexer_next(&lexer);
+    EXPECT_EQ(semicolon.kind, JS_TOK_SEMICOLON);
+    EXPECT_EQ(js_lexer_next(&lexer).kind, JS_TOK_EOF);
+
+    JsToken comment_tokens[4];
+    int comment_count = lex_source("\n--> legacy close comment\nvalue;",
+        comment_tokens, 4);
+    ASSERT_EQ(comment_count, 3);
+    EXPECT_EQ(comment_tokens[0].kind, JS_TOK_IDENTIFIER);
+    EXPECT_EQ(comment_tokens[1].kind, JS_TOK_SEMICOLON);
+    EXPECT_EQ(comment_tokens[2].kind, JS_TOK_EOF);
+}
+
 TEST(JsCParserLexer, PreservesCommentsLineTerminatorsAndTemplateSpan) {
     JsToken tokens[16];
     int count = lex_source("a /* comment\n */\n `x${{y: 1}}z`", tokens, 16);
@@ -136,6 +170,84 @@ TEST(JsCParser, ParsesModernJavaScriptWithOneReductionStream) {
     EXPECT_GT(recorder.binary, 0);
     EXPECT_GT(recorder.calls, 0);
     EXPECT_EQ(recorder.last_span.end_byte, strlen(source));
+}
+
+TEST(JsCParser, ParsesPostfixDecrementBeforeComparisonInForTest) {
+    const char* source =
+        "const my=rh(/^(?:if|else|else-if)$/,(e,t,n)=>_y(e,t,n,(s,i,r)=>{"
+        "const o=n.parent.children;let a=o.indexOf(s),l=0;for(;a-->=0;){"
+        "const c=o[a];c&&c.type===9&&(l+=c.branches.length)}return()=>{"
+        "if(r)s.codegenNode=Qa(i,l,n);else{const c=yy(s.codegenNode);"
+        "c.alternate=Qa(i,l+s.branches.length-1,n)}}}));";
+    JsParseError error = {};
+    EXPECT_EQ(js_parser_parse_source(source, strlen(source), JS_PARSE_SCRIPT,
+        NULL, NULL, NULL, &error), JS_PARSE_OK)
+        << (error.message ? error.message : "") << " at byte "
+        << error.span.start_byte;
+}
+
+TEST(JsCParser, ParsesDeepMemberBasesInDestructuringAssignments) {
+    enum { NESTING_DEPTH = 64 };
+    char source[2048];
+    size_t length = 0;
+    const char* prefix = "({value:";
+    memcpy(source + length, prefix, strlen(prefix));
+    length += strlen(prefix);
+    for (int i = 0; i < NESTING_DEPTH; i++) {
+        const char* open = "[{value:";
+        memcpy(source + length, open, strlen(open));
+        length += strlen(open);
+    }
+    const char* base = "[].slot";
+    memcpy(source + length, base, strlen(base));
+    length += strlen(base);
+    for (int i = 0; i < NESTING_DEPTH; i++) {
+        const char* close = "}].slot";
+        memcpy(source + length, close, strlen(close));
+        length += strlen(close);
+    }
+    const char* suffix = "}=source);";
+    memcpy(source + length, suffix, strlen(suffix));
+    length += strlen(suffix);
+    source[length] = '\0';
+
+    JsParseError error = {};
+    EXPECT_EQ(js_parser_parse_source(source, length, JS_PARSE_SCRIPT,
+        NULL, NULL, NULL, &error), JS_PARSE_OK)
+        << (error.message ? error.message : "") << " at byte "
+        << error.span.start_byte;
+}
+
+TEST(JsCParser, BoundsNestedCandidateDestructuringProbes) {
+    enum { NESTING_DEPTH = 64 };
+    char source[2048];
+    size_t length = 0;
+    const char* prefix = "const value={item:call(";
+    memcpy(source + length, prefix, strlen(prefix));
+    length += strlen(prefix);
+    for (int i = 0; i < NESTING_DEPTH; i++) {
+        const char* open = "[{item:call(";
+        memcpy(source + length, open, strlen(open));
+        length += strlen(open);
+    }
+    const char* base = "[]";
+    memcpy(source + length, base, strlen(base));
+    length += strlen(base);
+    for (int i = 0; i < NESTING_DEPTH; i++) {
+        const char* close = ")}]";
+        memcpy(source + length, close, strlen(close));
+        length += strlen(close);
+    }
+    const char* suffix = ")};";
+    memcpy(source + length, suffix, strlen(suffix));
+    length += strlen(suffix);
+    source[length] = '\0';
+
+    JsParseError error = {};
+    EXPECT_EQ(js_parser_parse_source(source, length, JS_PARSE_SCRIPT,
+        NULL, NULL, NULL, &error), JS_PARSE_OK)
+        << (error.message ? error.message : "") << " at byte "
+        << error.span.start_byte;
 }
 
 TEST(JsCParser, ParsesDeepArrayLiteralsWithoutRecursivePatternProbes) {
