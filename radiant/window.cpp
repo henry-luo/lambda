@@ -980,6 +980,14 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     log_cleanup();
 }
 
+static void window_write_memory_profile(DomDocument* doc, const char* input_file) {
+    const char* output_path = shell_getenv("RADIANT_MEMORY_PROFILE_PATH");
+    if (!output_path || !*output_path || !doc) return;
+    if (!view_memory_profile_write(doc, input_file, output_path)) {
+        log_error("view memory profile: failed to write %s", output_path);
+    }
+}
+
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
@@ -1264,6 +1272,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             render_html_doc(&ui_context, doc->view_tree, NULL);
             log_mem_stage("after-render");
         }
+        window_write_memory_profile(doc, file_to_load);
         log_notice("view: render complete");
 
         url_destroy(cwd);

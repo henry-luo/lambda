@@ -4050,7 +4050,7 @@ static Type* build_lit_sized_float_from_span(Transpiler* tp,
 
 
 static Type* build_literal_type_from_span(Transpiler* tp,
-        SourceSpan span, LambdaAstLiteralKind kind) {
+        SourceSpan span, LambdaAstLiteralKind kind, AstPrimaryNode* literal) {
     switch (kind) {
     case LAMBDA_AST_LITERAL_STRING:
     case LAMBDA_AST_LITERAL_SYMBOL:
@@ -4058,8 +4058,15 @@ static Type* build_literal_type_from_span(Transpiler* tp,
         return build_lit_string_from_span(tp, span, kind);
     case LAMBDA_AST_LITERAL_DATETIME:
         return build_lit_datetime_from_span(tp, span);
-    case LAMBDA_AST_LITERAL_NAMED_VALUE:
-        return build_lit_named_value_from_span(tp, span);
+    case LAMBDA_AST_LITERAL_NAMED_VALUE: {
+        Type* type = build_lit_named_value_from_span(tp, span);
+        if (type == &LIT_BOOL && literal) {
+            StrView source = source_span_text(tp, span);
+            literal->literal_value = strview_equal(&source, "true") ? 1 : 0;
+            literal->literal_value_kind = AST_PRIMARY_LITERAL_VALUE_BOOL;
+        }
+        return type;
+    }
     case LAMBDA_AST_LITERAL_INTEGER: {
         StrView source = source_span_text(tp, span);
         char* number = ast_copy_source_text(tp, source, span);
@@ -4067,7 +4074,13 @@ static Type* build_literal_type_from_span(Transpiler* tp,
         int64_t value = 0;
         bool in_band = lambda_parse_int_literal(number, &value);
         mem_free(number);
-        if (in_band) return &LIT_INT;
+        if (in_band) {
+            if (literal) {
+                literal->literal_value = value;
+                literal->literal_value_kind = AST_PRIMARY_LITERAL_VALUE_INT;
+            }
+            return &LIT_INT;
+        }
         record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "integer literal is outside compact int range; use an explicit suffix or decimal literal");
         return &TYPE_ERROR;
@@ -4090,7 +4103,7 @@ AstNode* build_literal_from_span(Transpiler* tp, SourceSpan span,
         LambdaAstLiteralKind kind) {
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
         AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
-    ast_node->type = build_literal_type_from_span(tp, span, kind);
+    ast_node->type = build_literal_type_from_span(tp, span, kind, ast_node);
     return (AstNode*)ast_node;
 }
 

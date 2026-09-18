@@ -4896,6 +4896,10 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
     if (!doc) {
         url_destroy(base_url);
         pool_destroy(pool);
+    } else if (!dom_document_finalize_loader_pool(doc, pool)) {
+        log_error("iframe_srcdoc_load: could not transfer loader pool to document");
+        free_document(doc);
+        return nullptr;
     }
     return doc;
 }

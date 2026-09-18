@@ -242,6 +242,11 @@ static JsAstNode* js_alloc_ast_node(JsTranspiler* tp,
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;
     ast_node->source_span = span;
+    if (node_type == AST_NODE_LITERAL && size >= sizeof(JsLiteralNode)) {
+        // Synthesized literals share this allocator; only admitted runtime
+        // literals receive a cache slot from build_js_literal_from_source.
+        ((JsLiteralNode*)ast_node)->runtime_literal_slot = UINT32_MAX;
+    }
     return ast_node;
 }
 
@@ -311,6 +316,9 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
         // BigInt is a decimal-backed JS primitive; marking it FLOAT let native
         // number inference reinterpret its preserved integer spelling.
         literal->type = literal->is_bigint ? &TYPE_DECIMAL : &TYPE_FLOAT;
+        if (literal->is_bigint) {
+            literal->runtime_literal_slot = tp->runtime_literal_count++;
+        }
     } else if (strcmp(node_type, "string") == 0) {
         literal->literal_type = AST_LITERAL_STRING;
         // Remove quotes and handle escape sequences
@@ -322,6 +330,7 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
             if (memchr(src, '\\', content_len) == NULL) {
                 literal->value.string_value = name_pool_create_len(tp->name_pool, src, content_len);
                 literal->type = &TYPE_STRING;
+                literal->runtime_literal_slot = tp->runtime_literal_count++;
                 return (JsAstNode*)literal;
             }
             // Process escape sequences in-place
@@ -408,6 +417,7 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
             literal->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
         }
         literal->type = &TYPE_STRING;
+        literal->runtime_literal_slot = tp->runtime_literal_count++;
     } else if (strcmp(node_type, "true") == 0) {
         literal->literal_type = AST_LITERAL_BOOLEAN;
         literal->value.boolean_value = true;

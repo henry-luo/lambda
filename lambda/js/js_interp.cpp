@@ -86,6 +86,9 @@ struct JsInterpFrame {
     JsInterpContinuation** async_loop_continuations;
     JsInterpContinuation** async_try_continuations;
     JsGeneratorStateRecord* generator_state;
+    // The cache itself is realm-owned; frames only retain the native row for
+    // their immutable parser image.
+    JsAstLiteralCacheEntry* literal_cache;
 };
 
 struct JsInterpReference {
@@ -3497,12 +3500,34 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         JsLiteralNode* literal = (JsLiteralNode*)node;
         switch (literal->literal_type) {
         case AST_LITERAL_NUMBER:
-            return js_interp_normal(literal->is_bigint
+        case AST_LITERAL_STRING: {
+            if (literal->runtime_literal_slot == UINT32_MAX) {
+                return js_interp_normal(literal->literal_type == AST_LITERAL_NUMBER
+                    ? js_make_number(literal->value.number_value)
+                    : js_make_string_len(literal->value.string_value->chars,
+                        literal->value.string_value->len));
+            }
+            if (!frame->literal_cache) {
+                const void* ast_image = frame->script->cache_template
+                    ? (const void*)frame->script->cache_template : (const void*)frame->script;
+                frame->literal_cache = js_ast_literal_cache_acquire(ast_image,
+                    frame->script->runtime_literal_count);
+            }
+            Item cached = ItemNull;
+            if (js_ast_literal_cache_read(frame->literal_cache,
+                    literal->runtime_literal_slot, &cached)) {
+                return js_interp_normal(cached);
+            }
+            Item value = literal->literal_type == AST_LITERAL_NUMBER
                 ? bigint_from_string(literal->bigint_str->chars, literal->bigint_str->len)
-                : js_make_number(literal->value.number_value));
-        case AST_LITERAL_STRING:
-            return js_interp_normal(js_make_string_len(literal->value.string_value->chars,
-                literal->value.string_value->len));
+                : js_make_string_len(literal->value.string_value->chars,
+                    literal->value.string_value->len);
+            if (item_is_error(value) || !js_ast_literal_cache_write(frame->literal_cache,
+                    literal->runtime_literal_slot, value)) {
+                return js_interp_throw(item_is_error(value) ? value : ItemError);
+            }
+            return js_interp_normal(value);
+        }
         case AST_LITERAL_BOOLEAN:
             return js_interp_normal((Item){.item = b2it(literal->value.boolean_value)});
         case AST_LITERAL_NULL: return js_interp_normal(ItemNull);

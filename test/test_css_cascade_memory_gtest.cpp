@@ -208,6 +208,7 @@ static ShellResult css_memory_run_page(const char* path) {
     const char* args[] = {LAMBDA_EXE, "view", path, "--headless", nullptr};
     const ShellEnvEntry env[] = {
         {"LAMBDA_AUTO_CLOSE", "1"},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
         {"RADIANT_CSS_CASCADE_MEMORY_PROFILE", "1"},
         {"RADIANT_CSS_CASCADE_MEMORY_FORCE_RECASCADE", "1"},
         {nullptr, nullptr},

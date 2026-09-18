@@ -841,6 +841,9 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
 }
 
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
+    // Event handlers retain generated function pointers, but not MIR's
+    // instruction lists. Drop that compiler-only IR before retaining the ctx.
+    jit_release_generated_ir(ctx);
     // A failed push cannot MIR_finish here: JIT-compiled function pointers
     // still live and would crash on call, so the context leaks to process
     // exit exactly as the old overflow path did.
@@ -4460,6 +4463,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
                 // belongs to this one execution and can be discarded now.
                 jm_clear_active_js_transpile(NULL, mt, NULL);
                 jm_destroy_mir_transpiler(mt);
+                // The cache retains native code through the artifact context;
+                // its finalized MIR instruction lists are no longer needed.
+                jit_release_generated_ir(ctx);
                 jm_clear_active_js_transpile(tp, NULL, NULL);
                 js_transpiler_destroy(tp);
                 return namespace_obj;

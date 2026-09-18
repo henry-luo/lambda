@@ -107,6 +107,13 @@ static bool view_memory_label_is(const MemStatSample* sample,
     return sample && label && strcmp(sample->label, label) == 0;
 }
 
+static void view_memory_root_domain_add(ViewMemoryDomain* domain,
+                                        const MemStatSample* sample,
+                                        uint32_t doc_id) {
+    if (!sample || sample->parent_id != 0 || sample->doc_id == doc_id) return;
+    view_memory_domain_add(domain, sample);
+}
+
 bool view_memory_profile_write(DomDocument* doc, const char* input_file,
                                const char* output_path) {
     if (!doc || !doc->view_tree || !output_path) return false;
@@ -121,10 +128,27 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
     ViewMemoryDomain canonical_prop_arena = {};
     ViewMemoryDomain scratch_arena = {};
     ViewMemoryDomain style_epoch_pool = {};
+    ViewMemoryDomain root_physical = {};
+    ViewMemoryDomain root_runtime_heap = {};
+    ViewMemoryDomain root_code = {};
+    ViewMemoryDomain root_ast = {};
+    ViewMemoryDomain root_other = {};
     uint64_t attribution_errors = 0;
 
     for (uint32_t i = 0; i < snapshot->count; i++) {
         const MemStatSample* sample = &snapshot->samples[i];
+        view_memory_root_domain_add(&root_physical, sample, doc_id);
+        if (sample->parent_id == 0 && sample->doc_id != doc_id) {
+            if (sample->role == MEM_ROLE_RUNTIME_HEAP) {
+                view_memory_domain_add(&root_runtime_heap, sample);
+            } else if (sample->role == MEM_ROLE_CODE) {
+                view_memory_domain_add(&root_code, sample);
+            } else if (sample->role == MEM_ROLE_AST) {
+                view_memory_domain_add(&root_ast, sample);
+            } else {
+                view_memory_domain_add(&root_other, sample);
+            }
+        }
         if (sample->doc_id != doc_id) continue;
         if (sample->flags & MEM_FLAG_ATTRIBUTION_ERROR) attribution_errors++;
         if (view_memory_label_is(sample, "dom.document.pool")) {
@@ -150,7 +174,7 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
     uint64_t physical_live = document_pool.bytes_in_use +
         prop_pool.bytes_in_use + style_epoch_pool.bytes_in_use;
 
-    char buffer[16384];
+    char buffer[32768];
     JsonWriter writer;
     jw_init(&writer, buffer, sizeof(buffer));
     jw_obj_begin(&writer);
@@ -159,6 +183,11 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
         jw_kv_str(&writer, "file", input_file ? input_file : "");
         jw_kv_uint(&writer, "doc_id", doc_id);
         jw_kv_uint(&writer, "layout_generation", doc->view_tree->layout_generation);
+        jw_key(&writer, "process_physical_total");
+        jw_obj_begin(&writer);
+            jw_kv_uint(&writer, "reserved_bytes", snapshot->physical_total_reserved);
+            jw_kv_uint(&writer, "live_bytes", snapshot->physical_total_in_use);
+        jw_obj_end(&writer);
         jw_key(&writer, "physical_total");
         jw_obj_begin(&writer);
             jw_kv_uint(&writer, "reserved_bytes", physical_reserved);
@@ -174,6 +203,15 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
             view_memory_domain_json(&writer, "view_tree.scratch_arena", &scratch_arena);
             view_memory_domain_json(&writer, "style.canonical.epoch.pool",
                                     &style_epoch_pool);
+        jw_obj_end(&writer);
+        jw_key(&writer, "process_root_domains");
+        jw_obj_begin(&writer);
+            view_memory_domain_json(&writer, "all_non_document_root_allocators",
+                                    &root_physical);
+            view_memory_domain_json(&writer, "runtime_heap", &root_runtime_heap);
+            view_memory_domain_json(&writer, "code", &root_code);
+            view_memory_domain_json(&writer, "ast", &root_ast);
+            view_memory_domain_json(&writer, "other", &root_other);
         jw_obj_end(&writer);
         jw_key(&writer, "logical_composites");
         jw_obj_begin(&writer);

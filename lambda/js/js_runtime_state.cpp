@@ -561,6 +561,8 @@ static bool js_runtime_state_alloc_records(JsRuntimeState* state) {
         "JS RegExp last match");
     root_vector_init(&state->template_registry.values, (Context*)context,
         "JS tagged template objects");
+    root_vector_init(&state->ast_literal_cache.values, (Context*)context,
+        "JS AST literal values");
     root_vector_init(&state->modules.values, (Context*)context,
         "JS module namespace slots");
     return true;

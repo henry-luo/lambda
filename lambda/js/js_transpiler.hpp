@@ -62,6 +62,9 @@ typedef enum JsScopeType {
 // artifacts; do not mirror those fields here.
 struct JsScript : Script {
     size_t source_length;           // source byte count; adopted Script owns source bytes
+    // Dense parse-image slots for string and BigInt literals. Their GC values
+    // live in the receiving realm, never in this cacheable AST owner.
+    uint32_t runtime_literal_count;
     JsScope* global_scope;          // JS global/module lexical scope root
     bool strict_mode;               // JS script/function strictness default
     // Cache identity records parse policy, not mutable execution mode.
