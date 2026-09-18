@@ -2467,6 +2467,10 @@ struct Context {
     // (raw addresses of already-rooted slots), single-thread-owned, dead
     // outside the transport window. Deleted when the true pointer ABI lands.
     uint64_t* mir_var_homes[LAMBDA_MAX_FUNCTION_ARGS];
+    // S12.1.4v2(3): the LAMBDA_COLOUR_GUARD_* bits an `fn`-context dynamic
+    // call publishes immediately before dispatch. lambda_dynamic_call consumes
+    // and ZEROES it first thing, so it is 0 outside that window.
+    uint32_t fn_colour_guard;
 };
 
 // A property key specification is compiler-neutral data stored in the sealed
@@ -2764,6 +2768,12 @@ extern "C" {
     bool lambda_type_matches(Item value, Type* expected);
     Item lambda_type_error(Item actual, Type* expected, const char* boundary);
     Item lambda_type_check(Item value, Type* expected, const char* boundary);
+    // S12.1.4v2(3): the run-time half of an `fn`-context call's colour check.
+    // Both return ItemNull / the argument on success and an error Item when
+    // the call would be a `pn` call that `fn` context cannot make.
+    Item lambda_fn_colour_guard(Function* fn, const Item* args, int argc,
+        uint32_t guard);
+    Item lambda_fn_colour_arg_check(Item argument);
     // Env-aware form used only by binder-carrying function entries.  The
     // legacy ABI remains a NULL-env wrapper for every existing boundary.
     Item lambda_type_check_env(Item value, Type* expected, Type** env,

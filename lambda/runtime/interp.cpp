@@ -1874,6 +1874,13 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return ItemError;
     }
     Function* fn = (Function*)(uintptr_t)callee_item.item;
+    if (node->fn_colour_guard) {
+        // S12.1.4v2(3): the words are in parameter order here, direct or
+        // dynamic, so one check covers both halves of the rule
+        Item refused = lambda_fn_colour_guard(fn, (const Item*)(void*)words,
+            dispatch_argc, node->fn_colour_guard);
+        if (item_is_error(refused)) return refused;
+    }
     AstIdentNode* imported_ident = callee && callee->node_type == AST_NODE_IDENT
         ? (AstIdentNode*)callee : NULL;
     bool cross_lang_js_call = imported_ident && imported_ident->entry &&

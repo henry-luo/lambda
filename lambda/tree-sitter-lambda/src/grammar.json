@@ -6588,6 +6588,10 @@
               {
                 "type": "STRING",
                 "value": "pn"
+              },
+              {
+                "type": "STRING",
+                "value": "function"
               }
             ]
           }
@@ -6699,8 +6703,21 @@
           ]
         },
         {
-          "type": "STRING",
-          "value": "fn"
+          "type": "FIELD",
+          "name": "kind",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "fn"
+              },
+              {
+                "type": "STRING",
+                "value": "function"
+              }
+            ]
+          }
         },
         {
           "type": "FIELD",

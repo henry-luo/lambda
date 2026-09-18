@@ -445,6 +445,14 @@ the semantic-promotion consolidation.
 ---
 
 
+<a id="lr07-16"></a>**LR07-16 · Dynamic calls ignore argument names · OPEN (found 2026-09-18)**
+`fn f(a, b) => a - b; let g = f` then `g(b: 1, a: 5)` returns `-4` on both
+tiers where the direct call `f(b: 1, a: 5)` returns `4`: a call through a value
+binds named arguments positionally, silently. `ast_resolve_call_args` needs the
+callee's declaration, which a dynamic call does not have. Either reject named
+arguments on a dynamic callee or resolve them against the runtime signature
+(`Function::fn_type`).
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -1007,6 +1015,20 @@ registry row.
 
 ---
 
+
+<a id="lr12-26"></a>**LR12-26 · An `fn` may call a statically-known `pn` · OPEN (found 2026-09-18)**
+S12.1.1 says `fn` cannot call `pn`, and the ruling is unmarked, but no check
+exists for a direct call: `fn bad(x) => logsq(x)` with `pn logsq` compiles and
+runs on both tiers. Only `call()` (`validate_effect_polymorphic_call`) and pn
+object methods were checked. The dynamic half (a `pn` reached through a value)
+was closed 2026-09-18 with S12.1.4v3(6), and the static rule now holds inside
+`function` bodies (C20-3) via the colour walk in `lambda_ast_finalize_script`
+(`colour_walk_call`, `build_ast.cpp`). Extending that one check to every `fn`
+context breaks three reliance sites: `lambda/package/dom/edit_history.ls`
+(`fn clear_history`/`fn replay_retained` call `pn session.set_history*`),
+`test/lambda/proc/type_binder_proc_raw.ls` (module-level calls to `pn`s), and
+`test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the
+module top level's colour, which no S#/D# point states (see C20.6).
 
 ## 13. Schema validator (LR_13)
 

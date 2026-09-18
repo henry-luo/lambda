@@ -2037,6 +2037,7 @@ JitImport jit_runtime_imports[] = {
     {"err2it", FPTR(err2it)},
     {"it2err", FPTR(it2err)},
     {"lambda_type_check", FPTR(lambda_type_check)},
+    {"lambda_fn_colour_arg_check", FPTR(lambda_fn_colour_arg_check)},
     {"lambda_type_check_env", FPTR(lambda_type_check_env)},
     {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},

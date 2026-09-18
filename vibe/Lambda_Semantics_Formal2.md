@@ -2240,8 +2240,8 @@ Recorded in spec §12 (S12.3.6, v15.2.0); ledger entry TS-8 closed as *not a def
 
 ### C20. Effect polymorphism: the `function` declaration (2026-09-18) — RESOLVED: closes SO28
 
-**Spec linkage:** S11.1.5 (the three function types), S12.1.4v2 (user `function`
-declarations; supersedes S12.1.4), SO44 (opened: binder depth on function values).
+**Spec linkage:** S11.1.5 (the three function types), S12.1.4v3 (user `function`
+declarations; supersedes S12.1.4 and S12.1.4v2), SO44 (opened: binder depth on function values).
 SO28 is closed.
 
 **The problem.** S12.1.1 gives every function one declared effect bit: `fn` is pure,
@@ -2277,22 +2277,22 @@ function apply_all(f: function, xs) => for (x in xs) f(x)
   the call is `pn` if any argument bound to a `function`-typed parameter is a `pn`, and
   `fn` otherwise — Flix's Boolean effect as a conjunction over the polymorphic
   parameters. Parameters typed `fn (...)` or `pn (...)` keep their fixed colour and do not
-  vote. → S12.1.4v2
+  vote. → S12.1.4v3
 - **C20-3 Body checking — the soundness core.** A `function` body is checked **as an `fn`
   body**: no `var`, `while`, `break`, `continue` or `return` (S12.1.2), and no calls to a
   statically-known `pn`. Its **only** effects are calls through its polymorphic
   parameters. This is what makes C20-2 sound: a pure argument really does yield a pure
-  call, because the body adds no effect of its own. → S12.1.4v2
+  call, because the body adds no effect of its own. → S12.1.4v3
 - **C20-4 Resolution.** The colour is resolved **statically** when every polymorphic
   argument's colour is statically known, and **checked at run time** otherwise — the same
   split S12.1.4 already applied to `call`. An `fn` caller passing a statically-known `pn`
   to a polymorphic parameter is a compile error. The error convention follows the
   resolved colour, as for `call` (S12.3.4): an `fn`-coloured call **returns** an error
-  value, a `pn`-coloured call **raises**. → S12.1.4v2
+  value, a `pn`-coloured call **raises**. → S12.1.4v3
 - **C20-5 Escaping closures.** A closure that a `function` returns or stores, and that
   captures a polymorphic parameter, is typed `function` (colour unknown). Calling it later
   is resolved under C20-4 — statically where its colour is known, at run time otherwise.
-  → S12.1.4v2
+  → S12.1.4v3
 - **C20-6 `call` is the first instance.** The system function `call` (S12.3.4) is now
   simply the built-in `function` with one polymorphic parameter, not a special case.
 
@@ -2352,8 +2352,8 @@ is a conformance bug independent of C20. `function` itself already exists as a b
 
 #### C20.5 Follow-ups
 
-- Grammar: `function` as a declaration keyword at statement start (today it only begins a
-  type expression). *`pn` / `pn (...)` in type position — done 2026-09-18.*
+- *Grammar: `function` as a declaration keyword at statement start — done 2026-09-18
+  (C parser and Tree-sitter).* *`pn` / `pn (...)` in type position — done 2026-09-18.*
 - *Type checker: disjoint `fn`/`pn` admission (C20-1), fixing C20.4 — done 2026-09-18*
   (runtime `is`/admission share one rule; static boundary rejects a known wrong colour and
   defers a `function` source; system procedure refs carry their signature). Found on the
@@ -2361,10 +2361,52 @@ is a conformance bug independent of C20. `function` itself already exists as a b
   alone read past the compact `TYPE_FUNC` singleton, so calling through an `f: function`
   parameter crashed the compiler; all now go through `lambda_type_func_signature`.
 - Binder selection over a function value still yields `function`; blocked on SO44.
-- Effect checker: `function` bodies checked as `fn` (C20-3); per-call colour resolution
-  with the run-time fallback (C20-4), shared with `call`.
+- *Effect checker: `function` bodies checked as `fn` (C20-3); per-call colour resolution
+  with the run-time fallback (C20-4) — done 2026-09-18, see C20.6.*
 - User docs: `Lambda_Func.md` (declarations), `Lambda_Type.md` (function types),
   `Lambda_Cheatsheet.md`.
 
-Recorded in spec §11 (S11.1.5), §12 (S12.1.4v2), Appendix B (SO28 closed, SO44 opened),
-v25.0.0.
+#### C20.6 Implementation rulings (designer, 2026-09-18) — S12.1.4v3
+
+Implementing the keyword exposed two points C20 had not ruled.
+
+**A `function`'s own value is `fn`** (S12.1.4v3(5)). S11.1.5 says every function value is
+`fn` or `pn`, and C20 said nothing about the declaration's own value. It is `fn`: C20-3
+checks its body as `fn`, so it adds no effect of its own, and it may cross an `fn (...)`
+contract. The alternatives were `pn` (sound but it would bar `function`s from every `fn`
+higher-order parameter, the case the feature exists for) and a third colour (it would
+break S11.1.5's disjoint union and need S11.1.5v2).
+
+**S12.1.1 now holds for dynamic callees** (S12.1.4v3(6)). Before this, an ordinary `fn`
+ran any `pn` it received as a value: `fn apply(f, x) => f(x)` executed a `pn` argument's
+side effect on both tiers. Value-colour `fn` is sound only if this hole is closed, since
+otherwise any `fn` could launder a `pn` through a `function` value. So an `fn`-context
+call through a value is checked at run time: a `pn` callee is refused, and a `function`
+callee refuses a `pn` in one of its polymorphic slots. The error convention is `fn`'s:
+the call returns the error value.
+
+**Mechanism** (appendix-level). A post-build walk (`lambda_ast_finalize_script`) resolves
+every `fn`-context call once all declarations are complete, so forward and recursive
+callees are covered: a statically `pn` call is E224, and an unresolved one gets
+`LAMBDA_COLOUR_GUARD_*` bits on its `AstCallNode`. The enclosing `function`'s own
+polymorphic parameters pass through unchecked (C20-2 already resolved their colour).
+Direct calls check guarded arguments through the existing parameter-error short-circuit,
+and dynamic calls publish the bits in `Context::fn_colour_guard`, which
+`lambda_dynamic_call` consumes first thing. The interpreter calls the same
+`lambda_fn_colour_guard`. A guarded call never becomes a self-tail-call jump. Routing a
+guarded direct call through the dynamic dispatcher was rejected, because dynamic calls
+bind named arguments positionally (LR07-16).
+
+**Found and left open:**
+- The *static* half of S12.1.1 was unenforced as well: an `fn` could call a known `pn`
+  directly. C20-3 needs the check inside `function` bodies, and it is enforced there.
+  Enforcing it everywhere breaks the DOM package and two fixtures that call `pn`s from
+  `fn` code or from module top level. No S#/D# point rules whether the module top level
+  is `fn` context, so this is logged as LR12-26 and awaits that ruling.
+- S12.1.4v3(4) is implemented conservatively: a closure inside a `function` that calls a
+  captured polymorphic parameter is checked as plain `fn`.
+- Pipe-to-callable (`x |> f`) and system-HOF callbacks (`map(f, xs)`) are dynamic routes
+  that do not yet carry the guard.
+
+Recorded in spec §11 (S11.1.5), §12 (S12.1.4v3), Appendix B (SO28 closed, SO44 opened),
+v25.1.0.

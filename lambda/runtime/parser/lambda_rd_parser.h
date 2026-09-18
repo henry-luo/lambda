@@ -300,6 +300,8 @@ enum {
     LAMBDA_REDUCTION_FLAG_RETURN_TYPE = 1u << 14,
     LAMBDA_REDUCTION_FLAG_ANNOTATION_BINDER = 1u << 15,
     LAMBDA_REDUCTION_FLAG_ANNOTATION_IMPLICIT_BINDER = 1u << 16,
+    // S12.1.4v2: a `function` declaration (colour-polymorphic `fn`)
+    LAMBDA_REDUCTION_FLAG_COLOUR_POLY = 1u << 17,
 };
 
 // The sink remains deliberately small. Phase 1 uses it for deterministic

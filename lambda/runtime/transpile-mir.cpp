@@ -6971,6 +6971,8 @@ static bool mir_argument_may_return_item_error(MirTranspiler* mt,
 
 static bool mir_direct_call_has_parameter_error_guard(MirTranspiler* mt,
         AstCallNode* call) {
+    // a run-time colour check yields its error through the same edge
+    if (call && (call->fn_colour_guard & LAMBDA_COLOUR_GUARD_ARGS)) return true;
     AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     if (!function || function->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* ident = (AstIdentNode*)function;
@@ -25663,6 +25665,18 @@ static void mir_emit_slot_home_transport(MirTranspiler* mt, int position,
         MIR_new_reg_op(mt->ctx, vh_addr)));
 }
 
+// S12.1.4v2(3): arm the dispatcher's colour guard for an `fn`-context dynamic
+// call. lambda_dynamic_call consumes and zeroes it, so the store must sit
+// immediately before the dispatch, after every argument has been evaluated.
+static void mir_emit_fn_colour_guard(MirTranspiler* mt, AstCallNode* call) {
+    if (!call || !call->fn_colour_guard) return;
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_U32,
+            (MIR_disp_t)offsetof(Context, fn_colour_guard),
+            mt->em.frame.runtime, 0, 1),
+        MIR_new_uint_op(mt->ctx, call->fn_colour_guard)));
+}
+
 static bool mir_emit_var_home_transport(MirTranspiler* mt, int position,
         MirVarEntry* borrow_root, MIR_reg_t val, bool allow_array_num) {
     // A typed var-array call may detach after a nested sharing boundary, so
@@ -27580,7 +27594,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             // ======== TCO interception ========
             // If this is a tail-recursive call to the current TCO function,
             // transform into: evaluate args → assign to params → goto tco_label
+            // a colour-guarded call keeps its entry so the check runs (S12.1.4v2)
             if (mt->tco_func && call_in_tail_position && is_recursive_call(call_node, mt->tco_func) &&
+                    !call_node->fn_colour_guard &&
                     mir_record_tail_arguments_proven(mt, call_node, fn_mangled)) {
                 log_debug("mir: TCO tail call to '%.*s' — converting to goto",
                     (int)mt->tco_func->name->len, mt->tco_func->name->chars);
@@ -28159,6 +28175,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     // boxed slow entry remains responsible for open edges.
                     short_circuit_error = false;
                 }
+                // S12.1.4v2(3): a polymorphic slot whose colour was unknown at
+                // compile time rides the error short-circuit, so a `pn` there
+                // makes this `fn`-context call yield its error unentered.
+                bool colour_checked = resolved_args[i] && i < 16 &&
+                    (call_node->fn_colour_guard & (1u << i));
+                if (colour_checked) short_circuit_error = true;
                 // CW25 / S9.2.2: a `var` argument that names a PLACE
                 // (`f(var m.rows[i])`) borrows that place, not merely its root.
                 // Detach the whole spine here, before any arm evaluates the
@@ -28414,6 +28436,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                 parameter_error_label = new_label(mt);
                                 parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
                             }
+                            if (colour_checked) {
+                                val = emit_call_1(mt, "lambda_fn_colour_arg_check",
+                                    MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                            }
                             emit_jump_if_item_error(mt, val, parameter_error_result,
                                 parameter_error_label);
                             has_parameter_error_guard = true;
@@ -28536,6 +28562,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             if (!has_parameter_error_guard) {
                                 parameter_error_label = new_label(mt);
                                 parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
+                            }
+                            if (colour_checked) {
+                                val = emit_call_1(mt, "lambda_fn_colour_arg_check",
+                                    MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                             }
                             emit_jump_if_item_error(mt, val, parameter_error_result,
                                 parameter_error_label);
@@ -29238,6 +29268,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     if (arg_count == 0) {
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
+        mir_emit_fn_colour_guard(mt, call_node);
         dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
@@ -29261,6 +29292,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         emit_dyn_var_transports(args, arg_count);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
+        mir_emit_fn_colour_guard(mt, call_node);
         if (arg_count == 1) {
             dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
@@ -29334,6 +29366,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
+        mir_emit_fn_colour_guard(mt, call_node);
         dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),

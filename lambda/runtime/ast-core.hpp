@@ -650,6 +650,9 @@ typedef struct AstCallNode : AstNode {
     uint16_t interp_source_argc;
     bool interp_has_named_args;
     bool interp_call_shape_planned;
+    // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
+    // colour must be checked at run time; 0 when statically resolved.
+    uint32_t fn_colour_guard;
 } AstCallNode;
 
 // A handler keeps both outcome bodies together so expression and statement

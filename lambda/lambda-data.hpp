@@ -1062,6 +1062,9 @@ typedef struct TypeFunc : Type {
     bool can_raise;             // true if function may raise errors (T^ or T^E)
     bool may_return_error;      // true if an Item-valued call may contain an ordinary error
     bool has_explicit_return_contract;
+    // S12.1.4v2: declared with `function` — the value is `fn`, but a call is
+    // `pn` when a `function`-typed argument is (its polymorphic slots)
+    bool is_colour_poly;
     uint16_t binder_count;
     TypeBinder** binders;       // canonical binder for each slot
 } TypeFunc;
@@ -1165,6 +1168,22 @@ static inline TypeFunc* lambda_type_func_signature(Type* type) {
 static inline bool lambda_type_func_is_proc(Type* type) {
     TypeFunc* signature = lambda_type_func_signature(type);
     return signature && signature->is_proc;
+}
+
+// S12.1.4v2(1): a polymorphic slot of a `function` declaration is a parameter
+// whose contract is exactly `function`; `fn (...)`/`pn (...)` slots keep
+// their fixed colour and never vote.
+// S12.1.4v2(3): the run-time half of an `fn`-context call's colour check.
+// Bit 31 asks for the callee's own colour (a dynamic callee); bits 0..15 name
+// the argument positions whose colour could not be resolved statically, and
+// are verified only where they land in the callee's polymorphic slots.
+#define LAMBDA_COLOUR_GUARD_CALLEE (1u << 31)
+#define LAMBDA_COLOUR_GUARD_ARGS 0xFFFFu
+
+static inline bool lambda_type_param_is_colour_poly(const TypeParam* param) {
+    if (!param) return false;
+    const Type* contract = param->contract_type ? param->contract_type : param->full_type;
+    return contract == &TYPE_FUNC;
 }
 
 // D2.6.6v2: the generic map/element/object descriptors are compact `Type`

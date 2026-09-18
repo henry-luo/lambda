@@ -743,9 +743,11 @@ module.exports = grammar({
     // `pub type`. The old spelling replaced `let` outright (`pub x = 1`),
     // which made one keyword compose two different ways. `pub var` stays
     // illegal simply by the modifier not composing with `var`.
+    // S12.1.4v2: `function` declares a colour-polymorphic `fn` — pure iff its
+    // `function`-typed arguments are.
     fn_stam: $ => seq(
       optional(field('pub', 'pub')),
-      field('kind', choice('fn', 'pn')),
+      field('kind', choice('fn', 'pn', 'function')),
       field('name', choice($.identifier, $.symbol)),
       '(', optional(field('declare', $.parameter)),
       repeat(seq(',', field('declare', $.parameter))), ')',
@@ -755,7 +757,7 @@ module.exports = grammar({
 
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')),
-      'fn', field('name', choice($.identifier, $.symbol)),
+      field('kind', choice('fn', 'function')), field('name', choice($.identifier, $.symbol)),
       '(', optional(seq(field('declare', $.parameter),
         repeat(seq(',', field('declare', $.parameter))))), ')',
       optional(field('type', $.return_type)),

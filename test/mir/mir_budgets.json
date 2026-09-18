@@ -256,10 +256,10 @@
       "name": "lambda_corpus_closure",
       "script": "test/lambda/closure.ls",
       "language": "lambda",
-      "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
+      "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Growth 2026-09-18 (+17, S12.1.4v2(3)): one u32 store of Context::fn_colour_guard before each `fn`-context dynamic call whose callee colour is not statically `fn` (17 such calls here); lambda_dynamic_call consumes it to refuse a `pn` callee. No new calls, safepoints or root stores.",
       "budgets": {
         "default": {
-          "module_insns": 2252
+          "module_insns": 2269
         }
       }
     },

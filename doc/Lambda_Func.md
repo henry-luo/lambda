@@ -20,18 +20,21 @@ This document covers Lambda's function system, including pure functional (`fn`) 
 5. [Method-Style Calls](#method-style-calls)
 6. [Closures](#closures)
 7. [Higher-Order Functions](#higher-order-functions)
-8. [Procedural Functions](#procedural-functions)
+8. [Colour-Polymorphic Functions](#colour-polymorphic-functions)
+9. [Procedural Functions](#procedural-functions)
 
 ---
 
 ## Function Overview
 
-Lambda supports two kinds of functions:
+Lambda supports two kinds of functions, plus a declaration form for
+higher-order functions whose purity depends on their arguments:
 
 | Kind | Keyword | Characteristics |
 |------|---------|-----------------|
 | **Functional** | `fn` | Pure, immutable, expression-based |
 | **Procedural** | `pn` | Mutable state, side effects, imperative |
+| **Colour-polymorphic** | `function` | Pure iff its `function`-typed arguments are |
 
 ### Quick Comparison
 
@@ -525,6 +528,40 @@ filter_shift([1, 2, 3, 4, 5], (x) => x > 2)  // [5, 6, 7]
 map_array([1, 2, 3], (x) => x * 2)           // [2, 4, 6]
 fold([1, 2, 3, 4], 0, (a, b) => a + b)       // 10
 ```
+
+---
+
+## Colour-Polymorphic Functions
+
+An ordinary `fn` never runs a procedure: calling a `pn` from `fn` context is a
+compile error, or, when the callee only arrives as a value, a run-time error
+returned as the call's value. A higher-order function that should accept both
+kinds is declared with `function`:
+
+```lambda
+fn square(x: int) => x * x
+pn log_square(x: int) { print(x); x * x }
+
+function apply_all(f: function, xs) => for (x in xs) f(x)
+
+let squares = apply_all(square, [1, 2, 3])   // pure call: [1, 4, 9]
+```
+
+- **A call's colour comes from its arguments.** A call is `pn` when an
+  argument in a `function`-typed parameter is a `pn`, and `fn` otherwise.
+  Parameters typed `fn (...)` or `pn (...)` keep their fixed colour.
+- **`fn` context may make only the pure calls.** `apply_all(square, xs)` is
+  fine anywhere; `apply_all(log_square, xs)` is allowed only inside a `pn`, and
+  is a compile error in `fn` context. When the argument's colour is known only
+  at run time, the call returns an error value instead of running the `pn`.
+- **The body is checked as an `fn` body.** No `var`, `while` or `return`, and
+  no calls to known procedures: its only effects are the calls it makes
+  through its `function` parameters.
+- **Its value is `fn`.** `apply_all is fn` is `true`, so it can be passed
+  where an `fn (...)` is expected.
+
+`call(f, args)` behaves the same way: it is the built-in colour-polymorphic
+function (S12.1.4v3).
 
 ---
 

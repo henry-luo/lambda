@@ -1716,13 +1716,28 @@ static bool parser_parse_parameter_list(LambdaRdParser* parser, LambdaParseValue
         error_expected_parameter_close, parameters_out, variadic_out);
 }
 
+// S12.1.4v2: `function name(...)` declares a colour-polymorphic function.
+// `function` stays a base-type word everywhere else, so only that word followed
+// by a name on the same line starts a declaration.
+static bool parser_at_colour_poly_declaration(LambdaRdParser* parser) {
+    LambdaToken word = parser->current;
+    static const char keyword[] = "function";
+    size_t length = sizeof(keyword) - 1;
+    return word.kind == LAMBDA_TOK_BASE_TYPE &&
+        word.span.end_byte - word.span.start_byte == length &&
+        memcmp(parser->lexer.source + word.span.start_byte, keyword, length) == 0 &&
+        token_is_key(parser->next.kind) && !parser->next.nl_before;
+}
+
 static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool is_public) {
     LambdaToken first = parser->current;
     bool is_proc = first.kind == LAMBDA_TOK_PN;
+    bool is_colour_poly = parser_at_colour_poly_declaration(parser);
     parser_advance(parser);
     LambdaToken name;
     if (!parser_take_name(parser, token_is_key, error_expected_function_name, &name)) return 0;
     uint32_t function_flags = is_proc ? LAMBDA_REDUCTION_FLAG_PROC : 0u;
+    if (is_colour_poly) function_flags |= LAMBDA_REDUCTION_FLAG_COLOUR_POLY;
     if (is_public) function_flags |= LAMBDA_REDUCTION_FLAG_PUBLIC;
     parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN, (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name, function_flags, NULL, 0);
     LambdaCallableSignature signature;
@@ -2038,7 +2053,8 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         if (is_public && parser->current.kind == LAMBDA_TOK_IDENTIFIER) {
             return parser_fail(parser, error_pub_declaration, LAMBDA_TOK_LET);
         }
-        if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN) {
+        if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN ||
+                parser_at_colour_poly_declaration(parser)) {
             return parse_function_declaration(parser, is_public);
         }
         if (parser->current.kind == LAMBDA_TOK_VIEW || parser->current.kind == LAMBDA_TOK_EDIT) {
@@ -2177,12 +2193,14 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         if (parser->procedural_depth && statement_first == LAMBDA_TOK_LBRACE && parser->next.kind == LAMBDA_TOK_RBRACE) {
             return parser_fail(parser, error_empty_block_statement, LAMBDA_TOK_RBRACE);
         }
+        // a `function` declaration closes its tail like `fn`/`pn` below
+        bool statement_declares_function = parser_at_colour_poly_declaration(parser);
         LambdaParseValue statement = parse_statement(parser);
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         parser_add_content(parser, &content, &has_content, &content_start, statement_token, statement);
         if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) break;
         bool closed_tail =
-            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB));
+            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_declares_function || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB));
         if (closed_tail) {
             parser_consume_separator(parser, terminator);
             if (parser->status != LAMBDA_PARSE_OK) return 0;

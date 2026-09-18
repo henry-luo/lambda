@@ -7840,11 +7840,159 @@ static void lambda_ast_note_fixed_array_lengths(Transpiler* tp, AstFuncNode* fn)
     walk_lambda_ast(fn->body, fixed_array_invalidate_cb, &scan, true);
 }
 
+// --- S12.1.4v2: call colours ------------------------------------------------
+// Resolved once every declaration is complete, so a forward or recursive
+// callee's parameters are known. In `fn` context a call that is statically a
+// `pn` call is a compile error, one whose colour is only known at run time is
+// marked with LAMBDA_COLOUR_GUARD_* bits for the tiers, and `pn` context needs
+// nothing. Pipe-to-callable and system-HOF callbacks are not covered yet.
+
+typedef enum CallColour {
+    CALL_COLOUR_FN,
+    CALL_COLOUR_PN,
+    CALL_COLOUR_UNKNOWN,
+    // the enclosing `function`'s own polymorphic parameter: its colour is the
+    // one its caller already resolved, so it is never checked again
+    CALL_COLOUR_PASSTHROUGH,
+} CallColour;
+
+typedef struct CallColourWalk {
+    Transpiler* tp;
+    AstFuncNode* function;  // innermost enclosing function; NULL at module level
+} CallColourWalk;
+
+static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
+    AstFuncNode* fn = walk->function;
+    if (!fn || !((TypeFunc*)fn->type)->is_colour_poly) return false;
+    node = ast_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_IDENT) return false;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    AstNode* binding = entry ? entry->node : NULL;
+    if (!binding || binding->node_type != AST_NODE_PARAM || !binding->type ||
+            binding->type->kind != TYPE_KIND_PARAM) return false;
+    // only this function's own parameter; a captured outer one is not its caller's
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        if ((AstNode*)param == binding) {
+            return lambda_type_param_is_colour_poly((TypeParam*)binding->type);
+        }
+    }
+    return false;
+}
+
+static CallColour colour_walk_value(CallColourWalk* walk, AstNode* value) {
+    if (colour_walk_is_passthrough(walk, value)) return CALL_COLOUR_PASSTHROUGH;
+    Type* type = value ? value->type : NULL;
+    if (type && !is_global_simple_type(type) && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* param = (TypeParam*)type;
+        type = param->contract_type ? param->contract_type :
+            param->full_type ? param->full_type : type;
+    }
+    type = boundary_unwrap_type(type);
+    if (!type) return CALL_COLOUR_UNKNOWN;
+    if (TypeFunc* signature = lambda_type_func_signature(type)) {
+        return signature->is_proc ? CALL_COLOUR_PN : CALL_COLOUR_FN;
+    }
+    // `function`, `any` and composite types may hold a `pn`; anything else is
+    // statically no function at all
+    if (type->type_id == LMD_TYPE_FUNC || type->type_id == LMD_TYPE_ANY ||
+            (!is_global_simple_type(type) && type->kind != TYPE_KIND_SIMPLE)) {
+        return CALL_COLOUR_UNKNOWN;
+    }
+    return CALL_COLOUR_FN;
+}
+
+// a direct call to a `function` declaration: each polymorphic slot votes (C20-2)
+static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
+        AstFuncNode* callee) {
+    AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    int argc = 0;
+    for (AstNode* arg = call->argument; arg; arg = arg->next) argc++;
+    ast_resolve_call_args(call->argument, callee, argc, resolved);
+    // a pipe-injected receiver fills slot 0, so the source arguments shift
+    int shift = call->pipe_inject ? 1 : 0;
+    uint32_t guard = 0;
+    int index = 0;
+    for (AstNamedNode* param = callee->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
+            param = (AstNamedNode*)((AstNode*)param)->next, index++) {
+        if (!param->type || param->type->kind != TYPE_KIND_PARAM ||
+                !lambda_type_param_is_colour_poly((TypeParam*)param->type)) continue;
+        AstNode* value = index >= shift ? resolved[index - shift] : NULL;
+        CallColour colour = value ? colour_walk_value(walk, value) :
+            (index < shift ? CALL_COLOUR_UNKNOWN : CALL_COLOUR_FN);
+        if (colour == CALL_COLOUR_PN) {
+            record_semantic_error_span(walk->tp, value->source_span, ERR_PROC_IN_FN,
+                "passing a procedure (pn) to parameter '%.*s' makes this call of "
+                "'%.*s' a pn call, which a function (fn) cannot make",
+                param->name ? (int)param->name->len : 0,
+                param->name ? param->name->chars : "",
+                callee->name ? (int)callee->name->len : 0,
+                callee->name ? callee->name->chars : "");
+        } else if (colour == CALL_COLOUR_UNKNOWN && index < 16) {
+            guard |= 1u << index;
+        }
+    }
+    call->fn_colour_guard = guard;
+}
+
+static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
+    AstNode* callee = ast_unwrap_primary(call->function);
+    // system functions carry their own colour rules (S12.1.4v2 covers user code)
+    if (!callee || callee->node_type == AST_NODE_SYS_FUNC) return;
+    if (AstFuncNode* direct = ast_direct_call_function(call)) {
+        if (direct->node_type == AST_NODE_PROC && walk->function &&
+                ((TypeFunc*)walk->function->type)->is_colour_poly) {
+            // S12.1.1: `fn` context, including a `function` body (C20-3),
+            // never calls a statically-known procedure
+            record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
+                "'%.*s' is a procedure (pn) and cannot be called from a function (fn)",
+                direct->name ? (int)direct->name->len : 0,
+                direct->name ? direct->name->chars : "");
+        } else if (((TypeFunc*)direct->type)->is_colour_poly) {
+            colour_walk_poly_call(walk, call, direct);
+        }
+        return;
+    }
+    // calling the enclosing `function`'s own polymorphic parameter is the
+    // effect it is allowed (C20-3)
+    if (colour_walk_is_passthrough(walk, callee)) return;
+    CallColour callee_colour = colour_walk_value(walk, callee);
+    // a dynamic callee's slots are unknown here, so every argument that may be
+    // a `pn` is offered to the run-time check, which tests the real signature
+    uint32_t guard = callee_colour == CALL_COLOUR_FN ? 0 : LAMBDA_COLOUR_GUARD_CALLEE;
+    int index = 0;
+    if (call->pipe_inject) guard |= 1u << index++;
+    for (AstNode* arg = call->argument; arg && index < 16; arg = arg->next, index++) {
+        CallColour colour = colour_walk_value(walk, arg);
+        if (colour == CALL_COLOUR_PN || colour == CALL_COLOUR_UNKNOWN) guard |= 1u << index;
+    }
+    call->fn_colour_guard = guard;
+}
+
+static bool colour_walk_visit(AstNode* node, void* data) {
+    CallColourWalk* walk = (CallColourWalk*)data;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        CallColourWalk inner = {walk->tp, fn};
+        walk_lambda_ast(fn->body, colour_walk_visit, &inner, true);
+        return false;
+    }
+    bool in_proc = walk->function && walk->function->node_type == AST_NODE_PROC;
+    if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
+        colour_walk_call(walk, (AstCallNode*)node);
+    }
+    return true;
+}
+
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     if (!tp || !script || tp->error_count != 0) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
+    if (tp->error_count != 0) return false;
+    CallColourWalk colour_walk = {tp, NULL};
+    walk_lambda_ast((AstNode*)script, colour_walk_visit, &colour_walk, true);
     if (tp->error_count != 0) return false;
     for (AstNode* item = script->child; item; item = item->next) {
         validate_top_level_enforcing_calls(tp, item);
@@ -8248,10 +8396,21 @@ static void direct_predeclare_top_level_functions(Transpiler* tp,
             token = lambda_lexer_next(&lexer);
             continue;
         }
-        if (delimiter_depth == 0 &&
-                (token.kind == LAMBDA_TOK_FN || token.kind == LAMBDA_TOK_PN)) {
+        // S12.1.4v2: `function name` predeclares like `fn name`; `function`
+        // is lexed as a base-type word, so match its spelling here.
+        bool colour_poly_word = token.kind == LAMBDA_TOK_BASE_TYPE &&
+            token.span.end_byte - token.span.start_byte == 8 &&
+            memcmp(source + token.span.start_byte, "function", 8) == 0;
+        if (delimiter_depth == 0 && (token.kind == LAMBDA_TOK_FN ||
+                token.kind == LAMBDA_TOK_PN || colour_poly_word)) {
             bool is_proc = token.kind == LAMBDA_TOK_PN;
             LambdaToken name = lambda_lexer_next(&lexer);
+            if (colour_poly_word && (name.nl_before ||
+                    !direct_function_name_token(name.kind))) {
+                // a bare `function` type word, not a declaration
+                token = name;
+                continue;
+            }
             if (direct_function_name_token(name.kind)) {
                 StrView name_view = {source + name.span.start_byte,
                     name.span.end_byte - name.span.start_byte};
@@ -8266,6 +8425,7 @@ static void direct_predeclare_top_level_functions(Transpiler* tp,
                         (SourceSpan){token.span.start_byte, name.span.end_byte},
                         name_view, is_proc);
                     ((TypeFunc*)fn->type)->is_public = public_pending;
+                    ((TypeFunc*)fn->type)->is_colour_poly = colour_poly_word;
                     lambda_ast_register_name(tp, (AstNamedNode*)fn);
                 } else if (existing->node->node_type == AST_NODE_FUNC ||
                         existing->node->node_type == AST_NODE_PROC) {
@@ -13683,6 +13843,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
             ((TypeFunc*)fn->type)->is_public =
                 (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0 ||
                 ((TypeFunc*)fn->type)->is_public;
+            if (reduction->flags & LAMBDA_REDUCTION_FLAG_COLOUR_POLY) {
+                ((TypeFunc*)fn->type)->is_colour_poly = true;
+            }
             sink->function_nodes[sink->function_depth] = fn;
             sink->function_scopes[sink->function_depth++] =
                 lambda_ast_enter_scope(tp, is_proc);

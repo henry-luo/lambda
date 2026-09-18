@@ -1629,7 +1629,8 @@ static void plan_mark_tail_calls(AstNode* node, AstFuncNode* fn) {
         AstCallNode* call = (AstCallNode*)node;
         // A propagating call (`f(...)^`) still has to inspect its result, so it
         // is not a tail position even though it is syntactically last.
-        if (!call->propagate && is_recursive_call(call, fn)) {
+        // a colour-guarded call keeps its entry so the check runs (S12.1.4v2)
+        if (!call->propagate && !call->fn_colour_guard && is_recursive_call(call, fn)) {
             call->interp_self_tail_call = true;
         }
         break;

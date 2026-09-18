@@ -919,6 +919,52 @@ static bool lambda_function_admitted(Item item, TypeId actual_id, Type* expected
         lambda_function_is_proc(item.function) == lambda_type_func_is_proc(expected);
 }
 
+static bool lambda_item_is_proc(Item item) {
+    return get_type_id(item) == LMD_TYPE_FUNC && lambda_function_is_proc(item.function);
+}
+
+// one wording for both tiers: the JIT checks a direct call's argument without
+// the callee in hand, so the argument case never names it
+#define LAMBDA_COLOUR_ARG_DETAIL "a pn argument makes this call a pn call"
+
+static Item lambda_fn_colour_error(const char* detail) {
+    set_runtime_error(ERR_PROC_IN_FN,
+        "cannot call a procedure (pn) from a function (fn): %s", detail);
+    return ItemError;
+}
+
+// S12.1.4v2(3): an `fn`-context call whose colour was not resolved statically.
+// A `pn` callee is refused when asked (a dynamic callee); a `function` callee
+// is refused when a masked argument lands in one of its polymorphic slots as a
+// `pn`, since that would make the call itself a `pn` call.
+extern "C" Item lambda_fn_colour_guard(Function* fn, const Item* args, int argc,
+        uint32_t guard) {
+    if (!fn || !guard) return ItemNull;
+    if ((guard & LAMBDA_COLOUR_GUARD_CALLEE) && lambda_function_is_proc(fn)) {
+        return lambda_fn_colour_error(fn->name ? fn->name : "anonymous procedure");
+    }
+    if (fn->entry_abi >= FN_ENTRY_ABI_HOSTED_FIRST) return ItemNull;
+    const TypeFunc* signature = (const TypeFunc*)fn->fn_type;
+    if (!signature || signature->type_id != LMD_TYPE_FUNC ||
+            !signature->is_colour_poly || !args) return ItemNull;
+    int index = 0;
+    for (const TypeParam* param = signature->param; param && index < argc &&
+            index < 16; param = param->next, index++) {
+        if ((guard & (1u << index)) && lambda_type_param_is_colour_poly(param) &&
+                lambda_item_is_proc(args[index])) {
+            return lambda_fn_colour_error(LAMBDA_COLOUR_ARG_DETAIL);
+        }
+    }
+    return ItemNull;
+}
+
+// The direct-call form: the caller already resolved the callee, so each
+// guarded argument is known to fill a polymorphic slot (S12.1.4v2(3)).
+extern "C" Item lambda_fn_colour_arg_check(Item argument) {
+    return lambda_item_is_proc(argument)
+        ? lambda_fn_colour_error(LAMBDA_COLOUR_ARG_DETAIL) : argument;
+}
+
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
@@ -1231,6 +1277,10 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
 
 static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
         LambdaDynamicCallMode mode, const char* caller) {
+    // S12.1.4v2(3): consume an `fn`-context caller's colour guard before any
+    // early exit, so a failed dispatch never leaves it armed for the next call
+    uint32_t colour_guard = context ? context->fn_colour_guard : 0;
+    if (colour_guard) context->fn_colour_guard = 0;
     int64_t source_actual = args ? args->length : 0;
     if (source_actual < 0 || source_actual > LAMBDA_MAX_FUNCTION_ARGS) {
         return lambda_dynamic_argument_limit_error(caller, source_actual,
@@ -1249,6 +1299,11 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
             fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
             "function does not publish a Core boxed dynamic-call entry");
+    }
+    if (colour_guard) {
+        Item refused = lambda_fn_colour_guard(fn, args ? args->items : NULL,
+            actual, colour_guard);
+        if (item_is_error(refused)) return refused;
     }
 
     int physical = 0;
