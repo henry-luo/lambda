@@ -2235,3 +2235,136 @@ arity overloading. The reference agreed with the reasoning rather than substitut
 for it.
 
 Recorded in spec §12 (S12.3.6, v15.2.0); ledger entry TS-8 closed as *not a defect*.
+
+---
+
+### C20. Effect polymorphism: the `function` declaration (2026-09-18) — RESOLVED: closes SO28
+
+**Spec linkage:** S11.1.5 (the three function types), S12.1.4v2 (user `function`
+declarations; supersedes S12.1.4), SO44 (opened: binder depth on function values).
+SO28 is closed.
+
+**The problem.** S12.1.1 gives every function one declared effect bit: `fn` is pure,
+`pn` may have effects. A higher-order function has no honest bit to declare:
+
+```lambda no-run
+// no-run: illustrates the pre-C20 dilemma
+fn apply_all(f, xs) => for (x in xs) f(x)
+```
+
+`apply_all(square, xs)` is pure; `apply_all(log_and_square, xs)` is not. Declaring `fn`
+refuses every `pn` argument; declaring `pn` makes every caller procedural, even the ones
+that pass a pure `f`, and throws away exactly what purity buys the caller (re-running,
+caching, parallelising). Features §3.6 named this the one capability a one-bit system
+lacks next to Koka, Unison and Flix, and recorded Flix-style Boolean effect polymorphism
+as the minimal fix. S12.1.4 (2026-08-24) admitted it for the system function `call` only.
+
+**Decision (designer ruling, 2026-09-18).** A third declaration keyword, `function`,
+declares a colour-polymorphic function:
+
+```lambda no-run
+// no-run: C20 is not yet implemented
+function apply_all(f: function, xs) => for (x in xs) f(x)
+```
+
+#### C20.1 The rulings
+
+- **C20-1 Types.** `fn T` and `pn T` are **disjoint**; `function` is their union and the
+  base type of both. `f is fn` and `f is pn` test the effect bit; `f is function` holds for
+  every function value. A parameter typed `fn (...)` admits only pure functions, `pn (...)`
+  only procedures, and `function` (or `function (...)`) either. → S11.1.5
+- **C20-2 Colour of a call.** A `function` declaration's effect is resolved **per call**:
+  the call is `pn` if any argument bound to a `function`-typed parameter is a `pn`, and
+  `fn` otherwise — Flix's Boolean effect as a conjunction over the polymorphic
+  parameters. Parameters typed `fn (...)` or `pn (...)` keep their fixed colour and do not
+  vote. → S12.1.4v2
+- **C20-3 Body checking — the soundness core.** A `function` body is checked **as an `fn`
+  body**: no `var`, `while`, `break`, `continue` or `return` (S12.1.2), and no calls to a
+  statically-known `pn`. Its **only** effects are calls through its polymorphic
+  parameters. This is what makes C20-2 sound: a pure argument really does yield a pure
+  call, because the body adds no effect of its own. → S12.1.4v2
+- **C20-4 Resolution.** The colour is resolved **statically** when every polymorphic
+  argument's colour is statically known, and **checked at run time** otherwise — the same
+  split S12.1.4 already applied to `call`. An `fn` caller passing a statically-known `pn`
+  to a polymorphic parameter is a compile error. The error convention follows the
+  resolved colour, as for `call` (S12.3.4): an `fn`-coloured call **returns** an error
+  value, a `pn`-coloured call **raises**. → S12.1.4v2
+- **C20-5 Escaping closures.** A closure that a `function` returns or stores, and that
+  captures a polymorphic parameter, is typed `function` (colour unknown). Calling it later
+  is resolved under C20-4 — statically where its colour is known, at run time otherwise.
+  → S12.1.4v2
+- **C20-6 `call` is the first instance.** The system function `call` (S12.3.4) is now
+  simply the built-in `function` with one polymorphic parameter, not a special case.
+
+#### C20.2 Consequence for type binders (agreed 2026-09-18)
+
+S11.4.8v2 selects the **narrowest** type of the value admitted at a binder site (S4.2.2).
+Once `fn` and `pn` are disjoint subtypes of `function` (C20-1), `fn` or `pn` is always
+strictly narrower than `function`, so a binder over a function value selects a coloured
+type, never bare `function`. No special case is needed: the existing narrowest-type rule
+yields the colour automatically. Repeated sites still join through S11.4.8v2, and the join
+of `fn` with `pn` is `function` — the "pure iff all are pure" answer again, falling out of
+the join rather than being stated separately.
+
+**Left open as SO44:** how narrow "narrowest" is for a function value — its full signature
+(`fn (int) int`) where known, or its colour alone (`fn`). The full-signature reading is
+the literal one under S4.2.2, and colour follows from it; it was not ruled because C20's
+final surface does not depend on it. It also meets S11.1.4v2's pending function-type
+variance.
+
+#### C20.3 Alternatives considered
+
+**`function apply_all(f: as T, xs) T` — the designer's first form, withdrawn.** It put the
+colour in a type binder. Two readings conflicted with existing rulings: under S11.4.8v2,
+`f: as T` binds the *type* of `f` (`fn`, `pn`, or a full signature) and admits any
+non-error value (`x: as T` ≡ `x: any ! error as T`); and a trailing `T` is a *return
+contract*, which would claim `apply_all` returns a function when it returns an array.
+Making the trailing slot mean "this call's colour" would have given the return slot a
+second meaning in one declaration form only. The binder insight survived as C20.2; the
+colour itself moved into the `function` keyword, where no type variable is needed.
+
+**Full effect rows (Koka, Unison).** Theoretically complete, but they re-import the
+fine-grained effect bookkeeping the unbundled design deliberately split into orthogonal
+channels (`T^E`, resource scopes, `start`). One Boolean per call is all Lambda's one-bit
+system needs.
+
+**Infer polymorphism for any `fn` with a function-typed parameter.** Rejected: it would
+silently change the meaning of every existing `fn` signature, and it violates the effect
+doctrine's rule to *colour what changes the caller's contract*. A caller must be able to
+see from the declaration that purity depends on the argument; the `function` keyword is
+that visible colour.
+
+**Forbid escaping closures in v1 (C20-5 alternative).** Simpler, but it rules out
+ordinary combinators such as `function compose(f: function, g: function) =>
+(x) => g(f(x))`. Typing the escapee `function` and reusing C20-4's run-time check costs
+nothing new.
+
+#### C20.4 Pre-existing defect found while ruling
+
+The implementation does not distinguish the colours in the type system today (probed
+2026-09-18, debug build of `f9962cf42`): a `pn` value satisfies `is fn` and the type
+`fn (int) int`; `pn` is rejected as a type pattern (`expected a type pattern`); and a
+binder over a function value selects `function`. The first of these already contradicts
+S12.1.1 — a parameter declared `fn (...)` promises purity yet admits a procedure — so it
+is a conformance bug independent of C20. `function` itself already exists as a base type
+(`grammar.js` `_base_type_kw`; `LIT_TYPE_FUNC` in `lambda/runtime/build_ast.cpp`), and
+`type(f)` returns it for every function value.
+
+#### C20.5 Follow-ups
+
+- Grammar: `function` as a declaration keyword at statement start (today it only begins a
+  type expression). *`pn` / `pn (...)` in type position — done 2026-09-18.*
+- *Type checker: disjoint `fn`/`pn` admission (C20-1), fixing C20.4 — done 2026-09-18*
+  (runtime `is`/admission share one rule; static boundary rejects a known wrong colour and
+  defers a `function` source; system procedure refs carry their signature). Found on the
+  way: every site that cast a function-typed expression's type to `TypeFunc` on the id
+  alone read past the compact `TYPE_FUNC` singleton, so calling through an `f: function`
+  parameter crashed the compiler; all now go through `lambda_type_func_signature`.
+- Binder selection over a function value still yields `function`; blocked on SO44.
+- Effect checker: `function` bodies checked as `fn` (C20-3); per-call colour resolution
+  with the run-time fallback (C20-4), shared with `call`.
+- User docs: `Lambda_Func.md` (declarations), `Lambda_Type.md` (function types),
+  `Lambda_Cheatsheet.md`.
+
+Recorded in spec §11 (S11.1.5), §12 (S12.1.4v2), Appendix B (SO28 closed, SO44 opened),
+v25.0.0.

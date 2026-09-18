@@ -5921,8 +5921,8 @@ static bool mir_contract_has_binder(Type* type, bool include_refs, int depth = 0
             if (mir_contract_has_binder(field->type, include_refs, depth + 1)) return true;
         }
     }
-    if (type->type_id == LMD_TYPE_FUNC) {
-        TypeFunc* function = (TypeFunc*)type;
+    // a `function` contract has no parameters to carry a binder (S11.1.5)
+    if (TypeFunc* function = lambda_type_func_signature(type)) {
         for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
             if (parameter->binder || mir_contract_has_binder(
                     parameter->contract_type ? parameter->contract_type : parameter->full_type,
@@ -8266,7 +8266,7 @@ static MIR_reg_t mir_emit_cow_path_array(MirTranspiler* mt, const AstCowPath* pa
 }
 
 static void mir_attach_function_type(MirTranspiler* mt, MIR_reg_t function,
-        AstFuncNode* fn_node) {
+        AstNode* fn_node) {
     if (!fn_node || !fn_node->type || fn_node->type->type_id != LMD_TYPE_FUNC) return;
     emit_call_void_2(mt, "lambda_function_set_type", MIR_T_P,
         MIR_new_reg_op(mt->ctx, function), MIR_T_P,
@@ -10280,9 +10280,9 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                 return LMD_TYPE_ANY;
             }
         }
-        Type* target_type = call->function ? call->function->type : NULL;
-        bool can_raise = target_type && target_type->type_id == LMD_TYPE_FUNC &&
-            ((TypeFunc*)target_type)->can_raise;
+        TypeFunc* target_signature = call->function
+            ? lambda_type_func_signature(call->function->type) : NULL;
+        bool can_raise = target_signature && target_signature->can_raise;
         if (!can_raise && call->function &&
                 call->function->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)call->function;
@@ -21076,11 +21076,8 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
         // A forward identifier can retain its pre-binding function type. The
         // resolved declaration owns the completed return contract (D8.2.4).
         AstFuncNode* function = ast_direct_call_function(call);
-        TypeFunc* function_type = function && function->type &&
-            function->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)function->type
-            : function_expr && function_expr->type &&
-                function_expr->type->type_id == LMD_TYPE_FUNC
-                ? (TypeFunc*)function_expr->type : NULL;
+        TypeFunc* function_type = function ? lambda_type_func_signature(function->type)
+            : function_expr ? lambda_type_func_signature(function_expr->type) : NULL;
         Type* result = function_type ? function_type->return_contract : NULL;
         bool open_result = result && result->type_id == LMD_TYPE_MAP &&
             result == &TYPE_MAP;
@@ -25619,8 +25616,7 @@ static bool mir_call_may_suspend(AstCallNode* call_node) {
         SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
         return info && info->is_async;
     }
-    if (!function || !function->type || function->type->type_id != LMD_TYPE_FUNC ||
-            !((TypeFunc*)function->type)->is_proc) return false;
+    if (!function || !lambda_type_func_is_proc(function->type)) return false;
     if (function->node_type != AST_NODE_IDENT) return true;
     NameEntry* entry = ((AstIdentNode*)function)->entry;
     AstNode* target = entry ? entry->node : NULL;
@@ -32435,6 +32431,9 @@ static MirValue transpile_definition_value(MirTranspiler* mt, AstNode* node) {
             MIR_T_P, MIR_new_reg_op(mt->ctx, address),
             MIR_T_I64, MIR_new_int_op(mt->ctx, info->arg_count),
             MIR_T_P, MIR_new_reg_op(mt->ctx, name));
+        // the signature carries the builtin's colour, so `is fn`/`is pn` and
+        // call()'s fn-context check see a system procedure as `pn` (S11.1.5)
+        mir_attach_function_type(mt, reg, node);
         result_rep = VALUE_REP_RAW_GC_POINTER;
         break;
     }
@@ -34819,15 +34818,13 @@ static Type* direct_call_return_contract(AstNode* body) {
     if (!expr || expr->node_type != AST_NODE_CALL_EXPR) return NULL;
     AstCallNode* call = (AstCallNode*)expr;
     AstNode* callee = ast_unwrap_primary(call->function);
-    if (callee && callee->type && callee->type->type_id == LMD_TYPE_FUNC) {
-        return ((TypeFunc*)callee->type)->returned;
-    }
+    TypeFunc* signature = callee ? lambda_type_func_signature(callee->type) : NULL;
+    if (signature) return signature->returned;
     if (callee && callee->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)callee;
         AstNode* target = ident->entry ? ident->entry->node : NULL;
-        if (target && target->type && target->type->type_id == LMD_TYPE_FUNC) {
-            return ((TypeFunc*)target->type)->returned;
-        }
+        signature = target ? lambda_type_func_signature(target->type) : NULL;
+        if (signature) return signature->returned;
     }
     return NULL;
 }
@@ -35097,15 +35094,13 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
         AstNode* callee = ast_unwrap_primary(call->function);
-        Type* callee_type = callee ? callee->type : NULL;
-        bool can_raise = callee_type && callee_type->type_id == LMD_TYPE_FUNC &&
-            ((TypeFunc*)callee_type)->can_raise;
+        TypeFunc* callee_signature = callee ? lambda_type_func_signature(callee->type) : NULL;
+        bool can_raise = callee_signature && callee_signature->can_raise;
         if (!can_raise && callee && callee->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)callee;
             AstNode* target = ident->entry ? ident->entry->node : NULL;
-            can_raise = target && target->type &&
-                target->type->type_id == LMD_TYPE_FUNC &&
-                ((TypeFunc*)target->type)->can_raise;
+            TypeFunc* target_signature = target ? lambda_type_func_signature(target->type) : NULL;
+            can_raise = target_signature && target_signature->can_raise;
         }
         if (can_raise || mir_call_may_check_array_boundary(mt, call)) return false;
         AstNode* recursive_target = callee && callee->node_type == AST_NODE_IDENT
@@ -35608,9 +35603,7 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (body->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)body;
         AstNode* callee = ast_unwrap_primary(call->function);
-        Type* callee_type = callee ? callee->type : NULL;
-        if (callee_type && callee_type->type_id == LMD_TYPE_FUNC) {
-            TypeFunc* signature = (TypeFunc*)callee_type;
+        if (TypeFunc* signature = callee ? lambda_type_func_signature(callee->type) : NULL) {
             return signature->can_raise || !signature->returned ||
                 mir_decl_type_id(signature->returned) == LMD_TYPE_ANY;
         }

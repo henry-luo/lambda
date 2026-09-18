@@ -1153,6 +1153,20 @@ extern Type TYPE_ANY_NO_ERROR;
 extern Type TYPE_ANY_NO_NULL;
 extern Type TYPE_ANY_NO_ERROR_OR_NULL;
 
+// S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
+// union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
+// so a caller that needs a signature must ask here rather than cast on the id.
+static inline TypeFunc* lambda_type_func_signature(Type* type) {
+    return type && type->type_id == LMD_TYPE_FUNC && type != &TYPE_FUNC
+        ? (TypeFunc*)type : NULL;
+}
+
+// true only for a `pn` signature; `function` leaves the colour open
+static inline bool lambda_type_func_is_proc(Type* type) {
+    TypeFunc* signature = lambda_type_func_signature(type);
+    return signature && signature->is_proc;
+}
+
 // D2.6.6v2: the generic map/element/object descriptors are compact `Type`
 // singletons.  Only a concrete descriptor can be read as its extended
 // TypeMap shape; keeping the discriminator here prevents each language front
@@ -1184,6 +1198,10 @@ static inline const char* type_contract_display_name(const Type* type) {
     // Abstract numeric contracts share LMD_TYPE_TYPE with the `type` value,
     // so contract diagnostics must preserve their canonical pointer identity.
     if (type == &TYPE_INTEGER) return "integer";
+    // a function contract names its colour; bare `function` falls through
+    if (TypeFunc* signature = lambda_type_func_signature((Type*)type)) {
+        return signature->is_proc ? "pn" : "fn";
+    }
     if (type == &TYPE_NUMBER) return "number";
     return type ? get_type_name(type->type_id) : "unknown";
 }

@@ -1,0 +1,2 @@
+error[E207]: argument 1 expected fn, got pn
+error[E207]: argument 1 expected pn, got fn

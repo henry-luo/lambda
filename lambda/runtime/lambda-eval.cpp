@@ -901,6 +901,24 @@ void lambda_function_set_type(Function* fn, void* fn_type) {
     fn->fn_type = fn_type;
 }
 
+// S12.1.1/S11.1.5: a function value's colour is its signature's effect bit.
+// Hosted entries reuse this storage under their own layout, so only a Lambda
+// signature is read; a value without one is not a Lambda `pn`.
+static bool lambda_function_is_proc(const Function* fn) {
+    if (!fn || fn->entry_abi >= FN_ENTRY_ABI_HOSTED_FIRST) return false;
+    const TypeFunc* signature = (const TypeFunc*)fn->fn_type;
+    return signature && signature->type_id == LMD_TYPE_FUNC && signature->is_proc;
+}
+
+// S11.1.5: `function` admits both colours; every other function type admits
+// only its own, so a `pn` never crosses an `fn` contract (S12.1.1). Shared by
+// `is` and boundary admission so the two cannot disagree.
+static bool lambda_function_admitted(Item item, TypeId actual_id, Type* expected) {
+    if (actual_id != LMD_TYPE_FUNC) return false;
+    return expected == &TYPE_FUNC ||
+        lambda_function_is_proc(item.function) == lambda_type_func_is_proc(expected);
+}
+
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
@@ -1318,8 +1336,7 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
     // S12.1.4: a pn target reached from fn context. Static analysis catches
     // this when the callee is statically known; a dynamic callee can only be
     // caught here.
-    TypeFunc* signature = (TypeFunc*)fn->fn_type;
-    if (!caller_is_proc && signature && signature->is_proc) {
+    if (!caller_is_proc && lambda_function_is_proc(fn)) {
         set_runtime_error(ERR_PROC_IN_FN,
             "%s: cannot call a procedure (pn) from a function (fn)", caller);
         return ItemError;
@@ -1647,8 +1664,7 @@ static bool runtime_contract_uses_binder(Type* type, int depth = 0) {
             if (runtime_contract_uses_binder(field->type, depth + 1)) return true;
         }
     }
-    if (type->type_id == LMD_TYPE_FUNC) {
-        TypeFunc* function = (TypeFunc*)type;
+    if (TypeFunc* function = lambda_type_func_signature(type)) {
         for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
             if (parameter->binder || runtime_contract_uses_binder(
                     parameter->contract_type ? parameter->contract_type : parameter->full_type,
@@ -1766,6 +1782,8 @@ bool lambda_type_matches(Item item, Type* expected) {
     case LMD_TYPE_ARRAY:
         return actual_id == LMD_TYPE_RANGE || actual_id == LMD_TYPE_ARRAY ||
             actual_id == LMD_TYPE_ARRAY_NUM;
+    case LMD_TYPE_FUNC:
+        return lambda_function_admitted(item, actual_id, expected);
     default:
         return actual_id == expected->type_id;
     }
@@ -1787,6 +1805,14 @@ static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
     }
     if (type_id == LMD_TYPE_FLOAT) {
         snprintf(buffer, capacity, "float %.17g", item.get_double());
+        return;
+    }
+    if (type_id == LMD_TYPE_FUNC) {
+        // name the colour: a function-contract mismatch is a colour mismatch
+        const char* name = item.function ? item.function->name : NULL;
+        snprintf(buffer, capacity, "%s%s%s",
+            lambda_function_is_proc(item.function) ? "pn" : "fn",
+            name && *name ? " " : "", name ? name : "");
         return;
     }
     snprintf(buffer, capacity, "%s", get_type_name(type_id));
@@ -2101,6 +2127,9 @@ Bool fn_is(Item a, Item b) {
             ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
             return result->valid ? BOOL_TRUE : BOOL_FALSE;
         }
+    case LMD_TYPE_FUNC:
+        return lambda_function_admitted(a, a_type_id, type_b->type)
+            ? BOOL_TRUE : BOOL_FALSE;
     default:
         return a_type_id == type_b->type->type_id ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -4359,8 +4388,7 @@ static bool input_schema_collect_type(Type* type, NamePool* name_pool,
             return true;
         }
     }
-    if (type->type_id == LMD_TYPE_FUNC) {
-        TypeFunc* fn = (TypeFunc*)type;
+    if (TypeFunc* fn = lambda_type_func_signature(type)) {
         if (!input_schema_collect_type(fn->returned, name_pool, visited) ||
                 !input_schema_collect_type(fn->inferred_return, name_pool, visited) ||
                 !input_schema_collect_type(fn->return_contract, name_pool, visited) ||

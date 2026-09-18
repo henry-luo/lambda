@@ -1554,6 +1554,16 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             source != target && target != &TYPE_MAP) {
         return STATIC_BOUNDARY_DEFERRED;
     }
+    // S11.1.5 / S12.1.4v2(3): `function` admits both colours; a known colour
+    // must match an `fn`/`pn` contract, and a `function`-typed source leaves
+    // the colour to the runtime check.
+    if (source->type_id == LMD_TYPE_FUNC && target->type_id == LMD_TYPE_FUNC &&
+            target != &TYPE_FUNC) {
+        if (source == &TYPE_FUNC) return STATIC_BOUNDARY_DEFERRED;
+        if (lambda_type_func_is_proc(source) != lambda_type_func_is_proc(target)) {
+            return STATIC_BOUNDARY_REJECTED;
+        }
+    }
     return types_compatible_with_full(source, target, target) ?
         STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
 }
@@ -2763,8 +2773,7 @@ static bool start_has_named_arguments(AstNode* target) {
 static void validate_start_parts(Transpiler* tp, AstStartNode* start,
         SourceSpan span, AstNode* target, AstNode* args, AstNode* options,
         AstCallNode* target_call) {
-    TypeFunc* fn_type = target && target->type &&
-        target->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)target->type : NULL;
+    TypeFunc* fn_type = target ? lambda_type_func_signature(target->type) : NULL;
     if (!fn_type || !fn_type->is_proc) {
         record_semantic_error_span(tp, span, ERR_INVALID_CALL,
             "`start` first argument must resolve to a procedure (pn)");
@@ -2879,11 +2888,9 @@ static bool static_bind_argument(Type** env, bool* written, TypeBinder* binder,
 
 bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         Type** env_out, uint16_t env_count) {
-    if (!call || !env_out || !call->function || !call->function->type ||
-            call->function->type->type_id != LMD_TYPE_FUNC) {
-        return false;
-    }
-    TypeFunc* func_type = (TypeFunc*)call->function->type;
+    TypeFunc* func_type = call && call->function
+        ? lambda_type_func_signature(call->function->type) : NULL;
+    if (!env_out || !func_type) return false;
     if (!func_type->binder_count || func_type->binder_count > env_count ||
             func_type->binder_count > LAMBDA_MAX_FUNCTION_ARGS) {
         return false;
@@ -2905,10 +2912,10 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count) {
-    if (!call || !call->function || !call->function->type ||
-            call->function->type->type_id != LMD_TYPE_FUNC) return true;
-
-    TypeFunc* func_type = (TypeFunc*)call->function->type;
+    // a `function`-typed callee has no signature to validate against
+    TypeFunc* func_type = call && call->function
+        ? lambda_type_func_signature(call->function->type) : NULL;
+    if (!func_type) return true;
     TypeParam* expected_param = func_type->param;
     AstNode* arg = call->argument;
     int arg_index = 0;
@@ -5853,8 +5860,7 @@ static bool match_has_error_handler(AstMatchNode* match) {
 
 static TypeFunc* call_function_signature(AstCallNode* call) {
     AstNode* function = call ? boundary_unwrap_primary(call->function) : NULL;
-    return function && function->type && function->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)function->type : NULL;
+    return function ? lambda_type_func_signature(function->type) : NULL;
 }
 
 static bool parameter_is_error_acknowledgment(TypeParam* parameter) {
@@ -6482,8 +6488,7 @@ static bool handler_operand_is_proc(AstNode* operand) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
         return info && info->is_proc;
     }
-    return callee->type && callee->type->type_id == LMD_TYPE_FUNC &&
-        ((TypeFunc*)callee->type)->is_proc;
+    return lambda_type_func_is_proc(callee->type);
 }
 
 
@@ -7382,8 +7387,7 @@ static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause
         }
         return false;
     }
-    if (!function || !function->type || function->type->type_id != LMD_TYPE_FUNC ||
-            !((TypeFunc*)function->type)->is_proc) return false;
+    if (!function || !lambda_type_func_is_proc(function->type)) return false;
     AstFuncNode* callee = direct_pn_callee(call);
     if (!callee) {
         if (indirect) *indirect = true;
@@ -9550,8 +9554,7 @@ static AstNode* direct_start_node(Transpiler* tp, SourceSpan span,
     if (target) target->next = NULL;
     if (args) args->next = NULL;
     if (options) options->next = NULL;
-    TypeFunc* fn_type = target && target->type && target->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)target->type : NULL;
+    TypeFunc* fn_type = target ? lambda_type_func_signature(target->type) : NULL;
     AstCallNode* target_call = (AstCallNode*)alloc_ast_node_from_span(tp,
         AST_NODE_CALL_EXPR, span, sizeof(AstCallNode));
     target_call->function = target;
@@ -9627,9 +9630,7 @@ static void validate_effect_polymorphic_call(Transpiler* tp, SourceSpan span,
     if (!target || target->node_type != AST_NODE_IDENT) return;
     AstIdentNode* ident = (AstIdentNode*)target;
     AstNode* binding = ident->entry ? ident->entry->node : NULL;
-    TypeFunc* signature = binding && binding->type &&
-            binding->type->type_id == LMD_TYPE_FUNC
-        ? (TypeFunc*)binding->type : NULL;
+    TypeFunc* signature = binding ? lambda_type_func_signature(binding->type) : NULL;
     if (signature && signature->is_proc) {
         record_semantic_error_span(tp, span, ERR_PROC_IN_FN,
             "call: '%.*s' is a procedure (pn) and cannot be called from a "
@@ -9813,8 +9814,10 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         if (bitwise_type) {
             call->type = bitwise_type;
         }
-    } else if (effective && effective->type && effective->type->type_id == LMD_TYPE_FUNC) {
-        TypeFunc* type = (TypeFunc*)effective->type;
+    } else if (TypeFunc* type = effective
+            ? lambda_type_func_signature(effective->type) : NULL) {
+        // a `function`-typed callee has no signature; it is typed like any
+        // other dynamic callee below (S11.1.5)
         call->can_raise = type->can_raise;
         call->type = function_call_result_type(tp, type);
     } else {
@@ -13470,9 +13473,10 @@ AstNode* build_propagate_node_from_parts(Transpiler* tp, SourceSpan span,
         AstCallNode* call = (AstCallNode*)effective;
         call->propagate = true;
         may_error = may_error || call->can_raise;
-        if (call->can_raise && call->function && call->function->type &&
-                call->function->type->type_id == LMD_TYPE_FUNC) {
-            Type* success = function_success_result_type((TypeFunc*)call->function->type);
+        TypeFunc* signature = call->function
+            ? lambda_type_func_signature(call->function->type) : NULL;
+        if (call->can_raise && signature) {
+            Type* success = function_success_result_type(signature);
             if (success) call->type = success;
         }
     }
