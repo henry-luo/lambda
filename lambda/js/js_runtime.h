@@ -437,7 +437,7 @@ bool js_function_source_span(const char* source, size_t source_length,
 Item js_new_interpreted_function(struct AstFuncNode* function,
                                  struct JsScript* script,
                                  struct JsInterpEnv* environment,
-                                 int param_count, uint32_t flags);
+                                 uint32_t flags);
 void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);

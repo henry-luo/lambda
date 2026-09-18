@@ -13,7 +13,7 @@ struct JsInterpEnv;
 struct JsCallableCode;
 
 JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
-    AstFuncNode* function, int param_count, uint32_t module_state_id);
+    AstFuncNode* function, uint32_t module_state_id);
 
 enum JsFunctionBodyKind : uint8_t {
     JS_FUNCTION_BODY_CODE = 0,
@@ -152,6 +152,9 @@ struct JsCallableCode {
     uint8_t body_kind;
     bool has_direct_eval;
     bool uses_arguments;
+    // Parser-owned parameter shape is fixed for every closure of an AST
+    // definition; activations must not rediscover it by walking the list.
+    bool has_non_simple_params;
     // Script-pool code is shared by all closures from one AST definition and
     // must not be reclaimed when one GC function value dies.
     bool definition_owned;
@@ -281,6 +284,10 @@ static inline const JsAstBody* js_fn_ast(const JsFunction* fn) {
 static inline const JsCallableCode* js_fn_ast_definition(const JsFunction* fn) {
     const JsAstBody* ast = js_fn_ast(fn);
     return ast && ast->definition ? ast->definition : NULL;
+}
+static inline bool js_fn_ast_has_simple_params(const JsFunction* fn) {
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
+    return definition && !definition->has_non_simple_params;
 }
 static inline AstFuncNode* js_fn_ast_function(const JsFunction* fn) {
     const JsCallableCode* definition = js_fn_ast_definition(fn);

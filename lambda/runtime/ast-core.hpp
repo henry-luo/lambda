@@ -483,6 +483,11 @@ struct NameScope {
     // Slots are assigned while parameter annotations are reduced left to
     // right. The completed TypeFunc copies the canonical sites into its table.
     uint16_t binder_count;
+    // JavaScript direct-scope construction seals durable lexical-cell slots
+    // before an AST is shared by executions (D8.2.4). Lambda frame slots stay
+    // on their function plan, so the fact is unused by that profile.
+    uint32_t binding_slot_count;
+    bool binding_slots_planned;
 };
 
 // What const value, if any, a node carries. The payload always lives in the
@@ -658,15 +663,40 @@ typedef struct AstCallNode : AstNode {
     // the body instead of opening a frame, matching the loop lowering emits
     // for the same shape (AIO1's self-tail-call slice).
     bool interp_self_tail_call;
-    // Lambda's frame planner records immutable source argument shape so the
-    // hot walker does not rescan a stable argument list before every call.
+    // Both AST interpreters retain immutable source argument shape so their
+    // hot walkers do not rescan a stable argument list before every call.
     uint16_t interp_source_argc;
     bool interp_has_named_args;
+    bool interp_has_spread_args;
     bool interp_call_shape_planned;
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;
 } AstCallNode;
+
+// D8.2.4: call argument shape belongs to the immutable AST definition. Both
+// profile builders use this one preparation route; runtime dispatch still
+// resolves every callee, receiver, and argument value dynamically.
+static inline bool ast_plan_call_shape(AstCallNode* call) {
+    if (!call) return false;
+    uint32_t argc = 0;
+    bool has_named_args = false;
+    bool has_spread_args = false;
+    for (AstNode* argument = call->argument; argument; argument = argument->next) {
+        if (argc == UINT16_MAX) {
+            call->interp_call_shape_planned = false;
+            return false;
+        }
+        argc++;
+        has_named_args = has_named_args || argument->node_type == AST_NODE_NAMED_ARG;
+        has_spread_args = has_spread_args || argument->node_type == AST_NODE_SPREAD;
+    }
+    call->interp_source_argc = (uint16_t)argc;
+    call->interp_has_named_args = has_named_args;
+    call->interp_has_spread_args = has_spread_args;
+    call->interp_call_shape_planned = true;
+    return true;
+}
 
 // A handler keeps both outcome bodies together so expression and statement
 // forms share the same single-evaluation routing semantics in the backend.

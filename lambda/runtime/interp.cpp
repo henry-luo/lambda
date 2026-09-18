@@ -335,6 +335,75 @@ public:
     Scratch& operator=(const Scratch&) = delete;
 };
 
+// A bounded Item span borrowed from the activation's prepared root window.
+// Argument values remain live through nested evaluation and the callee entry;
+// unplanned/oversized frames retain the existing dynamically rooted fallback
+// rather than borrowing outside their proven window (D5.3.3).
+class ScratchSpan {
+    InterpFrame* frame_;
+    uint32_t first_;
+    uint32_t count_;
+
+public:
+    ScratchSpan(InterpFrame* frame, uint32_t count)
+            : frame_(frame), first_(0), count_(count) {
+        if (!frame_) return;
+        if (frame_->scratch_top > frame_->slot_count ||
+                count_ > frame_->slot_count - frame_->scratch_top) {
+            log_error("interp: planned argument span exceeds activation window");
+            frame_ = NULL;
+            return;
+        }
+        first_ = frame_->scratch_top;
+        frame_->scratch_top += count_;
+        for (uint32_t index = 0; index < count_; index++) {
+            frame_->slots[first_ + index] = ITEM_NULL;
+        }
+    }
+
+    ~ScratchSpan() {
+        if (!frame_) return;
+        if (frame_->scratch_top != first_ + count_) {
+            log_error("interp: scratch span lifetime is not LIFO");
+            return;
+        }
+        for (uint32_t index = 0; index < count_; index++) {
+            frame_->slots[first_ + index] = ITEM_NULL;
+        }
+        frame_->scratch_top = first_;
+    }
+
+    bool valid() const { return frame_ != NULL; }
+    uint64_t* words() { return frame_ ? frame_->slots + first_ : NULL; }
+
+    ScratchSpan(const ScratchSpan&) = delete;
+    ScratchSpan& operator=(const ScratchSpan&) = delete;
+};
+
+class InterpArgumentRoots {
+    ScratchSpan frame_span_;
+    RootSpan fallback_span_;
+    bool uses_frame_span_;
+
+public:
+    InterpArgumentRoots(InterpFrame* frame, uint32_t count,
+            bool use_frame_span)
+            : frame_span_(use_frame_span ? frame : NULL,
+                  use_frame_span ? count : 0),
+              fallback_span_(frame_span_.valid() ? 0 : count),
+              uses_frame_span_(frame_span_.valid()) {}
+
+    bool valid() const {
+        return uses_frame_span_ || fallback_span_.valid();
+    }
+    uint64_t* words() {
+        return uses_frame_span_ ? frame_span_.words() : fallback_span_.words();
+    }
+
+    InterpArgumentRoots(const InterpArgumentRoots&) = delete;
+    InterpArgumentRoots& operator=(const InterpArgumentRoots&) = delete;
+};
+
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -1866,7 +1935,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     if (item_is_error(fn_slot.get())) return fn_slot.get();
 
     int dispatch_argc = has_named_args ? named_param_count : argc;
-    RootSpan arg_roots((size_t)(dispatch_argc > 0 ? dispatch_argc : 1));
+    InterpArgumentRoots arg_roots(f,
+        (uint32_t)(dispatch_argc > 0 ? dispatch_argc : 1), !has_named_args);
+    if (!arg_roots.valid()) return ItemError;
     uint64_t* words = arg_roots.words();
     int i = 0;
     if (has_named_args) {

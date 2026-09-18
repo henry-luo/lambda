@@ -28,6 +28,12 @@ static void direct_walk_block(JsTranspiler* tp, JsBlockNode* block,
 static void direct_predeclare_vars(JsTranspiler* tp, JsAstNode* node);
 static void direct_predeclare_scope(JsTranspiler* tp, JsAstNode* node);
 
+static void direct_plan_scope_slots(JsTranspiler* tp, JsScope* scope) {
+    if (js_scope_plan_binding_slots(scope)) return;
+    log_error("js-direct-scope: lexical slot planning overflowed");
+    if (tp) tp->has_errors = true;
+}
+
 static void direct_link_interp_import_binding(JsTranspiler* tp,
         String* source, String* local_name, NameEntry* entry) {
     if (!tp || !source || !local_name || !entry) return;
@@ -481,8 +487,12 @@ static void direct_walk_function(JsTranspiler* tp, JsFunctionNode* function,
     } else {
         direct_walk_node(tp, (JsAstNode*)function->body);
     }
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
-    if (name_scope) js_scope_pop(tp);
+    if (name_scope) {
+        direct_plan_scope_slots(tp, name_scope);
+        js_scope_pop(tp);
+    }
 }
 
 static void direct_walk_block(JsTranspiler* tp, JsBlockNode* block,
@@ -495,6 +505,7 @@ static void direct_walk_block(JsTranspiler* tp, JsBlockNode* block,
     js_scope_push(tp, scope);
     direct_predeclare_scope(tp, block->statements);
     direct_walk_list(tp, block->statements);
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
 }
 
@@ -532,6 +543,7 @@ static void direct_walk_if_branch(JsTranspiler* tp, JsIfNode* conditional,
     js_scope_push(tp, scope);
     direct_predeclare_one(tp, branch);
     direct_walk_node(tp, branch);
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
     (void)conditional;
 }
@@ -546,6 +558,7 @@ static void direct_walk_for(JsTranspiler* tp, JsForNode* loop) {
     direct_walk_node(tp, loop->test);
     direct_walk_node(tp, loop->update);
     direct_walk_node(tp, loop->body);
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
 }
 
@@ -565,6 +578,7 @@ static void direct_walk_for_of(JsTranspiler* tp, JsForOfNode* loop) {
     }
     direct_walk_node(tp, loop->right);
     direct_walk_node(tp, loop->body);
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
 }
 
@@ -582,6 +596,7 @@ static void direct_walk_catch(JsTranspiler* tp, JsCatchNode* handler) {
     // references after the parameter bindings are installed.
     direct_walk_pattern_defaults(tp, handler->param);
     direct_walk_node(tp, handler->body);
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
 }
 
@@ -603,6 +618,7 @@ static void direct_walk_switch(JsTranspiler* tp, JsSwitchNode* switched) {
         direct_walk_node(tp, case_node->test);
         direct_walk_list(tp, case_node->consequent);
     }
+    direct_plan_scope_slots(tp, scope);
     js_scope_pop(tp);
 }
 
@@ -633,7 +649,10 @@ static void direct_walk_class(JsTranspiler* tp, JsClassNode* class_node) {
         // scopes are children of the class-expression scope when one exists.
         direct_walk_list(tp, ((JsBlockNode*)class_node->body)->statements);
     }
-    if (tp->current_scope != saved) js_scope_pop(tp);
+    if (tp->current_scope != saved) {
+        direct_plan_scope_slots(tp, tp->current_scope);
+        js_scope_pop(tp);
+    }
     if (class_expression) class_node->type = saved_class_type;
 }
 
@@ -868,6 +887,7 @@ bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast) {
     tp->current_scope = global;
     ((JsProgramNode*)ast)->global_vars = global;
     direct_walk_node(tp, ast);
+    direct_plan_scope_slots(tp, global);
     tp->current_scope = global;
-    return true;
+    return !tp->has_errors;
 }

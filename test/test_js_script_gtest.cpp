@@ -78,6 +78,89 @@ TEST(JsCallableDefinitions, SharesAstDefinitionWithoutSharingCaptures) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsCallableDefinitions, CachesParameterShapeAndFormalLength) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "function mapped(first, second) { first = 40; return arguments[0]; } "
+        "function factory(default_value) { return function(first, second = default_value, ...rest) "
+        "{ return first + second + rest.length; }; } "
+        "var first = factory(40); var second = factory(41); "
+        "class Box { constructor(first, second = 2, ...rest) {} } "
+        "[mapped(1, 2), first.length, Box.length];";
+    Item lengths = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "cached-parameter-shape.js", NULL);
+
+    ASSERT_FALSE(item_is_error(lengths));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(lengths, 0), flt2it(40.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(lengths, 1), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(lengths, 2), flt2it(1.0)).item,
+        b2it(true));
+
+    const char read_first[] = "first;";
+    Item first = js_interp_execute_source(&runtime, read_first, sizeof(read_first) - 1,
+        "read-cached-first.js", NULL);
+    const char read_second[] = "second;";
+    Item second = js_interp_execute_source(&runtime, read_second, sizeof(read_second) - 1,
+        "read-cached-second.js", NULL);
+    const char read_mapped[] = "mapped;";
+    Item mapped = js_interp_execute_source(&runtime, read_mapped, sizeof(read_mapped) - 1,
+        "read-cached-mapped.js", NULL);
+
+    ASSERT_EQ(get_type_id(first), LMD_TYPE_FUNC);
+    ASSERT_EQ(get_type_id(second), LMD_TYPE_FUNC);
+    ASSERT_EQ(get_type_id(mapped), LMD_TYPE_FUNC);
+    JsFunction* first_function = (JsFunction*)first.function;
+    JsFunction* second_function = (JsFunction*)second.function;
+    JsFunction* mapped_function = (JsFunction*)mapped.function;
+    ASSERT_EQ(first_function->code, second_function->code);
+    EXPECT_EQ(first_function->code->param_count, 3);
+    EXPECT_EQ(first_function->code->formal_length, 1);
+    EXPECT_TRUE(first_function->code->has_non_simple_params);
+    EXPECT_FALSE(js_fn_ast_has_simple_params(first_function));
+    EXPECT_EQ(mapped_function->code->param_count, 2);
+    EXPECT_EQ(mapped_function->code->formal_length, 2);
+    EXPECT_FALSE(mapped_function->code->has_non_simple_params);
+    EXPECT_TRUE(js_fn_ast_has_simple_params(mapped_function));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PlansImmutableCallArgumentShapeAtBuild) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "callee(1, 2); callee(...values);";
+    JsScript* script = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
+        "planned-call-shape.js", false);
+
+    ASSERT_NE(script, nullptr);
+    JsProgramNode* program = (JsProgramNode*)script->ast_root;
+    ASSERT_NE(program, nullptr);
+    ASSERT_NE(program->body, nullptr);
+    ASSERT_EQ(program->body->node_type, AST_NODE_EXPR_STMT);
+    JsExpressionStatementNode* first_statement =
+        (JsExpressionStatementNode*)program->body;
+    ASSERT_EQ(first_statement->expression->node_type, AST_NODE_CALL_EXPR);
+    JsCallNode* plain_call = (JsCallNode*)first_statement->expression;
+    ASSERT_NE(program->body->next, nullptr);
+    ASSERT_EQ(program->body->next->node_type, AST_NODE_EXPR_STMT);
+    JsExpressionStatementNode* second_statement =
+        (JsExpressionStatementNode*)program->body->next;
+    ASSERT_EQ(second_statement->expression->node_type, AST_NODE_CALL_EXPR);
+    JsCallNode* spread_call = (JsCallNode*)second_statement->expression;
+
+    EXPECT_TRUE(plain_call->interp_call_shape_planned);
+    EXPECT_EQ(plain_call->interp_source_argc, 2u);
+    EXPECT_FALSE(plain_call->interp_has_spread_args);
+    EXPECT_TRUE(spread_call->interp_call_shape_planned);
+    EXPECT_EQ(spread_call->interp_source_argc, 1u);
+    EXPECT_TRUE(spread_call->interp_has_spread_args);
+
+    runtime_cleanup(&runtime);
+}
+
 static uint64_t js_test_callable_target(Context*, uint64_t value) { return value; }
 
 TEST(JsCallableDefinitions, LiveMirValuesSurviveWeakTableTeardown) {
@@ -2599,6 +2682,96 @@ TEST(JsInterpreter, KeepsSelfReferentialDefaultParametersInTdz) {
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
     EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(0.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, SealsLexicalSlotsBeforeActivation) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function outer(first) { let local = first; return local + 1; } outer(4);";
+    JsScript* script = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
+        "sealed-lexical-slots.js", false);
+
+    ASSERT_NE(script, nullptr);
+    ASSERT_NE(script->global_scope, nullptr);
+    EXPECT_TRUE(script->global_scope->binding_slots_planned);
+    EXPECT_EQ(script->global_scope->binding_slot_count, 1u);
+    JsProgramNode* program = (JsProgramNode*)script->ast_root;
+    ASSERT_NE(program, nullptr);
+    ASSERT_NE(program->body, nullptr);
+    ASSERT_EQ(program->body->node_type, AST_NODE_FUNC);
+    JsFunctionNode* outer = (JsFunctionNode*)program->body;
+    ASSERT_NE(outer->vars, nullptr);
+    EXPECT_TRUE(outer->vars->binding_slots_planned);
+    EXPECT_EQ(outer->vars->binding_slot_count, 1u);
+    JsBlockNode* body = (JsBlockNode*)outer->body;
+    ASSERT_NE(body, nullptr);
+    ASSERT_NE(body->vars, nullptr);
+    EXPECT_TRUE(body->vars->binding_slots_planned);
+    EXPECT_EQ(body->vars->binding_slot_count, 1u);
+
+    Item result = js_interp_execute_script(&runtime, script, NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(5.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, SealsSyntheticFieldInitializerSlotsBeforeActivation) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "class Box { value = 3; } new Box().value;";
+    JsScript* script = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
+        "sealed-field-initializer-slots.js", false);
+
+    ASSERT_NE(script, nullptr);
+    JsProgramNode* program = (JsProgramNode*)script->ast_root;
+    ASSERT_NE(program, nullptr);
+    ASSERT_NE(program->body, nullptr);
+    ASSERT_EQ(program->body->node_type, AST_NODE_CLASS);
+    JsClassNode* box = (JsClassNode*)program->body;
+    ASSERT_NE(box->body, nullptr);
+    JsBlockNode* class_body = (JsBlockNode*)box->body;
+    ASSERT_NE(class_body->statements, nullptr);
+    ASSERT_EQ(class_body->statements->node_type, AST_NODE_FIELD);
+    JsFunctionNode* initializer = js_script_field_initializer_ensure(script,
+        (JsFieldDefinitionNode*)class_body->statements);
+    ASSERT_NE(initializer, nullptr);
+    ASSERT_NE(initializer->vars, nullptr);
+    EXPECT_TRUE(initializer->vars->binding_slots_planned);
+    EXPECT_EQ(initializer->vars->binding_slot_count, 0u);
+
+    Item result = js_interp_execute_script(&runtime, script, NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(3.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ReusesParameterRootWindowAcrossOrdinaryAndGeneratorCalls) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function ordinary(first = { value: 1 }, second = { value: 2 }, ...rest) { "
+        "return first.value + second.value + rest.length; } "
+        "function* suspended(first = { value: 3 }, second = { value: 4 }, ...rest) { "
+        "yield first.value + second.value + rest.length; } "
+        "var ordinary_result = ordinary(undefined, undefined, 7, 8); "
+        "var iterator = suspended(undefined, undefined, 9, 10, 11); "
+        "[ordinary_result, iterator.next().value];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "parameter-root-window.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(5.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(10.0)).item,
         b2it(true));
 
     runtime_cleanup(&runtime);
