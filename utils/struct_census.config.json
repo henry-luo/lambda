@@ -6,8 +6,8 @@
   "exclude_dirs": [
     "lambda/mir",
     "lambda/tree-sitter",
+    "lambda/js/mvp",
     "lambda/module",
-    "lambda/module/bash",
     "lib/sqlite",
     "lib/font/woff2",
     "lib/font/freetype",
