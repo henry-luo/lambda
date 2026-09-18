@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D8.4.1v2: local/parameter array receivers use the guarded packed tagged arm and retain one js_elements_get_number miss continuation.",
+  "description": "D8.4.1v2: local/parameter array receivers use the guarded packed tagged arm and retain one js_elements_get_number miss continuation. JS Tune13 (7aa60dd72) fused the typed read's kind check, live-length check and data-pointer borrow into one js_typed_array_data_at_if_kind leaf (still no js_typed_array_get), and routed an existing-slot numeric store through js_array_set_existing_number_no_gc, whose false arm keeps the full js_set.",
   "checks": [
     {
       "in_func": "_js_repeated_first_#_body",
@@ -12,8 +12,7 @@
     {
       "in_func": "_js_local_typed_total_#_body",
       "expect": [
-        "call\tjs_typed_array_element_type",
-        "call\tjs_typed_array_current_data_ptr"
+        "call\tjs_typed_array_data_at_if_kind"
       ],
       "forbid": [
         "call\tjs_typed_array_get"
@@ -22,7 +21,7 @@
     {
       "in_func": "_js_overwrite_existing_#_body",
       "expect": [
-        "call\tjs_elements_set_int_completion",
+        "call\tjs_array_set_existing_number_no_gc",
         "call\tjs_set"
       ]
     }

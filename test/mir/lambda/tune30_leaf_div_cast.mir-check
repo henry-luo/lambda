@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune30 \u00a710.9: `int(...)`, `div` and `%` by a nonzero literal are admitted into an inlined leaf. `tune30_ms2` and `tune30_lcg` are the shapes paraffins' ms2/ms3 and quicksort's lcg_next have, and neither call survives; the remainder reaches the caller's own native `mod` (its slow arm stays as the cold path both forms keep). A nonzero literal divisor is what rules out the error arm -- with a dynamic divisor the leaf keeps its call.",
+  "checks": [
+    {
+      "in_func": "_tune30_walk_#",
+      "expect": [
+        "mod\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "call\t_tune30_ms2_",
+        "call\t_tune30_lcg_",
+        "call\t_tune30_ms2_#_b",
+        "call\t_tune30_lcg_#_b"
+      ]
+    }
+  ]
+}

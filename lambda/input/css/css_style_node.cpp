@@ -199,6 +199,9 @@ CssDeclaration* css_declaration_clone_for_cascade(
     decl->owns_payload = false;
     decl->tree_owned_record = true;
     decl->ref_count = 1;
+    decl->payload_owner = NULL;
+    decl->payload_retain = NULL;
+    decl->payload_release = NULL;
     return decl;
 }
 
@@ -516,6 +519,9 @@ CssDeclaration* css_declaration_clone_owned(
     clone->source_file = NULL;
     clone->property_name = NULL;
     clone->value_text = NULL;
+    clone->payload_owner = NULL;
+    clone->payload_retain = NULL;
+    clone->payload_release = NULL;
     clone->value = css_value_clone_owned(source->value, target_pool);
     if (source->value && !clone->value) goto declaration_clone_failed;
     clone->source_file = pool_strdup(target_pool, source->source_file);
@@ -685,13 +691,9 @@ static StyleNode* style_node_create(CssPropertyCode property_code, Pool* pool) {
     StyleNode* node = (StyleNode*)pool_calloc(pool, sizeof(StyleNode));
     if (!node) return NULL;
 
-    // Initialize base AVL node
-    node->base.property_id = property_code;
-    node->base.declaration = node; // Point to self for easy casting
-    node->base.height = 1;
-    node->base.left = NULL;
-    node->base.right = NULL;
-    node->base.parent = NULL;
+    // The AvlTree owns one wrapper node; duplicating its links in every
+    // StyleNode retained a second, unused AVL record for each property.
+    node->property_code = property_code;
 
     // Initialize style-specific fields
     node->winning_decl = NULL;
@@ -1156,10 +1158,10 @@ void style_node_print_cascade(StyleNode* node) {
         return;
     }
 
-    const char* prop_name = css_property_spelling_from_code(static_cast<CssPropertyCode>(node->base.property_id));
+    const char* prop_name = css_property_spelling_from_code(node->property_code);
     // property ids use uintptr_t, so diagnostics must follow the active ABI's format.
     printf("StyleNode for %s (ID: %" PRIuPTR "):\n",
-           prop_name ? prop_name : "unknown", node->base.property_id);
+           prop_name ? prop_name : "unknown", (uintptr_t)node->property_code);
 
     if (node->winning_decl) {
         printf("  Winning: ");
@@ -1302,16 +1304,78 @@ StyleTree* style_tree_clone_owned(StyleTree* source, Pool* target_pool) {
     return clone;
 }
 
-static void css_declaration_destroy_tree_copy(CssDeclaration* declaration,
-                                               Pool* pool) {
-    if (!declaration || !declaration->tree_owned_record) return;
+static CssDeclaration* css_declaration_clone_for_cascade_tree(
+        const CssDeclaration* source, Pool* target_pool) {
+    if (!source || !target_pool) return NULL;
+    if (source->payload_owner && source->payload_retain) {
+        CssDeclaration* clone = css_declaration_clone_for_cascade(
+            source, source->specificity, source->origin, target_pool);
+        if (!clone) return NULL;
+        source->payload_retain(source->payload_owner);
+        clone->payload_owner = source->payload_owner;
+        clone->payload_retain = source->payload_retain;
+        clone->payload_release = source->payload_release;
+        return clone;
+    }
+    if (source->owns_payload) {
+        return css_declaration_clone_owned(source, source->specificity,
+                                           source->origin, target_pool);
+    }
+    return css_declaration_clone_for_cascade(source, source->specificity,
+                                             source->origin, target_pool);
+}
+
+StyleTree* style_tree_clone_for_cascade(StyleTree* source, Pool* target_pool) {
+    if (!source || !target_pool) return NULL;
+    StyleTree* clone = style_tree_create(target_pool);
+    if (!clone) return NULL;
+
+    size_t count = 0;
+    style_tree_foreach(source, owned_clone_count_declarations, &count);
+    if (count == 0) return clone;
+    CssDeclaration** declarations = (CssDeclaration**)pool_alloc(
+        target_pool, count * sizeof(CssDeclaration*));
+    if (!declarations) {
+        style_tree_destroy_owned(clone);
+        return NULL;
+    }
+    OwnedCloneCollectContext collect = {declarations, 0, count};
+    style_tree_foreach(source, owned_clone_collect_declarations, &collect);
+    qsort(declarations, collect.count, sizeof(CssDeclaration*),
+          declaration_source_order_compare);
+
+    for (size_t i = 0; i < collect.count; i++) {
+        CssDeclaration* copy = css_declaration_clone_for_cascade_tree(
+            declarations[i], target_pool);
+        if (!copy || !style_tree_apply_declaration(clone, copy)) {
+            css_declaration_destroy_owned(copy, target_pool);
+            pool_free(target_pool, declarations);
+            style_tree_destroy_owned(clone);
+            return NULL;
+        }
+    }
+    pool_free(target_pool, declarations);
+    return clone;
+}
+
+void css_declaration_destroy_owned(CssDeclaration* declaration, Pool* pool) {
+    if (!declaration || !pool) return;
     if (declaration->owns_payload) {
         css_value_destroy_owned(declaration->value, pool);
         pool_free(pool, (void*)declaration->source_file);
         pool_free(pool, (void*)declaration->property_name);
         pool_free(pool, (void*)declaration->value_text);
     }
+    if (declaration->payload_owner && declaration->payload_release) {
+        declaration->payload_release(declaration->payload_owner);
+    }
     pool_free(pool, declaration);
+}
+
+static void css_declaration_destroy_tree_copy(CssDeclaration* declaration,
+                                               Pool* pool) {
+    if (!declaration || !declaration->tree_owned_record) return;
+    css_declaration_destroy_owned(declaration, pool);
 }
 
 static void style_tree_reclaim_branch(AvlNode* avl_node, Pool* pool) {
@@ -1341,12 +1405,34 @@ void style_tree_destroy_owned(StyleTree* style_tree) {
     // Canonical epoch trees disappear only with their entire epoch pool; an
     // element-level destroy would invalidate every other shared binding.
     assert(style_tree->canonical_owner == NULL);
+    assert(style_tree->borrow_ref_count == 0);
     Pool* pool = style_tree->pool;
     if (style_tree->tree) {
         style_tree_reclaim_branch(style_tree->tree->root, pool);
         pool_free(pool, style_tree->tree);
     }
     pool_free(pool, style_tree);
+}
+
+void style_tree_acquire_borrow(StyleTree* style_tree) {
+    if (!style_tree) return;
+    style_tree->borrow_ref_count++;
+}
+
+void style_tree_release_borrow(StyleTree* style_tree) {
+    if (!style_tree || style_tree->borrow_ref_count == 0) return;
+    style_tree->borrow_ref_count--;
+    if (style_tree->borrow_ref_count == 0 && style_tree->retired_borrow_source) {
+        style_tree_destroy_owned(style_tree);
+    }
+}
+
+void style_tree_retire_borrow_source(StyleTree* style_tree) {
+    if (!style_tree) return;
+    style_tree->retired_borrow_source = true;
+    if (style_tree->borrow_ref_count == 0) {
+        style_tree_destroy_owned(style_tree);
+    }
 }
 
 static bool style_tree_find_inline(StyleNode* node, void* context) {
@@ -1493,7 +1579,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
 
 #ifndef NDEBUG
 static bool print_tree_callback(StyleNode* node, void* context) {
-    printf("  Property %" PRIuPTR ": ", node->base.property_id);
+    printf("  Property %" PRIuPTR ": ", (uintptr_t)node->property_code);
 
     if (node->winning_decl) {
         printf("winning ");

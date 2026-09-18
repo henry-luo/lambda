@@ -1,0 +1,6 @@
+affine=25 1 0
+strided=32 20
+wide=100001 1000000
+doubling=127 0 0
+doubling2=134217727
+

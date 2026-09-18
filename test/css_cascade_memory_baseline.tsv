@@ -1,0 +1,35 @@
+# CSS cascade memory regression baseline
+#
+# Captured on 2026-09-18 with the arm64 macOS standard host via
+# `make test-css-cascade-memory`. The existing standard configuration selected
+# a release host for this capture; the target itself does not force a build
+# mode. The workload runs page load then one clean
+# full recascade. It checks the CSS-role/canonical pools and the document-pool
+# allocation caused by each cascade; the latter is where owned specified-style
+# retention is observable. Payload totals ensure recipe sharing does not
+# regress into one deep declaration snapshot per canonical entry, while the
+# cold-cache totals ensure this steady-state workload retains no optional
+# history. This follows D4.1.4v4, D4.2.1v3-D4.2.5v3, and
+# D4.5.1v3: pool lifetime and allocator attribution remain explicit.
+#
+# The fixture set covers library-selector breadth (jqueryui), large external
+# stylesheet input (linuxmint), repeated content cards (netflix), a high-DOM
+# Bootstrap document, and two independently packaged web templates. Values are
+# bytes except entries, bound_refs, payloads, payload_refs, and bound_entries.
+# The GTest allows 15% plus 4 KiB for pool extent rounding; structural counts
+# and cold-cache storage are strict ceilings. A recascade must not grow
+# canonical CSS beyond that margin.
+#
+# fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries bound_refs payloads payload_refs bound_entries cold_entries cold_bytes
+jqueryui initial 176242 67082 415 321604 321604 317508 78 327 411 763 78 0 0
+jqueryui recascade 176242 37770 104 321604 321604 0 78 327 411 763 78 0 0
+linuxmint initial 715354 502944 754 577222 577222 573126 154 506 594 1768 154 0 0
+linuxmint recascade 715354 243360 104 577222 577222 0 154 506 594 1768 154 0 0
+netflix initial 464141 355136 592 224337 224337 220241 57 245 283 628 57 0 0
+netflix recascade 465741 228160 104 224337 224337 0 57 245 283 628 57 0 0
+bootstrap5_kitchen_sink initial 4184606 3584791 1202 1044081 1044081 1039985 250 1212 834 3302 250 0 0
+bootstrap5_kitchen_sink recascade 4553618 2922267 104 1046285 1046285 0 250 1224 834 3302 250 0 0
+matrix_admin initial 717288 552224 439 340279 340279 336183 90 367 386 995 90 0 0
+matrix_admin recascade 733224 362272 104 340279 340279 0 90 367 386 995 90 0 0
+bschool initial 1018890 742992 561 632405 632405 628309 124 424 639 2069 124 0 0
+bschool recascade 1038234 520976 104 632405 632405 0 124 424 639 2069 124 0 0

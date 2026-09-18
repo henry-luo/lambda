@@ -38,15 +38,15 @@ typedef struct WeakDeclaration {
 } WeakDeclaration;
 
 // ============================================================================
-// Style Node (extends AVL Node)
+// Style Node (stored by an AVL wrapper)
 // ============================================================================
 
 /**
  * Style Node
- * Extends AvlNode to support CSS cascade resolution
+ * Stores cascade state addressed by the owning AVL wrapper
  */
 typedef struct StyleNode {
-    AvlNode base;                    // Base AVL tree node
+    CssPropertyCode property_code;   // Mirrors the owning AVL wrapper key
     CssDeclaration* winning_decl;    // Current winning declaration
     WeakDeclaration* weak_list;      // Sorted list of losing declarations
     bool needs_recompute;            // Flag for computed value invalidation
@@ -69,6 +69,8 @@ typedef struct StyleTree {
     int next_source_order;           // Next source order counter
     uint32_t compute_version;        // Global compute version for cache invalidation
     void* canonical_owner;           // StyleCanonicalEntry for epoch-owned immutable trees
+    uint32_t borrow_ref_count;       // Generated pseudo boxes borrowing this tree
+    bool retired_borrow_source;      // Detached pseudo tree pending its last borrower
 } StyleTree;
 
 // ============================================================================
@@ -128,6 +130,9 @@ bool css_declaration_can_clone_owned(const CssDeclaration* source);
 CssDeclaration* css_declaration_clone_owned(
     const CssDeclaration* source, CssSpecificity specificity,
     CssOrigin origin, Pool* target_pool);
+
+// Reclaim a declaration snapshot that owns all of its payload fields.
+void css_declaration_destroy_owned(CssDeclaration* declaration, Pool* pool);
 
 /**
  * Increment declaration reference count
@@ -338,9 +343,16 @@ StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool);
 
 /** Clone all declaration records into target_pool; borrowed values must outlive it. */
 StyleTree* style_tree_clone_owned(StyleTree* source, Pool* target_pool);
+StyleTree* style_tree_clone_for_cascade(StyleTree* source, Pool* target_pool);
 
 /** Reclaim a tree whose nodes and declaration records are all pool-owned. */
 void style_tree_destroy_owned(StyleTree* style_tree);
+
+// Generated pseudo boxes borrow their owner's immutable-for-the-pass tree.
+// A replaced pseudo tree is reclaimed after its final generated box rebinds.
+void style_tree_acquire_borrow(StyleTree* style_tree);
+void style_tree_release_borrow(StyleTree* style_tree);
+void style_tree_retire_borrow_source(StyleTree* style_tree);
 
 bool style_tree_has_inline_declarations(StyleTree* style_tree);
 bool style_tree_is_empty(StyleTree* style_tree);

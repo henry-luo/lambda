@@ -1,0 +1,11 @@
+pinf=inf ninf=-inf
+sum=nan
+pick=
+pick2=
+pick3=
+diff=
+scaled=
+edge=33
+edge2=22
+plain=33 22
+

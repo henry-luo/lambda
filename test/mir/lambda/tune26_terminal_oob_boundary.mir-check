@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune26 / S4.1 / D5.2 / D5.3: each float[] read retains a cold lambda_type_check for its semantic OOB rejection, but that known-failing edge returns directly and does not tag-test the guaranteed error or rebuild typed-array caches.",
+  "description": "Tune26 / S4.1 / D5.2 / D5.3: each float[] read retains a cold lambda_type_check for its semantic OOB rejection, and that known-failing edge still does not tag-test the guaranteed error or rebuild typed-array caches. LR12-24/TE-15: the rejection now leaves on the error lane instead of being converted back to a double -- an `it2d` on this arm is the NaN republication the defect channel exists to remove, so it is forbidden outright.",
   "checks": [
     {
       "in_func": "_read_sum_#",
@@ -9,8 +9,10 @@
       ],
       "expect_seq": [
         ", 72057594037927936",
-        "call\tlambda_type_check_p, lambda_type_check",
-        { "pattern": "call\tit2d_p, it2d", "next_line": true }
+        "call\tlambda_type_check_p, lambda_type_check"
+      ],
+      "forbid": [
+        "call\tit2d_p, it2d"
       ],
       "count": {
         "call\tlambda_type_check_p, lambda_type_check": 4

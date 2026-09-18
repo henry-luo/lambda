@@ -216,9 +216,21 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
             jw_kv_uint(&writer, "exact_compare_count", style_stats.exact_compare_count);
             jw_kv_uint(&writer, "collision_count", style_stats.collision_count);
             jw_kv_uint(&writer, "cow_count", style_stats.cow_count);
+            jw_kv_uint(&writer, "cache_eviction_count", style_stats.cache_eviction_count);
+            jw_kv_uint(&writer, "current_bound_entry_count",
+                       style_stats.current_bound_entry_count);
+            jw_kv_uint(&writer, "current_unbound_entry_count",
+                       style_stats.current_unbound_entry_count);
+            jw_kv_uint(&writer, "current_payload_count",
+                       style_stats.current_payload_count);
+            jw_kv_uint(&writer, "current_payload_ref_count",
+                       style_stats.current_payload_ref_count);
             jw_kv_uint(&writer, "current_reserved_bytes",
                        style_stats.current_reserved_bytes);
             jw_kv_uint(&writer, "current_live_bytes", style_stats.current_live_bytes);
+            jw_kv_uint(&writer, "current_bound_bytes", style_stats.current_bound_bytes);
+            jw_kv_uint(&writer, "current_unbound_bytes", style_stats.current_unbound_bytes);
+            jw_kv_uint(&writer, "cold_cache_cap_bytes", style_stats.cold_cache_cap_bytes);
             jw_kv_uint(&writer, "retired_referenced_reserved_bytes",
                        style_stats.retired_referenced_reserved_bytes);
         jw_obj_end(&writer);

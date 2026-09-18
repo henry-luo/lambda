@@ -1563,7 +1563,7 @@ bounds-check elimination as a new item not yet in any ledger.
 
 **Historical gate analysis (2026-08-28).** Insertion capture was then
 implemented on both tiers behind `LAMBDA_COW_CAPTURE` (default off;
-[LR12-R9](<Lambda_Issue_Ledger(fixed).md#lr12-r9>)). The flip has since landed
+[LR12-R9](<Lambda_Issue_Ledger (fixed).md#lr12-r9>)). The flip has since landed
 unconditionally; the following text records the pre-flip migration analysis:
 element/field reads still borrow: as soon as a slot holds a captured value,
 the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy and

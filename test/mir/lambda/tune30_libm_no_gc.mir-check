@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune30 T30-3: `math.sqrt`/`math.sin` reach the libm leaves by native pointer, on the float lane, with no boxed helper. The other half of the track -- that such a call is NOT an allocation point, so the caller neither spills its roots before it nor reloads its container layouts after it -- is an ABSENCE between two instructions, which this DSL cannot express; the size probe `lambda_tune30_libm_no_gc` in mir_budgets.json states it instead (`_tune30_norms_#` at 213; removing `sqrt` from JIT_LIBM_LEAVES gives 222).",
+  "checks": [
+    {
+      "in_func": "_tune30_norms_#",
+      "expect": [
+        "call\tsqrt_p, sqrt, {{r}}, {{r}}",
+        "call\tsin_p, sin, {{r}}, {{r}}",
+        "dadd\t{{r}}, {{r}}, {{r}}"
+      ],
+      "forbid": [
+        "call\tfn_math_sqrt_p, fn_math_sqrt",
+        "call\tfn_math_sin_p, fn_math_sin"
+      ]
+    }
+  ]
+}

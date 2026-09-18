@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "Tune30 \u00a710.5: a leaf emitted at its call site inherits each argument's interval, so the caller's counter bounds reach the inlined body's own arithmetic. `tune30_cell` is inlined (no call survives) and its operands are proven in band, which removes the sentinel exclusion and the slow-add arm from the proven copy -- spectralnorm went 3.51x -> 2.25x on exactly this. The count is a ratchet: with the propagation disabled the same body emits 7 `lambda_int_lane_add_slow` call sites and 27 band constants instead of 4 and 20, because every inlined operand falls back to its unproven form. The remaining four are the loop's unversioned generic sibling, which keeps the checked shape by design. `72057594037927935` is the container-pointer mask (Tune30 \u00a710.8): a container Item IS its pointer, so an indexed access must not re-mask it; four remain on the boxed edges that genuinely receive an Item.",
+  "checks": [
+    {
+      "in_func": "_tune30_mul_row_#",
+      "forbid": [
+        "call\t_tune30_cell_",
+        "call\t_tune30_cell_#_b"
+      ],
+      "count": {
+        "call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow": 4,
+        "72057594037927935": 4
+      }
+    }
+  ]
+}

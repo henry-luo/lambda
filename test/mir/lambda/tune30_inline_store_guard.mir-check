@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune30 T30-5: the leaf `tune30_bump` is small enough to be emitted at its direct call site, so no call to it survives and the caller holds the store itself. T30-2: because the write scan reads an inlinable callee's body in place of the call, the loop still earns its hoisted ownership guard, and the inlined store reaches the raw i64 lane store instead of the checked setter.",
+  "checks": [
+    {
+      "in_func": "_tune30_inline_store_guard_#",
+      "expect": [
+        "mov\ti64:({{r}}), {{r}}"
+      ],
+      "forbid": [
+        "call\t_tune30_bump_",
+        "call\t_tune30_bump_#_b"
+      ]
+    }
+  ]
+}
