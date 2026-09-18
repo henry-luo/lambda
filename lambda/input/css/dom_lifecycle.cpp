@@ -363,17 +363,19 @@ void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
 
 static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
                                    DomNodeRecord** blocked) {
-    if (node && node->is_element() && node->as_element()->is_synthetic()) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    DomNodeRecord* record = dom_record_find(registry, node);
+    // A retired descendant can remain in a detached parent's old sibling
+    // chain while the registry is the only safe source of its generation.
+    if (!record || record->state == DOM_NODE_RETIRED || !record->recyclable ||
+        !record->primary_size || record->id != node->id) {
+        if (blocked) *blocked = record;
+        return false;
+    }
+    if (node->is_element() && node->as_element()->is_synthetic()) {
         // Layout-only pseudo nodes are linked into the retained view tree, not
         // the script DOM; keep their addresses stable for the next layout pass.
         return true;
-    }
-    DomNodeRegistry* registry = dom_registry(doc);
-    DomNodeRecord* record = dom_record_find(registry, node);
-    if (!record || record->state == DOM_NODE_RETIRED || record->id != node->id ||
-        !record->recyclable || !record->primary_size) {
-        if (blocked) *blocked = record;
-        return false;
     }
     for (int reason = 0; reason < DOM_NODE_PIN_REASON_COUNT; reason++) {
         if (record->pins[reason]) {
