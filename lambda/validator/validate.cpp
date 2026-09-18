@@ -821,6 +821,10 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_FLOAT:
         case LMD_TYPE_BOOL:
         case LMD_TYPE_NULL:
+        // PTH30: `path` is a surface scalar type now (`x is path`, `path` in a
+        // schema), so a bare TYPE_PATH must validate by tag like every other
+        // scalar instead of falling into the "unsupported type" arm below.
+        case LMD_TYPE_PATH:
             result = validate_against_primitive_type(validator, item, type);
             break;
 

@@ -10,6 +10,7 @@
 #include "concurrency.h"
 #include "hosted-call-dispatch.hpp"
 #include "interp.hpp"
+#include "doc_context.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
@@ -154,7 +155,7 @@ static LambdaError* create_runtime_errorf(LambdaErrorCode code,
  * Set a runtime error in the current evaluation context.
  * Captures a stack trace using native frame pointer walking.
  */
-static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
+void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     if (!context) return;
 
     va_list args;
@@ -2925,41 +2926,69 @@ Bool fn_ne(Item a_item, Item b_item) {
     return !result;
 }
 
+// S6.2.1v2 order bands, in ascending order. They were open-coded as integer
+// literals at the `rank_a == N` sites below, which made inserting a band (PTH30
+// put `path` between `symbol` and `string`) a renumbering exercise across two
+// functions. Naming them makes an insertion local.
+enum TotalOrderBand {
+    ORDER_BAND_NULL = 0,
+    ORDER_BAND_FALSE,
+    ORDER_BAND_TRUE,
+    ORDER_BAND_NUMBER,
+    ORDER_BAND_DTIME,
+    ORDER_BAND_SYMBOL,
+    // PTH30: `path` is its own band between `symbol` and `string`, ordered
+    // bytewise within the band by canonical spelling (S2.4.2v4).
+    ORDER_BAND_PATH,
+    ORDER_BAND_STRING,
+    ORDER_BAND_BINARY,
+    ORDER_BAND_SEQUENCE,
+    ORDER_BAND_MAP,
+    ORDER_BAND_OBJECT,
+    ORDER_BAND_ELEMENT,
+    ORDER_BAND_TYPE,
+    ORDER_BAND_FUNC,
+    ORDER_BAND_NAN,
+    ORDER_BAND_ERROR,
+    ORDER_BAND_OTHER,
+};
+
 static int total_type_rank(Item item) {
     TypeId tid = get_type_id(item);
-    if (is_float_type_id(tid) && isnan(item.get_double())) return 14;
-    if (tid == LMD_TYPE_DECIMAL && decimal_item_is_nan(item)) return 14;
+    if (is_float_type_id(tid) && isnan(item.get_double())) return ORDER_BAND_NAN;
+    if (tid == LMD_TYPE_DECIMAL && decimal_item_is_nan(item)) return ORDER_BAND_NAN;
     switch (tid) {
-    case LMD_TYPE_NULL: return 0;
-    case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
+    case LMD_TYPE_NULL: return ORDER_BAND_NULL;
+    case LMD_TYPE_BOOL: return item.bool_val ? ORDER_BAND_TRUE : ORDER_BAND_FALSE;
     case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT:
     case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_UINT64:
     case LMD_TYPE_COMPLEX:
-        return 3;
-    case LMD_TYPE_DTIME: return 4;
-    case LMD_TYPE_SYMBOL: return 5;
-    case LMD_TYPE_STRING: return 6;
-    case LMD_TYPE_BINARY: return 7;
+        return ORDER_BAND_NUMBER;
+    case LMD_TYPE_DTIME: return ORDER_BAND_DTIME;
+    case LMD_TYPE_SYMBOL: return ORDER_BAND_SYMBOL;
+    case LMD_TYPE_PATH: return ORDER_BAND_PATH;
+    case LMD_TYPE_STRING: return ORDER_BAND_STRING;
+    case LMD_TYPE_BINARY: return ORDER_BAND_BINARY;
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_VARRAY:
-        return 8;
+        return ORDER_BAND_SEQUENCE;
     case LMD_TYPE_MAP: case LMD_TYPE_VMAP:
         // S6.2.1: `object` is its own ORDER BAND between map and element. Since
         // the flip a nominal value wears a map or element tag, so the band is
         // selected by the record rather than by the tag.
         return lambda_value_nominal(tid, (const void*)(uintptr_t)item.item)
-            ? 10 : 9;
+            ? ORDER_BAND_OBJECT : ORDER_BAND_MAP;
     case LMD_TYPE_ELEMENT: case LMD_TYPE_VELMT:
         return lambda_value_nominal(tid, (const void*)(uintptr_t)item.item)
-            ? 10 : 11;
+            ? ORDER_BAND_OBJECT : ORDER_BAND_ELEMENT;
     case LMD_TYPE_TYPE:
-        return 12;
+        return ORDER_BAND_TYPE;
     case LMD_TYPE_FUNC:
-        return 13;
+        return ORDER_BAND_FUNC;
     case LMD_TYPE_ERROR:
-        return 15;
+        return ORDER_BAND_ERROR;
     default:
-        return 16;
+        return ORDER_BAND_OTHER;
     }
 }
 
@@ -3228,7 +3257,7 @@ int total_cmp(Item a_item, Item b_item) {
 
     TypeId a_tid = get_type_id(a_item);
     TypeId b_tid = get_type_id(b_item);
-    if (rank_a == 3) {
+    if (rank_a == ORDER_BAND_NUMBER) {
         LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
         if (comparison.valid && !comparison.unordered) return comparison.order;
         // A nan is unordered against every number, so the ORDER has to place it
@@ -3266,7 +3295,22 @@ int total_cmp(Item a_item, Item b_item) {
     if (a_tid == LMD_TYPE_STRING || a_tid == LMD_TYPE_BINARY) {
         return total_byte_cmp(a_item, b_item);
     }
-    if (rank_a == 8) {
+    if (a_tid == LMD_TYPE_PATH) {
+        // PTH30: within the `path` band the order is bytewise over the
+        // CANONICAL spelling (S2.4.2v4), not over the segment list, so two
+        // paths that print alike order alike whatever their segment structure.
+        StrBuf* sb_a = strbuf_new();
+        StrBuf* sb_b = strbuf_new();
+        if (a_item.path) path_to_string(a_item.path, sb_a);
+        if (b_item.path) path_to_string(b_item.path, sb_b);
+        uint32_t len_a = sb_a->length, len_b = sb_b->length;
+        uint32_t min_len = len_a < len_b ? len_a : len_b;
+        int cmp = min_len ? memcmp(sb_a->str, sb_b->str, min_len) : 0;
+        strbuf_free(sb_a);  strbuf_free(sb_b);
+        if (cmp != 0) return cmp < 0 ? -1 : 1;
+        return (len_a > len_b) - (len_a < len_b);
+    }
+    if (rank_a == ORDER_BAND_SEQUENCE) {
         int64_t len_a = seq_get_length(a_item, a_tid);
         int64_t len_b = seq_get_length(b_item, b_tid);
         int64_t min_len = len_a < len_b ? len_a : len_b;
@@ -3276,7 +3320,7 @@ int total_cmp(Item a_item, Item b_item) {
         }
         return (len_a > len_b) - (len_a < len_b);
     }
-    if (rank_a == 9) {
+    if (rank_a == ORDER_BAND_MAP) {
         bool a_handle = a_tid == LMD_TYPE_VMAP && lambda_task_handle_is(a_item);
         bool b_handle = b_tid == LMD_TYPE_VMAP && lambda_task_handle_is(b_item);
         if (a_handle || b_handle) {
@@ -4553,6 +4597,254 @@ Item fn_input2(Item target_item, Item type) {
 // declared extern "C" to allow calling from C code (path.c)
 extern "C" Item fn_input1(Item url) {
     return fn_input2(url, ItemNull);
+}
+
+// ============================================================================
+// The force step `#` (PTH31-PTH39)
+// ============================================================================
+// Everything left of `#` is address resolution and performs no I/O (PTH38);
+// only `#` crosses from the reference to its target. `p#` on a provider path is
+// sugar for `input(p)` plus navigation (PTH53v2), so no new I/O path enters the
+// runtime.
+
+// A path may run from a provider to the deepest node of a document with no `#`
+// at the boundary, so the walk that finds the boundary needs somewhere to stash
+// the steps it passed. A document deeper than this is navigated by forcing the
+// prefix explicitly.
+enum { FORCE_MAX_TRAILING_STEPS = 64 };
+
+// The canonical spelling (S2.4.2v4) is the document context's key, so two
+// spellings of one location share a head and `===` holds across them.
+static String* force_location_key(Path* path) {
+    StrBuf* sb = strbuf_new();
+    path_to_string(path, sb);
+    String* key = heap_strcpy(sb->str, sb->length);
+    strbuf_free(sb);
+    return key;
+}
+
+// One trailing step, applied to the forced value. `fn_member`/`fn_index` are
+// the ordinary in-memory navigation (S7.1) — PTH34 requires the result to be
+// identical to navigating the value by hand, so this must not be a second
+// lookup path.
+static Item force_apply_step(Item value, Path* step) {
+    switch (PATH_GET_SEG_TYPE(step)) {
+    case LPATH_SEG_INT:
+        return fn_index(value, (Item){.item = i2it((int32_t)step->int_value)});
+    case LPATH_SEG_NORMAL: {
+        if (!step->name) return ItemNull;
+        String* name = heap_strcpy(step->name, strlen(step->name));
+        return fn_member(value, (Item){.item = s2it(name)});
+    }
+    default:
+        // A parent/root/wildcard step is a path operation, not an in-document
+        // navigation; it belongs to the prefix, which the walk below guarantees.
+        return ItemNull;
+    }
+}
+
+// Force one document location and publish it in the per-evaluation document
+// context, so a second force of the same location yields the SAME node
+// (PTH50v3) and `p#body.0 === p#body.0` holds (PTH45v2).
+static Item force_document(Path* doc_path, bool* raised) {
+    *raised = false;
+    String* key = force_location_key(doc_path);
+    if (!key) return ItemNull;
+    Document* existing = doc_context_lookup(key->chars, key->len);
+    if (existing) return existing->head;
+
+    Item head;
+    if (path_get_scheme(doc_path) == PATH_SCHEME_SYS) {
+        // PTH37: an in-memory reference is a TOTAL read — absence is null
+        // (S7.1.1v3), never a raise.
+        head = path_resolve_for_iteration(doc_path);
+        if (head.item == ItemError.item) return ItemNull;
+    } else {
+        // PTH36: `input`/`fetch` are pn-family effectful readers, so an
+        // unreadable document RAISES (S7.4.5) rather than answering null.
+        head = fn_input1((Item){.item = (uint64_t)(uintptr_t)doc_path});
+        if (head.item == ItemError.item) { *raised = true; return ItemError; }
+    }
+    if (head.item == ItemNull.item) return ItemNull;
+    doc_context_install(doc_path, key->chars, key->len, head, 0);
+    return head;
+}
+
+// ============================================================================
+// `temp.` documents (PTH44v2, PTH76)
+// ============================================================================
+// Runtime data gains identity by being PLACED IN A DOCUMENT: `temp.` is the
+// in-memory provider root, and its documents live for the evaluation (SO20).
+// `temp(...)` and `temp.'name'` are the same pairing `input(p)` and `p#`
+// already have — the function acts, the dotted form addresses.
+
+static Path* temp_path_for(String* name) {
+    Pool* pool = context ? context->pool : NULL;
+    Path* root = path_get_root(PATH_SCHEME_TEMP);
+    if (!pool || !root || !name) return NULL;
+    return path_extend(pool, root, name->chars);
+}
+
+static Item temp_document(Item name_item, Item content, bool has_content) {
+    TypeId name_tid = get_type_id(name_item);
+    if (!is_text_type_id(name_tid)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "temp: document name must be a string or symbol, got type: %s",
+            get_type_name(name_tid));
+        return ItemError;
+    }
+    String* name = fn_string(name_item);
+    Path* path = temp_path_for(name);
+    if (!path) {
+        set_runtime_error(ERR_IO_ERROR, "temp: no document context");
+        return ItemError;
+    }
+    String* key = force_location_key(path);
+    if (!key) return ItemError;
+    Document* existing = doc_context_lookup(key->chars, key->len);
+    if (has_content) {
+        // PTH76: creation RAISES when the name is taken. Silently replacing
+        // would make `temp` a Tier-3 write in disguise, and the whole point of
+        // the immediate form is that it is document management, not an edit.
+        if (existing) {
+            set_runtime_error(ERR_IO_ERROR,
+                "temp: document '%s' already exists", name->chars);
+            return ItemError;
+        }
+        Document* doc = doc_context_install(path, key->chars, key->len, content, 0);
+        return doc ? doc->head : ItemError;
+    }
+    if (existing) return existing->head;
+    // `temp(name)` on an unknown name creates an EMPTY document (root `{}`) so
+    // the address is live and `open t = temp('x') { … }` has something to open.
+    Pool* pool = context ? context->pool : NULL;
+    TypeMap* empty_shape = pool
+        ? (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap)) : NULL;
+    Map* empty_map = empty_shape ? map_alloc_for_type(empty_shape, NULL, 0) : NULL;
+    if (!empty_map) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "temp: failed to create document");
+        return ItemError;
+    }
+    Item empty = {.item = (uint64_t)(uintptr_t)empty_map};
+    Document* doc = doc_context_install(path, key->chars, key->len, empty, 0);
+    return doc ? doc->head : ItemError;
+}
+
+Item fn_temp1(Item name) { return temp_document(name, ItemNull, false); }
+Item fn_temp2(Item name, Item content) { return temp_document(name, content, true); }
+
+// ============================================================================
+// Address-of `&` and reference equality `===` (PTH40-PTH45v2)
+// ============================================================================
+
+// PTH42: identity is the container's PATH WITHIN ITS DOCUMENT, and lineage
+// lives in the document's node table rather than in the node — no parent
+// pointers are added to Lambda values (S10.4.3v2, S10.5.3v2). So `&` walks the
+// table to the root and spells the path on the way back down.
+enum { ADDRESS_OF_MAX_DEPTH = 256 };
+
+Item fn_address_of(Item value) {
+    TypeId tid = get_type_id(value);
+    if (tid == LMD_TYPE_ERROR) return value;
+    // PTH41: scalars never carry identity — a scalar read yields an Item, and an
+    // identity on it would have to be manufactured per read. PTH52v3: a local
+    // COW copy carries nothing either, so it is simply absent from the table.
+    const void* container = (const void*)(uintptr_t)value.item;
+    const DocNodeEntry* entry = doc_context_find_node(container);
+    if (!entry || !entry->doc || !entry->doc->path) return ItemNull;
+
+    // Collect the chain root-ward, then extend the document's own path back
+    // down. The two loops are the `&` cost: O(depth), no per-node storage.
+    const DocNodeEntry* chain[ADDRESS_OF_MAX_DEPTH];
+    int depth = 0;
+    for (const DocNodeEntry* walk = entry; walk && walk->parent;
+            walk = doc_context_find_node(walk->parent)) {
+        if (depth >= ADDRESS_OF_MAX_DEPTH) return ItemNull;
+        chain[depth++] = walk;
+    }
+    Pool* pool = context ? context->pool : NULL;
+    Path* path = entry->doc->path;
+    for (int i = depth - 1; i >= 0; i--) {
+        const DocNodeEntry* step = chain[i];
+        path = step->key_name
+            ? path_extend_len(pool, path, step->key_name, step->key_name_length)
+            : path_extend_int(pool, path, step->key_index);
+        if (!path) return ItemNull;
+    }
+    return (Item){.item = (uint64_t)(uintptr_t)path};
+}
+
+// PTH45v2: `a === b` is `&a != null and &a == &b`. In practice it is pointer
+// equality, which is sound because document nodes never move (D4.3.1), a
+// `commit` always creates new nodes, and local copies carry no identity. The
+// generation is part of the comparison because two nodes at one location across
+// a commit are different nodes — and the table entry is per node, so comparing
+// the registered entries compares both halves at once.
+Bool fn_ref_eq(Item a, Item b) {
+    // S1.9: equality is total. Identity-less operands compare FALSE, never a
+    // compile error — this is the SO39 sub-question, settled.
+    const DocNodeEntry* ea = doc_context_find_node((const void*)(uintptr_t)a.item);
+    if (!ea) return BOOL_FALSE;
+    return a.item == b.item ? BOOL_TRUE : BOOL_FALSE;
+}
+
+// PTH48: a symbol is a URN and needs a resolver mapping the name to a location.
+// Lambda's resolver has no identity/namespace table yet, so the read is total
+// and empty — it must never fall back to a lexical binding, a module export, or
+// the sys-func registry (S1.8, S2.4.3v3).
+static Item force_symbol(Item ref) {
+    (void)ref;
+    return ItemNull;
+}
+
+Item fn_force(Item ref) {
+    TypeId tid = get_type_id(ref);
+    if (tid == LMD_TYPE_ERROR) return ref;
+    if (tid == LMD_TYPE_SYMBOL) return force_symbol(ref);
+    if (tid != LMD_TYPE_PATH) {
+        // PTH37: forcing a non-reference is a static type error where the type
+        // is known and an error() value otherwise (S7.10).
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "'#' forces a reference (symbol or path), got type: %s",
+            get_type_name(tid));
+        return ItemError;
+    }
+    Path* path = ref.path;
+    if (!path) return ItemNull;
+
+    // PTH34: force the longest prefix that names a document, then apply the
+    // remaining steps in memory. `a.b#c.d`, `a.b.c.d#` and `a.b#.c.d` are one
+    // value because all three arrive here with the same full path.
+    Path* trailing[FORCE_MAX_TRAILING_STEPS];
+    int trailing_count = 0;
+    Path* doc_path = path_longest_existing_prefix(path);
+    if (!doc_path) {
+        // No cheap existence probe (http) or nothing exists: the whole path is
+        // the document, and forcing it reports the real failure.
+        doc_path = path;
+    } else {
+        for (Path* probe = path; probe && probe != doc_path; probe = probe->parent) {
+            if (trailing_count >= FORCE_MAX_TRAILING_STEPS) {
+                set_runtime_error(ERR_IO_ERROR,
+                    "'#' reference has more than %d steps past its document",
+                    FORCE_MAX_TRAILING_STEPS);
+                return ItemError;
+            }
+            trailing[trailing_count++] = probe;
+        }
+    }
+
+    bool raised = false;
+    Item value = force_document(doc_path, &raised);
+    if (raised) return ItemError;
+
+    // The walk above collected leaf-first; navigation runs root-first.
+    for (int i = trailing_count - 1; i >= 0; i--) {
+        if (value.item == ItemNull.item) return ItemNull;
+        value = force_apply_step(value, trailing[i]);
+        if (value.item == ItemError.item) return ItemError;
+    }
+    return value;
 }
 
 // parse(str, format) - parse a string into Lambda data structures

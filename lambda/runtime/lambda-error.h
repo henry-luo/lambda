@@ -354,6 +354,12 @@ SourceLocation src_loc(const char* file, uint32_t line, uint32_t col);
 SourceLocation src_loc_span(const char* file, uint32_t line, uint32_t col, 
                             uint32_t end_line, uint32_t end_col);
 
+// Set the current evaluation's error, capturing a native stack trace. It was a
+// file-local helper in lambda-eval.cpp until Tier-3 CRUD (write_set.cpp) needed
+// the same reporting; promoted rather than copied (one error path, one trace).
+void set_runtime_error(LambdaErrorCode code, const char* format, ...)
+    __attribute__((format(printf, 2, 3)));
+
 #ifdef __cplusplus
 }
 #endif

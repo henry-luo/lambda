@@ -432,7 +432,7 @@ view <input> state valid, invalid, keyboard_activation_armed: false {}
 on init(evt)  { validate.revalidate(~) aria.reflect(~) }
 on input(evt) { validate.revalidate(~) aria.reflect(~) }
 on blur(evt)  { keyboard_activation_armed = false; validate.revalidate(~) aria.reflect(~) }
-on commit(evt) { editing.commit(~) }
+on commit(evt) { editing.commit_change(~) }
 on beforeinput(evt) { editing.apply_fn(~, evt, false) }
 on keydown(evt) {
     keyboard_activation_armed = false
@@ -459,7 +459,7 @@ view <textarea> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) aria.reflect(~) }
 on input(evt) { validate.revalidate(~) aria.reflect(~) }
 on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
-on commit(evt) { editing.commit(~) }
+on commit(evt) { editing.commit_change(~) }
 on beforeinput(evt) { editing.apply_fn(~, evt, true) }
 
 // <input type=range> — the slider, keyboard and pointer (ESO58).

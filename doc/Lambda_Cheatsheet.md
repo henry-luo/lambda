@@ -340,7 +340,7 @@ Pipe `|>` with current item `~`:
 | `[1,2,3] \|> ~ * 2` | [2,4,6] - map over items |
 | `[1,2,3] \|> sum` | 6 - aggregate (no ~) |
 | `users \|> ~.age` | [12,20,62] - extract field |
-| `['a','b'] \|> {i:~#, v:~}` | ~# = index/key |
+| `['a','b'] \|> {i:~key, v:~}` | `~key` = index/key |
 
 Filter with `that`:
 
@@ -404,6 +404,36 @@ Data type determines output format:
 - String: raw text (no formatting)
 - Binary: raw binary data
 - Other types: Lambda/Mark format
+
+## References & Document Updates
+
+A `path` is a reference: it reads nothing until the postfix `#` forces it.
+
+| Form | Meaning |
+|---|---|
+| `p.a.b` | still a path — steps append, nothing is read |
+| `p#` | the document at `p` (exactly `input(p)`) |
+| `p#name` | force, then member `name` (fragment sugar for `p#.name`) |
+| `p.a.b#` | extend the path, then force — the same value |
+| `&x` | the reference `x` carries as its identity, else `null` |
+| `a === b` | reference equality: `&a != null and &a == &b` |
+| `x is reference` | `reference` is the type `symbol \| path` |
+
+Every document write is a statement; `=` never writes a document.
+
+| Statement | Meaning |
+|---|---|
+| `put t = v` | upsert at a location (a position replaces, a key upserts) |
+| `put v before t` / `put v after t` | insert at a head node |
+| `put v into t` | add a member: append, upsert keys, or add a child |
+| `del t` | remove a location |
+| `put a = 1, b = 2` | comma-joined: one statement, written order |
+| `commit` / `rollback` | end the write set, or discard it |
+| `open v = target { … }` | one bounded transaction; `#` implied on `v` |
+| `temp(name, content)` | create an in-memory document; `temp.'name'` addresses it |
+
+Edits build a write-only next version: nothing changes until `commit`, and every
+value operand reads the head. Outside `open`, each statement commits at once.
 
 ## Control Flow
 
@@ -769,13 +799,13 @@ result * 2                    // result is clean here
 `x is error` tests a soft `T | error` value.
 
 ## Operator Precedence (High to Low)
-1. `()` `[]` `.` `?` `.?` - Primary, query
-2. `-` `+` `not` `!` - Unary (`not`: logical NOT, `!`: type negation)
+1. `()` `[]` `.` `#` `?` `.?` - Primary, force, query
+2. `-` `+` `not` `!` `&` - Unary (`not`: logical NOT, `!`: type negation, `&`: address-of)
 3. `**` - Exponentiation
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
 6. `<` `<=` `>` `>=` - Relational
-7. `==` `!=` - Equality
+7. `==` `!=` `===` - Equality (`===`: reference equality)
 8. `and` - Logical AND
 9. `or` - Logical OR
 10. `to` - Range

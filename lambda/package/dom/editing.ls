@@ -86,7 +86,7 @@ fn fit(elem, data, text_len, sel_len) {
 // precede `blur` and the decision is made before either is dispatched (ESO42).
 // The engine fires the event; the template only answers. The snapshot itself
 // stays engine-side — value_at_focus reads it.
-pub pn commit(elem) {
+pub pn commit_change(elem) {
     let before = dom.value_at_focus(elem);
     // No snapshot means this is the first blur after init, which is not a
     // commit — treating it as one would fire `change` on every focus pass.

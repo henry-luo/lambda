@@ -116,7 +116,7 @@ function binary_rules($, in_element) {
     mk('|', 'set_union', 'left'),
     mk('|>', 'pipe', 'left'),
     mk('that', 'pipe', 'left'),
-    mk('&', 'set_intersect', 'left'),
+    mk(alias($._bin_amp, '&'), 'set_intersect', 'left'),
     // §7.1 removed unary `!` from value expressions, so infix `!` (set
     // exclusion) is unguarded: it can only continue.
     mk('!', 'set_exclude', 'left'),
@@ -168,6 +168,8 @@ module.exports = grammar({
     $._bin_star,
     $._bin_slash,
     $._bin_lt,
+    // PTH40: `&` is dual-role now (infix set intersection, prefix address-of).
+    $._bin_amp,
     $._call_lparen,
     $._index_lbracket,
     // Same line, or across a break for the S16.2.4 `.ident(` member-call form.
@@ -203,6 +205,12 @@ module.exports = grammar({
     // one or two tokens later.
     [$._field_name, $.primary_type],
     [$._field_name, $.base_type],
+    // S16.10.2 vs S16.10.1: inside `{`, a Tier-3 statement head is either the
+    // statement (a BLOCK interior) or a map KEY. The `:` one token later
+    // decides, so GLR forks and the losing branch dies immediately -- the same
+    // shape as the `_field_name` forks above.
+    [$._key, $._stam_seq],
+    [$._key, $.primary_expr],
   ],
 
   supertypes: $ => [],
@@ -242,6 +250,7 @@ module.exports = grammar({
       'is_in',
       // §7.2: `not` binds BELOW comparisons and `is`/`in`/`at`, above
       // `and`/`or` — the Python placement, so `not a == b` is `not (a == b)`.
+      'unary',
       'logical_not',
       'logical_and',
       'logical_or',
@@ -330,6 +339,8 @@ module.exports = grammar({
       // expression: `if c {} else {} [0]` glues on one line).
       $._if_closed,
       $._for_closed,
+      // PTH68v3: the transaction block ends in a braced body, like `while`.
+      $.open_stam,
     ),
 
     _open_stam: $ => choice(
@@ -339,6 +350,12 @@ module.exports = grammar({
       $.type_stam,
       $.assign_stam,
       $.return_stam,
+      // PTH60v3/PTH62: the Tier-3 statements. `put`/`del` end in a greedy
+      // clause list, `commit`/`rollback` in a bare word.
+      $.put_stam,
+      $.del_stam,
+      $.commit_stam,
+      $.rollback_stam,
       $._if_open,
       $._for_open,
       $._expr_tail,
@@ -441,11 +458,21 @@ module.exports = grammar({
     // keyword (`type: string`, `string: int`), which is what the C parser's
     // `token_is_key` has always allowed.
     _field_name: $ => choice($.symbol, $.identifier,
-      alias($._base_type_kw, $.base_type), alias('type', $.base_type)),
+      alias($._base_type_kw, $.base_type), alias('type', $.base_type),
+      alias($._tier3_kw, $.identifier)),
 
     _key: $ => choice($.symbol, $.identifier,
       alias($._base_type_kw, $.base_type), alias('type', $.base_type),
+      alias($._tier3_kw, $.identifier),
       $.last_index, '*'),
+
+    // S16.10.2: `put`, `del`, `commit`, `rollback` and `open` are barred as
+    // BINDING names (S16.10.1) and stay legal as DATA names. These are the
+    // SAME anonymous tokens the statements use, deliberately: a separate
+    // higher-precedence token would win in the lexer and the statement heads
+    // could never match. Which reading applies is a parse-state decision, and
+    // the `_key`/`_stam_seq` conflict above is what lets GLR see the `:`.
+    _tier3_kw: _ => choice('put', 'del', 'commit', 'rollback', 'open'),
 
     // S16.8.9: a bracketed key is evaluated, while a bare name remains a
     // literal attribute name. Keeping the computed form separate prevents
@@ -551,6 +578,7 @@ module.exports = grammar({
     _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
+      $.address_of_expr,
       $.not_expr,
       $.binary_expr,
       $.if_expr,
@@ -594,6 +622,7 @@ module.exports = grammar({
       $.member_expr,
       $.handler_expr,
       $.propagate_expr,
+      $.force_expr,
       $.call_expr,
       $.query_expr,
       $._parenthesized_expr,
@@ -610,6 +639,7 @@ module.exports = grammar({
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, 'import',
         alias($._apply_kw, $.identifier),
+        alias('commit', $.identifier),
         // `type(x)` — the keyword is callable even though it is not a bare
         // value. One token of lookahead separates it from a declaration:
         // `(` means call, an identifier means `type Name …`.
@@ -641,6 +671,24 @@ module.exports = grammar({
     )),
     last_index: _ => token(prec(2, 'last')),
 
+    // PTH32/PTH33: the force step. `#` is a PURE continuation token -- it has
+    // no prefix reading, so unlike `(`/`[`/`.`/`^` it needs no `_join` guard
+    // and a line may begin `#name` (S16.2.2v3). The fragment step must abut the
+    // `#`, which `token(seq(...))` enforces: `p# name` is two expressions.
+    force_expr: $ => prec.left(110, seq(
+      field('operand', $.primary_expr),
+      '#',
+      optional(field('fragment', choice($.identifier, $.symbol, $.integer,
+        $.base_type))),
+    )),
+
+    // PTH40: prefix `&` is address-of. `&` is also infix set intersection, so
+    // it is DUAL-ROLE (S16.2.3v3) and a line beginning `&x` after an open-tail
+    // statement is an error repaired by `;`.
+    address_of_expr: $ => prec.right('unary', seq(
+      '&', field('operand', $._expr),
+    )),
+
     query_expr: $ => prec.left('query_expr', seq(
       field('object', $.primary_expr),
       field('op', choice('?', '.?')),
@@ -658,7 +706,7 @@ module.exports = grammar({
         field('object', choice($.primary_expr, $.member_expr)),
         alias($._member_dot, '.'),
         field('field', choice($.identifier, $.symbol, $.integer,
-          $.path_wildcard, $.base_type)),
+          $.path_wildcard, $.base_type, alias($._tier3_kw, $.identifier))),
       )),
       prec.left('member', seq(
         field('object', choice($.primary_expr, $.member_expr)),
@@ -687,13 +735,18 @@ module.exports = grammar({
     current_parent_expr: _ => token(prec(4, '~~')),
     path_wildcard: _ => token(choice('**', '*')),
 
-    _binary_eq_symbol_op: _ => token(choice('==', '!=')),
+    // PTH45v2: `===` is reference equality. Longest match first, so `a === b`
+    // never lexes as `a == (= b)`.
+    _binary_eq_symbol_op: _ => token(choice('===', '==', '!=')),
     _binary_eq_word_op: _ => token(choice('eq', 'ne')),
     _binary_word_relation_op: _ => token(choice('lt', 'le', 'ge', 'gt')),
 
     binary_expr: $ => choice(...binary_rules($, false)),
 
-    current_expr: _ => token(choice('~#', '~')),
+    // PTH47: the current key/index accessor is `~key`; `~#` is retired so that
+    // `#` means force everywhere (S1.7). `~key` is a fused token -- `~ key`
+    // with a space stays two tokens.
+    current_expr: _ => token(choice('~key', '~')),
     current_error_expr: _ => prec(0, token('^')),
 
     _at: _ => token(prec(2, 'at')),
@@ -814,6 +867,39 @@ module.exports = grammar({
     assign_stam: $ => seq(
       field('target', choice($.identifier, $.index_expr, $.member_expr)),
       '=', field('value', $._expr),
+    ),
+
+    // Tier 3 (PTH55-PTH80): every document write is one of these statements;
+    // `=` never writes a document. `before`, `after` and `into` are CLAUSE
+    // words inside the statement, like `in` in a `for` header, so they stay
+    // bindable (S16.10.1) -- which is why they are not lexed as keywords.
+    put_stam: $ => seq(
+      'put', field('clause', $._put_clause),
+      repeat(seq(',', field('clause', $._put_clause))),
+    ),
+
+    _put_clause: $ => choice(
+      seq(field('target', $._expr), '=', field('value', $._expr)),
+      seq(field('value', $._expr), choice('before', 'after', 'into'),
+          field('target', $._expr)),
+    ),
+
+    del_stam: $ => seq(
+      'del', field('target', $._expr),
+      repeat(seq(',', field('target', $._expr))),
+    ),
+
+    commit_stam: _ => 'commit',
+    rollback_stam: _ => 'rollback',
+
+    // PTH68v3/PTH75v3: the block is a bounded transaction and the optional
+    // alias is a reference with `#` implied -- the `=` is a binding introducer,
+    // as in `let`, not an assignment.
+    open_stam: $ => seq(
+      'open',
+      optional(seq(field('alias', $.identifier), '=')),
+      field('target', $._expr),
+      '{', field('body', $.content), '}',
     ),
 
     // S16.6.1: ONE node, two spellings. There is no separate statement form —

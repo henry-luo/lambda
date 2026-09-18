@@ -62,6 +62,14 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_RETURN,
     LAMBDA_TOK_RAISE,
     LAMBDA_TOK_IMPORT,
+    // Tier-3 statement heads (PTH58, PTH62, PTH68v3). A statement head bars a
+    // binding name (S16.10.1), which is exactly why `before`/`after`/`into`
+    // stayed CLAUSE words instead: they only ever appear after something else.
+    LAMBDA_TOK_PUT,
+    LAMBDA_TOK_DEL,
+    LAMBDA_TOK_COMMIT,
+    LAMBDA_TOK_ROLLBACK,
+    LAMBDA_TOK_OPEN,
     LAMBDA_TOK_APPLY,
     LAMBDA_TOK_NOT,
     LAMBDA_TOK_DIV,
@@ -106,7 +114,13 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_QUESTION,
     LAMBDA_TOK_CARET,
     LAMBDA_TOK_TILDE,
-    LAMBDA_TOK_TILDE_INDEX,
+    // PTH47: `~key` is the current key/index accessor. It replaces `~#` so that
+    // `#` means force everywhere (S1.7); `~word` is the fused focal-accessor
+    // family, of which `~~` (LAMBDA_TOK_PARENT) is the other member.
+    LAMBDA_TOK_TILDE_KEY,
+    // `~` fused with a word that is not in the accessor table. It exists so the
+    // parser can name the table instead of reporting a bare lexical error.
+    LAMBDA_TOK_TILDE_ACCESSOR,
     LAMBDA_TOK_PARENT,
     LAMBDA_TOK_SLASH,
     LAMBDA_TOK_PLUS,
@@ -116,11 +130,18 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_STAR_STAR,
     LAMBDA_TOK_PERCENT,
     LAMBDA_TOK_AMPERSAND,
+    // PTH32: the force step. A pure POSTFIX token with no prefix role, which is
+    // why it joins the S16.2.2v3 continuation set: a line beginning `#name`
+    // continues the chain above it.
+    LAMBDA_TOK_HASH,
     LAMBDA_TOK_PIPE,
     LAMBDA_TOK_PIPE_FORWARD,
     LAMBDA_TOK_BANG,
     LAMBDA_TOK_EQ,
     LAMBDA_TOK_EQ_EQ,
+    // PTH45v2: `===` is reference equality. Like `==` it is a pure continuation
+    // token (S16.2.2v3) -- it has no prefix reading, so a line may start with it.
+    LAMBDA_TOK_EQ_EQ_EQ,
     LAMBDA_TOK_BANG_EQ,
     LAMBDA_TOK_LT_EQ,
     LAMBDA_TOK_SUBTYPE,
@@ -219,6 +240,25 @@ typedef enum LambdaReductionForm {
     LAMBDA_REDUCTION_FORM_CALL,
     LAMBDA_REDUCTION_FORM_INDEX,
     LAMBDA_REDUCTION_FORM_MEMBER,
+    // PTH32: `expr#`. One child, the reference. The fragment sugar `p#name`
+    // (PTH33) reduces to this followed by an ordinary MEMBER/INDEX, so nothing
+    // downstream needs a second spelling for "force then navigate".
+    LAMBDA_REDUCTION_FORM_FORCE,
+    // Tier 3. PUT carries its clause in `flags` (see LAMBDA_REDUCTION_FLAG_PUT_*)
+    // so one form covers `= v`, `before`, `after` and `into`.
+    LAMBDA_REDUCTION_FORM_PUT,
+    // The comma-joined `put`/`del` statement; children are its clauses.
+    LAMBDA_REDUCTION_FORM_CRUD_SEQ,
+    LAMBDA_REDUCTION_FORM_DEL,
+    LAMBDA_REDUCTION_FORM_COMMIT,
+    LAMBDA_REDUCTION_FORM_ROLLBACK,
+    LAMBDA_REDUCTION_FORM_OPEN,
+    // The alias binding has to exist BEFORE the block body is reduced, or `t`
+    // inside `open t = doc { put t.a = 1 }` is an unbound name. Same shape as
+    // FOR_BEGIN/FOR_END: a scope opens, the alias is declared into it, the body
+    // reduces, the scope closes.
+    LAMBDA_REDUCTION_FORM_OPEN_BEGIN,
+    LAMBDA_REDUCTION_FORM_OPEN_END,
     LAMBDA_REDUCTION_FORM_QUERY,
     LAMBDA_REDUCTION_FORM_HANDLER,
     LAMBDA_REDUCTION_FORM_PROPAGATE,
@@ -300,6 +340,10 @@ enum {
     LAMBDA_REDUCTION_FLAG_RETURN_TYPE = 1u << 14,
     LAMBDA_REDUCTION_FLAG_ANNOTATION_BINDER = 1u << 15,
     LAMBDA_REDUCTION_FLAG_ANNOTATION_IMPLICIT_BINDER = 1u << 16,
+    // Which `put` clause was written (PTH70v4). Absent means `put target = v`.
+    LAMBDA_REDUCTION_FLAG_PUT_BEFORE = 1u << 17,
+    LAMBDA_REDUCTION_FLAG_PUT_AFTER = 1u << 18,
+    LAMBDA_REDUCTION_FLAG_PUT_INTO = 1u << 19,
 };
 
 // The sink remains deliberately small. Phase 1 uses it for deterministic

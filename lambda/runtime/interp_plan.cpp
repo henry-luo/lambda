@@ -175,6 +175,9 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
+    // --- Tier 3: the CRUD statements and the transaction block (PTH60v3) ---
+    case AST_NODE_CRUD_STAM:
+    case AST_NODE_OPEN_STAM:
     // --- P1.1: comprehensions ---
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_CLAUSE:
@@ -271,6 +274,7 @@ const char* interp_node_kind_name(AstNodeType kind) {
     K(AST_NODE_PATTERN_SEQ) K(AST_NODE_VIEW) K(AST_NODE_STATE_ENTRY)
     K(AST_NODE_START) K(AST_NODE_EVENT_HANDLER) K(AST_NODE_HANDLER_EXPR)
     K(AST_NODE_HANDLER_STAM) K(AST_NODE_CURRENT_ERROR) K(AST_NODE_PATTERN_ISLAND)
+    K(AST_NODE_CRUD_STAM) K(AST_NODE_OPEN_STAM)
 #undef K
     default: return "AST_NODE_<unknown>";
     }

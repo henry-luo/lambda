@@ -498,6 +498,14 @@ typedef enum SysFunc {
     SYSFUNC_FORMAT2,
     SYSFUNC_ERROR,
     SYSFUNC_EXISTS,         // exists(path) - check if file/dir exists
+    // PTH76: `temp(name, content)` creates the in-memory document temp.'name'
+    // with `content` as its head and returns that head; `temp(name)` returns an
+    // existing head, creating an empty document when there is none. Creation is
+    // IMMEDIATE and outside any write set -- document management like io.mkdir,
+    // not a Tier-3 edit -- which is what lets the document be read in the same
+    // evaluation without a commit.
+    SYSFUNC_TEMP1,
+    SYSFUNC_TEMP2,
     SYSFUNC_NORMALIZE,
     SYSFUNC_NORMALIZE2,     // normalize(str, form) with 2 args
     // string functions
@@ -1597,6 +1605,7 @@ Path* path_new(Pool* pool, int scheme);                           // Create new 
 Path* path_new_authority(Pool* pool, int scheme, const char* authority);
 Path* path_clone(Pool* pool, Path* source);                       // Clone immutable path spine into pool
 Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
+Path* path_extend_len(Pool* pool, Path* base, const char* segment, size_t len);
 Path* path_extend_int(Pool* pool, Path* base, int64_t value);
 Path* path_select_parent(Pool* pool, Path* base);
 Path* path_select_root(Pool* pool, Path* base);
@@ -3128,6 +3137,33 @@ extern "C" {
 
     Item fn_input1(Item url);
     Item fn_input2(Item url, Item options);
+    // PTH32: the force step `#`. Turns a reference into what it refers to:
+    // `input(p)` plus trailing navigation for a provider path (PTH53v2), the
+    // system value for a `sys.*` path, null for an absent in-memory reference.
+    Item fn_force(Item ref);
+    // PTH40: address-of. The reference the operand carries as its identity, or
+    // null. Performs no I/O and mints no identity.
+    Item fn_address_of(Item value);
+    // PTH45v2: reference equality, `&a != null and &a == &b`.
+    Bool fn_ref_eq(Item a, Item b);
+    Item fn_temp1(Item name);
+    Item fn_temp2(Item name, Item content);
+    // Tier 3 (PTH60v3): the CRUD statements. Each RECORDS an edit into the
+    // write set and answers null; nothing a reader can see changes until
+    // `commit` (PTH61). Outside `open` the record autocommits (PTH63v2).
+    Item fn_put_member(Item base, Item key, Item value);
+    Item fn_put_node(Item node, Item value);
+    Item fn_put_before(Item value, Item node);
+    Item fn_put_after(Item value, Item node);
+    Item fn_put_into(Item value, Item container);
+    Item fn_del_member(Item base, Item key);
+    Item fn_del_node(Item node);
+    Item fn_commit(void);
+    Item fn_rollback(void);
+    // `open target { … }` (PTH68v3): the block is a bounded transaction whose
+    // exit is a commit-or-rollback point.
+    Item fn_open_begin(Item target);
+    Item fn_open_end(Bool unwinding);
     Item fn_parse1(Item str);
     Item fn_parse2(Item str, Item options);
     Item fn_parse_html_fragment1(Item str);
