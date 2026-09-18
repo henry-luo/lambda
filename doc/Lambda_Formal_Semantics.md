@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 24.5.0 (2026-09-17)
+**Spec version:** 25.0.0 (2026-09-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1253,6 +1253,17 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   nominal-base admission. Function-type variance is pending; until ruled,
   function-type operands are rejected. [S1.7, S6.1.1, S11.3.1v2, D3.2.1,
   D3.2.5v2]
+- **S11.1.5*** **Three function types: `fn`, `pn`, and their union
+  `function`.** `fn` and `pn` types are **disjoint** by effect bit;
+  `function` is the base type of both. `f is fn` and `f is pn` test the bit,
+  and `f is function` holds for every function value. A contract
+  `fn (...)` admits only pure functions and `pn (...)` only procedures —
+  admitting a `pn` at an `fn` contract would break S12.1.1's promise —
+  while `function` or `function (...)` admits either. Since `fn` and `pn`
+  are strictly narrower than `function`, a binder over a function value
+  (S11.4.8v2) selects a coloured type, and the join of `fn` with `pn` is
+  `function`. The `<:` relation over function-type operands stays pending
+  under S11.1.4v2. [C20-1, C20.2]
 
 ### S11.2 Match
 
@@ -1392,15 +1403,31 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.1.3** Reactive templates are the doctrine applied: template body =
   pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
   architecture enforced by the effect bit. [Features §3.7]
-- **S12.1.4*** **Effect polymorphism, admitted narrowly.** A function may
-  take its colour from an argument rather than declaring one. `call` (S12.3.4)
-  is the first and, for now, only such function: `call(f, args)` is `fn` when
-  `f` is `fn` and `pn` when `f` is `pn`. The colour is resolved **statically
-  whenever `f`'s is statically known**, and checked at **run time** otherwise
-  — a dynamic callee is exactly the case where the bit cannot be read off the
-  source. This is the minimal instance of SO28's pure-iff-argument-pure
-  polymorphism; it does not generalize to user-declared signatures, which
-  still carry one declared bit each (S12.1.1).
+- **S12.1.4v2*** **Effect polymorphism: the `function` declaration.** A
+  function declared with the keyword `function` takes its colour from its
+  arguments rather than declaring one — *pure iff its function arguments are
+  pure*:
+
+  ```lambda no-run
+  // no-run: S12.1.4v2 is not yet implemented
+  function apply_all(f: function, xs) => for (x in xs) f(x)
+  ```
+
+  (1) **Colour per call:** a call is `pn` if any argument bound to a
+  `function`-typed parameter is a `pn`, and `fn` otherwise; parameters typed
+  `fn (...)` or `pn (...)` keep their fixed colour and do not vote.
+  (2) **The body is checked as an `fn` body** (S12.1.2 applies, and no
+  statically-known `pn` may be called): its only effects are calls through
+  its polymorphic parameters — which is what makes (1) sound. (3) The colour
+  is resolved **statically** when every polymorphic argument's colour is
+  known and checked at **run time** otherwise; an `fn` caller passing a
+  statically-known `pn` is a compile error, and the error convention follows
+  the resolved colour as for `call` (S12.3.4). (4) A closure that escapes a
+  `function` capturing a polymorphic parameter is typed `function`, and
+  calling it is resolved under (3). `call(f, args)` is the built-in instance
+  with one polymorphic parameter. *Colour what changes the caller's
+  contract* — the keyword makes the dependence visible in the declaration.
+  [C20-2–C20-6, Features §3.6]
 
 ### S12.2 Assignment
 
@@ -1448,7 +1475,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   applies `f` to the members of the array `args` as individual arguments,
   and is the sanctioned way to forward a collected argument list — notably
   `fn outer(...) => call(inner, varg())`, which nothing else expresses when
-  `inner` is itself variadic. Its colour follows `f` (S12.1.4). Three
+  `inner` is itself variadic. Its colour follows `f` (S12.1.4v2). Three
   consequences follow from its being dynamic by construction, and are
   accepted rather than worked around: arity is checked at run time, not
   statically (S12.3.1 still bounds the callee's own slots); the result type
@@ -2118,11 +2145,13 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S9.3.1 | **UNCONDITIONAL since 2026-08-29** — insertion capture is applied at the specified container insertion points on both tiers, and `LAMBDA_COW_CAPTURE` is no longer consulted. The implementation marks named values at capture sites; freshly produced containers are not marked because they have no second observer at that insertion point. Plain-parameter snapshots under **S9.1.3** are unconditional as well, with `var` remaining the sole write-through construct. Full implementation record: [LR12-R9](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-r9>). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
 | S11.1.1v2 | `T[]` and nested `T[][]` contracts are implemented at annotation and parameter boundaries, including scalar, sized-scalar, pointer, string, named-map, and nested lanes. General structural array-pattern composition and the `is [T]` inline parse crash remain open. |
+| S11.1.5 | **Colour half conformant as of 2026-09-18.** `pn`/`pn (...)` parse in type position (C parser, type-pattern parser, Tree-sitter); `is fn`/`is pn`, `match` arms and parameter admission test the colour through one runtime rule, and the static boundary rejects a known wrong colour (E207) while deferring a `function`-typed source to the runtime check; system procedure references carry their signature on both tiers. Fixtures `test/lambda/proc/fn_pn_function_types.ls`, `negative/semantic/fn_pn_colour_mismatch.ls`, `negative/runtime/fn_pn_colour_mismatch.ls`. **Residue:** a binder over a function value still selects `function` (blocked on SO44); hosted (JS) function values read as `fn`. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
 | S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
+| S12.1.4v2 | Ruled 2026-09-18 (user); only the `call` instance is implemented. The `function` declaration keyword, `fn`-body checking of `function` bodies, and per-call colour resolution are not; follow-ups in [C20.5](../vibe/Lambda_Semantics_Formal2.md). |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
@@ -2208,11 +2237,11 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 **Sys funcs and surface**
 - **SO26** RF6 mutator convention: updated-owner vs unit; and `splice`'s public result (owner / unit / removed members).
 - **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
-- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs). Partially
-  answered 2026-08-24: S12.1.4 admits `call` (S12.3.4) as the first
-  effect-polymorphic function. Whether the mechanism extends to
-  user-declared signatures stays open; Flix-style Boolean effect
-  polymorphism is the recorded minimal fix. [Features §3.6]
+- **SO44** Binder depth on function values: whether a binder (S11.4.8v2)
+  over a function value selects its full signature (`fn (int) int`) where
+  known, or only its colour (`fn`/`pn`). The full signature is the literal
+  S4.2.2 reading; it meets S11.1.4v2's pending function-type variance.
+  [C20.2]
 - **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
 - **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
@@ -2251,8 +2280,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
-| S11 types | C7, C8.5c; TE-1–TE-18; OB13 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md` |
-| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19; OB5–OB6 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md` |
+| S11 types | C7, C8.5c, C20; TE-1–TE-18; OB13 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |

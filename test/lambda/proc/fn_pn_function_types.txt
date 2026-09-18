@@ -1,0 +1,10 @@
+[true, false, true]
+[false, true, true]
+[true, false]
+[true, false, true]
+[true, false, true]
+[true, false, true, false]
+["fn", "pn", "other"]
+[false, false, false]
+[9, 16, 25, 36]
+

@@ -725,10 +725,7 @@ static bool interp_contract_has_binder(Type* type, bool include_refs, int depth 
             if (interp_contract_has_binder(field->type, include_refs, depth + 1)) return true;
         }
     }
-    if (type->type_id == LMD_TYPE_FUNC) {
-        // `func` is likewise a compact generic Type rather than TypeFunc.
-        if (type == &TYPE_FUNC) return false;
-        TypeFunc* function = (TypeFunc*)type;
+    if (TypeFunc* function = lambda_type_func_signature(type)) {
         for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
             if (parameter->binder || interp_contract_has_binder(
                     parameter->contract_type ? parameter->contract_type : parameter->full_type,
@@ -5323,6 +5320,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             if (!info || !info->func_ptr) return ItemError;
             Function* fn = to_sys_fn_named(info->func_ptr, info->arg_count,
                 info->name);
+            // same signature (and so colour) the MIR tier attaches (S11.1.5)
+            lambda_function_set_type(fn, sys->type);
             return interp_ptr_item(fn);
         }
     default:

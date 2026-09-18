@@ -2161,6 +2161,20 @@
           }
         ]
       },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "fn",
+            "named": false
+          },
+          {
+            "type": "pn",
+            "named": false
+          }
+        ]
+      },
       "type": {
         "multiple": false,
         "required": true,

@@ -1428,6 +1428,20 @@ TEST_F(NegativeScriptTest, StaticUnionContractsDisplayTheirFullExpectedType) {
         "cannot initialize 'wrong_union' of type int | string with bool");
 }
 
+// S11.1.5 / S12.1.4v2(3): a known wrong colour is rejected at compile time;
+// a colour known only at run time is rejected at the parameter boundary.
+TEST_F(NegativeScriptTest, FunctionColourMismatchIsRejectedStatically) {
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_pn_colour_mismatch.ls",
+        "error[E207]: argument 1 expected fn, got pn");
+    ExpectErrorMessage("test/lambda/negative/semantic/fn_pn_colour_mismatch.ls",
+        "error[E207]: argument 1 expected pn, got fn");
+}
+
+TEST_F(NegativeScriptTest, FunctionColourMismatchIsRejectedAtRuntime) {
+    ExpectRuntimeErrorMessage("test/lambda/negative/runtime/fn_pn_colour_mismatch.ls",
+        "expected fn, got pn logsq");
+}
+
 TEST_F(NegativeScriptTest, ProceduralStatementsOutsidePnReportE224WithoutCascade) {
     const char* script = "test/lambda/negative/semantic/proc_stam_outside_pn.ls";
     ScriptResult result = run_lambda_script(script);

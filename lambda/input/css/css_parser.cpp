@@ -480,17 +480,11 @@ static bool css_parse_selector_function(const CssToken* tokens, int* pos,
     }
 
     const CssToken* token = &tokens[*pos];
-    const char* name = token->value;
-    if (!name && token->start && token->length > 0) {
-        char* name_buf = pool_dup_n(pool, token->start, token->length);
-        if (!name_buf) return false;
-        name = name_buf;
-    }
+    char* name = css_token_value_dup(token, pool);
+    if (!name) return false;
     size_t name_len = name ? strlen(name) : 0;
     if (name_len > 0 && name[name_len - 1] == '(') {
-        char* clean_name = pool_dup_n(pool, name, name_len - 1);
-        if (!clean_name) return false;
-        name = clean_name;
+        name[name_len - 1] = '\0';
     }
 
     (*pos)++;
@@ -1398,23 +1392,18 @@ static const char* css_parse_attribute_value(const CssToken* tokens, int* pos,
                                              int token_count, Pool* pool) {
     if (*pos >= token_count || (tokens[*pos].type != CSS_TOKEN_STRING &&
                                 tokens[*pos].type != CSS_TOKEN_IDENT)) return NULL;
-    const char* value = tokens[*pos].value;
+    char* value = css_token_value_dup(&tokens[*pos], pool);
+    if (!value) return NULL;
     if (tokens[*pos].type == CSS_TOKEN_STRING) {
         if (value && (value[0] == '"' || value[0] == '\'')) {
             size_t len = strlen(value);
             if (len >= 2) {
                 char* value_buf = pool_dup_n(pool, value + 1, len - 2);
                 if (value_buf) {
+                    pool_free(pool, value);
                     value = value_buf;
                 }
             }
-        } else if (value) {
-            value = pool_strdup(pool, value);
-        }
-    } else if (!value && tokens[*pos].start && tokens[*pos].length > 0) {
-        char* value_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
-        if (value_buf) {
-            value = value_buf;
         }
     }
     (*pos)++;
@@ -1775,13 +1764,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 // This is a pseudo-element
                 (*pos)++;
                 if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
-                    const char* elem_name = tokens[*pos].value;
-                    if (!elem_name && tokens[*pos].start && tokens[*pos].length > 0) {
-                        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
-                        if (name_buf) {
-                            elem_name = name_buf;
-                        }
-                    }
+                    const char* elem_name = css_token_value_dup(&tokens[*pos], pool);
+                    if (!elem_name) return NULL;
 
                     (*pos)++;
 
@@ -1842,13 +1826,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
             // Single colon - pseudo-class or legacy pseudo-element
             else if (pseudo_token->type == CSS_TOKEN_IDENT) {
-                const char* pseudo_name = pseudo_token->value;
-                if (!pseudo_name && pseudo_token->start && pseudo_token->length > 0) {
-                    char* name_buf = pool_dup_n(pool, pseudo_token->start, pseudo_token->length);
-                    if (name_buf) {
-                        pseudo_name = name_buf;
-                    }
-                }
+                const char* pseudo_name = css_token_value_dup(pseudo_token, pool);
+                if (!pseudo_name) return NULL;
 
                 (*pos)++;
 
@@ -1995,13 +1974,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             return NULL;
         }
 
-    const char* attr_name = tokens[*pos].value;
-    if (!attr_name && tokens[*pos].start && tokens[*pos].length > 0) {
-        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
-        if (name_buf) {
-            attr_name = name_buf;
-        }
-        }
+        const char* attr_name = css_token_value_dup(&tokens[*pos], pool);
+        if (!attr_name) return NULL;
         (*pos)++;
 
         // Skip whitespace
@@ -2101,15 +2075,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     }
 
     // Extract property name from token (use start/length since value may be NULL)
-    const char* property_name;
-    if (tokens[*pos].value) {
-        property_name = tokens[*pos].value;
-    } else if (tokens[*pos].start && tokens[*pos].length > 0) {
-        // Create null-terminated string from start/length
-        char* name_buf = pool_dup_n(pool, tokens[*pos].start, tokens[*pos].length);
-        if (!name_buf) return NULL;
-        property_name = name_buf;
-    } else {
+    const char* property_name = css_token_value_dup(&tokens[*pos], pool);
+    if (!property_name) {
         log_debug("[CSS Parser] No property name in token");
         return NULL;
     }
@@ -2780,12 +2747,12 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         if (tokens[ti].type == CSS_TOKEN_WHITESPACE) continue;
                         if (tokens[ti].type == CSS_TOKEN_STRING) {
                             // @import 'file.css' or @import "file.css"
-                            import_url = tokens[ti].value;
+                            import_url = css_token_value_dup(&tokens[ti], pool);
                             break;
                         }
                         if (tokens[ti].type == CSS_TOKEN_URL) {
                             // @import url(file.css) — unquoted URL token
-                            import_url = tokens[ti].value;
+                            import_url = css_token_value_dup(&tokens[ti], pool);
                             break;
                         }
                         if (tokens[ti].type == CSS_TOKEN_FUNCTION && tokens[ti].value &&
@@ -2797,7 +2764,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                                 arg_start++;
                             }
                             if (arg_start < pos && tokens[arg_start].type == CSS_TOKEN_STRING) {
-                                import_url = tokens[arg_start].value;
+                                import_url = css_token_value_dup(&tokens[arg_start], pool);
                                 break;
                             }
 
@@ -2838,7 +2805,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         log_debug(" @import URL extracted: '%s'", import_url);
                     }
                 } else if (tokens[value_start].value) {
-                    rule->data.charset_rule.charset = tokens[value_start].value;
+                    rule->data.charset_rule.charset = css_token_value_dup(
+                        &tokens[value_start], pool);
                 }
             }
 
@@ -2884,7 +2852,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             }
 
             // Store the name
-            rule->data.generic_rule.name = keyword_name;
+            rule->data.generic_rule.name = pool_strdup(pool, keyword_name);
 
             // Build prefix content (e.g., animation name for @keyframes)
             // This is everything between the at-keyword and the opening brace
@@ -3328,16 +3296,21 @@ CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
     if (!tokens || token_count == 0) return NULL;
 
     int start = css_skip_whitespace_tokens(tokens, 0, (int)token_count);
-    if (start >= (int)token_count) return NULL;
-
     CssRule* rule = NULL;
-    int consumed = css_parse_rule_from_tokens_internal(
-        tokens + start, (int)token_count - start, pool, &rule);
-    if (consumed <= 0 || !rule) return NULL;
-
-    int end = start + consumed;
-    end = css_skip_whitespace_tokens(tokens, end, (int)token_count);
-    if (end >= (int)token_count || tokens[end].type != CSS_TOKEN_EOF) return NULL;
+    if (start < (int)token_count) {
+        int consumed = css_parse_rule_from_tokens_internal(
+            tokens + start, (int)token_count - start, pool, &rule);
+        if (consumed <= 0 || !rule) {
+            rule = NULL;
+        } else {
+            int end = start + consumed;
+            end = css_skip_whitespace_tokens(tokens, end, (int)token_count);
+            if (end >= (int)token_count || tokens[end].type != CSS_TOKEN_EOF) {
+                rule = NULL;
+            }
+        }
+    }
+    css_token_array_release(pool, tokens, token_count);
     return rule;
 }
 
@@ -3353,8 +3326,9 @@ CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length,
         tokens, &pos, (int)token_count, pool);
     if (!group || group->selector_count == 0 ||
         !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
-        return NULL;
+        group = NULL;
     }
+    css_token_array_release(pool, tokens, token_count);
     return group;
 }
 
@@ -3399,8 +3373,9 @@ CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool
     CssDeclaration* declaration = css_parse_declaration_from_tokens(
         tokens, &pos, (int)token_count, pool);
     if (!declaration || !css_declaration_parse_consumed_all(tokens, pos, (int)token_count)) {
-        return NULL;
+        declaration = NULL;
     }
+    css_token_array_release(pool, tokens, token_count);
     return declaration;
 }
 
@@ -3426,7 +3401,10 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
     size_t capacity = 8;
     CssDeclaration** declarations = (CssDeclaration**)pool_calloc(
         pool, capacity * sizeof(CssDeclaration*));
-    if (!declarations) return NULL;
+    if (!declarations) {
+        css_token_array_release(pool, tokens, token_count);
+        return NULL;
+    }
 
     int pos = 0;
     while (pos < (int)token_count) {
@@ -3453,6 +3431,7 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
             if (*declaration_count >= capacity) {
                 if (!lam::pool_copy_grow_array(pool, &declarations, &capacity,
                                                 *declaration_count, *declaration_count + 1, 8, true)) {
+                    css_token_array_release(pool, tokens, token_count);
                     return declarations;
                 }
             }
@@ -3463,6 +3442,7 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
         if (pos == before) pos++;
     }
 
+    css_token_array_release(pool, tokens, token_count);
     if (*declaration_count == 0) return NULL;
     return declarations;
 }

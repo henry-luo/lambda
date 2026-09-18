@@ -130,7 +130,7 @@ AstNode* parse_intersect(Lexer* lx);
 AstNode* parse_unary(Lexer* lx);
 AstNode* parse_primary(Lexer* lx);
 AstNode* parse_element_type(Lexer* lx);
-AstNode* parse_fn_type(Lexer* lx);
+AstNode* parse_fn_type(Lexer* lx, bool is_proc);
 AstNode* parse_island(Lexer* lx);
 AstNode* parse_island_body(Lexer* lx);
 AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right,
@@ -766,9 +766,12 @@ AstNode* parse_element_type(Lexer* lx) {
 // return may carry the raised channel (`T^`, `T^E`), the one place `^` survives
 // (CT3v2/CT4). The node's param/vars stay null: the transpiler reads only
 // ->type from a FUNC_TYPE node, and the TypeFunc carries the full contract.
-AstNode* parse_fn_type(Lexer* lx) {
+// `pn (...)` spells the same contract with the procedure colour; `fn` and `pn`
+// types are disjoint, `function` is their union (S11.1.5).
+AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
     AstFuncNode* ast_node = (AstFuncNode*)new_node(lx, AST_NODE_FUNC_TYPE, sizeof(AstFuncNode));
     TypeFunc* fn_type = (TypeFunc*)alloc_type(lx->tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    fn_type->is_proc = is_proc;
     set_fn_return_contract(fn_type, &TYPE_ANY_NO_ERROR, false);
 
     TypeParam* prev_param = NULL;
@@ -849,7 +852,8 @@ AstNode* parse_primary(Lexer* lx) {
     if (!w.length) { fail(lx, "expected a type"); return NULL; }
     lx->p += w.length;
 
-    if (word_is(w, "fn")) { return parse_fn_type(lx); }
+    if (word_is(w, "fn")) { return parse_fn_type(lx, false); }
+    if (word_is(w, "pn")) { return parse_fn_type(lx, true); }
     if (word_is(w, "true") || word_is(w, "false")) {
         // &LIT_BOOL makes the emitter re-read source through the node's span,
         // which is the whole token. A lone `case true:` token reads correctly;
@@ -1109,7 +1113,8 @@ AstNode* parse_binder(Lexer* lx) {
 AstNode* parse_return_pattern_atom(Lexer* lx) {
     skip_space(lx);
     StrView word = peek_word(lx);
-    if (!word.length || word_is(word, "fn") || word_is(word, "true") ||
+    if (!word.length || word_is(word, "fn") || word_is(word, "pn") ||
+            word_is(word, "true") ||
             word_is(word, "false")) {
         fail(lx, "expected a return type");
         return NULL;
@@ -1161,7 +1166,8 @@ AstNode* parse_view_pattern_primary(Lexer* lx) {
         return parse_element_type(lx);
     }
     StrView word = peek_word(lx);
-    if (!word.length || word_is(word, "fn") || word_is(word, "true") ||
+    if (!word.length || word_is(word, "fn") || word_is(word, "pn") ||
+            word_is(word, "true") ||
             word_is(word, "false")) {
         fail(lx, "expected a view pattern primary");
         return NULL;

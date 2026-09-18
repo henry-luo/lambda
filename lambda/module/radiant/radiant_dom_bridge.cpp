@@ -848,8 +848,9 @@ static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_te
         tokens, &pos, (int)token_count, pool);
     if (!group || group->selector_count == 0 ||
         !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
-        return nullptr;
+        group = nullptr;
     }
+    css_token_array_release(pool, tokens, token_count);
     return group;
 }
 

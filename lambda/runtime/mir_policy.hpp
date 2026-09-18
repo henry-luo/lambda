@@ -15,10 +15,6 @@
 // native stack. Minified document bundles can lower to roughly seventeen MIR
 // instructions per AST node, so keep them below the unsafe activation size.
 #define MIR_RADIANT_AST_NODE_THRESHOLD 25000U
-// A document can import many individually-safe modules whose combined native
-// compiler state is still disproportionate to page rendering.  Keep a bounded
-// first tranche in MIR and run later modules through the established AST tier.
-#define MIR_RADIANT_DOCUMENT_JIT_AST_NODE_BUDGET 100000U
 #define MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT 15000U
 
 static inline bool mir_large_interp_enabled(void) {
@@ -37,16 +33,5 @@ static inline size_t mir_large_source_interp_threshold(void) {
     char* end = NULL;
     long parsed = strtol(value, &end, 10);
     if (end == value || parsed <= 0) return MIR_LARGE_SOURCE_INTERP_BYTES_DEFAULT;
-    return (size_t)parsed;
-}
-
-static inline size_t mir_radiant_document_jit_ast_node_budget(void) {
-    const char* value = getenv("LAMBDA_JS_DOCUMENT_JIT_AST_NODES");
-    if (!value || !value[0]) return MIR_RADIANT_DOCUMENT_JIT_AST_NODE_BUDGET;
-    char* end = NULL;
-    unsigned long parsed = strtoul(value, &end, 10);
-    if (end == value || parsed == 0 || parsed > UINT32_MAX) {
-        return MIR_RADIANT_DOCUMENT_JIT_AST_NODE_BUDGET;
-    }
     return (size_t)parsed;
 }

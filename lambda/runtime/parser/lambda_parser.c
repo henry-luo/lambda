@@ -437,7 +437,7 @@ static bool token_is_literal(LambdaTokenKind kind) {
 }
 
 static bool token_starts_type(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_BANG;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_BANG;
 }
 
 static bool token_starts_return_type(LambdaTokenKind kind) {
@@ -593,7 +593,8 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
     LambdaTokenKind closing_stack[128];
     uint32_t nesting = 0;
     bool need_atom = true;
-    bool function_type = first.kind == LAMBDA_TOK_FN;
+    // `fn (...)` and `pn (...)` are the two coloured function types (S11.1.5)
+    bool function_type = first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_PN;
     while (parser->status == LAMBDA_PARSE_OK) {
         LambdaTokenKind kind = parser->current.kind;
         if (kind == LAMBDA_TOK_EOF && nesting) {
