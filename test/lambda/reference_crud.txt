@@ -1,0 +1,77 @@
+"===== temp. DOCUMENTS (PTH44v2, PTH76) ====="
+temp.crud_a.m
+temp.crud_a.rows
+true
+true
+"===== ONE STATEMENT, ONE TRANSACTION (PTH63v2) ====="
+2
+1
+true
+false
+"===== THE CRUD STATEMENTS (PTH60v3, PTH70v4) ====="
+{
+  y: 2
+}
+{
+  y: 2,
+  p: 7,
+  q: 8
+}
+[{
+    id: 1
+  }, {
+    id: 2
+  }, {
+    id: 3
+  }]
+[{
+    id: 0
+  }, {
+    id: 1
+  }, {
+    id: 2
+  }, {
+    id: 3
+  }, {
+    id: 4
+  }]
+[{
+    id: 99
+  }, {
+    id: 1
+  }, {
+    id: 2
+  }, {
+    id: 3
+  }, {
+    id: 4
+  }]
+[{
+    id: 1
+  }, {
+    id: 2
+  }, {
+    id: 3
+  }, {
+    id: 4
+  }]
+"===== THE open TRANSACTION (PTH66v2, PTH68v3) ====="
+{
+  n: 20,
+  tag: 'x'
+}
+30
+30
+"===== NO READ-YOUR-WRITES (PTH61) ====="
+31
+"===== MVCC: A LOOP KEEPS ITS VERSION (PTH64v2) ====="
+[{
+    id: 1,
+    seen: true
+  }, {
+    id: 2,
+    seen: true
+  }, {
+    id: 3,
+    seen: true
+  }]

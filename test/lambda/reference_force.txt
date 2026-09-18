@@ -1,0 +1,31 @@
+"===== THE reference TYPE (PTH30) ====="
+path
+true
+false
+true
+true
+false
+false
+[1, 'z', /.a, /.b, "s"]
+"===== THE FORCE STEP # (PTH31-PTH34) ====="
+path
+"reference fixture"
+1
+1
+1
+true
+"===== ADDRESS-OF & AND === (PTH40-PTH45v2) ====="
+\.test.lambda.'reference_doc.json'.a
+\.test.lambda.'reference_doc.json'.a.b
+\.test.lambda.'reference_doc.json'.items
+true
+true
+true
+{
+  c: 1
+}
+true
+true
+false
+false
+false

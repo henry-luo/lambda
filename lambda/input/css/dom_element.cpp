@@ -165,6 +165,7 @@ DomDocument* dom_document_create(Input* input) {
         mem_free(document);
         return nullptr;
     }
+    document->owns_input_resources = true;
 
     log_debug("dom_document_create: created document with arena");
     return document;
@@ -221,6 +222,16 @@ void dom_document_destroy(DomDocument* document) {
     }
     document->destroy();
     mem_free(document);
+}
+
+Input* dom_document_take_owned_input_resources(DomDocument* document) {
+    if (!document || !document->owns_input_resources) return nullptr;
+    document->owns_input_resources = false;
+    return document->input;
+}
+
+void dom_document_borrow_input_resources(DomDocument* document) {
+    if (document) document->owns_input_resources = false;
 }
 
 bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool) {
@@ -2621,6 +2632,8 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
         log_error("dom_element_clone: failed to create document for clone");
         return NULL;
     }
+    // The clone's backing tree remains allocated in the source Input.
+    dom_document_borrow_input_resources(clone_doc);
 
     // Build DomElement wrapper from the cloned Lambda element
     DomElement* clone = build_dom_tree_from_element(cloned_elem.element, clone_doc, nullptr);

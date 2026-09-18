@@ -165,6 +165,17 @@ AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
     AstNode* condition, AstNode* body, NameScope* loop_scope);
 AstNode* build_propagate_node_from_parts(Transpiler* tp, SourceSpan span,
     AstNode* operand);
+// PTH32/PTH40: the one-operand reference forms. Both reuse AstUnaryNode so the
+// existing unary plumbing (rooting, dumps, const folding) carries them.
+AstNode* build_force_node_from_parts(Transpiler* tp, SourceSpan span,
+    AstNode* operand);
+AstNode* build_address_of_node_from_parts(Transpiler* tp, SourceSpan span,
+    AstNode* operand);
+// Tier 3 (PTH60v3, PTH68v3).
+AstNode* build_crud_statement_from_parts(Transpiler* tp, SourceSpan span,
+    uint8_t write_op, AstNode* target, AstNode* value);
+AstNode* build_open_statement_from_parts(Transpiler* tp, SourceSpan span,
+    AstNode* target, AstNode* body, String* alias, AstNode* alias_decl);
 
 // The parser publishes a reduction tape without AST allocation or scope
 // mutation. The builder replays it into the binding-bearing AST; validation

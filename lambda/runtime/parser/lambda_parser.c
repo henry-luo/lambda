@@ -44,6 +44,17 @@ static const char* const error_unexpected_trailing_input = "unexpected trailing 
 static const char* const error_retired_value_where =
     "'where' is not a filter operator; write 'that' (e.g. items that ~ > 0). "
     "'where' is only a 'for' header clause";
+// PTH47: `~word` is a closed accessor table, not an open binding lookup, so an
+// unknown accessor names the table instead of failing as an unbound name.
+static const char* const error_unknown_focal_accessor =
+    "unknown focal accessor; the accessors are '~key' (current key/index) and "
+    "'~~' (parent). Write '~.name' for a member of the current item";
+static const char* const error_too_many_crud_clauses =
+    "too many comma-joined edits in one 'put'/'del' statement";
+static const char* const error_open_body_open =
+    "expected '{' to open the transaction block after the 'open' target";
+static const char* const error_open_body_close =
+    "expected '}' to close the transaction block";
 static const char* const error_too_many_grouped_expressions = "too many grouped expressions in parser POC";
 static const char* const error_too_many_call_arguments = "too many call arguments in parser POC";
 static const char* const error_too_many_index_dimensions = "too many index dimensions in parser POC";
@@ -331,7 +342,12 @@ static LambdaToken parser_next_significant(LambdaRdParser* parser) {
 }
 
 static bool token_is_dual_role(LambdaTokenKind kind) {
-    return kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT;
+    // PTH40 (S16.2.3v3): `&` is infix set intersection AND prefix address-of, so
+    // after an open-tail statement a line beginning `&x` is a syntax error
+    // repaired by `;` -- the same treatment `-x` gets. Address-of is rarely a
+    // line's first token, so the cost is accepted. `#` and `===` deliberately
+    // stay OUT of this set: neither has a prefix reading (S16.2.2v3).
+    return kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_AMPERSAND;
 }
 
 static bool token_is_control_statement(LambdaTokenKind kind) {
@@ -421,7 +437,13 @@ static bool token_is_binder_name_candidate(LambdaTokenKind kind) {
 // and element-name predicates derive from this one set so a tag, an
 // attribute, and a map key can never drift apart as keywords are added.
 static bool token_is_name_word(LambdaTokenKind kind) {
-    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT;
+    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT ||
+        // The Tier-3 statement heads are barred as BINDING names (S16.10.1)
+        // but stay legal DATA names (S16.10.2): `{open: true}`, `.open`,
+        // `<del>` and an `open:` object-type field all still read.
+        kind == LAMBDA_TOK_PUT || kind == LAMBDA_TOK_DEL ||
+        kind == LAMBDA_TOK_COMMIT || kind == LAMBDA_TOK_ROLLBACK ||
+        kind == LAMBDA_TOK_OPEN;
 }
 
 static bool token_is_key(LambdaTokenKind kind) {
@@ -445,7 +467,7 @@ static bool token_starts_return_type(LambdaTokenKind kind) {
 }
 
 static bool token_starts_expression(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_INDEX || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
 }
 
 typedef bool (*LambdaTokenKindPredicate)(LambdaTokenKind kind);
@@ -1451,8 +1473,8 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
     if (!parser_enter(parser)) return 0;
     LambdaToken first = parser->current;
     LambdaParseValue value = 0;
-    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_INDEX || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
-        if (parser->pipe_rhs_depth && (first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_INDEX)) {
+    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
+        if (parser->pipe_rhs_depth && (first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY)) {
             parser->pipe_rhs_has_current = true;
         }
         parser_advance(parser);
@@ -1481,7 +1503,11 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         // §7.1: `!x` used to mean type complement and silently produced a
         // TYPE where every C/JS habit expects negation.
         return parser_fail(parser, error_not_logical_negation, LAMBDA_TOK_NOT);
-    } else if (first.kind == LAMBDA_TOK_NOT || first.kind == LAMBDA_TOK_MINUS || first.kind == LAMBDA_TOK_PLUS || first.kind == LAMBDA_TOK_STAR) {
+    } else if (first.kind == LAMBDA_TOK_NOT || first.kind == LAMBDA_TOK_MINUS || first.kind == LAMBDA_TOK_PLUS || first.kind == LAMBDA_TOK_STAR || first.kind == LAMBDA_TOK_AMPERSAND) {
+        // PTH40: prefix `&` is address-of. It binds LOOSER than postfix, so
+        // `&p#name` is `&(p#name)` and `&x.y` is `&(x.y)` -- as in C. Adding the
+        // prefix role is what makes `&` dual-role and moves it into the
+        // S16.2.3v3 banned set below.
         value = parse_prefix_operator(parser, first, first.kind == LAMBDA_TOK_NOT ? LAMBDA_BP_MEMBERSHIP : LAMBDA_BP_PREFIX);
     } else if (first.kind == LAMBDA_TOK_LET) {
         value = parse_let_expression(parser);
@@ -1493,6 +1519,8 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         value = parse_match_expression(parser);
     } else if (first.kind == LAMBDA_TOK_RAISE) {
         value = parse_prefix_operator(parser, first, 0);
+    } else if (first.kind == LAMBDA_TOK_TILDE_ACCESSOR) {
+        parser_set_error(parser, error_unknown_focal_accessor, LAMBDA_TOK_TILDE_KEY);
     } else {
         parser_set_error(parser, error_expected_expression, LAMBDA_TOK_IDENTIFIER);
     }
@@ -1508,6 +1536,7 @@ static const int infix_bp[LAMBDA_TOK_ELLIPSIS + 1] = {
     [LAMBDA_TOK_PIPE] = LAMBDA_BP_SET,
     [LAMBDA_TOK_AMPERSAND] = LAMBDA_BP_SET, [LAMBDA_TOK_BANG] = LAMBDA_BP_SET,
     [LAMBDA_TOK_TO] = LAMBDA_BP_SET, [LAMBDA_TOK_EQ_EQ] = LAMBDA_BP_EQUALITY,
+    [LAMBDA_TOK_EQ_EQ_EQ] = LAMBDA_BP_EQUALITY,
     [LAMBDA_TOK_BANG_EQ] = LAMBDA_BP_EQUALITY, [LAMBDA_TOK_EQ_WORD] = LAMBDA_BP_EQUALITY,
     [LAMBDA_TOK_NE_WORD] = LAMBDA_BP_EQUALITY, [LAMBDA_TOK_LT] = LAMBDA_BP_RELATION,
     [LAMBDA_TOK_LT_EQ] = LAMBDA_BP_RELATION, [LAMBDA_TOK_GT] = LAMBDA_BP_RELATION,
@@ -1597,6 +1626,31 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser, LambdaParseValue l
             if (!parse_path_segment(parser)) return 0;
             SourceSpan span = {left_start_byte, parser->current.span.start_byte};
             left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX, LAMBDA_REDUCTION_FORM_MEMBER, span, field, children, 1);
+            continue;
+        }
+        // PTH32: `#` is a postfix step at member/index precedence, chaining with
+        // `.`, `[]`, `./` and `.~~`. It has no prefix role, so unlike those it is
+        // NOT dual-role and continues across a line break (S16.2.2v3).
+        if (parser->current.kind == LAMBDA_TOK_HASH) {
+            LambdaToken hash = parser->current;
+            parser_advance(parser);
+            SourceSpan span = {left_start_byte, parser->current.span.start_byte};
+            left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX,
+                LAMBDA_REDUCTION_FORM_FORCE, span, hash, children, 1);
+            // PTH33 fragment sugar: immediately after `#` one step may omit its
+            // dot -- the URI fragment form. Adjacency is the whole rule: with a
+            // space `p# name` is two expressions and fails as juxtaposition,
+            // exactly as `~ key` does.
+            bool fragment_step = token_is_key(parser->current.kind) ||
+                parser->current.kind == LAMBDA_TOK_INTEGER;
+            if (fragment_step && parser->current.span.start_byte == hash.span.end_byte) {
+                LambdaParseValue fragment_children[1] = {left};
+                LambdaToken field = parser->current;
+                if (!parse_path_segment(parser)) return 0;
+                SourceSpan fragment_span = {left_start_byte, parser->current.span.start_byte};
+                left = parser_reduce_token(parser, LAMBDA_REDUCE_POSTFIX,
+                    LAMBDA_REDUCTION_FORM_MEMBER, fragment_span, field, fragment_children, 1);
+            }
             continue;
         }
         if (parser_accept(parser, LAMBDA_TOK_QUESTION) || parser_accept(parser, LAMBDA_TOK_DOT_QUESTION)) {
@@ -1716,13 +1770,28 @@ static bool parser_parse_parameter_list(LambdaRdParser* parser, LambdaParseValue
         error_expected_parameter_close, parameters_out, variadic_out);
 }
 
+// S12.1.4v2: `function name(...)` declares a colour-polymorphic function.
+// `function` stays a base-type word everywhere else, so only that word followed
+// by a name on the same line starts a declaration.
+static bool parser_at_colour_poly_declaration(LambdaRdParser* parser) {
+    LambdaToken word = parser->current;
+    static const char keyword[] = "function";
+    size_t length = sizeof(keyword) - 1;
+    return word.kind == LAMBDA_TOK_BASE_TYPE &&
+        word.span.end_byte - word.span.start_byte == length &&
+        memcmp(parser->lexer.source + word.span.start_byte, keyword, length) == 0 &&
+        token_is_key(parser->next.kind) && !parser->next.nl_before;
+}
+
 static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool is_public) {
     LambdaToken first = parser->current;
     bool is_proc = first.kind == LAMBDA_TOK_PN;
+    bool is_colour_poly = parser_at_colour_poly_declaration(parser);
     parser_advance(parser);
     LambdaToken name;
     if (!parser_take_name(parser, token_is_key, error_expected_function_name, &name)) return 0;
     uint32_t function_flags = is_proc ? LAMBDA_REDUCTION_FLAG_PROC : 0u;
+    if (is_colour_poly) function_flags |= LAMBDA_REDUCTION_FLAG_COLOUR_POLY;
     if (is_public) function_flags |= LAMBDA_REDUCTION_FLAG_PUBLIC;
     parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN, (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name, function_flags, NULL, 0);
     LambdaCallableSignature signature;
@@ -1998,6 +2067,124 @@ static bool parser_parse_import_module(LambdaRdParser* parser, LambdaToken* firs
     return true;
 }
 
+// PTH60v3: `before`, `after` and `into` are CLAUSE WORDS inside the statement,
+// like `in` in a `for` header, so they stay bindable (S16.10.1). That is why
+// they are matched by spelling here rather than lexed as keywords -- `into` is
+// already the `group by … into name` collector and the two cannot collide (one
+// follows `group by`, the other `put <expr>`).
+static bool parser_token_text_is(const LambdaRdParser* parser, LambdaToken token,
+        const char* word) {
+    size_t length = token.span.end_byte - token.span.start_byte;
+    size_t word_length = strlen(word);
+    return length == word_length && token.span.end_byte <= parser->lexer.length &&
+        memcmp(parser->lexer.source + token.span.start_byte, word, word_length) == 0;
+}
+
+static bool parser_put_clause_flag(const LambdaRdParser* parser, uint32_t* flag_out) {
+    LambdaToken token = parser->current;
+    if (token.kind == LAMBDA_TOK_INTO) { *flag_out = LAMBDA_REDUCTION_FLAG_PUT_INTO; return true; }
+    if (token.kind != LAMBDA_TOK_IDENTIFIER) return false;
+    if (parser_token_text_is(parser, token, "before")) {
+        *flag_out = LAMBDA_REDUCTION_FLAG_PUT_BEFORE;
+        return true;
+    }
+    if (parser_token_text_is(parser, token, "after")) {
+        *flag_out = LAMBDA_REDUCTION_FLAG_PUT_AFTER;
+        return true;
+    }
+    return false;
+}
+
+// One `put` edit. `put target = v` writes the target first; the insertion forms
+// write the VALUE first (`put v before t`), so both are normalised to
+// children = {target, value} and the clause travels in the flags.
+static LambdaParseValue parse_put_clause(LambdaRdParser* parser) {
+    LambdaToken first = parser->current;
+    LambdaParseValue left;
+    if (!parser_parse_expression_value(parser, 0, &left)) return 0;
+    uint32_t clause_flag = 0;
+    if (parser_put_clause_flag(parser, &clause_flag)) {
+        parser_advance(parser);
+        LambdaParseValue target;
+        if (!parser_parse_expression_value(parser, 0, &target)) return 0;
+        LambdaParseValue children[2] = {target, left};
+        SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+        return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
+            LAMBDA_REDUCTION_FORM_PUT, span, first, (LambdaToken){0}, clause_flag,
+            children, 2);
+    }
+    if (!parser_expect(parser, LAMBDA_TOK_EQ)) return 0;
+    LambdaParseValue value;
+    if (!parser_parse_expression_value(parser, 0, &value)) return 0;
+    LambdaParseValue children[2] = {left, value};
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
+        LAMBDA_REDUCTION_FORM_PUT, span, first, (LambdaToken){0}, 0, children, 2);
+}
+
+static LambdaParseValue parse_del_clause(LambdaRdParser* parser) {
+    LambdaToken first = parser->current;
+    LambdaParseValue target;
+    if (!parser_parse_expression_value(parser, 0, &target)) return 0;
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_one_ex(parser, LAMBDA_REDUCE_STATEMENT,
+        LAMBDA_REDUCTION_FORM_DEL, span, first, (LambdaToken){0}, 0, target);
+}
+
+// PTH60v3: edits may be COMMA-JOINED into one statement, recording the edits in
+// written order exactly as separate statements would. `,` is the interior
+// separator and `;`/newline closes the statement.
+enum { LAMBDA_CRUD_MAX_CLAUSES = 32 };
+
+static LambdaParseValue parse_crud_statement(LambdaRdParser* parser, bool is_put) {
+    LambdaToken head = parser->current;
+    parser_advance(parser);
+    LambdaParseValue clauses[LAMBDA_CRUD_MAX_CLAUSES];
+    uint32_t count = 0;
+    do {
+        if (count >= LAMBDA_CRUD_MAX_CLAUSES) {
+            return parser_fail(parser, error_too_many_crud_clauses, LAMBDA_TOK_SEMICOLON);
+        }
+        clauses[count] = is_put ? parse_put_clause(parser) : parse_del_clause(parser);
+        if (parser->status != LAMBDA_PARSE_OK) return 0;
+        count++;
+    } while (parser_accept(parser, LAMBDA_TOK_COMMA));
+    if (count == 1) return clauses[0];
+    SourceSpan span = {head.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
+        LAMBDA_REDUCTION_FORM_CRUD_SEQ, span, head, (LambdaToken){0}, 0,
+        clauses, count);
+}
+
+// `open target { … }` / `open v = target { … }` (PTH68v3, PTH75v3). The `=` is
+// a binding introducer, as in `let`, not an assignment.
+static LambdaParseValue parse_open_statement(LambdaRdParser* parser) {
+    LambdaToken head = parser->current;
+    parser_advance(parser);
+    LambdaToken alias = {0};
+    if (token_is_key(parser->current.kind) && parser->next.kind == LAMBDA_TOK_EQ) {
+        alias = parser->current;
+        parser_advance(parser);
+        parser_advance(parser);
+    }
+    LambdaParseValue target;
+    if (!parser_parse_expression_value(parser, 0, &target)) return 0;
+    if (parser->current.kind != LAMBDA_TOK_LBRACE) {
+        return parser_fail(parser, error_open_body_open, LAMBDA_TOK_LBRACE);
+    }
+    // The alias is in scope for the BODY, so it is declared before the body
+    // reduces and the scope closes after it.
+    parser_context(parser, LAMBDA_REDUCTION_FORM_OPEN_BEGIN, head.span, alias);
+    LambdaParseValue body;
+    if (!parser_parse_plain_braced(parser, error_open_body_open,
+            error_open_body_close, &body)) return 0;
+    parser_context(parser, LAMBDA_REDUCTION_FORM_OPEN_END, head.span, head);
+    LambdaParseValue children[2] = {target, body};
+    SourceSpan span = {head.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
+        LAMBDA_REDUCTION_FORM_OPEN, span, head, alias, 0, children, 2);
+}
+
 static LambdaParseValue parse_statement(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
     parser->last_statement_self_delimiting = false;
@@ -2038,7 +2225,8 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         if (is_public && parser->current.kind == LAMBDA_TOK_IDENTIFIER) {
             return parser_fail(parser, error_pub_declaration, LAMBDA_TOK_LET);
         }
-        if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN) {
+        if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN ||
+                parser_at_colour_poly_declaration(parser)) {
             return parse_function_declaration(parser, is_public);
         }
         if (parser->current.kind == LAMBDA_TOK_VIEW || parser->current.kind == LAMBDA_TOK_EDIT) {
@@ -2049,6 +2237,26 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         }
         if (parser->current.kind == LAMBDA_TOK_VAR) {
             return parse_var_statement(parser);
+        }
+        // Tier 3 (PTH60v3, PTH62, PTH68v3). Statement position only: `=` has no
+        // external effect ever (PTH55), so a document write is never an
+        // expression and these heads can never be read as one.
+        if (parser->current.kind == LAMBDA_TOK_PUT ||
+                parser->current.kind == LAMBDA_TOK_DEL) {
+            return parse_crud_statement(parser, parser->current.kind == LAMBDA_TOK_PUT);
+        }
+        if (parser->current.kind == LAMBDA_TOK_COMMIT ||
+                parser->current.kind == LAMBDA_TOK_ROLLBACK) {
+            LambdaToken head = parser->current;
+            parser_advance(parser);
+            SourceSpan span = {head.span.start_byte, parser->current.span.start_byte};
+            return parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT,
+                head.kind == LAMBDA_TOK_COMMIT ? LAMBDA_REDUCTION_FORM_COMMIT
+                                               : LAMBDA_REDUCTION_FORM_ROLLBACK,
+                span, head, (LambdaToken){0}, 0, NULL, 0);
+        }
+        if (parser->current.kind == LAMBDA_TOK_OPEN) {
+            return parse_open_statement(parser);
         }
         if (parser->current.kind == LAMBDA_TOK_APPLY && parser->next.kind == LAMBDA_TOK_SEMICOLON) {
             parser_advance(parser);
@@ -2177,12 +2385,17 @@ static LambdaParseValue parse_content(LambdaRdParser* parser, LambdaTokenKind te
         if (parser->procedural_depth && statement_first == LAMBDA_TOK_LBRACE && parser->next.kind == LAMBDA_TOK_RBRACE) {
             return parser_fail(parser, error_empty_block_statement, LAMBDA_TOK_RBRACE);
         }
+        // a `function` declaration closes its tail like `fn`/`pn` below
+        bool statement_declares_function = parser_at_colour_poly_declaration(parser);
         LambdaParseValue statement = parse_statement(parser);
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         parser_add_content(parser, &content, &has_content, &content_start, statement_token, statement);
         if (parser->current.kind == terminator || parser->current.kind == LAMBDA_TOK_EOF) break;
         bool closed_tail =
-            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB));
+            statement_first == LAMBDA_TOK_BREAK || statement_first == LAMBDA_TOK_CONTINUE || statement_first == LAMBDA_TOK_IMPORT || (parser->prev_kind == LAMBDA_TOK_RBRACE && (statement_first == LAMBDA_TOK_FN || statement_first == LAMBDA_TOK_PN || statement_declares_function || statement_first == LAMBDA_TOK_TYPE || statement_first == LAMBDA_TOK_VIEW || statement_first == LAMBDA_TOK_EDIT || statement_first == LAMBDA_TOK_WHILE || statement_first == LAMBDA_TOK_MATCH || statement_first == LAMBDA_TOK_IF || statement_first == LAMBDA_TOK_FOR || statement_first == LAMBDA_TOK_PUB ||
+            // PTH68v3 (§7.14): the transaction block ends in a braced body that
+            // admits no postfix, so it is a CLOSED tail like `while` and `match`.
+            statement_first == LAMBDA_TOK_OPEN));
         if (closed_tail) {
             parser_consume_separator(parser, terminator);
             if (parser->status != LAMBDA_PARSE_OK) return 0;

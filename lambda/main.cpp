@@ -34,7 +34,9 @@
 #include "../lib/log.h"  // Add logging support
 #include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
-#include "runtime/transpiler.hpp"  // For Runtime struct definition
+#include "runtime/transpiler.hpp"
+#include "runtime/doc_context.hpp"
+#include "runtime/write_set.hpp"
 #include "runtime/runtime-state.h"
 #include "runtime/ast.hpp"  // For print_root_item declaration
 #include "runtime/emit_ast_dump.h"
@@ -4395,6 +4397,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // script's path_get_root() would use dangling pointers, leading
             // to corrupted path traversal (infinite loop / SIGSEGV).
             path_reset();
+            doc_context_reset();
+            write_set_reset();
 
             // Clean up per-run execution scripts; InputManager retains only cache artifacts.
             runtime_teardown_batch_scripts(&runtime);
@@ -4536,6 +4540,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     js_batch_reset();
                     runtime_reset_heap(&runtime);
                     path_reset();
+                    doc_context_reset();
+                    write_set_reset();
+            write_set_reset();
                 }
                 js_test262_clear_ast_harness(&runtime, &ast_harness);
                 test262_native_harness = false;

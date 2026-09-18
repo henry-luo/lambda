@@ -1,0 +1,1 @@
+error[E224]: passing a procedure (pn) to parameter 'f' makes this call of 'apply_all' a pn call, which a function (fn) cannot make

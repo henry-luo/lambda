@@ -916,7 +916,7 @@ fn wrapper(...) => call(sum_all, varg())
 wrapper(1, 2, 3)                  // 6
 ```
 
-`call` is the built-in **effect-polymorphic** function (S12.1.4v2): its colour
+`call` is the built-in **effect-polymorphic** function (S12.1.4v3): its colour
 follows `f`, so `call(f, …)` is a `fn` call when `f` is an `fn` and a `pn` call
 when `f` is a `pn`. Calling a `pn` from `fn` context is therefore an error —
 reported at compile time when `f` is statically known, at run time otherwise.
@@ -965,7 +965,26 @@ Parse content from a file path or URL.
 | `input(target)` | `data^E` | Parse target (auto-detect format) | `input(/.'data.json')^` |
 | `input(target, format)` | `data^E` | Parse target with specified format | `input("data.json", 'json')^` |
 
+`p#` is the same read spelled as an operator: `p#` is `input(p)`, and
+`p#a.b` forces and then navigates. `input(p, format)` stays the
+explicit-format spelling, and `exists(p)` the probe that forces nothing.
+
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
+
+#### temp(name) / temp(name, content)
+
+Create or open an **in-memory document** under the `temp.` root. Runtime data
+has no identity until it is placed in a document, which is what `temp` is for;
+the documents live for the evaluation.
+
+| Function | Result | Description |
+|----------|--------|-------------|
+| `temp(name, content)` | `data^E` | Create `temp.name` with `content` as its head, and answer that head; raises if the name is taken |
+| `temp(name)` | `data` | The existing head, creating an empty document when there is none |
+
+Creation is immediate and outside any write set — document management like
+`io.mkdir`, not a Tier-3 edit — so the document is readable in the same
+evaluation without a `commit`. The dotted form `temp.'name'` addresses it.
 
 | Format | Description | Example |
 |--------|-------------|---------|

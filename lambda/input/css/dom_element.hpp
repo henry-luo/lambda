@@ -360,6 +360,10 @@ struct DomDocument {
     // Layout records live controls here so init need not rescan the DOM.
     ArrayList* behavior_init_controls;
 
+    // Foreign documents can borrow their creator's Input. Only the document
+    // assigned a fresh Input may release that Input's document context.
+    bool owns_input_resources;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -386,7 +390,7 @@ struct DomDocument {
                     js_realm_released_after_load(false), dom_package_loaded(false),
                     owns_script_runtime(false), behavior_init_pending(false),
                     design_mode(false), document_domain(nullptr), owned_loader_pool(nullptr),
-                    behavior_init_controls(nullptr) {}
+                    behavior_init_controls(nullptr), owns_input_resources(false) {}
 
     bool init(Input* input);
     void destroy();
@@ -1255,6 +1259,13 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement);
  * @param document Document to destroy
  */
 void dom_document_destroy(DomDocument* document);
+
+// Transfer the Input cleanup right from its owning document. Borrowing
+// documents return null because their creator retains the Input context.
+Input* dom_document_take_owned_input_resources(DomDocument* document);
+
+// Mark a document as borrowing its Input from another document.
+void dom_document_borrow_input_resources(DomDocument* document);
 
 // Complete a loader-pool handoff. A replacement document can already own an
 // independent pool, in which case this releases the superseded loader pool.

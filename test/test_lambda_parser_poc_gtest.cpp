@@ -143,10 +143,10 @@ TEST(LambdaRdLexerPoc, RecognizesOpaquePatternAndPathBuildingBlocks) {
     static const LambdaTokenKind expected[] = {
         LAMBDA_TOK_BINARY, LAMBDA_TOK_DATETIME, LAMBDA_TOK_STRING,
         LAMBDA_TOK_SYMBOL, LAMBDA_TOK_PATTERN_ISLAND, LAMBDA_TOK_DOT_QUESTION,
-        LAMBDA_TOK_PARENT, LAMBDA_TOK_TILDE_INDEX, LAMBDA_TOK_ELLIPSIS,
+        LAMBDA_TOK_PARENT, LAMBDA_TOK_TILDE_KEY, LAMBDA_TOK_ELLIPSIS,
         LAMBDA_TOK_STAR_STAR, LAMBDA_TOK_PIPE_FORWARD, LAMBDA_TOK_EOF,
     };
-    expect_kinds("b'AA==' t'2026-08-19T01:02Z' \"x\\n\" 'y' \\(d[3]) .? ~~ ~# ... ** |>",
+    expect_kinds("b'AA==' t'2026-08-19T01:02Z' \"x\\n\" 'y' \\(d[3]) .? ~~ ~key ... ** |>",
         expected, (int)(sizeof(expected) / sizeof(expected[0])));
 }
 

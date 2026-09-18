@@ -14,9 +14,9 @@ let squares = [1, 2, 3, 4, 5] |> ~ ** 2;
 let incremented = [10, 20, 30] |> ~ + 1;
 let halved = [10, 20, 30] |> ~ / 2;
 
-// Pipe with index access ~#
-let indexed = ['a', 'b', 'c'] |> {index: ~#, value: ~};
-let with_positions = [10, 20, 30] |> (~ + ~#);
+// Pipe with index access ~key
+let indexed = ['a', 'b', 'c'] |> {index: ~key, value: ~};
+let with_positions = [10, 20, 30] |> (~ + ~key);
 
 // Using system functions directly (not pipe aggregate)
 let total = sum([1, 2, 3, 4, 5]);
@@ -62,9 +62,9 @@ let string_concat = "hello" |> ~ ++ " world";
 let processed = [1, 2, 3] |> abs(~ - 5);
 let stringified = [1, 2, 3] |> string(~);
 
-// Map iteration with pipe (~ is value, ~# is key)
+// Map iteration with pipe (~ is value, ~key is key)
 let map_data = {a: 1, b: 2, c: 3};
-let map_transformed = map_data |> {key: ~#, val: ~ * 10};
+let map_transformed = map_data |> {key: ~key, val: ~ * 10};
 
 // Complex real-world patterns
 let products = [

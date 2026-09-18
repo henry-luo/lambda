@@ -32,6 +32,8 @@ extern "C" const char* any_reason_name(AnyReason reason) {
     case ANY_WIDENED_VAR:         return "widened_var";
     case ANY_STATEMENT:           return "statement";
     case ANY_ERROR_RECOVERY:      return "error_recovery";
+    case ANY_FORCE:               return "force";
+    case ANY_ADDRESS_OF:          return "address_of";
     case ANY_LEGACY_UNCLASSIFIED: return "legacy_unclassified";
     default:                      return "unknown";
     }
@@ -418,6 +420,19 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_ASSIGN_PATTERN:
             AST_VISIT(((AstAssignNode*)node)->left);
             AST_VISIT(((AstAssignNode*)node)->right); break;
+        // Tier 3 (PTH60v3). Every child is an ordinary expression evaluated at
+        // the statement, so the generic walk must reach them or the frame
+        // planner never allocates storage for the bindings they read.
+        case AST_NODE_CRUD_STAM:
+            // For CRUD_OP_SEQUENCE `value` is the clause chain, which the
+            // generic walk follows through `next` like any other child list.
+            AST_VISIT(((AstCrudNode*)node)->object);
+            AST_VISIT(((AstCrudNode*)node)->key);
+            AST_VISIT(((AstCrudNode*)node)->value); break;
+        case AST_NODE_OPEN_STAM:
+            AST_VISIT(((AstOpenNode*)node)->target);
+            AST_VISIT(((AstOpenNode*)node)->alias_decl);
+            AST_VISIT(((AstOpenNode*)node)->body); break;
         case AST_NODE_CALL_EXPR: case AST_NODE_NEW_EXPR:
             AST_VISIT(((AstCallNode*)node)->function);
             AST_VISIT(((AstCallNode*)node)->argument); break;

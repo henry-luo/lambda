@@ -12,5 +12,8 @@ pn select_int(count: int) int {
     return binder_pick(7, count)
 }
 
-let dynamic: any = 9;
-[binder_pick(3, 2), binder_pick(2.5, 4), select_int(6), binder_pick(dynamic, 1)]
+// A script's top level is functional (S12.1.1): pn calls belong in main().
+pn main() {
+    let dynamic: any = 9
+    print([binder_pick(3, 2), binder_pick(2.5, 4), select_int(6), binder_pick(dynamic, 1)])
+}

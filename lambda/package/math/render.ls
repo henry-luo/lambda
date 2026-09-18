@@ -2973,8 +2973,8 @@ fn render_children_scan(node, context, i, acc) {
         // MathLive separates a bare unknown control word from a following
         // parenthesized expression; it is recovery punctuation, not mopen.
         (let err = render_node(node[i], context),
-         let open = render_node(node[i + 1], context),
-         render_children_scan(node, context, i + 2, acc ++ [err, box.skip_box(0.17), open]))
+         let open_brace = render_node(node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [err, box.skip_box(0.17), open_brace]))
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          let spacer = if (last_box_is_colorbox(acc)) [box.skip_box(0.17)] else [],

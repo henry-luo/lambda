@@ -7,4 +7,5 @@ pn nested_count(m: int, n: int) int {
     return nested_count(m - 1, nested_count(m, n - 1))
 }
 
-nested_count(2, 2)
+// a script's top level is functional (S12.1.1): the pn is driven from main()
+pn main() { print(nested_count(2, 2)) }

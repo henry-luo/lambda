@@ -180,6 +180,10 @@
         {
           "type": "SYMBOL",
           "name": "_for_closed"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "open_stam"
         }
       ]
     },
@@ -209,6 +213,22 @@
         {
           "type": "SYMBOL",
           "name": "return_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "put_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "del_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "commit_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "rollback_stam"
         },
         {
           "type": "SYMBOL",
@@ -1978,6 +1998,15 @@
           },
           "named": true,
           "value": "base_type"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_tier3_kw"
+          },
+          "named": true,
+          "value": "identifier"
         }
       ]
     },
@@ -2011,12 +2040,46 @@
           "value": "base_type"
         },
         {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_tier3_kw"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
           "type": "SYMBOL",
           "name": "last_index"
         },
         {
           "type": "STRING",
           "value": "*"
+        }
+      ]
+    },
+    "_tier3_kw": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "put"
+        },
+        {
+          "type": "STRING",
+          "value": "del"
+        },
+        {
+          "type": "STRING",
+          "value": "commit"
+        },
+        {
+          "type": "STRING",
+          "value": "rollback"
+        },
+        {
+          "type": "STRING",
+          "value": "open"
         }
       ]
     },
@@ -3963,7 +4026,12 @@
                 "type": "FIELD",
                 "name": "operator",
                 "content": {
-                  "type": "STRING",
+                  "type": "ALIAS",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_bin_amp"
+                  },
+                  "named": false,
                   "value": "&"
                 }
               },
@@ -4477,6 +4545,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "address_of_expr"
+        },
+        {
+          "type": "SYMBOL",
           "name": "not_expr"
         },
         {
@@ -4629,6 +4701,10 @@
           {
             "type": "SYMBOL",
             "name": "propagate_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "force_expr"
           },
           {
             "type": "SYMBOL",
@@ -4955,6 +5031,81 @@
         }
       }
     },
+    "force_expr": {
+      "type": "PREC_LEFT",
+      "value": 110,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "operand",
+            "content": {
+              "type": "SYMBOL",
+              "name": "primary_expr"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "#"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "fragment",
+                "content": {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "SYMBOL",
+                      "name": "identifier"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "symbol"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "integer"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "base_type"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "address_of_expr": {
+      "type": "PREC_RIGHT",
+      "value": "unary",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "&"
+          },
+          {
+            "type": "FIELD",
+            "name": "operand",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expr"
+            }
+          }
+        ]
+      }
+    },
     "query_expr": {
       "type": "PREC_LEFT",
       "value": "query_expr",
@@ -5101,6 +5252,15 @@
                     {
                       "type": "SYMBOL",
                       "name": "base_type"
+                    },
+                    {
+                      "type": "ALIAS",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_tier3_kw"
+                      },
+                      "named": true,
+                      "value": "identifier"
                     }
                   ]
                 }
@@ -5295,6 +5455,10 @@
       "content": {
         "type": "CHOICE",
         "members": [
+          {
+            "type": "STRING",
+            "value": "==="
+          },
           {
             "type": "STRING",
             "value": "=="
@@ -5948,7 +6112,12 @@
                 "type": "FIELD",
                 "name": "operator",
                 "content": {
-                  "type": "STRING",
+                  "type": "ALIAS",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_bin_amp"
+                  },
+                  "named": false,
                   "value": "&"
                 }
               },
@@ -6274,7 +6443,7 @@
         "members": [
           {
             "type": "STRING",
-            "value": "~#"
+            "value": "~key"
           },
           {
             "type": "STRING",
@@ -6588,6 +6757,10 @@
               {
                 "type": "STRING",
                 "value": "pn"
+              },
+              {
+                "type": "STRING",
+                "value": "function"
               }
             ]
           }
@@ -6699,8 +6872,21 @@
           ]
         },
         {
-          "type": "STRING",
-          "value": "fn"
+          "type": "FIELD",
+          "name": "kind",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "fn"
+              },
+              {
+                "type": "STRING",
+                "value": "function"
+              }
+            ]
+          }
         },
         {
           "type": "FIELD",
@@ -7268,6 +7454,214 @@
             "type": "SYMBOL",
             "name": "_expr"
           }
+        }
+      ]
+    },
+    "put_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "put"
+        },
+        {
+          "type": "FIELD",
+          "name": "clause",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_put_clause"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "FIELD",
+                "name": "clause",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_put_clause"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "_put_clause": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "target",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_expr"
+              }
+            },
+            {
+              "type": "STRING",
+              "value": "="
+            },
+            {
+              "type": "FIELD",
+              "name": "value",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_expr"
+              }
+            }
+          ]
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "value",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_expr"
+              }
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "before"
+                },
+                {
+                  "type": "STRING",
+                  "value": "after"
+                },
+                {
+                  "type": "STRING",
+                  "value": "into"
+                }
+              ]
+            },
+            {
+              "type": "FIELD",
+              "name": "target",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_expr"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "del_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "del"
+        },
+        {
+          "type": "FIELD",
+          "name": "target",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expr"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "FIELD",
+                "name": "target",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expr"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "commit_stam": {
+      "type": "STRING",
+      "value": "commit"
+    },
+    "rollback_stam": {
+      "type": "STRING",
+      "value": "rollback"
+    },
+    "open_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "open"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "alias",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "identifier"
+                  }
+                },
+                {
+                  "type": "STRING",
+                  "value": "="
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "target",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expr"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "FIELD",
+          "name": "body",
+          "content": {
+            "type": "SYMBOL",
+            "name": "content"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
         }
       ]
     },
@@ -10957,6 +11351,14 @@
     [
       "_field_name",
       "base_type"
+    ],
+    [
+      "_key",
+      "_stam_seq"
+    ],
+    [
+      "_key",
+      "primary_expr"
     ]
   ],
   "precedences": [
@@ -11032,6 +11434,10 @@
       {
         "type": "STRING",
         "value": "is_in"
+      },
+      {
+        "type": "STRING",
+        "value": "unary"
       },
       {
         "type": "STRING",
@@ -11153,6 +11559,10 @@
     {
       "type": "SYMBOL",
       "name": "_bin_lt"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_bin_amp"
     },
     {
       "type": "SYMBOL",

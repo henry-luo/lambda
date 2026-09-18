@@ -149,6 +149,11 @@ typedef enum AstNodeType : uint16_t {
     // The secondary binding in `for (key, value at source)` has the named
     // binding layout, not the enclosing AstLoopNode layout.
     AST_NODE_FOR_INDEX = 549,
+    // Tier 3 (PTH60v3, PTH68v3): the CRUD statements and the transaction block.
+    // They are statements, never expressions -- `=` has no external effect ever
+    // (PTH55), so a document write has exactly one spelling.
+    AST_NODE_CRUD_STAM = 550,
+    AST_NODE_OPEN_STAM = 551,
 } AstNodeType;
 
 typedef enum LoopForm {
@@ -164,6 +169,12 @@ typedef enum Operator {
     OPERATOR_POS,
     OPERATOR_SPREAD,
     OPERATOR_PROPAGATE,
+    // PTH32: postfix `#`, the force step. Postfix in source, but a one-operand
+    // node like the rest of this group.
+    OPERATOR_FORCE,
+    // PTH40: prefix `&`, address-of. Reads the reference the operand carries as
+    // its identity, or null; performs no I/O and mints no identity.
+    OPERATOR_ADDRESS_OF,
 
     // binary
     OPERATOR_ADD,
@@ -184,6 +195,8 @@ typedef enum Operator {
     OPERATOR_LE,
     OPERATOR_GT,
     OPERATOR_GE,
+    // PTH45v2: `a === b` is reference equality, `&a != null and &a == &b`.
+    OPERATOR_REF_EQ,
     OPERATOR_ELEM_EQ,
     OPERATOR_ELEM_NE,
     OPERATOR_ELEM_LT,
@@ -656,6 +669,9 @@ typedef struct AstCallNode : AstNode {
     bool interp_has_named_args;
     bool interp_has_spread_args;
     bool interp_call_shape_planned;
+    // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
+    // colour must be checked at run time; 0 when statically resolved.
+    uint32_t fn_colour_guard;
 } AstCallNode;
 
 // D8.2.4: call argument shape belongs to the immutable AST definition. Both
@@ -922,6 +938,36 @@ typedef struct AstAssignNode : AstNode {
     bool var_root_unshare;
 } AstAssignNode;
 
+// One Tier-3 edit (PTH60v3). A `put`/`del` statement is a list of these, in
+// written order; a comma-joined statement records exactly what three separate
+// statements would.
+typedef struct AstCrudNode : AstNode {
+    // WriteOp, kept as a plain byte so ast-core.hpp stays free of the runtime
+    // write-set header (the parser and the AST dump both read it).
+    uint8_t write_op;
+    // The location. A member/index target is SPLIT into `object` + `key` so the
+    // runtime is handed the head container and the step within it; a bare node
+    // target leaves `key` null and the node itself is the anchor (PTH71v2).
+    AstNode* object;
+    AstNode* key;
+    AstNode* value;   // null for `del`
+} AstCrudNode;
+
+// `open target { … }` / `open v = target { … }` (PTH68v3). The alias is a
+// reference with `#` implied (PTH75v3), so it binds the opened document.
+typedef struct AstOpenNode : AstNode {
+    AstNode* target;
+    AstNode* body;
+    String* alias;                 // null for the alias-less form
+    // The declarator the alias binding was registered through, and the ONLY
+    // place the binding is read from: a later pass re-registers declarators, so
+    // a NameEntry* cached here at build time goes stale and its slot is never
+    // planned. It is also a child of this node, which is how the frame planner
+    // reaches the alias; its `init` stays null because the opened document is
+    // produced by the block, not by an initialiser.
+    AstNode* alias_decl;
+} AstOpenNode;
+
 // for declaration decomposition (let a, b = expr / let a, b at expr)
 typedef struct AstDecomposeNode : AstNode {
     String** names;
@@ -1127,6 +1173,13 @@ typedef struct AstSpreadNode : AstNode {
     AstNode* argument;
 } AstSpreadNode;
 
+static inline struct NameEntry* ast_open_alias_entry(const AstOpenNode* node) {
+    AstNode* decl = node ? node->alias_decl : NULL;
+    return decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR
+        ? ((AstDeclaratorNode*)decl)->entry : NULL;
+}
+
+
 typedef struct AstForOfNode : AstNode {
     AstNode* left;
     AstNode* init;
@@ -1233,6 +1286,8 @@ typedef enum AnyReason {
     ANY_WIDENED_VAR,         // mutable binding widened by reassignment
     ANY_STATEMENT,           // statement node carries no value type
     ANY_ERROR_RECOVERY,      // a diagnostic already fired; ANY avoids cascades
+    ANY_FORCE,               // `#` target shape unknown until the document loads
+    ANY_ADDRESS_OF,          // `&expr` — a reference, or null (PTH40)
     ANY_LEGACY_UNCLASSIFIED, // not yet classified — must trend to zero
     ANY_REASON_COUNT
 } AnyReason;

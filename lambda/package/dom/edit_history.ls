@@ -252,14 +252,16 @@ fn move_entry(history, entry, is_undo) {
     else { undo: [*to, entry], redo: history_take(from, len(from) - 1), open_group: null }
 }
 
-fn clear_history(host, current) {
+// Writing the session history is an effect, so these two are procedures:
+// an `fn` can never call a `pn` (S12.1.1). Only `replay` (a `pn`) calls them.
+pn clear_history(host, current) {
     let cleared = { undo: [], redo: [], open_group: null };
     let updated = session.set_history(host, cleared);
     if (updated == null) false
     else release_entries(host, [*current.history.undo, *current.history.redo], 0)
 }
 
-fn replay_retained(host, edit_context, current, entry, is_undo) {
+pn replay_retained(host, edit_context, current, entry, is_undo) {
     if (not dom.edit_replay_delta(host, edit_context.token, entry.delta_id,
                                   is_undo)) {
         clear_history(host, current);

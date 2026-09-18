@@ -177,8 +177,8 @@ extern void edit_session_subscribe(void* session, int kind, void* callback, void
 // edit bridge sys func wrappers
 extern Item fn_undo(void);
 extern Item fn_redo(void);
-extern Item fn_commit0(void);
-extern Item fn_commit1(Item description);
+extern Item fn_edit_commit0(void);
+extern Item fn_edit_commit1(Item description);
 
 extern Item pn_select(Item handles, Item timeout_ms);
 
@@ -1082,6 +1082,16 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
      C_RET_BOOL, NULL, "fn_exists", FPTR(fn_exists), NULL, NULL, false, 0},
 
+    // PTH76: `temp` creates or opens an in-memory document, pn-family because
+    // installing a document is an effect on the evaluation's context. The
+    // one-argument form is TOTAL -- it returns the existing head, creating an
+    // empty document when there is none -- so only the creating form can raise.
+    {SYSFUNC_TEMP1, "temp", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_temp1", FPTR(fn_temp1), NULL, NULL, false, 0},
+
+    {SYSFUNC_TEMP2, "temp", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "fn_temp2", FPTR(fn_temp2), NULL, NULL, false, 0},
+
     // ========================================================================
     // Bitwise functions — operate on integers, not method-eligible
     // ========================================================================
@@ -1159,11 +1169,14 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_EDIT_REDO, "redo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
 
-    {SYSFUNC_EDIT_COMMIT, "commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_commit0", FPTR(fn_commit0), NULL, NULL, false, 0},
+    // `commit` is the Tier-3 transaction statement (PTH62), so the editor's
+    // version-commit function carries the `edit_` prefix instead of sharing
+    // the keyword's spelling (S1.7: one symbol, one concept).
+    {SYSFUNC_EDIT_COMMIT, "edit_commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_edit_commit0", FPTR(fn_edit_commit0), NULL, NULL, false, 0},
 
-    {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
+    {SYSFUNC_EDIT_COMMIT1, "edit_commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_edit_commit1", FPTR(fn_edit_commit1), NULL, NULL, false, 0},
 
     // reactive UI: emit event to parent template handler
     {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
@@ -1799,6 +1812,23 @@ JitImport jit_runtime_imports[] = {
     {"fn_neg", FPTR(fn_neg)},
     {"fn_eq", FPTR(fn_eq)},
     {"fn_ne", FPTR(fn_ne)},
+    // PTH32/PTH40/PTH45v2: the reference forms. MIR Direct emits a boxed call
+    // to each, the same helper the T0 interpreter calls (rule 13).
+    {"fn_force", FPTR(fn_force)},
+    {"fn_address_of", FPTR(fn_address_of)},
+    {"fn_ref_eq", FPTR(fn_ref_eq)},
+    // Tier 3 (PTH60v3): the CRUD statements and the transaction boundary.
+    {"fn_put_member", FPTR(fn_put_member)},
+    {"fn_put_node", FPTR(fn_put_node)},
+    {"fn_put_before", FPTR(fn_put_before)},
+    {"fn_put_after", FPTR(fn_put_after)},
+    {"fn_put_into", FPTR(fn_put_into)},
+    {"fn_del_member", FPTR(fn_del_member)},
+    {"fn_del_node", FPTR(fn_del_node)},
+    {"fn_commit", FPTR(fn_commit)},
+    {"fn_rollback", FPTR(fn_rollback)},
+    {"fn_open_begin", FPTR(fn_open_begin)},
+    {"fn_open_end", FPTR(fn_open_end)},
     {"fn_str_eq_ptr", FPTR(fn_str_eq_ptr)},
     {"fn_sym_eq_ptr", FPTR(fn_sym_eq_ptr)},
     {"fn_lt", FPTR(fn_lt)},
@@ -2037,6 +2067,9 @@ JitImport jit_runtime_imports[] = {
     {"err2it", FPTR(err2it)},
     {"it2err", FPTR(it2err)},
     {"lambda_type_check", FPTR(lambda_type_check)},
+    {"lambda_fn_colour_arg_check", FPTR(lambda_fn_colour_arg_check)},
+    {"lambda_fn_colour_guard_list", FPTR(lambda_fn_colour_guard_list)},
+    {"lambda_fn_colour_guard_args", FPTR(lambda_fn_colour_guard_args)},
     {"lambda_type_check_env", FPTR(lambda_type_check_env)},
     {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},

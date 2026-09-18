@@ -391,7 +391,7 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
-    Input* document_input = doc->input;
+    Input* document_input = dom_document_take_owned_input_resources(doc);
     Pool* owned_loader_pool = doc->owned_loader_pool;
     doc->owned_loader_pool = nullptr;
 
@@ -490,10 +490,11 @@ void free_document(DomDocument* doc) {
     }
 
     // The Input context owns parser arenas outside the loader pool. Release it
-    // after every DOM-owned allocator has detached from the same context.
+    // after every DOM-owned allocator has detached from the same context. A
+    // foreign document borrows its creator's Input, which remains live.
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
-    input_release_document_resources(document_input);
+    if (document_input) input_release_document_resources(document_input);
     if (owned_loader_pool) mem_pool_destroy(owned_loader_pool);
 }
 

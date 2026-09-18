@@ -591,6 +591,11 @@ void shape_entry_set_type(ShapeEntry* entry, Type* type);
 // readers; it is a bug to rely on that.
 const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry);
 
+// Read one shaped field's value. Defined in lambda-data-runtime.cpp; declared
+// here rather than re-externed per consumer, which is how the JS adapter, the
+// document node table, and the Tier-3 write set had each grown their own copy.
+Item _map_read_field(ShapeEntry* field, void* map_data);
+
 // Nullable-native projection: the field's slot is int?/bool?/float?/T? lane.
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out);
@@ -1062,6 +1067,9 @@ typedef struct TypeFunc : Type {
     bool can_raise;             // true if function may raise errors (T^ or T^E)
     bool may_return_error;      // true if an Item-valued call may contain an ordinary error
     bool has_explicit_return_contract;
+    // S12.1.4v2: declared with `function` — the value is `fn`, but a call is
+    // `pn` when a `function`-typed argument is (its polymorphic slots)
+    bool is_colour_poly;
     uint16_t binder_count;
     TypeBinder** binders;       // canonical binder for each slot
 } TypeFunc;
@@ -1167,6 +1175,22 @@ static inline bool lambda_type_func_is_proc(Type* type) {
     return signature && signature->is_proc;
 }
 
+// S12.1.4v2(1): a polymorphic slot of a `function` declaration is a parameter
+// whose contract is exactly `function`; `fn (...)`/`pn (...)` slots keep
+// their fixed colour and never vote.
+// S12.1.4v2(3): the run-time half of an `fn`-context call's colour check.
+// Bit 31 asks for the callee's own colour (a dynamic callee); bits 0..15 name
+// the argument positions whose colour could not be resolved statically, and
+// are verified only where they land in the callee's polymorphic slots.
+#define LAMBDA_COLOUR_GUARD_CALLEE (1u << 31)
+#define LAMBDA_COLOUR_GUARD_ARGS 0xFFFFu
+
+static inline bool lambda_type_param_is_colour_poly(const TypeParam* param) {
+    if (!param) return false;
+    const Type* contract = param->contract_type ? param->contract_type : param->full_type;
+    return contract == &TYPE_FUNC;
+}
+
 // D2.6.6v2: the generic map/element/object descriptors are compact `Type`
 // singletons.  Only a concrete descriptor can be read as its extended
 // TypeMap shape; keeping the discriminator here prevents each language front
@@ -1257,6 +1281,13 @@ extern TypeType LIT_TYPE_STRING;
 extern TypeType LIT_TYPE_BINARY;
 extern TypeType LIT_TYPE_SYMBOL;
 extern TypeType LIT_TYPE_PATH;
+// PTH30: `reference` is the type ALIAS `symbol | path` (URI = URN | URL), not a
+// nominal supertype — a supertype would force every symbol operation
+// (indexing, slicing, `\symbol(…)` islands) to rule on paths, whereas the alias
+// dissolves at each use site into the two evaluation contracts S2.4.3v3 keeps
+// distinct.
+extern TypeBinary TYPE_REFERENCE;
+extern TypeType LIT_TYPE_REFERENCE;
 extern TypeType LIT_TYPE_DTIME;
 extern TypeType LIT_TYPE_DATE;   // sub-type: date-only datetime
 extern TypeType LIT_TYPE_TIME;   // sub-type: time-only datetime

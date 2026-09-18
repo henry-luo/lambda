@@ -1442,6 +1442,18 @@ TEST_F(NegativeScriptTest, FunctionColourMismatchIsRejectedAtRuntime) {
         "expected fn, got pn logsq");
 }
 
+// S12.1.4v2: a `function` call that is statically a `pn` call is rejected in
+// `fn` context, and a `function` body is checked as an `fn` body.
+TEST_F(NegativeScriptTest, FunctionDeclarationColourIsCheckedStatically) {
+    ExpectErrorMessage("test/lambda/negative/semantic/function_colour_static.ls",
+        "error[E224]: passing a procedure (pn) to parameter 'f' makes this call of "
+        "'apply_all' a pn call, which a function (fn) cannot make");
+    ExpectErrorMessage("test/lambda/negative/semantic/function_body_is_fn.ls",
+        "error[E224]: 'logsq' is a procedure (pn) and cannot be called from a function (fn)");
+    ExpectErrorMessage("test/lambda/negative/semantic/function_body_var.ls",
+        "error[E224]: `var` is only allowed inside a procedure (pn)");
+}
+
 TEST_F(NegativeScriptTest, ProceduralStatementsOutsidePnReportE224WithoutCascade) {
     const char* script = "test/lambda/negative/semantic/proc_stam_outside_pn.ls";
     ScriptResult result = run_lambda_script(script);

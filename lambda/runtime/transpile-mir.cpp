@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "write_set.hpp"
 #include "lambda-number-types.hpp"
 #include "re2_wrapper.hpp"
 #include "../io/mark_builder.hpp"
@@ -6971,6 +6972,8 @@ static bool mir_argument_may_return_item_error(MirTranspiler* mt,
 
 static bool mir_direct_call_has_parameter_error_guard(MirTranspiler* mt,
         AstCallNode* call) {
+    // a run-time colour check yields its error through the same edge
+    if (call && (call->fn_colour_guard & LAMBDA_COLOUR_GUARD_ARGS)) return true;
     AstNode* function = ast_unwrap_primary(call ? call->function : NULL);
     if (!function || function->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* ident = (AstIdentNode*)function;
@@ -13127,6 +13130,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         case OPERATOR_IN:
         case OPERATOR_AT:
         case OPERATOR_EQ:
+        case OPERATOR_REF_EQ:
         case OPERATOR_NE:
         case OPERATOR_LT:
         case OPERATOR_LE:
@@ -13950,6 +13954,9 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
     case OPERATOR_INTERSECT: fn_name = "fn_intersect"; break;
     case OPERATOR_EXCLUDE: fn_name = "fn_exclude"; break;
     case OPERATOR_EQ: fn_name = "fn_eq"; break;
+    // PTH45v2: `===` never takes a native fast path -- identity is a relation
+    // the document context holds, not anything either operand's lane carries.
+    case OPERATOR_REF_EQ: fn_name = "fn_ref_eq"; break;
     case OPERATOR_NE: fn_name = "fn_ne"; break;
     case OPERATOR_LT: fn_name = "fn_lt"; break;
     case OPERATOR_LE: fn_name = "fn_le"; break;
@@ -14010,7 +14017,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
     // return type; on some ABIs the upper bytes may be garbage, so mask to 0xFF
     // for a clean native bool.  Ordered comparisons (fn_lt/fn_gt/fn_le/fn_ge) now
     // return an Item (boxed bool or element-wise mask) — leave it unmasked.
-    if (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE) {
+    if (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE || bi->op == OPERATOR_REF_EQ) {
         MIR_reg_t clean = new_reg(mt, "cmask", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, clean),
             MIR_new_reg_op(mt->ctx, result),
@@ -14176,6 +14183,20 @@ static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
         MIR_reg_t boxed = transpile_box_item(mt, un->operand);
         return mir_unary_value(mt, un,
             emit_call_1(mt, "fn_pos", MIR_T_I64, MIR_T_I64,
+                MIR_new_reg_op(mt->ctx, boxed)), VALUE_REP_ITEM);
+    }
+    // PTH32/PTH40: both reference forms are one boxed runtime call, shared with
+    // the T0 interpreter (rule 13) so the tiers cannot drift (S1.6).
+    case OPERATOR_FORCE: {
+        MIR_reg_t boxed = transpile_box_item(mt, un->operand);
+        return mir_unary_value(mt, un,
+            emit_call_1(mt, "fn_force", MIR_T_I64, MIR_T_I64,
+                MIR_new_reg_op(mt->ctx, boxed)), VALUE_REP_ITEM);
+    }
+    case OPERATOR_ADDRESS_OF: {
+        MIR_reg_t boxed = transpile_box_item(mt, un->operand);
+        return mir_unary_value(mt, un,
+            emit_call_1(mt, "fn_address_of", MIR_T_I64, MIR_T_I64,
                 MIR_new_reg_op(mt->ctx, boxed)), VALUE_REP_ITEM);
     }
     case OPERATOR_PROPAGATE: {
@@ -25663,6 +25684,61 @@ static void mir_emit_slot_home_transport(MirTranspiler* mt, int position,
         MIR_new_reg_op(mt->ctx, vh_addr)));
 }
 
+// S12.1.4v3(6): only a colour-guarded dynamic call (an `fn`-context call whose
+// callee colour is unknown) runs this check, and the dispatch it guards is
+// unchanged. The check allocates only when it refuses; a refusal skips the
+// dispatch and becomes the call's value (S12.3.4 `fn` convention).
+struct MirColourGuard {
+    MIR_label_t refused;
+    MIR_reg_t result;
+};
+
+static MirColourGuard mir_colour_guard_begin(MirTranspiler* mt, AstCallNode* call,
+        MIR_reg_t callee, const MIR_reg_t* args, int argc, MIR_reg_t args_list) {
+    MirColourGuard guard = {0, 0};
+    if (!call || !call->fn_colour_guard) return guard;
+    MIR_reg_t refused;
+    if (args_list) {
+        refused = emit_call_3(mt, "lambda_fn_colour_guard_list", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, call->fn_colour_guard));
+    } else {
+        MIR_var_t vars[6] = {{MIR_T_I64, "f", 0}, {MIR_T_I64, "g", 0},
+            {MIR_T_I64, "n", 0}, {MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0},
+            {MIR_T_I64, "c", 0}};
+        MirImportEntry* ie = ensure_import(mt, "lambda_fn_colour_guard_args",
+            MIR_T_I64, 6, vars, 1);
+        MIR_op_t slots[3];
+        for (int i = 0; i < 3; i++) {
+            slots[i] = i < argc ? MIR_new_reg_op(mt->ctx, args[i])
+                : MIR_new_int_op(mt->ctx, 0);
+        }
+        refused = new_reg(mt, "colour_check", MIR_T_I64);
+        emit_insn(mt, MIR_new_call_insn(mt->ctx, 9,
+            MIR_new_ref_op(mt->ctx, ie->proto), MIR_new_ref_op(mt->ctx, ie->import),
+            MIR_new_reg_op(mt->ctx, refused), MIR_new_reg_op(mt->ctx, callee),
+            MIR_new_int_op(mt->ctx, call->fn_colour_guard),
+            MIR_new_int_op(mt->ctx, argc), slots[0], slots[1], slots[2]));
+    }
+    guard.refused = new_label(mt);
+    guard.result = new_reg(mt, "colour_call", MIR_T_I64);
+    emit_jump_if_item_error(mt, refused, guard.result, guard.refused);
+    return guard;
+}
+
+static MIR_reg_t mir_colour_guard_end(MirTranspiler* mt, MirColourGuard guard,
+        MIR_reg_t result) {
+    if (!guard.refused) return result;
+    MIR_label_t done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, guard.result), MIR_new_reg_op(mt->ctx, result)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+    emit_label(mt, guard.refused);
+    emit_label(mt, done);
+    return guard.result;
+}
+
 static bool mir_emit_var_home_transport(MirTranspiler* mt, int position,
         MirVarEntry* borrow_root, MIR_reg_t val, bool allow_array_num) {
     // A typed var-array call may detach after a nested sharing boundary, so
@@ -27580,7 +27656,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             // ======== TCO interception ========
             // If this is a tail-recursive call to the current TCO function,
             // transform into: evaluate args → assign to params → goto tco_label
+            // a colour-guarded call keeps its entry so the check runs (S12.1.4v2)
             if (mt->tco_func && call_in_tail_position && is_recursive_call(call_node, mt->tco_func) &&
+                    !call_node->fn_colour_guard &&
                     mir_record_tail_arguments_proven(mt, call_node, fn_mangled)) {
                 log_debug("mir: TCO tail call to '%.*s' — converting to goto",
                     (int)mt->tco_func->name->len, mt->tco_func->name->chars);
@@ -28159,6 +28237,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     // boxed slow entry remains responsible for open edges.
                     short_circuit_error = false;
                 }
+                // S12.1.4v2(3): a polymorphic slot whose colour was unknown at
+                // compile time rides the error short-circuit, so a `pn` there
+                // makes this `fn`-context call yield its error unentered.
+                bool colour_checked = resolved_args[i] && i < 16 &&
+                    (call_node->fn_colour_guard & (1u << i));
+                if (colour_checked) short_circuit_error = true;
                 // CW25 / S9.2.2: a `var` argument that names a PLACE
                 // (`f(var m.rows[i])`) borrows that place, not merely its root.
                 // Detach the whole spine here, before any arm evaluates the
@@ -28414,6 +28498,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                 parameter_error_label = new_label(mt);
                                 parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
                             }
+                            if (colour_checked) {
+                                val = emit_call_1(mt, "lambda_fn_colour_arg_check",
+                                    MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                            }
                             emit_jump_if_item_error(mt, val, parameter_error_result,
                                 parameter_error_label);
                             has_parameter_error_guard = true;
@@ -28536,6 +28624,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             if (!has_parameter_error_guard) {
                                 parameter_error_label = new_label(mt);
                                 parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
+                            }
+                            if (colour_checked) {
+                                val = emit_call_1(mt, "lambda_fn_colour_arg_check",
+                                    MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                             }
                             emit_jump_if_item_error(mt, val, parameter_error_result,
                                 parameter_error_label);
@@ -29236,12 +29328,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // the null sentinel instead of allocating a dead generated home.
 
     if (arg_count == 0) {
+        MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
+            NULL, 0, 0);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
         mt->module_rooted_reg = 0;
+        dyn_result = mir_colour_guard_end(mt, colour, dyn_result);
     } else if (arg_count <= 3 && !dyn_var_signature) {
         MIR_reg_t args[3];
         int arg_roots[3];
@@ -29259,6 +29354,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             args[i] = load_gc_root_slot(mt, arg_roots[i], "dynamic_arg");
         }
         emit_dyn_var_transports(args, arg_count);
+        MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
+            args, arg_count, 0);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
         if (arg_count == 1) {
@@ -29299,6 +29396,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_new_int_op(mt->ctx, 0)));
         }
         mt->module_rooted_reg = 0;
+        dyn_result = mir_colour_guard_end(mt, colour, dyn_result);
     } else {
         // `fn_call_into` owns the common dynamic ABI. Build a rooted plain
         // Array so every 4-8 argument call reaches its checked dispatch. A
@@ -29332,6 +29430,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             boxed_fn = load_gc_root_slot(mt, boxed_fn_root, "dynamic_fn");
         }
         args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
+        MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
+            NULL, 0, args_list);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
@@ -29339,6 +29439,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
         mt->module_rooted_reg = 0;
+        dyn_result = mir_colour_guard_end(mt, colour, dyn_result);
     }
 
     // T21-3b: reload the transported `var` bindings (see the direct path).
@@ -32488,6 +32589,104 @@ static MirValue transpile_pipe_file_value(MirTranspiler* mt,
 // but publish a descriptor at the expression boundary. In particular, a return
 // or raise may have transferred control before the dummy result is observed
 // (D2.4.1–D2.4.3, D8.2.6).
+// ============================================================================
+// Tier 3: the CRUD statements and the transaction block (PTH60v3, PTH68v3)
+// ============================================================================
+// Each statement is one boxed runtime call, the same helper the T0 interpreter
+// invokes (rule 13), so the two tiers cannot drift (S1.6). Every operand is
+// evaluated HERE and reads the head (PTH61).
+
+static MIR_reg_t transpile_crud_statement_item(MirTranspiler* mt,
+        AstCrudNode* crud) {
+    if (crud->write_op == CRUD_OP_COMMIT || crud->write_op == CRUD_OP_ROLLBACK) {
+        MIR_reg_t result = emit_call_0(mt,
+            crud->write_op == CRUD_OP_COMMIT ? "fn_commit" : "fn_rollback",
+            MIR_T_I64);
+        emit_return_if_item_error(mt, result);
+        return result;
+    }
+    if (crud->write_op == CRUD_OP_SEQUENCE) {
+        // PTH60v3: the comma-joined edits record in WRITTEN ORDER, exactly as
+        // separate statements would.
+        MIR_reg_t last = emit_null_item_reg(mt);
+        for (AstNode* clause = crud->value; clause; clause = clause->next) {
+            last = transpile_crud_statement_item(mt, (AstCrudNode*)clause);
+        }
+        return last;
+    }
+    MIR_reg_t target = transpile_box_item(mt, crud->object);
+    MIR_reg_t value = crud->value ? transpile_box_item(mt, crud->value)
+                                  : emit_null_item_reg(mt);
+    MIR_reg_t result;
+    switch (crud->write_op) {
+    case WRITE_OP_BEFORE: case WRITE_OP_AFTER: case WRITE_OP_INTO: {
+        // The clause forms take (value, target): `put v before t`.
+        const char* helper = crud->write_op == WRITE_OP_BEFORE ? "fn_put_before"
+            : crud->write_op == WRITE_OP_AFTER ? "fn_put_after" : "fn_put_into";
+        result = emit_call_2(mt, helper, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, target));
+        break;
+    }
+    default: {
+        bool remove = crud->write_op == WRITE_OP_DELETE;
+        if (crud->key) {
+            // A dotted member name is a static key, not an identifier read:
+            // it is interned through the property-key path, exactly as
+            // member access lowers it.
+            MIR_reg_t key = crud->key->node_type == AST_NODE_IDENT
+                ? mir_join_name_item(mt, ((AstIdentNode*)crud->key)->name)
+                : transpile_box_item(mt, crud->key);
+            result = remove
+                ? emit_call_2(mt, "fn_del_member", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, target),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key))
+                : emit_call_3(mt, "fn_put_member", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, target),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        } else {
+            result = remove
+                ? emit_call_1(mt, "fn_del_node", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, target))
+                : emit_call_2(mt, "fn_put_node", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, target),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        }
+        break;
+    }
+    }
+    emit_return_if_item_error(mt, result);
+    return result;
+}
+
+static MIR_reg_t transpile_open_statement_item(MirTranspiler* mt,
+        AstOpenNode* open_node) {
+    MIR_reg_t target = transpile_box_item(mt, open_node->target);
+    MIR_reg_t opened = emit_call_1(mt, "fn_open_begin", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, target));
+    emit_return_if_item_error(mt, opened);
+    // PTH75v3: the alias binds the OPENED DOCUMENT (`#` is implied on the
+    // target); the lazy address is recovered with `&v`.
+    NameEntry* alias_entry = ast_open_alias_entry(open_node);
+    if (alias_entry && open_node->alias) {
+        // The alias has no declarator initialiser -- the opened document comes
+        // from the call above -- so the block declares its var here, exactly as
+        // a join clause binds its item.
+        mir_join_bind_item_var(mt, open_node->alias, alias_entry, &TYPE_ANY,
+            opened);
+    }
+    transpile_expr_value(mt, open_node->body);
+    // PTH66v2: the block commits at its end. An unhandled runtime error inside
+    // the body has already returned through emit_return_if_item_error, so a
+    // rollback on that path is the ENCLOSING evaluation's teardown, not this
+    // instruction stream's -- which is why `unwinding` is false here.
+    MIR_reg_t closed = emit_call_1(mt, "fn_open_end", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+    emit_return_if_item_error(mt, closed);
+    return closed;
+}
+
 static MirValue transpile_statement_value(MirTranspiler* mt, AstNode* node) {
     MIR_reg_t reg = 0;
     switch (node->node_type) {
@@ -32531,6 +32730,12 @@ static MirValue transpile_statement_value(MirTranspiler* mt, AstNode* node) {
         break;
     case AST_NODE_ASSIGN_STAM:
         reg = transpile_assign_stam(mt, (AstAssignStamNode*)node);
+        break;
+    case AST_NODE_CRUD_STAM:
+        reg = transpile_crud_statement_item(mt, (AstCrudNode*)node);
+        break;
+    case AST_NODE_OPEN_STAM:
+        reg = transpile_open_statement_item(mt, (AstOpenNode*)node);
         break;
     default:
         log_error("mir-value: unsupported statement producer %d", node->node_type);
@@ -34083,7 +34288,9 @@ static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
             node->node_type == AST_NODE_PUB_STAM ||
             node->node_type == AST_NODE_TYPE_STAM ||
             node->node_type == AST_NODE_VAR_STAM ||
-            node->node_type == AST_NODE_ASSIGN_STAM)) {
+            node->node_type == AST_NODE_ASSIGN_STAM ||
+            node->node_type == AST_NODE_CRUD_STAM ||
+            node->node_type == AST_NODE_OPEN_STAM)) {
         return transpile_statement_value(mt, node);
     }
     if (node && node->node_type == AST_NODE_OBJECT_LITERAL) {
