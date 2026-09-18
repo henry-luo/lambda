@@ -2964,6 +2964,20 @@
             "icon": "\u267b\ufe0f"
           },
           {
+            "source": "test/test_css_cascade_memory_gtest.cpp",
+            "name": "CSS Cascade Memory Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_css_cascade_memory_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "\ud83e\udde0"
+          },
+          {
             "source": "lib/test_pdf_writer_gtest.cpp",
             "name": "PDF Writer Tests",
             "dependencies": [

@@ -1,0 +1,28 @@
+# CSS cascade memory regression baseline
+#
+# Captured on 2026-09-18 with the arm64 macOS release host via
+# `make test-css-cascade-memory`. The workload runs page load then one clean
+# full recascade. It checks the CSS-role/canonical pools and the document-pool
+# allocation caused by each cascade; the latter is where owned specified-style
+# retention is observable. This follows D4.1.4v4, D4.2.1v3-D4.2.5v3, and
+# D4.5.1v3: pool lifetime and allocator attribution remain explicit.
+#
+# The fixture set covers library-selector breadth (jqueryui), large external
+# stylesheet input (linuxmint), repeated content cards (netflix), a high-DOM
+# Bootstrap document, and two independently packaged web templates. Values are
+# bytes except entries and bound_refs. The GTest allows 15% plus 4 KiB for pool
+# extent rounding; a recascade must not grow canonical CSS beyond that margin.
+#
+# fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries bound_refs
+jqueryui initial 175402 69010 243235 329214 329214 327166 78 327
+jqueryui recascade 238506 39560 243235 329214 329214 0 78 327
+linuxmint initial 723442 515224 5235893 701065 701065 699017 154 506
+linuxmint recascade 1023626 263752 5235893 701065 701065 0 154 506
+netflix initial 445269 338408 980448 226670 226670 224622 57 245
+netflix recascade 678309 215400 980448 226670 226670 0 57 245
+bootstrap5_kitchen_sink initial 4111862 3524103 23528905 1472858 1472858 1470810 250 1212
+bootstrap5_kitchen_sink recascade 19386414 2518220 24256763 1475178 1475178 0 250 1224
+matrix_admin initial 689696 527768 1041872 383931 383931 381883 90 367
+matrix_admin recascade 1059872 343752 1041872 383931 383931 0 90 367
+bschool initial 988706 716616 1920892 796941 796941 794893 124 424
+bschool recascade 1520794 501560 1920892 796941 796941 0 124 424

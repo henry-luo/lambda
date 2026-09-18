@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
+#include "../lib/mem_context.h"
 #include "../lib/mem_grow.hpp"
 #include "../lib/time_util.h"
 #include "../lib/uv_loop.h"
@@ -1518,12 +1519,96 @@ static void layout_apply_css_stylesheets(DomDocument* doc, DomElement* root,
         doc, root, stylesheets, count, pool, engine, matcher);
 }
 
+struct CssCascadeMemorySnapshot {
+    PoolStats document_pool;
+    PoolStats work_pool;
+    uint64_t css_live_bytes;
+    uint64_t css_reserved_bytes;
+    StyleEpochStats style_epoch;
+};
+
+static bool css_cascade_memory_profile_enabled(void) {
+    const char* enabled = getenv("RADIANT_CSS_CASCADE_MEMORY_PROFILE");
+    return enabled && strcmp(enabled, "1") == 0;
+}
+
+static bool css_cascade_memory_force_recascade(void) {
+    const char* enabled = getenv("RADIANT_CSS_CASCADE_MEMORY_FORCE_RECASCADE");
+    return css_cascade_memory_profile_enabled() && enabled && strcmp(enabled, "1") == 0;
+}
+
+static long long css_cascade_memory_delta(uint64_t after, uint64_t before) {
+    return after >= before ? (long long)(after - before)
+                           : -(long long)(before - after);
+}
+
+static CssCascadeMemorySnapshot css_cascade_memory_snapshot(DomDocument* doc,
+                                                             Pool* work_pool) {
+    CssCascadeMemorySnapshot snapshot = {};
+    if (!doc) return snapshot;
+
+    pool_get_detailed_stats(doc->document_pool, &snapshot.document_pool);
+    pool_get_detailed_stats(work_pool, &snapshot.work_pool);
+    style_epoch_get_stats(doc, &snapshot.style_epoch);
+
+    // The document context excludes process-global CSS caches while retaining
+    // every CSS-role allocator that belongs to this page load.
+    MemSnapshot* mem_snapshot = mem_snapshot_capture((MemContext*)doc->services.mem_ctx);
+    if (!mem_snapshot) return snapshot;
+    for (uint32_t index = 0; index < mem_snapshot->count; index++) {
+        const MemStatSample* sample = &mem_snapshot->samples[index];
+        if (sample->role != MEM_ROLE_CSS) continue;
+        snapshot.css_live_bytes += sample->bytes_in_use;
+        snapshot.css_reserved_bytes += sample->bytes_reserved;
+    }
+    mem_snapshot_free(mem_snapshot);
+    return snapshot;
+}
+
+static void log_css_cascade_memory(const char* phase,
+                                   const CssCascadeMemorySnapshot* before,
+                                   const CssCascadeMemorySnapshot* after) {
+    if (!before || !after) return;
+    const StyleEpochStats* epoch = &after->style_epoch;
+    log_notice(
+        "[CSS_CASCADE_MEMORY] phase=%s document_live=%zu document_reserved=%zu "
+        "document_live_delta=%lld work_live_delta=%lld css_live=%llu css_reserved=%llu "
+        "css_live_delta=%lld canonical_live=%zu canonical_reserved=%zu "
+        "canonical_live_delta=%lld epoch=%llu entries=%llu trees=%llu bound_refs=%llu "
+        "lookups=%llu hits=%llu misses=%llu",
+        phase ? phase : "load",
+        after->document_pool.live_bytes,
+        after->document_pool.reserved_bytes,
+        css_cascade_memory_delta(after->document_pool.live_bytes,
+                                 before->document_pool.live_bytes),
+        css_cascade_memory_delta(after->work_pool.live_bytes,
+                                 before->work_pool.live_bytes),
+        (unsigned long long)after->css_live_bytes,
+        (unsigned long long)after->css_reserved_bytes,
+        css_cascade_memory_delta(after->css_live_bytes, before->css_live_bytes),
+        epoch->current_live_bytes,
+        epoch->current_reserved_bytes,
+        css_cascade_memory_delta(epoch->current_live_bytes,
+                                 before->style_epoch.current_live_bytes),
+        (unsigned long long)epoch->current_epoch_id,
+        (unsigned long long)epoch->canonical_entry_count,
+        (unsigned long long)epoch->canonical_tree_count,
+        (unsigned long long)epoch->bound_element_refs,
+        (unsigned long long)epoch->lookup_count,
+        (unsigned long long)epoch->hit_count,
+        (unsigned long long)epoch->miss_count);
+}
+
 static void apply_load_css_cascade(DomDocument* dom_doc,
                                    DomElement* dom_root,
                                    CssEngine* css_engine,
                                    Pool* pool,
                                    const char* phase) {
     if (!dom_doc || !dom_root || !pool || !css_engine) return;
+    bool profile_memory = css_cascade_memory_profile_enabled();
+    CssCascadeMemorySnapshot before = {};
+    if (profile_memory) before = css_cascade_memory_snapshot(dom_doc, pool);
+
     auto t_cascade_start = time_now_ns();
     layout_apply_css_stylesheets(
         dom_doc, dom_root, dom_doc->stylesheets, dom_doc->stylesheet_count,
@@ -1531,6 +1616,11 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
     log_info("[TIMING] load: CSS cascade (%s): %.1fms",
              phase ? phase : "load",
              time_elapsed_ms_f(t_cascade_start, time_now_ns()));
+
+    if (profile_memory) {
+        CssCascadeMemorySnapshot after = css_cascade_memory_snapshot(dom_doc, pool);
+        log_css_cascade_memory(phase, &before, &after);
+    }
 }
 
 // check for a UTF-8 BOM.
@@ -2084,7 +2174,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // single ordering invariant; the retired pre-cascade mode made that state
     // dependent on an environment variable.
     log_mem_stage("load_html: before_pre_script_cascade");
-    apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "pre-script");
+    apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "initial");
     log_mem_stage("load_html: pre_script_cascade_done");
     auto t_initial_cascade = timing ? time_now_ns() : t_inline_style;
     auto t_post_script = t_initial_cascade;
@@ -2116,14 +2206,21 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             }
         }
 
-        if (dom_doc->js.mutation_count > 0) {
+        bool force_profile_recascade = css_cascade_memory_force_recascade();
+        if (dom_doc->js.mutation_count > 0 || force_profile_recascade) {
             log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
                      dom_doc->js.mutation_count);
+
+            if (force_profile_recascade && dom_doc->js.mutation_count == 0) {
+                // The opt-in probe repeats the production clear-and-cascade path
+                // so its second sample measures reuse without synthetic DOM state.
+                log_notice("[CSS_CASCADE_MEMORY] forcing clean recascade for profile");
+            }
 
             dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
             view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
                                         clear_load_stylesheet_cascade_visitor, nullptr);
-            apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "post-script");
+            apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "recascade");
             log_mem_stage("load_html: post_script_cascade_done");
         }
 
