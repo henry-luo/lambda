@@ -1,0 +1,8 @@
+{
+  "name": "script screen uses the host viewport",
+  "viewport": {"width": 321, "height": 123},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#screen-state"},
+     "attribute": "data-screen", "equals": "321x123:321x123"}
+  ]
+}

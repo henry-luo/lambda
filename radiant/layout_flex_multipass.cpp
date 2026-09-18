@@ -1009,6 +1009,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             if (!(flex_item->embed && flex_item->embedp()->doc)) {
                 const char *src_value = flex_item->get_attribute("src");
                 if (src_value) {
+                    if (iframe_navigation_must_not_run_in_layout(lycon, src_value)) {
+                        // D5.4.1: flex layout cannot recursively claim a remote
+                        // iframe's evaluator while it owns the parent isolate.
+                        log_debug("flex iframe: deferring cross-origin navigation: %s", src_value);
+                        return;
+                    }
                     lycon->ui_context->iframe_depth++;
 
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,

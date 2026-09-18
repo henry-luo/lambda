@@ -1717,9 +1717,9 @@ void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
 
 void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
         JsFuncCollected* fc, FnVariantAnalysis* body) {
-    // Local Number representation belongs to the source body, not to its
-    // return ABI. A boxed or undefined completion can still contain a wholly
-    // numeric local region (D3.3.2v2).
+    // Local Number facts describe the guarded native entry, whose parameter
+    // admission has already established Number inputs. A boxed body retains
+    // JavaScript's complete value domain and cannot reuse those F64 facts.
     if (!mt || !fc || !body) return;
     AstIndex* index = &mt->tp->ast_index;
     int capacity = 0;
@@ -1773,8 +1773,8 @@ TypeId jm_numeric_binding_type(JsMirTranspiler* mt, NameEntry* binding) {
             }
         }
     }
-    // Native entries share the source body's identity proof. Do not duplicate
-    // the fact table merely because the entry's return representation differs.
+    // Native entries may reuse the Number facts recorded for their guarded
+    // sibling when an older analysis record lacks the native slot.
     if (mt->in_native_func) {
         body = fn_analysis_variant(analysis, FN_ENTRY_BOXED_BODY);
         for (int index = 0; body && index < body->binding_count; index++) {

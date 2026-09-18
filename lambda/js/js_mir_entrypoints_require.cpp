@@ -164,9 +164,11 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
         ? js_interp_execute_es_module_script(runtime, script, result_home)
         : js_interp_execute_script(runtime, script, result_home);
     js_mir_finish_script_turn(runtime, result);
-    // AST direct eval can schedule callbacks backed by deferred MIR code.
-    // Drain the script turn before matching the JIT fresh-turn cleanup.
-    if (!js_batch_execution_mode) jm_cleanup_deferred_mir();
+    // D8.5.1v2: a document realm owns every module artifact until its Runtime
+    // teardown. Browser-global sync can take the AST path between two module
+    // tasks, so it must not release an earlier module's callable code page.
+    bool document_realm = runtime && runtime->dom_doc != NULL;
+    if (!js_batch_execution_mode && !document_realm) jm_cleanup_deferred_mir();
     return result;
 }
 

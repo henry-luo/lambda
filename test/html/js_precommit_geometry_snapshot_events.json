@@ -1,0 +1,8 @@
+{
+  "name": "host-driven scripts keep the precommit geometry snapshot",
+  "viewport": {"width": 321, "height": 123},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#geometry-state"},
+     "attribute": "data-precommit-width", "equals": "0"}
+  ]
+}

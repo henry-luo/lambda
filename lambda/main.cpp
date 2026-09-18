@@ -850,6 +850,11 @@ static int lambda_main_finish(int ret_code) {
     return ret_code;
 }
 
+static void lambda_view_log_completion(int exit_code) {
+    // Online smoke tests retain NOTICE milestones while suppressing verbose diagnostics.
+    log_notice("view command completed with result: %d", exit_code);
+}
+
 // Thread-local context from runner.cpp (for error handling)
 extern __thread EvalContext* context;
 
@@ -3922,7 +3927,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 font_dirs, font_dir_count, event_log, state_dump);
             mem_free(graph_bridge_source);
 
-            log_info("view command completed with result: %d", exit_code);
+            lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
         }
 
@@ -3960,7 +3965,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 mem_free(temp_file_path);
             }
 
-            log_info("view command completed with result: %d", exit_code);
+            lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
         }
 
@@ -3998,7 +4003,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             if (temp_file_path_is_local) file_delete(temp_file_path);
             mem_free(temp_file_path);
         }
-        log_info("view command completed with result: %d", exit_code);
+        lambda_view_log_completion(exit_code);
 
         // Always print peak physical footprint on macOS so the parent test process
         // can read true app memory usage (excludes shared OS framework pages).

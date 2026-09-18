@@ -2976,10 +2976,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (!element) return sizes;
     uint32_t measurement_generation = lycon && lycon->doc && lycon->doc->view_tree
         ? lycon->doc->view_tree->measurement_cache_generation : 0;
-    int intrinsic_basis = intrinsic_percentage_width_is_indefinite(lycon) ? 1 : 0;
+    // Content-only queries omit the element's own sizing constraints, so they
+    // cannot reuse the normal intrinsic contribution for the same percentage basis.
+    int intrinsic_basis = (content_only ? 2 : 0) +
+        (intrinsic_percentage_width_is_indefinite(lycon) ? 1 : 0);
     uint8_t intrinsic_basis_mask = (uint8_t)(1u << intrinsic_basis);
-    if (!content_only &&
-        element->styles_resolved() && element->has_cached_intrinsic_widths() &&
+    if (element->styles_resolved() && element->has_cached_intrinsic_widths() &&
         element->layout_cache &&
         (element->layout_cache->intrinsic_measurement_valid_mask & intrinsic_basis_mask) &&
         element->layout_cache->intrinsic_measurement_generation[intrinsic_basis] ==
@@ -5971,7 +5973,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // store result in intrinsic sizing cache
-    if (!content_only && element->styles_resolved()) {
+    if (element->styles_resolved()) {
         radiant::LayoutCache* cache = radiant::layout_pass_ensure_cache(lycon, element);
         if (cache) {
             cache->intrinsic_min_content_width[intrinsic_basis] = sizes.min_content;

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Result47 / D2.4.1-D2.4.3, D8.2.4-D8.2.6: the boxed fallback of a Number-specialized function must preserve a direct BigInt division result for the following generic multiply. The guarded Number fast path may convert integer inputs, but the fallback must not coerce the generic divide result through it2d.",
+  "checks": [
+    {
+      "in_func": "_js_idiv_#_body",
+      "in_range": {
+        "from": "call\tjs_divide",
+        "to": "call\tjs_multiply"
+      },
+      "expect": [
+        "call\tjs_divide"
+      ],
+      "forbid": [
+        "call\tit2d"
+      ]
+    }
+  ]
+}

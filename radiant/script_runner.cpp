@@ -172,17 +172,6 @@ static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 
-static bool dom_tree_has_autofocus(DomElement* elem) {
-    if (!elem) return false;
-    if (elem->has_attribute("autofocus")) return true;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && dom_tree_has_autofocus(child->as_element())) {
-            return true;
-        }
-    }
-    return false;
-}
-
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 extern "C" void script_runner_set_retain_js_state(bool retain) {
@@ -1046,8 +1035,11 @@ static void emit_body_onload_source(StrBuf* script_buf, ArrayList* onload_tasks)
     }
 }
 
-static void append_browser_document_preamble(StrBuf* script_buf) {
+static void append_browser_document_preamble(StrBuf* script_buf, const DomDocument* doc) {
     if (!script_buf) return;
+    const UiContext* uicon = doc ? (const UiContext*)doc->js.host_ui_context : nullptr;
+    float viewport_width = uicon ? uicon->viewport_width : 0.0f;
+    float viewport_height = uicon ? uicon->viewport_height : 0.0f;
     strbuf_append_str(script_buf,
         "var window = globalThis;\n"
         // Third-party libraries export these names through window. Do not
@@ -1104,14 +1096,14 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
-        // Screen dimensions derive from the document viewport; a synthetic
-        // undefined value made ordinary legacy feature probes crash.
-        "var screen = {\n"
-        "  width: document.documentElement ? document.documentElement.clientWidth : 0,\n"
-        "  height: document.documentElement ? document.documentElement.clientHeight : 0,\n"
-        "  availWidth: document.documentElement ? document.documentElement.clientWidth : 0,\n"
-        "  availHeight: document.documentElement ? document.documentElement.clientHeight : 0\n"
-        "};\n"
+    );
+    // Bootstrap screen metrics come from the host viewport, not a CSSOM read
+    // that would synchronously lay out an otherwise uncommitted document.
+    strbuf_append_format(script_buf,
+        "var screen = { width: %g, height: %g, availWidth: %g, availHeight: %g };\n",
+        (double)viewport_width, (double)viewport_height,
+        (double)viewport_width, (double)viewport_height);
+    strbuf_append_str(script_buf,
         "window.screen = screen;\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
         "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
@@ -1915,7 +1907,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     // the previous post-DOM scheduler entered interactive before user code.
     script_runner_set_ready_state(runtime, "loading");
     preamble_buf = strbuf_new_cap(4096);
-    append_browser_document_preamble(preamble_buf);
+    append_browser_document_preamble(preamble_buf, (DomDocument*)runtime->dom_doc);
 #ifndef NDEBUG
     preamble_source_len = preamble_buf->length;
 #endif
@@ -2406,7 +2398,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
     // at event time without re-compilation.
     bool retain_for_autofocus = dom_doc->root &&
-        dom_tree_has_autofocus(dom_doc->root);
+        radiant_document_has_autofocus(dom_doc->root);
     if (preamble && preamble->mir_ctx) {
         dom_doc->js.preamble_state = preamble;
         dom_doc->js.mir_ctx = preamble->mir_ctx;

@@ -592,11 +592,11 @@ struct CacheEntry {
 struct LayoutCache {
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
-    // Intrinsic percentage terms resolve differently with an indefinite parent;
-    // retain one contribution for each basis within the current pass.
-    float intrinsic_min_content_width[2];
-    float intrinsic_max_content_width[2];
-    uint32_t intrinsic_measurement_generation[2];
+    // Percentage terms and content-only requests each need a distinct result;
+    // retain all four contributions within the current layout pass.
+    float intrinsic_min_content_width[4];
+    float intrinsic_max_content_width[4];
+    uint32_t intrinsic_measurement_generation[4];
     uint8_t intrinsic_measurement_valid_mask;
     bool is_empty;
     uint32_t generation;
@@ -607,8 +607,9 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
     }
-    cache->intrinsic_measurement_generation[0] = 0;
-    cache->intrinsic_measurement_generation[1] = 0;
+    for (int i = 0; i < 4; i++) {
+        cache->intrinsic_measurement_generation[i] = 0;
+    }
     cache->intrinsic_measurement_valid_mask = 0;
     cache->is_empty = true;
     cache->generation = generation;
@@ -3236,6 +3237,8 @@ typedef struct LayoutContext {
     bool abspos_static_size_override_y;
     // CSS Position 3 sticky constraints require final scrollport and containing-block geometry.
     bool defer_sticky_positioning;
+    // Final sticky resolution touches only candidates seen during this layout pass.
+    ArrayList* deferred_sticky_blocks;
     // Structured layout debug categories and optional release profiling buckets
     radiant::LayoutDebugState layout_debug;
     radiant::LayoutProfiler profiler;
@@ -3739,6 +3742,10 @@ void layout_detach_first_letter_pseudo_content_for_layout_reset(struct DomElemen
 void layout_detach_materialized_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element);
+// Cross-origin document navigation needs its own host turn.  The synchronous
+// layout paths use this guard to retain the iframe's replaced-element box.
+bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
+                                              const char* src);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
                                 int iframe_width, int iframe_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
@@ -3956,6 +3963,7 @@ float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float conta
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_apply_sticky_positions(LayoutContext* lycon, View* root);
+void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 ViewBlock* find_initial_containing_view_block(ViewBlock* element);
 ViewBlock* find_positioned_containing_block(ViewElement* view);

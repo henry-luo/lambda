@@ -3717,10 +3717,23 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
 static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
                                          const char* type, View* related);
 
+bool radiant_document_has_autofocus(DomElement* root) {
+    if (!root) return false;
+    if (root->has_attribute("autofocus")) return true;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && radiant_document_has_autofocus(child->as_element())) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void radiant_run_autofocus(DomDocument* doc) {
     if (!doc || !doc->state || !doc->root || focus_has_current((DocState*)doc->state)) {
         return;
     }
+    // ES30: package policy cannot select a target without a declared candidate.
+    if (!radiant_document_has_autofocus(doc->root)) return;
     // `focusinit` is behavior-only; its resulting native focus transition
     // still emits the public focus/focusin pair after the package selects it.
     EventContext evcon = {};
@@ -3748,46 +3761,52 @@ void radiant_run_autofocus(DomDocument* doc) {
 //   * behavior no longer depends on paint. Every drain used to sit behind
 //     `render_html_doc`, so a run that laid out without painting — headless
 //     event handling, and `lambda.exe layout` — never inited at all.
-//   * nothing outlives the pass that scheduled it, so there is no queue cap, no
-//     silent drop, and no raw View* to purge when a document is freed.
+//   * the candidate queue belongs to the document and is released with it;
+//     controls are recorded once during layout rather than found by a full DOM
+//     walk after every layout pass.
 //   * batch stays free of handler side effects by construction: the layout
 //     command stops before the phase rather than merely failing to reach
 //     window.cpp (ESO33's property, now structural).
 //
-// Iteration is a document-order walk of the view tree, not of the state store.
-// The store has no cheap id->view direction, its hash order is unspecified (and
-// handler writes carry repaint rects that the .mark goldens count), and a
-// handler can insert into the very map an iteration would be holding.
-static void behavior_init_visit(DomNode* node, DocState* state, int* out_count) {
+static int behavior_init_control_document_order(ArrayListValue left, ArrayListValue right) {
+    const DomNode* left_node = static_cast<const DomNode*>(left);
+    const DomNode* right_node = static_cast<const DomNode*>(right);
+    if (left_node->id < right_node->id) return -1;
+    if (left_node->id > right_node->id) return 1;
+    return 0;
+}
+
+static void behavior_init_control(DomDocument* doc, DocState* state, View* view,
+                                  int* out_count) {
+    if (!doc || !state || !view || !view->is_element()) return;
+    DomElement* elem = lam::dom_require_element(view);
+    if (elem->doc != doc || !elem->form_control() ||
+        form_control_behavior_inited(state, view)) {
+        return;
+    }
+    // Give the document its evaluator here rather than at load, so only a
+    // document that actually owns a control the package governs pays for one.
+    // A thread holds a single Runtime, so an unnecessary evaluator denies it
+    // to a Lambda-script subdocument (EO4).
+    radiant_document_ensure_evaluator(doc);
+    // The bit is recorded only when a template actually claimed init, because
+    // it creates durable ViewState. An unclaimed control is re-offered next
+    // phase; that failed match does not change the state-store shape.
+    if (dispatch_behavior_handler(nullptr, view, "init", nullptr, nullptr)) {
+        form_control_set_behavior_inited(state, view, true);
+        (*out_count)++;
+    }
+}
+
+static void behavior_init_visit(DomNode* node, DomDocument* doc, DocState* state,
+                                int* out_count) {
     if (!node) return;
     if (node->is_element()) {
-        DomElement* elem = static_cast<DomElement*>(node);
         View* view = static_cast<View*>(node);
-        if (elem->form_control() && !form_control_behavior_inited(state, view)) {
-            // Give the document its evaluator here rather than at load, so only
-            // a document that actually owns a control the package governs pays
-            // for one. A thread holds a single Runtime, so a document that
-            // creates one it does not need denies it to a Lambda-script
-            // subdocument — which is how a PDF and a Lambda report rendered into
-            // an iframe stopped loading ("eval thread already owns a Runtime").
-            // The walk only reaches form controls, which is the same narrowing
-            // the queue drain applied (EO4).
-            if (elem->doc) radiant_document_ensure_evaluator(elem->doc);
-            // The bit is recorded only when a template actually claimed the
-            // init, because recording it is what creates the control's durable
-            // ViewState. `<button>` is a form control that no template governs;
-            // marking it would mint a FORM_CONTROL state entry purely to say
-            // "nothing to do", which changes the store's shape (the state-machine
-            // tests pin the kind) for no gain. An unclaimed control simply gets
-            // re-offered by the next phase, which is a failed match and nothing
-            // more.
-            if (dispatch_behavior_handler(nullptr, view, "init", nullptr, nullptr)) {
-                form_control_set_behavior_inited(state, view, true);
-                (*out_count)++;
-            }
-        }
+        behavior_init_control(doc, state, view, out_count);
+        DomElement* elem = static_cast<DomElement*>(node);
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            behavior_init_visit(child, state, out_count);
+            behavior_init_visit(child, doc, state, out_count);
         }
     }
 }
@@ -3799,11 +3818,23 @@ void radiant_run_behavior_init(DomDocument* doc) {
     doc->behavior_init_pending = false;
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->root) return;
+    ArrayList* controls = doc->behavior_init_controls;
+    doc->behavior_init_controls = arraylist_new(8);
     int count = 0;
     // Initial handlers commonly seed both :valid and :invalid. Apply their
     // final pseudo-state together; nothing can paint between init turns.
     pseudo_state_batch_begin(state);
-    behavior_init_visit(static_cast<DomNode*>(doc->root), state, &count);
+    if (controls) {
+        arraylist_sort(controls, behavior_init_control_document_order);
+        for (int index = 0; index < controls->length; index++) {
+            behavior_init_control(doc, state, (View*)controls->data[index], &count);
+        }
+        arraylist_free(controls);
+    } else {
+        // Queue allocation failed while controls were created; preserve behavior
+        // with the former document walk until a later pass can allocate it.
+        behavior_init_visit(static_cast<DomNode*>(doc->root), doc, state, &count);
+    }
     pseudo_state_batch_end(doc, state);
     if (count > 0) log_debug("behavior-init: inited %d control(s)", count);
 }
@@ -10254,6 +10285,27 @@ struct EventDocumentScope {
         active = true;
     }
 
+    void activate_target(EventContext* evcon) {
+        DomDocument* target_doc = event_context_target_document(evcon);
+        Runtime* runtime = dom_document_script_runtime(target_doc);
+        if (!runtime) return;
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        if (!owner || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return;
+        owner->heap = runtime_heap(runtime);
+        owner->name_pool = runtime_name_pool(runtime);
+        owner->type_list = runtime_type_list(runtime);
+        owner->pool = runtime_heap(runtime)->pool;
+        if (context != owner && !radiant_eval_context_switch(owner)) return;
+        // D5.4.1: iframe hit testing is the quiescent ownership boundary;
+        // following handlers use the evaluator that owns the target document.
+        if (dom_document_has_js_realm(target_doc) &&
+                !js_runtime_state_init(owner)) return;
+        if (dom_document_has_js_realm(target_doc)) {
+            dom_set_ui_context(evcon->ui_context);
+            dom_set_document(target_doc);
+        }
+    }
+
     ~EventDocumentScope() {
         if (active) s_event_scope_depth--;
         // No restore: the document that just ran keeps the thread until some
@@ -10372,6 +10424,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse event at (%.1f, %.1f)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree);
+        document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Update hover state based on new target
@@ -10829,6 +10882,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse button event (%.1f, %.1f)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
+        document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward mouse button events to layer-mode webview
@@ -11851,6 +11905,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_debug("Mouse scroll event");
         mouse_x = scroll->x;  mouse_y = scroll->y; // updated to use scroll's x and y
         target_html_doc(&evcon, doc->view_tree);
+        document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
 
         // Forward scroll to layer-mode webview

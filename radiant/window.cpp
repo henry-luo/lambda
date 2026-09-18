@@ -939,10 +939,6 @@ void log_init_wrapper() {
         log_parse_config_file("log.conf");
     }
 }
-void log_cleanup() {
-    log_finish();
-}
-
 // Layout test function for headless testing
 static int window_finish_event_sim(EventSimContext* sim_ctx) {
     if (!sim_ctx) return 0;
@@ -977,7 +973,7 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     lambda_uv_cleanup();
     js_event_loop_set_virtual_clock(false, 0.0);
     if (log_memory) log_mem_stage("after-cleanup");
-    log_cleanup();
+    // CLI teardown owns the logger so it can record the view completion result.
 }
 
 static void window_write_memory_profile(DomDocument* doc, const char* input_file) {
@@ -1017,7 +1013,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     float requested_device_scale = headless && sim_ctx ? sim_ctx->device_scale : 0.0f;
     if (ui_context_init(&ui_context, headless, requested_device_scale) != 0) {
         if (sim_ctx) event_sim_free(sim_ctx);
-        log_cleanup();
         return -1;
     }
     ui_context.event_log_enabled = enable_event_log;

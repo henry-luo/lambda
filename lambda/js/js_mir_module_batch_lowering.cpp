@@ -2931,8 +2931,6 @@ static int js_mir_analyze_and_plan(void* opaque) {
             }
         }
 
-        jm_populate_numeric_binding_facts(mt, fc, body);
-
         if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE) {
             FnVariantAnalysis* native =
                 &analysis->variants[analysis->variant_count++];
@@ -2962,6 +2960,11 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     native->params[p] = {param_type, rep, 0};
                 }
             }
+            // Number-only local facts belong to the guarded native entry. The
+            // boxed body remains reachable with BigInt or any other JS value,
+            // so publishing those facts there would coerce its dynamic result
+            // through an F64 register (D2.4.1-D2.4.3, D8.2.4-D8.2.6).
+            jm_populate_numeric_binding_facts(mt, fc, native);
         }
         if ((fc->node->is_async || fc->node->is_generator) &&
                 analysis->variant_count < 4) {
