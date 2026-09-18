@@ -1006,6 +1006,101 @@ TEST(JsInterpreter, ReusesFunctionAstTemplateAcrossHeapReplacement) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, RetainsAstStringAndBigIntLiteralsInRealmCache) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    struct LiteralCase {
+        const char* source;
+        size_t length;
+        const char* filename;
+        TypeId type_id;
+    } cases[] = {
+        {"'cached literal';", sizeof("'cached literal';") - 1,
+            "cached-string-literal.js", LMD_TYPE_STRING},
+        {"1234567890123456789012345678901234567890n;",
+            sizeof("1234567890123456789012345678901234567890n;") - 1,
+            "cached-bigint-literal.js", LMD_TYPE_DECIMAL},
+    };
+
+    for (const LiteralCase& test : cases) {
+        JsScript* script = js_interp_prepare_script(&runtime, test.source,
+            test.length, test.filename, false);
+        ASSERT_NE(script, nullptr);
+        ASSERT_EQ(script->runtime_literal_count, 1u);
+
+        {
+            RootFrame roots(3);
+            Rooted<Item> first(roots, js_interp_execute_script(&runtime, script, NULL));
+            ASSERT_FALSE(item_is_error(first.get()));
+            ASSERT_EQ(get_type_id(first.get()), test.type_id);
+            Rooted<Item> second(roots, js_interp_execute_script(&runtime, script, NULL));
+            ASSERT_FALSE(item_is_error(second.get()));
+            EXPECT_EQ(first.get().item, second.get().item);
+
+            JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
+            ASSERT_NE(state, nullptr);
+            JsAstLiteralCacheEntry* entry = state->ast_literal_cache.entries;
+            const void* image = script->cache_template ? (const void*)script->cache_template
+                : (const void*)script;
+            while (entry && entry->ast_image != image) {
+                entry = entry->next;
+            }
+            ASSERT_NE(entry, nullptr);
+            EXPECT_TRUE(entry->materialized[0]);
+            Item* cached = root_vector_at(&state->ast_literal_cache.values,
+                entry->first_root_slot);
+            ASSERT_NE(cached, nullptr);
+            EXPECT_EQ(cached->item, first.get().item);
+
+            heap_gc_collect();
+            Rooted<Item> after_gc(roots, js_interp_execute_script(&runtime, script, NULL));
+            ASSERT_FALSE(item_is_error(after_gc.get()));
+            EXPECT_EQ(js_strict_equal(first.get(), after_gc.get()).item, b2it(true));
+        }
+
+        // Cached ASTs can outlive this heap; the replacement realm must make
+        // a fresh, precisely rooted literal cache instead of using old slots.
+        runtime_reset_heap(&runtime);
+        JsScript* replacement = js_interp_prepare_script(&runtime, test.source,
+            test.length, test.filename, false);
+        ASSERT_NE(replacement, nullptr);
+        RootFrame replacement_roots(1);
+        Rooted<Item> replacement_value(replacement_roots,
+            js_interp_execute_script(&runtime, replacement, NULL));
+        ASSERT_FALSE(item_is_error(replacement_value.get()));
+        ASSERT_EQ(get_type_id(replacement_value.get()), test.type_id);
+
+        JsRuntimeState* replacement_state = js_runtime_state_for(runtime.eval_context);
+        ASSERT_NE(replacement_state, nullptr);
+        JsAstLiteralCacheEntry* replacement_entry = replacement_state->ast_literal_cache.entries;
+        const void* replacement_image = replacement->cache_template
+            ? (const void*)replacement->cache_template : (const void*)replacement;
+        while (replacement_entry && replacement_entry->ast_image != replacement_image) {
+            replacement_entry = replacement_entry->next;
+        }
+        ASSERT_NE(replacement_entry, nullptr);
+        EXPECT_TRUE(replacement_entry->materialized[0]);
+    }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, KeepsSynthesizedTypeScriptEnumLiteralsOutOfAstLiteralCache) {
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] = "enum Hue { Red = 7 } Hue[7];";
+    {
+        RootFrame roots(2);
+        Rooted<Item> result(roots, transpile_js_typescript_to_mir_len(&runtime,
+            source, sizeof(source) - 1, "<synthetic-literal-cache.ts>", NULL));
+        ASSERT_FALSE(item_is_error(result.get()));
+        Rooted<Item> expected(roots, js_make_string("Red"));
+        EXPECT_EQ(js_strict_equal(result.get(), expected.get()).item, b2it(true));
+    }
+    runtime_cleanup(&runtime);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+}
+
 TEST(JsInterpreter, LazyGlobalsPreserveOwnDescriptorsAndReplacements) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1247,6 +1342,28 @@ TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
     EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
         nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, StaticModuleHonorsRequestedAstBackend) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "export const answer = 42;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+        "ast-module-backend-setup.js", NULL)));
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_module_to_mir(&runtime, source,
+        "ast-module-backend.mjs");
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("answer")), flt2it(42.0)).item, b2it(true));
+    JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(js_code_store_count(&state->code_store), 0);
 
     runtime_cleanup(&runtime);
 }

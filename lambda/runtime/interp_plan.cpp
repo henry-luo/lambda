@@ -1048,6 +1048,7 @@ bool interp_predicate_supported(AstNode* predicate) {
 typedef struct PlanCtx {
     Script* script;
     FnFramePlan* plan;        // plan currently being filled
+    const AstFuncNode* function;
     uint32_t next_slot;       // next named-binding index within this plan
     uint32_t param_count;
     uint32_t max_scratch;
@@ -1140,6 +1141,42 @@ static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
         }
         plan_assign_entry(pc, e);
     }
+}
+
+// A capture's dense slot is stable for the lifetime of its immutable function
+// definition. Link each read occurrence while the existing frame-plan walk is
+// already classifying bindings, so the hot walker need not rescan FnCapture.
+static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
+    if (!ident) return;
+    ident->interp_capture_owner = NULL;
+    if (!pc || !pc->function || !ident->entry) return;
+    uint16_t slot = 0;
+    for (FnCapture* capture = pc->function->captures; capture;
+            capture = capture->next, slot++) {
+        if (capture->entry != ident->entry) continue;
+        ident->interp_capture_owner = (const AstNode*)pc->function;
+        ident->interp_capture_slot = slot;
+        return;
+    }
+}
+
+static void plan_link_call_shape(AstCallNode* call) {
+    if (!call) return;
+    uint32_t argc = 0;
+    bool has_named_args = false;
+    for (AstNode* argument = call->argument; argument; argument = argument->next) {
+        if (argc == UINT16_MAX) {
+            // Preserve the existing runtime arity diagnostic for a malformed
+            // oversize call rather than narrowing its source fact.
+            call->interp_call_shape_planned = false;
+            return;
+        }
+        argc++;
+        has_named_args = has_named_args || argument->node_type == AST_NODE_NAMED_ARG;
+    }
+    call->interp_source_argc = (uint16_t)argc;
+    call->interp_has_named_args = has_named_args;
+    call->interp_call_shape_planned = true;
 }
 
 // Scratch need: the maximum number of Items that must stay live in frame slots
@@ -1670,6 +1707,7 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     PlanCtx pc = {0};
     pc.script = outer->script;
     pc.plan = &fn->analysis->frame_plan;
+    pc.function = fn;
     pc.storage = BINDING_STORAGE_REGISTER;
     TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
     pc.is_variadic = signature && signature->type_id == LMD_TYPE_FUNC &&
@@ -1721,6 +1759,12 @@ static void plan_walk(AstNode* node, void* ctx) {
     PlanCtx* pc = (PlanCtx*)ctx;
     if (!node || pc->failed) return;
     switch (node->node_type) {
+    case AST_NODE_IDENT:
+        plan_link_capture_identifier(pc, (AstIdentNode*)node);
+        break;
+    case AST_NODE_CALL_EXPR:
+        plan_link_call_shape((AstCallNode*)node);
+        break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
     case AST_NODE_PROC:

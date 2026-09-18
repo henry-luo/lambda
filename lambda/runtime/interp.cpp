@@ -513,7 +513,8 @@ static bool interp_is_object_field_entry(const NameEntry* entry) {
     return entry && entry->node && entry->node->node_type == AST_NODE_KEY_EXPR;
 }
 
-static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
+static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry,
+        int capture_slot) {
     if (!entry) return ItemNull;
     for (InterpViewBinding* binding = f->st ? f->st->view_bindings : NULL;
             binding; binding = binding->prev) {
@@ -549,7 +550,7 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
         if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
         return interp_read_module_slot(owner, entry->slot);
     }
-    int cap = interp_capture_index(f->fn, entry);
+    int cap = capture_slot >= 0 ? capture_slot : interp_capture_index(f->fn, entry);
     if (cap >= 0) {
         if (!f->env || (uint32_t)cap >= f->env_count) return ItemNull;
         // Capture storage is owned by the closure and outlives every frame that
@@ -564,6 +565,20 @@ static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
         return ItemError;
     }
     return (Item){.item = f->slots[entry->slot]};
+}
+
+static Item interp_read_binding(InterpFrame* f, NameEntry* entry) {
+    return interp_read_binding_at_capture_slot(f, entry, -1);
+}
+
+static Item interp_read_identifier(InterpFrame* f, const AstIdentNode* ident) {
+    int capture_slot = -1;
+    if (f && f->fn && ident && ident->interp_capture_owner ==
+            (const AstNode*)f->fn) {
+        capture_slot = (int)ident->interp_capture_slot;
+    }
+    return interp_read_binding_at_capture_slot(f, ident ? ident->entry : NULL,
+        capture_slot);
 }
 
 static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
@@ -860,14 +875,74 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     return true;
 }
 
+typedef struct InterpStaticMemberNameEntry {
+    const AstIdentNode* source;
+    String* runtime_name;
+} InterpStaticMemberNameEntry;
+
+static uint64_t interp_static_member_name_hash(const void* item,
+        uint64_t seed0, uint64_t seed1) {
+    const InterpStaticMemberNameEntry* entry =
+        (const InterpStaticMemberNameEntry*)item;
+    return hashmap_hash_xxhash3_bytes(&entry->source, sizeof(entry->source),
+        seed0, seed1);
+}
+
+static int interp_static_member_name_compare(const void* left, const void* right,
+        void* udata) {
+    (void)udata;
+    const InterpStaticMemberNameEntry* lhs =
+        (const InterpStaticMemberNameEntry*)left;
+    const InterpStaticMemberNameEntry* rhs =
+        (const InterpStaticMemberNameEntry*)right;
+    return lhs->source == rhs->source ? 0 :
+        (uintptr_t)lhs->source < (uintptr_t)rhs->source ? -1 : 1;
+}
+
+static void interp_static_member_names_destroy(InterpState* state) {
+    if (!state || !state->static_member_names) return;
+    hashmap_free(state->static_member_names);
+    state->static_member_names = NULL;
+}
+
+// Dotted-member names are source facts, but their pooled runtime identity is
+// EvalContext-owned (D4.6.2v2). Link once per activation instead of storing a
+// foreign NamePool pointer in a reusable AST image.
+static Item interp_static_member_name_item(InterpFrame* frame,
+        const AstIdentNode* source) {
+    if (!frame || !frame->st || !source || !source->name) return ItemError;
+    InterpState* state = frame->st;
+    if (!state->static_member_names) {
+        state->static_member_names = hashmap_new(sizeof(InterpStaticMemberNameEntry),
+            32, 0, 0, interp_static_member_name_hash,
+            interp_static_member_name_compare, NULL, NULL);
+    }
+    InterpStaticMemberNameEntry probe = {.source = source};
+    if (state->static_member_names) {
+        const InterpStaticMemberNameEntry* cached =
+            (const InterpStaticMemberNameEntry*)hashmap_get(
+                state->static_member_names, &probe);
+        if (cached && cached->runtime_name) {
+            return (Item){.item = s2it(cached->runtime_name)};
+        }
+    }
+
+    String* runtime_name = heap_create_name(source->name->chars, source->name->len);
+    if (!runtime_name) return ItemError;
+    if (state->static_member_names) {
+        probe.runtime_name = runtime_name;
+        hashmap_set(state->static_member_names, &probe);
+    }
+    return (Item){.item = s2it(runtime_name)};
+}
+
 static Item interp_eval_cow_path_key(InterpFrame* f, AstNode* key_node,
         bool is_member) {
     AstNode* key = ast_unwrap_primary(key_node);
     if (is_member && key && key->node_type == AST_NODE_IDENT) {
         // a dotted segment is a literal property key, never a binding read.
         AstIdentNode* name = (AstIdentNode*)key;
-        return (Item){.item = s2it(heap_create_name(name->name->chars,
-            name->name->len))};
+        return interp_static_member_name_item(f, name);
     }
     return eval_expr(f, key_node);
 }
@@ -882,20 +957,28 @@ static void* interp_const_at(Script* module, int index) {
     return module->const_list->data[index];
 }
 
-// Mirrors the literal arm of transpile_box_item: the value lives in the node's
-// Type*, resolved against the *owning* Script's const_list, not on the node.
+// Mirrors the literal arm of transpile_box_item: non-compact values live in
+// the Type*, resolved against the *owning* Script's const_list.  Compact
+// bool/int primaries retain their parse-time scalar so T0 avoids source work.
 static Item eval_literal(InterpFrame* f, AstNode* node) {
     Type* type = node->type;
     TypeId tid = type->type_id;
     TypeConst* tc = (TypeConst*)type;
+    AstPrimaryNode* primary = (AstPrimaryNode*)node;
     switch (tid) {
     case LMD_TYPE_NULL:
         return ItemNull;
     case LMD_TYPE_BOOL:
+        if (primary->literal_value_kind == AST_PRIMARY_LITERAL_VALUE_BOOL) {
+            return (Item){.item = b2it(primary->literal_value != 0)};
+        }
         return (Item){.item = b2it(parse_bool_literal_span(f->module->source, node->source_span)
             ? BOOL_TRUE : BOOL_FALSE)};
     case LMD_TYPE_INT: {
         if (type == &LIT_INT) {
+            if (primary->literal_value_kind == AST_PRIMARY_LITERAL_VALUE_INT) {
+                return (Item){.item = i2it(primary->literal_value)};
+            }
             return (Item){.item = i2it(parse_int_literal_span(f->module->source,
                 node->source_span))};
         }
@@ -1376,13 +1459,17 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
 }
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
-    int source_argc = 0;
-    for (AstNode* a = node->argument; a; a = a->next) source_argc++;
+    int source_argc = node->interp_call_shape_planned
+        ? (int)node->interp_source_argc : 0;
+    if (!node->interp_call_shape_planned) {
+        for (AstNode* a = node->argument; a; a = a->next) source_argc++;
+    }
     int argc = source_argc + (injected ? 1 : 0);
 
     AstNode* callee = ast_unwrap_primary(node->function);
     AstFuncNode* direct_fn = ast_direct_call_function(node);
-    bool has_named_args = ast_call_has_named_args(node);
+    bool has_named_args = node->interp_call_shape_planned
+        ? node->interp_has_named_args : ast_call_has_named_args(node);
     TypeFunc* direct_signature = direct_fn && ((AstNode*)direct_fn)->type &&
             ((AstNode*)direct_fn)->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)((AstNode*)direct_fn)->type : NULL;
@@ -4545,7 +4632,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             }
             return ItemError;
         }
-        return interp_read_binding(f, entry);
+        return interp_read_identifier(f, ident);
     }
     case AST_NODE_UNARY:
         return eval_unary(f, (AstUnaryNode*)node);
@@ -4622,11 +4709,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item key;
         if (field->field && field->field->node_type == AST_NODE_IDENT) {
             // A dotted member name is a static key, not an identifier read:
-            // lowering interns it as a runtime-pool name Item (the property-key
-            // path), and reading it as a binding would resolve to null.
+            // link its runtime-pool name once for this activation; reading it
+            // as a binding would resolve to null.
             AstIdentNode* name = (AstIdentNode*)field->field;
-            key = (Item){.item = s2it(heap_create_name(name->name->chars,
-                name->name->len))};
+            key = interp_static_member_name_item(f, name);
         } else {
             key = eval_expr(f, field->field);
         }
@@ -5770,7 +5856,10 @@ public:
     }
 
     ~InterpStateGuard() {
-        if (owns_) g_interp_state = saved_;
+        if (owns_) {
+            interp_static_member_names_destroy(&state_);
+            g_interp_state = saved_;
+        }
     }
 
     InterpState* get() const { return g_interp_state; }
@@ -6954,6 +7043,7 @@ static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragme
         lambda_recovery_frame_end(boundary);
     }
 
+    interp_static_member_names_destroy(&st);
     g_interp_state = saved;
     // A fault landing bypasses C++ destructors. Restore the runner-level
     // binding unconditionally so a later REPL/history execution cannot see

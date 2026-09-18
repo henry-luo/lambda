@@ -3,6 +3,7 @@
 #include <string.h>
 #include "../../../lib/str.h"
 #include "../../../lib/escape.h"
+#include "../../../lib/mem_grow.hpp"
 #include "../line_counter.hpp"
 #include <assert.h>
 
@@ -743,9 +744,12 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
         }
     }
 
-    // Allocate token array (estimate maximum tokens)
-    size_t max_tokens = length + 10; // Conservative estimate
-    CssToken* token_array = static_cast<CssToken*>(pool_alloc(tokenizer->pool, sizeof(CssToken) * max_tokens));
+    // Token density is far below one token per byte on real stylesheets. The
+    // former length-sized reservation kept a 64-byte slot for every source
+    // byte in the document pool after parsing had completed.
+    size_t token_capacity = 8;
+    CssToken* token_array = static_cast<CssToken*>(pool_alloc(
+        tokenizer->pool, sizeof(CssToken) * token_capacity));
     if (!token_array) {
         return 0;
     }
@@ -757,7 +761,14 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
     line_counter_init(&tokenizer->line_counter);
     LineCounter* line_counter = &tokenizer->line_counter;
 
-    while (pos < length && token_count < max_tokens - 1) {
+    while (pos < length) {
+        // One input pass can emit whitespace, a content token, and the final
+        // EOF token. The array has no published aliases while tokenizing, so
+        // pool_realloc can grow it without retaining prior generations.
+        if (!lam::pool_grow_array(tokenizer->pool, &token_array, &token_capacity,
+                                  token_count + 3, 8)) {
+            return 0;
+        }
         // Skip leading whitespace and track it
         size_t ws_start = pos;
         css_sync_line_counter(line_counter, input, &line_tracked_pos, ws_start);
@@ -1112,7 +1123,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
     }
 
     // Add EOF token
-    if (token_count < max_tokens) {
+    if (token_count < token_capacity) {
         css_sync_line_counter(line_counter, input, &line_tracked_pos, length);
         CssToken* eof_token = &token_array[token_count];
         eof_token->type = CSS_TOKEN_EOF;

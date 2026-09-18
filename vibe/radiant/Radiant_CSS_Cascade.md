@@ -703,6 +703,98 @@ changes cannot reintroduce retained conditional scratch or old style trees
 without changing the baseline deliberately. The page gate must remain
 alongside the focused ownership tests in §5.1.
 
+#### Live GitHub Brotli comparison
+
+On 2026-09-18, the standard debug host loaded
+`https://github.com/google/brotli` at 1200 × 800 with the same no-op event
+file before and after this implementation. The before revision was
+`0a46bd2129c6a4f5bf444bf5deec8a767c250126`; the after revision was
+`12b507e510bc4c8f9ed3d5ca321480687a072f14`. Both runs parsed the top-level
+document to 26 MB, built the DOM at 28 MB, and reported the same 555-node
+script AST census. This confirms a comparable primary document and script
+workload, although a live site remains unsuitable for a strict regression
+gate.
+
+| Cascade boundary | Before footprint change | After footprint change | Reduction |
+|---|---:|---:|---:|
+| Initial cascade | 195 MB → 1,831 MB = +1,636 MB | 189 MB → 203 MB = +14 MB | 1,622 MB (99.1%) |
+| Post-script full recascade | 6,891 MB → 8,647 MB = +1,756 MB | 5,099 MB → 5,102 MB = +3 MB | 1,753 MB (99.8%) |
+
+These are `MEMSTAGE` process-footprint deltas, so they include every allocator
+touched during the cascade and are not an exact pre-change CSS-owner total.
+The old revision predates the structured CSS counters. The current run supplies
+that ownership attribution: its initial cascade retained 1,650,184 canonical
+CSS bytes and 3,738 work-pool bytes; the forced recascade retained 1,652,868
+canonical CSS bytes, added zero canonical bytes, and used 104 work-pool bytes.
+Both samples had zero cold-cache entries and bytes. The current post-script
+footprint was also 1,792 MB lower before recascade, but that interval includes
+JavaScript and resource work and is not attributed to CSS here.
+
+#### Residual 5.102 GB diagnosis and correction
+
+The 5.102 GB figure did not represent retained CSS cascade state. The forced
+recascade at that point added only 3 MB of process footprint, retained
+1,652,868 bytes of canonical CSS, and had a 104-byte cascade work-pool delta.
+The remaining process memory had two independent causes:
+
+| Live allocation family in the stopped Brotli capture | Bytes | Share of attributed bytes |
+|---|---:|---:|
+| MIR compiler/generator structures for document JavaScript | 1,135,941,968 | 54.8% |
+| CSS source parsing and tokenizer arrays | 548,500,688 | 26.4% |
+| Other JavaScript parsing/binding | 191,830,080 | 9.2% |
+| Other allocations | 187,434,512 | 9.0% |
+| Pool VM reservations and DOM/font allocations | 10,297,984 | 0.5% |
+| **Total stack-attributed live allocations** | **2,074,061,344** | **100.0%** |
+
+macOS allocator diagnostics also reported about 994 MB allocated in the
+default malloc zone, about 1.1 GB of allocator fragmentation, and 683 MB of
+MIR VM allocations. The stack logger changes allocator behavior, so its total
+is attribution evidence rather than a process-footprint replacement. Together
+they explain why a 1.65 MB canonical store could coexist with multi-gigabyte
+physical footprint.
+
+The CSS tokenizer had reserved one 64-byte `CssToken` slot per source byte in
+the loader pool. Its capacity now starts at eight tokens and grows only while
+tokens are emitted. The regression test covers a 512 KiB comment, which emits
+two content tokens plus EOF and therefore must not reserve proportional token
+storage. The standard six-page cascade gate remains within its pre-existing
+byte baseline. On the Brotli post-script snapshot, the tracked loader subtree
+fell as follows; these pool figures are directly comparable ownership metrics.
+
+| Post-script tracked state | Before capacity growth | After capacity growth | Change |
+|---|---:|---:|---:|
+| `cmd_layout` live bytes | 253,892,809 | 86,615,497 | -167,277,312 (-65.9%) |
+| `cmd_layout` reserved bytes | 536,857,600 | 268,422,144 | -268,435,456 (-50.0%) |
+| All tracked physical live bytes | 298,989,366 | 126,090,658 | -172,898,708 (-57.8%) |
+| Canonical CSS live bytes | 1,652,868 | 1,650,184 | unchanged in practical terms |
+
+The larger defect was a broken execution-tier boundary. `script_runner.cpp`
+intentionally selects the AST executor for a browser document so that all
+callbacks share one closure ABI. Static modules bypassed the normal script
+entrypoint, and `transpile_js_module_to_mir()` ignored that selection. Every
+imported asset could therefore retain MIR compiler/generator state despite an
+AST document realm. The module path now consults
+`js_ast_interpreter_requested()` before lowering and dispatches to its existing
+AST module executor. This completes the one-realm ownership rule and follows
+**D1.3v3**: a hosted guest shares the host's accounting and lifecycle rather
+than creating a parallel compiler-owner lifetime.
+
+| Same URL, viewport, and no-op event file | Before tier propagation | After tier propagation | Reduction |
+|---|---:|---:|---:|
+| Post-script process footprint | 3,700 MB | 310 MB | 3,390 MB (91.6%) |
+| Post-layout process footprint | 3,819 MB | 433 MB | 3,386 MB (88.7%) |
+| Post-render process footprint | 3,823 MB | 454 MB | 3,369 MB (88.1%) |
+| After cleanup process footprint | 1,016 MB | 87 MB | 929 MB (91.4%) |
+
+Both captures reached the same 550-node layout result and completed the
+headless event file. The live asset manifest is not frozen, so this table is
+diagnostic evidence rather than a regression threshold. It is corroborated by
+the script cache: the prior capture built 75 MIR images, while the corrected
+capture built none for the document module graph. The focused
+`JsInterpreter.StaticModuleHonorsRequestedAstBackend` test checks the same
+dispatch and verifies that its direct static module creates no MIR code-store
+entry.
+
 ## 5. Suggested implementation order and acceptance gates
 
 | Stage | Deliverable | Gate before proceeding |
@@ -896,9 +988,10 @@ does not isolate their loader/engine pool. The direct probes in A.2/A.3 provide
 the controlled attribution.
 
 An additional attempt to collect `/usr/bin/time -l` resource statistics could
-not obtain them because the environment denied `sysctl kern.clockrate`.
-Consequently this proposal reports no new process-peak measurement and no
-predicted percentage reduction for the historical GitHub page.
+not obtain them because the environment denied `sysctl kern.clockrate`. The
+later live GitHub capture in §4.1 instead uses the existing `MEMSTAGE`
+footprint metric. It records comparable before/after cascade deltas without
+claiming an allocator-owner split for the pre-change revision.
 
 ### A.6 Reproduction with retained local artifacts
 

@@ -223,6 +223,23 @@ TEST(InterpWalker, ContainersAndAccess) {
         "nums\nwords\nm\nnums[0]\nnums[2]\nm.x\nm.y\nlen(nums)\n");
 }
 
+TEST(InterpWalker, RepeatedStaticMemberAccess) {
+    // Static dotted names must retain their source meaning while linking to
+    // the active NamePool only once per interpreter activation (D4.6.2v2).
+    expect_tiers_agree("static_member_links",
+        "let record = {left: 2, nested: {right: 3}}\n"
+        "[for (i in 1 to 64) record.left + record.nested.right]\n");
+}
+
+TEST(InterpWalker, RepeatedCaptureRead) {
+    // Frame planning links this use of `base` to its closure slot; its value
+    // remains the Lambda snapshot capture required by D6.2.3.
+    expect_tiers_agree("capture_slot_link",
+        "fn make_adder(base) { (n) => n + base }\n"
+        "let add = make_adder(7)\n"
+        "[for (i in 1 to 64) add(i)]\n");
+}
+
 TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     // S4.2.2/D8.1.1v10: binder joining and dependent-result specialization
     // stay on the boxed boundary, so T0, eager MIR, and the shipped default agree.

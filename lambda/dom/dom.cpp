@@ -479,10 +479,26 @@ static DocState* dom_state_for_nodes(DomNode* target, DomNode* parent) {
     return doc ? doc->state : nullptr;
 }
 
+static bool dom_mutation_node_was_connected(DomDocument* doc, DomNode* node) {
+    if (!doc || !doc->root || !node) return false;
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current == static_cast<DomNode*>(doc->root)) return true;
+    }
+    return false;
+}
+
+static DomJsMutationAttribute dom_mutation_attribute_from_name(const char* name) {
+    if (name && str_icmp_cstr(name, "class") == 0) {
+        return DOM_JS_MUTATION_ATTRIBUTE_CLASS;
+    }
+    return DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
+}
+
 static inline void dom_record_mutation_detail(DomJsMutationKind kind,
                                                  DomNode* target,
                                                  DomNode* parent,
-                                                 uint32_t sequence) {
+                                                 uint32_t sequence,
+                                                 const char* attribute_name = nullptr) {
     parent = dom_mutation_source_parent(parent);
     DomDocument* doc = dom_mutation_document(target, parent);
     if (!doc) return;
@@ -508,6 +524,12 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
         record->parent = parent;
         record->target_id = target_ref.expected_id;
         record->parent_id = parent_ref.expected_id;
+        record->attribute = kind == DOM_JS_MUTATION_ATTRIBUTE
+            ? dom_mutation_attribute_from_name(attribute_name)
+            : DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN;
+        record->was_connected =
+            dom_mutation_node_was_connected(doc, target) ||
+            dom_mutation_node_was_connected(doc, parent);
     } else {
         doc->js.mutation_record_overflow++;
     }
@@ -644,7 +666,8 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     }
 
     if (!has_pending_structural_record) {
-        dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence);
+        dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence,
+                                   attribute_name);
     }
     dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
 
@@ -10611,7 +10634,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         // srcdoc can be assigned after the browsing context was lazily cached;
         // rehydrate that existing blank document before dispatching its load.
         dom_after_srcdoc_set((void*)elem);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "srcdoc");
         return value;
     }
 
@@ -10622,7 +10646,8 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             // set_attribute owns the pooled class cache; writing class_names
             // directly bypasses its persistent-field lifetime bookkeeping.
             elem->set_attribute("class", class_str);
-            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                                "class");
             log_debug("dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
         }
@@ -10657,14 +10682,16 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             return value;
         }
         elem->set_attribute("contenteditable", normalized);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "contenteditable");
         return value;
     }
 
     if (prop_id == JS_DOM_PROP_AUTOCAPITALIZE) {
         const char* s = dom_to_attr_cstr(value);
         elem->set_attribute("autocapitalize", s);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "autocapitalize");
         return value;
     }
 
@@ -11556,7 +11583,8 @@ static Item dom_svg_class_name_set_base_val(Item value) {
     DomElement* elem = dom_svg_owner_from_value(dom_realm_receiver());
     if (elem) {
         elem->set_attribute("class", dom_to_attr_cstr(value));
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "class");
     }
     return value;
 }
@@ -15996,7 +16024,8 @@ static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation ope
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->add_class(cls);
         }
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "class");
         return ItemNull;
     }
 
@@ -16006,7 +16035,8 @@ static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation ope
             const char* cls = fn_to_cstr(args[i]);
             if (cls) elem->remove_class(cls);
         }
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "class");
         return ItemNull;
     }
 
@@ -16021,17 +16051,20 @@ static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation ope
             bool force = js_is_truthy(args[1]);
             if (force) {
                 elem->add_class(cls);
-                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                                    "class");
                 return (Item){.item = ITEM_TRUE};
             } else {
                 elem->remove_class(cls);
-                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                                    "class");
                 return (Item){.item = ITEM_FALSE};
             }
         }
         // no force: toggle
         bool result = elem->toggle_class(cls);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                            "class");
         return (Item){.item = b2it(result ? 1 : 0)};
     }
 

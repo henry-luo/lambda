@@ -63,6 +63,11 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_CONTROL_VALUE = 8
 } DomJsMutationKind;
 
+typedef enum DomJsMutationAttribute {
+    DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN,
+    DOM_JS_MUTATION_ATTRIBUTE_CLASS,
+} DomJsMutationAttribute;
+
 // tier-1: doc-pool, survives relayout
 typedef struct DomJsMutationRecord {
     uint32_t sequence;
@@ -71,6 +76,10 @@ typedef struct DomJsMutationRecord {
     DomNode* parent;
     uint32_t target_id;
     uint32_t parent_id;
+    DomJsMutationAttribute attribute;
+    // Capture connection at mutation time; a later append must not make a
+    // detached node's earlier attribute/text writes look document-visible.
+    bool was_connected;
 } DomJsMutationRecord;
 
 #define DOM_JS_MUTATION_RECORD_CAP 64
@@ -343,6 +352,10 @@ struct DomDocument {
     // mutating the document URL's hostname.
     const char* document_domain;
 
+    // Loader-created source pools survive the DOM/JS teardown and are released
+    // immediately after it. Caller-supplied pools remain external.
+    Pool* owned_loader_pool;
+
     // Keep this queue at the tail with the other non-JIT document state.
     // Layout records live controls here so init need not rescan the DOM.
     ArrayList* behavior_init_controls;
@@ -372,7 +385,7 @@ struct DomDocument {
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
                     js_realm_released_after_load(false), dom_package_loaded(false),
                     owns_script_runtime(false), behavior_init_pending(false),
-                    design_mode(false), document_domain(nullptr),
+                    design_mode(false), document_domain(nullptr), owned_loader_pool(nullptr),
                     behavior_init_controls(nullptr) {}
 
     bool init(Input* input);
@@ -1242,6 +1255,10 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement);
  * @param document Document to destroy
  */
 void dom_document_destroy(DomDocument* document);
+
+// Complete a loader-pool handoff. A replacement document can already own an
+// independent pool, in which case this releases the superseded loader pool.
+bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool);
 
 // ============================================================================
 // DOM Element Creation and Destruction

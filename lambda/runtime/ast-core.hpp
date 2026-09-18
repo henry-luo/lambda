@@ -645,6 +645,11 @@ typedef struct AstCallNode : AstNode {
     // the body instead of opening a frame, matching the loop lowering emits
     // for the same shape (AIO1's self-tail-call slice).
     bool interp_self_tail_call;
+    // Lambda's frame planner records immutable source argument shape so the
+    // hot walker does not rescan a stable argument list before every call.
+    uint16_t interp_source_argc;
+    bool interp_has_named_args;
+    bool interp_call_shape_planned;
 } AstCallNode;
 
 // A handler keeps both outcome bodies together so expression and statement
@@ -673,14 +678,28 @@ typedef struct AstStartNode : AstNode {
     bool escapes;
 } AstStartNode;
 
+typedef enum AstPrimaryLiteralValueKind : uint8_t {
+    AST_PRIMARY_LITERAL_VALUE_NONE = 0,
+    AST_PRIMARY_LITERAL_VALUE_BOOL,
+    AST_PRIMARY_LITERAL_VALUE_INT,
+} AstPrimaryLiteralValueKind;
+
 typedef struct AstPrimaryNode : AstNode {
     AstNode *expr;
+    // Bare compact literals retain their decoded scalar here.  The shared
+    // literal Type remains type-only, so a source span is never reparsed on
+    // each AST-interpreter evaluation (D8.1.3v11/D8.2.5v2).
+    int64_t literal_value;
+    AstPrimaryLiteralValueKind literal_value_kind;
 } AstPrimaryNode;
 
 typedef struct AstLiteralNode : AstPrimaryNode {
     AstLiteralType literal_type;
     bool has_decimal;
     bool is_bigint;
+    // JS assigns a dense immutable-AST slot to literals whose runtime value
+    // needs realm-owned materialization. UINT32_MAX means no such value.
+    uint32_t runtime_literal_slot;
     union {
         double number_value;
         String* string_value;
@@ -722,6 +741,11 @@ typedef struct AstNamedNode : AstNode {
 typedef struct AstIdentNode : AstNode {
     String* name;
     NameEntry *entry;
+    // Lambda's frame planner links an occurrence that reads a closure capture
+    // to its immutable owning function and dense environment slot. Both are
+    // AST facts, never EvalContext-owned runtime values (D8.2.4).
+    const AstNode* interp_capture_owner;
+    uint16_t interp_capture_slot;
 } AstIdentNode;
 
 typedef struct AstVarDeclNode : AstNode {

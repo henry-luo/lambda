@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_interp.hpp"
 #include "../../lib/hashmap_helpers.h"
 #include "../input/input-script-cache.h"
 
@@ -841,6 +842,9 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
 }
 
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
+    // Event handlers retain generated function pointers, but not MIR's
+    // instruction lists. Drop that compiler-only IR before retaining the ctx.
+    jit_release_generated_ir(ctx);
     // A failed push cannot MIR_finish here: JIT-compiled function pointers
     // still live and would crash on call, so the context leaks to process
     // exit exactly as the old overflow path did.
@@ -4190,11 +4194,14 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     bool document_ast_too_large = runtime->dom_doc != NULL &&
         mir_large_interp_enabled() &&
         tp->ast_index.count > MIR_RADIANT_AST_NODE_THRESHOLD;
-    if (document_ast_too_large) {
+    bool ast_executor_requested = js_ast_interpreter_requested();
+    if (ast_executor_requested || document_ast_too_large) {
         // Static imports bypass the source-script compiler, so select its
         // established AST tier here before MIR lowering scales with the graph.
-        log_info("js-mir: document module AST (%u nodes) uses AST executor",
-            tp->ast_index.count);
+        const char* reason = ast_executor_requested ? "requested backend"
+            : "module threshold";
+        log_info("js-mir: module AST (%u nodes) uses AST executor (%s)",
+            tp->ast_index.count, reason);
         js_tla_exit_module();
         return js_mir_execute_ast_module(runtime, tp, filename);
     }
@@ -4463,6 +4470,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
                 // belongs to this one execution and can be discarded now.
                 jm_clear_active_js_transpile(NULL, mt, NULL);
                 jm_destroy_mir_transpiler(mt);
+                // The cache retains native code through the artifact context;
+                // its finalized MIR instruction lists are no longer needed.
+                jit_release_generated_ir(ctx);
                 jm_clear_active_js_transpile(tp, NULL, NULL);
                 js_transpiler_destroy(tp);
                 return namespace_obj;

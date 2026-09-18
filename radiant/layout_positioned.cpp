@@ -235,26 +235,37 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 static int layout_sticky_block_equals(ArrayListValue left, ArrayListValue right) {
-    return left != right;
+    // arraylist_index_of treats non-zero as equal; preserve every distinct
+    // candidate so the post-layout pass resolves each sticky box exactly once.
+    return left == right;
 }
 
-static void layout_register_deferred_sticky(LayoutContext* lycon, ViewBlock* block) {
-    if (!lycon || !block || !block->position ||
-        block->positionp()->position != CSS_VALUE_STICKY ||
-        lycon->run_mode != radiant::RunMode::PerformLayout ||
-        !lycon->deferred_sticky_blocks) {
-        return;
+static void layout_collect_deferred_sticky_blocks(LayoutContext* lycon, View* view) {
+    if (!lycon || !view || !lycon->deferred_sticky_blocks) return;
+
+    ViewBlock* block = nullptr;
+    if (view->is_block()) {
+        block = lam::view_require_block(view);
+    } else if (view->view_type == RDT_VIEW_INLINE) {
+        block = lam::unsafe_view_block_api_span(static_cast<ViewSpan*>(view));
     }
-    if (arraylist_index_of(lycon->deferred_sticky_blocks,
+    if (block && block->position &&
+        block->positionp()->position == CSS_VALUE_STICKY &&
+        arraylist_index_of(lycon->deferred_sticky_blocks,
                            layout_sticky_block_equals, block) < 0) {
         arraylist_append(lycon->deferred_sticky_blocks, block);
+    }
+
+    if (!view->is_element()) return;
+    ViewElement* element = lam::view_require_element(view);
+    for (View* child = element->first_child; child; child = child->next()) {
+        layout_collect_deferred_sticky_blocks(lycon, child);
     }
 }
 
 // apply CSS Position 3 sticky constraints to the nearest scroll container.
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     if (lycon && lycon->defer_sticky_positioning) {
-        layout_register_deferred_sticky(lycon, block);
         return;
     }
     if (!block->position) return;
@@ -442,11 +453,11 @@ void layout_apply_sticky_positions(LayoutContext* lycon, View* root) {
     bool saved_defer = lycon->defer_sticky_positioning;
     lycon->defer_sticky_positioning = false;
     if (lycon->deferred_sticky_blocks) {
-        ViewBlock* root_block = root->is_block() ? lam::view_require_block(root) : nullptr;
-        if (root_block && root_block->position &&
-            root_block->positionp()->position == CSS_VALUE_STICKY) {
-            layout_sticky_positioned(lycon, root_block);
-        }
+        // CSS Position 3 resolves nested sticky translations from outer to inner.
+        // Build from the completed view tree: table and inline layout paths do not
+        // all invoke the positioning hook while their boxes are under construction.
+        arraylist_clear(lycon->deferred_sticky_blocks);
+        layout_collect_deferred_sticky_blocks(lycon, root);
         for (int index = 0; index < lycon->deferred_sticky_blocks->length; index++) {
             ViewBlock* block = (ViewBlock*)lycon->deferred_sticky_blocks->data[index];
             if (block && block->position &&

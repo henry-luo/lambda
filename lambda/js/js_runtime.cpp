@@ -9853,6 +9853,83 @@ extern "C" Item js_array_push(Item array, Item value) {
 #define js_template_entries (js_runtime_state.template_registry.entries)
 #define js_template_values (js_runtime_state.template_registry.values)
 
+static void js_ast_literal_cache_clear(JsAstLiteralCache* cache,
+        bool destroy_roots) {
+    if (!cache) return;
+    JsAstLiteralCacheEntry* entry = cache->entries;
+    while (entry) {
+        JsAstLiteralCacheEntry* next = entry->next;
+        mem_free(entry->materialized);
+        mem_free(entry);
+        entry = next;
+    }
+    cache->entries = NULL;
+    if (destroy_roots) root_vector_destroy(&cache->values);
+    else root_vector_clear(&cache->values);
+}
+
+extern "C" JsAstLiteralCacheEntry* js_ast_literal_cache_acquire(
+        const void* ast_image, uint32_t literal_count) {
+    if (!js_active_runtime_state || !ast_image || literal_count == 0) return NULL;
+    JsAstLiteralCache* cache = &js_runtime_state.ast_literal_cache;
+    for (JsAstLiteralCacheEntry* entry = cache->entries; entry; entry = entry->next) {
+        if (entry->ast_image != ast_image) continue;
+        if (entry->literal_count != literal_count) return NULL;
+        // RootVector forgets entries when its heap changes. A stale native
+        // row must not reuse the old root-slot coordinates in the new realm.
+        if (root_vector_at(&cache->values, entry->first_root_slot)) return entry;
+        js_ast_literal_cache_clear(cache, false);
+        break;
+    }
+
+    JsAstLiteralCacheEntry* entry = (JsAstLiteralCacheEntry*)mem_calloc(1,
+        sizeof(JsAstLiteralCacheEntry), MEM_CAT_JS_RUNTIME);
+    if (!entry) return NULL;
+    entry->materialized = (uint8_t*)mem_calloc(literal_count, sizeof(uint8_t),
+        MEM_CAT_JS_RUNTIME);
+    if (!entry->materialized) {
+        mem_free(entry);
+        return NULL;
+    }
+    entry->ast_image = ast_image;
+    entry->literal_count = literal_count;
+    entry->first_root_slot = root_vector_count(&cache->values);
+    for (uint32_t slot = 0; slot < literal_count; slot++) {
+        if (!root_vector_push(&cache->values, ItemNull)) {
+            root_vector_shrink(&cache->values, entry->first_root_slot);
+            mem_free(entry->materialized);
+            mem_free(entry);
+            return NULL;
+        }
+    }
+    entry->next = cache->entries;
+    cache->entries = entry;
+    return entry;
+}
+
+extern "C" bool js_ast_literal_cache_read(const JsAstLiteralCacheEntry* entry,
+        uint32_t slot, Item* out) {
+    if (!entry || !out || slot >= entry->literal_count || !entry->materialized[slot]) {
+        return false;
+    }
+    Item* value = root_vector_at(&js_runtime_state.ast_literal_cache.values,
+        entry->first_root_slot + slot);
+    if (!value) return false;
+    *out = *value;
+    return true;
+}
+
+extern "C" bool js_ast_literal_cache_write(JsAstLiteralCacheEntry* entry,
+        uint32_t slot, Item value) {
+    if (!entry || slot >= entry->literal_count) return false;
+    Item* destination = root_vector_at(&js_runtime_state.ast_literal_cache.values,
+        entry->first_root_slot + slot);
+    if (!destination) return false;
+    *destination = value;
+    entry->materialized[slot] = 1;
+    return true;
+}
+
 extern "C" void js_reset_template_registry(void) {
     if (!js_active_runtime_state) return;
     JsTemplateRegistryEntry* entry = js_template_entries;
@@ -9877,6 +9954,7 @@ extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state) {
     }
     state->template_registry.entries = NULL;
     root_vector_destroy(&state->template_registry.values);
+    js_ast_literal_cache_clear(&state->ast_literal_cache, true);
 }
 
 extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {

@@ -1141,6 +1141,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     jm_destroy_mir_transpiler(mt);
     if (g_jm_preamble_out) {
         // Preamble mode: keep MIR context alive — harness function objects reference compiled code
+        // but no longer need finalized MIR instruction lists.
+        jit_release_generated_ir(ctx);
         g_jm_preamble_out->mir_ctx = ctx;
         g_jm_preamble_out->source_buffer = owned_source;
         jm_clear_active_js_transpile(NULL, NULL, owned_source);

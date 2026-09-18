@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "../../lambda/input/css/css_tokenizer.hpp"
+#include "../../lib/mem.h"
 #include "../../lib/mempool.h"
 #include <string.h>
 
@@ -108,6 +109,33 @@ TEST_F(CssTokenizerTest, WhitespaceHandling) {
 TEST_F(CssTokenizerTest, ComplexCssBasic) {
     const char* css = "@media screen and (max-width: 768px) { .container { width: 100%; } }";
     expectTokensGenerated(css, 10); // Should produce many tokens
+}
+
+TEST_F(CssTokenizerTest, LargeCommentUsesTokenCountNotInputLength) {
+    const size_t source_length = 512u * 1024u;
+    char* css = (char*)mem_alloc(source_length + 1, MEM_CAT_INPUT_CSS);
+    ASSERT_NE(css, nullptr);
+    css[0] = '/';
+    css[1] = '*';
+    memset(css + 2, 'x', source_length - 4);
+    css[source_length - 2] = '*';
+    css[source_length - 1] = '/';
+    css[source_length] = '\0';
+
+    CssTokenizer* tokenizer = css_tokenizer_create(pool);
+    ASSERT_NE(tokenizer, nullptr);
+    PoolStats before = {};
+    PoolStats after = {};
+    pool_get_detailed_stats(pool, &before);
+    CssToken* tokens = nullptr;
+    int count = css_tokenizer_tokenize(tokenizer, css, source_length, &tokens);
+    pool_get_detailed_stats(pool, &after);
+    mem_free(css);
+
+    ASSERT_GE(count, 2);
+    ASSERT_NE(tokens, nullptr);
+    EXPECT_LT(after.live_bytes - before.live_bytes, source_length * 2)
+        << "token storage must grow with emitted tokens, not source bytes";
 }
 
 // Test basic utility functions
@@ -395,4 +423,3 @@ TEST_F(CssTokenizerTest, TokenCopyingPreservesUnion_DelimiterToken) {
         }
     }
 }
-
