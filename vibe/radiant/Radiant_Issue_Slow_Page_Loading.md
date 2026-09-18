@@ -14,10 +14,10 @@ no `S#` or `D#` point applies.
 
 The slow YouTube pages are **not network-bound** after the iframe document has
 arrived, and their dominant cost is **LambdaJS AST execution**, including
-serial script/lifecycle work. AST parsing and building are material, and are
-needlessly repeated for the AST-backend selection probe, but they do not
-explain most of the 116–122 second blocks. The player document deliberately
-does not use MIR: its scripts exceed the AST-realm threshold.
+serial script/lifecycle work. AST parsing and building are material, but they
+do not explain most of the 116–122 second blocks. Browser documents now use
+the AST backend unconditionally, eliminating the prior parse-and-discard
+backend-selection probe.
 
 GitHub's roughly 6.4 GiB peak is **not a 6.4 GiB script cache**. It is a
 process physical-footprint peak composed chiefly of two full CSS cascades and
@@ -83,12 +83,10 @@ two-minute script block.
 
 ### 3.2 Backend selection: AST, not MIR
 
-`MIR_RADIANT_AST_NODE_THRESHOLD` is 25,000 nodes in
-`lambda/runtime/mir_policy.hpp:MIR_RADIANT_AST_NODE_THRESHOLD`. The selection routine
-`script_task_collection_requires_ast_realm` in
-`radiant/script_runner.cpp` parses eligible sources to count their AST nodes;
-when it sees more than the threshold it sets the document-wide AST backend.
-The YouTube player logs explicitly record:
+At the time of the recorded run, `MIR_RADIANT_AST_NODE_THRESHOLD` was 25,000
+nodes in `lambda/runtime/mir_policy.hpp:MIR_RADIANT_AST_NODE_THRESHOLD`; the
+runner used a parse-only probe to select a document-wide AST realm. The
+YouTube player logs explicitly record:
 
 ```
 script_runner: document selects AST backend; script #10 has 190267 AST nodes
@@ -102,9 +100,11 @@ code. Small supporting work, including Lambda DOM-package code and some
 module paths on other pages, may still use MIR; it is not the dominant player
 document path.
 
-The selection probe itself parses a large source and destroys the probe before
-the executable AST is subsequently parsed and built. This duplicate parse is
-a real AST-build cost, but it is not the principal cause of the full block.
+As of 2026-09-18, `execute_document_scripts` in
+`radiant/script_runner.cpp` sets `Runtime::js_ast_backend` unconditionally.
+`cmd_layout` also no longer creates a document MIR lease session. The runner
+therefore no longer parses a source solely to select a backend, and browser
+documents cannot enter the incompatible cached-MIR path.
 
 ### 3.3 `reason_docs` timeline
 
@@ -146,7 +146,7 @@ completed.
 | Candidate | Finding |
 |---|---|
 | Network | Not the post-document bottleneck. The observed HTTP fetch is sub-second; the long interval begins in the script runner. |
-| AST parsing/building | Material, including a duplicate selection parse; roughly the early ~14 seconds in the representative trace. |
+| AST parsing/building | Material; roughly the early ~14 seconds in the representative trace. The current runner no longer adds a selection-only parse. |
 | AST interpretation | Dominant. More than 100 seconds follow AST availability in sequential script and lifecycle work. |
 | MIR | Not the player-document execution tier. The log explicitly selects and uses the AST executor. |
 | Sequential loading | Yes. Sequential script/lifecycle queues make each interval additive; synchronous iframe layout propagates the delay to the parent. |

@@ -5245,21 +5245,9 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
-    // AST execution does not consume cached MIR preambles or units; entering
-    // the cache's compile-only MIR realm path leaves DOM registration state
-    // incompatible with the AST document realm.
-    InputScriptCache* script_cache = input_manager_global_script_cache();
-    const char* js_alias = shell_getenv("LAMBDA_DISABLE_JS_MIR_CACHE");
-    bool js_alias_disabled = js_alias &&
-        (strcmp(js_alias, "1") == 0 || strcmp(js_alias, "true") == 0);
-    bool js_mir_cache_enabled = batch_mode && !js_ast_interpreter_requested() &&
-        input_script_cache_mir_enabled(script_cache) && !js_alias_disabled;
-    JsMirLeaseSession* js_mir_session = js_mir_cache_enabled
-        ? js_mir_lease_session_create() : nullptr;
-    if (js_mir_cache_enabled && !js_mir_session) {
-        log_error("layout_js_mir_lease: failed to create batch lease session; continuing uncached");
-    }
-    script_runner_set_js_mir_lease_session(js_mir_session);
+    // Browser documents always use the AST executor, so a batch MIR lease
+    // cannot supply a compatible preamble or compiled unit.
+    script_runner_set_js_mir_lease_session(nullptr);
 
     for (int i = 0; i < opts.font_dir_count; i++) {
         font_context_add_scan_directory(ui_context.font_ctx, opts.font_dirs[i]);
@@ -5381,7 +5369,6 @@ int cmd_layout(int argc, char** argv) {
         timing_file = nullptr;
     }
     script_runner_set_js_mir_lease_session(nullptr);
-    js_mir_lease_session_close(js_mir_session);
     ui_context_cleanup(&ui_context);
     if (cwd) url_destroy(cwd);
 
