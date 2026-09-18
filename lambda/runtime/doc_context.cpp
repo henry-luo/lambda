@@ -4,12 +4,10 @@
 #include "doc_context.hpp"
 
 #include "../lambda-data.hpp"
+#include "heap_api.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
-
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
 #include "../../lib/mem.h"
 #include "../../lib/memtrack.h"
 
@@ -192,27 +190,34 @@ Document* doc_context_install(Path* path, const char* location, size_t length,
     return doc;
 }
 
-// Keep `value` alive for the rest of the evaluation. Each retained version is
-// its own GC root slot, so the array may be reallocated without moving a
-// registered address: the slots themselves are what the collector scans.
+// Retained versions live in chunks, each registered as one GC root range when
+// it is allocated. A chunk never moves or grows, so retaining a version never
+// re-registers a live root (a reallocated array would have to hand every slot
+// over); each new chunk doubles the last, keeping the number of ranges
+// logarithmic in the number of commits. Unfilled slots are zero, which the
+// collector skips.
+struct DocRetainChunk {
+    DocRetainChunk* next;   // the older chunk
+    uint32_t count;
+    uint32_t capacity;
+    Item slots[];
+};
+
+// Keep `value` alive for the rest of the evaluation.
 static void doc_retain_version(Document* doc, Item value) {
     if (!doc || value.item == ItemNull.item) return;
-    if (doc->retained_count == doc->retained_capacity) {
-        uint32_t capacity = doc->retained_capacity ? doc->retained_capacity * 2 : 4;
-        Item* grown = (Item*)mem_calloc(capacity, sizeof(Item), MEM_CAT_EVAL);
-        if (!grown) return;
-        for (uint32_t i = 0; i < doc->retained_count; i++) {
-            heap_unregister_gc_root(&doc->retained[i].item);
-            grown[i] = doc->retained[i];
-            heap_register_gc_root(&grown[i].item);
-        }
-        mem_free(doc->retained);
-        doc->retained = grown;
-        doc->retained_capacity = capacity;
+    DocRetainChunk* chunk = doc->retained;
+    if (!chunk || chunk->count == chunk->capacity) {
+        uint32_t capacity = chunk ? chunk->capacity * 2 : 4;
+        DocRetainChunk* fresh = (DocRetainChunk*)mem_calloc(1,
+            sizeof(DocRetainChunk) + capacity * sizeof(Item), MEM_CAT_EVAL);
+        if (!fresh) return;
+        fresh->next = chunk;
+        fresh->capacity = capacity;
+        heap_register_gc_root_range(&fresh->slots[0].item, (int)capacity);
+        doc->retained = chunk = fresh;
     }
-    doc->retained[doc->retained_count] = value;
-    heap_register_gc_root(&doc->retained[doc->retained_count].item);
-    doc->retained_count++;
+    chunk->slots[chunk->count++] = value;
 }
 
 void doc_context_commit_head(Document* doc, Item head) {
@@ -235,10 +240,13 @@ void doc_context_reset(void) {
             DocLocationEntry* entry = (DocLocationEntry*)item;
             if (entry->doc) {
                 heap_unregister_gc_root(&entry->doc->head.item);
-                for (uint32_t r = 0; r < entry->doc->retained_count; r++) {
-                    heap_unregister_gc_root(&entry->doc->retained[r].item);
+                DocRetainChunk* chunk = entry->doc->retained;
+                while (chunk) {
+                    DocRetainChunk* older = chunk->next;
+                    heap_unregister_gc_root_range(&chunk->slots[0].item);
+                    mem_free(chunk);
+                    chunk = older;
                 }
-                mem_free(entry->doc->retained);
             }
             mem_free((void*)entry->location);
             mem_free(entry->doc);

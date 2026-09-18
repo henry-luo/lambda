@@ -10,12 +10,9 @@
 #include "../../lib/log.h"
 #include "lambda-number-runtime.hpp"
 #include "lambda-root-frame.hpp"
-
 // The write set outlives its statements, so its recorded values are registered
 // roots rather than stack-frame ones.
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
-
+#include "heap_api.h"
 
 // The whole transaction state. It is evaluation-scoped and single-threaded by
 // the same invariant as the document context: one thread of control owns the

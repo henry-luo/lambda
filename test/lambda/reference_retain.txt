@@ -1,0 +1,12 @@
+40
+{
+  n: 0,
+  rows: [{
+      id: 0
+    }]
+}
+[{
+    id: 0
+  }]
+true
+temp.retain.rows

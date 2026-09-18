@@ -25,6 +25,7 @@
 #include "../lambda-data.hpp"
 
 struct Document;
+struct DocRetainChunk;
 
 // One registered container and the step that reaches it from `parent` — a
 // NameKey or an IntKey (S8.2.1v4). The key is held as raw name-plus-index
@@ -53,14 +54,12 @@ struct Document {
     // after a later commit". The node table addresses nodes by POINTER, so a
     // superseded version that the collector freed would let a later allocation
     // land on a registered address and inherit a dead node's parent and key.
-    // Every committed version is therefore retained, as one GC root per
-    // version rather than one per node: everything a version's table entries
-    // name is reachable from its root. The cost is one retained version per
-    // commit for the evaluation — which is what makes `open` the remedy for a
-    // loop of writes (PTH64v2), not just an atomicity one.
-    Item* retained;
-    uint32_t retained_count;
-    uint32_t retained_capacity;
+    // Every committed version is therefore retained as a GC root, per version
+    // rather than per node: everything a version's table entries name is
+    // reachable from its root. The cost is one retained version per commit for
+    // the evaluation — which is what makes `open` the remedy for a loop of
+    // writes (PTH64v2), not just an atomicity one.
+    DocRetainChunk* retained;   // newest chunk first
 };
 
 // Look a location up without loading. NULL when it has never been forced.
