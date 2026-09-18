@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "../../../lib/avl_tree.h"
+#include "../../../lib/arraylist.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/ownership.hpp"
 #include "../../../lib/strbuf.h"
@@ -331,8 +332,7 @@ struct DomDocument {
 
     // F8/ES19: at least one form control in this document may not have had its
     // behavior `init` turn yet. Set when a control's prop is created during
-    // layout, cleared by the init phase. A pure gate: a document with no form
-    // controls never pays for the walk.
+    // layout and cleared by the init phase.
     bool behavior_init_pending;
 
     // designMode is document editing state, not a property of whichever JS
@@ -342,6 +342,10 @@ struct DomDocument {
     // The legacy document.domain override relaxes same-origin checks without
     // mutating the document URL's hostname.
     const char* document_domain;
+
+    // Keep this queue at the tail with the other non-JIT document state.
+    // Layout records live controls here so init need not rescan the DOM.
+    ArrayList* behavior_init_controls;
 
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
@@ -368,7 +372,8 @@ struct DomDocument {
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
                     js_realm_released_after_load(false), dom_package_loaded(false),
                     owns_script_runtime(false), behavior_init_pending(false),
-                    design_mode(false), document_domain(nullptr) {}
+                    design_mode(false), document_domain(nullptr),
+                    behavior_init_controls(nullptr) {}
 
     bool init(Input* input);
     void destroy();

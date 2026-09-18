@@ -1,0 +1,11 @@
+<!doctype html>
+<html>
+<body>
+  <div id="screen-state"></div>
+  <script>
+    const state = document.getElementById("screen-state");
+    state.setAttribute("data-screen", screen.width + "x" + screen.height + ":" +
+      screen.availWidth + "x" + screen.availHeight);
+  </script>
+</body>
+</html>

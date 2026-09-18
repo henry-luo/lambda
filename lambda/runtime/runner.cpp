@@ -2318,15 +2318,15 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (remove_index && script->reference) {
         runtime_loaded_script_delete_instance(runtime, script);
     }
+    if (script->cache_owned_template) {
+        // D8.5.1v2: the cache entry retains its template lease until eviction.
+        // Closing it here would evict the image and recursively destroy this
+        // Script while runtime cleanup still owns its stack frame.
+        return;
+    }
     if (script->cache_scope) {
         input_script_cache_close_scope(script->cache_scope);
         script->cache_scope = NULL;
-    }
-    if (script->cache_owned_template) {
-        // The persistent cache owns the immutable AST/MIR image. Runtime
-        // teardown releases only its execution lease above; artifact
-        // invalidation later performs the real destruction.
-        return;
     }
     if (script->ast_overlay_strings) {
         for (int i = 0; i < script->ast_overlay_strings->length; i++) {

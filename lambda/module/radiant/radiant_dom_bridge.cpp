@@ -2669,6 +2669,10 @@ RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove2, JUBE_DOM_REMOVE)
 
 static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
     if (!doc || !doc->root || s_radiant_dom_geometry_layout_active) return;
+    // The window host commits layout between event turns. A load-time geometry
+    // read must observe that committed snapshot (zero before the first commit),
+    // rather than construct a provisional tree during script execution.
+    if (doc->js.host_driven_loop) return;
     UiContext* uicon = (UiContext*)doc->js.host_ui_context;
     if (!uicon) return;
     // geometry reads must reconcile pending DOM mutations before the first snapshot.

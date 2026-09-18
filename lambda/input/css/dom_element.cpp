@@ -258,6 +258,10 @@ void DomDocument::destroy() {
         mem_free(pending_navigation_url);
         pending_navigation_url = nullptr;
     }
+    if (behavior_init_controls) {
+        arraylist_free(behavior_init_controls);
+        behavior_init_controls = nullptr;
+    }
 
     // Runtime-backed extension values must release their GC roots while the
     // document's retained Lambda runtime is still alive.

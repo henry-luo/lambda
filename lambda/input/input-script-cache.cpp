@@ -92,6 +92,7 @@ struct InputScriptCache {
     uint64_t next_access_epoch;
     InputScriptCacheStats stats;
     ArrayList* retired_inputs;
+    bool shutting_down;
 };
 
 static const char* cache_text(const char* value, const char* fallback) {
@@ -603,6 +604,7 @@ InputScriptCache* input_script_cache_create(void) {
 void input_script_cache_destroy(InputScriptCache* cache) {
     if (!cache) return;
     pthread_mutex_lock(&cache->mutex);
+    cache->shutting_down = true;
     InputScriptCacheStats stats = cache->stats;
     log_notice("script-cache: shutdown entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu mir_hits=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained=%llu peak=%llu",
         (unsigned long long)stats.retained_entries,
@@ -620,16 +622,21 @@ void input_script_cache_destroy(InputScriptCache* cache) {
         (unsigned long long)(stats.retained_source_bytes +
             stats.retained_ast_bytes + stats.retained_mir_bytes),
         (unsigned long long)stats.peak_bytes);
-    hashmap_free(cache->entries);
+    // D8.5.1v2: releasing a cached template closes its retained lease. Move
+    // the owners out before callbacks run so lease release can take this
+    // mutex without recursively locking cache teardown.
+    HashMap* entries = cache->entries;
+    ArrayList* retired_inputs = cache->retired_inputs;
     cache->entries = NULL;
-    if (cache->retired_inputs) {
-        for (int i = 0; i < cache->retired_inputs->length; i++) {
-            cache_destroy_input((ScriptInput*)cache->retired_inputs->data[i]);
-        }
-        arraylist_free(cache->retired_inputs);
-        cache->retired_inputs = NULL;
-    }
+    cache->retired_inputs = NULL;
     pthread_mutex_unlock(&cache->mutex);
+    hashmap_free(entries);
+    if (retired_inputs) {
+        for (int i = 0; i < retired_inputs->length; i++) {
+            cache_destroy_input((ScriptInput*)retired_inputs->data[i]);
+        }
+        arraylist_free(retired_inputs);
+    }
     pthread_mutex_destroy(&cache->mutex);
     mem_free(cache);
 }
@@ -970,10 +977,10 @@ void input_script_cache_release(InputScriptLease* lease) {
     lease->released = true;
     if (cache) {
         cache->stats.leases_released++;
-        if (lease->persistent && input && input->retired &&
+        if (!cache->shutting_down && lease->persistent && input && input->retired &&
                 input->lease_count == 0) {
             cache_reap_retired_input_locked(cache, input);
-        } else if (lease->persistent) {
+        } else if (!cache->shutting_down && lease->persistent) {
             cache_enforce_retention_limit_locked(cache);
         }
         pthread_mutex_unlock(&cache->mutex);

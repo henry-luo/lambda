@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Cross-Origin Iframe Layout</title>
+  <style>
+    body { margin: 0; font: 16px sans-serif; }
+    iframe { width: 320px; height: 120px; border: 1px solid #333; }
+  </style>
+</head>
+<body>
+  <p id="parent-content">The parent document must render before a remote frame navigates.</p>
+  <iframe src="https://iframe.invalid.example/frame.html"></iframe>
+</body>
+</html>

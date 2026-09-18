@@ -8,6 +8,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
+#include "../lib/url.h"
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lib/time_util.h"
@@ -4212,6 +4213,39 @@ static bool layout_empty_editing_host(ViewBlock* block) {
     return editing_host_lookup(element, &host) && host.host == element;
 }
 
+void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || lycon->run_mode != radiant::RunMode::PerformLayout ||
+        !block || !block->is_element() || block->view_type == RDT_VIEW_MARKER ||
+        !block->blk || block->block()->content_visibility_hidden ||
+        (!block->block()->contain_intrinsic_width_auto &&
+         !block->block()->contain_intrinsic_height_auto)) {
+        return;
+    }
+
+    DomElement* element = block->as_element();
+    float remembered_width = block->width;
+    float remembered_height = block->height;
+    LayoutFragmentBox* fragment = element->layout_fragment_list();
+    if (fragment) {
+        remembered_width = 0.0f;
+        remembered_height = 0.0f;
+        for (; fragment; fragment = fragment->next) {
+            remembered_width = max(remembered_width, fragment->width);
+            remembered_height += fragment->height;
+        }
+    }
+    // CSS Sizing 4 remembers the principal box's inner dimensions after its
+    // final fragment geometry is known, without rescanning the whole document.
+    remembered_width = layout_content_size_from_border_box(block, remembered_width, true);
+    remembered_height = layout_content_size_from_border_box(block, remembered_height, false);
+    if (block->block()->contain_intrinsic_width_auto) {
+        element->set_last_remembered_width(remembered_width);
+    }
+    if (block->block()->contain_intrinsic_height_auto) {
+        element->set_last_remembered_height(remembered_height);
+    }
+}
+
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     float flow_width, flow_height;
     bool preserved_empty_vertical_multicol_line = false;
@@ -4774,6 +4808,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             block->scroll()->pane, scroll_min_x, h_max, scroll_min_y, v_max);
         scroll_apply_pending_element_scroll(block);
     }
+    layout_store_last_remembered_size(lycon, block);
 }
 
 static void layout_resolve_auto_margins_after_width_change(
@@ -4917,6 +4952,26 @@ static DomDocument* load_iframe_src_doc(LayoutContext* lycon,
     return doc;
 }
 
+bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
+                                              const char* src) {
+    DomDocument* parent_doc = lycon && lycon->ui_context
+        ? lycon->ui_context->document : nullptr;
+    if (!parent_doc || !parent_doc->url || !src || !src[0]) return false;
+
+    Url* target_url = url_parse_with_base(src, parent_doc->url);
+    if (!target_url || !url_is_valid(target_url)) {
+        if (target_url) url_destroy(target_url);
+        return false;
+    }
+
+    const char* parent_origin = url_get_origin(parent_doc->url);
+    const char* target_origin = url_get_origin(target_url);
+    bool is_cross_origin = !parent_origin || !target_origin ||
+        strcmp(parent_origin, target_origin) != 0;
+    url_destroy(target_url);
+    return is_cross_origin;
+}
+
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
                                 int iframe_width, int iframe_height) {
     if (!lycon || !lycon->ui_context || !doc || !doc->html_root) return;
@@ -4945,6 +5000,12 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
         const char* srcdoc = block->get_attribute("srcdoc");
         const char* src = block->get_attribute("src");
         if ((srcdoc && *srcdoc) || (src && *src)) {
+            if (!srcdoc && iframe_navigation_must_not_run_in_layout(lycon, src)) {
+                // D5.4.1: a cross-origin frame needs a separate evaluator, so
+                // never construct it recursively while the parent lays out.
+                log_debug("iframe: deferring cross-origin navigation: %s", src);
+                return;
+            }
             LayoutContentBox iframe_content = layout_content_box(block);
             // The embedded viewport is the iframe content box; using the outer
             // border box creates false overflow and an inner scrollbar.

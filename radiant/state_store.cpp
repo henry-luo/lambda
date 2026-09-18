@@ -2408,17 +2408,16 @@ View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry
         return NULL;
     }
     DomDocument* doc = state->owner_store->document;
-    DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
-    View* rooted = view_tree_find_live_id(root, entry->view_id);
-    if (rooted) return rooted;
+    if (entry->owner_id == entry->view_id && entry->owner_address) {
+        // D4.5.1v3: validate the stable lifecycle identity before falling
+        // back to a tree walk, including for document-owned detached nodes.
+        DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
+        DomNode* owner = dom_node_ref_validate(doc, owner_ref);
+        if (owner && owner->id == entry->view_id) return static_cast<View*>(owner);
+    }
 
-    // A document-owned detached node has no rendered-root path, but its DOM
-    // lifetime record still proves it is a valid owner for ViewState.
-    if (entry->owner_id != entry->view_id || !entry->owner_address) return NULL;
-    DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
-    DomNode* detached = dom_node_ref_validate(doc, owner_ref);
-    if (!detached || detached->id != entry->view_id) return NULL;
-    return static_cast<View*>(detached);
+    DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
+    return view_tree_find_live_id(root, entry->view_id);
 }
 
 static void doc_state_log_dropdown_owner_transition(DocState* state,
@@ -3538,6 +3537,28 @@ void form_control_set_behavior_inited(DocState* state, View* view, bool inited) 
     if (view_state) view_state->flags.behavior_inited = inited ? 1 : 0;
 }
 
+static int behavior_init_control_equals(ArrayListValue left, ArrayListValue right) {
+    return left != right;
+}
+
+void radiant_queue_behavior_init_control(DomDocument* doc, View* view) {
+    if (!doc || !view || !view->is_element()) return;
+    if (!doc->behavior_init_controls) {
+        doc->behavior_init_controls = arraylist_new(8);
+    }
+    if (doc->behavior_init_controls &&
+        arraylist_index_of(doc->behavior_init_controls,
+                           behavior_init_control_equals, view) < 0 &&
+        !arraylist_append(doc->behavior_init_controls, view)) {
+        // A partial queue could omit a control, so force the safe full walk.
+        arraylist_free(doc->behavior_init_controls);
+        doc->behavior_init_controls = nullptr;
+    }
+    // Allocation failure retains the pending gate; the init phase falls back
+    // to the document walk so behavior remains correct under memory pressure.
+    doc->behavior_init_pending = true;
+}
+
 // Re-arm a control for the next init phase. This is how programmatic mutation
 // re-derives validity: `el.value = ...` and attribute writes fire no `input`
 // event, so nothing else in the package would revalidate them. Clearing the bit
@@ -3549,7 +3570,7 @@ void form_control_invalidate_behavior_init(DocState* state, View* view) {
     if (!view_state || !view_state->flags.behavior_inited) return;
     view_state->flags.behavior_inited = 0;
     DomElement* elem = view->is_element() ? lam::dom_require_element(view) : nullptr;
-    if (elem && elem->doc) elem->doc->behavior_init_pending = true;
+    if (elem && elem->doc) radiant_queue_behavior_init_control(elem->doc, view);
 }
 
 static SmFamily form_control_schema_family_for_view(View* view) {

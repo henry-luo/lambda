@@ -4978,6 +4978,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     mem_scratch_init((MemContext*)doc->services.mem_ctx, &lycon->scratch, doc->view_tree->scratch_arena, MEM_ROLE_LAYOUT, "layout.scratch");
 
     lycon->counter_context = counter_context_create(lycon->scratch.arena);
+    lycon->deferred_sticky_blocks = arraylist_new(8);
 
 }
 
@@ -4988,6 +4989,10 @@ void layout_cleanup(LayoutContext* lycon) {
     if (lycon->counter_context) {
         counter_context_destroy(lycon->counter_context);
         lycon->counter_context = nullptr;
+    }
+    if (lycon->deferred_sticky_blocks) {
+        arraylist_free(lycon->deferred_sticky_blocks);
+        lycon->deferred_sticky_blocks = nullptr;
     }
 
     if (scratch_arena) {
@@ -5007,46 +5012,6 @@ static void reset_float_prelaid_flags(DomNode* node) {
     elem->set_float_prelaid(false);
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         reset_float_prelaid_flags(child);
-    }
-}
-
-static void layout_store_last_remembered_sizes(DomNode* node) {
-    if (!node || !node->is_element()) return;
-
-    DomElement* element = node->as_element();
-    // block sizing and must not be interpreted as BlockProp here.
-    if (element->view_type == RDT_VIEW_MARKER) return;
-    if (element->blk && !element->block()->content_visibility_hidden &&
-        (element->block()->contain_intrinsic_width_auto ||
-         element->block()->contain_intrinsic_height_auto)) {
-        float remembered_width = element->width;
-        float remembered_height = element->height;
-        LayoutFragmentBox* fragment = element->layout_fragment_list();
-        if (fragment) {
-            remembered_width = 0.0f;
-            remembered_height = 0.0f;
-            for (; fragment; fragment = fragment->next) {
-                remembered_width = max(remembered_width, fragment->width);
-                remembered_height += fragment->height;
-            }
-        }
-        // CSS Sizing 4 remembers the principal box's inner dimensions; fragment
-        // aggregation reconstructs its border box, so remove each boundary once.
-        ViewBlock* remembered_block = lam::unsafe_view_block_element_storage(element);
-        remembered_width = layout_content_size_from_border_box(
-            remembered_block, remembered_width, true);
-        remembered_height = layout_content_size_from_border_box(
-            remembered_block, remembered_height, false);
-        if (element->block()->contain_intrinsic_width_auto) {
-            element->set_last_remembered_width(remembered_width);
-        }
-        if (element->block()->contain_intrinsic_height_auto) {
-            element->set_last_remembered_height(remembered_height);
-        }
-    }
-
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        layout_store_last_remembered_sizes(child);
     }
 }
 
@@ -5148,8 +5113,6 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     uint64_t t_init = time_now_ns();
 
     layout_html_root(&lycon, root_node);
-
-    layout_store_last_remembered_sizes(root_node);
 
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);

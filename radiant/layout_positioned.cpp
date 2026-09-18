@@ -234,9 +234,29 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
             lam::view_require_element(block), applied_x, applied_y);
     }
 }
+static int layout_sticky_block_equals(ArrayListValue left, ArrayListValue right) {
+    return left != right;
+}
+
+static void layout_register_deferred_sticky(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block || !block->position ||
+        block->positionp()->position != CSS_VALUE_STICKY ||
+        lycon->run_mode != radiant::RunMode::PerformLayout ||
+        !lycon->deferred_sticky_blocks) {
+        return;
+    }
+    if (arraylist_index_of(lycon->deferred_sticky_blocks,
+                           layout_sticky_block_equals, block) < 0) {
+        arraylist_append(lycon->deferred_sticky_blocks, block);
+    }
+}
+
 // apply CSS Position 3 sticky constraints to the nearest scroll container.
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
-    if (lycon && lycon->defer_sticky_positioning) return;
+    if (lycon && lycon->defer_sticky_positioning) {
+        layout_register_deferred_sticky(lycon, block);
+        return;
+    }
     if (!block->position) return;
 
     ViewElement* scroll_ancestor = NULL;
@@ -421,7 +441,23 @@ void layout_apply_sticky_positions(LayoutContext* lycon, View* root) {
     if (!lycon || !root) return;
     bool saved_defer = lycon->defer_sticky_positioning;
     lycon->defer_sticky_positioning = false;
-    layout_apply_sticky_positions_recursive(lycon, root);
+    if (lycon->deferred_sticky_blocks) {
+        ViewBlock* root_block = root->is_block() ? lam::view_require_block(root) : nullptr;
+        if (root_block && root_block->position &&
+            root_block->positionp()->position == CSS_VALUE_STICKY) {
+            layout_sticky_positioned(lycon, root_block);
+        }
+        for (int index = 0; index < lycon->deferred_sticky_blocks->length; index++) {
+            ViewBlock* block = (ViewBlock*)lycon->deferred_sticky_blocks->data[index];
+            if (block && block->position &&
+                block->positionp()->position == CSS_VALUE_STICKY) {
+                layout_sticky_positioned(lycon, block);
+            }
+        }
+    } else {
+        // allocation failure keeps the complete tree walk as the safe fallback.
+        layout_apply_sticky_positions_recursive(lycon, root);
+    }
     lycon->defer_sticky_positioning = saved_defer;
 }
 // find the root view used for static/absolute/fixed containing-block fallback.

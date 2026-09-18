@@ -77,6 +77,7 @@ void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
 // and so keeps batch output free of handler side effects. Self-gating on
 // DomDocument::behavior_init_pending, so calling it on a quiet document is free.
 void radiant_run_behavior_init(struct DomDocument* doc);
+void radiant_queue_behavior_init_control(struct DomDocument* doc, View* view);
 #endif
 
 typedef enum  {
@@ -3213,6 +3214,7 @@ View* focus_get_visible(DocState* state);
 
 // ES30: package-owned autofocus selection. Native retains the focus write,
 // focus-event emission point, queued scroll geometry, and paint invalidation.
+bool radiant_document_has_autofocus(struct DomElement* root);
 void radiant_run_autofocus(struct DomDocument* doc);
 
 // ============================================================================

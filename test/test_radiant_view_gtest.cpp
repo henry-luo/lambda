@@ -120,6 +120,26 @@ static bool test_radiant_view_file_contains(const char* path, const char* needle
     return found;
 }
 
+static ShellResult test_radiant_view_run_logged_headless(const char* page,
+                                                         const char* event_path,
+                                                         const ShellEnvEntry* env) {
+    const char* args[7] = {};
+    int arg_count = 0;
+    args[arg_count++] = "./lambda.exe";
+    args[arg_count++] = "view";
+    args[arg_count++] = page;
+    if (event_path) {
+        args[arg_count++] = "--event-file";
+        args[arg_count++] = event_path;
+    }
+    args[arg_count++] = "--headless";
+    args[arg_count] = NULL;
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    return shell_exec("./lambda.exe", args, &options);
+}
+
 static void test_radiant_view_run_case(size_t index) {
     RadiantViewCaseResult* result = &g_radiant_view_results[index];
     const RadiantViewCase* view_case = &g_radiant_view_cases[index];
@@ -337,23 +357,113 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
         {"LAMBDA_LOG_FILE", view_log},
         {NULL, NULL},
     };
-    const char* args[] = {
-        "./lambda.exe", "view", "test/html/image_cache_promotion.html", "--headless", NULL,
-    };
-    ShellOptions options = {0};
-    options.env = env;
-    options.merge_stderr = true;
     // Per-child environment keeps this diagnostic isolated from parallel workers.
-    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        "test/html/image_cache_promotion.html", nullptr, env);
     ASSERT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     shell_result_free(&shell_result);
+    // The window releases its runtime before CLI teardown records this result.
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "view command completed with result: 0"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         view_log,
         "[image] Decoded local image on demand: 64x42 (intrinsic 640x427, target 60x40)"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         view_log,
         "[image] Decoded local image on demand: 640x427 (intrinsic 640x427, target 640x427)"));
+}
+
+TEST(RadiantViewTest, ReportsViewCompletionAtNoticeLevel) {
+    const char* page = "test/layout/data/page/sample1.html";
+    const char* view_log = "./temp/test_radiant_view_notice_completion_log.txt";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "view command completed with result: 0"));
+}
+
+TEST(RadiantViewTest, InitializesScriptScreenFromHostViewport) {
+    const char* page = "test/html/js_screen_viewport_preamble.html";
+    const char* events = "test/html/js_screen_viewport_preamble_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, nullptr);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, DefersPrecommitGeometryReadInHostDrivenView) {
+    const char* page = "test/html/js_precommit_geometry_snapshot.html";
+    const char* events = "test/html/js_precommit_geometry_snapshot_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, nullptr);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, DefersCrossOriginIframeNavigationOutsideLayout) {
+    const char* page = "test/html/iframe_cross_origin_deferred.html";
+    const char* view_log = "./temp/test_radiant_view_cross_origin_iframe_log.txt";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "DEBUG"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "iframe: deferring cross-origin navigation"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "view command completed with result: 0"));
+}
+
+TEST(RadiantViewTest, KeepsModuleCodeAliveAcrossBrowserTaskSync) {
+    const char* page = "test/html/js_module_task_lifetime.html";
+    const char* output = "./temp/test_radiant_module_task_lifetime.svg";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(
+        "test/html/js_module_task_lifetime_source.js"));
+    ASSERT_TRUE(test_radiant_view_file_readable(
+        "test/html/js_module_task_lifetime_consumer.js"));
+    test_radiant_view_ensure_temp_dir();
+
+    const char* args[] = {
+        "./lambda.exe", "render", page, "-o", output, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    // The second module imports a callable exported before browser-global sync.
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "module-code-alive"));
 }
 
 TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
