@@ -1346,6 +1346,28 @@ TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, StaticModuleHonorsRequestedAstBackend) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "export const answer = 42;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+        "ast-module-backend-setup.js", NULL)));
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_module_to_mir(&runtime, source,
+        "ast-module-backend.mjs");
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("answer")), flt2it(42.0)).item, b2it(true));
+    JsRuntimeState* state = js_runtime_state_for(runtime.eval_context);
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(js_code_store_count(&state->code_store), 0);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, PreservesLiveBindingsThroughNamedReexports) {
     Runtime runtime = {};
     runtime_init(&runtime);

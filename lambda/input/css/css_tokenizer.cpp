@@ -747,7 +747,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
     // Token density is far below one token per byte on real stylesheets. The
     // former length-sized reservation kept a 64-byte slot for every source
     // byte in the document pool after parsing had completed.
-    size_t token_capacity = 256;
+    size_t token_capacity = 8;
     CssToken* token_array = static_cast<CssToken*>(pool_alloc(
         tokenizer->pool, sizeof(CssToken) * token_capacity));
     if (!token_array) {
@@ -766,7 +766,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
         // EOF token. The array has no published aliases while tokenizing, so
         // pool_realloc can grow it without retaining prior generations.
         if (!lam::pool_grow_array(tokenizer->pool, &token_array, &token_capacity,
-                                  token_count + 3, 256)) {
+                                  token_count + 3, 8)) {
             return 0;
         }
         // Skip leading whitespace and track it
