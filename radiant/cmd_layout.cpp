@@ -1524,6 +1524,8 @@ struct CssCascadeMemorySnapshot {
     PoolStats work_pool;
     uint64_t css_live_bytes;
     uint64_t css_reserved_bytes;
+    uint64_t condition_evaluations;
+    uint64_t condition_cache_hits;
     StyleEpochStats style_epoch;
 };
 
@@ -1543,13 +1545,18 @@ static long long css_cascade_memory_delta(uint64_t after, uint64_t before) {
 }
 
 static CssCascadeMemorySnapshot css_cascade_memory_snapshot(DomDocument* doc,
-                                                             Pool* work_pool) {
+                                                             Pool* work_pool,
+                                                             CssEngine* engine) {
     CssCascadeMemorySnapshot snapshot = {};
     if (!doc) return snapshot;
 
     pool_get_detailed_stats(doc->document_pool, &snapshot.document_pool);
     pool_get_detailed_stats(work_pool, &snapshot.work_pool);
     style_epoch_get_stats(doc, &snapshot.style_epoch);
+    if (engine) {
+        snapshot.condition_evaluations = engine->condition_evaluations;
+        snapshot.condition_cache_hits = engine->condition_cache_hits;
+    }
 
     // The document context excludes process-global CSS caches while retaining
     // every CSS-role allocator that belongs to this page load.
@@ -1575,7 +1582,11 @@ static void log_css_cascade_memory(const char* phase,
         "document_live_delta=%lld work_live_delta=%lld css_live=%llu css_reserved=%llu "
         "css_live_delta=%lld canonical_live=%zu canonical_reserved=%zu "
         "canonical_live_delta=%lld epoch=%llu entries=%llu trees=%llu bound_refs=%llu "
-        "lookups=%llu hits=%llu misses=%llu",
+        "payloads=%llu payload_refs=%llu bound_entries=%llu cold_entries=%llu "
+        "cold_bytes=%zu cold_cap=%zu evictions=%llu "
+        "lookups=%llu hits=%llu misses=%llu condition_evaluations=%llu "
+        "condition_cache_hits=%llu condition_evaluations_delta=%lld "
+        "condition_cache_hits_delta=%lld",
         phase ? phase : "load",
         after->document_pool.live_bytes,
         after->document_pool.reserved_bytes,
@@ -1594,9 +1605,22 @@ static void log_css_cascade_memory(const char* phase,
         (unsigned long long)epoch->canonical_entry_count,
         (unsigned long long)epoch->canonical_tree_count,
         (unsigned long long)epoch->bound_element_refs,
+        (unsigned long long)epoch->current_payload_count,
+        (unsigned long long)epoch->current_payload_ref_count,
+        (unsigned long long)epoch->current_bound_entry_count,
+        (unsigned long long)epoch->current_unbound_entry_count,
+        epoch->current_unbound_bytes,
+        epoch->cold_cache_cap_bytes,
+        (unsigned long long)epoch->cache_eviction_count,
         (unsigned long long)epoch->lookup_count,
         (unsigned long long)epoch->hit_count,
-        (unsigned long long)epoch->miss_count);
+        (unsigned long long)epoch->miss_count,
+        (unsigned long long)after->condition_evaluations,
+        (unsigned long long)after->condition_cache_hits,
+        css_cascade_memory_delta(after->condition_evaluations,
+                                 before->condition_evaluations),
+        css_cascade_memory_delta(after->condition_cache_hits,
+                                 before->condition_cache_hits));
 }
 
 static void apply_load_css_cascade(DomDocument* dom_doc,
@@ -1607,7 +1631,7 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
     if (!dom_doc || !dom_root || !pool || !css_engine) return;
     bool profile_memory = css_cascade_memory_profile_enabled();
     CssCascadeMemorySnapshot before = {};
-    if (profile_memory) before = css_cascade_memory_snapshot(dom_doc, pool);
+    if (profile_memory) before = css_cascade_memory_snapshot(dom_doc, pool, css_engine);
 
     auto t_cascade_start = time_now_ns();
     layout_apply_css_stylesheets(
@@ -1618,7 +1642,7 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
              time_elapsed_ms_f(t_cascade_start, time_now_ns()));
 
     if (profile_memory) {
-        CssCascadeMemorySnapshot after = css_cascade_memory_snapshot(dom_doc, pool);
+        CssCascadeMemorySnapshot after = css_cascade_memory_snapshot(dom_doc, pool, css_engine);
         log_css_cascade_memory(phase, &before, &after);
     }
 }

@@ -1,4 +1,4 @@
-// Release-page regression for CSS cascade ownership and reuse.
+// Standard-host page regression for CSS cascade ownership and reuse.
 
 #include <gtest/gtest.h>
 
@@ -36,6 +36,11 @@ struct CssMemorySample {
     int64_t canonical_live_delta;
     uint64_t entries;
     uint64_t bound_refs;
+    uint64_t payloads;
+    uint64_t payload_refs;
+    uint64_t bound_entries;
+    uint64_t cold_entries;
+    uint64_t cold_bytes;
 };
 
 struct CssMemoryBaseline {
@@ -47,6 +52,11 @@ struct CssMemoryBaseline {
     uint64_t canonical_live_delta;
     uint64_t entries;
     uint64_t bound_refs;
+    uint64_t payloads;
+    uint64_t payload_refs;
+    uint64_t bound_entries;
+    uint64_t cold_entries;
+    uint64_t cold_bytes;
 };
 
 static const CssMemoryCase k_css_memory_cases[] = {
@@ -107,7 +117,12 @@ static bool css_memory_parse_sample(const char* line, CssMemorySample* sample) {
         css_memory_parse_uint64(line, "canonical_live=", &sample->canonical_live) &&
         css_memory_parse_int64(line, "canonical_live_delta=", &sample->canonical_live_delta) &&
         css_memory_parse_uint64(line, "entries=", &sample->entries) &&
-        css_memory_parse_uint64(line, "bound_refs=", &sample->bound_refs);
+        css_memory_parse_uint64(line, "bound_refs=", &sample->bound_refs) &&
+        css_memory_parse_uint64(line, "payloads=", &sample->payloads) &&
+        css_memory_parse_uint64(line, "payload_refs=", &sample->payload_refs) &&
+        css_memory_parse_uint64(line, "bound_entries=", &sample->bound_entries) &&
+        css_memory_parse_uint64(line, "cold_entries=", &sample->cold_entries) &&
+        css_memory_parse_uint64(line, "cold_bytes=", &sample->cold_bytes);
 }
 
 static bool css_memory_read_samples(CssMemorySample* initial,
@@ -154,12 +169,18 @@ static bool css_memory_read_baseline(const char* case_name, const char* phase,
         unsigned long long canonical_live_delta = 0;
         unsigned long long entries = 0;
         unsigned long long bound_refs = 0;
+        unsigned long long payloads = 0;
+        unsigned long long payload_refs = 0;
+        unsigned long long bound_entries = 0;
+        unsigned long long cold_entries = 0;
+        unsigned long long cold_bytes = 0;
         int field_count = sscanf(line,
-            "%95s %31s %llu %llu %llu %llu %llu %llu %llu %llu",
+            "%95s %31s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
             name, recorded_phase, &document_live, &document_live_delta,
             &work_live_delta, &css_live, &canonical_live, &canonical_live_delta,
-            &entries, &bound_refs);
-        if (field_count != 10 || strcmp(name, case_name) != 0 ||
+            &entries, &bound_refs, &payloads, &payload_refs, &bound_entries,
+            &cold_entries, &cold_bytes);
+        if (field_count != 15 || strcmp(name, case_name) != 0 ||
             strcmp(recorded_phase, phase) != 0) {
             continue;
         }
@@ -171,6 +192,11 @@ static bool css_memory_read_baseline(const char* case_name, const char* phase,
         out_baseline->canonical_live_delta = (uint64_t)canonical_live_delta;
         out_baseline->entries = (uint64_t)entries;
         out_baseline->bound_refs = (uint64_t)bound_refs;
+        out_baseline->payloads = (uint64_t)payloads;
+        out_baseline->payload_refs = (uint64_t)payload_refs;
+        out_baseline->bound_entries = (uint64_t)bound_entries;
+        out_baseline->cold_entries = (uint64_t)cold_entries;
+        out_baseline->cold_bytes = (uint64_t)cold_bytes;
         found = true;
         break;
     }
@@ -220,6 +246,16 @@ static void css_memory_expect_within_baseline(const CssMemoryCase* test_case,
         << test_case->name << " " << phase << " canonical recipe entries";
     EXPECT_LE(actual->bound_refs, baseline->bound_refs)
         << test_case->name << " " << phase << " canonical style bindings";
+    EXPECT_LE(actual->payloads, baseline->payloads)
+        << test_case->name << " " << phase << " immutable declaration payloads";
+    EXPECT_LE(actual->payload_refs, baseline->payload_refs)
+        << test_case->name << " " << phase << " immutable declaration payload bindings";
+    EXPECT_LE(actual->bound_entries, baseline->bound_entries)
+        << test_case->name << " " << phase << " currently bound canonical entries";
+    EXPECT_LE(actual->cold_entries, baseline->cold_entries)
+        << test_case->name << " " << phase << " retained cold canonical entries";
+    EXPECT_LE(actual->cold_bytes, baseline->cold_bytes)
+        << test_case->name << " " << phase << " retained cold canonical bytes";
 }
 
 TEST(CssCascadeMemory, PageLoadAndRecascadeStayWithinBaseline) {

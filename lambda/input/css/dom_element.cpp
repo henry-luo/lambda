@@ -431,6 +431,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         if (element->specified_style_shared()) {
             style_epoch_unbind_element(element);
         } else if (element->specified_style_borrowed()) {
+            style_tree_release_borrow(element->specified_style);
             element->specified_style = nullptr;
             element->mark_specified_style_owned();
         } else if (element->specified_style) {
@@ -552,6 +553,7 @@ void dom_element_clear(DomElement* element) {
     } else if (element->specified_style_borrowed()) {
         // A generated pseudo box may discard its view of the source tree, but
         // it must never clear declarations owned by the originating element.
+        style_tree_release_borrow(element->specified_style);
         element->specified_style = style_tree_create(element->doc->document_pool);
         element->mark_specified_style_owned();
     } else if (element->specified_style) {
@@ -570,6 +572,32 @@ void dom_element_clear(DomElement* element) {
     // The pool will handle cleanup
 }
 
+static bool dom_element_clear_custom_properties(DomElement* element,
+                                                bool remove_inline) {
+    if (!element || !element->doc) return false;
+    bool removed = false;
+    CssCustomProp** slot = &element->css_variables;
+    while (*slot) {
+        CssCustomProp* prop = *slot;
+        bool is_inline = prop->declaration &&
+            prop->declaration->specificity.inline_style != 0;
+        if (is_inline != remove_inline) {
+            slot = &prop->next;
+            continue;
+        }
+        *slot = prop->next;
+        // Stylesheet cascade clones own only their record. Their source payload
+        // remains in the stylesheet pool, so retiring the record is safe here.
+        if (prop->declaration && prop->declaration->tree_owned_record &&
+            !prop->declaration->owns_payload) {
+            pool_free(element->doc->document_pool, prop->declaration);
+        }
+        pool_free(element->doc->document_pool, prop);
+        removed = true;
+    }
+    return removed;
+}
+
 void dom_element_clear_cascaded_styles(DomElement* element) {
     if (!element) return;
     if (!element->doc) {
@@ -579,7 +607,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         return;
     }
 
-    bool changed = false;
+    bool changed = dom_element_clear_custom_properties(element, false);
     if (element->specified_style_shared()) {
         // Canonical trees never contain inline declarations, so detaching is
         // sufficient and avoids materializing declarations that are discarded.
@@ -598,7 +626,14 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
             changed = style_tree_remove_non_inline_declarations(
                 element->specified_style);
         } else if (!style_tree_is_empty(element->specified_style)) {
-            style_tree_clear(element->specified_style);
+            // The principal specified tree has no registered borrowers. Replace
+            // it as one exclusive owner so a full recascade cannot retain the
+            // discarded declaration graph until document teardown.
+            StyleTree* replacement = style_tree_create(element->doc->document_pool);
+            if (!replacement) return;
+            style_tree_destroy_owned(element->specified_style);
+            element->specified_style = replacement;
+            element->mark_specified_style_owned();
             changed = true;
         }
     } else {
@@ -615,6 +650,15 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
     if (!element) return;
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+    } else if (element->specified_style_borrowed()) {
+        if (element->specified_style == style) {
+            element->set_styles_resolved(false);
+            element->set_needs_style_recompute(true);
+            return;
+        }
+        style_tree_release_borrow(element->specified_style);
+        element->specified_style = nullptr;
+        element->mark_specified_style_owned();
     } else if (!element->specified_style_borrowed() && element->specified_style &&
                element->specified_style != style) {
         style_tree_destroy_owned(element->specified_style);
@@ -622,7 +666,10 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
     // Generated pseudo elements are views over their source declarations; the
     // source element remains the sole owner across view retirement and rebuild.
     element->specified_style = style;
-    if (style) element->mark_specified_style_borrowed();
+    if (style) {
+        style_tree_acquire_borrow(style);
+        element->mark_specified_style_borrowed();
+    }
     else element->mark_specified_style_owned();
     // Borrowing changes the cascade input. A retained generated box may have
     // just inherited its host's font, so it must reapply its own declarations.
@@ -638,6 +685,7 @@ void dom_element_destroy(DomElement* element) {
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
     } else if (element->specified_style_borrowed()) {
+        style_tree_release_borrow(element->specified_style);
         element->specified_style = nullptr;
         element->mark_specified_style_owned();
     } else if (element->specified_style) {
@@ -668,6 +716,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
     } else if (element->specified_style_borrowed()) {
+        style_tree_release_borrow(element->specified_style);
         element->specified_style = nullptr;
         element->mark_specified_style_owned();
     } else if (element->specified_style) {
@@ -681,17 +730,12 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_release_cached_id(element);
     dom_element_release_cached_classes(element);
     dom_element_clear_synthetic_attributes(element);
-    CssCustomProp* variable = element->css_variables;
-    while (variable) {
-        CssCustomProp* next = variable->next;
-        pool_free(element->doc->document_pool, variable);
-        variable = next;
-    }
-    element->css_variables = nullptr;
+    dom_element_clear_custom_properties(element, true);
+    dom_element_clear_custom_properties(element, false);
     if (element->ext) {
         for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
             if (element->ext->pseudo_styles[kind]) {
-                style_tree_destroy_owned(element->ext->pseudo_styles[kind]);
+                style_tree_retire_borrow_source(element->ext->pseudo_styles[kind]);
                 element->ext->pseudo_styles[kind] = nullptr;
             }
         }
@@ -806,7 +850,8 @@ static bool dom_element_clear_inline_style_declarations(DomElement* element) {
         return false;
     }
     if (!style_epoch_ensure_owned(element)) return false;
-    return style_tree_remove_inline_declarations(element->specified_style);
+    bool removed = style_tree_remove_inline_declarations(element->specified_style);
+    return dom_element_clear_custom_properties(element, true) || removed;
 }
 
 static void dom_element_attribute_did_set(DomElement* element,
@@ -1439,6 +1484,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         prop->value = declaration->value;
         prop->value_text = declaration->value_text;
         prop->value_text_len = declaration->value_text_len;
+        prop->declaration = declaration;
         prop->next = element->css_variables;
         element->css_variables = prop;
 
@@ -1524,13 +1570,22 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
 
     bool cleared = false;
     for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
-        StyleTree* style = element->ext->pseudo_styles[kind];
-        if (style) {
-            // Pseudo rules share the base cascade epoch, so stale :hover
-            // declarations must not survive into the next state.
+        StyleTree** slot = &element->ext->pseudo_styles[kind];
+        StyleTree* style = *slot;
+        if (!style) continue;
+        StyleTree* replacement = style_tree_create(element->doc->document_pool);
+        if (!replacement) {
+            // Preserve the old in-place reset only when publication of a new
+            // tree fails; generated boxes must still see valid declarations.
             style_tree_clear(style);
             cleared = true;
+            continue;
         }
+        *slot = replacement;
+        // Retained generated boxes still borrow `style`.  Its declaration graph
+        // becomes reclaimable as each box rebinds or leaves the view tree.
+        style_tree_retire_borrow_source(style);
+        cleared = true;
     }
     return cleared;
 }

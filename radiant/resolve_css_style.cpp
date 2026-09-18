@@ -1449,13 +1449,16 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
     while (element) {
         // Check if this element has CSS variables
         if (element->css_variables) {
-            CssCustomProp* var = element->css_variables;
-            while (var) {
-                if (css_custom_property_name_matches(var->name, var_name)) {
-                    return var->value;
+            CssCustomProp* winner = nullptr;
+            for (CssCustomProp* var = element->css_variables; var; var = var->next) {
+                if (!css_custom_property_name_matches(var->name, var_name)) continue;
+                if (!winner || !winner->declaration || !var->declaration ||
+                    css_declaration_cascade_compare(var->declaration,
+                                                    winner->declaration) > 0) {
+                    winner = var;
                 }
-                var = var->next;
             }
+            if (winner) return winner->value;
         }
         if (element->parent && element->parent->is_element()) {
             element = lam::dom_require<DOM_NODE_ELEMENT>(element->parent);

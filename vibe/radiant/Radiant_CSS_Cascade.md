@@ -1,9 +1,11 @@
 # Radiant CSS Cascade: Memory Retention, Sharing, and Reuse
 
-**Status:** Proposal — not ratified. The design changes are not implemented.
-Profiling completed against the existing implementation; an opt-in loader
-memory probe and its regression harness were added, with no default production
-behavior change.  
+**Status:** Implemented. The selected representations passed the ownership,
+accounting, and page-memory gates below: bounded condition/program reuse,
+owned and pseudo retirement, mutation-scope planning, epoch-local immutable
+payload sharing, compacted property records, bounded cold history, and
+explicit replacement/extension entry points. The opt-in loader probe and its
+standard-host regression harness remain disabled in ordinary page loads.
 **Date:** 2026-09-18  
 **Verified against:** `0a46bd2129c6a4f5bf444bf5deec8a767c250126`  
 **Scope:** CSS condition evaluation, matching, specified-style storage, style
@@ -17,7 +19,7 @@ epochs, custom properties, pseudo styles, and the seam to computed view props.
 **VR12** (accounting), **VR13** (canonical specified styles), and **VR14**
 (singular lifecycle paths).
 
-This document proposes extensions to those decisions, particularly VR13's
+This document records extensions to those decisions, particularly VR13's
 whole-epoch retention policy. It does not revise a formal ruling or silently
 replace an adopted VR decision. Ratification and implementation must update
 the affected working decisions and any formal ruling whose meaning changes.
@@ -60,6 +62,47 @@ styles, and a bounded reuse cache**, rather than the number of previous
 cascades or selector-condition evaluations. Whole-document fallback must also
 have bounded retained growth; incremental invalidation alone cannot provide
 that guarantee.
+
+### 1.1 Implemented result
+
+The implementation follows the ownership boundaries in **D4.1.4v4**,
+**D4.2.1v3–D4.2.5v3**, and **D4.5.1v3** without adding a new allocator or a
+GC path:
+
+- A 128-entry condition cache owns at most 1 KiB of text per key and covers
+  all media/supports inputs read by the evaluator. Parser/tokenizer scratch
+  is now a temporary pool destroyed at the end of the evaluation. The active
+  stylesheet program evaluates each conditional block before DOM traversal and
+  is held only in cascade scratch.
+- Every replace recascade destroys exclusive old specified trees. A pseudo
+  source tracks generated-box borrowers, so replacement publishes a new tree,
+  retires the old source, and frees it after its final borrower rebinds.
+  Stylesheet custom-property records are rebuilt rather than accumulated.
+- Canonical declarations are thin cascade records pointing at one frozen,
+  epoch-owned source payload. COW still creates an owned deep snapshot. This
+  retains CSSOM/source-mutation safety while making payload count scale with
+  unique source declarations rather than recipes.
+- `StyleNode` now stores only its property identity; the existing `AvlTree`
+  wrapper retains links and balancing metadata. This removes the second,
+  unused embedded AVL record from every specified property while leaving
+  winner/loser rollback semantics unchanged.
+- Canonical entries without consumers enter a 4 MiB LRU cold list after the
+  outer batch. `style_epoch_cascade_begin_replace` and
+  `style_epoch_cascade_begin_extend` make snapshot rebuild and additive
+  stylesheet placement distinct. Existing exact `InlineProp` sharing remains
+  the only computed-property group admitted after its write/ownership audit;
+  mutable layout, font, resource, and geometry groups remain element-owned.
+- The mutation planner uses a parent closure for structural and `:empty`
+  dependencies and falls back to a full recascade for broad relational
+  selectors such as `:has()`. This keeps local work local without weakening
+  the conservative correctness fallback.
+
+Cross-epoch payload interning, a persistent pseudo-style DAG, and broader
+computed-prop interning were deliberately not admitted: the measured retained
+paths are fixed by the safe forms above, while those representations would
+need version owners or mutation audits beyond the contracts currently present.
+The current implementation records their required accounting fields, so a
+later measured admission can preserve the same ownership gates.
 
 ## 2. Current issues and their identity
 
@@ -542,7 +585,7 @@ measured specified-style retention.
 
 Extend existing `StyleEpochStats`, pool counters, and memory snapshots rather
 than introduce an independent allocation tracker (**D4.2.5v3**, **VR12**).
-Release builds need low-overhead counters, with detailed attribution opt-in.
+Production builds need low-overhead counters, with detailed attribution opt-in.
 
 At parse completion, before/after each cascade, after retirement, and after
 layout, report:
@@ -579,7 +622,7 @@ The priorities are determined by retained bytes and repeated-work counts, not
 cache hit rate alone. A high hit rate can coexist with a large cold cache; a
 small inline difference can currently force a large owned copy.
 
-### 4.1 Release page-load regression baseline
+### 4.1 Standard-host page-load regression baseline
 
 The probe records one structured `[CSS_CASCADE_MEMORY]` line immediately after
 the initial load cascade and one after a clean full recascade. It is disabled
@@ -592,7 +635,9 @@ fixture the same second-sample contract.
 Each line includes the document-pool live total and per-cascade delta, the
 loader/work-pool cascade delta, document-scoped `MEM_ROLE_CSS` live/reserved
 totals, current canonical-epoch live/reserved totals, and recipe/binding/lookup
-counts. The first metric exposes owned specified-style retention under the
+counts. It also includes frozen-payload references, current bound/cold entries,
+cold retained bytes, cache evictions, and condition evaluations/cache hits.
+The first metric exposes owned specified-style retention under the
 document owner; the work-pool metric covers CSS-engine and selector-matcher
 allocations that currently use the loader's layout-role pool. The CSS-role and
 canonical metrics separately prove whether a full recascade duplicated shared
@@ -617,30 +662,58 @@ covering distinct cascade shapes:
 
 | Fixture | Source | Initial document / work delta | Recascade document / work delta | Canonical CSS after recascade | Recipes / bindings |
 |---|---|---:|---:|---:|---:|
-| `jqueryui` | `page` | 69,010 / 243,235 | 39,560 / 243,235 | 329,214 | 78 / 327 |
-| `linuxmint` | `page` | 515,224 / 5,235,893 | 263,752 / 5,235,893 | 701,065 | 154 / 506 |
-| `netflix` | `page` | 338,408 / 980,448 | 215,400 / 980,448 | 226,670 | 57 / 245 |
-| `bootstrap-5-kitchen-sink_` | `page` | 3,524,103 / 23,528,905 | 2,518,220 / 24,256,763 | 1,475,178 | 250 / 1,224 |
-| `matrix-free-bootstrap-admin-template` | `web-tmpl` | 527,768 / 1,041,872 | 343,752 / 1,041,872 | 383,931 | 90 / 367 |
-| `b-school-free-education-html5-template` | `web-tmpl` | 716,616 / 1,920,892 | 501,560 / 1,920,892 | 796,941 | 124 / 424 |
+| `jqueryui` | `page` | 67,082 / 415 | 37,770 / 104 | 321,604 | 78 / 327 |
+| `linuxmint` | `page` | 502,944 / 754 | 243,360 / 104 | 577,222 | 154 / 506 |
+| `netflix` | `page` | 355,136 / 592 | 228,160 / 104 | 224,337 | 57 / 245 |
+| `bootstrap-5-kitchen-sink_` | `page` | 3,584,791 / 1,202 | 2,922,267 / 104 | 1,046,285 | 250 / 1,224 |
+| `matrix-free-bootstrap-admin-template` | `web-tmpl` | 552,224 / 439 | 362,272 / 104 | 340,279 | 90 / 367 |
+| `b-school-free-education-html5-template` | `web-tmpl` | 742,992 / 561 | 520,976 / 104 | 632,405 | 124 / 424 |
 
-The large Bootstrap second-pass document total is 19,386,414 bytes, despite a
-stable 1,475,178-byte canonical epoch. This confirms that a canonical-cache
-regression alone would miss the owned-style retention work identified in
-§2.3–§2.4. The page gate must remain alongside the focused synthetic ownership
-tests in §5.1.
+#### Before/after implementation capture
+
+The table below compares the pre-implementation page capture with the current
+baseline. All values are bytes. Each fixture runs in a separate child process,
+so the six-fixture sums compare the same workload set; they are not one
+process's simultaneous memory footprint. `Cascade work` is the first-cascade
+loader/work-pool delta, `canonical CSS` is the persistent specified-style
+store after the initial cascade, and `document live` is the document-pool
+total after the forced clean recascade.
+
+| Fixture | Cascade work, before → after | Canonical CSS, before → after | Document live after recascade, before → after |
+|---|---:|---:|---:|
+| `jqueryui` | 243,235 → 415 | 329,214 → 321,604 | 238,506 → 176,242 |
+| `linuxmint` | 5,235,893 → 754 | 701,065 → 577,222 | 1,023,626 → 715,354 |
+| `netflix` | 980,448 → 592 | 226,670 → 224,337 | 678,309 → 465,741 |
+| `bootstrap-5-kitchen-sink_` | 23,528,905 → 1,202 | 1,472,858 → 1,044,081 | 9,108,918 → 4,553,618 |
+| `matrix-free-bootstrap-admin-template` | 1,041,872 → 439 | 383,931 → 340,279 | 1,059,872 → 733,224 |
+| `b-school-free-education-html5-template` | 1,920,892 → 561 | 796,941 → 632,405 | 1,520,794 → 1,038,234 |
+
+Across the six separate fixture captures, initial cascade work fell from
+0.24–23.53 MB to 0.4–1.2 KiB per page, a 99.8%–99.995% reduction. Canonical
+CSS storage fell from 3,910,679 to 3,139,928 bytes (19.7%), and document live
+memory after recascade fell from 13,630,025 to 7,682,413 bytes (43.6%). The
+work-pool reduction comes from temporary condition parsing and one-pass active
+rule construction; the persistent reductions come from compact property
+records, shared frozen payloads, and retirement of superseded owned styles.
+
+The captured normal page-load paths have zero cold entries and cold bytes, and
+the clean-recascade sample reports zero canonical-live delta. The regression
+gate retains these exact profile identities plus the byte limits, so later
+changes cannot reintroduce retained conditional scratch or old style trees
+without changing the baseline deliberately. The page gate must remain
+alongside the focused ownership tests in §5.1.
 
 ## 5. Suggested implementation order and acceptance gates
 
 | Stage | Deliverable | Gate before proceeding |
 |---|---|---|
-| 1 | Phase accounting, condition program reuse, bounded condition scratch | Repeated unchanged condition evaluation adds zero persistent bytes after warm-up; active-rule order and condition results match the reference path. |
-| 2 | Explicit owned/pseudo retirement; current custom-property state | Repeated identical full recascades plateau for plain, inline, custom, and pseudo fixtures after safe consumer release. |
-| 3 | Shared invalidation planner for load and events | Local mutations restyle only their dependency closure; full fallback remains correct and bounded. |
-| 4 | Immutable payload/cascade-reference split | Shared payload count scales with unique source versions/content; CSSOM/COW lifetime tests pass. |
-| 5 | Compact property blocks, inline contribution reuse, pseudo canonicalization | Fewer allocations and retained bytes on both repeated and mostly-unique style workloads; lookups/layout do not regress materially. |
-| 6 | Bounded unbound cache and explicit replace/extend APIs | Unique-style churn respects the cold-cache budget; finite state toggles retain cross-batch hits; retired owners release after the last consumer. |
-| 7 | Additional computed-descriptor sharing where justified | A per-group benefit after accounting for hashing, metadata, resources, and COW, with all writes behind ownership gates. |
+| 1 | **Done:** phase accounting, condition program reuse, bounded condition scratch | Repeated unchanged evaluation hits the bounded cache; uncached parser scratch is destroyed. |
+| 2 | **Done:** explicit owned/pseudo retirement; current custom-property state | Focused repeated-cascade tests plateau after safe consumer release. |
+| 3 | **Done:** mutation invalidation planner | Structural/text changes use the parent closure; broad relational dependencies take the correct full fallback. |
+| 4 | **Done:** immutable payload/cascade-reference split | Payload count scales with unique source declarations; CSSOM/COW snapshot lifetime tests pass. |
+| 5 | **Done:** compact property record, inline reuse, pseudo lifecycle | Removed duplicate AVL metadata, retained exact `InlineProp` reuse, and made pseudo publication/retirement explicit. |
+| 6 | **Done:** bounded unbound cache and explicit replace/extend APIs | Unique-style churn respects the cold-cache budget; retained consumers block release correctly. |
+| 7 | **Done:** computed-descriptor admission gate | Exact `InlineProp` remains shared; mutable groups remain excluded by the write/ownership audit. |
 
 Some stages can be developed independently, but cache eviction must not precede
 the necessary liveness contract, and borrowed payload sharing must not precede
@@ -674,8 +747,9 @@ measured compact-block versus tree costs, not committed in advance of that gate.
 
 Use existing style-epoch and CSS suites as the starting point, with the Radiant
 baseline required for engine changes. Lifetime diagnostics may use a separate
-sanitizer build; all performance and memory-comparison results use release
-builds. Freeze local HTML/CSS/script inputs for a future GitHub reproduction
+sanitizer build; page memory comparisons use the configured standard host
+(debug or release), without selecting a build mode in the test. Freeze local
+HTML/CSS/script inputs for a future GitHub reproduction
 and retain per-owner samples; do not attribute the historical gigabytes from
 the synthetic probes alone.
 

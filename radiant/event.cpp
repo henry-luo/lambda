@@ -5924,6 +5924,9 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
     dom_js_mutation_records_reset(doc);
 }
 
+static bool dom_js_document_has_structural_css_dependency(DomDocument* doc);
+static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc);
+
 static void dom_js_mutation_log_records(DomDocument* doc) {
 #ifndef NDEBUG
     if (!doc) return;
@@ -6023,6 +6026,12 @@ static DomElement* dom_js_record_cascade_root(DomDocument* doc,
         // Structural selectors are affected by a parent's child list, not
         // just by the inserted node. Re-cascading this subtree contains the
         // invalidation without discarding the document's retained layout.
+        node = record->parent;
+    } else if ((record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
+                record->kind == DOM_JS_MUTATION_TEXT) &&
+               dom_js_document_has_structural_css_dependency(doc)) {
+        // A class/attribute change can alter a sibling selector's result. A
+        // text change can flip :empty. Their parent contains that local closure.
         node = record->parent;
     } else {
         node = record->target ? record->target : record->parent;
@@ -6211,6 +6220,17 @@ static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc
     return false;
 }
 
+static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (dom_js_stylesheet_structural_dependency(doc->stylesheets[i]) !=
+                DOM_JS_STRUCTURAL_DEPENDENCY_NONE) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reason) {
     if (reason) *reason = "eligible";
     if (!doc || !doc->root || !doc->view_tree) {
@@ -6261,6 +6281,20 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
             // their cascade root above, so they retain incremental layout.
             if (reason) *reason = "broad-structural-css-risk";
             return false;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
+            record->kind == DOM_JS_MUTATION_TEXT) {
+            if (!checked_broad_structural_css) {
+                has_broad_structural_css =
+                    dom_js_document_has_broad_structural_css_dependency(doc);
+                checked_broad_structural_css = true;
+            }
+            if (has_broad_structural_css) {
+                // A changed descendant can change an ancestor :has() match;
+                // parent-local recascade cannot prove that closure is complete.
+                if (reason) *reason = "broad-relational-css-risk";
+                return false;
+            }
         }
     }
     return true;
