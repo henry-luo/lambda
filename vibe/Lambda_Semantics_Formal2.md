@@ -2436,11 +2436,18 @@ crashed in style teardown (`style_builder_release_all`) during this work pass ag
 same crash also reproduced on an unmodified HEAD build mid-session, so its cause was not
 pinned down.
 
-**Known cost.** Closures returned by a factory (`let add10 = make_adder(10)`) are
-statically `any`, because return inference widens a returned `fn` value. So calling one
-from `fn` context is a guarded site: `closure.ls` has 17 of them, costing about 13 instructions
-each (budget re-baselined with the reason). Keeping a returned `fn`'s signature through
-return inference would make these sites static and free again.
+**Closure factories resolve statically.** At first, a closure returned by a factory
+(`fn make_adder(n) { fn inner(x) => x + n; inner }`) was statically `any`. A functional
+block with several items was typed as an open list even when its only value item was
+`inner`, so every call through such a closure from `fn` context needed the check
+(17 sites in `closure.ls`, about 13 instructions each). Now a block whose single value
+item (`ast_content_single_value`, shared with the lowering's rule) is a *function* takes
+that function's signature. The factories return `fn`, those sites need no check, and
+`closure.ls` ends 9 instructions *below* its pre-S12.1.1v2 size. Typing *every* such
+block by its value was tried and rejected: it broke 180 tests, because the open reading
+had been masking error escapes (E208, e.g. `clamp_val` in the chart package) and lane
+assumptions. That is a separate, language-wide migration. The checks that remain are
+genuinely dynamic, such as `fn apply_twice(f, x) => f(f(x))` with an untyped `f`.
 
 Recorded in spec §11 (S11.1.5), §12 (S12.1.1v2, S12.1.4v3), Appendix B (SO28 closed, SO44
 opened), v26.0.0.

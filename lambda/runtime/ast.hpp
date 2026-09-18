@@ -797,6 +797,23 @@ static inline bool is_side_effect_stam(int node_type) {
     }
 }
 
+// A functional block's value when it has exactly one value item among its
+// declarations and side-effect statements: the lowering returns that item
+// itself (not a one-element list), so the block's static type is its type.
+// A `for` value spreads, so it keeps the open list reading. NULL otherwise.
+static inline AstNode* ast_content_single_value(AstNode* items) {
+    AstNode* value = NULL;
+    int item_count = 0;
+    for (AstNode* item = items; item; item = item->next) {
+        item_count++;
+        if (is_declaration_node(item->node_type) || is_side_effect_stam(item->node_type)) continue;
+        if (value) return NULL;
+        value = item;
+    }
+    if (!value || item_count < 2 || value->node_type == AST_NODE_FOR_EXPR) return NULL;
+    return value;
+}
+
 // S16.6.8: the pn-only constructs whose presence at a block's TOP LEVEL makes
 // the block a statement rather than an expression. Deliberately narrower than
 // `is_side_effect_stam`: `raise` is an expression (fn-land divergence) and a
