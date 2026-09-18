@@ -3,6 +3,7 @@
 // Native GC rooting is runtime policy. Keep these C++ helpers beside the
 // runtime side-stack API so value-model headers do not own collection state.
 #include "lambda-stack.h"
+#include "side_stack.h"
 
 extern "C" Context* eval_context_tls_runtime(void);
 
@@ -10,11 +11,24 @@ extern "C" Context* eval_context_tls_runtime(void);
 extern "C++" {
 #endif
 
+enum class RootFrameLifetime : uint8_t {
+    NESTED,
+    ACTIVATION,
+};
+
 class RootFrame {
     LambdaRootFrame frame_;
+    LambdaSideStackSnapshot activation_mark_;
+    bool restores_activation_;
 
 public:
-    explicit RootFrame(size_t slot_count) : frame_{} {
+    explicit RootFrame(size_t slot_count,
+            RootFrameLifetime lifetime = RootFrameLifetime::NESTED)
+        : frame_{}, activation_mark_{},
+          restores_activation_(lifetime == RootFrameLifetime::ACTIVATION) {
+        // An activation owns the pair of watermarks. Nested helpers only own
+        // their exact roots, so number homes remain valid for the caller.
+        if (restores_activation_) activation_mark_ = lambda_side_stack_snapshot();
         // Pool/arena-backed input paths have no collecting runtime, so their
         // fallback homes are safe; only a real runtime reservation may fail closed.
         if (eval_context_tls_runtime() &&
@@ -23,9 +37,14 @@ public:
         }
     }
 
-    ~RootFrame() { lambda_root_frame_end(&frame_); }
+    ~RootFrame() {
+        lambda_root_frame_end(&frame_);
+        if (restores_activation_) lambda_side_stack_restore(activation_mark_);
+    }
 
     bool valid() const { return frame_.active; }
+    uint64_t* words() { return frame_.slots; }
+    const uint64_t* words() const { return frame_.slots; }
     uint64_t* slot(size_t index) { return lambda_root_frame_slot(&frame_, index); }
     uint64_t* take_slot() { return lambda_root_frame_take_slot(&frame_); }
 

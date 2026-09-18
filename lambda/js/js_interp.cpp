@@ -5511,11 +5511,13 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     // Function declarations are hoisted into the function environment, yet
     // their closures must retain the function body's lexical environment so
     // a later same-body class/let binding remains visible when they run.
-    JsInterpEnv* env = js_interp_env_create(js_fn_ast_function(function)->vars,
-        js_fn_ast(function)->env);
+    bool elides_function_environment = js_fn_ast_elides_function_environment(function);
+    JsInterpEnv* env = elides_function_environment ? js_fn_ast(function)->env
+        : js_interp_env_create(js_fn_ast_function(function)->vars,
+            js_fn_ast(function)->env);
     JsInterpEnvRoot env_root(env);
-    if (!env || !env_root.registered) return ItemError;
-    if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
+    if (!elides_function_environment && (!env || !env_root.registered)) return ItemError;
+    if (!elides_function_environment && !(function->flags & JS_FUNC_FLAG_ARROW)) {
         env->has_lexical_this = 1;
         // the kernel bound and coerced this call's receiver before entry.
         env->lexical_this = js_get_lexical_this_binding().item;
@@ -5546,7 +5548,9 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     JsInterpEvalLocalFrame eval_local(body_env ? body_env : env,
         js_fn_ast_has_direct_eval(function));
     uint64_t* frame_this_home = lexical_this_home ? lexical_this_home
-        : (is_arrow ? &ast_body->lexical_this.item : &env->lexical_this);
+        : (is_arrow ? &ast_body->lexical_this.item : elides_function_environment
+            ? (uint64_t*)(void*)activation->items[JS_CALL_ACTIVATION_THIS]
+            : &env->lexical_this);
     JsInterpFrame frame = {js_fn_ast_script(function), env, frame_this_home,
         new_target_home, home_class_home,
         (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0, function,

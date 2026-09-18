@@ -155,6 +155,9 @@ struct JsCallableCode {
     // Parser-owned parameter shape is fixed for every closure of an AST
     // definition; activations must not rediscover it by walking the list.
     bool has_non_simple_params;
+    // This synchronous AST definition owns no function/body binding slots or
+    // observable lexical activation state, so calls may use their outer env.
+    bool elides_function_environment;
     // Script-pool code is shared by all closures from one AST definition and
     // must not be reclaimed when one GC function value dies.
     bool definition_owned;
@@ -304,6 +307,10 @@ static inline bool js_fn_ast_has_direct_eval(const JsFunction* fn) {
 static inline bool js_fn_ast_uses_arguments(const JsFunction* fn) {
     const JsCallableCode* definition = js_fn_ast_definition(fn);
     return definition && definition->uses_arguments;
+}
+static inline bool js_fn_ast_elides_function_environment(const JsFunction* fn) {
+    const JsCallableCode* definition = js_fn_ast_definition(fn);
+    return definition && definition->elides_function_environment;
 }
 static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, bound);

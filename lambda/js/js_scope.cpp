@@ -605,6 +605,21 @@ typedef TypedHashMap<JsAstCallableEntry,
     HashMapIntegralMemberKeyOps<JsAstCallableEntry, &JsAstCallableEntry::function_id>>
     JsAstCallableMap;
 
+static bool js_callable_elides_function_environment(AstFuncNode* function,
+        const JsAstFunctionFacts& facts) {
+    JsBlockNode* body = function && function->body &&
+            function->body->node_type == AST_NODE_BLOCK
+        ? (JsBlockNode*)function->body : NULL;
+    // A call activation can borrow its closure environment only when it owns
+    // no cells and no lexical state that a nested arrow/eval can observe.
+    return function && !function->is_async && !function->is_generator &&
+        !facts.has_direct_eval && !facts.has_with &&
+        !facts.has_direct_super_call && !facts.has_lexical_super_call &&
+        facts.observations == 0 &&
+        (!function->vars || !function->vars->first) &&
+        (!body || !body->vars || !body->vars->first);
+}
+
 // The Script pool owns one canonical code artifact for each indexed AST
 // function. Closures retain that artifact rather than a parallel definition row.
 JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
@@ -643,6 +658,10 @@ JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
     code->uses_arguments = facts.observations &
         JS_AST_OBSERVES_ARGUMENTS;
     code->has_non_simple_params = parameter_facts.has_non_simple_params;
+    // The canonical definition owns this static proof, avoiding repeated
+    // scope/fact walks for every closure activation (D8.2.4–D8.2.5v2).
+    code->elides_function_environment = js_callable_elides_function_environment(
+        function, facts);
     code->definition_owned = true;
     key.code = code;
     JsAstCallableMap::set(script->ast_callables, key);
