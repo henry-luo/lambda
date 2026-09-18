@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-18  
 **Status:** IN PROGRESS — Phases 1–3 and the first Phase 4/5 convergence
-slices have landed. Measurement and the remaining cross-profile slices are
+slices have landed. A strict-AST current-versus-baseline comparison is
+captured; JS sparse-find attribution and the remaining cross-profile slices are
 pending.
 **Source baseline:** `12b507e51`; measurements captured on 2026-09-18.  
 **Scope:** Lambda's boxed AST interpreter and the existing Item-based LambdaJS
@@ -127,6 +128,35 @@ JS phase probes attributed 99.16–99.97% of their pipeline time to execution,
 including library initialization. Lambda's procedural `run ... main()` probes
 reported zero `interp_exec` despite multi-second execution: repair or supplement
 that instrumentation before using it as an execution metric.
+
+### 2.3 Current comparison (2026-09-18)
+
+The [current raw samples](../../temp/interp_tune/2026-09-18_current_vs_12b507e51/raw.json),
+[current report](../../temp/interp_tune/2026-09-18_current_vs_12b507e51/report.md),
+and [interleaved JS confirmation](../../temp/interp_tune/2026-09-18_current_vs_12b507e51/js_pair_confirmation.json)
+compare the current release executable with the preserved `12b507e51` release
+binary. Every child explicitly used `LAMBDA_TIER=interp`,
+`JS_EXECUTION_BACKEND=ast`, `LAMBDA_NO_LOG=1`, and `--no-log`; this excludes
+auto-tier promotion as required by **D8.1.1v9, D8.1.3v11**. Results are
+whole-process wall-time medians, so they include parsing and setup as well as
+interpreter execution.
+
+The ten passing Lambda fixtures selected in §2.1 totalled 19.383 s versus
+21.943 s before the tuning: **11.7% lower time (1.132×)**. The largest changes
+were `richards2` (−19.5%), `richards` (−18.7%), `deltablue` (−16.4%), and
+`deltablue2` (−15.6%). This is a comparison of the complete tuning branch with
+its preserved source baseline, not an ablation that credits a particular slice.
+
+The initial five-sample JS top-ten comparison was 29.852 s versus 30.576 s
+(−2.4%), but its old and new captures were separated in time and are too noisy
+to claim a gain. A five-pair alternating confirmation instead found
+`sparse_reduce` unchanged (+0.0%), `lib_fast_diff` effectively unchanged
+(+1.2%), and `lib_moment` effectively unchanged (−0.7%); the earlier apparent
+`lib_moment` win was capture noise. `sparse_find` is a material regression
+(+21.3%) and fails the §14 investigation gate. Its callbacks bind `v`, so they
+are not admitted to the later zero-binding JS function-environment elision;
+trace its repeated Get/callback path before treating any JS interpreter slice
+as complete.
 
 ## 3. Required architecture and ownership
 
@@ -899,7 +929,7 @@ backend; preserve baseline binaries instead.
 
 | Change group | Required artifact | Status |
 |---|---|---|
-| Baseline/tooling | Frozen manifest, execution evidence, raw samples and failure ledger | Not started |
+| Baseline/tooling | Frozen manifest, execution evidence, raw samples and failure ledger | Partial; preserved baseline and current strict-AST samples captured |
 | Phase 1: Lambda literal decoding | Per-primary prepared payloads; AST literal smoke tests pass; decode-counter and folding-on/off matrix remain | Implemented; measurement gate pending |
 | Phase 1: JS literal reuse | Realm-owned immutable cache; repeated-use, GC and heap-replacement tests pass; materialization/parse deltas remain | Implemented; measurement gate pending |
 | Linked names/index route | Activation-local Lambda member links; existing JS property-lane audit; identity/order tests and name-work deltas | Partial; sparse/index counter gate pending |
@@ -908,7 +938,7 @@ backend; preserve baseline binaries instead.
 | JS local slots | Canonical zero-slot eligibility proof and escaped-closure regression; exact split item/scalar storage and allocation deltas | Partial; only empty function records elided |
 | Residual primitive guards | Profile evidence, exact guards, semantic edge-case tests | Conditional |
 | Sparse/regex runtime tracks | Separate algorithm proofs and performance tables | Separate follow-ups |
-| Closeout | Full correctness delta, per-language performance/memory report, final source map | Not started |
+| Closeout | Full correctness delta, per-language performance/memory report, final source map | Partial; Lambda report captured; JS sparse-find regression outstanding |
 
 Before marking complete:
 
