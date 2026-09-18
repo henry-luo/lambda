@@ -387,7 +387,7 @@ A store costs an indirection on every access, so use it only for the shape that 
 
 This is not a Lambda quirk. Arena-plus-index is how the same programs are written in Rust without `Rc<RefCell<_>>`, in entity-component-system game engines, and in Swift with structs. What you get in exchange is worth the indirection: because your state is a flat table rather than a cyclic object graph, it stays comparable with `==`, printable, and serializable at any point — you can dump the whole scheduler to JSON mid-run, which a graph of mutable references can never do.
 
-> **Implementation status.** Copy-on-assignment for bindings, insertion capture (`S9.3.1`), and plain-parameter snapshots (`S9.1.3`) are enforced on both tiers. `var` is the sole write-through construct; write it wherever a procedure is meant to change its caller's value. The implementation record is [LR12-R9](<../vibe/Lambda_Issue_Ledger(fixed).md#lr12-r9>).
+> **Implementation status.** Copy-on-assignment for bindings, insertion capture (`S9.3.1`), and plain-parameter snapshots (`S9.1.3`) are enforced on both tiers. `var` is the sole write-through construct; write it wherever a procedure is meant to change its caller's value. The implementation record is [LR12-R9](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-r9>).
 
 ---
 

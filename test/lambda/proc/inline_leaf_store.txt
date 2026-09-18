@@ -1,0 +1,8 @@
+pair=[0, 5, 0, 0] [9, 6, 9, 9]
+bump=[0, 6, 0, 0]
+flags=[false, true, true, false]
+cow=[77, 2, 3] [1, 2, 3]
+nested=[0, 10, 20, 9] [1, 11, 21, 0]
+oob=[1, 2]
+done
+

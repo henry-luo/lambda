@@ -1,0 +1,7 @@
+stored=[inf, 2, -inf]
+copied=[0, inf, -inf]
+loop=[inf, 2, -inf]
+after_oob=[0, inf, -inf]
+float=[inf, 2] [0, inf]
+done
+

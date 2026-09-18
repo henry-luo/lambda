@@ -6,7 +6,7 @@
 > and the retired Outstanding rollup's design gaps (§15).
 >
 > **This is the only active issue ledger in `vibe/`.** Fixed and obsolete records
-> are archived in the sibling [fixed issue ledger](<Lambda_Issue_Ledger(fixed).md>).
+> are archived in the sibling [fixed issue ledger](<Lambda_Issue_Ledger (fixed).md>).
 > Every former sibling was reviewed on 2026-08-25 and retired to `vibe/impl/`;
 > each keeps its detail and evidence, while its live residue is indexed here.
 > Add new issues here, not to the fixed archive or a retired archive. This is
@@ -26,7 +26,7 @@ Every live issue below was re-checked against the tree at `c568f0f93`. Three out
 |---|---|
 | **OPEN** | Reproduced in current source; `file:line` anchors re-resolved. |
 | **PARTIAL** | Some sub-claims fixed, a real residue remains. The residue is stated. |
-| **RESOLVED** | Verified fixed or removed; moved to the [fixed issue ledger](<Lambda_Issue_Ledger(fixed).md>). |
+| **RESOLVED** | Verified fixed or removed; moved to the [fixed issue ledger](<Lambda_Issue_Ledger (fixed).md>). |
 
 ### Second pass — 2026-08-25 (sibling ledgers)
 
@@ -34,7 +34,7 @@ Every live issue below was re-checked against the tree at `c568f0f93`. Three out
 
 | Doc | Result |
 |---|---|
-| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR_12 #8, now resolved and moved to [LR12-R8](<Lambda_Issue_Ledger(fixed).md#lr12-r8>). |
+| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR_12 #8, now resolved and moved to [LR12-R8](<Lambda_Issue_Ledger (fixed).md#lr12-r8>). |
 | `impl/Lambda_Issue_Type_Support (retired).md` | TS-1, TS-2, TS-7 verified **FIXED**; TS-5's dead-code half fixed; TS-9's C16 implementation has landed. TS-6, TS-8 confirmed open; TS-3, TS-4 open pending measurement → §14. |
 | `Lambda_Issues8 (retired).md` | **All 28 entries triaged; 22 re-tested.** 17 fixed/closed, 9 open or partial (§14), 4 not re-tested (Radiant-retained, Structurizr fixtures, and an incremental-release build issue — each needs a fixture outside the core runtime). Earlier note: **Fixed:** unbraced scalar `if` in a block body; map literal after `if` (S16.4.1v2); multiline iterator + `where`; `list` as a for-binding (now a clear diagnostic); the double-quoted-key error cascade. **Ruled not a defect:** double-quoted map keys — the doc was wrong and is corrected. **Does not reproduce:** recursive params overwritten after descent. **Still open → §14:** dynamic map spread, element attribute spread, one-line Mark comprehensions, and the weak double-quoted-key diagnostic. |
 | `Lambda_Issues5 (retired).md` | 7 entries re-tested. **Fixed:** postfix `^` in `let` (#4), chained comparisons (#5), string slicing (#11), `if`-expression value in a `pn` (#15), and §23's inline-`if` attribute value. **By design, not defects:** element-wise list `+` (#1), `let` reassignment rejected in a `pn` (#10). **Still open:** §23's attribute spread → §14. |
@@ -167,7 +167,7 @@ configure, and run` (`lambda/main.cpp:3818`).
 `PROFILE_MAX_SCRIPTS` 64 (`runner.cpp:213`) and `PROFILE_PATH_MAX` 512 (`:214`)
 still silently drop rows and truncate paths (`:281`, `:291`).
 *Residue only:* `PROFILE_MAX_IMPORT_LEVELS` is gone along with the parallel
-import-level batching (see [LR01-R1](<Lambda_Issue_Ledger(fixed).md#lr01-r1>)).
+import-level batching (see [LR01-R1](<Lambda_Issue_Ledger (fixed).md#lr01-r1>)).
 
 <a id="lr01-6"></a>**LR01-6 · Fixed and non-reentrant static buffers · OPEN**
 Module BSS name `char buf[256]` (`runner.cpp:565`); REPL synthetic path `char
@@ -300,7 +300,7 @@ every use fails to parse.
 (`lambda/lambda-data.hpp:346`–`347`) bound the per-map hash table; on saturation
 lookups silently fall back to the O(n) shape chain. `NAME_POOL_SYMBOL_LIMIT` 32
 (`lambda/lambda.h:77`) and `LAMBDA_TCO_MAX_ITERATIONS` 1000000 (`:83`) are
-likewise fixed. `ArrayNumShape.ndim` is bounded 1..32 — see [LR05-1](<Lambda_Issue_Ledger(fixed).md#lr05-1>).
+likewise fixed. `ArrayNumShape.ndim` is bounded 1..32 — see [LR05-1](<Lambda_Issue_Ledger (fixed).md#lr05-1>).
 
 <a id="lr03-5"></a>**LR03-5 · `it2d` / `it2b` coercions · PARTIAL**
 *Improved 2026-09-14:* `item_try_to_double` is now the fallible numeric boundary.
@@ -371,7 +371,7 @@ this sits outside the pool/GC discipline.
 
 ## 6. C transpiler — legacy C2MIR (LR_06)
 
-**All nine issues are archived in the [fixed issue ledger](<Lambda_Issue_Ledger(fixed).md#lr06-r1r9>).** The backend no longer exists in the tree.
+**All nine issues are archived in the [fixed issue ledger](<Lambda_Issue_Ledger (fixed).md#lr06-r1r9>).** The backend no longer exists in the tree.
 
 ## 7. MIR Direct transpiler & JIT (LR_07)
 
@@ -425,8 +425,8 @@ enforces its own `LAMBDA_INTERP_TCO_MAX_ITERATIONS` (`interp.cpp:5051`). A
 correctly TCO'd loop consumes no native stack, so the ceiling is a proxy for a
 proof the transpiler declines to use.
 
-*Absorbed from [LR11-R6](<Lambda_Issue_Ledger(fixed).md#lr11-r6>) /
-[LR12-R3](<Lambda_Issue_Ledger(fixed).md#lr12-r3>) on 2026-09-10:*
+*Absorbed from [LR11-R6](<Lambda_Issue_Ledger (fixed).md#lr11-r6>) /
+[LR12-R3](<Lambda_Issue_Ledger (fixed).md#lr12-r3>) on 2026-09-10:*
 `is_tco_function_safe` (`safety_analyzer.cpp:441`) computes exactly that proof —
 "every recursive call in this function is in tail position, so after the goto
 transform the frame cannot grow" — and is **declared, defined, and never
@@ -496,8 +496,8 @@ The scalar comparators enumerate numeric/datetime/string cases and return
 (`lambda/runtime/lambda-eval.cpp:1650`, `:1811`) — cross-family `<` is an error
 while cross-family `==` is `false`, the Python-style split. The former
 strict-equality and VMap key-domain residue is resolved in
-[OI-1-R1](<Lambda_Issue_Ledger(fixed).md#oi1-r1>); the conversion-failure case
-is retained as [LR04-4](<Lambda_Issue_Ledger(fixed).md#lr04-4>).
+[OI-1-R1](<Lambda_Issue_Ledger (fixed).md#oi1-r1>); the conversion-failure case
+is retained as [LR04-4](<Lambda_Issue_Ledger (fixed).md#lr04-4>).
 
 <a id="lr09-5"></a>**LR09-5 · `NULL`-pointer and unimplemented registry rows · OPEN**
 `number` is still marked `// unimplemented`
@@ -736,20 +736,26 @@ The place-copy rule should mark `row` because its place is written while the
 copy is alive, but both writes are visible through the other name. Repro:
 `temp/t29/packed_probe.ls` (`row_copy_loop`, expected 9110, prints 9944).
 
-<a id="lr12-15"></a>**LR12-15 · An out-of-range nested store is logged, not raised · OPEN**
+<a id="lr12-15"></a>**LR12-15 · An out-of-range nested store is logged, not raised · CLOSED 2026-09-18 — consolidated into [LR12-24](#lr12-24)**
 S7.1.3v2. `var m = [fill(2, 0), fill(2, 0)]; m[2][0] = 1; return 5` returns 5
 on both tiers. The store logs its failure: on JIT, a `fn_array_set` null-pointer
 message; on T0, "cow path mutation encountered a non-container child". The
 procedure continues as if nothing happened. Same for a packed matrix. Repro:
 `temp/t29/packed_probe.ls` (`oob_loop`, `oob_packed`).
 
-<a id="lr12-16"></a>**LR12-16 · JIT drops a store error in a plain-parameter callee · OPEN**
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](#lr12-24).
+
+<a id="lr12-16"></a>**LR12-16 · JIT drops a store error in a plain-parameter callee · CLOSED 2026-09-18 — consolidated into [LR12-24](#lr12-24)**
 S7.1.3v2, SI3v2. `pn store(a: int[], i: int, v: int) int { a[i] = v; return a[0] }`
 called with an out-of-range `i` returns an error value on T0. On the JIT it
 returns `a[0]`, after logging the same `fn_array_set` bounds error. The same
 store in a callee with a local root raises on both tiers. Present on the
 post-T29-3 binary. Repro: `temp/t29/oob_int.ls` (JIT prints `param_oob=false`,
 T0 `true`).
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](#lr12-24).
 
 <a id="lr12-17"></a>**LR12-17 · JIT COW facts ignored control flow; writes leaked into shared values · FIXED 2026-09-17**
 S9.1.2 / D4.4.1. Found in Tune29 §20.3, present on the Result46 binary. MIR
@@ -767,6 +773,231 @@ binding the body may share at loop entry, and `MirCowLoopJoin` joins the
 facts at loop exits. Regressions: `test/lambda/proc/cow_flow_join.ls` and
 `test/mir/lambda/tune29_handle_alias.ls` (identical on interp, jit and auto;
 forced-GC clean).
+
+<a id="lr12-18"></a>**LR12-18 · A native float return drops a raised boundary error · CLOSED 2026-09-18 — consolidated into [LR12-24](#lr12-24)**
+S7.1.3v2, SI3v2. `pn f(a: float[], i: int) float { var s: float = 1.0; s = s + a[i]; return s }`
+with an out-of-range `i` returns an error on T0 (the program aborts with E201).
+The JIT logs the same E201 and returns `nan`: the native float return lane has
+no transport for the error the assignment boundary raised. Present on v46.
+Same family as LR12-16. Repro: `temp/t30/h/err_prop.ls`. A boxed (`any`)
+return propagates correctly.
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](#lr12-24).
+
+<a id="lr12-19"></a>**LR12-19 · Literal-bounded dense loops read past a short array · FIXED 2026-09-18**
+S7.1.3v2, D4.3.1. Found in Tune30 T30-1; present on v46. For
+`while (i < 5) { … a[i] … }`, `mir_dense_loop_scan` never copied the literal
+bound into its result, so the dense guard compared each array's length with
+`-1`, which is always true. Every proven read then loaded past the end of a
+shorter array instead of yielding null: `count_lit([1, 2])` counted 0 nulls
+where T0 counts 2. Fixed by copying the literal. Once fixed, a second defect
+made the guard always false: for a literal bound it emitted
+`mulo 5, 5; bo`, MIR folds the product into a move, and the `bo` read a
+stale flag. The square is now computed at compile time. Regression
+`test/lambda/proc/dense_loop_short_array.ls`.
+
+<a id="lr12-20"></a>**LR12-20 · A dense-guard proof leaked into its fallback arm · FIXED 2026-09-18**
+S7.1.3v2. `mir_expr_may_be_null` treated a read that is provable under the
+dense guard as never null, even outside the guard-true arm. A versioned
+tree's merged result (or a guarded load) can still be the null a short array
+yields, so `s = s + a[i]` in a loop skipped the declared binding's rejection
+and produced `nan` where T0 raises E201. The proof is now used only while the
+arm assumes the guard. Regression: same fixture.
+
+<a id="lr12-21"></a>**LR12-21 · Index arithmetic over lane sentinels wrapped into a valid index · FIXED 2026-09-18**
+S7.1.3v2, S4.1.2. `mir_emit_native_index_expr` gave a leaf no validity check,
+so a sentinel lane value (`INT_LANE_INF` = `INT64_MAX`, `INT_LANE_NEG_INF` =
+`INT64_MIN+1`, `INT_LANE_NAN`, the null lane) entered the index sum as a plain
+integer: `a[x + y]` with `x = inf, y = -inf` wrapped to `a[0]` and
+`-inf + -inf` to `a[2]`, where T0 yields null. The band test sat only on the
+result, which a wrap satisfies. Each leaf that `mir_int_lane_operand_proven_in_band`
+does not prove now carries the exact three-instruction test
+`(v >> 53) + 1 <=u 1`; a sum of in-band leaves cannot wrap, so the result's
+band test is gone and the poison is `(value | mask) >>u shift` (`INT64_MAX`,
+which every bounds check rejects, including one holding a nonnegative index
+proof that skips its `< 0` test). Present since v46. Regression:
+`test/lambda/proc/index_sentinel_sum.ls`.
+
+<a id="lr12-22"></a>**LR12-22 · A raised E201 inside a JIT function yields a value instead of propagating · CLOSED 2026-09-18 — consolidated into [LR12-24](#lr12-24)**
+S4.1.2, S7.1.3v2. `pn f(data: int[], n: int, stride: int) int` whose body does
+`acc = acc + data[i] + j` with `i` out of range raises E201 on both tiers, but
+T0 abandons the caller's statement while the JIT returns `inf` and the caller
+prints it. Same family as [LR12-18](#lr12-18) (a native return lane has no
+error channel), seen here on a declared int lane. Probe:
+`temp/t30/h/tier_divergence_probe.ls` (`wide=` and `sentinel=` lines print on
+the JIT only). Pre-existing: reproduces on the Tune29 binary.
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](#lr12-24).
+
+<a id="lr12-23"></a>**LR12-23 · The interpreter's compact-int loop re-ran a partially applied iteration · FIXED 2026-09-18**
+S4.1.2. Reported as a saturation disagreement — `steps = steps + m` with `m`
+doubling gave `9007199254740991` on the JIT (the exact sum `2^53 - 1`, a legal
+int) and `inf` on T0 — but the cause was worse than saturation.
+`interp_fast_int_exec` commits each assignment as it executes it, and a value
+that leaves the compact band abandons the fast path *mid-body*; the ordinary
+evaluator then re-ran the whole iteration, so every statement that had already
+committed ran a second time. `while (i < n) { c = c + 1; m = m * K; i = i + 1 }`
+returned **4** for `n = 3`: a wrong answer with no saturation in sight. One
+iteration is now atomic — `interp_fast_int_collect_targets` records the
+register slots the body can write and a bail restores them, so the ordinary
+evaluator resumes from the state the iteration started with. Regression:
+`test/lambda/proc/loop_fast_path_bail.ls` (pre-fix T0: `bail=4`, `double=inf`,
+`guarded=25`).
+
+The second instance noted against this entry — `int(r * (r + 1) div 2)` with a
+saturating `r`, where T0 abandons the statement and the JIT prints `inf` — is
+*not* this bug. It is the error-propagation family of
+[LR12-22](#lr12-22)/[LR12-18](#lr12-18) and stays open there.
+
+<a id="lr12-24"></a>**LR12-24 · TE-15 defect containment — declaration and reassignment boundaries FIXED 2026-09-18; the remaining origination classes are OPEN**
+S7.1.3v2, S7.4.2, S7.4.3, TE-15, TE-18. Four entries were filed separately as
+JIT defects — [LR12-15](#lr12-15), [LR12-16](#lr12-16), [LR12-18](#lr12-18)
+and [LR12-22](#lr12-22). They are one missing feature, not four bugs, and this
+entry supersedes them.
+
+**The ruling.** TE-15 (`vibe/Lambda_Design_Type_Enforcement.md`, decided
+2026-08-01), as narrowed by TE-18 (2026-08-06), governs a failed deferred type
+check — exactly the E201 all four symptoms raise. Skip is a
+**declaration-boundary** mechanism: the error skips to the end of the block
+that *declares* the binding whose establishment (case 1) or assignment (case 7)
+failed, and that block evaluates to the error. `while`, `if`, plain blocks and
+`for` contribute no region of their own. The fn body is the outermost block, so
+an uncontained defect **becomes the function's result and crosses a plain `T`
+return on the unenumerated system channel** — inference must never widen a
+signature. The cross-function ABI is named in the ruling: boxed-returning calls
+carry the error in the result Item; **native-returning calls check an error
+lane — "one load-and-branch after the call, the Swift-`throws` shape"**, an
+emission-time effect bit that is *transitive in the implementation, invisible
+in types*.
+
+**What was wrong.** The JIT lost the defect entirely when the return lane was a
+native scalar: `emit_function_error_return` fell through to
+`emit_function_return`, republishing the error Item's bits through the value
+lane — `inf` from an int lane, `nan` from a float one. TE-15 anticipated
+exactly this: value-propagation through unboxed lanes was rejected because
+"today's accidental out-of-band i64 *is* [an in-band sentinel], and its
+consumer-dependent meaning is the measured divergence".
+
+**Correction to this entry's earlier text: T0 does not over-contain.** Measured
+2026-09-18 with `temp/lr1224/probe2.ls`: T0 binds the error to the caller's
+unannotated `let` (an acceptor per TE-15), answers `r is error` = true and
+`type(r)` = `error`, and runs the rest of the caller's block. The earlier claim
+that "`print("s=" ++ straight(a, 5))` emits nothing" is real but is a *different*
+question — `print` of an error-valued `++` chain renders nothing on **both**
+tiers — not a containment failure. Recorded as [LR12-25](#lr12-25), together
+with the more serious finding beside it: `string(<contained error>)` re-raises
+it as a top-level fault and terminates the script, on both tiers.
+
+**Fixed (2026-09-18) — TE-18 cases 1 and 7.** The mechanism the ruling asks for
+already existed for `T^E` bodies: `RETURN_SHAPE_NATIVE_ERROR` (shape 4) returns
+`[native, error]`, and the call site merges lane 2 into a boxed value-or-error
+join. It was gated on `TypeFunc::can_raise` alone. Three changes:
+1. `function_body_may_originate_defect` (`transpile-mir.cpp`) walks the whole
+   body — not just its top-level statements, which is all
+   `function_body_may_check_boundary` ever scanned, and which is blind for a
+   `pn` whose body is a BLOCK rather than a LIST — and reports every
+   declaration (case 1) and reassignment (case 7) boundary that emits a check.
+2. `lambda_body_return_lane` and `analyze_lambda_mir_variants` select the error
+   lane on `can_raise || may_originate_defect`, from **one** shared
+   `carries_error_lane` fact so the body and its forward-declared contract
+   cannot disagree (RV2). `em_return_shape`'s parameter was renamed off
+   `can_raise` for the same reason.
+3. The call site reads `call_variant->result.shape == RETURN_SHAPE_NATIVE_ERROR`
+   from the callee's descriptor instead of re-deriving the rule from the
+   signature (RV10: read the transport, never recreate it).
+
+The scan asks the emitter's own gates — `mir_boundary_is_redundant` and the
+newly extracted `mir_assignment_boundary_applies`, which `transpile_assign` now
+also calls so the two cannot drift. Asking a looser AST-level question instead
+cost real code: `declaration_may_check_boundary` answers "may check" for
+`var total: int = 0` (a literal carries its own `is_literal` Type), which gave
+every counted loop a lane — and with it the number-frame scratch slot the
+shape-4 epilogue spills its native result into.
+
+Pinned by `test/lambda/proc/defect_native_return_lane.{ls,txt}` — both classes
+and both native lanes (`int_acc`/`float_acc` for case 7, `read_sum` for case 1),
+plus the happy path and a clean call after the defect, identical on both tiers
+— and by `test/mir/lambda/tune26_terminal_oob_boundary.mir-check`, whose
+`expect_seq` previously required `lambda_type_check` to be followed immediately
+by `it2d` — **the sidecar was pinning the NaN republication itself**. It now
+forbids `it2d` on that arm outright.
+
+**Cost.** Static: `lambda_corpus_deltablue` module_insns 8773 → 8998 (+225,
++2.6%), `_constraint_choose_method_#` 1701 → 1744 (+43); no other ratchet probe
+moved. Runtime: **within noise** — A/B from one release binary with the
+predicate behind a temporary switch, median of 7, nine rows between −0.6% and
++0.3% (deltablue +0.1%/+0.2%, nbody −0.1%, richards −0.5%, splay −0.2%). The
+hot path gains one compare-and-branch per native call to a defect-capable
+callee, which is what TE-15 budgeted for. TE-15 still names the `may_defect`
+call-graph fixed point (D6.1.3) as what removes it, and says it "must be built
+before, not after, the routing work".
+
+Verified after the fix: baseline 5631/5634 (Lambda runtime 3527/3530), MIR
+emission 156/156, ratchet 20/20, forced-GC stress 203/203, Lambda runtime suite
+941/941. The three remaining failures are JS (`tune12_array_access`,
+`dynamic_call_invoke_entry`, `regex_bt_legacy_octal_assertion`); they are red at
+HEAD — no JS source is modified here, and the unpulled upstream commits touch
+only Radiant, CSS and the build.
+
+**Still OPEN — the other origination classes.** `emit_return_if_item_error` has
+~40 call sites; this fix covers two. Parameter admission, element and field
+stores (TE-18 **S1**, which also requires a *report* that this fix does not
+emit), and literal construction still reach a native return lane and still
+republish raw bits. An assertion placed there during this work fired on 75 of
+156 emission fixtures, which is the honest measure of the remainder;
+`fn twice(tree: Tree) int => total(tree) + total(tree)` is a minimal example.
+The residue now logs `mir-defect-residue` at each such emission, so
+`grep mir-defect-residue log.txt` enumerates it over any corpus instead of it
+being silent.
+
+Two further blockers for the remainder, both already ruled on:
+- **TE-17 I3 lane eligibility.** A defect-capable call's result is
+  `T | error` and therefore *not lane-eligible*, so `f(x) + 1` must be computed
+  boxed. The emitter does not know this yet: forcing a lane onto
+  `tune14_native_return`'s accumulator produced
+  `mir-value: unavailable representation transition 1 -> 2` — an Item the
+  consumer demanded as an int lane. Until I3 lands, the lane can only be given
+  to bodies whose callers can still consume the merged join.
+- **TE-18 S1's report.** A failed element store leaves an aliased container
+  partially mutated; scope exit cannot undo it, so the ruling requires a
+  runtime report using case 7's three tiers. Neither tier emits one.
+
+Repros: `temp/t29/packed_probe.ls`, `temp/t29/oob_int.ls` (`param_oob` still
+diverges: T0 true, JIT false — the S1 store class), `temp/t30/h/err_prop.ls`,
+`temp/t30/h/tier_divergence_probe.ls`, `temp/lr1224/oob_read.ls` (now agrees).
+
+**Where the rest of the work belongs.** The design tracks it in
+`vibe/impl/Lambda_Impl_Type_Enforce.md`, but the file on disk is
+`Lambda_Impl_Type_Enforce (done).md`, so the tracking pointer is stale and the
+remaining round-2 work reads as finished.
+
+<a id="lr12-25"></a>**LR12-25 · A contained error is invisible to `print` and escapes containment through `string()` · OPEN**
+S7.4.2, TE-18 case 5. Measured 2026-09-18, **identical on both tiers**, with a
+contained defect bound to `r` (`temp/lr1224/print_err3.ls`,
+`temp/lr1224/print_err4.ls`):
+
+| form | behaviour |
+|---|---|
+| `print(r)` | prints an empty line; execution continues, exit 0 |
+| `print("x " ++ r ++ "\n")` | prints **nothing at all**; execution continues |
+| `string(r)` | **terminates the script** — the contained error is re-raised as a top-level `error[E201]`, exit 1 |
+
+The first two are a rendering gap: expression composition correctly does not
+skip (TE-18 case 5 — "the result type is `T | error`; the error flows as a
+value"), so `"x " ++ r` is an error value, but the output surface then discards
+it silently. Every contained defect is therefore invisible in a program's own
+output, which is what made TE-15 containment look like a lost statement.
+
+The third is a **containment escape**, and the more serious of the two: a value
+that `is error` answered true for, and that the block legitimately holds,
+becomes an uncatchable process-level failure the moment it is converted. The
+three failure channels (S7.4.2) do not permit a soft error to promote itself to
+a fault at a conversion boundary.
+
+Split from [LR12-24](#lr12-24), where the `print` half was mis-diagnosed as T0
+over-containment. It is not: T0 contains correctly.
 
 <a id="lr12-7"></a>**LR12-7 · The procedural surface is thin and ad hoc · OPEN**
 IO procedures are a hand-curated set in one file with bespoke validation per
@@ -996,8 +1227,8 @@ function in the one dependent-iteration case — real, but small and local.
 *If chosen:* promote the reference-doc prose to an `S#` ruling so the order is
 normative rather than descriptive, and extend the diagnostic from
 `expected let clause` to name the rule and the repair — the shape the element
-and map-key diagnostics now use (see [i8-semidiag](<Lambda_Issue_Ledger(fixed).md#i8-semidiag>),
-[i8-dqdiag](<Lambda_Issue_Ledger(fixed).md#i8-dqdiag>)).
+and map-key diagnostics now use (see [i8-semidiag](<Lambda_Issue_Ledger (fixed).md#i8-semidiag>),
+[i8-dqdiag](<Lambda_Issue_Ledger (fixed).md#i8-dqdiag>)).
 
 **Option B — Relax it.** Allow a generator to follow a `let`. The dependency
 direction is already strictly left-to-right *within* the pipeline — `let j = k`
@@ -1059,8 +1290,8 @@ and points at the generator that actually conflicts.
   Lambda expression lowering has no semantic `MIR_reg_type()` probe or raw-register
   expression shim. The historical truncation, boxed-result, and error-unboxing
   failures are resolved by the implementation records, including
-  [LR07-1](Lambda_Issue_Ledger(fixed).md#lr07-1) and
-  [LR07-4](Lambda_Issue_Ledger(fixed).md#lr07-4), under **D2.4.1–D2.4.3**.
+  [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>) and
+  [LR07-4](<Lambda_Issue_Ledger (fixed).md#lr07-4>), under **D2.4.1–D2.4.3**.
 - **OI-6 · Codegen quality cluster (JS).** Destination-passing lowering
   (66–88% of emitted MIR is MOVs); shape-based polymorphic inline caching;
   de-pointered relocatable MIR (~59 baked realm pointers) blocking artifact
@@ -1106,11 +1337,11 @@ One policy each, not per-site fixes.
   retires the class. Ledger instances: [LR01-5](#lr01-5), [LR11-4](#lr11-4),
   [LR13-5](#lr13-5).
 - **Layout-coupled raw offsets** — resolved for module binding by removing the
-  unreachable `init_module_import` walk ([LR01-8](<Lambda_Issue_Ledger(fixed).md#lr01-8>)); GC
-  trace/compaction is resolved by [LR08-5](<Lambda_Issue_Ledger(fixed).md#lr08-5>).
+  unreachable `init_module_import` walk ([LR01-8](<Lambda_Issue_Ledger (fixed).md#lr01-8>)); GC
+  trace/compaction is resolved by [LR08-5](<Lambda_Issue_Ledger (fixed).md#lr08-5>).
 - **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
   the `sys://` map-walk segfault workaround was replaced by the shape-aware
-  traversal in [LR01-R3](<Lambda_Issue_Ledger(fixed).md#lr01-r3>).
+  traversal in [LR01-R3](<Lambda_Issue_Ledger (fixed).md#lr01-r3>).
 - **`SysFuncInfo` registry expressiveness** — data-driven argument/return
   conventions would delete inline special-casing ([LR09-1](#lr09-1),
   [LR09-2](#lr09-2)).
@@ -1139,7 +1370,7 @@ together, not individually.
 | Cluster | Entries | Root |
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
-| **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](Lambda_Issue_Ledger(fixed).md#lr07-1). |
+| **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |

@@ -1257,6 +1257,21 @@ extern Item js_has_property(Item target, uint64_t lane, Item observable_key);
 extern Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 
+// Tune30 T30-3: the libm leaves the sys-func table reaches by native pointer
+// (`math.sqrt` etc.). They allocate nothing, never re-enter generated code and
+// keep no argument, so a call to one is not an allocation point: marking them
+// MAY_GC made every call spill and reload the caller's roots and reload every
+// cached array data pointer (D4.3.1) -- 25 instructions around nbody's `sqrt`.
+// One list feeds both the import rows and the NO_GC audit below.
+#define JIT_LIBM_LEAVES(X) \
+    X(sqrt) X(cbrt) X(hypot) X(exp) X(exp2) X(expm1) \
+    X(log) X(log2) X(log10) X(log1p) \
+    X(sin) X(cos) X(tan) X(asin) X(acos) X(atan) X(atan2) \
+    X(sinh) X(cosh) X(tanh) X(asinh) X(acosh) X(atanh) \
+    X(floor) X(ceil) X(round) X(trunc)
+#define JIT_LIBM_IMPORT_ROW(name) {#name, FPTR(name), JIT_IMPORT_PURE_SCALAR},
+#define JIT_LIBM_AUDIT_NAME(name) #name,
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset),
@@ -1832,6 +1847,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_abs_i", FPTR(fn_abs_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_abs_f", FPTR(fn_abs_f), JIT_IMPORT_PURE_SCALAR},
     {"fabs", FPTR(fabs), JIT_IMPORT_PURE_SCALAR},
+    JIT_LIBM_LEAVES(JIT_LIBM_IMPORT_ROW)
     {"fn_neg_i", FPTR(fn_neg_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_neg_f", FPTR(fn_neg_f), JIT_IMPORT_PURE_SCALAR},
     {"fn_not_u", FPTR(fn_not_u), JIT_IMPORT_PURE_SCALAR},
@@ -3626,6 +3642,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // descriptor overlays before mutating direct packed storage.
         "js_array_set_existing_number_no_gc",
         "js_async_iterator_close_needs_await",
+        JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
         "fn_min2_u",
         "fn_max2_u",
         "fn_abs_i",

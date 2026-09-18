@@ -42,7 +42,7 @@
 
 S9.3.1 (insertion captures by value) is unconditional on both tiers since
 2026-08-29; the `LAMBDA_COW_CAPTURE` escape hatch was retired — see
-[LR12-R9](<Lambda_Issue_Ledger(fixed).md#lr12-r9>). The original blocker was not
+[LR12-R9](<Lambda_Issue_Ledger (fixed).md#lr12-r9>). The original blocker was not
 performance or missing syntax. It was this:
 
 > **Insertion capture and borrowing reads are individually sound and jointly
@@ -736,7 +736,7 @@ passes with the unconditional capture semantics.
 §11.2/§11.3 exclusivity, Appendix B.2); semantics record
 [`Lambda_Semantics_Formal.md`](Lambda_Semantics_Formal.md) (C4.1 bug catalog,
 C4.2e handle store, C4.4 #6); status and evidence
-[LR12-R9](<Lambda_Issue_Ledger(fixed).md#lr12-r9>); spec
+[LR12-R9](<Lambda_Issue_Ledger (fixed).md#lr12-r9>); spec
 [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md)
 (S9.1.2, S9.1.3, S9.2.2, S9.2.3, S9.3.1, S10.4.3, SO14).
 

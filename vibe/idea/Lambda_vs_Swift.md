@@ -79,7 +79,7 @@ For cleanup, Swift gives you manual `defer` plus ARC `deinit` (and `~Copyable` R
 
 ## Implementation-status caveat
 
-A few S9 clauses remain spec-final with implementation work still landing elsewhere; insertion capture (S9.3.1) and plain-param snapshotting (within S9.1.3) are now unconditional on both tiers ([LR12-R9](<../Lambda_Issue_Ledger(fixed).md#lr12-r9>)). Write against the spec rules as the remaining COW work evolves.
+A few S9 clauses remain spec-final with implementation work still landing elsewhere; insertion capture (S9.3.1) and plain-param snapshotting (within S9.1.3) are now unconditional on both tiers ([LR12-R9](<../Lambda_Issue_Ledger (fixed).md#lr12-r9>)). Write against the spec rules as the remaining COW work evolves.
 
 ## Summary
 
