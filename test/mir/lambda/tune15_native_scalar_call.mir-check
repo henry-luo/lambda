@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "description": "Tune15 B2.2 keeps statically-bound scalar procedure calls on the native ABI.",
+  "description": "Tune15 B2.2 keeps statically-bound scalar procedure calls on the native ABI. Tune30 T30-5: `tune15_add` is small enough to be emitted at both call sites, so the native lane arithmetic appears inline and no call to it remains.",
   "checks": [
     {
       "in_func": "_tune15_call_#",
       "expect": [
-        "call\t_tune15_add_",
         "add\t{{r}}, {{r}}, {{r}}"
       ],
       "forbid": [
         "call\tfn_add_p, fn_add",
-        "call\t_tune15_add_#_b"
+        "call\t_tune15_add_#_b",
+        "call\t_tune15_add_#"
       ]
     }
   ]

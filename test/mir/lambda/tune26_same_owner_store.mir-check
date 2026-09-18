@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune26 T26-4: a local certified bool[] proves its plain unshared carrier once before same-lane stores and reads. Each guarded access keeps its dynamic bounds checks and the checked setter as the cold miss path; an alias remains observable as a COW snapshot. 2026-09-13: the checked path is now array_num_set_cow_idx (CW32v2), the raw bool load folds its element offset into the computed address instead of a u8:3 displacement, and the group is scoped to the proven region -- the guarded `while` emits a generic sibling (D2.2.2, D8.3.1) whose own raw load would otherwise be counted as a third. The two inlined u8 certificate reads are gone on purpose: CW32v2 tests the shared bit at operation entry inside array_num_set_cow_idx, so the sequence now pins what the same-lane store still guarantees -- a bounds check against the length, then the raw u8 lane store through the data pointer. 2026-09-17 (T28-7): the first pinned store is `flags[0]`, whose literal index is now proven non-negative, so its negative-index test is gone; the length test remains because `fill(n + 1, ...)` has no static length.",
+  "description": "Tune26 T26-4: a local certified bool[] proves its plain unshared carrier once before same-lane stores and reads. Each guarded access keeps its dynamic bounds checks and the checked setter as the cold miss path; an alias remains observable as a COW snapshot. 2026-09-13: the checked path is now array_num_set_cow_idx (CW32v2), the raw bool load folds its element offset into the computed address instead of a u8:3 displacement, and the group is scoped to the proven region -- the guarded `while` emits a generic sibling (D2.2.2, D8.3.1) whose own raw load would otherwise be counted as a third. The two inlined u8 certificate reads are gone on purpose: CW32v2 tests the shared bit at operation entry inside array_num_set_cow_idx, so the sequence now pins what the same-lane store still guarantees -- a bounds check against the length, then the raw u8 lane store through the data pointer. 2026-09-17 (T28-7): the first pinned store is `flags[0]`, whose literal index is now proven non-negative, so its negative-index test is gone; the length test remains because `fill(n + 1, ...)` has no static length. Tune30 T30-1 (2026-09-18): the finite loop's fast arm is versioned on the dense guard (its miss enters the existing generic sibling), and the fast copy reads the bool lane without a sentinel exclusion; the scoped range therefore ends at the generic sibling's head and holds exactly the fast copy's one raw load.",
   "checks": [
     {
       "in_func": "_tune26_same_owner_store_#",
@@ -15,7 +15,7 @@
         "call\tarray_num_set_cow_idx"
       ],
       "count": {
-        "mov\t{{r}}, u8:({{r}})": 2
+        "mov\t{{r}}, u8:({{r}})": 1
       },
       "in_range": {
         "from": "func\t",

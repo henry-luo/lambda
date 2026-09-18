@@ -1,0 +1,8 @@
+int_ok=21
+float_ok=3.5
+int_defect=true type=error
+float_defect=true type=error
+decl_ok=5
+decl_defect=true type=error
+still_native=11
+

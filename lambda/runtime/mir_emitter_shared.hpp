@@ -920,10 +920,14 @@ static inline int em_gc_new_home(MirEmitter* em) {
 // the v27 havlak wrong-answer bug class (boxed result fed to a raw native
 // entry). `boxed_scalar_mode` is the same signature-derived fact the v2 home
 // protocol already gates on, so v3 shape selection is no weaker than v2's.
-static inline FnReturnShape em_return_shape(bool native_return, bool can_raise,
-        ScalarReturnClass boxed_scalar_mode) {
+// `carries_error_lane`: does lane 2 carry an error Item? A raised `^E` and a
+// deferred-check defect (LR12-24/TE-15) are both producers; the parameter is
+// deliberately NOT named `can_raise`, because reading it as the signature bit
+// is what let a defect cross a native return as raw number bits.
+static inline FnReturnShape em_return_shape(bool native_return,
+        bool carries_error_lane, ScalarReturnClass boxed_scalar_mode) {
     if (native_return) {
-        return can_raise ? RETURN_SHAPE_NATIVE_ERROR : RETURN_SHAPE_NATIVE;
+        return carries_error_lane ? RETURN_SHAPE_NATIVE_ERROR : RETURN_SHAPE_NATIVE;
     }
     return boxed_scalar_mode != SCALAR_RETURN_NONE
         ? RETURN_SHAPE_ITEM_SCALAR : RETURN_SHAPE_ITEM;

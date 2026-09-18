@@ -4046,6 +4046,49 @@ static bool interp_fast_int_eval(InterpFrame* frame, AstNode* node,
     }
 }
 
+// LR12-23: the statement executor below commits each assignment as it goes,
+// and a value that leaves the compact band abandons the fast path mid-body.
+// The ordinary evaluator then re-runs the WHOLE iteration, so every statement
+// that already committed ran twice -- `while (i < n) { c = c + 1; m = m * K;
+// i = i + 1 }` counted one iteration twice and returned 4 for n = 3. One
+// iteration must therefore be atomic: these collect the register slots the
+// body can write, so a bail can restore the values it entered with.
+static bool interp_fast_int_collect_targets(AstNode* node, int* slots,
+        int* count, int capacity) {
+    if (!node) return false;
+    if (node->node_type == AST_NODE_CONTENT) {
+        for (AstNode* item = ((AstListNode*)node)->item; item; item = item->next) {
+            if (!interp_fast_int_collect_targets(item, slots, count, capacity)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        NameEntry* target = assign->target_entry;
+        if (!target && assign->left && assign->left->node_type == AST_NODE_IDENT) {
+            target = ((AstIdentNode*)assign->left)->entry;
+        }
+        if (!target || target->binding_storage != BINDING_STORAGE_REGISTER ||
+                target->slot < 0) return false;
+        for (int i = 0; i < *count; i++) {
+            if (slots[i] == target->slot) return true;
+        }
+        if (*count >= capacity) return false;
+        slots[(*count)++] = target->slot;
+        return true;
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        return interp_fast_int_collect_targets(branch->then, slots, count,
+                capacity) &&
+            (!branch->otherwise || interp_fast_int_collect_targets(
+                branch->otherwise, slots, count, capacity));
+    }
+    return false;
+}
+
 static bool interp_fast_int_exec(InterpFrame* frame, AstNode* node,
         const InterpFastIntCache* cache) {
     if (!frame || !node) return false;
@@ -4287,12 +4330,30 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
     if (!interp_fast_int_cache_fill(&cache, frame, loop->cond) ||
             !interp_fast_int_cache_fill(&cache, frame, loop->body)) return false;
     if (interp_fast_int_linear_while(frame, loop, &cache, result)) return true;
+    // LR12-23: the slots one iteration may write, so a mid-body bail hands the
+    // ordinary evaluator the state the iteration STARTED with. Without this
+    // the abandoned iteration's committed statements ran a second time.
+    int target_slots[8];
+    int target_count = 0;
+    if (!interp_fast_int_collect_targets(loop->body, target_slots, &target_count,
+            (int)(sizeof(target_slots) / sizeof(target_slots[0])))) {
+        return false;
+    }
     for (;;) {
         InterpFastIntValue condition;
         if (!interp_fast_int_eval(frame, loop->cond, &cache, &condition)) return false;
         bool truth = condition.boolean ? condition.value != 0 : condition.value != 0;
         if (!truth) break;
-        if (!interp_fast_int_exec(frame, loop->body, &cache)) return false;
+        uint64_t saved[8];
+        for (int i = 0; i < target_count; i++) {
+            saved[i] = frame->slots[target_slots[i]];
+        }
+        if (!interp_fast_int_exec(frame, loop->body, &cache)) {
+            for (int i = 0; i < target_count; i++) {
+                frame->slots[target_slots[i]] = saved[i];
+            }
+            return false;
+        }
     }
     *result = ItemNull;
     return true;
