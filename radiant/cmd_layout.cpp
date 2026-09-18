@@ -146,9 +146,6 @@ static void dump_post_script_memory_snapshot(void) {
         log_error("RADIANT_MEMORY_PROFILE: failed to dump post-script snapshot to %s",
                   output_path);
     }
-    if (shell_getenv("RADIANT_POST_SCRIPT_MEMORY_PAUSE")) {
-        raise(SIGSTOP);
-    }
 }
 
 // CSS references share URL resolution, but only link elements use the layout

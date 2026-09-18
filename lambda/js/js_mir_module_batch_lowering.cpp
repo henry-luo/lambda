@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_interp.hpp"
 #include "../../lib/hashmap_helpers.h"
 #include "../input/input-script-cache.h"
 
@@ -4102,6 +4103,18 @@ static Item jm_execute_cached_module_mir(Runtime* runtime,
     return result;
 }
 
+static bool jm_document_mir_budget_reserve(Runtime* runtime,
+        uint32_t ast_node_count) {
+    if (!runtime || !runtime->dom_doc || !mir_large_interp_enabled()) return true;
+    JsRuntimeState* state = js_runtime_state_for(context);
+    if (!state) return true;
+    uint64_t budget = mir_radiant_document_jit_ast_node_budget();
+    uint64_t used = state->document_mir_ast_nodes;
+    if (ast_node_count > budget || used > budget - ast_node_count) return false;
+    state->document_mir_ast_nodes = used + ast_node_count;
+    return true;
+}
+
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
     // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
@@ -4193,11 +4206,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     bool document_ast_too_large = runtime->dom_doc != NULL &&
         mir_large_interp_enabled() &&
         tp->ast_index.count > MIR_RADIANT_AST_NODE_THRESHOLD;
-    if (document_ast_too_large) {
+    bool ast_executor_requested = js_ast_interpreter_requested();
+    bool document_jit_budget_available = !document_ast_too_large &&
+        !ast_executor_requested && jm_document_mir_budget_reserve(runtime,
+            tp->ast_index.count);
+    if (ast_executor_requested || document_ast_too_large ||
+            !document_jit_budget_available) {
         // Static imports bypass the source-script compiler, so select its
         // established AST tier here before MIR lowering scales with the graph.
-        log_info("js-mir: document module AST (%u nodes) uses AST executor",
-            tp->ast_index.count);
+        const char* reason = ast_executor_requested ? "requested backend"
+            : document_ast_too_large ? "module threshold" : "document budget";
+        log_info("js-mir: module AST (%u nodes) uses AST executor (%s)",
+            tp->ast_index.count, reason);
         js_tla_exit_module();
         return js_mir_execute_ast_module(runtime, tp, filename);
     }

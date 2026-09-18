@@ -1050,6 +1050,9 @@ struct JsRuntimeState {
     uint32_t batch_test_module_state_id = UINT32_MAX;
     uint32_t batch_preamble_module_state_id = UINT32_MAX;
     uint32_t batch_preamble_var_count = 0;
+    // Per-document MIR admission stays on the realm that owns its generated
+    // code, so a later document starts with a fresh compilation allowance.
+    uint64_t document_mir_ast_nodes = 0;
     uint64_t heap_epoch = 1;
 
     JsRegexpLastMatch regexp_last_match = {};
