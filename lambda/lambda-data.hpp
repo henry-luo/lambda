@@ -591,6 +591,11 @@ void shape_entry_set_type(ShapeEntry* entry, Type* type);
 // readers; it is a bug to rely on that.
 const LaneStorageDesc* shape_entry_storage(const ShapeEntry* entry);
 
+// Read one shaped field's value. Defined in lambda-data-runtime.cpp; declared
+// here rather than re-externed per consumer, which is how the JS adapter, the
+// document node table, and the Tier-3 write set had each grown their own copy.
+Item _map_read_field(ShapeEntry* field, void* map_data);
+
 // Nullable-native projection: the field's slot is int?/bool?/float?/T? lane.
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out);
@@ -1276,6 +1281,13 @@ extern TypeType LIT_TYPE_STRING;
 extern TypeType LIT_TYPE_BINARY;
 extern TypeType LIT_TYPE_SYMBOL;
 extern TypeType LIT_TYPE_PATH;
+// PTH30: `reference` is the type ALIAS `symbol | path` (URI = URN | URL), not a
+// nominal supertype — a supertype would force every symbol operation
+// (indexing, slicing, `\symbol(…)` islands) to rule on paths, whereas the alias
+// dissolves at each use site into the two evaluation contracts S2.4.3v3 keeps
+// distinct.
+extern TypeBinary TYPE_REFERENCE;
+extern TypeType LIT_TYPE_REFERENCE;
 extern TypeType LIT_TYPE_DTIME;
 extern TypeType LIT_TYPE_DATE;   // sub-type: date-only datetime
 extern TypeType LIT_TYPE_TIME;   // sub-type: time-only datetime

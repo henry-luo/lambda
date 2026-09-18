@@ -1425,7 +1425,7 @@ struct DocState;
 // from one that claimed the intent and changed nothing (a maxlength-blocked
 // keystroke), which must not produce an `input` event.
 extern "C" uint64_t radiant_splice_epoch(void);
-// Change requests made by a behavior template's `commit` handler (ESO42),
+// Change requests made by a behavior template's `edit_commit` handler (ESO42),
 // sampled across the commit dispatch to read its answer.
 extern "C" uint64_t radiant_change_request_epoch(void);
 

@@ -1,0 +1,5 @@
+{
+  "title": "reference fixture",
+  "a": {"b": {"c": 1}},
+  "items": [{"id": 1}, {"id": 2}, {"id": 3}]
+}

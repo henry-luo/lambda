@@ -49,6 +49,10 @@ bool parse_path_scheme(PathLexer* lx, PathScheme* out) {
     if (path_word_is(word, "http")) { *out = PATH_SCHEME_HTTP; return true; }
     if (path_word_is(word, "https")) { *out = PATH_SCHEME_HTTPS; return true; }
     if (path_word_is(word, "sys")) { *out = PATH_SCHEME_SYS; return true; }
+    // PTH44v2: `temp.'name'` addresses an in-memory document. The call form
+    // `temp(name, content)` creates one; the two are lexically distinct
+    // (`temp(` against `temp.`), so one word heads both without an S1.7 clash.
+    if (path_word_is(word, "temp")) { *out = PATH_SCHEME_TEMP; return true; }
     return false;
 }
 

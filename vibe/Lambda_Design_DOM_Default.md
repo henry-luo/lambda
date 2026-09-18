@@ -475,7 +475,7 @@ Verified against the tree at 2026-09-06 (`event.cpp`, `lambda/dom/*.ls`, `lambda
 | `beforeinput` | Input Events L1/L2; cancelable except `insertCompositionText` / `deleteCompositionText` | UA updates the DOM as described by `inputType` | dispatched through the ordinary JS/author path; the package supplies the default — `editing.ls` splices text controls (F5/ES9), `dom_edit.ls` splices contenteditable through the DOM-range waist (F13). Prevented ⇒ the package default is not invoked (ES20/F14.3–F14.4) | ✅ text controls · ✅ contenteditable (§4) |
 | platform `TextInput` callback after rich/form handling declines | — | historical fallback, not a web-standard editing action | behavior-only `textinputfallback` reaches `caret.ls` only with a focused non-form caret. It collapses selection and advances one character through the caret waist, deliberately without editing text | ⚠️ (ES35) |
 | `input` | Input Events; not cancelable | none — reports a mutation that already happened | dispatched post-mutation from the one engine path that applied the edit; package `on input` re-derives `:valid`/`:invalid` and the ARIA mirrors | ✅ |
-| `change` | HTML; not cancelable | none | the *decision* is the behavior-only `commit` hook before blur (ESO42); native fires the event so it precedes `blur` for JS and templates alike | ✅ |
+| `change` | HTML; not cancelable | none | the *decision* is the behavior-only `edit_commit` hook before blur (ESO42); native fires the event so it precedes `blur` for JS and templates alike | ✅ |
 | `select` | HTML; not cancelable | none | text-control selection writers queue one post-commit, noncancelable `select` task on the element; contenteditable selection remains `selectionchange` | ✅ text controls |
 
 ### 3.2 Keyboard
@@ -595,7 +595,7 @@ Radiant-internal seams. No JS listener can observe them; each exists because the
 | Hook | Spec concept implemented | Suppressed by `preventDefault`? |
 | --- | --- | --- |
 | `init` | steady-state constraint validation + ARIA reflection at control creation (ESO31) | n/a — runs as a pipeline phase between layout and render (ES19), not in event dispatch |
-| `commit` | HTML's "when the value is committed" decision behind `change` | n/a — pre-event, no JS has run yet (ESO42) |
+| `edit_commit` | HTML's "when the value is committed" decision behind `change` — named `commit` until that word became the Tier-3 transaction statement (PTH62) | n/a — pre-event, no JS has run yet (ESO42) |
 | `optioncommit` | activation of a `<select>` option — the popup overlay is not DOM, so no event exists | follows the click that carried it |
 | `caretkey` | keydown's caret-movement **default action** | **yes** — dispatched with context |
 | `scrollkey` | keydown's document-scroll **default action** after caret/activation decline | **yes** — dispatched with context |

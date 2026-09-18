@@ -50,6 +50,10 @@ enum TokenType {
     BIN_STAR,
     BIN_SLASH,
     BIN_LT,
+    // PTH40 (S16.2.3v3): `&` gained a PREFIX role (address-of) beside its infix
+    // set-intersection one, so it joined the dual-role set and needs the same
+    // same-line guard `+` and `-` have.
+    BIN_AMP,
     CALL_LPAREN,
     INDEX_LBRACKET,
     MEMBER_DOT,
@@ -179,6 +183,10 @@ static bool classify_start(TSLexer *lexer, bool element_scope) {
         case '|': case '&': case '%': case '?': case '>': case '=': case '!':
         case '-': case '(': case '[': case '^': case '/': case '<': case '.':
         case ')': case ']': case '}': case ',': case ';': case ':':
+        // PTH39 (S16.2.2v3): `#` is the force step and has no prefix role, so
+        // it can only CONTINUE — a line beginning `#name` extends the chain
+        // above it rather than opening a statement.
+        case '#':
             return false;
         // `+` and `*` are dual-role as prefixes, so they never open a
         // juxtaposed statement either.
@@ -352,6 +360,9 @@ bool tree_sitter_lambda_external_scanner_scan(
                 // `<:` is the ordinary grammar token for S11.1.4v2, never a
                 // guarded `<` followed by an orphaned colon.
                 if (valid_symbols[BIN_LT]) { return emit_op(lexer, BIN_LT, '=', ':'); }
+                break;
+            case '&':
+                if (valid_symbols[BIN_AMP]) { return emit_op(lexer, BIN_AMP, 0, 0); }
                 break;
             case '(':
                 if (valid_symbols[CALL_LPAREN]) { return emit_op(lexer, CALL_LPAREN, 0, 0); }

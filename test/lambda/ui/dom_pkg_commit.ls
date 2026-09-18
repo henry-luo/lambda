@@ -1,5 +1,5 @@
 // ESO42 fixture. The `change` that follows a blur is decided by the dom
-// package's `commit` handler, not by native — this page's own template is an
+// package's `edit_commit` handler, not by native — this page's own template is an
 // author template that only counts the `change` events that result.
 // `seq` records the order events arrive: each change appends a 1, each blur a
 // 2, so "change then blur" reads as 12 and the inverted order would read 21.

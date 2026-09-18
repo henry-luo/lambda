@@ -8,6 +8,8 @@
 #include <unistd.h>    // for sysconf
 #endif
 #include "transpiler.hpp"
+#include "doc_context.hpp"
+#include "write_set.hpp"
 #include "ast_build.hpp"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/thread_pool.h"
@@ -2583,6 +2585,11 @@ void runtime_reset_heap(Runtime* runtime) {
 
 void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
+    // PTH44v2/SO20: the document context and its node table live for the
+    // evaluation. Their entries point into the heap this teardown destroys, so
+    // they must go with it or the next run would read freed nodes.
+    doc_context_reset();
+    write_set_reset();
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
         if (!eval_context_init(cleanup_owner)) return;

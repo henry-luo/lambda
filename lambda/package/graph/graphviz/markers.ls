@@ -9,9 +9,9 @@ fn arrow_shape(text, index) {
   if (len(matches) > 0) matches[0] else null
 }
 
-fn component_name(shape, open, side) {
-  let base = if (open and contains(["box", "diamond", "dot"], shape)) "o" ++ shape
-    else shape ++ (if (open) ":open" else "");
+fn component_name(shape, is_open, side) {
+  let base = if (is_open and contains(["box", "diamond", "dot"], shape)) "o" ++ shape
+    else shape ++ (if (is_open) ":open" else "");
   base ++ (if (side == "l") ":left" else if (side == "r") ":right" else "")
 }
 
@@ -19,14 +19,14 @@ fn parse_result(valid, values, next = null) =>
   {valid: valid, values: values, next: next}
 
 fn arrow_component(text, index) {
-  let open = slice(text, index, index + 1) == "o";
-  let modifier_index = index + (if (open) 1 else 0);
+  let is_open = slice(text, index, index + 1) == "o";
+  let modifier_index = index + (if (is_open) 1 else 0);
   let modifier = slice(text, modifier_index, modifier_index + 1);
   let side = if (modifier == "l" or modifier == "r") modifier else "";
   let shape_index = modifier_index + (if (side != "") 1 else 0);
   let shape = arrow_shape(text, shape_index);
   if (shape == null) parse_result(false, [])
-  else parse_result(true, [component_name(shape, open, side)], shape_index + len(shape))
+  else parse_result(true, [component_name(shape, is_open, side)], shape_index + len(shape))
 }
 
 fn arrow_components(text, index, values) {

@@ -38,8 +38,8 @@ let sel_ins = sel_map(ins, sel)
 "ins_p1:"; sel_ins.paths[1][0]
 
 // 5. map through a delete of index 1 (B): that path drops, [3] shifts to [2]
-let del = step_replace([], 1, 2, [])
-let sel_del = sel_map(del, sel)
+let deleted = step_replace([], 1, 2, [])
+let sel_del = sel_map(deleted, sel)
 "del_len:"; len(sel_del.paths)
 "del_survivor:"; sel_del.paths[0][0]
 

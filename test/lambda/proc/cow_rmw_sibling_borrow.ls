@@ -5,7 +5,7 @@
 
 type Table = {keys: array, vals: array}
 
-pn put(var t: Table, key: int, value: any) any {
+pn put_slot(var t: Table, key: int, value: any) any {
     var keys = t.keys
     var vals = t.vals
     var i = 0
@@ -49,7 +49,7 @@ pn cross_store(var t: Table, key: int) int {
 pn run_hot(var t: Table) {
     var k = 0
     while (k < 60) {
-        put(t, k % 20, k)
+        put_slot(t, k % 20, k)
         k = k + 1
     }
 }
@@ -62,8 +62,8 @@ pn main() {
 
     // a snapshot of the root before the puts keeps its own arrays
     let before = t
-    put(t, 100, "x")
-    put(t, 3, "y")
+    put_slot(t, 100, "x")
+    put_slot(t, 3, "y")
     print([len(before.keys), len(t.keys), before.vals[3], t.vals[3], t.vals[20]])
     print("\n")
 
@@ -71,7 +71,7 @@ pn main() {
     // up in `vals`
     var shared = ["a", "b"]
     var s: Table = {keys: shared, vals: shared}
-    put(s, 7, 8)
+    put_slot(s, 7, 8)
     print([s.keys, s.vals, shared])
     print("\n")
 
@@ -90,7 +90,7 @@ pn main() {
     var y = ["b"]
     u.keys = y
     u.vals = y
-    put(u, 9, 10)
+    put_slot(u, 9, 10)
     print([u.keys, u.vals, y])
     print("\n")
 }

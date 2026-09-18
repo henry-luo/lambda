@@ -729,6 +729,13 @@ static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_
             if (tt->type == &TYPE_OBJECT)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_OBJECT; }
             if (tt->type == &TYPE_NUMBER)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_NUMBER; }
             if (tt->type == &TYPE_INTEGER) { if (out_tid) *out_tid = tid; return &LIT_TYPE_INTEGER; }
+            // PTH30: `reference` is the union `symbol | path`, so like `number`
+            // and `integer` its payload carries LMD_TYPE_TYPE and the tag
+            // fallback below would hand `is` the `type` singleton instead —
+            // `p is reference` would then answer false for every path.
+            if (tt->type == (Type*)&TYPE_REFERENCE) {
+                if (out_tid) *out_tid = tid; return &LIT_TYPE_REFERENCE;
+            }
             if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {
                 switch ((NumSizedType)tt->type->kind) {
                 case NUM_INT8:    if (out_tid) *out_tid = tid; return &LIT_TYPE_I8;
@@ -781,6 +788,9 @@ static inline bool is_side_effect_stam(int node_type) {
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
     case AST_NODE_HANDLER_STAM:
+    // Tier 3: a CRUD statement contributes no output value; it records an edit.
+    case AST_NODE_CRUD_STAM:
+    case AST_NODE_OPEN_STAM:
         return true;
     default:
         return false;
@@ -803,6 +813,9 @@ static inline bool is_procedural_only_stam(int node_type) {
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_LOOP:
+    // PTH60v3: the CRUD statements are pn-family, statement position only.
+    case AST_NODE_CRUD_STAM:
+    case AST_NODE_OPEN_STAM:
         return true;
     default:
         return false;
@@ -835,6 +848,10 @@ static inline bool side_effect_result_can_error(int node_type) {
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
     case AST_NODE_PIPE_FILE_STAM:
+    // A rejected CRUD target or a failing commit must not become a silent
+    // no-op: the statement's error is its only report (S7.1.1).
+    case AST_NODE_CRUD_STAM:
+    case AST_NODE_OPEN_STAM:
         return true;
     default:
         return false;
