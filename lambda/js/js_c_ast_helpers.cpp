@@ -488,6 +488,8 @@ void refresh_js_binary_type(JsTranspiler* tp, JsBinaryNode* binary) {
         TypeId r = rt ? rt->type_id : LMD_TYPE_ANY;
         if (l == LMD_TYPE_STRING || r == LMD_TYPE_STRING) {
             binary->type = &TYPE_STRING;
+        } else if (l == LMD_TYPE_DECIMAL && r == LMD_TYPE_DECIMAL) {
+            binary->type = &TYPE_DECIMAL;
         } else if (l == LMD_TYPE_FLOAT && r == LMD_TYPE_FLOAT) {
             binary->type = &TYPE_FLOAT;
         } else {
@@ -507,9 +509,23 @@ void refresh_js_binary_type(JsTranspiler* tp, JsBinaryNode* binary) {
         }
         break;
     default:
-        // Arithmetic, exponentiation and the bitwise/shift family all produce
-        // a JS number.
-        binary->type = &TYPE_FLOAT;
+        // Arithmetic, exponentiation and bitwise/shift operators preserve a
+        // proven Number or BigInt pair. Open operands must stay boxed: marking
+        // `a / b` as FLOAT when a and b are untyped converts a BigInt result
+        // through it2d in the MIR body before a later generic operation sees it.
+        {
+            Type* lt = binary->left ? binary->left->type : NULL;
+            Type* rt = binary->right ? binary->right->type : NULL;
+            TypeId l = lt ? lt->type_id : LMD_TYPE_ANY;
+            TypeId r = rt ? rt->type_id : LMD_TYPE_ANY;
+            if (l == LMD_TYPE_DECIMAL && r == LMD_TYPE_DECIMAL) {
+                binary->type = &TYPE_DECIMAL;
+            } else if (l == LMD_TYPE_FLOAT && r == LMD_TYPE_FLOAT) {
+                binary->type = &TYPE_FLOAT;
+            } else {
+                binary->type = js_set_type_any(tp, ANY_JS_BINARY);
+            }
+        }
         break;
     }
 }

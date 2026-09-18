@@ -280,6 +280,12 @@ TEST(LambdaTypedPathTests, PreservesSnapshotsAndRejectsInvalidWritesJit) {
         "test/mir/lambda/typed_path_store.txt", true, "jit");
 }
 
+TEST(LambdaTypedPathTests, ReopensBoxedTypedAdapterResultForNativeConsumer) {
+    test_lambda_script_against_file(
+        "test/mir/lambda/result47_untyped_native_adapter.ls",
+        "test/mir/lambda/result47_untyped_native_adapter.txt", true, "jit");
+}
+
 // Tune27 (§10.15): the baseline runs the auto tier, where a once-called body
 // stays in T0 and a JIT-only defect hides behind a T0 golden -- the nullable
 // float store that stored its null sentinel as an element was found only by

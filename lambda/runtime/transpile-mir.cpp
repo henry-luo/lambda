@@ -11567,6 +11567,13 @@ static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
         MirValue call_value = transpile_call(mt, (AstCallNode*)primary);
         if (call_value.rep == VALUE_REP_ITEM) {
             emit_return_if_item_error(mt, call_value.reg);
+            // A typed callee may route this dynamic edge through its boxed
+            // adapter. Its error arm is gone above, and the registered native
+            // return contract proves that the remaining Item is an int; carry
+            // that fact into the shared conversion instead of treating the
+            // adapter's source-level `any` as a union (D2.4.1-D2.4.3, D8.6.2).
+            call_value = mir_value_from_reg(mt, primary, call_value.reg,
+                VALUE_REP_ITEM, &TYPE_INT, LMD_TYPE_INT);
         }
         return em_require_rep(&mt->em, call_value, VALUE_REP_INT_LANE).reg;
     }
