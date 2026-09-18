@@ -63,6 +63,11 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_CONTROL_VALUE = 8
 } DomJsMutationKind;
 
+typedef enum DomJsMutationAttribute {
+    DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN,
+    DOM_JS_MUTATION_ATTRIBUTE_CLASS,
+} DomJsMutationAttribute;
+
 // tier-1: doc-pool, survives relayout
 typedef struct DomJsMutationRecord {
     uint32_t sequence;
@@ -71,6 +76,10 @@ typedef struct DomJsMutationRecord {
     DomNode* parent;
     uint32_t target_id;
     uint32_t parent_id;
+    DomJsMutationAttribute attribute;
+    // Capture connection at mutation time; a later append must not make a
+    // detached node's earlier attribute/text writes look document-visible.
+    bool was_connected;
 } DomJsMutationRecord;
 
 #define DOM_JS_MUTATION_RECORD_CAP 64

@@ -117,6 +117,30 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) 
     EXPECT_FALSE(state_get_bool(doc_state, orphan, "mutation-orphan-state"));
 }
 
+TEST_F(StateStoreDomMutationTest, PruneAfterReflowRestoresFocusAssignedBeforeViewIdentity) {
+    DocState* doc_state = state();
+    ASSERT_NE(doc_state, nullptr);
+
+    live->tag_name = "input";
+    live->tag_id = MARKUP_NAME_INPUT;
+    static_cast<DomNode*>(live)->id = 0;
+    ASSERT_EQ(live->tag(), MARKUP_NAME_INPUT);
+    ASSERT_TRUE(is_view_programmatically_focusable(static_cast<View*>(live)));
+    // Script focus can precede retained view-id assignment during first layout.
+    doc_state->transition_depth++;
+    focus_set_programmatic(doc_state, static_cast<View*>(live));
+    doc_state->transition_depth--;
+    ASSERT_EQ(focus_get(doc_state), static_cast<View*>(live));
+
+    static_cast<DomNode*>(live)->id = doc.next_node_id++;
+    EXPECT_FALSE(state_get_bool(doc_state, live, STATE_FOCUS));
+
+    uint32_t pruned = state_store_prune_after_reflow(doc_state);
+    EXPECT_GT(pruned, 0u);
+    EXPECT_TRUE(state_get_bool(doc_state, live, STATE_FOCUS));
+    EXPECT_TRUE(radiant_state_validate_interaction(doc_state, nullptr));
+}
+
 TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebuild) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

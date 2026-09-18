@@ -3476,6 +3476,14 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         log_error("dom-package: cannot bind the document eval thread");
         return false;
     }
+    // D8.5.1v2: package modules share the document evaluator's module registry.
+    // A Lambda-rendered iframe has no JS DOM realm, but module registration
+    // still reads the context-owned JS support epoch while compiling the
+    // package after an iframe target switch.
+    if (!js_runtime_state_init(ctx)) {
+        log_error("dom-package: cannot initialize the document support capsule");
+        return false;
+    }
     if (!g_template_registry) g_template_registry = template_registry_new();
 
     // behavior mode spans only this load, so the page's own templates keep
@@ -6080,7 +6088,10 @@ static DomElement* dom_js_record_cascade_root(DomDocument* doc,
 
 static bool dom_js_record_has_connected_endpoint(DomDocument* doc,
                                                  DomJsMutationRecord* record) {
-    if (!doc || !record) return false;
+    if (!doc || !record || !record->was_connected) return false;
+    // Connection is observed at mutation time. A detached subtree may be
+    // appended later in this batch, but only that child-insert can affect the
+    // document's cascade or layout.
     DomNode* root = static_cast<DomNode*>(doc->root);
     if (record->target == root) return true;
     return dom_js_is_connected_to_document(doc, record->parent);
@@ -6251,6 +6262,255 @@ static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc
     return false;
 }
 
+static bool dom_js_simple_selector_mentions_mutation_attribute(
+        CssSimpleSelector* simple, DomJsMutationAttribute attribute);
+
+static bool dom_js_selector_mentions_mutation_attribute(
+        CssSelector* selector, DomJsMutationAttribute attribute) {
+    if (!selector) return false;
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_selector_mentions_mutation_attribute(
+                    compound->simple_selectors[s], attribute)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_simple_selector_mentions_mutation_attribute(
+        CssSimpleSelector* simple, DomJsMutationAttribute attribute) {
+    if (!simple) return false;
+    if (attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS &&
+        (simple->type == CSS_SELECTOR_TYPE_CLASS ||
+         ((simple->type >= CSS_SELECTOR_ATTR_EXACT &&
+           simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE) &&
+          simple->attribute.name &&
+          str_icmp_cstr(simple->attribute.name, "class") == 0))) {
+        return true;
+    }
+    for (size_t i = 0; i < simple->function_selector_count; i++) {
+        if (dom_js_selector_mentions_mutation_attribute(
+                simple->function_selectors[i], attribute)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_relational_mutation_attribute_dependency(
+        CssSelector* selector, DomJsMutationAttribute attribute);
+
+static bool dom_js_simple_selector_has_relational_mutation_attribute_dependency(
+        CssSimpleSelector* simple, DomJsMutationAttribute attribute) {
+    if (!simple) return false;
+    if (simple->type == CSS_SELECTOR_PSEUDO_HAS) {
+        for (size_t i = 0; i < simple->function_selector_count; i++) {
+            if (dom_js_selector_mentions_mutation_attribute(
+                    simple->function_selectors[i], attribute)) {
+                return true;
+            }
+        }
+    }
+    for (size_t i = 0; i < simple->function_selector_count; i++) {
+        if (dom_js_selector_has_relational_mutation_attribute_dependency(
+                simple->function_selectors[i], attribute)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_relational_mutation_attribute_dependency(
+        CssSelector* selector, DomJsMutationAttribute attribute) {
+    if (!selector) return false;
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_selector_has_relational_mutation_attribute_dependency(
+                    compound->simple_selectors[s], attribute)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+typedef bool (*DomJsRulePredicate)(CssRule* rule, void* context);
+
+static bool dom_js_rule_tree_has_match(CssRule* rule,
+                                       DomJsRulePredicate predicate,
+                                       void* context) {
+    if (!rule) return false;
+    if (predicate && predicate(rule, context)) return true;
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTING ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            if (dom_js_rule_tree_has_match(rule->data.style_rule.nested_rules[i],
+                                           predicate, context)) {
+                return true;
+            }
+        }
+    } else if (rule->type == CSS_RULE_MEDIA ||
+               rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER ||
+               rule->type == CSS_RULE_SCOPE ||
+               rule->type == CSS_RULE_LAYER) {
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            if (dom_js_rule_tree_has_match(rule->data.conditional_rule.rules[i],
+                                           predicate, context)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_stylesheet_tree_has_match(CssStylesheet* stylesheet,
+                                             DomJsRulePredicate predicate,
+                                             void* context) {
+    if (!stylesheet || stylesheet->disabled) return false;
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        if (dom_js_rule_tree_has_match(stylesheet->rules[i], predicate, context)) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < stylesheet->imported_count; i++) {
+        if (dom_js_stylesheet_tree_has_match(stylesheet->imported_stylesheets[i],
+                                             predicate, context)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_relational_mutation_attribute_dependency(
+        CssRule* rule, void* context) {
+    DomJsMutationAttribute attribute = *(DomJsMutationAttribute*)context;
+    if (!rule || (rule->type != CSS_RULE_STYLE &&
+                  rule->type != CSS_RULE_NESTING &&
+                  rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
+        return false;
+    }
+    if (rule->data.style_rule.selector_group) {
+        for (size_t i = 0; i < rule->data.style_rule.selector_group->selector_count; i++) {
+            if (dom_js_selector_has_relational_mutation_attribute_dependency(
+                    rule->data.style_rule.selector_group->selectors[i], attribute)) {
+                return true;
+            }
+        }
+    }
+    return dom_js_selector_has_relational_mutation_attribute_dependency(
+        rule->data.style_rule.selector, attribute);
+}
+
+static bool dom_js_document_has_relational_mutation_attribute_dependency(
+        DomDocument* doc, DomJsMutationAttribute attribute) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (dom_js_stylesheet_tree_has_match(
+                doc->stylesheets[i],
+                dom_js_rule_has_relational_mutation_attribute_dependency,
+                &attribute)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_can_match_mutated_element(CssSelector* selector,
+                                                       DomElement* target) {
+    if (!selector || !target || selector->compound_selector_count == 0) return true;
+    CssCompoundSelector* rightmost =
+        selector->compound_selectors[selector->compound_selector_count - 1];
+    if (!rightmost) return true;
+    for (size_t i = 0; i < rightmost->simple_selector_count; i++) {
+        CssSimpleSelector* simple = rightmost->simple_selectors[i];
+        if (simple && simple->type == CSS_SELECTOR_TYPE_ELEMENT && simple->value &&
+            (!target->tag_name || str_icmp_cstr(simple->value, target->tag_name) != 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool dom_js_selector_has_relational_mutation_target_dependency(
+        CssSelector* selector, DomElement* target);
+
+static bool dom_js_simple_selector_has_relational_mutation_target_dependency(
+        CssSimpleSelector* simple, DomElement* target) {
+    if (!simple) return false;
+    if (simple->type == CSS_SELECTOR_PSEUDO_HAS) {
+        for (size_t i = 0; i < simple->function_selector_count; i++) {
+            if (dom_js_selector_can_match_mutated_element(
+                    simple->function_selectors[i], target)) {
+                return true;
+            }
+        }
+    }
+    for (size_t i = 0; i < simple->function_selector_count; i++) {
+        if (dom_js_selector_has_relational_mutation_target_dependency(
+                simple->function_selectors[i], target)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_relational_mutation_target_dependency(
+        CssSelector* selector, DomElement* target) {
+    if (!selector) return false;
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            if (dom_js_simple_selector_has_relational_mutation_target_dependency(
+                    compound->simple_selectors[s], target)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_relational_mutation_target_dependency(CssRule* rule,
+                                                                   void* context) {
+    DomElement* target = (DomElement*)context;
+    if (!rule || !target || (rule->type != CSS_RULE_STYLE &&
+                             rule->type != CSS_RULE_NESTING &&
+                             rule->type != CSS_RULE_NESTED_DECLARATIONS)) {
+        return false;
+    }
+    if (rule->data.style_rule.selector_group) {
+        for (size_t i = 0; i < rule->data.style_rule.selector_group->selector_count; i++) {
+            if (dom_js_selector_has_relational_mutation_target_dependency(
+                    rule->data.style_rule.selector_group->selectors[i], target)) {
+                return true;
+            }
+        }
+    }
+    return dom_js_selector_has_relational_mutation_target_dependency(
+        rule->data.style_rule.selector, target);
+}
+
+static bool dom_js_document_has_relational_mutation_target_dependency(
+        DomDocument* doc, DomElement* target) {
+    if (!doc || !target || !doc->stylesheets || doc->stylesheet_count <= 0) return true;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (dom_js_stylesheet_tree_has_match(
+                doc->stylesheets[i],
+                dom_js_rule_has_relational_mutation_target_dependency, target)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
     if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
     for (int i = 0; i < doc->stylesheet_count; i++) {
@@ -6275,6 +6535,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
 
     bool checked_broad_structural_css = false;
     bool has_broad_structural_css = false;
+    bool checked_class_relational_css = false;
+    bool has_class_relational_css = false;
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
@@ -6312,6 +6574,29 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
             // their cascade root above, so they retain incremental layout.
             if (reason) *reason = "broad-structural-css-risk";
             return false;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+            record->attribute == DOM_JS_MUTATION_ATTRIBUTE_CLASS) {
+            if (!checked_class_relational_css) {
+                has_class_relational_css =
+                    dom_js_document_has_relational_mutation_attribute_dependency(
+                        doc, DOM_JS_MUTATION_ATTRIBUTE_CLASS);
+                checked_class_relational_css = true;
+            }
+            if (!has_class_relational_css) continue;
+            // Only a class-sensitive :has() can affect an ancestor outside
+            // the mutation's local cascade root.
+            if (reason) *reason = "broad-relational-css-risk";
+            return false;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE &&
+            record->attribute == DOM_JS_MUTATION_ATTRIBUTE_UNKNOWN &&
+            record->target && record->target->is_element() &&
+            !dom_js_document_has_relational_mutation_target_dependency(
+                doc, record->target->as_element())) {
+            // An attribute cannot make a differently typed element match a
+            // :has() argument, so its ancestor match set is unchanged.
+            continue;
         }
         if (record->kind == DOM_JS_MUTATION_ATTRIBUTE ||
             record->kind == DOM_JS_MUTATION_TEXT) {
@@ -6675,10 +6960,14 @@ static bool post_html_handler_incremental_rebuild(
     uint64_t t2 = time_now_ns();
 
     int dirty_rect_count = 0;
+    int state_pruned = 0;
     bool selective_dirty = false;
     const char* repaint_reason = nullptr;
     bool allow_geometry_dirty = !repaint_root_overflow && old_bound_count > 0;
     if (state) {
+        // Incremental reflow also needs the StateStore ownership and focus
+        // repair performed by the retained full-layout fallback.
+        state_pruned = (int)state_store_prune_after_reflow(state); // INT_CAST_OK: reconcile telemetry count.
         dirty_clear(&state->dirty_tracker);
         if (repaint_root_overflow) {
             repaint_reason = "repaint-root-overflow";
@@ -6719,7 +7008,7 @@ static bool post_html_handler_incremental_rebuild(
                             mutations, doc->js.mutation_record_count,
                             doc->js.mutation_record_overflow,
                             "mutation-subtrees", "incremental-layout",
-                            "retained", 0);
+                            "retained-pruned-after-reflow", state_pruned);
     return true;
 }
 

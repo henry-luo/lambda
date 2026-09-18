@@ -65,6 +65,8 @@ static void view_state_set_hovered_internal(DocState* state, View* view, bool ho
                                             bool assert_after_mutation);
 static void view_state_set_active_internal(DocState* state, View* view, bool active,
                                            bool assert_after_mutation);
+static uint32_t view_state_sync_focus_flag(DocState* state, DomNode* root,
+                                           View* focused);
 
 // The list lives inside DocState; keeping its destructor here lets every
 // state owner tear down without depending on the event dispatcher.
@@ -3029,6 +3031,11 @@ uint32_t state_store_prune_after_reflow(DocState* state) {
     if (!root) return 0;
 
     uint32_t removed = view_state_prune_orphans(state);
+    if (state->focus && state->focus->current) {
+        // A script can focus a control before layout assigns its persistent
+        // view id. Re-establish the flag once the retained view is live.
+        removed += view_state_sync_focus_flag(state, root, state->focus->current);
+    }
     removed += state_map_prune_orphans(state, root);
 
     if (state->cursor && state->cursor->view &&
@@ -3538,7 +3545,9 @@ void form_control_set_behavior_inited(DocState* state, View* view, bool inited) 
 }
 
 static int behavior_init_control_equals(ArrayListValue left, ArrayListValue right) {
-    return left != right;
+    // arraylist_index_of treats non-zero as equal; retain every distinct
+    // control so the post-layout init phase visits the complete document set.
+    return left == right;
 }
 
 void radiant_queue_behavior_init_control(DomDocument* doc, View* view) {
@@ -3772,6 +3781,38 @@ static void view_state_set_active_internal(DocState* state, View* view, bool act
 void view_state_set_focused(DocState* state, View* view, bool focused) {
     view_state_set_flag_internal(state, view, VIEW_STATE_FLAG_FOCUSED, focused, "focus",
         "view_state_set_focused", true);
+}
+
+static uint32_t view_state_sync_focus_flag(DocState* state, DomNode* root,
+                                           View* focused) {
+    if (!state || !root || !focused || !state->view_state_map ||
+        !view_tree_contains_view(root, focused)) {
+        return 0;
+    }
+
+    uint32_t changed = 0;
+    bool found_focused_view = false;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        if (!entry || !entry->state) continue;
+        View* live_view = view_tree_find_live_id(root, entry->view_id);
+        bool expected = live_view == focused;
+        if (expected) found_focused_view = true;
+        if ((entry->state->flags.focused != 0) == expected) continue;
+        entry->state->flags.focused = expected ? 1 : 0;
+        changed++;
+    }
+
+    if (!found_focused_view) {
+        // No state record existed while the focus transition ran because the
+        // view had not yet been assigned its retained identity.
+        view_state_set_flag_internal(state, focused, VIEW_STATE_FLAG_FOCUSED,
+            true, "focus", "view_state_sync_focus_flag", false);
+        changed++;
+    }
+    return changed;
 }
 
 typedef void (*ViewStateTargetSetter)(DocState* state, View* view, bool value,

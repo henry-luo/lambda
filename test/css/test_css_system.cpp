@@ -485,7 +485,7 @@ TEST_F(StyleTreeTest, SingleDeclarationApplication) {
 
     StyleNode* node = style_tree_apply_declaration(style_tree, color_decl);
     ASSERT_NE(node, nullptr);
-    EXPECT_EQ(node->base.property_id, CSS_PROPERTY_COLOR);
+    EXPECT_EQ(node->property_code, CSS_PROPERTY_COLOR);
     EXPECT_EQ(node->winning_decl, color_decl);
     EXPECT_EQ(node->weak_list, nullptr);
 
@@ -707,7 +707,7 @@ TEST_F(StyleTreeTest, TreeTraversal) {
     int count = style_tree_foreach(style_tree, [](StyleNode* node, void* context) -> bool {
         VisitedProperties* properties = (VisitedProperties*)context;
         if (properties->count >= 3) return false;
-        properties->values[properties->count++] = (CssPropertyCode)node->base.property_id;
+        properties->values[properties->count++] = node->property_code;
         return true;
     }, &visited_properties);
 
