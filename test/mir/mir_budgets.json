@@ -278,10 +278,10 @@
       "name": "js_corpus_array_methods",
       "script": "test/js/array_methods.js",
       "language": "js",
-      "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots and merged Item error-tag branches in each generated root frame. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
+      "description": "Picked corpus script (array/callback-heavy), including fixed call-argument slots and merged Item error-tag branches in each generated root frame. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Re-baseline 2026-09-18 (-18): measured shrink with the JS interpreter-tuning commits e4498011e/20f3458e8/d7fce59c6 in tree (not attributed to one); unrelated to the Lambda S12.1.1v2 work.",
       "budgets": {
         "default": {
-          "module_insns": 3255
+          "module_insns": 3237
         }
       }
     },
