@@ -325,6 +325,7 @@ static JsAstNode* js_c_lower_decorated_class(JsCAstSink* sink,
         argument->name = class_value->name;
         call->callee = decorator;
         call->arguments = (JsAstNode*)argument;
+        (void)ast_plan_call_shape(call);
         fallback->name = class_value->name;
         coalesce->op = OPERATOR_JS_NULLISH_COALESCE;
         coalesce->left = (JsAstNode*)call;
@@ -494,6 +495,7 @@ static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
     fallback->right = (JsAstNode*)fallback_assignment;
     call->callee = (JsAstNode*)function;
     call->arguments = (JsAstNode*)fallback;
+    (void)ast_plan_call_shape(call);
     invocation->expression = (JsAstNode*)call;
     namespace_declaration->next = (JsAstNode*)invocation;
     return (JsAstNode*)namespace_declaration;

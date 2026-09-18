@@ -1,9 +1,9 @@
 # Lambda Implementation Plan: Shared AST Interpreter Tuning
 
 **Date:** 2026-09-18  
-**Status:** IN PROGRESS — Phase 1 is implemented; Phase 2 and Phase 3 have
-landed their Lambda static-fact slices. Measurement and the remaining
-cross-profile slices are pending.  
+**Status:** IN PROGRESS — Phases 1–3 have landed their scoped interpreter
+slices; Phase 4 has scoped JS and Lambda activation-window convergence slices.
+Measurement and the remaining cross-profile slices are pending.
 **Source baseline:** `12b507e51`; measurements captured on 2026-09-18.  
 **Scope:** Lambda's boxed AST interpreter and the existing Item-based LambdaJS
 AST backend, pinned to interpretation. Not the separate JS MVP ABI/backend.
@@ -483,9 +483,25 @@ Choose no pool-layout change if the measured benefit does not justify it.
 - `InterpWalker.RepeatedCaptureRead` exercises snapshot capture reads in a
   repeated-call loop. Focused interpreter differential tests cover captures,
   static members, named arguments, literals and type binders. JS lexical-cell
-  planning and lazy parameter-diagnostic formatting remain separate work: the
-  current contract checker receives an already-built diagnostic string, so a
-  lazy descriptor boundary needs a dedicated ownership/error-format design.
+  slots are now sealed by direct-scope construction before the AST can be
+  shared by executions; `js_interp_env_create` consumes the prepared count and
+  no longer rewrites `NameEntry::slot` per activation. Lazy synthetic class
+  field-initializer functions likewise seal their known zero-slot scope at
+  construction in the execution overlay (**D8.2.4–D8.2.5v2**).
+  AST callable definitions now retain their source-owned parameter shape and
+  resolved formal length in the shared `JsCallableCode`; closures, mapped
+  `arguments`, and class constructors consume that immutable record instead
+  of rescanning parameters. The same parameter-facts pass now supplies the
+  callable's total arity, removing the immediately preceding independent list
+  count (**D8.2.4, D8.2.5v2**).
+  `AstCallNode` now has one shared preparation routine for representable
+  source arity, named operands, and spread presence. Lambda's plan and every
+  JS call constructor use it; the JS walker can select its direct rooted-call
+  path without another argument-list scan, while oversized lists retain the
+  existing scan and diagnostics (**D8.2.4, D8.2.5v2**).
+  Lazy parameter-diagnostic formatting remains separate work: the current
+  contract checker receives an already-built diagnostic string, so a lazy
+  descriptor boundary needs a dedicated ownership/error-format design.
 
 Starting points: `ast-core.hpp::{NameEntry,NameScope,FnAnalysis,FnFramePlan,
 AstCallNode}`, `compiler_pass.cpp`, `interp_plan.cpp`, and both walkers.
@@ -555,6 +571,30 @@ typed admission failures and cold-start preparation/memory costs are checked.
 Starting points: `interp.cpp::{InterpFrameGuard,Scratch}`,
 `js_interp.cpp::JsInterpFrame`, `runtime-state.{h,cpp}`,
 `lambda-root-frame.hpp`, `side_stack.c`, `FnFramePlan`.
+
+### 9.0 Landed implementation (2026-09-18)
+
+- Ordinary JS calls and generator/async-generator activation setup now reserve
+  one exact one-slot root window for the complete parameter-binding sequence,
+  rather than opening and closing an identical window for every parameter.
+  The window exists only when a function has parameters. Each completed
+  binding is owned by the traced function environment, so the reusable slot
+  roots only the parameter currently crossing allocation-capable binding work
+  and is cleared before a later rest-array allocation (**D5.3.3**). This
+  matches the activation-scoped reservation discipline
+  already used by Lambda's `InterpFrameGuard`, without falsely merging JS
+  suspension/control-frame semantics with Lambda frames.
+- Focused JS coverage exercises defaults and rest parameters in both ordinary
+  and suspended activation setup. This is a client convergence slice, not yet
+  a common abstraction: the audit found JS `yield`/`await`, direct eval and
+  re-entrant property/call behavior need distinct lifetime plans before a
+  shared activation type is justified.
+- Lambda's bounded ordinary dynamic-call arguments now borrow a contiguous
+  span from their planned activation root window. The planner reserves every
+  source argument plus a possible pipe injection and retains the callee root
+  while nested arguments run. Named and special call shapes, and any
+  unplanned/oversized activation, retain the established dynamic `RootSpan`
+  route (**D5.3.3, D8.2.5v2**).
 
 ### 9.1 Converge ownership before extraction
 
@@ -839,8 +879,8 @@ backend; preserve baseline binaries instead.
 | Phase 1: Lambda literal decoding | Per-primary prepared payloads; AST literal smoke tests pass; decode-counter and folding-on/off matrix remain | Implemented; measurement gate pending |
 | Phase 1: JS literal reuse | Realm-owned immutable cache; repeated-use, GC and heap-replacement tests pass; materialization/parse deltas remain | Implemented; measurement gate pending |
 | Linked names/index route | Activation-local Lambda member links; existing JS property-lane audit; identity/order tests and name-work deltas | Partial; sparse/index counter gate pending |
-| Static interpreter facts | Lambda capture/read and call-shape facts; planner/differential tests; JS planning and format deltas | Partial; measurement and JS slices pending |
-| Common activation/windows | Lifetime protocol, resource-bound tests, forced-GC results | Not started |
+| Static interpreter facts | Lambda capture/read and call-shape facts; JS lexical slots, callable parameter facts and shared call shapes | Partial; lazy diagnostics, local classification and measurement remain |
+| Common activation/windows | JS parameter and Lambda ordinary-call window reuse; lifetime protocol, resource-bound and forced-GC results remain | Partial; common extraction pending |
 | JS local slots | Eligibility proof/tests, environment allocation deltas | Not started |
 | Residual primitive guards | Profile evidence, exact guards, semantic edge-case tests | Conditional |
 | Sparse/regex runtime tracks | Separate algorithm proofs and performance tables | Separate follow-ups |

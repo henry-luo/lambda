@@ -808,9 +808,8 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
 }
 
 extern "C" Item js_new_interpreted_function(AstFuncNode* function,
-        JsScript* script, JsInterpEnv* environment, int param_count,
-        uint32_t flags) {
-    if (!function || param_count < 0) return ItemError;
+        JsScript* script, JsInterpEnv* environment, uint32_t flags) {
+    if (!function) return ItemError;
     RootFrame roots(1);
     Rooted<Item> function_root(roots, ItemNull);
     JsFunction* fn = js_alloc_function_storage(true);
@@ -820,7 +819,7 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
     JsCallableCode* code = js_script_ast_callable_ensure(script, function,
-        param_count, lambda_active_module_state_id());
+        lambda_active_module_state_id());
     if (!code) return ItemError;
     ast->definition = code;
     // definition metadata is installed directly, with no per-value temporary.
@@ -833,7 +832,6 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
         ? js_get_new_target() : ItemNull;
     js_function_root_ast_payload(fn);
     fn->name = function->name;
-    code->formal_length = (int16_t)param_count;
     // AST closures created inside `with` use the same captured object
     // environment stack as compiled and native JS functions.
     js_function_capture_with_env(fn);

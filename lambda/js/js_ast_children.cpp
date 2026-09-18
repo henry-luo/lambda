@@ -382,6 +382,7 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
     JsAstNode* last_parameter = NULL;
     for (JsAstNode* parameter = parameters; parameter;
             parameter = parameter->next) {
+        facts.parameter_count++;
         if (!formal_ended) {
             bool ends_formal_length =
                 parameter->node_type == AST_NODE_REST_ELEMENT ||

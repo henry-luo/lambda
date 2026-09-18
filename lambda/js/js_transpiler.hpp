@@ -145,6 +145,8 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 // var scope rather than a simple catch parameter's legacy var target.
 NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* scope,
     String* name, JsAstNode* node, JsVarKind kind);
+// Seal source-owned lexical-cell slot order before any interpreter activation.
+bool js_scope_plan_binding_slots(JsScope* scope);
 void js_record_interp_import(JsTranspiler* tp, String* local, String* source,
     String* export_name, bool namespace_import);
 void js_record_interp_export(JsTranspiler* tp, String* local,

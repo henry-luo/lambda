@@ -624,6 +624,7 @@ JsAstNode* build_js_call_from_children(JsTranspiler* tp, SourceSpan span,
     call->callee = callee;
     call->arguments = arguments;
     call->optional = optional;
+    (void)ast_plan_call_shape(call);
     call->type = js_set_type_any(tp, ANY_JS_CALL);
     return (JsAstNode*)call;
 }
@@ -639,6 +640,7 @@ JsAstNode* build_js_new_from_children(JsTranspiler* tp, SourceSpan span,
         AST_NODE_NEW_EXPR, span, sizeof(JsCallNode));
     call->callee = callee;
     call->arguments = arguments;
+    (void)ast_plan_call_shape(call);
     call->type = js_set_type_any(tp, ANY_JS_CALL);
     return (JsAstNode*)call;
 }

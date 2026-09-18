@@ -160,6 +160,7 @@ typedef bool (*JsAstChildPredicate)(JsAstNode* child, void* ctx);
 // Parameter shape is source-owned: interpreter metadata and MIR planning must
 // not independently rediscover default/rest and binding-name semantics.
 struct JsAstParameterFacts {
+    int parameter_count = 0;
     int formal_length = -1;
     bool has_default_params = false;
     bool has_duplicate_param_names = false;

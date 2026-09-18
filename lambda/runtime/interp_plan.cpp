@@ -1161,22 +1161,9 @@ static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
 }
 
 static void plan_link_call_shape(AstCallNode* call) {
-    if (!call) return;
-    uint32_t argc = 0;
-    bool has_named_args = false;
-    for (AstNode* argument = call->argument; argument; argument = argument->next) {
-        if (argc == UINT16_MAX) {
-            // Preserve the existing runtime arity diagnostic for a malformed
-            // oversize call rather than narrowing its source fact.
-            call->interp_call_shape_planned = false;
-            return;
-        }
-        argc++;
-        has_named_args = has_named_args || argument->node_type == AST_NODE_NAMED_ARG;
-    }
-    call->interp_source_argc = (uint16_t)argc;
-    call->interp_has_named_args = has_named_args;
-    call->interp_call_shape_planned = true;
+    // An oversized list retains the existing walker-side scan and runtime
+    // diagnostic instead of narrowing its source count into the shared plan.
+    (void)ast_plan_call_shape(call);
 }
 
 // Scratch need: the maximum number of Items that must stay live in frame slots
@@ -1317,11 +1304,24 @@ static uint32_t plan_need(AstNode* node) {
     }
     case AST_NODE_CALL_EXPR:
     case AST_NODE_NEW_EXPR: {
-        // Arguments are rooted in their own RootSpan (the same shape
-        // lambda_dynamic_call uses); only the callee occupies a frame slot.
+        // The ordinary dynamic-call route borrows a bounded argument span
+        // from its activation window. Reserve one additional operand for a
+        // possible pipe injection; named and special calls retain their
+        // existing RootSpan route and harmlessly leave this reservation idle.
         AstCallNode* c = (AstCallNode*)node;
         uint32_t fn = plan_need(c->function);
-        uint32_t args = 1 + plan_need_max_siblings(c->argument);
+        uint32_t argument_slots = 1;
+        for (AstNode* argument = c->argument; argument; argument = argument->next) {
+            if (argument_slots == UINT32_MAX) return UINT32_MAX;
+            argument_slots++;
+        }
+        uint32_t argument_need = plan_need_max_siblings(c->argument);
+        if (argument_slots > UINT32_MAX - 1 ||
+                argument_need > UINT32_MAX - argument_slots - 1) {
+            return UINT32_MAX;
+        }
+        // The callee root remains live while each argument expression runs.
+        uint32_t args = 1 + argument_slots + argument_need;
         uint32_t best = fn > args ? fn : args;
         // CW25 place borrow (`f(var m.rows[i])`): eval_call holds the prepared
         // root, the key path and the segment key it is evaluating -- three
@@ -1763,6 +1763,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         plan_link_capture_identifier(pc, (AstIdentNode*)node);
         break;
     case AST_NODE_CALL_EXPR:
+    case AST_NODE_NEW_EXPR:
         plan_link_call_shape((AstCallNode*)node);
         break;
     case AST_NODE_FUNC:

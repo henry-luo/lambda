@@ -913,14 +913,14 @@ static bool js_interp_private_key(Item key) {
         property_key_kind(name) == NAME_KEY_PRIVATE;
 }
 
-static int js_interp_scope_slot_count(NameScope* scope) {
+static int js_interp_scope_slot_count(const NameScope* scope) {
     if (!scope) return 0;
-    int count = 0;
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        entry->slot = count++;
-        entry->storage_assigned = true;
+    if (!scope->binding_slots_planned ||
+            scope->binding_slot_count > (uint32_t)INT32_MAX) {
+        log_error("js-interp: lexical scope has no sealed slot plan");
+        return -1;
     }
-    return count;
+    return (int)scope->binding_slot_count;
 }
 
 static bool js_interp_scope_needs_environment(NameScope* scope) {
@@ -930,6 +930,7 @@ static bool js_interp_scope_needs_environment(NameScope* scope) {
 static JsInterpEnv* js_interp_env_create(NameScope* scope, JsInterpEnv* outer) {
     if (!context || !context->heap || !context->heap->gc) return NULL;
     int count = js_interp_scope_slot_count(scope);
+    if (count < 0) return NULL;
     // Each durable slot owns a companion scalar payload, matching the common
     // module/closure storage contract (D5.3).  A raw Item copy would retain a
     // caller's float home across a GC or async suspension.
@@ -1220,14 +1221,6 @@ static Item js_interp_register_private_binding(JsInterpFrame* frame,
     if (item_is_error(pushed)) return pushed;
     pushed = js_array_push(bindings_root.get(), key_root.get());
     return item_is_error(pushed) ? pushed : js_status_ok();
-}
-
-static bool js_interp_function_has_simple_params(const JsFunctionNode* function) {
-    for (const JsAstNode* param = function ? (const JsAstNode*)function->params : NULL;
-            param; param = (const JsAstNode*)param->next) {
-        if (param->node_type != AST_NODE_IDENT) return false;
-    }
-    return true;
 }
 
 static int js_interp_arguments_param_index(const JsInterpEnv* env,
@@ -1530,13 +1523,6 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     return value;
 }
 
-static int js_interp_function_formal_length(const JsFunctionNode* function) {
-    JsAstParameterFacts facts = js_ast_collect_parameter_facts(
-        function ? (JsAstNode*)function->params : NULL);
-    return facts.formal_length >= 0 ? facts.formal_length
-        : ast_linked_node_count(function ? function->params : NULL);
-}
-
 static Item js_interp_configure_function_metadata(Item function_item);
 
 static NameScope* js_interp_function_name_scope(const JsFunctionNode* function) {
@@ -1553,8 +1539,7 @@ static Item js_interp_new_function(JsInterpFrame* frame,
     JsInterpEnvRoot name_env_root(name_env);
     if (name_scope && (!name_env || !name_env_root.registered)) return ItemError;
     JS_ROOTS(roots, result_root, js_new_interpreted_function(function, frame->script,
-        name_env ? name_env : frame->env,
-        ast_linked_node_count(function->params), flags));
+        name_env ? name_env : frame->env, flags));
     if (!item_is_error(result_root.get()) &&
             (js_private_field_initializing || js_eval_initializer_context)) {
         // Nested closures retain the field-initializer early-error context
@@ -1571,8 +1556,6 @@ static Item js_interp_new_function(JsInterpFrame* frame,
     }
     result_root.set(js_interp_configure_function_metadata(result_root.get()));
     if (!item_is_error(result_root.get())) {
-        js_set_formal_length(result_root.get(),
-            js_interp_function_formal_length(function));
         const char* source_text = NULL;
         uint32_t source_length = 0;
         if (frame->script && js_function_source_span(frame->script->source,
@@ -1900,8 +1883,10 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
                 }
                 if (cls->superclass) js_mark_derived_constructor_func(method_root.get());
                 js_set_class_constructor(class_root.get(), method_root.get());
-                js_set_formal_length(class_root.get(), js_interp_function_formal_length(
-                    (JsFunctionNode*)method));
+                JsFunction* method_function = (JsFunction*)method_root.get().function;
+                int constructor_length = js_fn_formal_length(method_function);
+                js_set_formal_length(class_root.get(), constructor_length >= 0
+                    ? constructor_length : js_fn_param_count(method_function));
                 continue;
             }
             int64_t prefix_kind = method->kind == JsMethodDefinitionNode::JS_METHOD_GET
@@ -2665,6 +2650,13 @@ static bool js_interp_identifier_is(JsAstNode* node, const char* name);
 
 static bool js_interp_call_has_plain_arguments(JsCallNode* call, int* out_count) {
     if (!call || !out_count) return false;
+    if (call->interp_call_shape_planned) {
+        if (call->interp_has_spread_args) return false;
+        *out_count = (int)call->interp_source_argc;
+        return true;
+    }
+    // A malformed oversized list cannot fit the shared uint16_t fact. Retain
+    // the established walker scan rather than silently narrowing its arity.
     int count = 0;
     for (JsAstNode* arg = (JsAstNode*)call->arguments; arg;
             arg = (JsAstNode*)arg->next) {
@@ -4014,7 +4006,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
 static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         NameScope* scope, bool initialize_functions) {
     if (!scope) return js_interp_normal(make_js_undefined());
-    js_interp_scope_slot_count(scope);
+    if (js_interp_scope_slot_count(scope) < 0) return js_interp_throw(ItemError);
     if (frame && !frame->script->is_module &&
             scope == frame->script->global_scope) {
         // GlobalDeclarationInstantiation validates every lexical name before
@@ -5534,8 +5526,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     if (body_needs_environment && (!body_env || !body_env_root.registered)) return ItemError;
     if (!(function->flags & JS_FUNC_FLAG_ARROW) && js_fn_ast_uses_arguments(function)) {
         bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
-        bool mapped = !strict && js_interp_function_has_simple_params(
-            js_fn_ast_function(function));
+        bool mapped = !strict && js_fn_ast_has_simple_params(function);
         // Materialize before parameter defaults and keep it in the traced
         // activation record. Later nested calls therefore cannot replace an
         // AST function's lexical arguments binding through ambient state.
@@ -5569,28 +5560,36 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
     js_interp_prepare_parameter_tdz(&frame, js_fn_ast_function(function));
     int index = 0;
-    for (JsAstNode* param = (JsAstNode*)js_fn_ast_function(function)->params; param;
-            param = (JsAstNode*)param->next) {
-        RootFrame param_roots(1);
-        Rooted<Item> value_root(param_roots, make_js_undefined());
-        if (param->node_type == AST_NODE_REST_ELEMENT) {
-            value_root.set(js_array_new(0));
-            if (item_is_error(value_root.get())) return value_root.get();
-            for (; index < arg_count; index++) {
-                Item argument = args ? args[index] : make_js_undefined();
-                Item pushed = js_array_push(value_root.get(), argument);
-                if (item_is_error(pushed)) return pushed;
+    JsAstNode* params = (JsAstNode*)js_fn_ast_function(function)->params;
+    if (params) {
+        // D5.3.3: completed bindings own their values in the environment; this
+        // exact root slot only carries the next parameter through MAY_GC work.
+        RootFrame parameter_roots(1);
+        Rooted<Item> value_root(parameter_roots, make_js_undefined());
+        for (JsAstNode* param = params; param;
+                param = (JsAstNode*)param->next) {
+            // Match the former per-parameter frame: a prior binding is not
+            // retained across allocation while materializing this rest array.
+            value_root.set(make_js_undefined());
+            if (param->node_type == AST_NODE_REST_ELEMENT) {
+                value_root.set(js_array_new(0));
+                if (item_is_error(value_root.get())) return value_root.get();
+                for (; index < arg_count; index++) {
+                    Item argument = args ? args[index] : make_js_undefined();
+                    Item pushed = js_array_push(value_root.get(), argument);
+                    if (item_is_error(pushed)) return pushed;
+                }
+            } else {
+                value_root.set(index < arg_count && args ? args[index]
+                    : make_js_undefined());
+                index++;
             }
-        } else {
-            value_root.set(index < arg_count && args ? args[index]
-                : make_js_undefined());
-            index++;
+            frame.in_parameter_initializer = true;
+            JsInterpCompletion bound = js_interp_bind_pattern(&frame, param,
+                value_root.get(), true);
+            frame.in_parameter_initializer = false;
+            if (bound.kind != JS_INTERP_NORMAL) return bound.value;
         }
-        frame.in_parameter_initializer = true;
-        JsInterpCompletion bound = js_interp_bind_pattern(&frame, param,
-            value_root.get(), true);
-        frame.in_parameter_initializer = false;
-        if (bound.kind != JS_INTERP_NORMAL) return bound.value;
     }
     initialized = js_interp_initialize_function_declarations(&frame,
         js_fn_ast_function(function)->vars);
@@ -5711,7 +5710,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     JsInterpEnvRoot body_env_root(body ? body_env : NULL);
     if (!body_env || (body && !body_env_root.registered)) return ItemError;
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
-    bool mapped = !strict && js_interp_function_has_simple_params(js_fn_ast_function(function));
+    bool mapped = !strict && js_fn_ast_has_simple_params(function);
     int arg_count = (int)js_array_length(arguments_root.get());
     Item* args = arg_count > 0 ? arguments_root.get().array->items : NULL;
     arguments_object_root.set(js_build_arguments_object_for_call(args, arg_count,
@@ -5740,26 +5739,34 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
     js_interp_prepare_parameter_tdz(&init_frame, js_fn_ast_function(function));
     int index = 0;
-    for (JsAstNode* parameter = (JsAstNode*)js_fn_ast_function(function)->params;
-            parameter; parameter = (JsAstNode*)parameter->next) {
+    JsAstNode* parameters = (JsAstNode*)js_fn_ast_function(function)->params;
+    if (parameters) {
+        // D5.3.3: generator setup follows the ordinary activation's one-slot
+        // parameter lifetime; a bound value is owned by function_env afterward.
         RootFrame parameter_roots(1);
         Rooted<Item> value_root(parameter_roots, make_js_undefined());
-        if (parameter->node_type == AST_NODE_REST_ELEMENT) {
-            value_root.set(js_array_new(0));
-            if (item_is_error(value_root.get())) return value_root.get();
-            for (; index < arg_count; index++) {
-                Item pushed = js_array_push(value_root.get(), args[index]);
-                if (item_is_error(pushed)) return pushed;
+        for (JsAstNode* parameter = parameters; parameter;
+                parameter = (JsAstNode*)parameter->next) {
+            // Keep generator setup's reusable slot at the same liveness
+            // boundary as the ordinary activation path above.
+            value_root.set(make_js_undefined());
+            if (parameter->node_type == AST_NODE_REST_ELEMENT) {
+                value_root.set(js_array_new(0));
+                if (item_is_error(value_root.get())) return value_root.get();
+                for (; index < arg_count; index++) {
+                    Item pushed = js_array_push(value_root.get(), args[index]);
+                    if (item_is_error(pushed)) return pushed;
+                }
+            } else {
+                value_root.set(index < arg_count ? args[index] : make_js_undefined());
+                index++;
             }
-        } else {
-            value_root.set(index < arg_count ? args[index] : make_js_undefined());
-            index++;
+            init_frame.in_parameter_initializer = true;
+            JsInterpCompletion bound = js_interp_bind_pattern(&init_frame,
+                parameter, value_root.get(), true);
+            init_frame.in_parameter_initializer = false;
+            if (bound.kind != JS_INTERP_NORMAL) return bound.value;
         }
-        init_frame.in_parameter_initializer = true;
-        JsInterpCompletion bound = js_interp_bind_pattern(&init_frame,
-            parameter, value_root.get(), true);
-        init_frame.in_parameter_initializer = false;
-        if (bound.kind != JS_INTERP_NORMAL) return bound.value;
     }
     initialized = js_interp_initialize_function_declarations(&init_frame,
         js_fn_ast_function(function)->vars);
@@ -6039,6 +6046,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
             js_throw_syntax_error(js_make_string("unsupported AST interpreter script")));
     }
     int global_slots = js_interp_scope_slot_count(script->global_scope);
+    if (global_slots < 0) return runtime_publish_result(context, ItemError);
     // CJS/ES module evaluation can re-enter this executor through require or
     // import. The caller's slab is the dynamic state seen after that call.
     RuntimeModuleStateScope module_state;
@@ -6298,6 +6306,7 @@ static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) 
     if (script->es_module_scope_initialized) return make_js_undefined();
     RuntimeCurrentFileScope current_file(context, script->reference);
     int global_slots = js_interp_scope_slot_count(script->global_scope);
+    if (global_slots < 0) return ItemError;
     RuntimeModuleStateScope module_state;
     if (!lambda_module_state_prepare(script->module_state_id,
             (uint32_t)(global_slots > 0 ? global_slots : 1)) ||

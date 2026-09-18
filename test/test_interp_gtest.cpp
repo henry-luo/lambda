@@ -722,6 +722,8 @@ TEST(InterpFramePlan, NestedCallArgumentsStayInsideThePlannedWindow) {
     std::string log = read_file("log.txt");
     EXPECT_EQ(log.find("interp: scratch overflow"), std::string::npos)
         << "frame plan undercounted scratch for nested calls";
+    EXPECT_EQ(log.find("interp: planned argument span exceeds activation window"),
+        std::string::npos) << "frame plan undercounted ordinary call arguments";
 }
 
 TEST(InterpFramePlan, NominalMatchPatternsStayInsideThePlannedWindow) {

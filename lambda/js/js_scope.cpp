@@ -294,6 +294,20 @@ NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
     return tp ? js_scope_find_entry(tp->current_scope, name) : NULL;
 }
 
+bool js_scope_plan_binding_slots(JsScope* scope) {
+    if (!scope) return true;
+    if (scope->binding_slots_planned) return true;
+    uint32_t count = 0;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (count >= (uint32_t)INT32_MAX) return false;
+        entry->slot = (int32_t)count++;
+        entry->storage_assigned = true;
+    }
+    scope->binding_slot_count = count;
+    scope->binding_slots_planned = true;
+    return true;
+}
+
 NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
         String* name, JsAstNode* node, JsVarKind kind) {
     if (!target_scope) {
@@ -337,6 +351,12 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
             tp->binding_error_count++;
             return existing;
         }
+    }
+
+    if (target_scope->binding_slots_planned) {
+        log_error("js-scope: attempted to define a binding after slot planning");
+        if (tp) tp->has_errors = true;
+        return NULL;
     }
 
     // Create new name entry
@@ -561,6 +581,9 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     function->has_use_strict_directive = true;
     scope->kind = SCOPE_KIND_FUNCTION;
     scope->strict = true;
+    // The execution-overlay function bypasses direct scope construction, but
+    // still has an immutable zero-binding activation plan (D8.2.4).
+    if (!js_scope_plan_binding_slots(scope)) return NULL;
     body->node_type = AST_NODE_BLOCK;
     body->source_span = field->source_span;
     body->statements = (JsAstNode*)result;
@@ -585,7 +608,7 @@ typedef TypedHashMap<JsAstCallableEntry,
 // The Script pool owns one canonical code artifact for each indexed AST
 // function. Closures retain that artifact rather than a parallel definition row.
 JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
-        AstFuncNode* function, int param_count, uint32_t module_state_id) {
+        AstFuncNode* function, uint32_t module_state_id) {
     if (!script || !script->pool || !function) return NULL;
     if (!script->ast_callables) {
         script->ast_callables = JsAstCallableMap::create(8);
@@ -605,16 +628,21 @@ JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
     JsCallableCode* code = (JsCallableCode*)pool_calloc(
         js_script_execution_pool(script), sizeof(JsCallableCode));
     if (!code) return NULL;
+    JsAstParameterFacts parameter_facts = js_ast_collect_parameter_facts(
+        (JsAstNode*)function->params);
+    int param_count = parameter_facts.parameter_count;
     JsAstFunctionFacts facts = js_ast_collect_function_facts(
         (JsAstNode*)function->params, (JsAstNode*)function->body);
     js_callable_code_init_definition(code, function, (Script*)script,
         param_count);
-    code->formal_length = (int16_t)param_count;
+    code->formal_length = (int16_t)(parameter_facts.formal_length >= 0
+        ? parameter_facts.formal_length : param_count);
     code->module_state_id = module_state_id;
     code->body_kind = JS_FUNCTION_BODY_AST;
     code->has_direct_eval = facts.has_direct_eval;
     code->uses_arguments = facts.observations &
         JS_AST_OBSERVES_ARGUMENTS;
+    code->has_non_simple_params = parameter_facts.has_non_simple_params;
     code->definition_owned = true;
     key.code = code;
     JsAstCallableMap::set(script->ast_callables, key);
