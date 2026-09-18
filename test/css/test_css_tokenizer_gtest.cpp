@@ -136,6 +136,38 @@ TEST_F(CssTokenizerTest, LargeCommentUsesTokenCountNotInputLength) {
     ASSERT_NE(tokens, nullptr);
     EXPECT_LT(after.live_bytes - before.live_bytes, source_length * 2)
         << "token storage must grow with emitted tokens, not source bytes";
+    css_token_array_release(pool, tokens, (size_t)count);
+}
+
+TEST_F(CssTokenizerTest, TokenArrayReleaseReclaimsTokenRecordsAndValues) {
+    const size_t comment_count = 64u * 1024u;
+    const size_t source_length = comment_count * 5u;
+    char* css = (char*)mem_alloc(source_length + 1, MEM_CAT_INPUT_CSS);
+    ASSERT_NE(css, nullptr);
+    for (size_t i = 0; i < comment_count; i++) {
+        memcpy(css + i * 5u, "/*x*/", 5u);
+    }
+    css[source_length] = '\0';
+
+    CssTokenizer* tokenizer = css_tokenizer_create(pool);
+    ASSERT_NE(tokenizer, nullptr);
+    PoolStats before = {};
+    PoolStats tokenized = {};
+    PoolStats released = {};
+    pool_get_detailed_stats(pool, &before);
+    CssToken* tokens = nullptr;
+    int count = css_tokenizer_tokenize(tokenizer, css, source_length, &tokens);
+    pool_get_detailed_stats(pool, &tokenized);
+
+    ASSERT_EQ((int)comment_count + 1, count);
+    ASSERT_NE(tokens, nullptr);
+    EXPECT_LT(sizeof(CssToken), 64u);
+    EXPECT_GT(tokenized.live_bytes - before.live_bytes, source_length * 4u);
+
+    css_token_array_release(pool, tokens, (size_t)count);
+    pool_get_detailed_stats(pool, &released);
+    EXPECT_EQ(before.live_bytes, released.live_bytes);
+    mem_free(css);
 }
 
 // Test basic utility functions
@@ -333,8 +365,8 @@ TEST_F(CssTokenizerTest, DimensionToken_ViewportUnits) {
     EXPECT_EQ(dim_count, 4) << "Should have 4 viewport unit tokens";
 }
 
-TEST_F(CssTokenizerTest, DimensionToken_AllMetadataFieldsCopied) {
-    // Test that all token fields are copied, not just the union
+TEST_F(CssTokenizerTest, DimensionToken_StableFieldsCopied) {
+    // Test that compatibility conversion preserves token data needed by parsing.
     size_t count;
     CSSToken* tokens = tokenize("42px", &count);
     
@@ -351,14 +383,6 @@ TEST_F(CssTokenizerTest, DimensionToken_AllMetadataFieldsCopied) {
             EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, 42.0);
             EXPECT_EQ(tokens[i].data.dimension.unit, CSS_UNIT_PX);
             
-            // Metadata fields should exist (even if 0/NULL for simple test case)
-            // Just verify they don't cause crashes when accessed
-            int line = tokens[i].line;
-            int column = tokens[i].column;
-            bool escaped = tokens[i].is_escaped;
-            uint32_t codepoint = tokens[i].unicode_codepoint;
-            
-            (void)line; (void)column; (void)escaped; (void)codepoint; // Suppress unused warnings
             break;
         }
     }

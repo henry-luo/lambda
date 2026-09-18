@@ -916,9 +916,11 @@ void dom_range_unlink_from_state(DocState* state, DomRange* range) {
 }
 
 void dom_range_refresh_lifecycle_pins(DomDocument* doc) {
-    if (!doc) return;
+    // State teardown releases every live Range before document retirement.
+    // Without a state there are no endpoints to preserve and no pins to refresh.
+    if (!doc || !doc->state) return;
     dom_node_clear_reason_pins(doc, DOM_NODE_PIN_RANGE);
-    DomRange** head = doc->state ? dom_range_state_live_ranges_slot(doc->state) : nullptr;
+    DomRange** head = dom_range_state_live_ranges_slot(doc->state);
     if (!head) return;
     for (DomRange* range = *head; range; range = range->next) {
         DomNode* endpoints[2] = {range->start.node, range->end.node};

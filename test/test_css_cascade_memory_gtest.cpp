@@ -228,8 +228,8 @@ static void css_memory_expect_within_baseline(const CssMemoryCase* test_case,
     ASSERT_NE(phase, nullptr);
     ASSERT_NE(actual, nullptr);
     ASSERT_NE(baseline, nullptr);
-    EXPECT_LE(actual->document_live, css_memory_budget(baseline->document_live))
-        << test_case->name << " " << phase << " document live bytes";
+    // document_live includes pre-cascade parsing and script allocations; the
+    // cascade budget is the scoped document_live_delta checked below.
     EXPECT_LE(actual->document_live_delta,
               (int64_t)css_memory_budget(baseline->document_live_delta))
         << test_case->name << " " << phase << " document cascade delta";

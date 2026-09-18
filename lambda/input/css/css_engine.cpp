@@ -95,7 +95,6 @@ CssEngine* css_engine_create(Pool* pool) {
     engine->pool = pool;
 
     // Initialize core components
-    engine->tokenizer = css_tokenizer_create(pool);
     // Removed: engine->selector_parser (legacy linked-list parser removed)
     engine->value_parser = css_property_value_parser_create(pool);
 
@@ -148,7 +147,6 @@ void css_engine_destroy(CssEngine* engine) {
     }
 
     // Cleanup components
-    css_tokenizer_destroy(engine->tokenizer);
     // Removed: css_selector_parser_destroy (legacy parser removed)
     css_property_value_parser_destroy(engine->value_parser);
 
@@ -240,15 +238,30 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     stylesheet->rule_capacity = 64;
     stylesheet->rules = (CssRule**)pool_alloc(engine->pool, stylesheet->rule_capacity * sizeof(CssRule*));
 
-    // Tokenize the CSS
+    // Token records and lexemes have no stylesheet lifetime. A dedicated pool
+    // returns its VM extents after the semantic parser has copied retained data.
+    Pool* token_pool = pool_create();
+    if (!token_pool) {
+        log_error("CSS tokenizer scratch pool allocation failed");
+        return stylesheet;
+    }
+    CssTokenizer* tokenizer = css_tokenizer_create(token_pool);
+    if (!tokenizer) {
+        log_error("CSS tokenizer creation failed");
+        pool_destroy(token_pool);
+        return stylesheet;
+    }
+
+    // Tokenize the CSS.
     CssToken* tokens;
-    int token_count = css_tokenizer_tokenize(engine->tokenizer, css_text, strlen(css_text), &tokens);
+    int token_count = css_tokenizer_tokenize(tokenizer, css_text, strlen(css_text), &tokens);
 
     if (token_count <= 0) {
         log_debug("CSS tokenization returned %d tokens", token_count);
         clock_t end_time = clock();
         stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
         engine->stats.stylesheets_parsed++;
+        pool_destroy(token_pool);
         return stylesheet;
     }
 
@@ -368,6 +381,9 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     engine->stats.rules_parsed += stylesheet->rule_count;
     engine->stats.stylesheets_parsed++;
     engine->stats.parse_time += stylesheet->parse_time;
+    // Rules retain copied semantic values; release parser scratch and its VM extents.
+    css_token_array_release(token_pool, tokens, (size_t)token_count);
+    pool_destroy(token_pool);
     log_debug("Finished enhanced CSS parsing");
 
     return stylesheet;

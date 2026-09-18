@@ -3133,6 +3133,8 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     }
     DomDocument* fd = dom_document_create(input);
     if (!fd) return nullptr;
+    // This document borrows its creator's Input and must not release it.
+    dom_document_borrow_input_resources(fd);
 
     // Build the html/head/title/body tree using MarkBuilder for the Lambda
     // Element backings, then wrap each in a DomElement bound to the foreign doc.
@@ -3734,6 +3736,8 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
     if (!input) return ItemNull;
     DomDocument* fd = dom_document_create(input);
     if (!fd) return ItemNull;
+    // This document borrows its creator's Input and must not release it.
+    dom_document_borrow_input_resources(fd);
     if (qualified_name && *qualified_name) {
         MarkBuilder builder(input);
         Item item = builder.element(qualified_name).final();
@@ -4367,6 +4371,14 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
                                 }
                             }
                         }
+                        if (prev_tokens) {
+                            css_token_array_release(pool, prev_tokens, prev_tok_count);
+                        }
+                        if (cur_tokens) {
+                            css_token_array_release(pool, cur_tokens, cur_tok_count);
+                        }
+                        pool_free(pool, prev_copy);
+                        pool_free(pool, cur_copy);
                     }
                 }
             }

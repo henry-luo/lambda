@@ -768,6 +768,54 @@ fell as follows; these pool figures are directly comparable ownership metrics.
 | All tracked physical live bytes | 298,989,366 | 126,090,658 | -172,898,708 (-57.8%) |
 | Canonical CSS live bytes | 1,652,868 | 1,650,184 | unchanged in practical terms |
 
+#### Tokenizer scratch lifetime correction
+
+Geometric capacity removed the pathological one-slot-per-source-byte bound,
+but it did not close the lifetime. `pool_free()` coalesces a block for reuse;
+it does not release the pool's VM extent. A token array allocated in the
+document/loader pool could therefore remain reserved and committed after the
+stylesheet parser had stopped using it.
+
+`css_enhanced_parse_stylesheet()` now creates a tokenizer-only pool, builds
+the complete token array there, parses semantic rules into `engine->pool`, and
+destroys the tokenizer pool before returning the stylesheet. This makes the
+token records, copied lexemes, numeric conversion strings, and their VM
+extents parse-call scratch. It follows **D1.3v3**'s explicit ownership and
+cleanup discipline: parser temporary storage must not become a hidden
+document-lifetime owner.
+
+The downstream audit found no retained `CssToken*` in stylesheet, rule,
+selector, declaration, value, cascade, or epoch records. It did find retained
+`CssToken::value` strings. Selector function/pseudo/attribute strings,
+declaration property names, `@import` URLs, `@charset` values, generic at-rule
+names, and `var()`/`env()`/`attr()` references now duplicate the needed text
+into their semantic-owner pool before tokenizer scratch is destroyed. Values
+already represented as `CssValue` scalars or owned strings continue to use
+their existing copies.
+
+The tokenizer record also no longer carries unused parse-location state.
+`line` and `column` were only stamped then copied by the compatibility wrapper;
+`is_escaped` and `unicode_codepoint` were neither written nor read. Removing
+them and the per-byte `LineCounter` pass reduces `CssToken` from 64 to 48 bytes
+on the profiled 64-bit target.
+
+| Regression probe | Input / result | Required result | Observed result |
+|---|---|---|---|
+| Direct tokenizer release | 65,536 adjacent `/*x*/` comments, 327,680 source bytes, 65,537 emitted tokens | Releasing records and lexemes restores the pool's pre-tokenization live-byte count | Exact equality |
+| Enhanced stylesheet lifetime | Same comment-only sheet | Engine pool retains less than 20,480 bytes after parsing | Passed; only stylesheet state remains |
+| Semantic ownership after scratch reuse | `@charset`, `@import`, `@keyframes`, attribute/pseudo selector, and declaration property | Values remain valid after a 64 KiB allocation reuses freed tokenizer storage | Passed |
+
+The standard six-page CSS cascade memory baseline also passes. These tests are
+part of the normal Radiant test graph and do not select a build mode.
+
+The post-change standard-host GitHub Brotli capture reported 1,650,184 bytes
+of canonical CSS, 3,738 bytes of initial cascade work, and 104 bytes of
+recascade work: the same persistent CSS accounting as the prior capture. The
+structured samples occur after stylesheet parsing, so they deliberately do
+not include the transient tokenizer extent. The direct-release and
+scratch-reuse tests above provide that lifetime proof; the live capture proves
+the release did not disturb persistent cascade state.
+
 The larger defect was a broken execution-tier boundary. `script_runner.cpp`
 intentionally selects the AST executor for a browser document so that all
 callbacks share one closure ABI. Static modules bypassed the normal script
@@ -1023,7 +1071,7 @@ Line references identify the reviewed revision; symbols are the durable anchors.
 | `radiant/cmd_layout.cpp:1413, 1521, 2012, 2119` | `clear_load_stylesheet_cascade_visitor`, `apply_load_css_cascade`, loader engine pool, unconditional mutation-triggered full recascade. |
 | `radiant/css_cascade.cpp:13, 95, 133` | `apply_rule_to_element`, `apply_stylesheet_to_tree`, `radiant_apply_css_stylesheets_to_tree`; conditional evaluation and element/rule traversal. |
 | `lambda/input/css/css_engine.cpp:619, 662` | `css_evaluate_supports_span`, `css_evaluate_media_query`; retained parsing/string scratch. |
-| `lambda/input/css/css_tokenizer.cpp:505, 746` | `css_tokenize`, token allocation in `css_tokenizer_tokenize`; token buffers retained in the caller's pool. |
+| `lambda/input/css/css_tokenizer.cpp`, `css_engine.cpp` | `css_tokenize`, `css_tokenizer_tokenize`, `css_token_array_release`, and the stylesheet-local tokenizer pool; records/lexemes are parser scratch while semantic owners receive explicit copies. |
 | `lambda/input/css/style_epoch.cpp:85, 145, 236, 276, 292, 356, 432, 503, 618` | Environment key, release gate, eligibility, rule validation, recipe materialization, identity, canonical miss, COW, stats. |
 | `lambda/input/css/css_style_node.cpp:187, 502, 548, 684, 814, 829, 946, 1272, 1339` | Shallow cascade record versus owned snapshot, unref, node allocation, clear, insertion/source order, inline filtering, owned clone/destruction. |
 | `lib/avl_tree.c:641, 650` | `avl_tree_clear`, `avl_tree_insert`; forgotten root and separately allocated wrapper. |

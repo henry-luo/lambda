@@ -762,11 +762,13 @@ CSSVarRef* css_parse_var_function(CssPropertyValueParser* parser,
 
     // Variable name (without --)
     const char* full_name = tokens[0].value;
+    if (!full_name) return NULL;
     if (strncmp(full_name, "--", 2) == 0) {
-        var_ref->name = full_name + 2;  // Skip --
+        var_ref->name = pool_strdup(parser->pool, full_name + 2);  // Skip --
     } else {
-        var_ref->name = full_name;
+        var_ref->name = pool_strdup(parser->pool, full_name);
     }
+    if (!var_ref->name) return NULL;
 
     // Check for fallback value
     if (token_count > 2 && tokens[1].type == CSS_TOKEN_COMMA) {
@@ -793,7 +795,8 @@ CSSEnvRef* css_parse_env_function(CssPropertyValueParser* parser,
     CSSEnvRef* env_ref = (CSSEnvRef*)pool_calloc(parser->pool, sizeof(CSSEnvRef));
     if (!env_ref) return NULL;
 
-    env_ref->name = tokens[0].value;
+    env_ref->name = css_token_value_dup(&tokens[0], parser->pool);
+    if (!env_ref->name) return NULL;
 
     // Check for fallback value
     if (token_count > 2 && tokens[1].type == CSS_TOKEN_COMMA) {
@@ -820,12 +823,14 @@ CSSAttrRef* css_parse_attr_function(CssPropertyValueParser* parser,
     CSSAttrRef* attr_ref = (CSSAttrRef*)pool_calloc(parser->pool, sizeof(CSSAttrRef));
     if (!attr_ref) return NULL;
 
-    attr_ref->name = tokens[0].value;
+    attr_ref->name = css_token_value_dup(&tokens[0], parser->pool);
+    if (!attr_ref->name) return NULL;
 
     // Check for type or unit specifier
     int next_index = 1;
     if (token_count > next_index && tokens[next_index].type == CSS_TOKEN_IDENT) {
-        attr_ref->type_or_unit = tokens[next_index].value;
+        attr_ref->type_or_unit = css_token_value_dup(&tokens[next_index], parser->pool);
+        if (!attr_ref->type_or_unit) return NULL;
         next_index++;
     }
 

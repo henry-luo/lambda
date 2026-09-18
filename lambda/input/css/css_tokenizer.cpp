@@ -4,7 +4,6 @@
 #include "../../../lib/str.h"
 #include "../../../lib/escape.h"
 #include "../../../lib/mem_grow.hpp"
-#include "../line_counter.hpp"
 #include <assert.h>
 
 // Helper function to parse CSS unit from string
@@ -80,7 +79,7 @@ static void tokenize_number(const char* input, size_t length, size_t start,
 
     token->length = pos - start;
 
-    // parse the numeric value
+    // parse the numeric value without retaining conversion scratch.
     char* num_str = pool_dup_n(pool, token->start, number_end - start);
     if (num_str) {
         if (token->type == CSS_TOKEN_DIMENSION) {
@@ -88,6 +87,7 @@ static void tokenize_number(const char* input, size_t length, size_t start,
         } else {
             token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
         }
+        pool_free(pool, num_str);
     }
 
     *pos_ptr = pos;
@@ -486,6 +486,7 @@ void css_token_fix_common_errors(CssToken* token, Pool* pool) {
             memcpy(fixed_value, token->value, len);
             fixed_value[len] = '"'; // Add closing quote
             fixed_value[len + 1] = '\0';
+            pool_free(pool, (void*)token->value);
             token->value = fixed_value;
             token->type = CSS_TOKEN_STRING;
         }
@@ -497,6 +498,7 @@ void css_token_fix_common_errors(CssToken* token, Pool* pool) {
             memcpy(fixed_value, token->value, len);
             fixed_value[len] = ')'; // Add closing paren
             fixed_value[len + 1] = '\0';
+            pool_free(pool, (void*)token->value);
             token->value = fixed_value;
             token->type = CSS_TOKEN_URL;
         }
@@ -521,6 +523,7 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
     // Convert enhanced tokens to basic tokens for compatibility
     CSSToken* basic_tokens = (CSSToken*)pool_calloc(pool, enhanced_count * sizeof(CSSToken));
     if (!basic_tokens) {
+        css_token_array_release(pool, enhanced_tokens, (size_t)enhanced_count);
         *token_count = 0;
         return NULL;
     }
@@ -538,13 +541,11 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
         // Copy union data - use memcpy to ensure all union members are copied
         memcpy(&dst->data, &src->data, sizeof(src->data));
 
-        // Copy metadata fields
-        dst->line = src->line;
-        dst->column = src->column;
-        dst->is_escaped = src->is_escaped;
-        dst->unicode_codepoint = src->unicode_codepoint;
     }
 
+    // The compatibility array owns the token values; only the temporary
+    // enhanced record array can be released at this point.
+    pool_free(pool, enhanced_tokens);
     *token_count = enhanced_count;
     return basic_tokens;
 }
@@ -588,26 +589,6 @@ bool css_is_newline(int c) {
     return c == '\n' || c == '\r' || c == '\f';
 }
 
-static bool css_line_counter_is_newline(char c) {
-    return css_is_newline((unsigned char)c);
-}
-
-static void css_sync_line_counter(LineCounter* counter,
-                                  const char* input,
-                                  size_t* tracked_pos,
-                                  size_t pos) {
-    if (!counter || !input || !tracked_pos || pos <= *tracked_pos) return;
-    line_counter_advance_bytes(counter, input + *tracked_pos, pos - *tracked_pos,
-                               css_line_counter_is_newline, true);
-    *tracked_pos = pos;
-}
-
-static void css_stamp_token_location(CssToken* token, const LineCounter* counter) {
-    if (!token || !counter) return;
-    token->line = counter->line;
-    token->column = counter->column;
-}
-
 // Enhanced tokenizer implementation
 CSSTokenizer* css_tokenizer_create(Pool* pool) {
     if (!pool) return NULL;
@@ -619,7 +600,6 @@ CSSTokenizer* css_tokenizer_create(Pool* pool) {
     tokenizer->input = NULL;
     tokenizer->length = 0;
     tokenizer->position = 0;
-    line_counter_init(&tokenizer->line_counter);
     tokenizer->supports_unicode = true;
     tokenizer->supports_css3 = true;
 
@@ -756,10 +736,6 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
 
     size_t token_count = 0;
     size_t pos = 0;
-    size_t line_tracked_pos = 0;
-    // Keep tokenizer cursor state in the shared byte counter used by HTML5/markup scans.
-    line_counter_init(&tokenizer->line_counter);
-    LineCounter* line_counter = &tokenizer->line_counter;
 
     while (pos < length) {
         // One input pass can emit whitespace, a content token, and the final
@@ -769,9 +745,8 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                                   token_count + 3, 8)) {
             return 0;
         }
-        // Skip leading whitespace and track it
+        // Skip leading whitespace.
         size_t ws_start = pos;
-        css_sync_line_counter(line_counter, input, &line_tracked_pos, ws_start);
         while (pos < length && css_is_whitespace(input[pos])) {
             pos++;
         }
@@ -783,22 +758,17 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
             token->start = input + ws_start;
             token->length = pos - ws_start;
             token->value = NULL;
-            css_stamp_token_location(token, line_counter);
             css_token_set_value(token, tokenizer->pool);
             token_count++;
-            css_sync_line_counter(line_counter, input, &line_tracked_pos, pos);
         }
 
         if (pos >= length) break;
 
-        css_sync_line_counter(line_counter, input, &line_tracked_pos, pos);
         char ch = input[pos];
         CssToken* token = &token_array[token_count];
         token->start = input + pos;
         token->length = 1;
         token->value = NULL;
-        token->value = NULL;
-        css_stamp_token_location(token, line_counter);
 
         // Basic character classification
         switch (ch) {
@@ -1119,18 +1089,15 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
         // Set token value and increment count
         css_token_set_value(token, tokenizer->pool);
         token_count++;
-        css_sync_line_counter(line_counter, input, &line_tracked_pos, pos);
     }
 
     // Add EOF token
     if (token_count < token_capacity) {
-        css_sync_line_counter(line_counter, input, &line_tracked_pos, length);
         CssToken* eof_token = &token_array[token_count];
         eof_token->type = CSS_TOKEN_EOF;
         eof_token->start = input + length;
         eof_token->length = 0;
         eof_token->value = "";  // Empty string instead of NULL
-        css_stamp_token_location(eof_token, line_counter);
         token_count++;
     }
 
@@ -1228,6 +1195,17 @@ char* css_token_to_string(const CssToken* token, Pool* pool) {
     if (!token || !pool) return NULL;
 
     return pool_dup_n(pool, token->start, token->length);
+}
+
+void css_token_array_release(Pool* pool, CssToken* tokens, size_t token_count) {
+    if (!pool || !tokens) return;
+    for (size_t i = 0; i < token_count; i++) {
+        // EOF uses a static empty literal; all tokenizer-owned values are pool blocks.
+        if (tokens[i].type != CSS_TOKEN_EOF && tokens[i].value) {
+            pool_free(pool, (void*)tokens[i].value);
+        }
+    }
+    pool_free(pool, tokens);
 }
 
 // ============================================================================

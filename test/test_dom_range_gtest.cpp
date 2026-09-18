@@ -231,6 +231,26 @@ TEST_F(DomRangeTest, RangeReleaseReusesFreelistSlot) {
     dom_range_release(second);
 }
 
+TEST(DomDocumentOwnership, BorrowedInputCannotBeReleasedByChildDocument) {
+    Pool* pool = tu_setup_pool();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+
+    DomDocument* owner = dom_document_create(input);
+    ASSERT_NE(owner, nullptr);
+    EXPECT_EQ(dom_document_take_owned_input_resources(owner), input);
+    EXPECT_EQ(dom_document_take_owned_input_resources(owner), nullptr);
+    dom_document_destroy(owner);
+
+    DomDocument* borrowed = dom_document_create(input);
+    ASSERT_NE(borrowed, nullptr);
+    dom_document_borrow_input_resources(borrowed);
+    EXPECT_EQ(dom_document_take_owned_input_resources(borrowed), nullptr);
+    dom_document_destroy(borrowed);
+    tu_teardown_pool(pool);
+}
+
 TEST_F(DomRangeTest, RangeChurnPlateausArenaUse) {
     DomRange* warmup = dom_range_create(state);
     ASSERT_NE(warmup, nullptr);

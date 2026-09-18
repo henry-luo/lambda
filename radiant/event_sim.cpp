@@ -677,6 +677,7 @@ static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
     int pos = 0;
     CssSelector* selector = css_parse_selector_with_combinators(
         tokens, &pos, (int)token_count, pool);
+    css_token_array_release(pool, tokens, token_count);
     if (!selector) return false;
     SelectorMatcher* matcher = sim_create_dom_selector_matcher(doc);
     if (!matcher) return false;
