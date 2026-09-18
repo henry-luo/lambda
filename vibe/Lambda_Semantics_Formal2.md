@@ -2399,14 +2399,48 @@ bind named arguments positionally (LR07-16).
 
 **Found and left open:**
 - The *static* half of S12.1.1 was unenforced as well: an `fn` could call a known `pn`
-  directly. C20-3 needs the check inside `function` bodies, and it is enforced there.
-  Enforcing it everywhere breaks the DOM package and two fixtures that call `pn`s from
-  `fn` code or from module top level. No S#/D# point rules whether the module top level
-  is `fn` context, so this is logged as LR12-26 and awaits that ruling.
+  directly. It was first enforced only inside `function` bodies, then everywhere once
+  the top-level ruling came in — see C20.7.
 - S12.1.4v3(4) is implemented conservatively: a closure inside a `function` that calls a
   captured polymorphic parameter is checked as plain `fn`.
 - Pipe-to-callable (`x |> f`) and system-HOF callbacks (`map(f, xs)`) are dynamic routes
   that do not yet carry the guard.
 
-Recorded in spec §11 (S11.1.5), §12 (S12.1.4v3), Appendix B (SO28 closed, SO44 opened),
-v25.1.0.
+#### C20.7 `fn` never calls `pn`; the top level is functional (designer, 2026-09-18) — S12.1.1v2
+
+C20.6 had left the static half of S12.1.1 enforced only inside `function` bodies,
+pending a ruling on the module top level (LR12-26). The designer ruled:
+
+1. **`fn` can never call `pn`**, enforced both statically and dynamically. The colour
+   walk now rejects a direct `pn` call in every `fn` context (E224).
+2. **A script's top level is functional.** Procedural code belongs in `main()`. This is
+   why the top level was never checked: before this walk, no direct `fn`→`pn` check
+   existed anywhere, and the top level simply inherited that gap. The parser already
+   rejected `var`/`while` there (E224), which is what made it *look* enforced.
+3. **The dynamic check must not tax the general path.** Most calls resolve statically
+   and pay nothing. Only an `fn`-context dynamic call whose callee is not statically
+   `fn`, or a `function` call with an argument of unknown colour, runs a check. The first
+   design violated this: it had `lambda_dynamic_call` read a Context word on every
+   dispatch, including from `pn` context. It was replaced before landing. A guarded
+   JIT site now calls `lambda_fn_colour_guard_args` (at most three arguments) or `_list`
+   before the unchanged per-arity dispatch entry, and the dispatcher carries no colour
+   work. Keeping the per-arity entries also keeps their observable diagnostics (the
+   `fn_call2: …` messages pinned by `test/std/boundary/error_chain_depth`).
+
+**Migration.** Three reliance sites were fixed rather than excused:
+`lambda/package/dom/edit_history.ls` (`clear_history` and `replay_retained` write the
+session history, so they became `pn`; their only caller `replay` was already `pn`),
+`test/lambda/proc/type_binder_proc_raw.ls` and `test/mir/lambda/tune26_nested_tco_native_result.ls`
+(top-level `pn` calls moved into `pn main()`; goldens unchanged). The DOM JS tests that
+crashed in style teardown (`style_builder_release_all`) during this work pass again; the
+same crash also reproduced on an unmodified HEAD build mid-session, so its cause was not
+pinned down.
+
+**Known cost.** Closures returned by a factory (`let add10 = make_adder(10)`) are
+statically `any`, because return inference widens a returned `fn` value. So calling one
+from `fn` context is a guarded site: `closure.ls` has 17 of them, costing about 13 instructions
+each (budget re-baselined with the reason). Keeping a returned `fn`'s signature through
+return inference would make these sites static and free again.
+
+Recorded in spec §11 (S11.1.5), §12 (S12.1.1v2, S12.1.4v3), Appendix B (SO28 closed, SO44
+opened), v26.0.0.

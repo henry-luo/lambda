@@ -25665,16 +25665,59 @@ static void mir_emit_slot_home_transport(MirTranspiler* mt, int position,
         MIR_new_reg_op(mt->ctx, vh_addr)));
 }
 
-// S12.1.4v2(3): arm the dispatcher's colour guard for an `fn`-context dynamic
-// call. lambda_dynamic_call consumes and zeroes it, so the store must sit
-// immediately before the dispatch, after every argument has been evaluated.
-static void mir_emit_fn_colour_guard(MirTranspiler* mt, AstCallNode* call) {
-    if (!call || !call->fn_colour_guard) return;
+// S12.1.4v3(6): only a colour-guarded dynamic call (an `fn`-context call whose
+// callee colour is unknown) runs this check, and the dispatch it guards is
+// unchanged. The check allocates only when it refuses; a refusal skips the
+// dispatch and becomes the call's value (S12.3.4 `fn` convention).
+struct MirColourGuard {
+    MIR_label_t refused;
+    MIR_reg_t result;
+};
+
+static MirColourGuard mir_colour_guard_begin(MirTranspiler* mt, AstCallNode* call,
+        MIR_reg_t callee, const MIR_reg_t* args, int argc, MIR_reg_t args_list) {
+    MirColourGuard guard = {0, 0};
+    if (!call || !call->fn_colour_guard) return guard;
+    MIR_reg_t refused;
+    if (args_list) {
+        refused = emit_call_3(mt, "lambda_fn_colour_guard_list", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, call->fn_colour_guard));
+    } else {
+        MIR_var_t vars[6] = {{MIR_T_I64, "f", 0}, {MIR_T_I64, "g", 0},
+            {MIR_T_I64, "n", 0}, {MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0},
+            {MIR_T_I64, "c", 0}};
+        MirImportEntry* ie = ensure_import(mt, "lambda_fn_colour_guard_args",
+            MIR_T_I64, 6, vars, 1);
+        MIR_op_t slots[3];
+        for (int i = 0; i < 3; i++) {
+            slots[i] = i < argc ? MIR_new_reg_op(mt->ctx, args[i])
+                : MIR_new_int_op(mt->ctx, 0);
+        }
+        refused = new_reg(mt, "colour_check", MIR_T_I64);
+        emit_insn(mt, MIR_new_call_insn(mt->ctx, 9,
+            MIR_new_ref_op(mt->ctx, ie->proto), MIR_new_ref_op(mt->ctx, ie->import),
+            MIR_new_reg_op(mt->ctx, refused), MIR_new_reg_op(mt->ctx, callee),
+            MIR_new_int_op(mt->ctx, call->fn_colour_guard),
+            MIR_new_int_op(mt->ctx, argc), slots[0], slots[1], slots[2]));
+    }
+    guard.refused = new_label(mt);
+    guard.result = new_reg(mt, "colour_call", MIR_T_I64);
+    emit_jump_if_item_error(mt, refused, guard.result, guard.refused);
+    return guard;
+}
+
+static MIR_reg_t mir_colour_guard_end(MirTranspiler* mt, MirColourGuard guard,
+        MIR_reg_t result) {
+    if (!guard.refused) return result;
+    MIR_label_t done = new_label(mt);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_U32,
-            (MIR_disp_t)offsetof(Context, fn_colour_guard),
-            mt->em.frame.runtime, 0, 1),
-        MIR_new_uint_op(mt->ctx, call->fn_colour_guard)));
+        MIR_new_reg_op(mt->ctx, guard.result), MIR_new_reg_op(mt->ctx, result)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done)));
+    emit_label(mt, guard.refused);
+    emit_label(mt, done);
+    return guard.result;
 }
 
 static bool mir_emit_var_home_transport(MirTranspiler* mt, int position,
@@ -29266,13 +29309,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // the null sentinel instead of allocating a dead generated home.
 
     if (arg_count == 0) {
+        MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
+            NULL, 0, 0);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
-        mir_emit_fn_colour_guard(mt, call_node);
         dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
         mt->module_rooted_reg = 0;
+        dyn_result = mir_colour_guard_end(mt, colour, dyn_result);
     } else if (arg_count <= 3 && !dyn_var_signature) {
         MIR_reg_t args[3];
         int arg_roots[3];
@@ -29290,9 +29335,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             args[i] = load_gc_root_slot(mt, arg_roots[i], "dynamic_arg");
         }
         emit_dyn_var_transports(args, arg_count);
+        MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
+            args, arg_count, 0);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
-        mir_emit_fn_colour_guard(mt, call_node);
         if (arg_count == 1) {
             dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
@@ -29331,6 +29377,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_new_int_op(mt->ctx, 0)));
         }
         mt->module_rooted_reg = 0;
+        dyn_result = mir_colour_guard_end(mt, colour, dyn_result);
     } else {
         // `fn_call_into` owns the common dynamic ABI. Build a rooted plain
         // Array so every 4-8 argument call reaches its checked dispatch. A
@@ -29364,14 +29411,16 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             boxed_fn = load_gc_root_slot(mt, boxed_fn_root, "dynamic_fn");
         }
         args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
+        MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
+            NULL, 0, args_list);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
         async_emit_invoke_resume_point(mt, call_node);
-        mir_emit_fn_colour_guard(mt, call_node);
         dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
         mt->module_rooted_reg = 0;
+        dyn_result = mir_colour_guard_end(mt, colour, dyn_result);
     }
 
     // T21-3b: reload the transported `var` bindings (see the direct path).

@@ -958,6 +958,22 @@ extern "C" Item lambda_fn_colour_guard(Function* fn, const Item* args, int argc,
     return ItemNull;
 }
 
+// The JIT's dynamic-call form, emitted only at a colour-guarded call site so
+// the general dispatch path carries no colour work at all.
+extern "C" Item lambda_fn_colour_guard_list(Item callee, List* args, uint32_t guard) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC) return ItemNull;  // dispatch reports it
+    return lambda_fn_colour_guard(callee.function, args ? args->items : NULL,
+        args ? (int)args->length : 0, guard);
+}
+
+// The JIT's per-arity form (at most three arguments, no list is built).
+extern "C" Item lambda_fn_colour_guard_args(Item callee, uint32_t guard, int argc,
+        Item a, Item b, Item c) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC) return ItemNull;  // dispatch reports it
+    Item args[3] = {a, b, c};
+    return lambda_fn_colour_guard(callee.function, args, argc < 3 ? argc : 3, guard);
+}
+
 // The direct-call form: the caller already resolved the callee, so each
 // guarded argument is known to fill a polymorphic slot (S12.1.4v2(3)).
 extern "C" Item lambda_fn_colour_arg_check(Item argument) {
@@ -1277,10 +1293,6 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
 
 static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
         LambdaDynamicCallMode mode, const char* caller) {
-    // S12.1.4v2(3): consume an `fn`-context caller's colour guard before any
-    // early exit, so a failed dispatch never leaves it armed for the next call
-    uint32_t colour_guard = context ? context->fn_colour_guard : 0;
-    if (colour_guard) context->fn_colour_guard = 0;
     int64_t source_actual = args ? args->length : 0;
     if (source_actual < 0 || source_actual > LAMBDA_MAX_FUNCTION_ARGS) {
         return lambda_dynamic_argument_limit_error(caller, source_actual,
@@ -1299,11 +1311,6 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
             fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
             "function does not publish a Core boxed dynamic-call entry");
-    }
-    if (colour_guard) {
-        Item refused = lambda_fn_colour_guard(fn, args ? args->items : NULL,
-            actual, colour_guard);
-        if (item_is_error(refused)) return refused;
     }
 
     int physical = 0;

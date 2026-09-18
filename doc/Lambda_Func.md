@@ -535,7 +535,8 @@ fold([1, 2, 3, 4], 0, (a, b) => a + b)       // 10
 
 An ordinary `fn` never runs a procedure: calling a `pn` from `fn` context is a
 compile error, or, when the callee only arrives as a value, a run-time error
-returned as the call's value. A higher-order function that should accept both
+returned as the call's value. A script's top level is `fn` context too, so
+procedural calls belong in `pn main()`. A higher-order function that should accept both
 kinds is declared with `function`:
 
 ```lambda

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 25.1.0 (2026-09-18)
+**Spec version:** 26.0.0 (2026-09-18)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1258,7 +1258,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `function` is the base type of both. `f is fn` and `f is pn` test the bit,
   and `f is function` holds for every function value. A contract
   `fn (...)` admits only pure functions and `pn (...)` only procedures —
-  admitting a `pn` at an `fn` contract would break S12.1.1's promise —
+  admitting a `pn` at an `fn` contract would break S12.1.1v2's promise —
   while `function` or `function (...)` admits either. Since `fn` and `pn`
   are strictly narrower than `function`, a binder over a function value
   (S11.4.8v2) selects a coloured type, and the join of `fn` with `pn` is
@@ -1392,10 +1392,14 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 
 ### S12.1 The one-bit effect system
 
-- **S12.1.1** `fn`/`pn` is a declared, compiler-checked, one-bit effect
+- **S12.1.1v2** `fn`/`pn` is a declared, compiler-checked, one-bit effect
   system: `fn` is pure and deterministic under any schedule; `pn` may have
-  effects; `fn` cannot call `pn`. Accepted price: no reified effects — a
-  `pn` call executes; there is no held, unexecuted effect value. [Features §3.6]
+  effects; **`fn` can never call `pn`** — statically where the callee is
+  known, and at run time where it arrives as a value (S12.1.4v3(6)). **A
+  script's top level is `fn` context**: procedural code belongs in `main()`.
+  The run-time check is confined to the calls that need it — never the
+  statically resolved ones. Accepted price: no reified effects — a `pn` call
+  executes; there is no held, unexecuted effect value. [Features §3.6, C20.7]
 - **S12.1.2** `break`, `continue`, `return`, `while`, and `var` declarations
   are `pn`-only; using them in an `fn` is a compile error. `return` inside
   `for` exits the function; a function without an explicit `return` returns
@@ -1425,7 +1429,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   `function` capturing a polymorphic parameter is typed `function`, and
   calling it is resolved under (3). (5) **A `function`'s own value is `fn`**
   (S11.1.5): it adds no effect of its own, so it may cross an `fn (...)`
-  contract; soundness comes from (6). (6) **S12.1.1 holds for dynamic
+  contract; soundness comes from (6). (6) **S12.1.1v2 holds for dynamic
   callees:** in `fn` context a call through a value is checked at run time —
   a `pn` callee is refused, and a `function` callee refuses a `pn` in a
   polymorphic slot — returning the error value. `call(f, args)` is the
@@ -2155,7 +2159,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
 | S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
-| S12.1.4v3 | **Largely conformant as of 2026-09-18.** `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. |
+| S12.1.4v3 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |

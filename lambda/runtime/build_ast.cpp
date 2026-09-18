@@ -7940,8 +7940,7 @@ static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
     // system functions carry their own colour rules (S12.1.4v2 covers user code)
     if (!callee || callee->node_type == AST_NODE_SYS_FUNC) return;
     if (AstFuncNode* direct = ast_direct_call_function(call)) {
-        if (direct->node_type == AST_NODE_PROC && walk->function &&
-                ((TypeFunc*)walk->function->type)->is_colour_poly) {
+        if (direct->node_type == AST_NODE_PROC) {
             // S12.1.1: `fn` context, including a `function` body (C20-3),
             // never calls a statically-known procedure
             record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,

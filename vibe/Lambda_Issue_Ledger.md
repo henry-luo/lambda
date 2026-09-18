@@ -1016,7 +1016,10 @@ registry row.
 ---
 
 
-<a id="lr12-26"></a>**LR12-26 · An `fn` may call a statically-known `pn` · OPEN (found 2026-09-18)**
+<a id="lr12-26"></a>**LR12-26 · An `fn` may call a statically-known `pn` · RESOLVED 2026-09-18 (S12.1.1v2, C20.7)**
+Resolved by the designer's ruling that a script's top level is functional: the check now
+runs in every `fn` context, and the three reliance sites below were migrated.
+Original entry:
 S12.1.1 says `fn` cannot call `pn`, and the ruling is unmarked, but no check
 exists for a direct call: `fn bad(x) => logsq(x)` with `pn logsq` compiles and
 runs on both tiers. Only `call()` (`validate_effect_polymorphic_call`) and pn
