@@ -1418,6 +1418,9 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
                     }
                 }
             }
+            if (tokens) {
+                css_token_array_release(element->doc->document_pool, tokens, token_count);
+            }
             // The tokenizer copies retained declaration data into document
             // storage; its mutable source buffer is only parse-call scratch.
             pool_free(element->doc->document_pool, decl_str);

@@ -50,7 +50,6 @@ typedef struct CssEngine {
     Pool* pool;
 
     // Core components
-    CssTokenizer* tokenizer;
     // Removed: selector_parser (legacy linked-list parser removed)
     struct CssPropertyValueParser* value_parser;
     struct CssStyleEngine* style_engine;

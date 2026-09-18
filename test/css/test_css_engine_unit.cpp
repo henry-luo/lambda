@@ -13,6 +13,8 @@
 
 #include <gtest/gtest.h>
 #include "helpers/css_test_helpers.hpp"
+#include "../../lib/mem.h"
+#include <string.h>
 
 extern "C" {
 #include "lambda/input/css/css_engine.hpp"
@@ -107,6 +109,83 @@ TEST_F(CssEngineTest, Stylesheet_WithComments) {
 
     ASSERT_NE(sheet, nullptr);
     EXPECT_GE(sheet->rule_count, 2);
+}
+
+TEST_F(CssEngineTest, Stylesheet_ReleasesTokenizerScratchAfterParsing) {
+    const size_t comment_count = 64u * 1024u;
+    const size_t source_length = comment_count * 5u;
+    char* css = (char*)mem_alloc(source_length + 1, MEM_CAT_INPUT_CSS);
+    ASSERT_NE(css, nullptr);
+    for (size_t i = 0; i < comment_count; i++) {
+        memcpy(css + i * 5u, "/*x*/", 5u);
+    }
+    css[source_length] = '\0';
+
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    PoolStats before = {};
+    PoolStats after = {};
+    pool_get_detailed_stats(pool.get(), &before);
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+    pool_get_detailed_stats(pool.get(), &after);
+    mem_free(css);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_EQ(0u, sheet->rule_count);
+    EXPECT_LT(after.live_bytes - before.live_bytes, source_length / 16u);
+}
+
+TEST_F(CssEngineTest, Stylesheet_RetainsSemanticTokenValuesAfterScratchRelease) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@charset\"UTF-8\";"
+        "@import\"theme.css\";"
+        "@keyframes pulse { from { opacity: 0; } }"
+        "article[data-kind=ready]::before { color: red; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+    ASSERT_NE(sheet, nullptr);
+
+    // Reuse freed tokenizer blocks before observing parser-owned state.
+    char* overwrite = (char*)pool_alloc(pool.get(), 64u * 1024u);
+    ASSERT_NE(overwrite, nullptr);
+    memset(overwrite, 'x', 64u * 1024u);
+
+    CssRule* charset_rule = nullptr;
+    CssRule* import_rule = nullptr;
+    CssRule* keyframes_rule = nullptr;
+    CssRule* style_rule = nullptr;
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        CssRule* rule = sheet->rules[i];
+        if (!rule) continue;
+        if (rule->type == CSS_RULE_CHARSET) charset_rule = rule;
+        if (rule->type == CSS_RULE_IMPORT) import_rule = rule;
+        if (rule->type == CSS_RULE_KEYFRAMES) keyframes_rule = rule;
+        if (rule->type == CSS_RULE_STYLE) style_rule = rule;
+    }
+
+    ASSERT_NE(charset_rule, nullptr);
+    ASSERT_NE(import_rule, nullptr);
+    ASSERT_NE(keyframes_rule, nullptr);
+    ASSERT_NE(style_rule, nullptr);
+    EXPECT_STREQ("UTF-8", charset_rule->data.charset_rule.charset);
+    EXPECT_STREQ("theme.css", import_rule->data.import_rule.url);
+    EXPECT_STREQ("keyframes", keyframes_rule->data.generic_rule.name);
+
+    CssSelector* selector = style_rule->data.style_rule.selector;
+    ASSERT_NE(selector, nullptr);
+    ASSERT_EQ(1u, selector->compound_selector_count);
+    CssCompoundSelector* compound = selector->compound_selectors[0];
+    ASSERT_NE(compound, nullptr);
+    ASSERT_GE(compound->simple_selector_count, 3u);
+    EXPECT_STREQ("article", compound->simple_selectors[0]->value);
+    EXPECT_STREQ("data-kind", compound->simple_selectors[1]->attribute.name);
+    EXPECT_STREQ("ready", compound->simple_selectors[1]->attribute.value);
+    EXPECT_STREQ("before", compound->simple_selectors[2]->value);
+
+    ASSERT_EQ(1u, style_rule->data.style_rule.declaration_count);
+    EXPECT_STREQ("color", style_rule->data.style_rule.declarations[0]->property_name);
 }
 
 // Test 1.5: Parse stylesheet with whitespace

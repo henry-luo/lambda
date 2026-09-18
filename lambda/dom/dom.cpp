@@ -4367,6 +4367,14 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
                                 }
                             }
                         }
+                        if (prev_tokens) {
+                            css_token_array_release(pool, prev_tokens, prev_tok_count);
+                        }
+                        if (cur_tokens) {
+                            css_token_array_release(pool, cur_tokens, cur_tok_count);
+                        }
+                        pool_free(pool, prev_copy);
+                        pool_free(pool, cur_copy);
                     }
                 }
             }

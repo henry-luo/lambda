@@ -2,7 +2,6 @@
 #define CSS_PARSER_H
 
 #include "css_style.hpp"
-#include "../line_counter.hpp"
 #include "../../../lib/mempool.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -108,11 +107,6 @@ typedef struct CssToken {
         char delimiter;        // for DELIM tokens
     } data;
 
-    // Parse location metadata
-    int line;
-    int column;
-    bool is_escaped;
-    uint32_t unicode_codepoint; // For Unicode escapes
 } CssToken;
 
 // Token stream for parser consumption
@@ -139,7 +133,6 @@ typedef struct CssTokenizer {
     const char* input;
     size_t length;
     size_t position;
-    LineCounter line_counter;
     bool supports_unicode;
     bool supports_css3;
 } CssTokenizer;
@@ -579,6 +572,12 @@ bool css_token_is_whitespace(const CssToken* token);
 bool css_token_is_comment(const CssToken* token);
 bool css_token_equals_string(const CssToken* token, const char* str);
 char* css_token_to_string(const CssToken* token, Pool* pool);
+static inline char* css_token_value_dup(const CssToken* token, Pool* pool) {
+    if (!token || !pool) return NULL;
+    if (token->value) return pool_strdup(pool, token->value);
+    return pool_dup_n(pool, token->start, token->length);
+}
+void css_token_array_release(Pool* pool, CssToken* tokens, size_t token_count);
 void css_free_tokens(CssToken* tokens);
 
 // Character classification helpers
