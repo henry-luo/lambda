@@ -5015,6 +5015,22 @@ static void reset_float_prelaid_flags(DomNode* node) {
     }
 }
 
+static void layout_store_last_remembered_sizes(LayoutContext* lycon, DomNode* node) {
+    if (!lycon || !node || !node->is_element()) return;
+
+    DomElement* element = node->as_element();
+    // Replaced elements do not all finish through block-flow finalization.
+    // Visit their completed view boxes before a later content-visibility pass
+    // needs the CSS Sizing 4 auto intrinsic-size memory.
+    if (element->view_type != RDT_VIEW_MARKER && element->blk) {
+        layout_store_last_remembered_size(
+            lycon, lam::unsafe_view_block_element_storage(element));
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        layout_store_last_remembered_sizes(lycon, child);
+    }
+}
+
 static thread_local DomDocument* s_layout_active_documents[8] = {};
 static thread_local int s_layout_active_document_count = 0;
 
@@ -5113,6 +5129,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     uint64_t t_init = time_now_ns();
 
     layout_html_root(&lycon, root_node);
+
+    layout_store_last_remembered_sizes(&lycon, root_node);
 
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);

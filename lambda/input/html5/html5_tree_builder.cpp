@@ -2037,10 +2037,11 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
             }
             parser->foster_parenting = false;
         } else {
-            // Whitespace only - insert directly (no formatting reconstruction needed)
+            // Whitespace table text belongs to the current node; fostering it
+            // repeatedly copies preceding text in the non-reclaiming input arena.
             if (token->data != nullptr && token->data->len > 0) {
                 for (size_t i = 0; i < token->data->len; i++) {
-                    html5_foster_parent_character(parser, token->data->chars[i]);
+                    html5_insert_character(parser, token->data->chars[i]);
                 }
             }
         }

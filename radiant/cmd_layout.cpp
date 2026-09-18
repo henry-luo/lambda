@@ -2292,6 +2292,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // If body has transform: scale(), apply it to the document's body_transform_scale
     // This can be used by the renderer to apply additional scaling
 
+    // The final load cascade already includes parser and load-time script writes;
+    // event-loop reconciliation must begin with only post-load DOM mutations.
+    dom_js_mutation_records_reset(dom_doc);
+
     auto t_end = time_now_ns();
     if (timing) {
         timing->loader_total_ms += time_elapsed_ms_f(t_start, t_end);
