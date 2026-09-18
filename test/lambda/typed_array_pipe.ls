@@ -18,7 +18,7 @@ mf                             // [1.5, 3, 4.5, 6, 7.5]
 shape(mf)                      // [5]
 
 '=== pipe map with index ==='
-a |> ~ + ~#                     // element + index: [1, 3, 5, 7, 9]
+a |> ~ + ~key                     // element + index: [1, 3, 5, 7, 9]
 
 // ============================================================
 // BRACKETED COMPREHENSION — [for (x in arr) body]

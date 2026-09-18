@@ -8,6 +8,7 @@
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
 #include "interp.hpp"
+#include "write_set.hpp"
 #include "runtime-state.h"
 #include "recovery_frame.h"
 #include "re2_wrapper.hpp"
@@ -947,6 +948,16 @@ static Item interp_eval_cow_path_key(InterpFrame* f, AstNode* key_node,
     return eval_expr(f, key_node);
 }
 
+// A dotted member name is a static key, not an identifier read: reading it as
+// a binding would resolve to null. Member access and the Tier-3 CRUD
+// statements both split a target into (object, key) and must agree on this.
+static Item interp_eval_member_key(InterpFrame* f, AstNode* field) {
+    if (field && field->node_type == AST_NODE_IDENT) {
+        return interp_static_member_name_item(f, (AstIdentNode*)field);
+    }
+    return eval_expr(f, field);
+}
+
 // ---------------------------------------------------------------------------
 // Literals
 // ---------------------------------------------------------------------------
@@ -1040,6 +1051,7 @@ static Item eval_literal(InterpFrame* f, AstNode* node) {
 // Operand order and helper selection mirror the boxed arms of
 // transpile_binary/transpile_unary; the numeric tower, meets and int totality
 // (S4.4, SI7) all live inside the helpers, so nothing is re-decided here.
+
 static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
     if (node->op == OPERATOR_SPREAD) return eval_expr(f, node->operand);
     // Publish before the call: the helper allocates, and an operand living only
@@ -1052,6 +1064,10 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
     case OPERATOR_NOT:      return (Item){.item = b2it(fn_not(operand))};
     case OPERATOR_NEG:      return fn_neg(operand);
     case OPERATOR_POS:      return fn_pos(operand);
+    // PTH32/PTH40: one forcing helper and one address-of helper, shared with
+    // MIR Direct, so both tiers answer identically (S1.6).
+    case OPERATOR_FORCE:       return fn_force(operand);
+    case OPERATOR_ADDRESS_OF:  return fn_address_of(operand);
     case OPERATOR_PROPAGATE:
         if (item_is_error(operand) && !interp_frame_pending(f)) {
             interp_signal(f, EvalSignal::RETURNED, operand);
@@ -1143,6 +1159,7 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     case OPERATOR_INTERSECT: return fn_intersect(left, right);
     case OPERATOR_EXCLUDE:   return fn_exclude(left, right);
     case OPERATOR_IS:        return (Item){.item = b2it(fn_is(left, right))};
+    case OPERATOR_REF_EQ:    return (Item){.item = b2it(fn_ref_eq(left, right))};
     case OPERATOR_SUBTYPE:   return (Item){.item = b2it(fn_subtype(left, right))};
     // `expr is nan` lowers to a one-operand fn_is_nan call (transpile-mir.cpp);
     // the parsed `nan` on the right is a marker, not a compared value.
@@ -4713,16 +4730,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item object_value = eval_expr(f, field->object);
         Scratch obj(f);
         obj.set(object_value);
-        Item key;
-        if (field->field && field->field->node_type == AST_NODE_IDENT) {
-            // A dotted member name is a static key, not an identifier read:
-            // link its runtime-pool name once for this activation; reading it
-            // as a binding would resolve to null.
-            AstIdentNode* name = (AstIdentNode*)field->field;
-            key = interp_static_member_name_item(f, name);
-        } else {
-            key = eval_expr(f, field->field);
-        }
+        Item key = interp_eval_member_key(f, field->field);
         Scratch key_slot(f);
         key_slot.set(key);
         // A Path's built-in properties are read through item_attr, which loads
@@ -4920,6 +4928,80 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
 
     // ---- procedural statements (S12.1.2): EvalSignal is the only non-local
     // mechanism for language control flow (AI14); longjmp stays fault-only ----
+    // Tier 3 (PTH60v3, PTH62, PTH68v3). Every value operand is evaluated HERE
+    // and reads the HEAD (PTH61): the next version is write-only, so
+    // `put doc#n = doc#n + 1` twice in one set leaves `n + 1`.
+    case AST_NODE_CRUD_STAM: {
+        AstCrudNode* crud = (AstCrudNode*)node;
+        if (crud->write_op == CRUD_OP_COMMIT) return fn_commit();
+        if (crud->write_op == CRUD_OP_ROLLBACK) return fn_rollback();
+        if (crud->write_op == CRUD_OP_SEQUENCE) {
+            // PTH60v3: the comma-joined edits record in WRITTEN ORDER, exactly
+            // as separate statements would.
+            for (AstNode* clause = crud->value; clause; clause = clause->next) {
+                Item result = eval_expr(f, clause);
+                if (item_is_error(result) || interp_frame_pending(f)) return result;
+            }
+            return ItemNull;
+        }
+        Item target = eval_expr(f, crud->object);
+        if (interp_frame_pending(f)) return target;
+        Scratch target_slot(f);
+        target_slot.set(target);
+        Item key = ItemNull;
+        if (crud->key) {
+            key = interp_eval_member_key(f, crud->key);
+            if (interp_frame_pending(f)) return key;
+        }
+        Scratch key_slot(f);
+        key_slot.set(key);
+        Item value = ItemNull;
+        if (crud->value) {
+            value = eval_expr(f, crud->value);
+            if (interp_frame_pending(f)) return value;
+        }
+        Scratch value_slot(f);
+        value_slot.set(value);
+        switch (crud->write_op) {
+        case WRITE_OP_PUT:
+            return crud->key
+                ? fn_put_member(target_slot.get(), key_slot.get(), value_slot.get())
+                : fn_put_node(target_slot.get(), value_slot.get());
+        case WRITE_OP_BEFORE:
+            return fn_put_before(value_slot.get(), target_slot.get());
+        case WRITE_OP_AFTER:
+            return fn_put_after(value_slot.get(), target_slot.get());
+        case WRITE_OP_INTO:
+            return fn_put_into(value_slot.get(), target_slot.get());
+        case WRITE_OP_DELETE:
+            return crud->key
+                ? fn_del_member(target_slot.get(), key_slot.get())
+                : fn_del_node(target_slot.get());
+        default:
+            log_error("interp: unhandled CRUD op %d", (int)crud->write_op);
+            return ItemError;
+        }
+    }
+    case AST_NODE_OPEN_STAM: {
+        AstOpenNode* open_node = (AstOpenNode*)node;
+        Item target = eval_expr(f, open_node->target);
+        if (interp_frame_pending(f)) return target;
+        Scratch target_slot(f);
+        target_slot.set(target);
+        Item opened = fn_open_begin(target_slot.get());
+        if (item_is_error(opened)) return opened;
+        Scratch opened_slot(f);
+        opened_slot.set(opened);
+        NameEntry* alias_entry = ast_open_alias_entry(open_node);
+        if (alias_entry) interp_write_binding(f, alias_entry, opened_slot.get());
+        Item body = eval_expr(f, open_node->body);
+        // PTH66v2: the block commits at its end, and ALWAYS rolls back when it
+        // exits by an unhandled runtime error.
+        bool unwinding = item_is_error(body) || interp_frame_pending(f);
+        Item closed = fn_open_end(unwinding ? BOOL_TRUE : BOOL_FALSE);
+        if (unwinding) return body;
+        return item_is_error(closed) ? closed : ItemNull;
+    }
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         Item value = eval_expr(f, assign->value);

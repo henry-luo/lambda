@@ -60,7 +60,8 @@ static const char* scheme_names[PATH_SCHEME_COUNT] = {
     "sys",    // PATH_SCHEME_SYS
     ".",      // PATH_SCHEME_REL (relative)
     "..",     // PATH_SCHEME_PARENT (legacy only)
-    "/"       // PATH_SCHEME_LOGICAL
+    "/",      // PATH_SCHEME_LOGICAL
+    "temp"    // PATH_SCHEME_TEMP (in-memory documents, PTH44v2)
 };
 
 static Path* path_root_of(Path* path) {
@@ -238,6 +239,7 @@ bool path_is_absolute(Path* path) {
            scheme == PATH_SCHEME_HTTP ||
            scheme == PATH_SCHEME_HTTPS ||
            scheme == PATH_SCHEME_SYS ||
+           scheme == PATH_SCHEME_TEMP ||
            scheme == PATH_SCHEME_LOGICAL;
 }
 
@@ -541,7 +543,26 @@ Path* path_extend(Pool* pool, Path* base, const char* segment) {
         log_error("path_extend: NULL segment");
         return base;
     }
-    return path_append_segment_typed(pool, base, segment, LPATH_SEG_NORMAL);
+    return path_extend_len(pool, base, segment, strlen(segment));
+}
+
+// A shape name is a StrView into a larger buffer and carries no terminator, so
+// `&` (which spells a node's path out of the document's node table) needs a
+// length-taking extend rather than a strlen one.
+Path* path_extend_len(Pool* pool, Path* base, const char* segment, size_t len) {
+    if (!base) {
+        log_error("path_extend_len: NULL base path");
+        return NULL;
+    }
+    if (!segment || !len) {
+        log_error("path_extend_len: empty segment");
+        return base;
+    }
+    if (!pool) {
+        log_error("path_extend_len: NULL pool");
+        return NULL;
+    }
+    return path_alloc_op(pool, base, LPATH_SEG_NORMAL, segment, len, 0);
 }
 
 Path* path_extend_int(Pool* pool, Path* base, int64_t value) {
@@ -715,6 +736,37 @@ bool path_ends_with_wildcard(Path* path) {
     if (!path) return false;
     LPathSegmentType seg_type = PATH_GET_SEG_TYPE(path);
     return seg_type == LPATH_SEG_WILDCARD || seg_type == LPATH_SEG_WILDCARD_REC;
+}
+
+// PTH34: the force step resolves the LONGEST PREFIX that names a document
+// through its provider and navigates the rest in memory, so
+// `server.dir.file.node1` needs to know where the document stops and the
+// in-document navigation starts. Only a store can answer that, which is why
+// this lives beside the OS-path conversion rather than in the evaluator.
+//
+// Returns the deepest ancestor (`path` included) that exists in the store, or
+// NULL when no prefix does. A scheme with no cheap existence probe (http) has
+// no prefix to find: the whole path is the document and the caller forces it.
+Path* path_longest_existing_prefix(Path* path) {
+    if (!path) return NULL;
+    PathScheme scheme = path_get_scheme(path);
+    if (scheme != PATH_SCHEME_FILE && scheme != PATH_SCHEME_REL &&
+            scheme != PATH_SCHEME_PARENT && scheme != PATH_SCHEME_LOGICAL) {
+        return NULL;
+    }
+    Pool* pool = path_get_pool();
+    if (!pool) return NULL;
+    for (Path* probe = path; probe && !path_is_root(probe); probe = probe->parent) {
+        // A wildcard segment is a query, not a location; it can only be the
+        // whole reference, never a prefix the trailing steps navigate into.
+        if (path_ends_with_wildcard(probe)) return probe == path ? probe : NULL;
+        StrBuf* buf = strbuf_new();
+        path_to_os_path(path_qualify_default(pool, probe), buf);
+        FileStat fs = file_stat(buf->str);
+        strbuf_free(buf);
+        if (fs.exists) return probe;
+    }
+    return NULL;
 }
 
 /**

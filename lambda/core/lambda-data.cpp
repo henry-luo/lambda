@@ -161,6 +161,10 @@ TypeType LIT_TYPE_STRING;
 TypeType LIT_TYPE_BINARY;
 TypeType LIT_TYPE_SYMBOL;
 TypeType LIT_TYPE_PATH;
+// PTH30: `reference` = `symbol | path`. Built as an ordinary union so every
+// existing union path (matching, printing, subtyping) handles it unchanged.
+TypeBinary TYPE_REFERENCE;
+TypeType LIT_TYPE_REFERENCE;
 TypeType LIT_TYPE_DTIME;
 TypeType LIT_TYPE_DATE;
 TypeType LIT_TYPE_TIME;
@@ -232,6 +236,16 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_BINARY) = LIT_TYPE;  LIT_TYPE_BINARY.type = &TYPE_BINARY;
     *(Type*)(&LIT_TYPE_SYMBOL) = LIT_TYPE;  LIT_TYPE_SYMBOL.type = &TYPE_SYMBOL;
     *(Type*)(&LIT_TYPE_PATH) = LIT_TYPE;  LIT_TYPE_PATH.type = &TYPE_PATH;
+    ((Type*)&TYPE_REFERENCE)->type_id = LMD_TYPE_TYPE;
+    ((Type*)&TYPE_REFERENCE)->kind = TYPE_KIND_BINARY;
+    // The members are the LIT_TYPE wrappers, not the bare Type singletons:
+    // that is what `lookup_base_type_name` hands the type-pattern parser, so a
+    // hand-built union must match or it validates down a different arm than the
+    // identical union written out as `(symbol | path)` (S1.6).
+    TYPE_REFERENCE.left = (Type*)&LIT_TYPE_SYMBOL;
+    TYPE_REFERENCE.right = (Type*)&LIT_TYPE_PATH;
+    TYPE_REFERENCE.op = OPERATOR_UNION;
+    *(Type*)(&LIT_TYPE_REFERENCE) = LIT_TYPE;  LIT_TYPE_REFERENCE.type = (Type*)&TYPE_REFERENCE;
     *(Type*)(&LIT_TYPE_DTIME) = LIT_TYPE;  LIT_TYPE_DTIME.type = &TYPE_DTIME;
     *(Type*)(&LIT_TYPE_DATE) = LIT_TYPE;  LIT_TYPE_DATE.type = &TYPE_DATE;
     *(Type*)(&LIT_TYPE_TIME) = LIT_TYPE;  LIT_TYPE_TIME.type = &TYPE_TIME;

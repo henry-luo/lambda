@@ -69,6 +69,10 @@ typedef enum {
     PATH_SCHEME_REL,        // . (relative path)
     PATH_SCHEME_PARENT,     // legacy parent root; new syntax uses LPATH_SEG_PARENT
     PATH_SCHEME_LOGICAL,    // / (logical resolver root)
+    // PTH44v2: `temp.` is the IN-MEMORY provider root. Runtime data gains
+    // identity by being placed in a document under it; the documents live for
+    // the evaluation (SO20). Unrelated to `sys.temp`, the OS temp directory.
+    PATH_SCHEME_TEMP,
     PATH_SCHEME_COUNT
 } PathScheme;
 
@@ -100,6 +104,11 @@ bool path_has_wildcards(Path* path);                              // Check if pa
 Item path_load_content(Path* path);                               // Load path content (file/URL)
 int64_t path_get_length(Path* path);                              // Get path content length (triggers load)
 Item path_get_item(Path* path, int64_t index);                    // Get item at index (triggers load)
+
+// PTH34: deepest ancestor (inclusive) that exists in the store, else NULL.
+// The force step uses it to split a reference into the document prefix and the
+// trailing steps it navigates in memory.
+Path* path_longest_existing_prefix(Path* path);
 
 // Path resolution for iteration (returns list for dirs, content for files)
 Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration

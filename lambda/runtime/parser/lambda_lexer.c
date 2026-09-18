@@ -186,6 +186,9 @@ static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size
         {"while", LAMBDA_TOK_WHILE}, {"break", LAMBDA_TOK_BREAK},
         {"continue", LAMBDA_TOK_CONTINUE}, {"return", LAMBDA_TOK_RETURN},
         {"raise", LAMBDA_TOK_RAISE}, {"import", LAMBDA_TOK_IMPORT},
+        {"put", LAMBDA_TOK_PUT}, {"del", LAMBDA_TOK_DEL},
+        {"commit", LAMBDA_TOK_COMMIT}, {"rollback", LAMBDA_TOK_ROLLBACK},
+        {"open", LAMBDA_TOK_OPEN},
         {"apply", LAMBDA_TOK_APPLY}, {"not", LAMBDA_TOK_NOT},
         {"div", LAMBDA_TOK_DIV}, {"and", LAMBDA_TOK_AND},
         {"or", LAMBDA_TOK_OR}, {"to", LAMBDA_TOK_TO},
@@ -546,6 +549,8 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     PUNCT1(';', LAMBDA_TOK_SEMICOLON);
     PUNCT1('^', LAMBDA_TOK_CARET);
     PUNCT1('%', LAMBDA_TOK_PERCENT);
+    // PTH32: `#` is free -- Lambda comments are `//` and `/* */`.
+    PUNCT1('#', LAMBDA_TOK_HASH);
     default: break;
     }
 #undef PUNCT1
@@ -568,9 +573,19 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             lexer_advance_byte(lexer);
             return lexer_make_token(LAMBDA_TOK_PARENT, start, line, column, lexer->offset);
         }
-        if (lexer_peek(lexer, 0) == '#') {
-            lexer_advance_byte(lexer);
-            return lexer_make_token(LAMBDA_TOK_TILDE_INDEX, start, line, column, lexer->offset);
+        // PTH47: `~word` is the fused focal-accessor family. `~` immediately
+        // followed by an identifier is one token, so the accessor namespace is
+        // open (a future accessor is a new word, never a new glyph) and can
+        // never capture a user binding — no binding starts with `~`. A space
+        // keeps the two-token reading: `~ key` is the current item then `key`.
+        if (lexer_is_ident_start(lexer)) {
+            size_t word_start = lexer->offset;
+            do { lexer_advance_ident_unit(lexer); } while (lexer_is_ident_continue(lexer));
+            if (lexer_word_equals(lexer->source, word_start, lexer->offset, "key")) {
+                return lexer_make_token(LAMBDA_TOK_TILDE_KEY, start, line, column, lexer->offset);
+            }
+            // An unknown accessor is a lexical error, never a binding lookup.
+            return lexer_make_token(LAMBDA_TOK_TILDE_ACCESSOR, start, line, column, lexer->offset);
         }
         return lexer_make_token(LAMBDA_TOK_TILDE, start, line, column, lexer->offset);
     }
@@ -602,6 +617,12 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
         lexer_advance_byte(lexer);
         if (lexer_peek(lexer, 0) == '=') {
             lexer_advance_byte(lexer);
+            // PTH45v2: `===`, reference equality. Longest match, so `==` keeps
+            // its meaning and `a === b` never lexes as `a == (= b)`.
+            if (lexer_peek(lexer, 0) == '=') {
+                lexer_advance_byte(lexer);
+                return lexer_make_token(LAMBDA_TOK_EQ_EQ_EQ, start, line, column, lexer->offset);
+            }
             return lexer_make_token(LAMBDA_TOK_EQ_EQ, start, line, column, lexer->offset);
         }
         if (lexer_peek(lexer, 0) == '>') {
@@ -698,7 +719,14 @@ const char* lambda_token_kind_name(LambdaTokenKind kind) {
     case LAMBDA_TOK_QUESTION: return "?";
     case LAMBDA_TOK_CARET: return "^";
     case LAMBDA_TOK_TILDE: return "~";
-    case LAMBDA_TOK_TILDE_INDEX: return "~#";
+    case LAMBDA_TOK_HASH: return "#";
+    case LAMBDA_TOK_PUT: return "put";
+    case LAMBDA_TOK_DEL: return "del";
+    case LAMBDA_TOK_COMMIT: return "commit";
+    case LAMBDA_TOK_ROLLBACK: return "rollback";
+    case LAMBDA_TOK_OPEN: return "open";
+    case LAMBDA_TOK_TILDE_KEY: return "~key";
+    case LAMBDA_TOK_TILDE_ACCESSOR: return "~<accessor>";
     case LAMBDA_TOK_PARENT: return "~~";
     case LAMBDA_TOK_SLASH: return "/";
     case LAMBDA_TOK_PLUS: return "+";
@@ -713,6 +741,7 @@ const char* lambda_token_kind_name(LambdaTokenKind kind) {
     case LAMBDA_TOK_BANG: return "!";
     case LAMBDA_TOK_EQ: return "=";
     case LAMBDA_TOK_EQ_EQ: return "==";
+    case LAMBDA_TOK_EQ_EQ_EQ: return "===";
     case LAMBDA_TOK_BANG_EQ: return "!=";
     case LAMBDA_TOK_LT: return "<";
     case LAMBDA_TOK_LT_EQ: return "<=";

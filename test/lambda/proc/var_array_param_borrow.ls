@@ -9,13 +9,13 @@
 //  whose computed-key store T0 does not run yet)
 type Rec = {values: array, n: int}
 pn slot_set(var s: array, i: int, v: int) any { s[i] = v }
-pn put(var r: Rec, i: int, v: int) any { slot_set(r.values, i, v) }
+pn put_slot(var r: Rec, i: int, v: int) any { slot_set(r.values, i, v) }
 pn widen(var s: array, i: int) any { s[i] = "x" }   // the open contract widens the packed lane in place
 pn put_direct(var r: Rec, i: int, v: int) any { r.values[i] = v }
 pn main() {
     var r: Rec = {values: fill(64, 0), n: 64}
     var i = 0
-    while (i < 64) { put(r, i, i * 2); i = i + 1 }
+    while (i < 64) { put_slot(r, i, i * 2); i = i + 1 }
     widen(r.values, 6)
     put_direct(r, 5, -5)
     print(r.values[0], " ", r.values[63], " ", r.values[5], " ", r.values[6], " ", len(r.values), "\n")

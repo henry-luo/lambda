@@ -1,5 +1,5 @@
 // Pipe and Where Operator Test Suite
-// Tests the pipe (|) and where operators with ~ (current item) and ~# (current index)
+// Tests the pipe (|) and where operators with ~ (current item) and ~key (current index)
 
 "===== PIPE OPERATOR BASIC TESTS ====="
 
@@ -17,16 +17,16 @@
 // Array pipe with subtraction
 [5, 10, 15] |> ~ - 1
 
-"--- Array iteration with ~# (index) ---";
+"--- Array iteration with ~key (index) ---";
 
 // Access index during iteration
-[100, 200, 300] |> ~#;
+[100, 200, 300] |> ~key;
 
 // Use both item and index
-["a", "b", "c"] |> { item: ~, index: ~# };
+["a", "b", "c"] |> { item: ~, index: ~key };
 
 // Multiply item by its index
-[10, 10, 10] |> ~ * ~#
+[10, 10, 10] |> ~ * ~key
 
 "--- Map iteration with ~ ---"
 
@@ -34,10 +34,10 @@
 { x: 1, y: 2, z: 3 } |> ~ * 10
 
 // Map pipe: access keys during iteration
-{ a: 100, b: 200, c: 300 } |> ~#
+{ a: 100, b: 200, c: 300 } |> ~key
 
 // Map pipe: create new structure
-{ a: 1, b: 2 } |> { key: ~#, value: ~ }
+{ a: 1, b: 2 } |> { key: ~key, value: ~ }
 
 "===== WHERE OPERATOR BASIC TESTS ====="
 
@@ -61,10 +61,10 @@
 "--- Filter arrays with index ---";
 
 // Filter by index (even indices)
-["a", "b", "c", "d", "e"] that (~# % 2 == 0);
+["a", "b", "c", "d", "e"] that (~key % 2 == 0);
 
 // Filter by index (first 3 items)
-[100, 200, 300, 400, 500] that (~# < 3)
+[100, 200, 300, 400, 500] that (~key < 3)
 
 "--- Filter maps ---"
 
@@ -104,7 +104,7 @@
 [1, 2, 3] |> { value: ~, doubled: ~ * 2 };
 
 // Include index in map
-["x", "y", "z"] |> { index: ~#, name: ~ }
+["x", "y", "z"] |> { index: ~key, name: ~ }
 
 "--- Pipe with nested structures ---";
 

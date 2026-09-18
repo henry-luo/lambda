@@ -412,15 +412,15 @@ When the left side is a scalar, `~` binds to the whole value:
 // Result: [2, 5, 10, 17, 26]
 ```
 
-### Key/Index Access with `~#`
+### Key/Index Access with `~key`
 
 ```lambda
-// Arrays — ~# is index (0-based)
-['a', 'b', 'c'] |> {index: ~#, value: ~}
+// Arrays — ~key is index (0-based)
+['a', 'b', 'c'] |> {index: ~key, value: ~}
 // [{index: 0, value: 'a'}, {index: 1, value: 'b'}, {index: 2, value: 'c'}]
 
-// Maps — ~ is value, ~# is key
-{a: 1, b: 2} |> {key: ~#, val: ~}
+// Maps — ~ is value, ~key is key
+{a: 1, b: 2} |> {key: ~key, val: ~}
 // [{key: 'a', val: 1}, {key: 'b', val: 2}]
 ```
 
@@ -477,7 +477,7 @@ users that (age >= min_age)
 
 ### Pipe Behavior Summary
 
-| Left Side | `~` Binds To | `~#` Binds To | Result |
+| Left Side | `~` Binds To | `~key` Binds To | Result |
 |-----------|--------------|---------------|--------|
 | `[a, b, c]` (array) | Each element | Index (0, 1, 2) | Array of results |
 | `(a, b, c)` (tuple) | Each element | Index (0, 1, 2) | Array of results |
@@ -1167,6 +1167,32 @@ for x in [1, 2], y in [3, 4] {
 
 `var`, `while`, `break`, `continue`, `return`, and assignment (`=`) are only available in `pn` (procedural) functions. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
 
+### Document Update Statements
+
+`put`, `del`, `commit`, `rollback` and the block form of `open` write documents.
+They are statements, never expressions: `=` has no external effect, so a
+document write has exactly one spelling.
+
+| Statement | Meaning |
+|---|---|
+| `put target = v` | upsert at a location; a position replaces, a key upserts |
+| `put v before t` / `put v after t` | insert around a head node |
+| `put v into t` | add a member: sequence append, map upsert, element child |
+| `del target` | remove a location; an absent one raises at commit |
+| `put a = 1, b = 2` | comma-joined edits: one statement, written order |
+| `commit` / `rollback` | end the write set, or discard it |
+| `open v = target { … }` | one bounded transaction; `#` implied on `v` |
+
+Edits accumulate into a write-only next version. Nothing a reader can see
+changes until `commit`, and every value operand reads the head. Outside `open`,
+each statement is its own transaction and commits at once.
+
+`put`, `del`, `commit`, `rollback` and `open` are reserved as binding names.
+They remain legal as **data** names — a map key, a member, an element tag, an
+event handler — so `{open: true}`, `m.open` and `<del "x">` are unchanged.
+`before`, `after` and `into` are clause words inside the statement and stay
+bindable. See [Document Updates](Lambda_Data.md#document-updates).
+
 ---
 
 ## Operators
@@ -1177,13 +1203,13 @@ From highest to lowest:
 
 | Precedence | Operators                  | Description     |
 | ---------- | -------------------------- | --------------- |
-| 1          | `()`, `[]`, `[T]`, `.`, `?`, `.?` | Primary, query  |
-| 2          | `-`, `+`, `not`, `!`, `*`  | Unary (`!`: type negation) |
+| 1          | `()`, `[]`, `[T]`, `.`, `#`, `?`, `.?` | Primary, force, query |
+| 2          | `-`, `+`, `not`, `!`, `*`, `&` | Unary (`!`: type negation, `&`: address-of) |
 | 3          | `**`                       | Exponentiation  |
 | 4          | `*`, `/`, `div`, `%`       | Multiplicative  |
 | 5          | `+`, `-`                   | Additive        |
 | 6          | `<`, `<=`, `>`, `>=`       | Relational      |
-| 7          | `==`, `!=`                 | Equality        |
+| 7          | `==`, `!=`, `===`          | Equality (`===`: reference equality) |
 | 8          | `and`                      | Logical AND     |
 | 9          | `or`                       | Logical OR      |
 | 10         | `to`                       | Range           |

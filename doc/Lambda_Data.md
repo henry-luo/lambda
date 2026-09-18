@@ -24,6 +24,9 @@ This document covers Lambda's literal values, collection types, and expressions 
      - [DateTime Constructors](#datetime-constructors)
    - [Boolean and Null Literals](#boolean-and-null-literals)
 3. [Path Literals](#path-literals)
+   - [References and the Force Step `#`](#references-and-the-force-step-)
+   - [Identity: `&` and `===`](#identity--and-)
+   - [Document Updates](#document-updates)
 4. [Collections](#collections)
    - [Arrays](#arrays)
    - [Maps](#maps)
@@ -524,6 +527,7 @@ The `path` type represents file system paths and URLs in a unified, platform-ind
 | HTTP               | `http`      | `http.'api.example.com'` | `http://api.example.com`    |
 | HTTPS              | `https`     | `https.'secure.api'`     | `https://secure.api`        |
 | System             | `sys`       | `sys.env.PATH`           | System environment variable |
+| Temporary          | `temp`      | `temp.'scratch'`         | An in-memory document       |
 
 ### Wildcards
 
@@ -585,6 +589,54 @@ exists(\.config.json)         // true or false
 let content = input(/.etc.hosts, 'text')   // Load file content
 let data = input(https.api.example.com.data, 'json')  // Fetch URL
 ```
+
+### References and the Force Step `#`
+
+A `path` is a **reference**: it names a location and reads nothing. Building
+`p.a.b`, comparing paths, and passing them around never touches the store. Only
+the postfix **force step** `#` crosses from the reference to its target.
+
+```lambda
+let p = \.data.'page.json'   // a path; nothing is read
+p.body.0                     // still a path: steps append
+p#                           // the document at p (exactly `input(p)`)
+p#body.0                     // force, then navigate the value
+p.body.0#                    // extend the path, then force — the same value
+```
+
+Immediately after `#` one step may omit its dot, the URI fragment form:
+`p#name` is `p#.name`, `p#3` is `p#.3`. No space is allowed between `#` and its
+fragment step.
+
+`reference` is the type `symbol | path` — a URI is a URN or a URL:
+
+```lambda
+/.etc.hosts is path        // true
+/.etc.hosts is symbol      // false — `path` is its own scalar type
+/.etc.hosts is reference   // true
+'name' is reference        // true
+```
+
+### Identity: `&` and `===`
+
+Containers **inside a document** carry an identity: their path within it.
+Prefix `&` reads that identity, or `null`; `===` compares two of them.
+
+```lambda
+let doc = \.data.'page.json'#
+&doc.a.b          // \.data.'page.json'.a.b
+&doc.title        // null — a scalar is a value, not a place
+&{x: 1}           // null — runtime-constructed data has none
+(&doc.a.b)#       // round trip: the reference forces back to the node
+
+doc.a === doc.a   // true
+doc.a === doc.b   // false
+1 === 1           // false — identity-less operands compare false, never error
+```
+
+`&` binds looser than the postfix steps, so `&x.y` is `&(x.y)`, as in C. Because
+`&` is also infix set intersection, a line that *starts* with `&` after an
+unfinished statement needs a `;` to separate them.
 
 ### System Info Paths (`sys.*`)
 
@@ -1200,3 +1252,61 @@ array((1, 2, 3))            // [1, 2, 3]
 ---
 
 This document covers the foundational data types and structures in Lambda. For type system details, see [Lambda Type System](Lambda_Type.md). For expressions and control flow, see [Lambda Expressions](Lambda_Expr_Stam.md).
+
+## Document Updates
+
+A document has three tiers, and they do not mix.
+
+| Tier | Forms | Sees | Writes |
+|---|---|---|---|
+| 1 — read | `let`, `for`, `#`, `input`, pipes, `that` | the **head** version | nothing |
+| 2 — value | `var`, `=`, copy-on-write | a snapshot taken at binding | the binding only |
+| 3 — update | `put`, `del`, `output`; `commit`, `rollback`; `open { }` | nothing | the **next** version |
+
+`=` never writes a document. Every document write is one of three statements —
+`put`, `del`, `output` — so a reader finds them by scanning for three words.
+
+```lambda
+put doc#count = doc#count + 1      // upsert at a location
+put x before items.0               // insert before a node
+put y after items.2                // insert after a node
+put z into items                   // add a member: append, upsert, or a child
+del doc#stale                      // remove a location
+put doc#a = 1, doc#b = 2           // comma-joined: one statement, written order
+```
+
+Edits build a **write-only next version**. Nothing a reader can see changes
+until `commit`, and every value operand reads the head — so two increments in
+one write set leave `head + 1`, not `head + 2`. Read-your-writes lives in Tier 2:
+build the value in a `var`, then `put doc# = d`.
+
+Outside `open`, each statement is its own transaction and commits at once — the
+shell case. Inside `open`, every statement forms one write set:
+
+```lambda
+open t = temp.'scratch' {
+    put t.n = 5;
+    put t.tag = 'x';
+    commit                    // or: the block commits at its end
+}                             // an unhandled error always rolls back
+```
+
+The `open` alias is the opened document (`#` is implied); `&t` recovers its
+address. A commit **advances** what the next force yields, and nothing already
+bound changes — a running loop keeps the version it started on:
+
+```lambda
+for (v in doc#items) { put v.seen = true }   // every row is reached
+```
+
+### `temp.` Documents
+
+Runtime data gains identity by being placed in a document under `temp.`, an
+in-memory provider whose documents live for the evaluation.
+
+```lambda
+let t = temp('scratch', {rows: [1, 2]})   // create; raises if the name is taken
+t.rows === temp.'scratch'#rows            // true — the same node
+temp('scratch')                           // the existing head
+open t = temp.'scratch' { put t.rows = [3] }
+```

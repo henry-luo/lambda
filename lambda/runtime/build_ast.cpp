@@ -5,6 +5,7 @@
 #include "type_contract.hpp"
 #include "type_build.hpp"
 #include "ast_build.hpp"
+#include "write_set.hpp"
 #include "parse_type_pattern.hpp"
 #include "parse_path_expr.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
@@ -4194,6 +4195,7 @@ bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
     else if (strview_equal(&op, "div")) { *op_out = OPERATOR_IDIV; }
     else if (strview_equal(&op, "%")) { *op_out = OPERATOR_MOD; }
     else if (strview_equal(&op, "==")) { *op_out = OPERATOR_EQ; }
+    else if (strview_equal(&op, "===")) { *op_out = OPERATOR_REF_EQ; }
     else if (strview_equal(&op, "!=")) { *op_out = OPERATOR_NE; }
     else if (strview_equal(&op, "<")) { *op_out = OPERATOR_LT; }
     else if (strview_equal(&op, "<=")) { *op_out = OPERATOR_LE; }
@@ -5044,6 +5046,12 @@ static const BaseTypeName BASE_TYPE_NAMES[] = {
     {"f64", (Type*)&LIT_TYPE_FLOAT},      {"decimal", (Type*)&LIT_TYPE_DECIMAL},
     {"integer", (Type*)&LIT_TYPE_INTEGER},{"number", (Type*)&LIT_TYPE_NUMBER},
     {"string", (Type*)&LIT_TYPE_STRING},  {"symbol", (Type*)&LIT_TYPE_SYMBOL},
+    // PTH30: `path` is a scalar type disjoint from `symbol`, not a sub-symbol.
+    // The runtime tag has always been separate (LMD_TYPE_PATH); this is the
+    // annotation name, so `x is path` resolves instead of degrading to ANY.
+    {"path", (Type*)&LIT_TYPE_PATH},
+    // PTH30: the URI alias — `reference` = `symbol | path` (URN | URL).
+    {"reference", (Type*)&LIT_TYPE_REFERENCE},
     {"datetime", (Type*)&LIT_TYPE_DTIME}, {"time", (Type*)&LIT_TYPE_TIME},
     {"date", (Type*)&LIT_TYPE_DATE},      {"binary", (Type*)&LIT_TYPE_BINARY},
     {"list", (Type*)&LIT_TYPE_LIST},      {"range", (Type*)&LIT_TYPE_RANGE},
@@ -8027,6 +8035,12 @@ struct LambdaDirectAstSink {
     NameScope* loop_scopes[64];
     AstForNode* for_nodes[64];
     uint32_t loop_scope_depth;
+    // `open v = target { … }` (PTH68v3). One scope per block, holding the alias
+    // binding. PTH-O15 defers nesting, so the depth never exceeds one in valid
+    // programs; the array keeps the underflow/overflow checks uniform.
+    NameScope* open_scopes[8];
+    AstDeclaratorNode* open_aliases[8];
+    uint32_t open_scope_depth;
     NameScope* group_scopes[64];
     uint32_t group_scope_depth;
     NameScope* completed_group_scope;
@@ -9142,8 +9156,9 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     Type* lt = left && left->type ? left->type : &TYPE_ANY;
     Type* rt = right && right->type ? right->type : &TYPE_ANY;
     if (op == OPERATOR_TO) return &TYPE_RANGE;
-    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_IS ||
-            op == OPERATOR_SUBTYPE || op == OPERATOR_IN || op == OPERATOR_AT) {
+    if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_REF_EQ ||
+            op == OPERATOR_IS || op == OPERATOR_SUBTYPE || op == OPERATOR_IN ||
+            op == OPERATOR_AT) {
         return &TYPE_BOOL;
     }
     if (op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT ||
@@ -13621,6 +13636,114 @@ AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
     return (AstNode*)node;
 }
 
+// PTH32: `expr#`. The result shape is whatever the document holds, so it is
+// open until the document loads; PTH36 makes it a can-raise read on a provider
+// path, so the type admits an error like any pn-family call.
+// ============================================================================
+// Tier 3: the CRUD statements (PTH60v3, PTH62, PTH68v3)
+// ============================================================================
+
+// PTH69v2: a CRUD target is a reference with `#` (post-`#` steps re-appended),
+// an `open` alias, or a Tier-1 binding of a head node plus member steps. A
+// member/index target is SPLIT here into (object, key) because a head-anchored
+// edit needs the container and the step within it, not a navigated value.
+//
+// PTH72v2/PTH73: `=`, `push` and `splice` are Tier 2 ONLY and `put`/`del`/
+// `output` Tier 3 only. A `var` root is therefore a compile error naming
+// `open`: a `var` is a Tier-2 value, and a CRUD statement never changes what
+// its target expression reads, so a `var` root could only mislead.
+static bool crud_reject_var_root(Transpiler* tp, SourceSpan span, AstNode* target) {
+    AstNode* root = target;
+    while (root) {
+        switch (root->node_type) {
+        case AST_NODE_PRIMARY: root = ((AstPrimaryNode*)root)->expr; continue;
+        case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR:
+            root = ((AstFieldNode*)root)->object; continue;
+        case AST_NODE_IDENT: {
+            NameEntry* entry = ((AstIdentNode*)root)->entry;
+            if (entry && entry->is_mutable) {
+                record_semantic_error_span(tp, span, ERR_SEMANTIC_ERROR,
+                    "a 'var' is Tier 2 and never a CRUD root; its writes are "
+                    "local (S9.1). Use 'open v = <document> { put v... }' to "
+                    "write the document");
+                return false;
+            }
+            return true;
+        }
+        default: return true;
+        }
+    }
+    return true;
+}
+
+AstNode* build_crud_statement_from_parts(Transpiler* tp, SourceSpan span,
+        uint8_t write_op, AstNode* target, AstNode* value) {
+    AstCrudNode* node = (AstCrudNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_CRUD_STAM, span, sizeof(AstCrudNode));
+    node->write_op = write_op;
+    node->value = value;
+    node->type = &TYPE_NULL;
+    if (!crud_reject_var_root(tp, span, target)) {
+        node->object = target;
+        return (AstNode*)node;
+    }
+    AstNode* effective = target;
+    while (effective && effective->node_type == AST_NODE_PRIMARY) {
+        effective = ((AstPrimaryNode*)effective)->expr;
+    }
+    // `before`/`after` anchor to a NODE, never to a location, so their target
+    // is never split — the runtime reads the node's own position instead.
+    bool positional = write_op == WRITE_OP_BEFORE || write_op == WRITE_OP_AFTER ||
+        write_op == WRITE_OP_INTO;
+    if (!positional && effective &&
+            (effective->node_type == AST_NODE_MEMBER_EXPR ||
+             effective->node_type == AST_NODE_INDEX_EXPR)) {
+        AstFieldNode* field = (AstFieldNode*)effective;
+        node->object = field->object;
+        node->key = field->field;
+    } else {
+        node->object = target;
+    }
+    return (AstNode*)node;
+}
+
+AstNode* build_open_statement_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* target, AstNode* body, String* alias, AstNode* alias_decl) {
+    AstOpenNode* node = (AstOpenNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_OPEN_STAM, span, sizeof(AstOpenNode));
+    node->target = target;
+    node->body = body;
+    node->alias = alias;
+    node->alias_decl = alias_decl;
+    node->type = &TYPE_NULL;
+    return (AstNode*)node;
+}
+
+AstNode* build_force_node_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* operand) {
+    AstUnaryNode* node = (AstUnaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_UNARY, span, sizeof(AstUnaryNode));
+    node->op = OPERATOR_FORCE;
+    node->op_str = strview_from_cstr("#");
+    node->operand = operand;
+    node->type = set_type_any(tp, ANY_FORCE);
+    return (AstNode*)node;
+}
+
+// PTH40: `&expr`. Total by the sys-fn absence rule (S7.4.5) -- a scalar, a
+// runtime literal and a local copy all answer null, never a raise -- so the
+// result is `reference | null` and never carries an error.
+AstNode* build_address_of_node_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* operand) {
+    AstUnaryNode* node = (AstUnaryNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_UNARY, span, sizeof(AstUnaryNode));
+    node->op = OPERATOR_ADDRESS_OF;
+    node->op_str = strview_from_cstr("&");
+    node->operand = operand;
+    node->type = set_type_any(tp, ANY_ADDRESS_OF);
+    return (AstNode*)node;
+}
+
 AstNode* build_propagate_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* operand) {
     AstNode* effective = operand;
@@ -13726,6 +13849,41 @@ static LambdaParseValue direct_ast_reduce(void* context,
             }
             tp->in_that_clause =
                 sink->that_context[--sink->that_context_depth];
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_OPEN_BEGIN) {
+            if (sink->open_scope_depth >= 8) {
+                // PTH-O15: nesting is deferred, so depth > 1 is already a
+                // runtime error; this is the structural floor under it.
+                log_error("direct sink open scope overflow");
+                sink->failed = true;
+                return 0;
+            }
+            uint32_t slot = sink->open_scope_depth++;
+            sink->open_scopes[slot] = lambda_ast_enter_scope(tp,
+                tp->current_scope && tp->current_scope->is_proc);
+            sink->open_aliases[slot] = NULL;
+            bool has_alias = reduction->detail_token.span.end_byte >
+                reduction->detail_token.span.start_byte;
+            if (has_alias) {
+                // PTH75v3: the alias is a reference with `#` implied, so it
+                // binds the OPENED DOCUMENT; the lazy address is `&v`.
+                AstDeclaratorNode* alias = build_declarator_from_name(tp,
+                    reduction->span, name_pool_create_strview(tp->name_pool,
+                        direct_token_text(tp, reduction->detail_token)));
+                alias->type = set_type_any(tp, ANY_FORCE);
+                lambda_ast_register_name(tp, alias);
+                sink->open_aliases[slot] = alias;
+            }
+            return 0;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_OPEN_END) {
+            if (!sink->open_scope_depth) {
+                log_error("direct sink open scope underflow");
+                sink->failed = true;
+                return 0;
+            }
+            lambda_ast_leave_scope(tp, sink->open_scopes[--sink->open_scope_depth]);
             return 0;
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_FOR_BEGIN ||
@@ -13957,7 +14115,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             }
         } else if (token.kind == LAMBDA_TOK_TILDE) {
             node = build_current_item_from_span(tp, token.span, false);
-        } else if (token.kind == LAMBDA_TOK_TILDE_INDEX) {
+        } else if (token.kind == LAMBDA_TOK_TILDE_KEY) {
             node = build_current_item_from_span(tp, token.span, true);
         } else if (token.kind == LAMBDA_TOK_PARENT) {
             node = build_current_parent_navigation_from_span(tp, token.span);
@@ -13992,6 +14150,13 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         if (reduction->detail_token.kind == LAMBDA_TOK_BANG) {
             return direct_ast_value(build_type_negation_from_parts(tp,
+                reduction->span, operand));
+        }
+        // PTH40: prefix `&` is address-of. The same glyph is infix set
+        // intersection, so the two readings are told apart by POSITION here, as
+        // `*` spread and `!` type negation already are.
+        if (reduction->detail_token.kind == LAMBDA_TOK_AMPERSAND) {
+            return direct_ast_value(build_address_of_node_from_parts(tp,
                 reduction->span, operand));
         }
         return direct_ast_value(build_unary_node_from_parts(tp,
@@ -14195,6 +14360,11 @@ static LambdaParseValue direct_ast_reduce(void* context,
             return direct_ast_value(build_handler_from_parts(tp, reduction->span,
                 object, body, value_body));
         }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FORCE &&
+                reduction->child_count == 1) {
+            return direct_ast_value(build_force_node_from_parts(tp,
+                reduction->span, object));
+        }
         if (reduction->form == LAMBDA_REDUCTION_FORM_PROPAGATE &&
                 reduction->child_count == 1) {
             return direct_ast_value(build_propagate_node_from_parts(tp,
@@ -14364,6 +14534,56 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 reduction->form == LAMBDA_REDUCTION_FORM_CONTINUE) {
             return direct_ast_value(build_control_statement_from_parts(tp,
                 reduction->span, reduction->form, child0));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_PUT &&
+                reduction->child_count == 2) {
+            uint8_t write_op =
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUT_BEFORE) ? WRITE_OP_BEFORE :
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUT_AFTER)  ? WRITE_OP_AFTER :
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUT_INTO)   ? WRITE_OP_INTO :
+                                                                        WRITE_OP_PUT;
+            return direct_ast_value(build_crud_statement_from_parts(tp,
+                reduction->span, write_op, child0,
+                direct_ast_node(reduction->children[1])));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_CRUD_SEQ) {
+            AstNode* chain = NULL;
+            for (uint32_t i = 0; i < reduction->child_count; i++) {
+                chain = direct_append(chain, direct_ast_node(reduction->children[i]));
+            }
+            AstCrudNode* node = (AstCrudNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_CRUD_STAM, reduction->span, sizeof(AstCrudNode));
+            node->write_op = CRUD_OP_SEQUENCE;
+            node->value = chain;
+            node->type = &TYPE_NULL;
+            return direct_ast_value((AstNode*)node);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_DEL &&
+                reduction->child_count == 1) {
+            return direct_ast_value(build_crud_statement_from_parts(tp,
+                reduction->span, WRITE_OP_DELETE, child0, NULL));
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_COMMIT ||
+                reduction->form == LAMBDA_REDUCTION_FORM_ROLLBACK) {
+            AstCrudNode* node = (AstCrudNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_CRUD_STAM, reduction->span, sizeof(AstCrudNode));
+            // `commit` and `rollback` carry no target; the write_op byte is out
+            // of WriteOp's range on purpose so a missing arm cannot read as an
+            // edit. See CRUD_OP_COMMIT/CRUD_OP_ROLLBACK.
+            node->write_op = reduction->form == LAMBDA_REDUCTION_FORM_COMMIT
+                ? CRUD_OP_COMMIT : CRUD_OP_ROLLBACK;
+            node->type = &TYPE_NULL;
+            return direct_ast_value((AstNode*)node);
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_OPEN &&
+                reduction->child_count == 2) {
+            // OPEN_END has already closed the scope, so the alias declarator
+            // recorded by OPEN_BEGIN is how the statement reaches its binding.
+            AstDeclaratorNode* alias = sink->open_aliases[sink->open_scope_depth];
+            sink->open_aliases[sink->open_scope_depth] = NULL;
+            return direct_ast_value(build_open_statement_from_parts(tp,
+                reduction->span, child0, direct_ast_node(reduction->children[1]),
+                alias ? alias->name : NULL, (AstNode*)alias));
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD) {
             direct_object_add_field(sink, reduction);
