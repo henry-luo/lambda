@@ -8,6 +8,7 @@
 // `items[]`/`data` pointer may ever be cached across an allocating call.
 
 #include "interp.hpp"
+#include "lambda-root-frame.hpp"
 #include "write_set.hpp"
 #include "runtime-state.h"
 #include "recovery_frame.h"
@@ -127,10 +128,18 @@ static bool interp_const_fold_enabled(void) {
 // bypasses this by design — LambdaRecoveryCheckpoint restores both watermarks
 // and abandons every interpreter frame above the landing wholesale, which is
 // correct because frames own no other resource.
+static size_t interp_frame_root_slot_count(const FnFramePlan* plan,
+        const TypeMethod* method, Function* callable,
+        const TypeFunc* signature) {
+    uint16_t binder_count = signature ? signature->binder_count : 0;
+    if (binder_count > LAMBDA_MAX_FUNCTION_ARGS) return 0;
+    size_t slots = plan && plan->planned ? plan->total_slots : 1;
+    return slots + (callable ? 1 : 0) + (method ? 1 : 0) + binder_count;
+}
+
 class InterpFrameGuard {
     InterpFrame frame_;
-    LambdaRootFrame roots_;
-    LambdaSideStackSnapshot mark_;
+    RootFrame roots_;
     bool ok_;
 
 public:
@@ -138,8 +147,8 @@ public:
                      const FnFramePlan* plan, Item* env, uint32_t env_count,
                      const TypeMethod* method = NULL, Item method_self = ItemNull,
                      Function* callable = NULL, const TypeFunc* signature = NULL)
-            : frame_{}, roots_{}, mark_{}, ok_(false) {
-        mark_ = lambda_side_stack_snapshot();
+            : frame_{}, roots_(interp_frame_root_slot_count(plan, method,
+                callable, signature), RootFrameLifetime::ACTIVATION), ok_(false) {
         size_t slots = plan && plan->planned ? plan->total_slots : 1;
         uint16_t binder_count = signature ? signature->binder_count : 0;
         if (binder_count > LAMBDA_MAX_FUNCTION_ARGS) {
@@ -149,9 +158,7 @@ public:
         // Binder types can be heap-owned type values. Reserve exact Item-shaped
         // roots for their direct-pointer carriers rather than relying on the
         // retired native-stack scan (D5, D3.3.3v3).
-        size_t root_slots = slots + (callable ? 1 : 0) + (method ? 1 : 0) +
-            binder_count;
-        if (!lambda_root_frame_begin(&roots_, root_slots)) {
+        if (!roots_.valid()) {
             // Fail closed through the armed recovery point rather than run
             // with non-rooting slots.
             lambda_root_frame_overflow_error();
@@ -161,21 +168,21 @@ public:
         frame_.fn = fn;
         frame_.module = module;
         frame_.plan = plan;
-        frame_.slots = roots_.slots;
+        frame_.slots = roots_.words();
         size_t auxiliary_slot = slots;
-        frame_.callable_slot = callable ? roots_.slots + auxiliary_slot++ : NULL;
+        frame_.callable_slot = callable ? roots_.words() + auxiliary_slot++ : NULL;
         if (frame_.callable_slot) {
             *frame_.callable_slot = (uint64_t)(uintptr_t)callable;
         }
         frame_.env = env;
         frame_.env_count = env_count;
         frame_.method = method;
-        frame_.method_self = method ? roots_.slots + auxiliary_slot : NULL;
+        frame_.method_self = method ? roots_.words() + auxiliary_slot : NULL;
         if (frame_.method_self) *frame_.method_self = method_self.item;
         auxiliary_slot += method ? 1 : 0;
         frame_.binder_count = binder_count;
         frame_.binder_env = binder_count
-            ? (Type**)(void*)(roots_.slots + auxiliary_slot) : NULL;
+            ? (Type**)(void*)(roots_.words() + auxiliary_slot) : NULL;
         for (uint16_t index = 0; index < binder_count; index++) {
             // NULL records that no binder site has supplied a concrete type.
             // TypeBoundRef admits against its declared bound until this slot is
@@ -203,10 +210,8 @@ public:
     ~InterpFrameGuard() {
         if (!ok_) return;
         frame_.st->top = frame_.caller;
-        lambda_root_frame_end(&roots_);
-        // The frame's number-stack extent dies with it; any wide scalar that
-        // must outlive it has already been re-homed into the caller's extent.
-        lambda_side_stack_restore(mark_);
+        // RootFrame restores this activation's root/number watermark pair;
+        // any wide scalar that must outlive it has already been re-homed.
     }
 
     bool valid() const { return ok_; }

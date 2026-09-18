@@ -128,6 +128,60 @@ TEST(JsCallableDefinitions, CachesParameterShapeAndFormalLength) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, ElidesProvenEmptyFunctionEnvironment) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "function outer() { return function() { return 7; }; } "
+        "function observesArguments() { return arguments.length; } "
+        "function ownsLocal() { let value = 1; return value; } "
+        "function captures(value) { function empty() { "
+        "return function() { return value; }; } return empty(); } "
+        "var captured = captures(8); "
+        "outer;";
+    Item outer_item = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "elided-function-environment.js", NULL);
+    ASSERT_EQ(get_type_id(outer_item), LMD_TYPE_FUNC);
+
+    const char arguments_source[] = "observesArguments;";
+    Item arguments_item = js_interp_execute_source(&runtime, arguments_source,
+        sizeof(arguments_source) - 1, "read-observes-arguments.js", NULL);
+    const char local_source[] = "ownsLocal;";
+    Item local_item = js_interp_execute_source(&runtime, local_source,
+        sizeof(local_source) - 1, "read-owns-local.js", NULL);
+    const char captured_source[] = "captured;";
+    Item captured_item = js_interp_execute_source(&runtime, captured_source,
+        sizeof(captured_source) - 1, "read-captured.js", NULL);
+    ASSERT_EQ(get_type_id(arguments_item), LMD_TYPE_FUNC);
+    ASSERT_EQ(get_type_id(local_item), LMD_TYPE_FUNC);
+    ASSERT_EQ(get_type_id(captured_item), LMD_TYPE_FUNC);
+
+    JsFunction* outer = (JsFunction*)outer_item.function;
+    EXPECT_TRUE(js_fn_ast_elides_function_environment(outer));
+    EXPECT_FALSE(js_fn_ast_elides_function_environment(
+        (JsFunction*)arguments_item.function));
+    EXPECT_FALSE(js_fn_ast_elides_function_environment(
+        (JsFunction*)local_item.function));
+
+    Item escaped = js_call_function(outer_item, make_js_undefined(), NULL, 0);
+    ASSERT_EQ(get_type_id(escaped), LMD_TYPE_FUNC);
+    // The escaped closure received the outer closure environment, not a
+    // short-lived empty record from the call that created it.
+    EXPECT_EQ(js_fn_ast((JsFunction*)escaped.function)->env, nullptr);
+    EXPECT_EQ(js_call_function(escaped, make_js_undefined(), NULL, 0).item,
+        flt2it(7.0).item);
+    {
+        PersistentRooted<Item> captured_root(captured_item);
+        ASSERT_TRUE(captured_root.valid());
+        heap_gc_collect();
+        // `empty` has no own bindings, but its escaped child must keep the
+        // surrounding `captures` environment rather than a popped call record.
+        EXPECT_EQ(js_call_function(captured_root.get(), make_js_undefined(), NULL, 0).item,
+            flt2it(8.0).item);
+    }
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, PlansImmutableCallArgumentShapeAtBuild) {
     Runtime runtime = {};
     runtime_init(&runtime);

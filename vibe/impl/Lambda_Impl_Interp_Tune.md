@@ -1,9 +1,9 @@
 # Lambda Implementation Plan: Shared AST Interpreter Tuning
 
 **Date:** 2026-09-18  
-**Status:** IN PROGRESS — Phases 1–3 have landed their scoped interpreter
-slices; Phase 4 has scoped JS and Lambda activation-window convergence slices.
-Measurement and the remaining cross-profile slices are pending.
+**Status:** IN PROGRESS — Phases 1–3 and the first Phase 4/5 convergence
+slices have landed. Measurement and the remaining cross-profile slices are
+pending.
 **Source baseline:** `12b507e51`; measurements captured on 2026-09-18.  
 **Scope:** Lambda's boxed AST interpreter and the existing Item-based LambdaJS
 AST backend, pinned to interpretation. Not the separate JS MVP ABI/backend.
@@ -595,6 +595,12 @@ Starting points: `interp.cpp::{InterpFrameGuard,Scratch}`,
   while nested arguments run. Named and special call shapes, and any
   unplanned/oversized activation, retain the established dynamic `RootSpan`
   route (**D5.3.3, D8.2.5v2**).
+- `RootFrame` now has an activation lifetime that owns the existing root and
+  number-stack watermark pair. Lambda's `InterpFrameGuard` uses it instead of
+  maintaining a duplicate `LambdaRootFrame`/snapshot teardown sequence;
+  ordinary nested JS helpers retain the default root-only lifetime. This is a
+  common exact-root primitive, not a merger of JS and Lambda control frames
+  (**D5.1.1v2, D5.3.3, D8.1.3v11**).
 
 ### 9.1 Converge ownership before extraction
 
@@ -670,6 +676,24 @@ whose identities cannot be observed through direct eval, captured with state,
 mapped arguments, nested closures or suspension. Treat uncertainty as requiring
 an environment cell. Do not add runtime stack-to-heap deoptimization/promotion
 to broaden the first slice.
+
+### 10.0 Landed first admission slice (2026-09-18)
+
+Synchronous AST functions with no function- or body-scope bindings now elide
+their otherwise empty per-call `JsInterpEnv`. The canonical `JsCallableCode`
+stores the proof: no `arguments`/`this`/`new.target` observation, direct eval,
+`with`, direct or lexical `super`, async/generator suspension, or binding slot.
+The call frame borrows the closure outer environment and the existing call
+activation's `this` home. The focused regression verifies that an escaped
+nested closure receives that outer environment, while `arguments` and local
+binding functions retain their environments (**D5.3.3, D6.2.3v2,
+D8.1.3v11, D8.2.4–D8.2.5v2**).
+
+This is deliberately not yet local-slot storage: an actual local binding needs
+separate exact Item roots and owned scalar homes. Reusing one native span for
+both would let the collector interpret scalar payload words as Items, violating
+the root/storage distinction. That split-storage activation owner remains the
+next Phase 5 admission step.
 
 ### Work
 
@@ -880,8 +904,8 @@ backend; preserve baseline binaries instead.
 | Phase 1: JS literal reuse | Realm-owned immutable cache; repeated-use, GC and heap-replacement tests pass; materialization/parse deltas remain | Implemented; measurement gate pending |
 | Linked names/index route | Activation-local Lambda member links; existing JS property-lane audit; identity/order tests and name-work deltas | Partial; sparse/index counter gate pending |
 | Static interpreter facts | Lambda capture/read and call-shape facts; JS lexical slots, callable parameter facts and shared call shapes | Partial; lazy diagnostics, local classification and measurement remain |
-| Common activation/windows | JS parameter and Lambda ordinary-call window reuse; lifetime protocol, resource-bound and forced-GC results remain | Partial; common extraction pending |
-| JS local slots | Eligibility proof/tests, environment allocation deltas | Not started |
+| Common activation/windows | JS parameter and Lambda ordinary-call window reuse; `RootFrame` activation lifetime; lifetime protocol, resource-bound and forced-GC results remain | Partial; cross-client resource plan pending |
+| JS local slots | Canonical zero-slot eligibility proof and escaped-closure regression; exact split item/scalar storage and allocation deltas | Partial; only empty function records elided |
 | Residual primitive guards | Profile evidence, exact guards, semantic edge-case tests | Conditional |
 | Sparse/regex runtime tracks | Separate algorithm proofs and performance tables | Separate follow-ups |
 | Closeout | Full correctness delta, per-language performance/memory report, final source map | Not started |
