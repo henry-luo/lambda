@@ -62,7 +62,9 @@ static const char* ui_monospace_fonts[] = {
 };
 static const char* system_ui_fonts[] = {
     "System Font", "SF Pro Display", "SF Pro", ".AppleSystemUIFont", "Segoe UI",
-    "Roboto", "Liberation Sans", "Arial", NULL
+    // Keep the metric-compatible web fallback ahead of generic Roboto when
+    // platform system UI faces are unavailable.
+    "Liberation Sans", "Arial", "Roboto", NULL
 };
 
 const char** font_get_generic_family(const char* family) {
@@ -412,8 +414,8 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
         int face_index = 0;
         void* platform_font_ref = NULL;
         void* base_font_ref = NULL;
-        void* platform_base_ref = NULL;
 #ifdef __APPLE__
+        void* platform_base_ref = NULL;
         if (source_handle) {
             // @font-face handles own an exact raw-data face; a CoreText name
             // lookup may substitute an installed font and change fallback metrics.

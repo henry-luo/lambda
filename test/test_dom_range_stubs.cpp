@@ -39,4 +39,8 @@ extern "C" uint64_t* lambda_root_frame_take_slot(LambdaRootFrame*) {
 
 extern "C" void lambda_root_frame_end(LambdaRootFrame*) {}
 
+extern "C" void lambda_side_stack_restore(LambdaSideStackSnapshot) {
+    // This focused target has no bound runtime or side-stack reservation.
+}
+
 extern "C" void lambda_root_frame_overflow_error(void) {}
