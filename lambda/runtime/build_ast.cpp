@@ -8746,8 +8746,18 @@ static AstNode* direct_content_node(LambdaDirectAstSink* sink,
     // block is an open list value, not the type of its first declaration. The
     // first-item shortcut reinterprets a later native result at the caller
     // boundary (D2.2.2).
+    AstNode* single_value = NULL;
     if (content->list_type->length == 1 && filtered && filtered->type) {
         content->type = filtered->type;
+    } else if (!(tp->current_scope && tp->current_scope->is_proc) &&
+            (single_value = ast_content_single_value(filtered)) &&
+            lambda_type_func_signature(single_value->type)) {
+        // `{ fn inner(x) => ...; inner }` IS `inner`: the lowering returns the
+        // block's one value item, so a returned function keeps its signature
+        // (and colour, S12.1.4v3) instead of widening to `any`. Only function
+        // values are typed this way: typing every such block exposes latent
+        // error-escape (E208) and lane reliance on the open reading.
+        content->type = single_value->type;
     } else if (tp->current_scope && tp->current_scope->is_proc && filtered) {
         AstNode* last = filtered;
         while (last->next) last = last->next;
