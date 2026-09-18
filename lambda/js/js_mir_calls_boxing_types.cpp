@@ -999,6 +999,10 @@ static TypeId jm_published_ast_type(const JsAstNode* node) {
     return node && node->type ? node->type->type_id : LMD_TYPE_ANY;
 }
 
+static bool jm_is_native_number_type(TypeId type_id) {
+    return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT;
+}
+
 // The AST builder owns all profile transfer rules. MIR only adds facts that
 // depend on the current binding or a collected callee (D8.2.4-D8.2.6).
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
@@ -1007,6 +1011,13 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (published != LMD_TYPE_ANY) return published;
 
     switch (node->node_type) {
+    case AST_NODE_LITERAL: {
+        JsLiteralNode* literal = (JsLiteralNode*)node;
+        if (literal->literal_type == AST_LITERAL_NUMBER && !literal->is_bigint) {
+            return LMD_TYPE_FLOAT;
+        }
+        return LMD_TYPE_ANY;
+    }
     case AST_NODE_IDENT: {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
@@ -1021,6 +1032,32 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             }
         }
         return LMD_TYPE_ANY;
+    }
+    case AST_NODE_BINARY: {
+        JsBinaryNode* binary = (JsBinaryNode*)node;
+        switch (binary->op) {
+        case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ:
+        case OPERATOR_JS_STRICT_NE: case OPERATOR_JS_INSTANCEOF: case OPERATOR_IN:
+            return LMD_TYPE_BOOL;
+        default:
+            break;
+        }
+        TypeId left_type = jm_get_effective_type(mt, binary->left);
+        TypeId right_type = jm_get_effective_type(mt, binary->right);
+        switch (binary->op) {
+        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
+        case OPERATOR_DIV: case OPERATOR_MOD: case OPERATOR_JS_EXP:
+        case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR:
+        case OPERATOR_JS_BIT_XOR: case OPERATOR_JS_LSHIFT:
+        case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:
+            // Current native bindings prove both operands are Numbers, so the
+            // direct callee may receive the F64 result without boxing it.
+            return jm_is_native_number_type(left_type) &&
+                jm_is_native_number_type(right_type) ? LMD_TYPE_FLOAT : LMD_TYPE_ANY;
+        default:
+            return LMD_TYPE_ANY;
+        }
     }
     case AST_NODE_CALL_EXPR: {
         JsCallNode* call = (JsCallNode*)node;
