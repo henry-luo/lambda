@@ -588,6 +588,186 @@ single non-thread-local flag: concurrent compilation/execution that wants
 per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
 [Runtime globals audit].
 
+<a id="lr12-10"></a>**LR12-10 · A copy of a `var` parameter saw later writes through it · PARTIAL (fixed 2026-09-17 for homed parameters; place borrows open)**
+S9.1.2 / S9.1.3. `pn f(var b: Box) { var saved = b; b.cells[0].k = 8; ... }`
+left `saved.cells[0].k == 8` on both tiers (and on the Result46 binary): the
+callee's own copy observed the borrow's write. The same held for a root stored
+into a container, a copy returned after the write, a reassigned alias, a typed
+array, and a copy followed by a `var` re-borrow that writes. Three defects
+combined:
+1. An alias bind marked its source only when the source was `cow_owned`, and
+   a `var` parameter never is (T0 declaration bind,
+   `mir_expr_is_owned_binding_alias`). T0's plain reassignment `s = b` marked
+   nothing even for owned locals -- a T0-only divergence (`s = b; b.x = v`
+   showed `v` through `s`).
+2. Stores through a `var` parameter write the root in place (CW33: the
+   chain-root prologue leaves it unique), so a root shared *after* entry was
+   mutated under its other holder.
+3. T0 re-borrowed a `var` parameter without the prepare MIR's call site emits
+   for a `cow_marked` root.
+
+**Fix.** (1) both tiers mark an alias of a `var` parameter, and T0 reassignment
+marks like MIR's `cow_binding`. (2) `lambda_ast_note_var_root_sharing`
+(script finalize, shared by both tiers) decides per `var` parameter whether the
+body may share its root -- a bind, return, container element, or a call
+argument the callee can keep (a plain parameter whose root it retains, CW29
+bare scan `cow_param_root_retained`; a `var` parameter that itself may share,
+iterated to a fixpoint); comparisons and truth tests are reads -- and flags each
+store a sharing use may precede (`AstAssignNode::var_root_unshare`,
+flow-sensitive like MIR's `cow_marked`; an `if` arm that exits contributes
+nothing, a loop counts as a whole). A flagged store detaches a shared root and
+republishes the binding (`interp_read_store_owner`,
+`mir_emit_var_root_unshare`, also used by the T29-1 writing bind); the CW33
+epilogue publishes it, and such parameters are marked publishable so callers
+transport the home. (3) a T0 activation that marked a `var` parameter prepares
+it before re-borrowing (`InterpFrame::var_marked_mask`). Size cost: jetstream
+deltablue2 unchanged, awfy deltablue2 +4 instructions, splay2 +53 (its
+rotations really do share their roots). Regression
+`test/lambda/proc/var_param_snapshot.ls` (identical on interp, jit, auto and
+default; forced-GC clean). Two goldens pinned the defect and were corrected:
+`proc/interp_typed_var_param.txt` (`let keep = x` then writes through `x`) and
+`proc/cow_rmw_borrow.txt` (`shared_root`: `snap.xs[2]` is 0, not 3).
+
+**Residue (OPEN):** the detach is gated on a publish channel. A place borrow
+argument (`f(b.other)` into `var c: Cell`, CW25) transports no home on either
+tier, so `var s = c; c.k = 50` still shows 50 through `s`: detaching would lose
+the caller's write instead. Needs the place-borrow home of CW33 cost item 2
+(`vibe/Lambda_Design_Runtime_COW.md` §11.10). Repro: `cell_alias` in
+`temp/varparam_more.ls` (expected 550, prints 5050).
+
+<a id="lr12-11"></a>**LR12-11 · A callee that returns its parameter aliased the argument · FIXED 2026-09-17**
+S9.1.2 / S9.1.3. `pn keep(p: Box) Box { return p }` then
+`var r = keep(b); b.size = 9` printed `r.size == 9` on both tiers (found while
+fixing LR12-10; present on the Result46 binary). The same held for a write
+through `r`, for `fn` callees, for a returned child (`return h.items[0]`), a
+conditional or `let`-aliased return, a forwarding wrapper, and a returned `var`
+parameter. Every call result was treated as a fresh owner
+(`ast_expr_produces_owned_container`), and `return` was the one retention site
+inside a callee that set no share bit.
+
+**Fix.** The AST pass decides, per parameter, whether the function result may
+be the parameter or a part of it (`ast_function_result_may_alias_entry`). The
+result may be:
+- the parameter itself, or a member or index path from it (an element of a
+  scalar array excepted);
+- either arm of an `if` or `match`, or a block's last value;
+- a local whose initializer or rebinding may alias the parameter (a loop or
+  pattern variable counts conservatively);
+- a call argument in a position the callee itself may return.
+
+FUNCTION_END seeds `NameEntry::cow_param_returned`, and script finalize
+completes it as a fixpoint (`lambda_ast_note_returned_params`), so forward and
+recursive callees resolve. Both tiers then share-mark the result after a direct
+call to such a callee (`ast_call_may_return_argument`; T0 in `eval_call`, MIR at
+the end of `transpile_call`), for plain and `var` parameters alike. MIR also:
+- keeps the share test on the argument roots and their children;
+- keeps it on a binding of such a call result;
+- skips the mark for a scalar result, and for a call in tail position, whose
+  caller marks instead (the mark would also split RV6 pair forwarding).
+
+An entry mark on the parameter (the CW29 placement) was tried first and
+rejected: it shared whole containers whose getters return one element
+(havlak2: +36k array copies, +38% time).
+
+**Cost.** Code that re-binds a getter result and writes it back now copies the
+element, because the element carries its sticky insertion mark. Before, MIR
+wrote through the shared object in place, which is the defect itself.
+havlak2 pays +34k small map copies. The outputs of all 157 benchmark scripts
+are unchanged. Release timing against the post-T29-1 build, which also
+predates LR12-10: havlak2 61.0 to 63.3 ms (+4%), splay2 +3%, cd2 +1%;
+deltablue2, richards2 and prettier_ast2 are flat.
+
+Regression `test/lambda/proc/call_result_alias.ls` (18 shapes; identical on
+interp, jit, auto and default; forced-GC clean).
+
+**Residue (OPEN):** a dynamic callee (a function value) is not analysed, so
+`var r = f(b)` with `f = keep` still aliases.
+
+<a id="lr12-12"></a>**LR12-12 · `push` did not capture the pushed value · FIXED 2026-09-17**
+S9.3.1 names `push`/`splice` as insertion points that capture by value. On both
+tiers (and the Result46 binary) `var x: Box = ...; push(bag, x); x.size = 5`
+left `bag[0].size == 5`, for a local root and for a `var` parameter alike
+(found while fixing LR12-10).
+
+**Fix.** `push` now captures a value that already has an observer, by the same
+rule as a literal element (`ast_expr_insertion_needs_capture`): MIR
+`mir_emit_insertion_capture` in the bound-owner and place arms, T0 in the push
+binding and place arms. A `var` parameter source is noted as marked so a later
+re-borrow detaches it (`interp_note_var_param_marked`). A fresh local whose
+only use in the function is one later push or compound store in its own
+statement list is moved instead (`NameEntry::insertion_moves_value`,
+`lambda_ast_note_insertion_moves`). Without that, deltablue2's constructors
+(`var c = {...}; push(w.cons, c)`) left a sticky mark that copied every element
+on its next write (+12k map copies, about +11% time). Regression
+`test/lambda/proc/push_insertion_capture.ls` (identical on interp, jit, auto and
+default; forced-GC clean).
+
+**Residue (OPEN):** `push(f(), x)` into a temporary owner does not capture.
+That only matters when `f` returns an argument through a dynamic callee (see
+LR12-11).
+
+<a id="lr12-13"></a>**LR12-13 · Index-then-field stores under a declared record array · FIXED 2026-09-17**
+D3.2.4v3. Found while testing LR12-12, present on the Result46 binary.
+`var bag: Box[] = [...]; bag[0].size = 6` failed on T0 with "typed nested
+array assignment index is out of bounds": `lambda_array_path_set_checked`
+walked only index keys. The JIT took the raw COW path store and admitted
+nothing, so `bag[0].size = v` with `v = "x"` stored the string into the int
+lane and read back a garbage integer.
+
+**Fix.** The checked map path setters' contract-generic body is shared
+(`runtime_container_path_set_checked[_inplace]`). The array setter delegates
+any path with a non-index key to it, and its leaf-only admission accepts a
+certified array root as well as a record (`runtime_value_rep_proves_contract`).
+An `any` step is an open leaf, like `array`. MIR routes array-rooted member
+paths through the same checked setter (`mir_emit_typed_array_path_store`, also
+used by the index-only arm). Covered by the LR12-12 regression (including a
+rejected dynamic value).
+
+<a id="lr12-14"></a>**LR12-14 · A row copy of a matrix aliases it both ways · OPEN**
+S9.1.2 / D4.4.6. Found while testing T29-5; present on the post-T29-3 binary,
+both tiers, for a loop-built and a packed matrix alike:
+```
+var m = [fill(3, 1), fill(3, 1), fill(3, 1)]
+var row = m[0]
+m[0][1] = 9      // row[1] reads 9
+row[2] = 4       // m[0][2] reads 4
+```
+The place-copy rule should mark `row` because its place is written while the
+copy is alive, but both writes are visible through the other name. Repro:
+`temp/t29/packed_probe.ls` (`row_copy_loop`, expected 9110, prints 9944).
+
+<a id="lr12-15"></a>**LR12-15 · An out-of-range nested store is logged, not raised · OPEN**
+S7.1.3v2. `var m = [fill(2, 0), fill(2, 0)]; m[2][0] = 1; return 5` returns 5
+on both tiers. The store logs its failure: on JIT, a `fn_array_set` null-pointer
+message; on T0, "cow path mutation encountered a non-container child". The
+procedure continues as if nothing happened. Same for a packed matrix. Repro:
+`temp/t29/packed_probe.ls` (`oob_loop`, `oob_packed`).
+
+<a id="lr12-16"></a>**LR12-16 · JIT drops a store error in a plain-parameter callee · OPEN**
+S7.1.3v2, SI3v2. `pn store(a: int[], i: int, v: int) int { a[i] = v; return a[0] }`
+called with an out-of-range `i` returns an error value on T0. On the JIT it
+returns `a[0]`, after logging the same `fn_array_set` bounds error. The same
+store in a callee with a local root raises on both tiers. Present on the
+post-T29-3 binary. Repro: `temp/t29/oob_int.ls` (JIT prints `param_oob=false`,
+T0 `true`).
+
+<a id="lr12-17"></a>**LR12-17 · JIT COW facts ignored control flow; writes leaked into shared values · FIXED 2026-09-17**
+S9.1.2 / D4.4.1. Found in Tune29 §20.3, present on the Result46 binary. MIR
+Direct chooses a raw or a share-checked store from per-binding "may be
+shared" facts, and updated them in emission order only. A detach or rebind in
+one `if`/`match` arm cleared the fact for the path that skipped the arm. A
+share made late in a loop body (`var d = c; push(snaps, d)`) did not reach
+the store emitted earlier in the body. Eight shapes wrote into a value that
+another binding still held; T0 was correct. One of them is havlak2's
+`arr_set`.
+
+**Fix.** `MirCowJoin` joins the facts at `if`/`match` merges, starting each
+arm from the entry facts. A generalized loop pre-scan marks every outer
+binding the body may share at loop entry, and `MirCowLoopJoin` joins the
+facts at loop exits. Regressions: `test/lambda/proc/cow_flow_join.ls` and
+`test/mir/lambda/tune29_handle_alias.ls` (identical on interp, jit and auto;
+forced-GC clean).
+
 <a id="lr12-7"></a>**LR12-7 · The procedural surface is thin and ad hoc · OPEN**
 IO procedures are a hand-curated set in one file with bespoke validation per
 procedure; there is no general effect/capability system, so adding a

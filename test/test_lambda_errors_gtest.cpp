@@ -1489,6 +1489,35 @@ TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) 
         "error[E201]: type check at typed map member assignment failed: expected int, got string 'very old'");
 }
 
+TEST_F(NegativeScriptTest, RequiredLiteralFieldRejectsNullOnEveryTier) {
+    // T29-2 (D3.2.6, S11.4.10): the JIT's shaped-literal path accepted null in
+    // a required field while the interpreter rejected it, so every tier is
+    // pinned here. The site label differs by tier (field vs declaration); the
+    // outcome may not: E201, and the binding is never established.
+    const char* scripts[] = {
+        "test/lambda/negative/runtime/typed_literal_required_array_null.ls",
+        "test/lambda/negative/runtime/typed_literal_required_dynamic_null.ls",
+        // Tune29 §19.1 item 2: the field-carrier admission keeps null rejected
+        "test/lambda/negative/runtime/typed_array_field_missing_carrier.ls",
+    };
+    const char* tiers[] = {"interp", "jit", "auto"};
+    const char* saved_tier = getenv("LAMBDA_TIER");
+    std::string saved = saved_tier ? saved_tier : "";
+    for (const char* script : scripts) {
+        for (const char* tier : tiers) {
+            setenv("LAMBDA_TIER", tier, 1);
+            ScriptResult result = run_lambda_script(script, true);
+            EXPECT_NE(result.exit_code, 0) << script << " tier=" << tier;
+            EXPECT_NE(strstr(result.output.c_str(), "error[E201]"), nullptr)
+                << script << " tier=" << tier << "\n" << result.output;
+            EXPECT_EQ(strstr(result.output.c_str(), "bound:"), nullptr)
+                << script << " tier=" << tier << "\n" << result.output;
+        }
+    }
+    if (saved_tier) setenv("LAMBDA_TIER", saved.c_str(), 1);
+    else unsetenv("LAMBDA_TIER");
+}
+
 TEST_F(NegativeScriptTest, InputSchemaUsesTheSharedTypedBoundary) {
     ScriptResult result = run_lambda_script(
         "test/lambda/negative/runtime/type_enforce_input_schema.ls", true);

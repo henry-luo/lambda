@@ -1,0 +1,5 @@
+residues=2207
+hits=3
+nan_self=false quot_nan=false quot=true
+mod_zero=nan mod_nan=nan mod_inf=7
+

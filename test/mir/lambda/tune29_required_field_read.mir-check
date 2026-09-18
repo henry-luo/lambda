@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "description": "T29-2 (D3.2.6): a required record field is read with no empty-slot arm and a member read through it has no receiver null test; an optional field and a nullable receiver keep their arms.",
+  "checks": [
+    {
+      "in_func": "_read_required_#",
+      "forbid": [
+        "72057594037927936",
+        "beq\t",
+        "bne\t"
+      ],
+      "count": {
+        "mov\t{{r}}, i64:16({{r}})": 2
+      }
+    },
+    {
+      "in_func": "_read_optional_#",
+      "expect": [
+        "beq\t",
+        "72057594037927936"
+      ]
+    },
+    {
+      "in_func": "_read_nullable_receiver_#",
+      "expect": [
+        "bne\t",
+        "72057594037927936"
+      ]
+    }
+  ]
+}

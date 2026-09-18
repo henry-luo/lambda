@@ -301,6 +301,24 @@ TEST(InterpWalker, TypeBinderContractsAgreeAcrossAllTiers) {
     EXPECT_EQ(summary_field(nested_interp.stderr_text, "fallback="), 0);
 }
 
+TEST(InterpWalker, NullableBoolFieldLaneAgreesAcrossAllTiers) {
+    // T29-2: a bool field read through an optional record element is the
+    // nullable bool lane. The JIT published it under the wrapper contract's
+    // TypeId, so a declared return crashed on the raw byte and a local branch
+    // tested it as an Item (D2.4.1-D2.4.3, D2.5.2v3).
+    const std::string path = "test/lambda/proc/typed_record_bool_lane.ls";
+    const std::string golden = read_file("test/lambda/proc/typed_record_bool_lane.txt");
+    RunResult interp = run_script(path, "interp", true);
+    RunResult jit = run_script(path, "jit", true);
+    RunResult default_tier = run_script(path, NULL, true);
+    EXPECT_EQ(interp.exit_code, 0) << interp.stderr_text;
+    EXPECT_EQ(jit.exit_code, 0) << jit.stderr_text;
+    EXPECT_EQ(default_tier.exit_code, 0) << default_tier.stderr_text;
+    EXPECT_EQ(trim_trailing(interp.stdout_text), trim_trailing(golden));
+    EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(golden));
+    EXPECT_EQ(trim_trailing(default_tier.stdout_text), trim_trailing(golden));
+}
+
 TEST(InterpWalker, SystemFunctionsAndMethods) {
     expect_tiers_agree("sysfuncs",
         "let s = \"Hello\"\nlen(s)\nupper(s)\nlower(s)\ncontains(s, \"ell\")\n"

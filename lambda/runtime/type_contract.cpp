@@ -670,6 +670,15 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     return cert;
 }
 
+// T29-5: the certificate already resolved the contract's lane and rank, so an
+// admission that has it in hand needs only the live carrier checks.
+bool lambda_array_num_matches_cert(Item value, const ArrayRepCert* cert) {
+    return cert && cert->has_array_num_lane &&
+        get_type_id(value) == LMD_TYPE_ARRAY_NUM && value.array_num &&
+        value.array_num->get_elem_type() == cert->array_num_elem &&
+        array_num_layout_proves_contract_rank(value.array_num, cert->rank);
+}
+
 static ArrayRepCert* array_rep_cert_for_value(Item value) {
     TypeId type_id = get_type_id(value);
     if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM &&
@@ -695,9 +704,7 @@ static bool array_representation_matches_cert(Item value,
     if (value_type == LMD_TYPE_ARRAY_NUM) {
         // The immutable certificate already resolved nullable/sized numeric
         // spellings; only the live carrier can have changed (D3.3.3v3).
-        return cert->has_array_num_lane && value.array_num &&
-            value.array_num->get_elem_type() == cert->array_num_elem &&
-            array_num_layout_proves_contract_rank(value.array_num, cert->rank);
+        return lambda_array_num_matches_cert(value, cert);
     }
     if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
     if (cert->rank != 1) {

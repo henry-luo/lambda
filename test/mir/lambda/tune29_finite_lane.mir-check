@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "T29-3: a proven in-band operand skips its tests. The literal divisors in residues need no zero test; the counter equality tests nan once; a `div` result keeps its nan test (S4.1.2).",
+  "checks": [
+    {
+      "in_func": "_residues_#",
+      "count": {
+        "call\tlambda_int_lane_divmod_slow": 4
+      },
+      "forbid": ["ne\t{{r}}, {{r}}, 0"]
+    },
+    {
+      "in_func": "_counter_hits_#",
+      "count": {
+        "-9223372036854775808": 1
+      }
+    },
+    {
+      "in_func": "_quotient_eq_#",
+      "count": {
+        "-9223372036854775808": 1
+      }
+    }
+  ]
+}

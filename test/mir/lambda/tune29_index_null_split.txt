@@ -1,0 +1,6 @@
+in=52439 oob=true neg=true
+two=90 left_oob=true right_oob=true
+var=20 null=true
+nan_eq=false nan_ne=true inf_eq=true inf_ne=true val_eq=true mix=false
+poison=nan nan nan
+

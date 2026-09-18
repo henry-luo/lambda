@@ -39,7 +39,7 @@ pn escape(var a, var other) {          // handle captured elsewhere before the w
     a.xs = l
     return 0
 }
-pn shared_root(var a) {                // spine shared at run time: falls back to the snapshot bind
+pn shared_root(var a) {                // spine shared at run time: falls back to the snapshot bind; `snap` keeps xs[2] == 0 (LR12-10)
     var snap = a
     var l = a.xs
     l[2] = 3

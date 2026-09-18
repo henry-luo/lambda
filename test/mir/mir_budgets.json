@@ -74,7 +74,7 @@
       "name": "lambda_scalar_home_tail_forward",
       "script": "test/mir/lambda/scalar_home_tail_forward.ls",
       "language": "lambda",
-      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. T22's S5.1.2 poison-correct int comparison adds the reviewed slow conversion edge for the recursive `n <= 0` condition while reducing the frame's roots and safepoints. The v3 caller frame owns no scalar home. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
+      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. T22's S5.1.2 poison-correct int comparison adds the reviewed slow conversion edge for the recursive `n <= 0` condition while reducing the frame's roots and safepoints. The v3 caller frame owns no scalar home. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). LR12-11 (2026-09-17): +3 in main -- `accumulate` may return its untyped `acc`, so the call site share-marks the (possibly container) result (S9.1.2); one call, one root, one safepoint. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 201->208; deltablue2 -12%, prettier_ast2 -14%.",
       "budgets": {
         "default": {
           "module_insns": 252,
@@ -107,13 +107,13 @@
           ]
         },
         "darwin-debug-v3": {
-          "module_insns": 198,
+          "module_insns": 208,
           "functions": {
             "_accumulate_#": {
               "insns": 85
             },
             "main": {
-              "insns": 40
+              "insns": 43
             }
           },
           "frames": [
@@ -128,11 +128,11 @@
             },
             {
               "name": "main",
-              "roots": 2,
+              "roots": 3,
               "root_stores": 0,
               "scalar_homes": 0,
               "number_scratch": 0,
-              "safepoints": 2
+              "safepoints": 3
             }
           ]
         }
@@ -325,10 +325,10 @@
       "name": "lambda_tune4_typed_array_guard",
       "script": "test/mir/lambda/typed_array_guard.ls",
       "language": "lambda",
-      "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
+      "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 1172->1196; deltablue2 -12%, prettier_ast2 -14%.",
       "budgets": {
         "default": {
-          "module_insns": 1172,
+          "module_insns": 1196,
           "functions": {
             "_guarded_load_#": {
               "insns": 55
@@ -485,13 +485,13 @@
       "name": "lambda_corpus_cube3d",
       "script": "test/benchmark/jetstream/cube3d2.ls",
       "language": "lambda",
-      "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
+      "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 14487->14499; deltablue2 -12%, prettier_ast2 -14%. Tune29 \u00a720 (2026-09-17): the MIR tier joins its may-be-shared binding facts at control-flow merges and loop entries (LR12-17), so run_cube's stores after branch-local detaches keep their share-bit checks -- module_insns 14499->14574, run_cube 9655->9730; cube3d2 time unchanged (7.78 vs 7.79 ms).",
       "budgets": {
         "default": {
-          "module_insns": 14487,
+          "module_insns": 14574,
           "functions": {
             "_run_cube_#": {
-              "insns": 9655
+              "insns": 9730
             }
           }
         }
@@ -501,13 +501,13 @@
       "name": "lambda_corpus_deltablue",
       "script": "test/benchmark/jetstream/deltablue2.ls",
       "language": "lambda",
-      "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see. Re-baseline 2026-09-16 (-176 module, -29 choose_method, Tune28 \u00a79.7): a record receiver whose binding is proven non-null no longer emits the null-sentinel arm of the field-read guard. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
+      "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see. Re-baseline 2026-09-16 (-176 module, -29 choose_method, Tune28 \u00a79.7): a record receiver whose binding is proven non-null no longer emits the null-sentinel arm of the field-read guard. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-17 (+96 module, +173 choose_method, Tune29 T29-1): a plain bool field store from a proven bool now takes the typed path store's inline arm with a checked cold arm instead of one generic call; jetstream deltablue2 25.4 -> 23.9 ms. Re-baseline 2026-09-17 (-16 module, -12 choose_method, Tune29 T29-3): int operators test only operands that may be null, and a literal divisor needs no band or zero test. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 8555->8804; deltablue2 -12%, prettier_ast2 -14%.",
       "budgets": {
         "default": {
-          "module_insns": 8475,
+          "module_insns": 8804,
           "functions": {
             "_constraint_choose_method_#": {
-              "insns": 1563
+              "insns": 1724
             }
           }
         }
@@ -517,10 +517,10 @@
       "name": "lambda_corpus_prettier_ast",
       "script": "test/benchmark/text/prettier_ast2.ls",
       "language": "lambda",
-      "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body. Tune28 T28-4 (2026-09-16): +13 per print_node and +49 module-wide are intended -- each lambda_module_name_id_at call became two loads (property_keys table + u32 key), a cheaper function by work done. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
+      "description": "Tune27 G9: the largest text-row image (79 members); print_node is its widest body. Tune28 T28-4 (2026-09-16): +13 per print_node and +49 module-wide are intended -- each lambda_module_name_id_at call became two loads (property_keys table + u32 key), a cheaper function by work done. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). LR12-11 (2026-09-17): +10 module -- print_nodes_at, print_statements_at and additive_tail_at may return their `acc` argument, so their non-tail call sites share-mark the result (S9.1.2). T29-3 (2026-09-17): -11 module -- per-operand null tests and one-sided equality nan tests. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 16267->16474; deltablue2 -12%, prettier_ast2 -14%.",
       "budgets": {
         "default": {
-          "module_insns": 16268,
+          "module_insns": 16474,
           "functions": {
             "_print_node_#": {
               "insns": 4061

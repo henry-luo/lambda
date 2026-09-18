@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "T29-5: the nested index store calls cow_path_set_packed_index before the per-link fn_index walk, and branches past the walk when it stored.",
+  "checks": [
+    {
+      "in_func": "_stamp_#",
+      "expect_seq": [
+        "call\tcow_path_set_packed_index",
+        "bne\t",
+        "call\tfn_index"
+      ]
+    }
+  ]
+}

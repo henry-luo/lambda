@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "T29-1 (D4.4.4v4): a record place spelled in several statements is navigated once -- one certificate check, one un-sharing slow arm -- and its later reads and writes go through the handle; replacing the container between spellings forces a second navigation.",
+  "checks": [
+    {
+      "in_func": "_step_#",
+      "count": {
+        "1535": 1,
+        "call\tcow_place_leaf_fixed": 1,
+        "call\tlambda_map_path_set_checked_fixed": 2
+      },
+      "forbid": [
+        "call\titem_at",
+        "call\tfn_index"
+      ]
+    },
+    {
+      "in_func": "_reset_#",
+      "count": {
+        "1535": 2
+      },
+      "forbid": [
+        "call\tcow_place_leaf_fixed"
+      ]
+    }
+  ]
+}

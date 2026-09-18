@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "T29-4: a typed int[] local store fed by an Item-valued call tests the value's int tag and stores it directly; the checked setter appears only in cold arms (the tag miss and the direct store's own guards).",
+  "checks": [
+    {
+      "in_func": "_fill_mod_#",
+      "expect_seq": [
+        "call\tfn_mod",
+        "bne\t",
+        "call\tlambda_array_set_checked_lane"
+      ],
+      "count": {
+        "call\tlambda_array_set_checked_lane": 2
+      }
+    }
+  ]
+}

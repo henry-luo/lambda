@@ -7669,6 +7669,10 @@ static bool reject_proc_method_value(AstNode* node, void* data) {
 
 static void lambda_ast_note_place_copy_place_writes(AstFuncNode* fn);
 static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn);
+static void lambda_ast_plan_place_handles(Transpiler* tp, AstFuncNode* fn);
+static void lambda_ast_note_var_root_sharing(ArrayList* functions);
+static void lambda_ast_note_returned_params(ArrayList* functions);
+static void lambda_ast_note_insertion_moves(AstFuncNode* fn);
 
 // CW24v3 / CW34 / CW36: the place-copy and handle-borrow decisions read the
 // `var` flags of every callee, and a procedure defined later in the module has
@@ -7680,11 +7684,15 @@ static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script) {
     ArrayList* functions = arraylist_new(8);
     if (!functions) return;
     walk_lambda_ast((AstNode*)script, direct_bind_collect_function, functions, true);
+    lambda_ast_note_returned_params(functions);
+    lambda_ast_note_var_root_sharing(functions);
     for (int i = 0; i < functions->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
         lambda_ast_note_place_copy_place_writes(fn);
         lambda_ast_lower_rmw_borrows(fn);
+        lambda_ast_plan_place_handles(tp, fn);
         lambda_ast_note_fixed_array_lengths(tp, fn);
+        lambda_ast_note_insertion_moves(fn);
     }
     arraylist_free(functions);
 }
@@ -10237,7 +10245,13 @@ typedef struct CowParamEffectScan {
     // here: it made every read-and-return helper mark, the exact cost D4.4.6
     // keeps free.
     bool bare_only;
+    // the body being scanned, and the local-part recursion depth
+    AstNode* body;
+    int depth;
 } CowParamEffectScan;
+
+static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
+        bool bare_only = false, int depth = 0);
 
 static void cow_param_note_alias(CowParamEffectScan* scan) {
     scan->retained = true;
@@ -10269,11 +10283,26 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
     CowParamEffectScan* scan = (CowParamEffectScan*)data;
     if (!scan || !node) return false;
     switch (node->node_type) {
-    case AST_NODE_VARIABLE_DECLARATOR:
-        if (cow_param_scan_matches(scan, ((AstDeclaratorNode*)node)->init)) {
-            cow_param_note_alias(scan);
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        if (!cow_param_scan_matches(scan, declarator->init)) break;
+        AstNode* bare = ast_unwrap_primary(declarator->init);
+        if (!scan->bare_only && declarator->entry && scan->depth < 4 &&
+                bare && bare->node_type != AST_NODE_IDENT) {
+            // Tune29 §19.1: a local bound to a PART of the parameter
+            // (`let keys = tree.keys`) keeps it past the call only if that
+            // local escapes in turn; a read-only local dies with the frame.
+            // The `var` publish fact stays conservative.
+            scan->var_may_publish = true;
+            if (ast_body_cow_param_effects(scan->body, declarator->entry, false,
+                    scan->depth + 1).retained) {
+                scan->retained = true;
+            }
+            break;
         }
+        cow_param_note_alias(scan);
         break;
+    }
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->target_entry == scan->entry) {
@@ -10305,7 +10334,9 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
         AstNode* callee = ast_unwrap_primary(call->function);
         SysFuncInfo* sys = callee && callee->node_type == AST_NODE_SYS_FUNC
             ? ((AstSysFuncNode*)callee)->fn_info : NULL;
-        bool pure_scalar_sys = scan->bare_only && sys && !sys->is_proc &&
+        // The local-part recursion (depth > 0) asks only the retention
+        // question, which a pure scalar builtin cannot answer yes to either.
+        bool pure_scalar_sys = (scan->bare_only || scan->depth > 0) && sys && !sys->is_proc &&
             sys->return_type && sys->return_type->type_id != LMD_TYPE_ANY &&
             !ast_type_needs_mutable_clone(sys->return_type->type_id) &&
             sys->return_type->type_id != LMD_TYPE_TYPE &&
@@ -10359,17 +10390,232 @@ static bool cow_param_retention_scan_node(AstNode* node, void* data) {
 }
 
 static CowParamEffectScan ast_body_cow_param_effects(AstNode* body, NameEntry* entry,
-        bool bare_only = false) {
-    CowParamEffectScan scan = {entry, false, false, bare_only};
+        bool bare_only, int depth) {
+    CowParamEffectScan scan = {entry, false, false, bare_only, body, depth};
     walk_lambda_ast(body, cow_param_retention_scan_node, &scan, false);
     return scan;
+}
+
+// LR12-11 (S9.1.2): whether `expr`'s value may be `entry`'s value or a part of
+// it. A call result is not: the callee marks what it returns of its own
+// parameters. A local follows its initializer and every rebinding; any other
+// binding (loop or pattern variable) stays conservative.
+static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
+        AstNode* body, int depth, bool whole);
+
+typedef struct ResultAliasScan {
+    NameEntry* entry;
+    NameEntry* local;
+    AstNode* body;
+    int depth;
+    bool returned;
+    // only the parameter's own root counts, not a part of it
+    bool whole;
+} ResultAliasScan;
+
+static bool result_alias_rebind_scan_node(AstNode* node, void* data) {
+    ResultAliasScan* scan = (ResultAliasScan*)data;
+    if (scan->returned) return false;
+    if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        if (assign->target_entry == scan->local &&
+                ast_result_may_alias_entry(assign->value, scan->entry, scan->body,
+                    scan->depth + 1, scan->whole)) {
+            scan->returned = true;
+        }
+    }
+    return true;
+}
+
+// a value of this static type shares no container
+static bool result_type_is_scalar(Type* type) {
+    switch (type ? type->type_id : LMD_TYPE_ANY) {
+    case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT: case LMD_TYPE_NUM_SIZED:
+    case LMD_TYPE_DECIMAL: case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_BINARY: case LMD_TYPE_DTIME:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// `whole`: the result may be the entry's own root, as opposed to a part of it
+static bool ast_result_may_alias_entry(AstNode* expr, NameEntry* entry,
+        AstNode* body, int depth, bool whole) {
+    AstNode* node = ast_unwrap_primary(expr);
+    if (!node) return false;
+    // a statically scalar value shares no container (`return a[i]` on float[])
+    if (result_type_is_scalar(node->type)) return false;
+    // only a binding or call hop can revisit a node (`a = b; b = a`), so only
+    // those count; the structural cases below walk a finite tree
+    if (depth > 16) return true;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        NameEntry* source = ((AstIdentNode*)node)->entry;
+        if (!source) return false;
+        if (source == entry) return true;
+        if (source->is_parameter) return false;
+        AstNode* decl = source->node;
+        if (!decl) return false;
+        // another parameter is decided on its own; a function name is no alias
+        if (decl->node_type == AST_NODE_PARAM || decl->node_type == AST_NODE_FUNC ||
+                decl->node_type == AST_NODE_PROC || decl->node_type == AST_NODE_FUNC_EXPR) {
+            return false;
+        }
+        if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return true;
+        if (ast_result_may_alias_entry(((AstDeclaratorNode*)decl)->init, entry,
+                body, depth + 1, whole)) {
+            return true;
+        }
+        if (!source->is_mutable) return false;
+        ResultAliasScan rebinds = {entry, source, body, depth, false, whole};
+        walk_lambda_ast(body, result_alias_rebind_scan_node, &rebinds, false);
+        return rebinds.returned;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR: {
+        // a part is never its own container's root (values have no cycles)
+        if (whole) return false;
+        AstNode* object = ast_unwrap_primary(((AstFieldNode*)node)->object);
+        if (node->node_type == AST_NODE_INDEX_EXPR && object) {
+            // an element of a scalar array (`return a[i]` on float[]) is a scalar
+            NameEntry* object_entry = object->node_type == AST_NODE_IDENT
+                ? ((AstIdentNode*)object)->entry : NULL;
+            Type* object_type = object_entry && object_entry->declared_type
+                ? object_entry->declared_type : object->type;
+            LambdaArrayContractInfo info = {};
+            if (object_type && lambda_array_contract_info(object_type, &info) &&
+                    result_type_is_scalar(info.immediate_element)) {
+                return false;
+            }
+        }
+        return ast_result_may_alias_entry(object, entry, body, depth, whole);
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        return ast_result_may_alias_entry(branch->then, entry, body, depth, whole) ||
+            ast_result_may_alias_entry(branch->otherwise, entry, body, depth, whole);
+    }
+    case AST_NODE_MATCH_EXPR: {
+        for (AstNode* arm = ((AstMatchNode*)node)->cases; arm; arm = arm->next) {
+            if (ast_result_may_alias_entry(((AstMatchArm*)arm)->body, entry, body,
+                    depth, whole)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    case AST_NODE_CALL_EXPR: {
+        // a callee that may return an argument passes the alias through; its
+        // own flag may be decided later (lambda_ast_note_returned_params)
+        if (!ast_call_may_return_argument(node)) return false;
+        AstCallNode* call = (AstCallNode*)node;
+        AstFuncNode* callee = ast_direct_call_function(call);
+        bool positional = callee && !ast_call_has_named_args(call);
+        AstNamedNode* param = callee ? callee->param : NULL;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            // only an argument in a returned position flows to the result; a
+            // whole root flows only where the callee returns its whole root
+            bool flows = !positional || !param ||
+                (param->entry && (whole ? param->entry->cow_param_root_returned
+                                        : param->entry->cow_param_returned));
+            if (flows && ast_result_may_alias_entry(arg, entry, body, depth + 1, whole)) {
+                return true;
+            }
+            if (param) param = (AstNamedNode*)((AstNode*)param)->next;
+        }
+        return false;
+    }
+    case AST_NODE_LIST:
+    case AST_NODE_CONTENT: {
+        // a block's value is its last item
+        AstNode* item = ((AstListNode*)node)->item;
+        while (item && item->next) item = item->next;
+        return ast_result_may_alias_entry(item, entry, body, depth, whole);
+    }
+    default:
+        return false;
+    }
+}
+
+static bool result_alias_return_scan_node(AstNode* node, void* data) {
+    ResultAliasScan* scan = (ResultAliasScan*)data;
+    if (scan->returned) return false;
+    if (node->node_type == AST_NODE_RETURN_STAM &&
+            ast_result_may_alias_entry(((AstReturnNode*)node)->value, scan->entry,
+                scan->body, 0, scan->whole)) {
+        scan->returned = true;
+    }
+    return true;
+}
+
+// The function result is every `return` value plus the body's own value.
+static bool ast_function_result_may_alias_entry(AstFuncNode* fn, NameEntry* entry,
+        bool whole = false) {
+    // a scalar parameter shares nothing (`parent_precedence: int`)
+    if (entry->declared_type && result_type_is_scalar(entry->declared_type)) return false;
+    bool returned = ast_result_may_alias_entry(fn->body, entry, fn->body, 0, whole);
+    if (!returned) {
+        ResultAliasScan scan = {entry, NULL, fn->body, 0, false, whole};
+        walk_lambda_ast(fn->body, result_alias_return_scan_node, &scan, false);
+        returned = scan.returned;
+    }
+    if (returned) {
+        log_debug("returned-param: %.*s result may alias %s`%.*s`",
+            fn->name ? (int)fn->name->len : 4, fn->name ? fn->name->chars : "anon",
+            whole ? "the root of " : "",
+            entry->name ? (int)entry->name->len : 1, entry->name ? entry->name->chars : "?");
+    }
+    return returned;
+}
+
+// LR12-11: FUNCTION_END decides each parameter from the callees finished so
+// far. A result forwarded through a later-defined (or recursive) callee needs
+// the whole module, so iterate to a fixpoint; the flag only ever turns on.
+static void lambda_ast_note_returned_params(ArrayList* functions) {
+    for (int pass = 0; pass <= functions->length; pass++) {
+        bool changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+            if (!fn || !fn->body) continue;
+            for (AstNamedNode* param = fn->param; param;
+                    param = (AstNamedNode*)((AstNode*)param)->next) {
+                NameEntry* entry = param->entry;
+                if (!entry) continue;
+                if (!entry->cow_param_returned &&
+                        ast_function_result_may_alias_entry(fn, entry)) {
+                    entry->cow_param_returned = true;
+                    changed = true;
+                }
+                if (entry->cow_param_returned && !entry->cow_param_root_returned &&
+                        ast_function_result_may_alias_entry(fn, entry, true)) {
+                    entry->cow_param_root_returned = true;
+                    changed = true;
+                }
+            }
+        }
+        if (!changed) break;
+    }
 }
 
 static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
     bool note = cow_param_note_enabled();
     // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
     // tells both tiers which plain params to snapshot at activation entry
-    if (((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
+    if (!fn->body) return;
+    // LR12-11: any function's result can hand a parameter back to the caller
+    // (seeded here, completed by lambda_ast_note_returned_params)
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        if (param->entry) {
+            param->entry->cow_param_returned =
+                ast_function_result_may_alias_entry(fn, param->entry);
+            param->entry->cow_param_root_returned = param->entry->cow_param_returned &&
+                ast_function_result_may_alias_entry(fn, param->entry, true);
+        }
+    }
+    if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
@@ -10381,6 +10627,8 @@ static void lambda_ast_note_param_cow_effects(Transpiler* tp, AstFuncNode* fn) {
             continue;
         }
         param->entry->cow_param_retained = effects.retained;
+        param->entry->cow_param_root_retained = effects.retained &&
+            ast_body_cow_param_effects(fn->body, param->entry, true).retained;
         param->entry->cow_param_mutated = ast_body_may_write_entry(fn->body,
             param->entry, false);
         if (!param->entry->cow_param_mutated || !note) continue;
@@ -11001,9 +11249,20 @@ static void rmw_use_cb(AstNode* child, AstNode* parent, void* opaque) {
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
             AstNode* bare = unwrap_primary_node(arg);
             TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
-            bool var_handle = bare && bare->node_type == AST_NODE_IDENT &&
-                ((AstIdentNode*)bare)->entry == handle && pt && pt->is_var_param;
-            if (!var_handle) rmw_use_scan(arg, scan);
+            bool bare_handle = bare && bare->node_type == AST_NODE_IDENT &&
+                ((AstIdentNode*)bare)->entry == handle;
+            bool var_handle = bare_handle && pt && pt->is_var_param;
+            // Tune29 §19.1 (D4.4.4v4): a plain argument the procedure only
+            // reads, or keeps a part of, never observes an in-place write.
+            // A returned part is share-marked at the call site on both tiers
+            // (LR12-11), and a part stored elsewhere is captured (S9.3.1), so
+            // a later write through the handle detaches it. Only a callee
+            // that may keep the leaf itself is refused. Named arguments break
+            // the positional pairing and stay refused.
+            bool read_handle = bare_handle && pt && !pt->is_var_param &&
+                arg->node_type != AST_NODE_NAMED_ARG && param->entry &&
+                !param->entry->cow_param_root_retained;
+            if (!var_handle && !read_handle) rmw_use_scan(arg, scan);
             if (param) param = (AstNamedNode*)((AstNode*)param)->next;
         }
         rmw_use_scan(call->function, scan);
@@ -11292,6 +11551,891 @@ static void lambda_ast_lower_rmw_borrows(AstFuncNode* fn) {
     rmw_discover_chain(fn->body);
 }
 
+// ---------------------------------------------------------------------------
+// T29-1 / CW37 (D4.4.4v4, COW §11.14): synthesized place handles.
+//
+// A record place P = root.s1[.s2] spelled in several statements of a `pn`
+// body is navigated once. The first unconditional read `P.f` in a statement
+// that spells P nowhere else BINDS the handle; later statements that spell P
+// only as `P.f` (read) or `P.f... = v` (write) USE it. A handle carries four
+// facts -- identity, layout, presence, uniqueness -- that hold while the place
+// and its ownership are unchanged. The events that may change them are the
+// COW record's Appendix D table, applied conservatively: anything this walk
+// does not recognise as a keep row ends the handle. A handle written through
+// binds by un-sharing its spine and leaf (S9.2.2), so no later write through
+// any spelling can detach the leaf under it.
+//
+// Scope: statement lists, `if` arms (a bind inside an arm dies with it), and
+// condition loops (a handle bound before the loop survives only if nothing in
+// the loop kills it; a bind in the body is redone each iteration). `for`
+// statements are opaque. Roots are declared, non-optional record `var` locals
+// or `var` parameters with no CW34 named borrow (whose in-place writes this
+// walk cannot see).
+// ---------------------------------------------------------------------------
+enum { PH_MAX_LIVE = 16, PH_MAX_USES = 64, PH_MAX_EXCLUDED = 16, PH_MAX_LINKS = 2 };
+
+typedef struct PlaceHandle {
+    AstFieldNode* bind;
+    AstCowPath path;
+    NameEntry* root;
+    RmwBorrowCtx keys;          // only key_idents/key_ident_count are used
+    uint16_t slot;
+    int uses;
+    bool writing;
+    struct PlaceHandle* next;
+} PlaceHandle;
+
+typedef struct PlaceHandleState {
+    PlaceHandle* live[PH_MAX_LIVE];
+    int count;
+} PlaceHandleState;
+
+typedef struct PlaceHandleCtx {
+    Pool* pool;
+    AstFuncNode* fn;
+    uint16_t next_slot;
+    PlaceHandle* all;
+    NameEntry* excluded[PH_MAX_EXCLUDED];
+    int excluded_count;
+    bool overflow;
+} PlaceHandleCtx;
+
+// one spelling found by a statement scan
+typedef struct PlaceHandleUse {
+    AstFieldNode* node;
+    bool write;
+    bool conditional;
+} PlaceHandleUse;
+
+typedef struct PlaceHandleScan {
+    AstNode* top;
+    PlaceHandle* h;
+    PlaceHandleUse uses[PH_MAX_USES];
+    int use_count;
+    int conditional;
+    bool kill;
+} PlaceHandleScan;
+
+static bool ph_path_prefix(const AstCowPath* path, const AstCowPath* prefix) {
+    if (path->count < prefix->count || !path->root || !prefix->root) return false;
+    for (int i = 0; i < prefix->count; i++) {
+        if (!rmw_segment_equal(path->segment[i], path->is_member[i],
+                prefix->segment[i], prefix->is_member[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static NameEntry* ph_path_root(const AstCowPath* path) {
+    AstNode* root = path->root;
+    return root && root->node_type == AST_NODE_IDENT ? ((AstIdentNode*)root)->entry : NULL;
+}
+
+// the node spelling the first `count` segments of the chain ending at `node`
+static AstFieldNode* ph_chain_node(AstNode* node, int total, int count) {
+    AstNode* current = unwrap_primary_node(node);
+    for (int i = total; i > count && current; i--) {
+        if (current->node_type != AST_NODE_MEMBER_EXPR &&
+                current->node_type != AST_NODE_INDEX_EXPR) return NULL;
+        current = unwrap_primary_node(((AstFieldNode*)current)->object);
+    }
+    return current && (current->node_type == AST_NODE_MEMBER_EXPR ||
+        current->node_type == AST_NODE_INDEX_EXPR) ? (AstFieldNode*)current : NULL;
+}
+
+static bool ph_root_eligible(PlaceHandleCtx* ctx, NameEntry* root) {
+    if (!root || !root->is_mutable || root->view_base || root->type_widened) return false;
+    if (root->is_parameter && !root->is_var_param) return false;
+    if (!root->has_type_annotation || !root->declared_type) return false;
+    Type* declared = root->declared_type;
+    if (lambda_type_accepts_null(declared)) return false;
+    Type* record = lambda_type_nonnull_map_contract(declared);
+    if (record != declared || !record || record == &TYPE_MAP ||
+            record->type_id != LMD_TYPE_MAP || !((TypeMap*)record)->is_trusted_contract) {
+        return false;
+    }
+    for (int i = 0; i < ctx->excluded_count; i++) {
+        if (ctx->excluded[i] == root) return false;
+    }
+    return true;
+}
+
+// P must be a short stable path whose declared contract is a trusted record
+static bool ph_path_eligible(PlaceHandleCtx* ctx, AstNode* node, PlaceHandle* out) {
+    AstCowPath path = {};
+    if (!ast_collect_cow_path(&path, node) || path.count < 1 ||
+            path.count > PH_MAX_LINKS) {
+        return false;
+    }
+    NameEntry* root = ph_path_root(&path);
+    if (!ph_root_eligible(ctx, root)) return false;
+    RmwBorrowCtx keys = {};
+    for (int i = 0; i < path.count; i++) {
+        if (path.is_member[i]) {
+            AstNode* segment = unwrap_primary_node(path.segment[i]);
+            if (!segment || segment->node_type != AST_NODE_IDENT) return false;
+        } else if (!rmw_key_is_stable(path.segment[i], &keys)) {
+            return false;
+        }
+    }
+    if (rmw_is_key_ident(&keys, root)) return false;
+    Type* contract = declared_compound_destination_type(NULL, node, NULL);
+    Type* record = lambda_type_nonnull_map_contract(contract);
+    if (!record || record == &TYPE_MAP || record->type_id != LMD_TYPE_MAP ||
+            !((TypeMap*)record)->is_trusted_contract) {
+        return false;
+    }
+    out->path = path;
+    out->root = root;
+    out->keys = keys;
+    return true;
+}
+
+static void ph_record_use(PlaceHandleScan* scan, AstFieldNode* node, bool write) {
+    if (!node) {
+        scan->kill = true;
+        return;
+    }
+    if (scan->use_count >= PH_MAX_USES) {
+        scan->kill = true;
+        return;
+    }
+    scan->uses[scan->use_count].node = node;
+    scan->uses[scan->use_count].write = write;
+    scan->uses[scan->use_count].conditional = scan->conditional > 0;
+    scan->use_count++;
+}
+
+static void ph_scan_node(AstNode* node, PlaceHandleScan* scan);
+
+static void ph_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+    PlaceHandleScan* scan = (PlaceHandleScan*)opaque;
+    if (!child || scan->kill) return;
+    if (parent == scan->top && child == scan->top->next) return;
+    ph_scan_node(child, scan);
+}
+
+static void ph_scan_children(AstNode* node, PlaceHandleScan* scan) {
+    ast_visit_core_children(node, ph_scan_cb, scan);
+}
+
+// index keys of the segments after `from` are ordinary expressions
+static void ph_scan_keys(const AstCowPath* path, int from, PlaceHandleScan* scan) {
+    for (int i = from; i < path->count && !scan->kill; i++) {
+        if (!path->is_member[i]) ph_scan_node(path->segment[i], scan);
+    }
+}
+
+// a place `path` (possibly the target of a write) rooted at the handle's root
+static void ph_scan_place(AstNode* chain, const AstCowPath* path, bool write,
+        bool field_write, PlaceHandleScan* scan) {
+    PlaceHandle* h = scan->h;
+    int n = h->path.count;
+    if (ph_path_prefix(path, &h->path)) {
+        if (path->count == n) {
+            // the place itself: `P.f = v` is a field write through the handle;
+            // a bare P (a value, an argument, a store target) ends it
+            if (field_write) ph_record_use(scan, ph_chain_node(chain, n, n), true);
+            else scan->kill = true;
+            return;
+        }
+        ph_record_use(scan, ph_chain_node(chain, path->count, n), write);
+        ph_scan_keys(path, n, scan);
+        return;
+    }
+    if (ph_path_prefix(&h->path, path)) {
+        scan->kill = true;   // a proper prefix of P: the container itself
+        return;
+    }
+    // a sibling slot of the root is a different place (D4.4.4v2)
+    if (path->count >= 1 && path->is_member[0] && h->path.is_member[0] &&
+            !rmw_segment_equal(path->segment[0], true, h->path.segment[0], true)) {
+        ph_scan_keys(path, 0, scan);
+        return;
+    }
+    scan->kill = true;
+}
+
+static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
+    if (!node || scan->kill) return;
+    PlaceHandle* h = scan->h;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (entry == h->root) scan->kill = true;   // the bare root
+        return;
+    }
+    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
+        AstCowPath path = {};
+        if (ast_collect_cow_path(&path, node) && ph_path_root(&path) == h->root) {
+            ph_scan_place(node, &path, false, false, scan);
+            return;
+        }
+        break;
+    }
+    case AST_NODE_MEMBER_ASSIGN_STAM: case AST_NODE_INDEX_ASSIGN_STAM: {
+        AstAssignNode* as = (AstAssignNode*)node;
+        AstCowPath path = {};
+        if (as->key && !as->key->next && ast_collect_cow_path(&path, as->object) &&
+                ph_path_root(&path) == h->root) {
+            // evaluate the value first, as the store does
+            ph_scan_node(as->value, scan);
+            if (scan->kill) return;
+            if (path.count >= AST_COW_PATH_MAX) {
+                scan->kill = true;
+                return;
+            }
+            bool member = node->node_type == AST_NODE_MEMBER_ASSIGN_STAM;
+            if (!member) ph_scan_node(as->key, scan);
+            // the object spells a place; the store writes one level below it
+            if (path.count == h->path.count && ph_path_prefix(&path, &h->path)) {
+                // `P.f = v` or `P[k] = v`: a field store through the handle
+                ph_record_use(scan, ph_chain_node(as->object, path.count, path.count), true);
+                return;
+            }
+            path.segment[path.count] = as->key;
+            path.is_member[path.count] = member;
+            path.count++;
+            // a store whose target is P itself or a prefix replaces the place
+            if (path.count <= h->path.count && ph_path_prefix(&h->path, &path)) {
+                scan->kill = true;
+                return;
+            }
+            if (path.count > h->path.count && ph_path_prefix(&path, &h->path)) {
+                ph_record_use(scan, ph_chain_node(as->object, path.count - 1,
+                    h->path.count), true);
+                ph_scan_keys(&path, h->path.count, scan);
+                return;
+            }
+            if (path.is_member[0] && h->path.is_member[0] &&
+                    !rmw_segment_equal(path.segment[0], true, h->path.segment[0], true)) {
+                ph_scan_keys(&path, 0, scan);
+                return;
+            }
+            scan->kill = true;
+            return;
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        NameEntry* target = ((AstAssignStamNode*)node)->target_entry;
+        if (target && (target == h->root || rmw_is_key_ident(&h->keys, target))) {
+            scan->kill = true;
+            return;
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        // a key may be written through `var`; a place under the root may be
+        // borrowed by the callee (CW25) -- both end the handle
+        for (AstNode* arg = ((AstCallNode*)node)->argument; arg; arg = arg->next) {
+            AstNode* bare = unwrap_primary_node(arg);
+            if (!bare) continue;
+            if (bare->node_type == AST_NODE_IDENT &&
+                    rmw_is_key_ident(&h->keys, ((AstIdentNode*)bare)->entry)) {
+                scan->kill = true;
+                return;
+            }
+            if ((bare->node_type == AST_NODE_MEMBER_EXPR ||
+                    bare->node_type == AST_NODE_INDEX_EXPR) &&
+                    rmw_subtree_uses_entry(bare, h->root)) {
+                scan->kill = true;
+                return;
+            }
+        }
+        break;
+    }
+    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC: case AST_NODE_HANDLER_EXPR:
+    case AST_NODE_HANDLER_STAM: case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR: case AST_NODE_START: case AST_NODE_TRY_STAM:
+        scan->kill = true;
+        return;
+    case AST_NODE_UNARY:
+        if (((AstUnaryNode*)node)->op == OPERATOR_PROPAGATE) {
+            scan->kill = true;
+            return;
+        }
+        break;
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (binary->op == OPERATOR_AND || binary->op == OPERATOR_OR) {
+            ph_scan_node(binary->left, scan);
+            scan->conditional++;
+            ph_scan_node(binary->right, scan);
+            scan->conditional--;
+            return;
+        }
+        break;
+    }
+    case AST_NODE_IF_EXPR: case AST_NODE_MATCH_EXPR: case AST_NODE_PIPE:
+        scan->conditional++;
+        ph_scan_children(node, scan);
+        scan->conditional--;
+        return;
+    case AST_NODE_LOOP: case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
+        // a loop inside an expression runs its body an unknown number of times
+        if (rmw_subtree_uses_entry(node, h->root)) scan->kill = true;
+        return;
+    default:
+        break;
+    }
+    ph_scan_children(node, scan);
+}
+
+static void ph_scan_statement(AstNode* stmt, PlaceHandle* h, PlaceHandleScan* scan) {
+    memset(scan, 0, sizeof(*scan));
+    scan->top = stmt;
+    scan->h = h;
+    ph_scan_node(stmt, scan);
+}
+
+static void ph_state_remove(PlaceHandleState* state, int index) {
+    state->live[index] = state->live[--state->count];
+}
+
+// the bind must not sit inside a node another handle already answers for
+static bool ph_node_shadowed(AstFieldNode* node, AstFieldNode** annotated, int count) {
+    for (int i = 0; i < count; i++) {
+        AstNode* current = (AstNode*)annotated[i];
+        while (current && (current->node_type == AST_NODE_MEMBER_EXPR ||
+                current->node_type == AST_NODE_INDEX_EXPR)) {
+            if (current != (AstNode*)annotated[i] && current == (AstNode*)node) return true;
+            current = unwrap_primary_node(((AstFieldNode*)current)->object);
+        }
+    }
+    return false;
+}
+
+typedef struct PhCandidateScan {
+    AstNode* top;
+    PlaceHandleCtx* ctx;
+    AstFieldNode* found[PH_MAX_USES];
+    int count;
+} PhCandidateScan;
+
+static void ph_candidate_cb(AstNode* child, AstNode* parent, void* opaque) {
+    PhCandidateScan* scan = (PhCandidateScan*)opaque;
+    if (!child) return;
+    if (parent == scan->top && child == scan->top->next) return;
+    switch (child->node_type) {
+    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC: case AST_NODE_FOR_EXPR: case AST_NODE_LOOP:
+        return;
+    case AST_NODE_MEMBER_EXPR: {
+        // `P.f`: its object is a candidate place
+        AstFieldNode* member = (AstFieldNode*)child;
+        AstNode* object = unwrap_primary_node(member->object);
+        if (!member->computed && object && (object->node_type == AST_NODE_MEMBER_EXPR ||
+                object->node_type == AST_NODE_INDEX_EXPR) && scan->count < PH_MAX_USES) {
+            scan->found[scan->count++] = (AstFieldNode*)object;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    ast_visit_core_children(child, ph_candidate_cb, opaque);
+}
+
+static void ph_process_list(PlaceHandleCtx* ctx, AstNode* head, PlaceHandleState* state);
+
+static void ph_process_plain(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleState* state) {
+    AstNode* stmt = unwrap_primary_node(node);
+    if (!stmt) return;
+    AstFieldNode* annotated[PH_MAX_USES];
+    int annotated_count = 0;
+    // live handles: a kill ends the handle and annotates nothing here
+    for (int i = 0; i < state->count;) {
+        PlaceHandle* h = state->live[i];
+        PlaceHandleScan scan;
+        ph_scan_statement(stmt, h, &scan);
+        if (scan.kill) {
+            ph_state_remove(state, i);
+            continue;
+        }
+        for (int u = 0; u < scan.use_count; u++) {
+            AstFieldNode* use = scan.uses[u].node;
+            use->handle_role = AST_PLACE_HANDLE_USE;
+            use->handle_slot = h->slot;
+            h->uses++;
+            if (scan.uses[u].write) h->writing = true;
+            if (annotated_count < PH_MAX_USES) annotated[annotated_count++] = use;
+        }
+        i++;
+    }
+    // new handles: one unconditional read spelling, nothing else of P here
+    PhCandidateScan found = {stmt, ctx, {}, 0};
+    ph_candidate_cb(stmt, NULL, &found);
+    for (int c = 0; c < found.count && state->count < PH_MAX_LIVE; c++) {
+        AstFieldNode* place = found.found[c];
+        PlaceHandle probe = {};
+        if (!ph_path_eligible(ctx, (AstNode*)place, &probe)) continue;
+        bool known = false;
+        for (int i = 0; i < state->count && !known; i++) {
+            known = state->live[i]->root == probe.root &&
+                state->live[i]->path.count == probe.path.count &&
+                ph_path_prefix(&state->live[i]->path, &probe.path);
+        }
+        if (known || place->handle_role != AST_PLACE_HANDLE_NONE ||
+                ph_node_shadowed(place, annotated, annotated_count)) {
+            continue;
+        }
+        PlaceHandleScan scan;
+        ph_scan_statement(stmt, &probe, &scan);
+        if (scan.kill || scan.use_count != 1 || scan.uses[0].node != place ||
+                scan.uses[0].write || scan.uses[0].conditional) {
+            continue;
+        }
+        if (ctx->next_slot == UINT16_MAX) {
+            ctx->overflow = true;
+            return;
+        }
+        PlaceHandle* h = (PlaceHandle*)pool_calloc(ctx->pool, sizeof(PlaceHandle));
+        if (!h) return;
+        *h = probe;
+        h->bind = place;
+        h->slot = ++ctx->next_slot;
+        h->next = ctx->all;
+        ctx->all = h;
+        place->handle_role = AST_PLACE_HANDLE_BIND_READ;
+        place->handle_slot = h->slot;
+        state->live[state->count++] = h;
+        if (annotated_count < PH_MAX_USES) annotated[annotated_count++] = place;
+    }
+}
+
+// does anything in `node` end `h`? (a use is not an end)
+static bool ph_subtree_kills(AstNode* node, PlaceHandle* h) {
+    // ph_scan_node descends into every child, nested statement lists included
+    for (AstNode* item = node; item; item = item->next) {
+        PlaceHandleScan scan;
+        ph_scan_statement(item, h, &scan);
+        if (scan.kill) return true;
+    }
+    return false;
+}
+
+// uses in a loop header (run every iteration): annotate, never bind
+static void ph_annotate_header(AstNode* part, PlaceHandleState* state) {
+    for (int i = 0; part && i < state->count; i++) {
+        PlaceHandleScan scan;
+        ph_scan_statement(part, state->live[i], &scan);
+        if (scan.kill) continue;   // unreachable: the loop was checked for kills
+        for (int u = 0; u < scan.use_count; u++) {
+            scan.uses[u].node->handle_role = AST_PLACE_HANDLE_USE;
+            scan.uses[u].node->handle_slot = state->live[i]->slot;
+            state->live[i]->uses++;
+            if (scan.uses[u].write) state->live[i]->writing = true;
+        }
+    }
+}
+
+static void ph_process_stmt(PlaceHandleCtx* ctx, AstNode* node, PlaceHandleState* state) {
+    AstNode* stmt = unwrap_primary_node(node);
+    if (!stmt || ctx->overflow) return;
+    switch (stmt->node_type) {
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* ifn = (AstIfNode*)stmt;
+        // the condition is evaluated unconditionally before either arm
+        if (ifn->cond) ph_process_plain(ctx, ifn->cond, state);
+        PlaceHandleState then_state = *state;
+        PlaceHandleState else_state = *state;
+        ph_process_list(ctx, ifn->then, &then_state);
+        ph_process_list(ctx, ifn->otherwise, &else_state);
+        // a handle survives the `if` only if both arms kept it
+        for (int i = 0; i < state->count;) {
+            PlaceHandle* h = state->live[i];
+            bool in_then = false, in_else = false;
+            for (int k = 0; k < then_state.count; k++) in_then |= then_state.live[k] == h;
+            for (int k = 0; k < else_state.count; k++) in_else |= else_state.live[k] == h;
+            if (in_then && in_else) i++;
+            else ph_state_remove(state, i);
+        }
+        return;
+    }
+    case AST_NODE_BLOCK:
+        ph_process_list(ctx, ((AstBlockNode*)stmt)->statements, state);
+        return;
+    case AST_NODE_CONTENT: case AST_NODE_SEQ:
+        ph_process_list(ctx, ((AstArrayNode*)stmt)->item, state);
+        return;
+    case AST_NODE_LIST:
+        ph_process_list(ctx, ((AstListNode*)stmt)->item, state);
+        return;
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)stmt;
+        for (int i = 0; i < state->count;) {
+            PlaceHandle* h = state->live[i];
+            bool killed = ph_subtree_kills(loop->init, h) ||
+                ph_subtree_kills(loop->test, h) || ph_subtree_kills(loop->update, h) ||
+                ph_subtree_kills(loop->body, h);
+            if (killed) ph_state_remove(state, i);
+            else i++;
+        }
+        // the header runs every iteration: uses only, no binds
+        ph_annotate_header(loop->init, state);
+        ph_annotate_header(loop->test, state);
+        ph_annotate_header(loop->update, state);
+        PlaceHandleState body = *state;
+        ph_process_list(ctx, loop->body, &body);
+        return;
+    }
+    case AST_NODE_FOR_EXPR: case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
+        for (int i = 0; i < state->count;) {
+            if (rmw_subtree_uses_entry(stmt, state->live[i]->root)) ph_state_remove(state, i);
+            else i++;
+        }
+        return;
+    default:
+        ph_process_plain(ctx, node, state);
+        return;
+    }
+}
+
+static void ph_process_list(PlaceHandleCtx* ctx, AstNode* head, PlaceHandleState* state) {
+    for (AstNode* node = head; node && !ctx->overflow; node = node->next) {
+        ph_process_stmt(ctx, node, state);
+    }
+}
+
+// CW34-36 named borrows write their place in place through a name this walk
+// does not track; their roots get no synthesized handle
+static void ph_exclude_borrow_roots_cb(AstNode* child, AstNode* parent, void* opaque) {
+    (void)parent;
+    PlaceHandleCtx* ctx = (PlaceHandleCtx*)opaque;
+    if (!child) return;
+    if (child->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstDeclaratorNode* named = (AstDeclaratorNode*)child;
+        if (named->entry && named->entry->cow_borrow_lowered && named->init) {
+            AstCowPath path = {};
+            NameEntry* root = ast_collect_cow_path(&path, named->init)
+                ? ph_path_root(&path) : NULL;
+            if (root && ctx->excluded_count < PH_MAX_EXCLUDED) {
+                ctx->excluded[ctx->excluded_count++] = root;
+            } else if (root) {
+                ctx->overflow = true;
+            }
+        }
+    }
+    ast_visit_core_children(child, ph_exclude_borrow_roots_cb, opaque);
+}
+
+// LR12-10 (S9.1.2, S9.1.3): does the body use a `var` parameter other than as a
+// place-path root or an assignment target? Any other use -- a binding, a call
+// argument (plain or `var`), a return, a container element -- may hand the
+// root object to a second observer, so writes through the parameter must
+// detach a shared root first. Conservative: any unrecognised use counts.
+typedef struct VarShareScan {
+    AstNode* top;
+    NameEntry* entry;
+    bool shared;
+} VarShareScan;
+
+static void var_share_scan_node(AstNode* node, VarShareScan* scan);
+
+static void var_share_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
+    VarShareScan* scan = (VarShareScan*)opaque;
+    if (!child || scan->shared) return;
+    if (parent == scan->top && child == scan->top->next) return;
+    var_share_scan_node(child, scan);
+}
+
+static bool var_share_is_bare(AstNode* node, NameEntry* entry) {
+    AstNode* bare = unwrap_primary_node(node);
+    return bare && bare->node_type == AST_NODE_IDENT &&
+        ((AstIdentNode*)bare)->entry == entry;
+}
+
+// index keys of a place path are ordinary expressions
+static void var_share_scan_keys(const AstCowPath* path, VarShareScan* scan) {
+    for (int i = 0; i < path->count && !scan->shared; i++) {
+        if (!path->is_member[i]) var_share_scan_node(path->segment[i], scan);
+    }
+}
+
+static void var_share_scan_node(AstNode* node, VarShareScan* scan) {
+    if (!node || scan->shared) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT:
+        if (((AstIdentNode*)node)->entry == scan->entry) scan->shared = true;
+        return;
+    case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
+        AstCowPath path = {};
+        if (ast_collect_cow_path(&path, node) && path.count > 0 &&
+                ph_path_root(&path) == scan->entry) {
+            // a place read yields a child, never the root itself
+            var_share_scan_keys(&path, scan);
+            return;
+        }
+        break;
+    }
+    case AST_NODE_MEMBER_ASSIGN_STAM: case AST_NODE_INDEX_ASSIGN_STAM: {
+        AstAssignNode* as = (AstAssignNode*)node;
+        AstCowPath path = {};
+        if (ast_collect_cow_path(&path, as->object) &&
+                ph_path_root(&path) == scan->entry) {
+            var_share_scan_keys(&path, scan);
+            if (node->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+                for (AstNode* key = as->key; key && !scan->shared; key = key->next) {
+                    var_share_scan_node(key, scan);
+                }
+            }
+            var_share_scan_node(as->value, scan);
+            return;
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM:
+        if (((AstAssignStamNode*)node)->target_entry == scan->entry) {
+            var_share_scan_node(((AstAssignStamNode*)node)->value, scan);
+            return;
+        }
+        break;
+    case AST_NODE_BINARY: {
+        // a comparison or type test only reads its operands
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        switch (binary->op) {
+        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
+        case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_IS:
+            if (!var_share_is_bare(binary->left, scan->entry)) {
+                var_share_scan_node(binary->left, scan);
+            }
+            if (!var_share_is_bare(binary->right, scan->entry)) {
+                var_share_scan_node(binary->right, scan);
+            }
+            return;
+        default:
+            break;
+        }
+        break;
+    }
+    case AST_NODE_UNARY:
+        if (((AstUnaryNode*)node)->op == OPERATOR_NOT &&
+                var_share_is_bare(((AstUnaryNode*)node)->operand, scan->entry)) {
+            return;   // truthiness is a read
+        }
+        break;
+    case AST_NODE_CALL_EXPR: {
+        // A bare argument shares the root only if the known procedure can:
+        // a plain parameter it retains (CW29), or a `var` parameter whose own
+        // body may share (the fixpoint in lambda_ast_note_var_root_sharing).
+        // Unknown callees and named or surplus arguments stay conservative.
+        AstCallNode* call = (AstCallNode*)node;
+        AstFuncNode* callee = direct_pn_callee(call);
+        if (!callee) break;
+        AstNamedNode* param = callee->param;
+        for (AstNode* arg = call->argument; arg && !scan->shared; arg = arg->next) {
+            if (var_share_is_bare(arg, scan->entry)) {
+                TypeParam* param_type = param ? (TypeParam*)((AstNode*)param)->type : NULL;
+                if (!param || !param->entry || !param_type ||
+                        (param_type->is_var_param ? param->entry->var_root_may_share
+                                                  : param->entry->cow_param_root_retained)) {
+                    scan->shared = true;
+                }
+            } else {
+                var_share_scan_node(arg, scan);
+            }
+            param = param ? (AstNamedNode*)((AstNode*)param)->next : NULL;
+        }
+        return;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* ifn = (AstIfNode*)node;
+        if (var_share_is_bare(ifn->cond, scan->entry)) {
+            var_share_scan_node(ifn->then, scan);
+            var_share_scan_node(ifn->otherwise, scan);
+            return;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    ast_visit_core_children(node, var_share_scan_cb, scan);
+}
+
+static bool var_share_subtree(AstNode* node, NameEntry* entry) {
+    if (!node) return false;
+    VarShareScan scan = {node, entry, false};
+    var_share_scan_node(node, &scan);
+    return scan.shared;
+}
+
+// flag every store through `entry` inside `node`
+static void var_share_flag_stores_cb(AstNode* child, AstNode* parent, void* opaque) {
+    (void)parent;
+    NameEntry* entry = (NameEntry*)opaque;
+    if (!child) return;
+    if (child->node_type == AST_NODE_MEMBER_ASSIGN_STAM ||
+            child->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+        AstCowPath path = {};
+        AstAssignNode* as = (AstAssignNode*)child;
+        if (ast_collect_cow_path(&path, as->object) && ph_path_root(&path) == entry) {
+            as->var_root_unshare = true;
+        }
+    }
+    ast_visit_core_children(child, var_share_flag_stores_cb, opaque);
+}
+
+static void var_share_flag_stores(AstNode* node, NameEntry* entry) {
+    if (node) var_share_flag_stores_cb(node, NULL, entry);
+}
+
+// Flow-sensitive, like MIR's cow_marked: a store needs the detach only when a
+// sharing use may run before it -- earlier in the list, in the same
+// statement, in either arm of an earlier `if`, or anywhere in an enclosing loop.
+static bool var_share_walk_list(AstNode* head, NameEntry* entry, bool seen);
+
+// a list whose last statement leaves it never reaches the statement after it
+static bool var_share_list_exits(AstNode* head) {
+    AstNode* last = NULL;
+    for (AstNode* node = head; node; node = node->next) last = node;
+    AstNode* stmt = unwrap_primary_node(last);
+    if (!stmt) return false;
+    switch (stmt->node_type) {
+    case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM:
+    case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM:
+        return true;
+    case AST_NODE_BLOCK:
+        return var_share_list_exits(((AstBlockNode*)stmt)->statements);
+    case AST_NODE_CONTENT: case AST_NODE_SEQ:
+        return var_share_list_exits(((AstArrayNode*)stmt)->item);
+    case AST_NODE_LIST:
+        return var_share_list_exits(((AstListNode*)stmt)->item);
+    default:
+        return false;
+    }
+}
+
+static bool var_share_walk_stmt(AstNode* node, NameEntry* entry, bool seen) {
+    AstNode* stmt = unwrap_primary_node(node);
+    if (!stmt) return seen;
+    switch (stmt->node_type) {
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* ifn = (AstIfNode*)stmt;
+        if (var_share_subtree(ifn->cond, entry)) seen = true;
+        bool after_then = var_share_walk_list(ifn->then, entry, seen);
+        bool after_else = var_share_walk_list(ifn->otherwise, entry, seen);
+        // an arm that leaves the list contributes nothing to what follows
+        bool then_exits = var_share_list_exits(ifn->then);
+        bool else_exits = ifn->otherwise && var_share_list_exits(ifn->otherwise);
+        return (!then_exits && after_then) || (!else_exits && after_else) ||
+            (then_exits && else_exits && seen);
+    }
+    case AST_NODE_BLOCK:
+        return var_share_walk_list(((AstBlockNode*)stmt)->statements, entry, seen);
+    case AST_NODE_CONTENT: case AST_NODE_SEQ:
+        return var_share_walk_list(((AstArrayNode*)stmt)->item, entry, seen);
+    case AST_NODE_LIST:
+        return var_share_walk_list(((AstListNode*)stmt)->item, entry, seen);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)stmt;
+        // a later iteration follows every use in the loop
+        if (var_share_subtree(loop->init, entry) || var_share_subtree(loop->test, entry) ||
+                var_share_subtree(loop->update, entry) ||
+                var_share_subtree(loop->body, entry)) {
+            seen = true;
+        }
+        return var_share_walk_list(loop->body, entry, seen);
+    }
+    default:
+        // within one statement evaluation order is the emitter's; any use in
+        // the statement counts for all of its stores
+        if (var_share_subtree(stmt, entry)) seen = true;
+        if (seen) var_share_flag_stores(stmt, entry);
+        return seen;
+    }
+}
+
+static bool var_share_walk_list(AstNode* head, NameEntry* entry, bool seen) {
+    for (AstNode* node = head; node; node = node->next) {
+        seen = var_share_walk_stmt(node, entry, seen);
+    }
+    return seen;
+}
+
+// one fixpoint step: does any `var` parameter of `fn` newly become sharable?
+static bool var_share_update_function(AstFuncNode* fn) {
+    bool changed = false;
+    if (!fn || !fn->body) return false;
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        NameEntry* entry = param->entry;
+        if (!entry || !entry->is_var_param || entry->var_root_may_share) continue;
+        if (var_share_subtree(fn->body, entry)) {
+            entry->var_root_may_share = true;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+// `functions` holds every function node of the script. The flags only grow,
+// so the fixpoint is reached within one pass per parameter.
+static void lambda_ast_note_var_root_sharing(ArrayList* functions) {
+    for (int pass = 0; pass <= functions->length; pass++) {
+        bool changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            changed |= var_share_update_function((AstFuncNode*)functions->data[i]);
+        }
+        if (!changed) break;
+    }
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        if (!fn || !fn->body) continue;
+        for (AstNamedNode* param = fn->param; param;
+                param = (AstNamedNode*)((AstNode*)param)->next) {
+            NameEntry* entry = param->entry;
+            if (entry && entry->is_var_param && entry->var_root_may_share) {
+                // a detached root must reach the caller, so callers transport
+                // a home for this position (CW33)
+                entry->cow_var_param_may_publish = true;
+                var_share_walk_list(fn->body, entry, false);
+            }
+        }
+    }
+}
+
+static void ph_clear_annotations_cb(AstNode* child, AstNode* parent, void* opaque) {
+    (void)parent;
+    if (!child) return;
+    if (child->node_type == AST_NODE_MEMBER_EXPR || child->node_type == AST_NODE_INDEX_EXPR) {
+        ((AstFieldNode*)child)->handle_role = AST_PLACE_HANDLE_NONE;
+        ((AstFieldNode*)child)->handle_slot = 0;
+    }
+    ast_visit_core_children(child, ph_clear_annotations_cb, opaque);
+}
+
+static void lambda_ast_plan_place_handles(Transpiler* tp, AstFuncNode* fn) {
+    if (!fn || ((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
+    PlaceHandleCtx ctx = {};
+    ctx.pool = tp->pool;
+    ctx.fn = fn;
+    ph_exclude_borrow_roots_cb(fn->body, NULL, &ctx);
+    if (ctx.overflow) return;
+    PlaceHandleState state = {};
+    ph_process_list(&ctx, fn->body, &state);
+    for (PlaceHandle* h = ctx.all; h; h = h->next) {
+        if (ctx.overflow || h->uses == 0) {
+            h->bind->handle_role = AST_PLACE_HANDLE_NONE;
+            h->bind->handle_slot = 0;
+        } else if (h->writing) {
+            h->bind->handle_role = AST_PLACE_HANDLE_BIND_WRITE;
+        }
+    }
+    if (ctx.overflow) {
+        // an unfinished plan may have annotated uses of dropped binds
+        ph_clear_annotations_cb(fn->body, NULL, NULL);
+        fn->place_handle_count = 0;
+        return;
+    }
+    fn->place_handle_count = ctx.next_slot;
+    log_debug("t29-handles: planned %u place handles", (unsigned)ctx.next_slot);
+}
+
 // CW24v3 / D4.4.6: decide, per place-copy binding, whether the PLACE may be
 // written while the copy is alive. The live range is the statement list from
 // the bind to the last top-level statement of that list naming the copy; a
@@ -11354,6 +12498,118 @@ static void place_copy_decide_list(AstNode* head, AstNode* fn_body) {
             break;
         }
     }
+}
+
+// LR12-12 (S9.3.1): `var x = <fresh>; ...; push(bag, x)` where the push (or a
+// compound store of `x`) is a later statement of the declaring list and the
+// only use of `x` anywhere in the function, nested functions included. The
+// container is then the value's sole observer, so the insertion skips its
+// capture. Otherwise its sticky share bit made the container's next write
+// through that element copy it (deltablue's constructors: +12k map copies).
+// A use inside a loop that does not redeclare `x` is not a sibling statement,
+// so it keeps the capture.
+typedef struct InsertionMoveScan {
+    NameEntry* entry;
+    AstNode* allowed;
+    int uses;
+} InsertionMoveScan;
+
+static bool insertion_move_count_cb(AstNode* node, void* data) {
+    InsertionMoveScan* scan = (InsertionMoveScan*)data;
+    if (scan->uses > 1) return false;
+    if (node->node_type == AST_NODE_IDENT && node != scan->allowed &&
+            ((AstIdentNode*)node)->entry == scan->entry) {
+        scan->uses++;
+    }
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) {
+        for (FnCapture* cap = ((AstFuncNode*)node)->captures; cap; cap = cap->next) {
+            if (cap->entry == scan->entry) scan->uses += 2;
+        }
+    }
+    return true;
+}
+
+static AstNode* insertion_statement_value(AstNode* stmt) {
+    stmt = unwrap_primary_node(stmt);
+    if (!stmt) return NULL;
+    if (stmt->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+            stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+        return ((AstCompoundAssignNode*)stmt)->value;
+    }
+    if (stmt->node_type != AST_NODE_CALL_EXPR) return NULL;
+    AstCallNode* call = (AstCallNode*)stmt;
+    AstNode* callee = unwrap_primary_node(call->function);
+    SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+        ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+    if (!info || info->fn != SYSPROC_PUSH || !call->argument ||
+            !call->argument->next || call->argument->next->next) {
+        return NULL;
+    }
+    return call->argument->next;
+}
+
+static void insertion_move_decide_declaration(AstNode* stmt_node,
+        AstDeclaratorNode* named, AstNode* fn_body) {
+    NameEntry* entry = named->entry;
+    AstNode* init = unwrap_primary_node(named->init);
+    if (!entry || entry->is_parameter || entry->is_place_copy ||
+            entry->cow_borrow_lowered || !init ||
+            init->node_type == AST_NODE_CALL_EXPR ||
+            !ast_expr_produces_owned_container(init)) {
+        return;
+    }
+    for (AstNode* later = stmt_node->next; later; later = later->next) {
+        AstNode* value = unwrap_primary_node(insertion_statement_value(later));
+        if (!value || value->node_type != AST_NODE_IDENT ||
+                ((AstIdentNode*)value)->entry != entry) {
+            continue;
+        }
+        InsertionMoveScan scan = {entry, value, 0};
+        walk_lambda_ast(fn_body, insertion_move_count_cb, &scan, true);
+        if (scan.uses == 0) entry->insertion_moves_value = true;
+        return;
+    }
+}
+
+static void insertion_move_decide_list(AstNode* head, AstNode* fn_body) {
+    for (AstNode* node = head; node; node = node->next) {
+        AstNode* stmt = unwrap_primary_node(node);
+        if (!stmt) continue;
+        switch (stmt->node_type) {
+        case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM: {
+            for (AstNode* d = ((AstVarDeclNode*)stmt)->declarations; d; d = d->next) {
+                if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+                    insertion_move_decide_declaration(node, (AstDeclaratorNode*)d, fn_body);
+                }
+            }
+            break;
+        }
+        case AST_NODE_IF_EXPR:
+            insertion_move_decide_list(((AstIfNode*)stmt)->then, fn_body);
+            insertion_move_decide_list(((AstIfNode*)stmt)->otherwise, fn_body);
+            break;
+        case AST_NODE_BLOCK:
+            insertion_move_decide_list(((AstBlockNode*)stmt)->statements, fn_body);
+            break;
+        case AST_NODE_CONTENT: case AST_NODE_SEQ:
+            insertion_move_decide_list(((AstArrayNode*)stmt)->item, fn_body);
+            break;
+        case AST_NODE_LIST:
+            insertion_move_decide_list(((AstListNode*)stmt)->item, fn_body);
+            break;
+        case AST_NODE_LOOP:
+            insertion_move_decide_list(((AstLoopControlNode*)stmt)->body, fn_body);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static void lambda_ast_note_insertion_moves(AstFuncNode* fn) {
+    if (!fn || ((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
+    insertion_move_decide_list(fn->body, fn->body);
 }
 
 // Any place copy the precise walk never reached (declared under a construct it

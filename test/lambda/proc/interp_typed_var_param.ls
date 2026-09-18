@@ -1,7 +1,9 @@
 // D8.1.1v8: typed `var` parameters cross the tier boundary. Every callee here
 // is entered more than the promotion threshold, so on the auto tier the
 // T0 -> satellite, satellite -> satellite and satellite -> T0 edges all occur;
-// the golden is tier-agreed with jit and interp.
+// the golden is tier-agreed with jit and interp. `keep` is a snapshot
+// (S9.1.2): the earlier golden showed later writes through `x` in it on every
+// tier, the defect LR12-10 fixed.
 type Rec = { pos: int, count: int }
 pn store_f(var x: float[], i: int, v: float) { x[i] = v }
 pn store_i(var x: int[], i: int, v: int) { x[i] = v }

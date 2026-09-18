@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "description": "Tune29 §19.1 (D4.4.4v4, COW Appendix D): a named handle passed as a plain argument to a callee that keeps no root stays a borrow, with its store-back inside one arm (CW36); a callee that may return the handle's root keeps the borrow but the call-site result mark shares it, so the later write detaches; handing the root to a `var` writer while the copy is alive snapshots the bind.",
+  "checks": [
+    {
+      "in_func": "_read_then_write_#",
+      "expect": [
+        "call\tcow_bind_rmw_handle"
+      ],
+      "forbid": [
+        "call\tcow_bind_var"
+      ]
+    },
+    {
+      "in_func": "_root_escapes_#",
+      "expect_seq": [
+        {
+          "pattern": "call\tcow_bind_rmw_handle"
+        },
+        {
+          "pattern": "call\tcow_mark_shared"
+        },
+        {
+          "pattern": "call\tmap_set_cow"
+        }
+      ]
+    },
+    {
+      "in_func": "_root_to_var_#",
+      "expect": [
+        "call\tcow_bind_var"
+      ],
+      "forbid": [
+        "call\tcow_bind_rmw_handle"
+      ]
+    }
+  ]
+}

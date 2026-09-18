@@ -2784,6 +2784,9 @@ extern "C" {
     // Other carriers retain the complete checked-boundary path.
     Item lambda_array_admit_numeric_contract(Item value, Type* expected,
         const char* boundary);
+    // `[]` admitted under `expected`: a certified empty ArrayNum for a
+    // primitive T[] contract, otherwise the checked generic empty array.
+    Item lambda_array_empty_for_contract(Type* expected, const char* boundary);
     Item lambda_map_set_checked(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
     Item lambda_map_set_checked_inplace(Item owner, Item key, Item value, Type* expected,
@@ -3240,6 +3243,8 @@ extern "C" {
     Item member_set_cow(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);
     Item cow_path_set_raw(Item owner, Item key, Item value);
+    int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,
+        Item key2, Item value);
     Item cow_path_set(Item owner, Item path, Item value);
     // NM-O8: nested store that leaves the ROOT alone (var / plain-pn params).
     Item cow_path_set_inplace(Item owner, Item path, Item value);

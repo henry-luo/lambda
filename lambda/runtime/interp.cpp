@@ -1091,6 +1091,36 @@ static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
 // through it fully update the binding. View-state overlays are excluded
 // (their writes must also run tmpl_state_set) and object-field entries have
 // no slot of their own; both keep the legacy entry write-back channel.
+// S9.1.2 / S9.1.3 (LR12-10): a `var` parameter's root arrives unique (the
+// chain-root prologue), but the body may have shared it since -- a copy, a
+// container, a call result. An in-place write would then show through that
+// copy. When the parameter has a publish channel, detach the shared root here
+// and republish it, so the write lands in the private object and the caller
+// receives it at return. Without a channel (no caller home), keep the old
+// in-place behaviour: a replacement could not reach the caller at all.
+static Item interp_read_store_owner(InterpFrame* f, NameEntry* root,
+        const AstAssignNode* store) {
+    Item owner = interp_read_binding(f, root);
+    if (!root->is_var_param || !store->var_root_unshare) return owner;
+    if (!root->storage_assigned || (uint32_t)root->slot >= 32 ||
+            !(f->var_publish_mask & (1u << root->slot))) return owner;
+    // a byte test when the root is unique; a one-level copy when shared
+    Item prepared = cow_prepare_write(owner);
+    if (item_is_error(prepared)) return prepared;
+    if (prepared.item != owner.item) interp_write_binding(f, root, prepared);
+    return prepared;
+}
+
+// LR12-10: remember that this activation shared one of its `var` parameters
+static void interp_note_var_param_marked(InterpFrame* f, AstNode* source) {
+    AstNode* node = ast_unwrap_primary(source);
+    if (!f || !node || node->node_type != AST_NODE_IDENT) return;
+    NameEntry* entry = ((AstIdentNode*)node)->entry;
+    if (!entry || !entry->is_var_param || !entry->storage_assigned ||
+            (uint32_t)entry->slot >= 32) return;
+    f->var_marked_mask |= 1u << entry->slot;
+}
+
 static uint64_t* interp_borrow_home(InterpFrame* f, NameEntry* entry) {
     if (!f || !entry || !entry->storage_assigned) return NULL;
     if (entry->binding_storage != BINDING_STORAGE_REGISTER) return NULL;
@@ -1561,6 +1591,12 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             }
             Item owner = interp_read_binding(f, owner_entry);
             Item replacement = ItemError;
+            if (sinfo->fn == SYSPROC_PUSH &&
+                    ast_expr_insertion_needs_capture(node->argument->next)) {
+                // S9.3.1 (LR12-12): the appended value is captured by value
+                cow_capture_value((Item){.item = values[0]});
+                interp_note_var_param_marked(f, node->argument->next);
+            }
             if (sinfo->fn == SYSPROC_PUSH) {
                 // Only a declared binding imposes the append contract; a
                 // representation certificate may also belong to an open alias.
@@ -1598,6 +1634,12 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             for (int i = 1; value_node; value_node = value_node->next, i++) {
                 place_words[i] = eval_expr(f, value_node).item;
                 if (interp_frame_pending(f)) return ItemNull;
+            }
+            if (sinfo->fn == SYSPROC_PUSH &&
+                    ast_expr_insertion_needs_capture(node->argument->next)) {
+                // S9.3.1 (LR12-12): the appended value is captured by value
+                cow_capture_value((Item){.item = place_words[1]});
+                interp_note_var_param_marked(f, node->argument->next);
             }
             Item leaf = ItemNull;
             if (interp_borrow_place_leaf(f, node->argument, &leaf, true)) {
@@ -1799,6 +1841,18 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
                 // the entry is retained beside the home: the callee prologue
                 // reads is_var_param off it to distinguish a chain-root
                 // borrow (prepare) from a re-borrow (inherit uniqueness)
+                if (entry->is_var_param && entry->storage_assigned &&
+                        (uint32_t)entry->slot < 32 &&
+                        (f->var_marked_mask & (1u << entry->slot))) {
+                    // LR12-10: a re-borrow of a `var` parameter this frame has
+                    // shared must detach first, as MIR's call site does for a
+                    // cow_marked root; the frame publishes it at return
+                    Item prepared = cow_prepare_write((Item){.item = *home});
+                    if (item_is_error(prepared)) return prepared;
+                    *home = prepared.item;
+                    words[index] = prepared.item;
+                    f->var_marked_mask &= ~(1u << entry->slot);
+                }
                 continue;
             }
             Item owner = (Item){.item = words[index]};
@@ -1846,10 +1900,15 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             for (int index = 0; index < dispatch_argc; index++) {
                 transport->mir_var_homes[index] = NULL;
             }
+            if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
             return result;
         }
-        return interp_call_with_borrowed(fn, (const Item*)(void*)words,
+        Item result = interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
+        // LR12-11 (S9.1.2): the result may be (part of) an argument the caller
+        // still holds; both observers must detach before a write
+        if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
+        return result;
     }
     // Every callee — interpreted or native — reaches its body through the
     // single dynamic dispatch point (AI7). Routing interpreted calls through it
@@ -1859,7 +1918,10 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     args.length = dispatch_argc;
     args.items = (Item*)(void*)words;
     uint64_t result_home = 0;
-    return fn_call_into(fn, dispatch_argc ? &args : NULL, &result_home);
+    Item result = fn_call_into(fn, dispatch_argc ? &args : NULL, &result_home);
+    // LR12-11: same call-site mark as the borrowed path above
+    if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -3659,7 +3721,9 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 }
                 bool declared_open_any_array =
                     ast_declared_type_is_open_any_array(named->declared_type);
-                if (src && src->cow_owned && (declared_open_any_array ||
+                // LR12-10 (S9.1.2): a `var` parameter's root is written in
+                // place, so an alias of it is an ownership boundary too
+                if (src && (src->cow_owned || src->is_var_param) && (declared_open_any_array ||
                         ast_expr_may_return_container(named->init, init_tid, var_tid))) {
                     // cow_bind_var may detach a copy, so it is a safepoint: the
                     // operand has to be reachable from a frame slot, not a C++
@@ -3667,6 +3731,7 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                     Scratch alias_slot(f);
                     alias_slot.set(value);
                     value = cow_bind_var(alias_slot.get());
+                    interp_note_var_param_marked(f, named->init);
                 }
             }
             if (!interp_bind_declared_value(f, named, value)) return;
@@ -4727,6 +4792,28 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // error-excluding `var` call short-circuits before COW mutation.
             return value;
         }
+        {
+            // LR12-10 (S9.1.2, SI3v2): reassigning an alias crosses the same
+            // ownership boundary as declaring one -- MIR marks it at its
+            // `cow_binding` site; T0 did not, so `s = b; b.x = v` showed the
+            // write through `s` on this tier only.
+            AstNode* source_node = ast_unwrap_primary(assign->value);
+            if (source_node && source_node->node_type == AST_NODE_IDENT) {
+                NameEntry* src = ((AstIdentNode*)source_node)->entry;
+                TypeId value_tid = assign->value->type
+                    ? assign->value->type->type_id : LMD_TYPE_ANY;
+                TypeId target_tid = target->declared_type
+                    ? target->declared_type->type_id : LMD_TYPE_ANY;
+                if (src && src != target && (src->cow_owned || src->is_var_param) &&
+                        ast_expr_may_return_container(assign->value, value_tid, target_tid)) {
+                    // a safepoint: keep the operand in a frame slot
+                    Scratch alias_slot(f);
+                    alias_slot.set(value);
+                    value = cow_bind_var(alias_slot.get());
+                    interp_note_var_param_marked(f, assign->value);
+                }
+            }
+        }
         value = interp_coerce_declared_binding(f, value, target->declared_type,
             "declared assignment binding");
         if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
@@ -4773,6 +4860,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // otherwise a later source mutation changes this stored snapshot.
             if (!ca->cow_borrow_release && ast_expr_insertion_needs_capture(ca->value)) {
                 cow_capture_value(value_slot.get());
+                interp_note_var_param_marked(f, ca->value);
             }
 
             Scratch path_slot(f);
@@ -4795,7 +4883,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             array_push(keys, terminal_slot.get());
 
             Scratch owner_slot(f);
-            owner_slot.set(interp_read_binding(f, root));
+            owner_slot.set(interp_read_store_owner(f, root, ca));
+            if (item_is_error(owner_slot.get())) return owner_slot.get();
             // An untyped COW path validates no enclosing contract; a nested
             // typed-map write must validate its rebuilt root before publish.
             //
@@ -4852,6 +4941,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // CW34: a borrowed handle's store-back skips the mark (handle dead)
         if (!ca->cow_borrow_release && ast_expr_insertion_needs_capture(ca->value)) {
             cow_capture_value(value_slot.get());
+            interp_note_var_param_marked(f, ca->value);
         }
 
         if (ca->key && ca->key->next) {
@@ -4861,7 +4951,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 return interp_frame_pending(f) ? ItemNull : ItemError;
             }
             Scratch owner(f);
-            owner.set(interp_read_binding(f, root));
+            owner.set(interp_read_store_owner(f, root, ca));
+            if (item_is_error(owner.get())) return owner.get();
             if (get_type_id(owner.get()) != LMD_TYPE_ARRAY_NUM) {
                 log_error("interp: planned N-D assignment target is not an ArrayNum");
                 return ItemError;
@@ -4888,7 +4979,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         if (interp_frame_pending(f)) return ItemNull;
 
         Scratch owner(f);
-        owner.set(interp_read_binding(f, root));
+        owner.set(interp_read_store_owner(f, root, ca));
+        if (item_is_error(owner.get())) return owner.get();
 
         if (ast_is_direct_numeric_mask_assignment(node)) {
             LambdaArrayContractInfo array_info = {};
@@ -5307,6 +5399,15 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         if (!guard.valid()) { st->depth++; return ItemError; }
         InterpFrame* frame = guard.frame();
         uint16_t params = fn_node->analysis->frame_plan.param_count;
+        if (borrowed) {
+            // LR12-10: which `var` params can publish a replaced root at return
+            for (int index = 0; index < (int)params && index < 32; index++) {
+                if (borrowed->homes[index] ||
+                        (borrowed->entries[index] && borrowed->caller)) {
+                    frame->var_publish_mask |= 1u << index;
+                }
+            }
+        }
         bool is_variadic = signature && signature->type_id == LMD_TYPE_FUNC &&
             signature->is_variadic;
         Item rest = is_variadic && argc > (int)params

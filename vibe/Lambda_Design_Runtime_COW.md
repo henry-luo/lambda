@@ -1,6 +1,6 @@
 # Lambda Design: Copy-on-Write for Mutable Value Semantics
 
-- **Status:** rev 9, 2026-08-29 (CW33 ratified — the `var`-param address ABI, §11.10). **Stage 1 is LANDED** (`vibe/impl/Lambda_Impl_Tune_COW (done).md`;
+- **Status:** rev 10, 2026-09-17 (CW37 ratified — handles carry four facts, synthesized handles, §11.14 + Appendix D; CW34–CW36 §11.11–§11.13; CW33 the `var`-param address ABI, §11.10). **Stage 1 is LANDED** (`vibe/impl/Lambda_Impl_Tune_COW (done).md`;
   formal-spec conformance: "COW Stage 1 landed" — `let`-finality real for
   Array/Map/Object/Element/VMap). The main body now carries only the **latest
   design**; the rev-1–7 decision narrative, the pre-Stage-1 motivating
@@ -804,6 +804,31 @@ written-once witness is the eventual answer if it matters.
    **CW24v2 phase 2** (observed mutated copies are legal; only the
    dead-store shape warns — `cow-dead-snapshot`).
 
+
+**Extension — returned parameters (LR12-11, 2026-09-17).** A `return` is a
+retention site like an insertion (S9.3.1), and it never marked: after
+`var r = keep(b)` both `r` and `b` held one unmarked object, so a write on
+either side reached the other (S9.1.2). The body walk now also decides, per
+parameter, whether the function result may be the parameter or a part of it,
+completed module-wide at script finalize. Each direct call site of such a
+function share-marks its result (a scalar or tail-position result is
+skipped), and MIR keeps the share test on the argument roots and on a binding
+of the result. This is the one place the scheme marks at a call site,
+recorded here against the rejection above:
+- **Why not the callee prologue.** An entry mark shares the whole parameter,
+  but a getter returns only an element of it. Marking the container cost
+  havlak2 +36k array copies (+38%); marking the returned value is exact.
+- **Why not in the callee's return lowering.** A `pn` body's last value is a
+  result too, and the lowering has several return paths. The call site covers
+  every consumer of the result in one place per tier.
+
+Dynamic callees are not analysed (open in the issue ledger).
+
+**Insertion moves (LR12-12).** A fresh local whose only use is one later
+`push` or compound store in its own statement list is moved into the
+container, with no capture. Otherwise its sticky bit makes the container's
+next write through that element copy it.
+
 ### 11.10 CW33 — the `var`-param ABI: address of the representation home (RATIFIED, designer, 2026-08-29; T0 stage + MIR M1a IMPLEMENTED same day)
 
 **Supersedes the caller-side pre-detach + T0 write-back design.** The current
@@ -1315,6 +1340,74 @@ overwrites it. Removing it needs a call-site convention ("this call's result
 overwrites the `var` argument's home, so the callee may move the argument"),
 which is a new shape outside CW36.
 
+### 11.14 CW37 — a handle carries facts; synthesized handles (RATIFIED 2026-09-17, user; IMPLEMENTED 2026-09-17, Tune29 T29-1 §12)
+
+**Where it came from.** The Result46 MIR comparison against the c2m C ports
+(`temp/r46/`, memory note `typed-vs-c2mir-mir-comparison`): deltablue's
+`c_choose_method` spells `w.cons[cid]` five times per branch and the typed
+lane navigates from `w` every time — ~38 MIR instructions per field read and
+~42 per field write (three COW shared-bit tests, two shape-identity compares,
+the certificate guard, two bounds tests, two null arms) against one
+instruction in C. This is the whole deltablue/havlak/richards/splay/cd family.
+Tune28's certificate hoist failed because the proof was carried in a flag
+after a join; the fix is to make the proof a property of a *handle*.
+
+**The principle (D4.4.4v4).** A handle `h` is a borrow of a place `P =
+root.p1…pn`. It may be named (`var h = w.cons[cid]`) or **synthesized by the
+compiler** for a path spelled repeatedly in one body. A handle carries four
+facts, each established once at the bind, and **the facts hold exactly as
+long as the place and its ownership are unchanged**:
+
+| Fact | Established by | Cached as |
+|---|---|---|
+| identity | navigating `P` once | the record's header pointer (never moves, D4.3.1) |
+| layout | D3.2.4v4: a certified container element or admitted field carries the declared-prefix proof | nothing at runtime; offsets are compile-time |
+| presence | D3.2.6 / S11.4.10: required fields are present; `P` itself is null-tested once if its type is optional | nothing at runtime |
+| uniqueness | the spine test (D4.4.4v3), extended to the leaf: a writing bind over a shared leaf **un-shares first** (S9.2.2) | one bit per handle |
+
+Three consequences follow from the principle, not from any table:
+
+1. **Eager un-share makes aliasing a non-problem.** After the leaf is unique,
+   no later write — through `h` or through any other spelling that aliases
+   `P` at runtime (`w.cons[j]` with `j == cid`) — can detach, so every alias
+   is a pointer to the same unique object, which is exactly value semantics
+   for a unique value. Without it a write through an aliasing spelling could
+   copy and leave `h` on the pre-copy object.
+2. **Data-zone pointers are never facts.** Packed field buffers and array
+   buffers compact under D4.3.1; a handle holds the header (and for a scalar
+   array element the index) and reloads the buffer pointer after any
+   allocation point. Only the header pointer survives a call.
+3. **A missing invalidation is a silent wrong write, not a lost
+   optimization**, so the conditions of D4.4.4v3 stay fixed: one static
+   decision for both tiers, the runtime spine test at the bind, and
+   store-back-or-mark on every writing path. The T0 walker keeps per-access
+   navigation, which is observably identical; tier parity remains the gate.
+
+The concrete invalidation table is an implementation record and is expected
+to change; it lives in Appendix D so the design holds onto the principle.
+
+**Tiers and loops.** The kill set is decided in `build_ast` and shared by both
+tiers. A handle bound outside a loop dies at the back edge if any iteration
+contains a killing event; a synthesized handle inside a loop body is bound
+afresh each iteration at the first spelling, so a `while` body pays one
+navigation per iteration instead of one per access.
+
+**Implementation record, Tune29 §20 (2026-09-17).** These follow within
+D4.4.4v4's implementation latitude; no ruling changed.
+1. A named handle passed as a plain argument to a `pn` that does not keep
+   the leaf itself stays a borrow. This is Appendix D's "keep identity, kill
+   uniqueness" row: a returned part is share-marked at the call site
+   (LR12-11), and a stored part is captured (S9.3.1).
+2. The MIR tier joins its "may be shared" binding facts at `if`/`match`
+   merges and loop exits, and pre-marks at loop entry every outer binding a
+   body may share (LR12-17). A fact that is true only on some paths is true
+   at the join.
+3. A parameter's "returned" fact is split into its root and its parts
+   (`cow_param_root_returned`). Only a returned root shares the argument root
+   at the call site.
+Un-sharing a shared child in place is not sound while its other owner is
+alive, which is the case in every row measured; see Tune29 §20.3.
+
 ## 12. Settled decisions and residual risks
 
 ### 12.1 Settled implementation contract
@@ -1655,3 +1748,25 @@ diagnosis `vibe/impl/Lambda_Impl_Tune3.md` §4 (M3); model survey
 `test/benchmark/Overall_Result10.md`; implementation
 `vibe/impl/Lambda_Impl_Tune_COW (done).md` (Stage 1) with §0 ledger
 mirroring Appendix B.
+
+## Appendix D — CW37 handle-invalidation table (implementation record)
+
+Ratified 2026-09-17 as the first concrete form of D4.4.4v4's principle; it is
+detail, not the ruling, and may change while the principle stands. "Kill"
+means the next use re-navigates, which is what today's code does on every
+access. When only uniqueness dies, the handle stays a valid pointer and its
+next write runs one shared-bit test on the leaf header and detaches with
+store-back if needed — the v3 store-back-or-mark obligation applied per
+handle instead of per access.
+
+| Event between bind and use | identity | uniqueness |
+|---|---|---|
+| write to `P` itself or to a strict prefix through any spelling other than `h` (`w.cons[cid] = …`, `w.cons = …`) | kill | kill |
+| `push`/`splice` or any reorder on a prefix container | kill | kill |
+| rebind of the root (`w = …`) | kill | kill |
+| root or a prefix passed as a `var` argument | kill | kill |
+| `h` itself passed as a `var` argument | reload from `h`'s home (the callee may rebind it, CW33) | kill |
+| root, a prefix, or `h` passed as a plain argument, bound by a `let`/`var` place copy, returned, stored, or captured | keep | kill (S9.1.3 snapshot share-marks the spine) |
+| write through `h`; read through any spelling; write to a sibling path that is not a prefix | keep | keep |
+| a call that receives none of root, prefix or `h` | keep | keep (S9.1.7: nothing else can reach `P`) |
+| error exit | n/a | partial writes stay visible, as for a `var` parameter |

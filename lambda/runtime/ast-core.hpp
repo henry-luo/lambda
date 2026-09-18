@@ -318,6 +318,15 @@ struct NameEntry {
     // it. Callers retain the COW check on later `var` re-borrows only for this
     // effect or cow_param_mutated (S9.1.2, S9.1.3).
     bool cow_param_retained;
+    // LR12-10: the plain parameter's own root (not only a child) may be kept
+    // past the call -- returned, stored or bound (CW29 bare-only scan)
+    bool cow_param_root_retained;
+    // LR12-11: the function result may be this parameter (plain or `var`) or
+    // a part of it, so each direct call site share-marks the result
+    bool cow_param_returned;
+    // Tune29 §19.1: the result may be this parameter's own root, not only a
+    // part of it; only then does the call site share the argument root itself
+    bool cow_param_root_returned;
     // A `var` parameter needs caller-home transport only when its body can
     // replace or retain the borrowed binding. Pure in-place writes keep the
     // caller's descriptor valid (S9.2.1, D3.3.3v3).
@@ -399,6 +408,16 @@ struct NameEntry {
     // store-back skips its capture mark (the handle is dead there). Decided
     // once at FUNCTION_END (lambda_ast_lower_rmw_borrows).
     bool cow_borrow_lowered;
+    // LR12-12 (S9.3.1): a fresh local whose only use is being stored into a
+    // container has no other observer, so that insertion need not capture it
+    bool insertion_moves_value;
+    // S9.1.2 / S9.1.3: this `var` parameter is used in the body other than as
+    // a place-path root or an assignment target (bound, passed, returned,
+    // stored), so something besides the borrow may come to observe its root
+    // object. Stores that such a use may precede carry
+    // AstAssignNode::var_root_unshare. Decided once at script finalize
+    // (lambda_ast_note_var_root_sharing); both tiers read it.
+    bool var_root_may_share;
     // T28-7: a local bound to `fill(N, v)` or an N-item scalar array literal,
     // never rebound, resized (push/splice) or passed where a callee could
     // resize it, holds an array of exactly `fixed_array_length` elements
@@ -580,6 +599,18 @@ static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* no
     return index && parent_id < index->count ? index->nodes[parent_id] : NULL;
 }
 
+// T29-1 / CW37 (D4.4.4v4): a record place spelled repeatedly in a `pn` body is
+// read through a synthesized handle. The first spelling binds it; later
+// spellings use it while the place and its ownership are unchanged. Decided
+// once at script finalize (lambda_ast_plan_place_handles); the interpreter
+// ignores these marks, which is observably identical.
+typedef enum AstPlaceHandleRole : uint8_t {
+    AST_PLACE_HANDLE_NONE = 0,
+    AST_PLACE_HANDLE_BIND_READ,    // bind; nothing writes through the handle
+    AST_PLACE_HANDLE_BIND_WRITE,   // bind and un-share the spine and leaf (S9.2.2)
+    AST_PLACE_HANDLE_USE,          // read or write through the bound handle
+} AstPlaceHandleRole;
+
 typedef struct AstFieldNode : AstNode {
     AstNode *object;
     union {
@@ -590,6 +621,9 @@ typedef struct AstFieldNode : AstNode {
     bool optional;
     // S12.3.3v2: a resolved pn method may only appear as a direct call callee.
     bool is_proc_method_reference;
+    // T29-1: nonzero when this node spells a synthesized place handle
+    uint8_t handle_role;       // AstPlaceHandleRole
+    uint16_t handle_slot;      // 1-based, unique within the function
 } AstFieldNode;
 
 typedef struct AstCallNode : AstNode {
@@ -828,6 +862,10 @@ typedef struct AstAssignNode : AstNode {
     // where it was read from, and the handle is dead afterwards -- no S9.3.1
     // capture mark (it would make the next bind of the place copy again).
     bool cow_borrow_release;
+    // LR12-10: the target root is a `var` parameter that may have been shared
+    // before this store runs; detach a shared root before writing
+    // (lambda_ast_note_var_root_sharing)
+    bool var_root_unshare;
 } AstAssignNode;
 
 // for declaration decomposition (let a, b = expr / let a, b at expr)
@@ -974,6 +1012,10 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
 static inline bool ast_expr_insertion_needs_capture(AstNode* expr) {
     AstNode* root_expr = ast_unwrap_primary(expr);
     if (!root_expr) return false;
+    if (root_expr->node_type == AST_NODE_IDENT) {
+        NameEntry* source = ((AstIdentNode*)root_expr)->entry;
+        if (source && source->insertion_moves_value) return false;
+    }
     return !ast_expr_produces_owned_container(root_expr);
 }
 
@@ -1073,6 +1115,8 @@ typedef struct AstFuncNode : AstNode {
     bool is_async;
     bool is_generator;
     bool has_use_strict_directive;
+    // T29-1: number of synthesized place-handle slots in this body
+    uint16_t place_handle_count;
     Type* declared_return_type;
 } AstFuncNode;
 
