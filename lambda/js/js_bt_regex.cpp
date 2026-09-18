@@ -402,6 +402,21 @@ static RxNode* property_class(Parser* ps, const char* name, int name_len, bool n
 }
 
 // Parse a character class [...]; ps->pos points at '['.
+// Annex B.1.2 LegacyOctalEscapeSequence, for the non-unicode grammar only.
+// `ps->pos` is at the first octal digit. A 0-3 lead takes up to two more octal
+// digits and a 4-7 lead one more, so the value never exceeds \377. This is the
+// ECMAScript reading of `\1` when the pattern has no group 1, of `\012`, and
+// of `\1` inside a class -- none of which is a backreference.
+static uint32_t parse_legacy_octal_escape(Parser* ps) {
+    uint32_t value = (uint32_t)(ps->p[ps->pos++] - '0');
+    int more = value <= 3 ? 2 : 1;
+    while (more-- > 0 && ps->pos < ps->len &&
+            ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '7') {
+        value = value * 8 + (uint32_t)(ps->p[ps->pos++] - '0');
+    }
+    return value;
+}
+
 static RxNode* parse_class(Parser* ps) {
     ps->pos++; // [
     bool negated = false;
@@ -429,7 +444,12 @@ static RxNode* parse_class(Parser* ps) {
                 case 't': lo = '\t'; ps->pos++; break;
                 case 'f': lo = '\f'; ps->pos++; break;
                 case 'v': lo = '\v'; ps->pos++; break;
-                case '0': lo = 0; ps->pos++; break;
+                // Annex B: a class has no backreferences, so `\1` is \x01;
+                // unicode mode keeps its previous reading.
+                case '0': case '1': case '2': case '3':
+                case '4': case '5': case '6': case '7':
+                    if (!ps->flags.unicode) { lo = parse_legacy_octal_escape(ps); break; }
+                    lo = e == '0' ? 0 : (unsigned char)e; ps->pos++; break;
                 case 'x': { ps->pos++; bool ok; lo = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
                 case 'u': { ps->pos++; bool ok; lo = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
                 case 'c': { ps->pos++; if (!parse_control_escape(ps, &lo)) lo = 'c'; break; }
@@ -454,7 +474,10 @@ static RxNode* parse_class(Parser* ps) {
                     case 't': hi='\t'; ps->pos++; break;
                     case 'f': hi='\f'; ps->pos++; break;
                     case 'v': hi='\v'; ps->pos++; break;
-                    case '0': hi=0; ps->pos++; break;
+                    case '0': case '1': case '2': case '3':
+                    case '4': case '5': case '6': case '7':
+                        if (!ps->flags.unicode) { hi = parse_legacy_octal_escape(ps); break; }
+                        hi = e == '0' ? 0 : (unsigned char)e; ps->pos++; break;
                     case 'x': { ps->pos++; bool ok; hi = parse_hex_escape(ps,&ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
                     case 'u': { ps->pos++; bool ok; hi = parse_unicode_escape(ps,&ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
                     case 'c': { ps->pos++; if (!parse_control_escape(ps, &hi)) hi = 'c'; break; }
@@ -570,6 +593,18 @@ static RxNode* parse_atom(Parser* ps) {
         if (ps->pos + 1 >= ps->len) { ps->error = true; return NULL; }
         char e = ps->p[ps->pos + 1];
         if (e >= '1' && e <= '9') {
+            if (e - '0' > ps->total_groups) {
+                // Annex B.1.2: a decimal escape naming no group is not a
+                // backreference. It re-reads as a legacy octal escape (`\1` is
+                // \x01) or, for 8 and 9, an identity escape. The RE2 path makes
+                // the same first-digit decision, so both matchers agree. Under
+                // /u it stays a syntax error.
+                if (ps->flags.unicode) { ps->error = true; return NULL; }
+                ps->pos++; // backslash
+                uint32_t cp = e <= '7' ? parse_legacy_octal_escape(ps)
+                                       : (uint32_t)(unsigned char)ps->p[ps->pos++];
+                RxNode* n = new_node(ps, RX_CHAR); n->cp = cp; return n;
+            }
             // numeric backreference: consume digits greedily while <= total groups
             ps->pos++; // backslash
             int val = 0; int start = ps->pos;
@@ -624,7 +659,11 @@ static RxNode* parse_atom(Parser* ps) {
             case 't': cp = '\t'; ps->pos += 2; break;
             case 'f': cp = '\f'; ps->pos += 2; break;
             case 'v': cp = '\v'; ps->pos += 2; break;
-            case '0': cp = 0; ps->pos += 2; break;
+            case '0':
+                // `\012` is \n in legacy mode (Annex B.1.2), not NUL then "12"
+                ps->pos++; // backslash
+                if (!ps->flags.unicode) { cp = parse_legacy_octal_escape(ps); break; }
+                cp = 0; ps->pos++; break;
             case 'x': { ps->pos += 2; bool ok; cp = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; return NULL; } break; }
             case 'u': { ps->pos += 2; bool ok; cp = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; return NULL; } break; }
             case 'c': { ps->pos += 2; if (!parse_control_escape(ps, &cp)) cp = 'c'; break; }
