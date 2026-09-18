@@ -146,7 +146,7 @@ libclang is driven through the C API, so nothing computes the builtin-header pat
 
 ## What the census cannot see
 
-- **Hosted language modules.** `lambda/module/**` (Python, Ruby, Bash, Node) are excluded by configuration. They are Jube-hosted guests rather than part of the D7.1.1 archive set, and their data structures would swamp the layers the split is actually about.
+- **JS MVP and hosted language modules.** `lambda/js/mvp/**` and `lambda/module/**` (Python, Ruby, Bash, Node) are excluded by configuration. They are retained MVP or Jube-hosted code rather than part of the D7.1.1 archive set, and their data structures would swamp the layers the split is actually about.
 - **Function-local types.** Parsing runs with `PARSE_SKIP_FUNCTION_BODIES`, which is what makes a cold run 40 s instead of several minutes. A struct declared inside a function body is not counted.
 - **Templates.** A class template has no layout until it is instantiated, so `size` and `align` come back `null`.
 - **Unreferenced headers.** A header that no `.cpp` or `.c` in `source_dirs` includes is never parsed. In practice this is a small set, but it is not zero.

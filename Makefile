@@ -61,7 +61,7 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
-RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
+RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
@@ -563,7 +563,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
@@ -642,6 +642,7 @@ help:
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
 	@echo "  test-layout-baseline - Run the shared layout baseline suites only"
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
+	@echo "  test-css-cascade-memory - Run CSS cascade memory regression with the baseline host build"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  view-ui              - Run manifest-owned Radiant view event fixtures"
 	@echo "  native-gui-ui        - Run manifest-owned native GUI event fixtures"
@@ -2122,6 +2123,8 @@ run-radiant-baseline:
 	radiant_view_elapsed=0; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	page_elapsed=0; \
+	css_memory_passed=0; css_memory_failed=0; css_memory_status="⏭️  SKIP"; \
+	css_memory_elapsed=0; \
 	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
 	fuzzy_elapsed=0; \
 	render_passed=0; render_failed=0; render_total=0; render_xpassed=0; render_xfailed=0; render_skipped=0; render_errors=0; render_regressions=0; render_details="not run"; render_status="⏭️  SKIP"; \
@@ -2233,6 +2236,24 @@ run-radiant-baseline:
 	fi; \
 	\
 	echo ""; \
+	echo "📦 CSS Cascade Memory Regression:"; \
+	if [ -f "test/test_css_cascade_memory_gtest.exe" ]; then \
+		css_memory_exit=0; \
+		run_logged "temp/_radiant_css_cascade_memory.log" ./test/test_css_cascade_memory_gtest.exe || css_memory_exit=$$?; \
+		css_memory_elapsed=$$run_logged_elapsed; \
+		output=$$(cat "temp/_radiant_css_cascade_memory.log"); \
+		echo "$$output" | grep -E "^\[|CSS cascade" | tail -5; \
+		css_memory_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		css_memory_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		css_memory_passed=$${css_memory_passed:-0}; css_memory_failed=$${css_memory_failed:-0}; \
+		if [ $$css_memory_exit -ne 0 ] && [ $$css_memory_failed -eq 0 ]; then css_memory_failed=1; fi; \
+		if [ $$css_memory_exit -eq 0 ] && [ $$css_memory_passed -gt 0 ]; then css_memory_status="✅ PASS"; else css_memory_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_css_cascade_memory_gtest.exe not found"; \
+		css_memory_failed=1; css_memory_status="❌ FAIL"; any_failed=1; \
+	fi; \
+	\
+	echo ""; \
 	echo "📦 Fuzzy Crash Tests:"; \
 	if [ -f "test/test_layout_fuzzy_gtest.exe" ]; then \
 		fuzzy_start=$$(date +%s); \
@@ -2329,8 +2350,8 @@ run-radiant-baseline:
 		if [ $$failed -eq 0 ]; then echo "   ✅ $$runner ($$passed passing files)"; else echo "   ❌ $$runner ($$failed regressions)"; wpt_dom2_status="❌ FAIL"; any_failed=1; fi; \
 	done; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + view_ui_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + view_ui_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + view_ui_passed + page_passed + css_memory_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + view_ui_failed + page_failed + css_memory_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
 	\
@@ -2348,6 +2369,7 @@ run-radiant-baseline:
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$(format_duration "$$radiant_view_elapsed"), $$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
 	echo "   ├── View UI Fixtures    $$view_ui_status  ($$(format_duration "$$view_ui_elapsed"), $$view_ui_passed passed, $$view_ui_failed failed) (test_ui_automation_gtest.exe --suite view)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$(format_duration "$$page_elapsed"), $$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
+	echo "   ├── CSS Cascade Memory $$css_memory_status  ($$(format_duration "$$css_memory_elapsed"), $$css_memory_passed passed, $$css_memory_failed failed) (test_css_cascade_memory_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$(format_duration "$$fuzzy_elapsed"), $$fuzzy_passed passed, $$fuzzy_failed failed) (test_layout_fuzzy_gtest.exe)"; \
 	echo "   ├── Render Visual       $$render_status  ($$(format_duration "$$render_elapsed"), $$render_details) (test_radiant_render.js --baseline)"; \
 	echo "   ├── WPT CSS Syntax      $$wpt_syntax_status  ($$(format_duration "$$wpt_syntax_elapsed"), $$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
@@ -2433,6 +2455,10 @@ test-page-load: build-test
 		echo "Error: test/test_page_load_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
 	fi
+
+test-css-cascade-memory: build-radiant-baseline
+	@echo "Running CSS cascade memory regression with the baseline host build..."
+	./test/test_css_cascade_memory_gtest.exe
 
 test-radiant-online: build-test
 	@echo "Running Radiant online URL smoke test suite..."

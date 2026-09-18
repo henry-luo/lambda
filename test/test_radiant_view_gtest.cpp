@@ -356,22 +356,22 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
         "[image] Decoded local image on demand: 640x427 (intrinsic 640x427, target 640x427)"));
 }
 
-TEST(RadiantViewTest, JsMirLeaseSessionKeepsFreshDocumentRealms) {
+TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_mutate.html"));
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_verify.html"));
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_external_classic.js"));
     test_radiant_view_ensure_temp_dir();
 
-    const char* output_dir = "./temp/test_js_mir_cache_realm";
+    const char* output_dir = "./temp/test_js_ast_realm";
 #ifdef _WIN32
     _mkdir(output_dir);
 #else
     mkdir(output_dir, 0755);
 #endif
 
-    const char* timing_path = "./temp/test_js_mir_cache_realm/timing.jsonl";
+    const char* timing_path = "./temp/test_js_ast_realm/timing.jsonl";
     const char* result_path =
-        "./temp/test_js_mir_cache_realm/html__js_cache_realm_verify.json";
+        "./temp/test_js_ast_realm/html__js_cache_realm_verify.json";
     const char* args[] = {
         "./lambda.exe", "layout",
         "test/html/js_cache_realm_mutate.html",
@@ -391,14 +391,14 @@ TEST(RadiantViewTest, JsMirLeaseSessionKeepsFreshDocumentRealms) {
         ? strstr(shell_result.stdout_buf, "pool_free: pointer") : nullptr);
     shell_result_free(&shell_result);
 
-    // The preamble and external code are shared while globals, prototypes,
-    // declarations, lifecycle tasks, and DOM bindings remain document-local.
+    // Each AST document realm keeps globals, prototypes, declarations,
+    // lifecycle tasks, and DOM bindings document-local.
     EXPECT_TRUE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-isolated|dom|load"));
     EXPECT_FALSE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-leaked"));
     EXPECT_TRUE(test_radiant_view_file_contains(
-        timing_path, "\"script_cache_hits\":2"));
+        timing_path, "\"script_cache_lookups\":0"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         timing_path, "\"script_cache_compiles\":0"));
 }

@@ -17,7 +17,6 @@
 #include "radiant.hpp"
 #include "script_timeout.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_events.h"
@@ -26,7 +25,6 @@
 #include "../lambda/js/js_host_hooks.h"
 #include "../lambda/dom/dom_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
-#include "../lambda/runtime/mir_policy.hpp"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/runtime/module_registry.h"
@@ -68,7 +66,6 @@
 
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
-extern "C" int g_mir_interp_mode;
 extern unsigned int g_js_mir_optimize_level;
 extern Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 extern char* js_load_script_source_from_cache(const char* path,
@@ -1201,36 +1198,6 @@ static size_t script_task_collection_source_bytes(JsScriptTaskCollection* collec
     return bytes;
 }
 
-static bool script_task_collection_requires_ast_realm(
-        JsScriptTaskCollection* collection) {
-    if (!collection) return false;
-    ArrayList* lists[] = {collection->scripts, collection->onload_handlers};
-    for (int list_index = 0; list_index < 2; list_index++) {
-        ArrayList* list = lists[list_index];
-        if (!list) continue;
-        for (int task_index = 0; task_index < list->length; task_index++) {
-            JsScriptTask* task = (JsScriptTask*)arraylist_get(list, task_index);
-            if (!task || task->status != JS_SCRIPT_TASK_READY ||
-                    !task->source || task->source_len == 0) continue;
-            // An indexed AST cannot contain more nodes than its syntax bytes
-            // plus its program root, so small sources need no duplicate parse.
-            if (task->source_len < MIR_RADIANT_AST_NODE_THRESHOLD - 1) continue;
-            JsTranspiler* probe = js_transpiler_create(NULL);
-            if (!probe) continue;
-            bool parsed = js_transpiler_parse_c(probe, task->source,
-                task->source_len, JS_PARSE_AUTO);
-            uint32_t node_count = parsed ? probe->ast_index.count : 0;
-            js_transpiler_destroy(probe);
-            if (node_count > MIR_RADIANT_AST_NODE_THRESHOLD) {
-                log_info("script_runner: document selects AST backend; script #%d has %u AST nodes",
-                    task->document_order, node_count);
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 static int loaded_external_scripts = 0;
 static int failed_external_scripts = 0;
 
@@ -2222,11 +2189,10 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     runtime_init(runtime);
     runtime->dom_doc = (void*)dom_doc;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
-    // Select once before the preamble so script callbacks retain one closure
-    // ABI throughout this DOM realm rather than crossing AST/MIR boundaries.
-    runtime->js_ast_backend = g_mir_interp_mode == 0 &&
-        !mir_explicit_interpreter_requested() && mir_large_interp_enabled() &&
-        script_task_collection_requires_ast_realm(&script_tasks);
+    // Browser documents use the AST executor throughout one DOM realm. This
+    // avoids a throwaway parse merely to select a backend and keeps callbacks
+    // on one closure ABI.
+    runtime->js_ast_backend = true;
     Context* saved_input_context = input_context;
     EvalContext* document_context = runtime_get_eval_context(runtime);
     if (!document_context) {
