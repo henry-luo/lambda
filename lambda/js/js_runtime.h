@@ -420,6 +420,15 @@ Item js_args_rest_array(Item* args, int64_t start, int64_t argc);
 struct AstFuncNode;
 struct JsScript;
 struct JsInterpEnv;
+struct JsAstLiteralCacheEntry;
+// Retained AST literal values are context-owned precise roots. `ast_image` is
+// the immutable template identity, not an execution Script shell.
+struct JsAstLiteralCacheEntry* js_ast_literal_cache_acquire(const void* ast_image,
+    uint32_t literal_count);
+bool js_ast_literal_cache_read(const struct JsAstLiteralCacheEntry* entry,
+    uint32_t slot, Item* out);
+bool js_ast_literal_cache_write(struct JsAstLiteralCacheEntry* entry,
+    uint32_t slot, Item value);
 // Return the source text mandated by Function.prototype.toString for a parsed
 // method/function node. Both MIR and AST execution use this canonical trimming.
 bool js_function_source_span(const char* source, size_t source_length,

@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_interp.hpp"
 #include "../../lib/hashmap_helpers.h"
 #include "../input/input-script-cache.h"
 
@@ -841,6 +842,9 @@ void jm_compile_recovery_state_destroy_context(JsRuntimeState* runtime_state) {
 }
 
 void jm_defer_mir_cleanup(MIR_context_t ctx) {
+    // Event handlers retain generated function pointers, but not MIR's
+    // instruction lists. Drop that compiler-only IR before retaining the ctx.
+    jit_release_generated_ir(ctx);
     // A failed push cannot MIR_finish here: JIT-compiled function pointers
     // still live and would crash on call, so the context leaks to process
     // exit exactly as the old overflow path did.
@@ -2928,8 +2932,6 @@ static int js_mir_analyze_and_plan(void* opaque) {
             }
         }
 
-        jm_populate_numeric_binding_facts(mt, fc, body);
-
         if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE) {
             FnVariantAnalysis* native =
                 &analysis->variants[analysis->variant_count++];
@@ -2959,6 +2961,11 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     native->params[p] = {param_type, rep, 0};
                 }
             }
+            // Number-only local facts belong to the guarded native entry. The
+            // boxed body remains reachable with BigInt or any other JS value,
+            // so publishing those facts there would coerce its dynamic result
+            // through an F64 register (D2.4.1-D2.4.3, D8.2.4-D8.2.6).
+            jm_populate_numeric_binding_facts(mt, fc, native);
         }
         if ((fc->node->is_async || fc->node->is_generator) &&
                 analysis->variant_count < 4) {
@@ -4096,6 +4103,18 @@ static Item jm_execute_cached_module_mir(Runtime* runtime,
     return result;
 }
 
+static bool jm_document_mir_budget_reserve(Runtime* runtime,
+        uint32_t ast_node_count) {
+    if (!runtime || !runtime->dom_doc || !mir_large_interp_enabled()) return true;
+    JsRuntimeState* state = js_runtime_state_for(context);
+    if (!state) return true;
+    uint64_t budget = mir_radiant_document_jit_ast_node_budget();
+    uint64_t used = state->document_mir_ast_nodes;
+    if (ast_node_count > budget || used > budget - ast_node_count) return false;
+    state->document_mir_ast_nodes = used + ast_node_count;
+    return true;
+}
+
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
     // Module compilation bypasses transpile_js_to_mir_core_len(), which normally
@@ -4187,11 +4206,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     bool document_ast_too_large = runtime->dom_doc != NULL &&
         mir_large_interp_enabled() &&
         tp->ast_index.count > MIR_RADIANT_AST_NODE_THRESHOLD;
-    if (document_ast_too_large) {
+    bool ast_executor_requested = js_ast_interpreter_requested();
+    bool document_jit_budget_available = !document_ast_too_large &&
+        !ast_executor_requested && jm_document_mir_budget_reserve(runtime,
+            tp->ast_index.count);
+    if (ast_executor_requested || document_ast_too_large ||
+            !document_jit_budget_available) {
         // Static imports bypass the source-script compiler, so select its
         // established AST tier here before MIR lowering scales with the graph.
-        log_info("js-mir: document module AST (%u nodes) uses AST executor",
-            tp->ast_index.count);
+        const char* reason = ast_executor_requested ? "requested backend"
+            : document_ast_too_large ? "module threshold" : "document budget";
+        log_info("js-mir: module AST (%u nodes) uses AST executor (%s)",
+            tp->ast_index.count, reason);
         js_tla_exit_module();
         return js_mir_execute_ast_module(runtime, tp, filename);
     }
@@ -4460,6 +4486,9 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
                 // belongs to this one execution and can be discarded now.
                 jm_clear_active_js_transpile(NULL, mt, NULL);
                 jm_destroy_mir_transpiler(mt);
+                // The cache retains native code through the artifact context;
+                // its finalized MIR instruction lists are no longer needed.
+                jit_release_generated_ir(ctx);
                 jm_clear_active_js_transpile(tp, NULL, NULL);
                 js_transpiler_destroy(tp);
                 return namespace_obj;

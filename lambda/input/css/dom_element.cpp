@@ -223,6 +223,20 @@ void dom_document_destroy(DomDocument* document) {
     mem_free(document);
 }
 
+bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool) {
+    if (!document || !pool) return false;
+    if (!document->owned_loader_pool) {
+        document->owned_loader_pool = pool;
+        return true;
+    }
+    if (document->owned_loader_pool != pool) {
+        // A loader such as a Lambda document can replace itself with a fresh
+        // HTML document. Its original pool then has no surviving consumers.
+        mem_pool_destroy(pool);
+    }
+    return true;
+}
+
 bool dom_document_replace_url(DomDocument* document, Url* replacement) {
     if (!document || !replacement) return false;
     if (!document->url) {

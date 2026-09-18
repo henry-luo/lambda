@@ -65,6 +65,22 @@ struct JsTemplateRegistry {
     RootVector values = {};
 };
 
+struct JsAstLiteralCacheEntry {
+    const void* ast_image = NULL;
+    uint32_t literal_count = 0;
+    int64_t first_root_slot = -1;
+    uint8_t* materialized = NULL;
+    JsAstLiteralCacheEntry* next = NULL;
+};
+
+// Parser images can be shared by the process-wide AST cache, but JavaScript
+// primitive values belong to one realm heap. This registry associates an
+// immutable image's dense literal slots with context-owned precise roots.
+struct JsAstLiteralCache {
+    JsAstLiteralCacheEntry* entries = NULL;
+    RootVector values = {};
+};
+
 struct JsMockSchedulerWait {
     // One scheduled wait owns its four async edges; a dynamic collection of
     // these records replaces the former capped parallel-root array.
@@ -972,6 +988,7 @@ struct JsRuntimeState {
     // tagged-template identity uses its own registry below.
     JsArrayRuntimeItemsHeader* array_runtime_items = NULL;
     JsTemplateRegistry template_registry = {};
+    JsAstLiteralCache ast_literal_cache = {};
     JsPrototypeSnapshotState* prototype_snapshot_state = NULL;
     void* regex_compile_cache = NULL;
     void* regex_permanent_cache = NULL;
@@ -1033,6 +1050,9 @@ struct JsRuntimeState {
     uint32_t batch_test_module_state_id = UINT32_MAX;
     uint32_t batch_preamble_module_state_id = UINT32_MAX;
     uint32_t batch_preamble_var_count = 0;
+    // Per-document MIR admission stays on the realm that owns its generated
+    // code, so a later document starts with a fresh compilation allowance.
+    uint64_t document_mir_ast_nodes = 0;
     uint64_t heap_epoch = 1;
 
     JsRegexpLastMatch regexp_last_match = {};

@@ -249,7 +249,7 @@ Default behavior, in order:
   commit and deliberately omits `.exe`, so broad test cleanup does not remove
   it. A pre-existing cache entry must be byte-identical; otherwise the run
   aborts rather than attaching a report to an ambiguous executable.
-- Runs `test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`, forwarding whichever of `--typed` / `--legacy` you passed (one is required — see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode)).
+- Runs `test/benchmark/run_benchmarks.py -e mir,c2mir,lambdajs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v9.json --fresh`, forwarding whichever of `--typed` / `--legacy` you passed (one is required — see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode)).
 - Derives the matching JSON path from `--report-output`; for example, `Overall_Result9.md` pairs with `benchmark_results_v9.json`.
 - Starts snapshot runs from an empty result file by default. Use `--merge` only when intentionally refreshing part of an existing JSON.
 - Writes run logs under `temp/benchmark_vN/`: `power_check.log`,

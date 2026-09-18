@@ -22,7 +22,7 @@ if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
 # which this workflow already assumes for its own relative paths.
 from run_benchmarks import check_release_build  # noqa: E402
 
-DEFAULT_ENGINES = "mir,lambdajs,quickjs,nodejs"
+DEFAULT_ENGINES = "mir,c2mir,lambdajs,nodejs"
 # Strings emitted only by a LAMBDA_JS_EXEC_PROFILE build — these are opt-trace
 # event names from the #ifdef block in lambda/js/js_exec_profile.cpp.
 #

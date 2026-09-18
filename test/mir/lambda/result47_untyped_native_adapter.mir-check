@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Result47 / D2.4.1-D2.4.3, D8.6.2: a dynamic argument routes typed safe_add through its boxed adapter, then the nested native consumer must check the Item error arm and reopen the proven int result. Before the fix _caller failed to compile with unavailable representation transition Item -> IntLane.",
+  "checks": [
+    {
+      "in_func": "_caller_#",
+      "expect": [
+        ":\tfunc\t"
+      ]
+    }
+  ]
+}

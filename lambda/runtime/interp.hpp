@@ -164,6 +164,9 @@ struct InterpState {
     InterpContext* contexts;
     InterpErrorContext* errors;
     InterpViewBinding* view_bindings;
+    // Per-activation links from immutable dotted-member AST identifiers to
+    // this EvalContext's NamePool records. The shared AST never owns these.
+    struct hashmap* static_member_names;
     // The current subscript owner for a nested `last` expression. This points
     // at a live frame slot and is restored when that subscript completes.
     uint64_t*    last_index_item;

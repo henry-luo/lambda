@@ -128,6 +128,26 @@ static bool css_path_is_http(const char* path) {
     return radiant_url_is_http(path);
 }
 
+static void dump_post_script_memory_snapshot(void) {
+    const char* output_path = shell_getenv("RADIANT_POST_SCRIPT_MEMORY_SNAPSHOT_PATH");
+    if (!output_path || !*output_path) return;
+    MemtrackStats stats = {};
+    memtrack_get_stats(&stats);
+    log_notice("RADIANT_MEMORY_PROFILE: post-script memtrack current=%zu peak=%zu",
+               stats.current_bytes, stats.peak_bytes);
+    for (int i = 0; i < MEM_CAT_COUNT; i++) {
+        const MemtrackCategoryStats* category = &stats.categories[i];
+        if (category->current_bytes == 0 && category->peak_bytes == 0) continue;
+        log_notice("RADIANT_MEMORY_PROFILE: post-script category=%s current=%zu peak=%zu",
+                   memtrack_category_names[i], category->current_bytes,
+                   category->peak_bytes);
+    }
+    if (!mem_context_dump_json_file(NULL, output_path)) {
+        log_error("RADIANT_MEMORY_PROFILE: failed to dump post-script snapshot to %s",
+                  output_path);
+    }
+}
+
 // CSS references share URL resolution, but only link elements use the layout
 // support-root fallback for WPT-style absolute paths.
 static bool css_resolve_reference_path(const char* href, const char* base_path,
@@ -2211,6 +2231,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         log_mem_stage("load_html: before_scripts");
         execute_document_scripts_profiled(html_root, dom_doc, pool, html_url, script_timing);
         log_mem_stage("load_html: after_scripts");
+        // The retained JS runtime is process-root-owned, so capture it before
+        // the post-script cascade can obscure script allocation attribution.
+        dump_post_script_memory_snapshot();
         auto t_script_exec = timing ? time_now_ns() : t_initial_cascade;
 
         if (dom_doc->root != dom_root) {
@@ -2534,6 +2557,10 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if (!doc) {
         url_destroy(full_url);
         pool_destroy(pool);
+    } else if (!dom_document_finalize_loader_pool(doc, pool)) {
+        log_error("load_html_doc: could not transfer loader pool to document");
+        free_document(doc);
+        return nullptr;
     }
 
     return doc;
@@ -3504,8 +3531,8 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
     dom_doc->page_kind = DOM_PAGE_KIND_GENERATED;
-
-    dom_doc->document_pool = pool;
+    // dom_document_create establishes the pool that owns its style-epoch
+    // manager; XML loader scratch remains in the caller's loader pool.
     dom_doc->url = xml_url;
 
     DomElement* html_elem = DomElement::create(dom_doc, "html", nullptr);
@@ -3566,7 +3593,18 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
     if (!pool) { log_error("load_html_string_doc: pool_create failed"); return nullptr; }
     Url* base_url = get_current_dir();
     if (!base_url) { log_error("load_html_string_doc: get_current_dir failed"); pool_destroy(pool); return nullptr; }
-    return load_lambda_html_doc(base_url, nullptr, viewport_width, viewport_height, pool, html_source);
+    DomDocument* doc = load_lambda_html_doc(base_url, nullptr, viewport_width, viewport_height,
+                                            pool, html_source);
+    if (!doc) {
+        pool_destroy(pool);
+        return nullptr;
+    }
+    if (!dom_document_finalize_loader_pool(doc, pool)) {
+        log_error("load_html_string_doc: could not transfer loader pool to document");
+        free_document(doc);
+        return nullptr;
+    }
+    return doc;
 }
 
 // evaluate a Lambda document and run it through the CSS/layout pipeline.

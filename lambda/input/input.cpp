@@ -1598,6 +1598,19 @@ void input_release_auxiliary_resources(Input* input) {
     }
 }
 
+void input_release_document_resources(Input* input) {
+    if (!input) return;
+    input_release_auxiliary_resources(input);
+    if (input->mem_ctx) {
+        // The document context owns the Input arena and its remaining tracked
+        // allocators; destroy it only after its DOM has detached from them.
+        mem_context_destroy((MemContext*)input->mem_ctx);
+        input->mem_ctx = nullptr;
+        input->arena = nullptr;
+        input->shape_pool = nullptr;
+    }
+}
+
 // Global singleton instance
 static InputManager* g_input_manager = nullptr;
 
@@ -1645,15 +1658,7 @@ void InputManager::reset_inputs() {
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
-            input_release_auxiliary_resources(input);
-            if (input && input->mem_ctx) {
-                // destroy document-owned allocators before the next document
-                // can observe stale arena or semantic-owner nodes.
-                mem_context_destroy((MemContext*)input->mem_ctx);
-                input->mem_ctx = nullptr;
-                input->arena = nullptr;
-                input->shape_pool = nullptr;
-            }
+            input_release_document_resources(input);
             if (input && input->url) {
                 url_destroy((Url*)input->url);
                 input->url = nullptr;

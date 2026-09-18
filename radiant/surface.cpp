@@ -22,6 +22,7 @@ typedef struct ImageEntry {
     // ImageFormat format;
     const char* path;  // todo: change to URL
     ImageSurface *image;
+    bool unavailable;
 } ImageEntry;
 
 typedef TypedHashMap<ImageEntry,
@@ -381,10 +382,23 @@ static void image_surface_apply_orientation_metadata(ImageSurface* surface, int 
     }
 }
 
-static void load_image_cleanup_failed(Url* abs_url, char* file_path, unsigned char* downloaded_data) {
+static void image_cache_store_unavailable(UiContext* uicon, char* file_path) {
+    if (!file_path) return;
+    if (!uicon || !uicon->image_cache) {
+        mem_free(file_path);
+        return;
+    }
+    // Cache the failed URL for this document so repeated intrinsic-size probes
+    // do not retry a synchronous network fetch that already failed.
+    ImageEntry entry = {.path = file_path, .image = nullptr, .unavailable = true};
+    ImageMap::set(uicon->image_cache, entry);
+}
+
+static void load_image_cleanup_failed(UiContext* uicon, Url* abs_url, char* file_path,
+                                      unsigned char* downloaded_data) {
     if (downloaded_data) mem_free(downloaded_data);
-    if (file_path) mem_free(file_path);
     if (abs_url) url_destroy(abs_url);
+    image_cache_store_unavailable(uicon, file_path);
 }
 
 static ImageSurface* image_surface_decode_memory(const unsigned char* data,
@@ -436,7 +450,8 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         ImageEntry search_key = {.path = (char*)img_url, .image = NULL};
         ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
         if (entry) {
-            log_debug("[BG-IMAGE] Data URI image loaded from cache");
+            log_debug(entry->unavailable ? "[BG-IMAGE] Data URI image unavailable from cache"
+                                         : "[BG-IMAGE] Data URI image loaded from cache");
             return entry->image;
         }
 
@@ -591,7 +606,8 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
         ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
         if (entry) {
-            log_debug("Image loaded from cache: %s", file_path);
+            log_debug(entry->unavailable ? "Image unavailable from cache: %s"
+                                         : "Image loaded from cache: %s", file_path);
             mem_free(file_path);
             url_destroy(abs_url);
             return entry->image;
@@ -600,9 +616,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         downloaded_data = (unsigned char*)download_http_content(url_str, &downloaded_size, nullptr);
         if (!downloaded_data || downloaded_size == 0) {
             log_error("[image] Failed to download image: %s", url_str);
-            if (downloaded_data) mem_free(downloaded_data);
-            mem_free(file_path);
-            url_destroy(abs_url);
+            load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
             return NULL;
         }
         log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
@@ -640,7 +654,8 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
     ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
     if (entry) {
-        log_debug("Image loaded from cache: %s", file_path);
+        log_debug(entry->unavailable ? "Image unavailable from cache: %s"
+                                     : "Image loaded from cache: %s", file_path);
         // HTTP cache lookup normally happens before download; keep this cleanup
         // for race/fallback paths so a cached surface never drops a fresh buffer.
         if (downloaded_data) mem_free(downloaded_data);
@@ -691,7 +706,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (!surface->pic) {
             log_debug("failed to load SVG image: %s", file_path);
             mem_free(surface);
-            load_image_cleanup_failed(abs_url, file_path, downloaded_data);
+            load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
             return NULL;
         }
         float svg_w, svg_h;
@@ -746,7 +761,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (downloaded_data) mem_free(downloaded_data);
         downloaded_data = nullptr;
         if (!surface) {
-            load_image_cleanup_failed(abs_url, file_path, nullptr);
+            load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
             return NULL;
         }
         image_surface_apply_orientation_metadata(surface, 1);
@@ -773,7 +788,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 downloaded_data = nullptr;
                 if (!surface) {
                     log_debug("failed to load image: %s", file_path);
-                    load_image_cleanup_failed(abs_url, file_path, nullptr);
+                    load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
                     return NULL;
                 }
             }
@@ -794,7 +809,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 surface = image_surface_decode_file(file_path);
                 if (!surface) {
                     log_debug("failed to load image: %s", file_path);
-                    load_image_cleanup_failed(abs_url, file_path, nullptr);
+                    load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
                     return NULL;
                 }
             }
@@ -858,8 +873,10 @@ bool image_entry_free(const void *item, void *udata) {
     (void)udata;
     ImageEntry* entry = (ImageEntry*)item;
     mem_free((char*)entry->path);  // always mem_alloc-owned: mem_strdup for HTTP paths, url_to_local_path for local paths
-    if (entry->image->url) url_destroy(entry->image->url);
-    image_surface_destroy(entry->image);
+    if (entry->image) {
+        if (entry->image->url) url_destroy(entry->image->url);
+        image_surface_destroy(entry->image);
+    }
     return true;
 }
 

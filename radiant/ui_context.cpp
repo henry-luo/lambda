@@ -392,6 +392,8 @@ void free_document(DomDocument* doc) {
     if (!doc) return;
 
     Input* document_input = doc->input;
+    Pool* owned_loader_pool = doc->owned_loader_pool;
+    doc->owned_loader_pool = nullptr;
 
     // Module-owned DOM wrappers are non-owning; unroot wrappers before the
     // document arena destroys the native nodes they point at.
@@ -487,11 +489,12 @@ void free_document(DomDocument* doc) {
         log_debug("free_document: released the document-owned script runtime");
     }
 
-    // Input registries are backed by the loader pool. Release their allocator
-    // nodes before document teardown can destroy an aliased pool (D4.2.1v3).
-    input_release_auxiliary_resources(document_input);
+    // The Input context owns parser arenas outside the loader pool. Release it
+    // after every DOM-owned allocator has detached from the same context.
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
+    input_release_document_resources(document_input);
+    if (owned_loader_pool) mem_pool_destroy(owned_loader_pool);
 }
 
 void ui_context_cleanup(UiContext* uicon) {

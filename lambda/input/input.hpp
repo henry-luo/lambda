@@ -64,6 +64,10 @@ public:
 // or document context is destroyed.
 void input_release_auxiliary_resources(Input* input);
 
+// Release a completed document's Input-owned allocators. The caller still owns
+// the backing pool and URL carrier.
+void input_release_document_resources(Input* input);
+
 // ============================================================================
 // InputManager Heap Factory (audited boundary)
 // ============================================================================
