@@ -194,11 +194,15 @@ def build_svg(metadata: dict[str, Any]) -> str:
     lines.append('  <g aria-label="Session creation month">')
     first_x = session_x(layout, 0, count)
     lines.append(f'    <line x1="{number(first_x)}" y1="{number(plot_y_min)}" x2="{number(first_x)}" y2="{number(plot_y_max)}" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 5"><title>{xml_text(labels[0])} · {xml_text(rendered_metadata["month_groups"][0]["label"])}</title></line>')
-    lines.append(f'    <text x="812.50" y="{layout["month_label_y"]}" text-anchor="middle" fill="#64748b" font-family="{FONT}" font-size="11" font-weight="600">Session month</text>')
+    month_xs = []
     for group in rendered_metadata["month_groups"]:
         start = index_by_label[group["start"]]
         end = index_by_label[group["end"]]
-        x = (session_x(layout, start, count) + session_x(layout, end, count)) / 2
+        month_xs.append((session_x(layout, start, count) + session_x(layout, end, count)) / 2)
+    # caption sits in the widest gap between month labels so it never overlaps one as sessions are added
+    caption_x = max(zip(month_xs, month_xs[1:]), key=lambda pair: pair[1] - pair[0], default=(plot_x_min, plot_x_max))
+    lines.append(f'    <text x="{number(sum(caption_x) / 2)}" y="{layout["month_label_y"]}" text-anchor="middle" fill="#64748b" font-family="{FONT}" font-size="11" font-weight="600">Session month</text>')
+    for group, x in zip(rendered_metadata["month_groups"], month_xs):
         lines.append(f'    <text x="{number(x)}" y="{layout["month_label_y"]}" text-anchor="middle" fill="#475569" font-family="{FONT}" font-size="11" font-weight="600">{xml_text(group["label"])}</text>')
     lines.append("  </g>")
 
@@ -241,8 +245,8 @@ def build_svg(metadata: dict[str, Any]) -> str:
             lines.append(f'  <circle cx="{number(x)}" cy="{number(y)}" r="3.5" fill="#ffffff" stroke="{style["color"]}" stroke-width="2"><title>{xml_text(key)} · {xml_text(labels[index])}: {float(value):.2f}×</title></circle>')
 
     lines.append("  </g>")
-    note_y = [825, 844, 863, 882]
-    for y, note in zip(note_y, metadata["notes"]):
+    for index, note in enumerate(metadata["notes"]):
+        y = 825 + 19 * index
         lines.append(f'  <text x="84" y="{y}" fill="#64748b" font-family="{FONT}" font-size="11">{xml_text(note)}</text>')
     lines.append("</svg>")
     return "\n".join(lines) + "\n"
