@@ -916,7 +916,7 @@ fn wrapper(...) => call(sum_all, varg())
 wrapper(1, 2, 3)                  // 6
 ```
 
-`call` is Lambda's one **effect-polymorphic** function (S12.1.4): its colour
+`call` is the built-in **effect-polymorphic** function (S12.1.4v2): its colour
 follows `f`, so `call(f, …)` is a `fn` call when `f` is an `fn` and a `pn` call
 when `f` is a `pn`. Calling a `pn` from `fn` context is therefore an error —
 reported at compile time when `f` is statically known, at run time otherwise.

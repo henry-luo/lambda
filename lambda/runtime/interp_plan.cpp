@@ -457,9 +457,7 @@ static void interp_sync_proc_visit(AstNode* node, void* ctx) {
                 scan->ok = false;
                 return;
             }
-        } else if (callee_expr && callee_expr->type &&
-                callee_expr->type->type_id == LMD_TYPE_FUNC &&
-                ((TypeFunc*)callee_expr->type)->is_proc) {
+        } else if (callee_expr && lambda_type_func_is_proc(callee_expr->type)) {
             AstFuncNode* callee = ast_direct_call_function(call);
             if (!callee && callee_expr->node_type == AST_NODE_IDENT) {
                 callee = interp_static_proc_binding(
@@ -662,9 +660,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             }
         } else if (!direct) {
             AstNode* callee = ast_unwrap_primary(call->function);
-            TypeFunc* dynamic_signature = callee && callee->type &&
-                    callee->type->type_id == LMD_TYPE_FUNC
-                ? (TypeFunc*)callee->type : NULL;
+            TypeFunc* dynamic_signature = callee
+                ? lambda_type_func_signature(callee->type) : NULL;
             if (ast_type_func_has_var_parameter(dynamic_signature)) {
                 // lambda_dynamic_call intentionally rejects mutable borrows;
                 // retain whole-script fallback before that ABI boundary.

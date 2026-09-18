@@ -408,6 +408,27 @@ type Article = <article title: string, author: string;
 | `fn (name: string) string` | Named parameter (documentation only) |
 | `fn (fn (int) int) int` | Takes a function, returns int |
 | `fn (int) fn (int) int` | Returns a function |
+| `pn (int) int` | A procedure taking int, returning int |
+| `function` | Any function value, `fn` or `pn` |
+
+### Function Colours
+
+`fn` and `pn` types are disjoint: an `fn` type admits only pure functions and
+a `pn` type only procedures, so a parameter declared `fn (...)` never receives
+a procedure. `function` is their union and admits either. `is fn` and `is pn`
+test which one a value is (S11.1.5).
+
+```lambda
+fn square(x: int) => x * x
+pn log_square(x: int) { x * x }
+
+let pure = [square is fn, square is pn, square is function]              // [true, false, true]
+let proc = [log_square is fn, log_square is pn, log_square is function]  // [false, true, true]
+```
+
+A statically-known procedure passed where an `fn (...)` is declared is a
+compile error; a colour known only at run time is checked at the parameter
+boundary.
 
 ### Function Type Examples
 

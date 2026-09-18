@@ -1069,8 +1069,10 @@ module.exports = grammar({
     fn_param: $ => seq(
       field('name', $.identifier), seq(':', field('type', $._type_pattern)),
     ),
+    // `fn` and `pn` function types are disjoint by colour; `function` is
+    // their union (S11.1.5).
     fn_type: $ => seq(
-      'fn',
+      field('kind', choice('fn', 'pn')),
       optional(seq('(', optional(field('declare', $.fn_param)),
         repeat(seq(',', field('declare', $.fn_param))), ')')),
       field('type', $.return_type),
