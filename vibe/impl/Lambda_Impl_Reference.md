@@ -30,8 +30,8 @@ Each stage kept `make build` green and `make test-lambda-baseline` at its entry
 state (5627/5634, seven pre-existing failures: five `test_js_script_gtest`, one
 `proc_proc_markup_mutation`, one `Test262Prelim.RunnerContracts`).
 
-Both front ends agree: `./test/c_s16_conformance.sh` 174/174,
-`./test/ts_s16_conformance.sh` 157/157. Regression tests:
+Both front ends agree: `./test/c_s16_conformance.sh` 175/175,
+`./test/ts_s16_conformance.sh` 158/158. Regression tests:
 `test/lambda/reference_force.ls` (R1–R5) and `test/lambda/reference_crud.ls`
 (R6), both verified identical on the T0 and MIR tiers.
 
@@ -186,13 +186,16 @@ the two test scripts it predicted, and two collisions it did not.
 | `lambda/package/graph/graphviz/markers.ls` | `open` parameter | `is_open` |
 | `test/lambda/editor/multi_node_selection.ls` | `let del` | `deleted` |
 
-**`commit` already ships as a sys function.** `SYSFUNC_EDIT_COMMIT` /
-`SYSFUNC_EDIT_COMMIT1` are the editor's `commit()` / `commit(label)`, used by
-`test/lambda/edit_bridge.ls`. The design did not list this. Resolved without a
-ruling change, by the rule the codebase already applies to `type` / `type(x)`:
-`commit` heads the transaction statement only when the next token is not `(`,
-and reads as the sys call everywhere else. It stays barred as a binding name,
-exactly as `type` is.
+**`commit` already shipped as a sys function.** `SYSFUNC_EDIT_COMMIT` /
+`SYSFUNC_EDIT_COMMIT1` were the editor's `commit()` / `commit(label)`, used by
+`test/lambda/edit_bridge.ls`. The design did not list this. It first landed with
+a `type` / `type(x)`-style lookahead (`commit` headed the statement only when no
+`(` followed); that was replaced on 2026-09-18 by renaming the editor function
+to `editor_commit()` / `editor_commit(label)` (C symbols `fn_editor_commit0/1`),
+so `commit` is now solely the transaction statement (S1.7: one symbol, one
+concept) and `commit()` is a parse error. `undo()` / `redo()` keep their names —
+neither collides with a keyword. The editor's command-name string `"commit"` in
+`edit_session_exec` is protocol, not the sys-function name, and is unchanged.
 
 **Data names were the large fallout.** S16.10.2 says data-name positions admit
 every keyword spelling, but the predicate sets enumerate keyword tokens

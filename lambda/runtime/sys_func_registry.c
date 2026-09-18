@@ -177,8 +177,8 @@ extern void edit_session_subscribe(void* session, int kind, void* callback, void
 // edit bridge sys func wrappers
 extern Item fn_undo(void);
 extern Item fn_redo(void);
-extern Item fn_commit0(void);
-extern Item fn_commit1(Item description);
+extern Item fn_editor_commit0(void);
+extern Item fn_editor_commit1(Item description);
 
 extern Item pn_select(Item handles, Item timeout_ms);
 
@@ -1169,11 +1169,14 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_EDIT_REDO, "redo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
 
-    {SYSFUNC_EDIT_COMMIT, "commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_commit0", FPTR(fn_commit0), NULL, NULL, false, 0},
+    // `commit` is the Tier-3 transaction statement (PTH62), so the editor's
+    // version-commit function carries the `editor_` prefix instead of sharing
+    // the keyword's spelling (S1.7: one symbol, one concept).
+    {SYSFUNC_EDIT_COMMIT, "editor_commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_editor_commit0", FPTR(fn_editor_commit0), NULL, NULL, false, 0},
 
-    {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
+    {SYSFUNC_EDIT_COMMIT1, "editor_commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_editor_commit1", FPTR(fn_editor_commit1), NULL, NULL, false, 0},
 
     // reactive UI: emit event to parent template handler
     {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,

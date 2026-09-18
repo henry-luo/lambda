@@ -4774,15 +4774,6 @@
                   "type": "ALIAS",
                   "content": {
                     "type": "STRING",
-                    "value": "commit"
-                  },
-                  "named": true,
-                  "value": "identifier"
-                },
-                {
-                  "type": "ALIAS",
-                  "content": {
-                    "type": "STRING",
                     "value": "type"
                   },
                   "named": true,

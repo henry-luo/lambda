@@ -639,7 +639,6 @@ module.exports = grammar({
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, 'import',
         alias($._apply_kw, $.identifier),
-        alias('commit', $.identifier),
         // `type(x)` — the keyword is callable even though it is not a bare
         // value. One token of lookahead separates it from a declaration:
         // `(` means call, an identifier means `type Name …`.

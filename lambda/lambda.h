@@ -656,8 +656,8 @@ typedef enum SysFunc {
     // edit bridge — MarkEditor operations (Phase 4)
     SYSFUNC_EDIT_UNDO,       // undo() - undo last edit commit
     SYSFUNC_EDIT_REDO,       // redo() - redo last undone commit
-    SYSFUNC_EDIT_COMMIT,     // commit() - commit current edits as version
-    SYSFUNC_EDIT_COMMIT1,    // commit(description) - commit with description
+    SYSFUNC_EDIT_COMMIT,     // editor_commit() - commit current edits as version
+    SYSFUNC_EDIT_COMMIT1,    // editor_commit(description) - commit with description
     // reactive UI event dispatch
     SYSPROC_EMIT,            // emit(event_name, data) - dispatch event to parent template handler
     SYSFUNC_PDF_PARSE_CONTENT_STREAM,  // pdf_parse_content_stream(bytes) - fast PDF content tokenizer

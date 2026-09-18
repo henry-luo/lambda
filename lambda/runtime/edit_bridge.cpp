@@ -870,12 +870,12 @@ Item fn_redo(void) {
     return (Item){.item = ok ? ITEM_TRUE : ITEM_FALSE};
 }
 
-Item fn_commit0(void) {
+Item fn_editor_commit0(void) {
     int ver = edit_commit(NULL);
     return (Item){.item = i2it(ver)};
 }
 
-Item fn_commit1(Item description) {
+Item fn_editor_commit1(Item description) {
     const char* desc = NULL;
     if (get_type_id(description) == LMD_TYPE_STRING) {
         String* s = description.get_string();

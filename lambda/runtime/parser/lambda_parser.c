@@ -467,7 +467,7 @@ static bool token_starts_return_type(LambdaTokenKind kind) {
 }
 
 static bool token_starts_expression(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_COMMIT || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
 }
 
 typedef bool (*LambdaTokenKindPredicate)(LambdaTokenKind kind);
@@ -1472,11 +1472,7 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
     if (!parser_enter(parser)) return 0;
     LambdaToken first = parser->current;
     LambdaParseValue value = 0;
-    // LAMBDA_TOK_COMMIT is admitted here, but deliberately NOT in
-    // token_is_identifier_like: `commit` stays barred as a binding name
-    // (S16.10.1, PTH-O8) while `commit(…)`, the editor sys call that already
-    // ships, keeps reading as a call. `type` / `type(x)` is the same split.
-    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS || first.kind == LAMBDA_TOK_COMMIT) {
+    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
         if (parser->pipe_rhs_depth && (first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY)) {
             parser->pipe_rhs_has_current = true;
         }
@@ -2236,12 +2232,7 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
                 parser->current.kind == LAMBDA_TOK_DEL) {
             return parse_crud_statement(parser, parser->current.kind == LAMBDA_TOK_PUT);
         }
-        // `commit` heads the transaction statement, but `commit(…)` is the
-        // editor sys function that already ships. One lookahead token tells
-        // them apart, exactly as it does for `type` above -- a keyword and a
-        // same-named sys call have coexisted on that rule since `type(x)`.
-        if ((parser->current.kind == LAMBDA_TOK_COMMIT &&
-                    parser->next.kind != LAMBDA_TOK_LPAREN) ||
+        if (parser->current.kind == LAMBDA_TOK_COMMIT ||
                 parser->current.kind == LAMBDA_TOK_ROLLBACK) {
             LambdaToken head = parser->current;
             parser_advance(parser);
