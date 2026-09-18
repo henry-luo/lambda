@@ -5,8 +5,74 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>
 #include "../../../lib/mem_grow.hpp"
+#include "../../../lib/mem_factory.h"
 #include "../../../lib/str.h"
+
+static uint64_t css_condition_hash_bytes(const char* text, size_t length) {
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (size_t i = 0; i < length; i++) {
+        hash ^= (uint8_t)text[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static uint64_t css_condition_environment_key(const CssEngine* engine,
+                                              CssConditionKind kind) {
+    if (!engine) return 0;
+    uint64_t width = 0;
+    uint64_t height = 0;
+    uint64_t ratio = 0;
+    memcpy(&width, &engine->context.viewport_width, sizeof(width));
+    memcpy(&height, &engine->context.viewport_height, sizeof(height));
+    memcpy(&ratio, &engine->context.device_pixel_ratio, sizeof(ratio));
+    uint64_t key = width ^ (height << 1u) ^ (ratio << 7u);
+    key ^= engine->context.reduced_motion ? UINT64_C(0x9e3779b97f4a7c15) : 0;
+    key ^= engine->context.high_contrast ? UINT64_C(0xbf58476d1ce4e5b9) : 0;
+    const char* scheme = engine->context.color_scheme ? engine->context.color_scheme : "";
+    key ^= css_condition_hash_bytes(scheme, strlen(scheme));
+    if (kind == CSS_CONDITION_SUPPORTS) {
+        key ^= engine->supports_css3 ? UINT64_C(0x94d049bb133111eb) : 0;
+        key ^= engine->features.css_color_4 ? UINT64_C(0x2545f4914f6cdd1d) : 0;
+        key ^= engine->features.css_logical_properties ? UINT64_C(0xd6e8feb86659fd93) : 0;
+    }
+    return key ? key : 1;
+}
+
+static bool css_condition_cache_lookup(CssEngine* engine, CssConditionKind kind,
+                                       const char* condition, bool* result) {
+    if (!engine || !condition || !result) return false;
+    size_t length = strlen(condition);
+    uint64_t hash = css_condition_hash_bytes(condition, length);
+    size_t slot = (size_t)(hash & (CSS_CONDITION_CACHE_CAPACITY - 1u));
+    CssConditionCacheEntry* entry = &engine->condition_cache[slot];
+    if (entry->kind != (uint8_t)kind || entry->condition_length != length ||
+        entry->environment_key != css_condition_environment_key(engine, kind) ||
+        !entry->condition || memcmp(entry->condition, condition, length) != 0) return false;
+    *result = entry->result != 0;
+    engine->condition_cache_hits++;
+    return true;
+}
+
+static void css_condition_cache_store(CssEngine* engine, CssConditionKind kind,
+                                      const char* condition, bool result) {
+    if (!engine || !condition) return;
+    size_t length = strlen(condition);
+    if (length > CSS_CONDITION_CACHE_MAX_TEXT_BYTES) return;
+    uint64_t hash = css_condition_hash_bytes(condition, length);
+    CssConditionCacheEntry* entry = &engine->condition_cache[
+        (size_t)(hash & (CSS_CONDITION_CACHE_CAPACITY - 1u))];
+    char* copy = pool_dup_n(engine->pool, condition, length);
+    if (!copy) return;
+    pool_free(engine->pool, (void*)entry->condition);
+    entry->condition = copy;
+    entry->condition_length = (uint32_t)length;
+    entry->environment_key = css_condition_environment_key(engine, kind);
+    entry->kind = (uint8_t)kind;
+    entry->result = result ? 1 : 0;
+}
 
 // Enhanced CSS Engine creation
 CssEngine* css_engine_create(Pool* pool) {
@@ -75,6 +141,11 @@ CssEngine* css_engine_create(Pool* pool) {
 
 void css_engine_destroy(CssEngine* engine) {
     if (!engine) return;
+
+    for (size_t i = 0; i < CSS_CONDITION_CACHE_CAPACITY; i++) {
+        pool_free(engine->pool, (void*)engine->condition_cache[i].condition);
+        engine->condition_cache[i].condition = nullptr;
+    }
 
     // Cleanup components
     css_tokenizer_destroy(engine->tokenizer);
@@ -616,14 +687,15 @@ static bool css_condition_find_operator(CssConditionSpan span, const char* op,
     return false;
 }
 
-static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span) {
-    if (!engine || !engine->pool) return false;
+static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span,
+                                       Pool* scratch) {
+    if (!engine || !scratch) return false;
     span = css_condition_trim(span);
     if (span.length == 0) return false;
 
     if (str_istarts_with(span.start, span.length, "not ", 4)) {
         CssConditionSpan operand = {span.start + 4, span.length - 4};
-        return !css_evaluate_supports_span(engine, operand);
+        return !css_evaluate_supports_span(engine, operand, scratch);
     }
 
     size_t op_pos = 0;
@@ -632,35 +704,46 @@ static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span)
         CssConditionSpan left = {span.start, op_pos};
         CssConditionSpan right = {span.start + op_pos + op_len,
                                   span.length - op_pos - op_len};
-        return css_evaluate_supports_span(engine, left) ||
-            css_evaluate_supports_span(engine, right);
+        return css_evaluate_supports_span(engine, left, scratch) ||
+            css_evaluate_supports_span(engine, right, scratch);
     }
     if (css_condition_find_operator(span, "and", &op_pos, &op_len)) {
         CssConditionSpan left = {span.start, op_pos};
         CssConditionSpan right = {span.start + op_pos + op_len,
                                   span.length - op_pos - op_len};
-        return css_evaluate_supports_span(engine, left) &&
-            css_evaluate_supports_span(engine, right);
+        return css_evaluate_supports_span(engine, left, scratch) &&
+            css_evaluate_supports_span(engine, right, scratch);
     }
 
     css_condition_outer_parens(&span);
     span = css_condition_trim(span);
     if (span.length == 0) return false;
-    char* declaration = pool_dup_n(engine->pool, span.start, span.length);
+    char* declaration = pool_dup_n(scratch, span.start, span.length);
     if (!declaration) return false;
     CssDeclaration* parsed = css_parse_declaration_text(
-        declaration, span.length, engine->pool);
+        declaration, span.length, scratch);
     return css_declaration_is_supported(parsed);
 }
 
-bool css_evaluate_supports_condition(CssEngine* engine, const char* condition) {
+static bool css_evaluate_supports_condition_uncached(CssEngine* engine,
+                                                      const char* condition) {
     if (!engine || !condition) return false;
+    Pool* scratch = mem_pool_create(NULL, MEM_ROLE_TEMP,
+                                    "css.supports_condition.scratch");
+    if (!scratch) return false;
     CssConditionSpan span = {condition, strlen(condition)};
-    return css_evaluate_supports_span(engine, span);
+    bool result = css_evaluate_supports_span(engine, span, scratch);
+    mem_pool_destroy(scratch);
+    return result;
 }
 
-bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
+static bool css_evaluate_media_query_uncached(CssEngine* engine,
+                                              const char* media_query) {
     if (!engine || !media_query) return true;  // Empty query matches all
+
+    Pool* scratch = mem_pool_create(NULL, MEM_ROLE_TEMP,
+                                    "css.media_query.scratch");
+    if (!scratch) return false;
 
 #ifdef RADIANT_TRACE_MEDIA_QUERY
     log_debug("[Media Query] Evaluating: '%s'", media_query);
@@ -669,8 +752,11 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
 #endif
 
     // Make a copy we can modify
-    char* query = pool_strdup(engine->pool, media_query);
-    if (!query) return false;
+    char* query = pool_strdup(scratch, media_query);
+    if (!query) {
+        mem_pool_destroy(scratch);
+        return false;
+    }
 
     // Handle comma-separated queries (OR logic)
     char* saveptr1;
@@ -709,8 +795,11 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
 
         // Split by 'and' (AND logic within a query)
         // Make another copy for tokenizing by 'and'
-        char* and_copy = pool_strdup(engine->pool, query_part);
-        if (!and_copy) return false;
+        char* and_copy = pool_strdup(scratch, query_part);
+        if (!and_copy) {
+            mem_pool_destroy(scratch);
+            return false;
+        }
 
         // Replace " and " with null terminators to split
         char* condition = and_copy;
@@ -789,6 +878,7 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
 #ifdef RADIANT_TRACE_MEDIA_QUERY
             log_debug("[Media Query] MATCHES: '%s'", media_query);
 #endif
+            mem_pool_destroy(scratch);
             return true;
         }
 
@@ -798,7 +888,30 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
 #ifdef RADIANT_TRACE_MEDIA_QUERY
     log_debug("[Media Query] DOES NOT MATCH: '%s'", media_query);
 #endif
+    mem_pool_destroy(scratch);
     return false;
+}
+
+bool css_evaluate_supports_condition(CssEngine* engine, const char* condition) {
+    if (!engine || !condition) return false;
+    bool result = false;
+    if (css_condition_cache_lookup(engine, CSS_CONDITION_SUPPORTS,
+                                   condition, &result)) return result;
+    engine->condition_evaluations++;
+    result = css_evaluate_supports_condition_uncached(engine, condition);
+    css_condition_cache_store(engine, CSS_CONDITION_SUPPORTS, condition, result);
+    return result;
+}
+
+bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
+    if (!engine || !media_query) return true;
+    bool result = false;
+    if (css_condition_cache_lookup(engine, CSS_CONDITION_MEDIA,
+                                   media_query, &result)) return result;
+    engine->condition_evaluations++;
+    result = css_evaluate_media_query_uncached(engine, media_query);
+    css_condition_cache_store(engine, CSS_CONDITION_MEDIA, media_query, result);
+    return result;
 }
 
 CssEngineStats css_engine_get_stats(const CssEngine* engine) {

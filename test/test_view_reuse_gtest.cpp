@@ -381,7 +381,8 @@ TEST_F(StyleEpochTest, ExactRecipesBindOneCanonicalTreeWithoutElementClones) {
     CssDeclaration* canonical = dom_element_get_specified_value(
         first, CSS_PROPERTY_WIDTH);
     ASSERT_NE(canonical, nullptr);
-    EXPECT_TRUE(canonical->owns_payload);
+    EXPECT_FALSE(canonical->owns_payload);
+    EXPECT_NE(canonical->payload_owner, nullptr);
     EXPECT_NE(canonical->value,
         width->data.style_rule.declarations[0]->value);
     StyleEpochStats stats = {};
@@ -389,6 +390,56 @@ TEST_F(StyleEpochTest, ExactRecipesBindOneCanonicalTreeWithoutElementClones) {
     EXPECT_GE(stats.hit_count, 1u);
     EXPECT_EQ(stats.bound_element_refs, 3u);
     EXPECT_GT(stats.current_reserved_bytes, 0u);
+}
+
+TEST_F(StyleEpochTest, CanonicalRecipesShareFrozenPayloadSnapshots) {
+    DomElement* first = append("first");
+    DomElement* second = append("second");
+    CssRule* width = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 40.0, CSS_UNIT_PX));
+    CssRule* height = rule(CSS_PROPERTY_HEIGHT,
+        css_value_create_length(doc.document_pool, 20.0, CSS_UNIT_PX), 2);
+
+    ASSERT_TRUE(style_epoch_cascade_begin(&doc, document_root, &engine, false));
+    ASSERT_EQ(dom_element_apply_rule(first, width, {}), 1);
+    ASSERT_EQ(dom_element_apply_rule(second, width, {}), 1);
+    ASSERT_EQ(dom_element_apply_rule(second, height, {}), 1);
+    style_epoch_cascade_end(&doc);
+
+    CssDeclaration* first_width = dom_element_get_specified_value(
+        first, CSS_PROPERTY_WIDTH);
+    CssDeclaration* second_width = dom_element_get_specified_value(
+        second, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(first_width, nullptr);
+    ASSERT_NE(second_width, nullptr);
+    EXPECT_NE(first->specified_style, second->specified_style);
+    EXPECT_EQ(first_width->value, second_width->value);
+    EXPECT_EQ(first_width->payload_owner, second_width->payload_owner);
+    StyleEpochStats stats = {};
+    style_epoch_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.current_payload_count, 2u);
+    EXPECT_EQ(stats.current_payload_ref_count, 3u);
+}
+
+TEST_F(StyleEpochTest, ReplaceModeRebuildsWithoutPriorRecipeBase) {
+    DomElement* child = append("child");
+    CssRule* width = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 40.0, CSS_UNIT_PX));
+    CssRule* height = rule(CSS_PROPERTY_HEIGHT,
+        css_value_create_length(doc.document_pool, 20.0, CSS_UNIT_PX), 2);
+
+    ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, document_root, &engine));
+    ASSERT_EQ(dom_element_apply_rule(child, width, {}), 1);
+    style_epoch_cascade_end(&doc);
+    ASSERT_NE(dom_element_get_specified_value(child, CSS_PROPERTY_WIDTH), nullptr);
+
+    dom_element_clear_cascaded_styles(child);
+    ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, child, &engine));
+    ASSERT_EQ(dom_element_apply_rule(child, height, {}), 1);
+    style_epoch_cascade_end(&doc);
+
+    EXPECT_EQ(dom_element_get_specified_value(child, CSS_PROPERTY_WIDTH), nullptr);
+    EXPECT_NE(dom_element_get_specified_value(child, CSS_PROPERTY_HEIGHT), nullptr);
 }
 
 TEST_F(StyleEpochTest, InvalidLaterDeclarationPreservesLastValidValue) {
@@ -536,4 +587,157 @@ TEST_F(StyleEpochTest, CowValueSnapshotSurvivesSourceMutationAndEpochRelease) {
     StyleEpochStats stats = {};
     style_epoch_get_stats(&doc, &stats);
     EXPECT_GE(stats.released_epoch_count, 1u);
+}
+
+TEST_F(StyleEpochTest, ConditionEvaluationIsBoundedAndInvalidatesOnEnvironmentChange) {
+    const char* media = "(min-width: 1px)";
+    const char* supports = "(display: block)";
+    CssEngine* conditional_engine = css_engine_create(doc.document_pool);
+    ASSERT_NE(conditional_engine, nullptr);
+    css_engine_set_viewport(conditional_engine, 1280.0, 720.0);
+    ASSERT_TRUE(css_evaluate_media_query(conditional_engine, media));
+    ASSERT_TRUE(css_evaluate_supports_condition(conditional_engine, supports));
+    uint64_t warm_evaluations = conditional_engine->condition_evaluations;
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+
+    for (size_t i = 0; i < 100; i++) {
+        EXPECT_TRUE(css_evaluate_media_query(conditional_engine, media));
+        EXPECT_TRUE(css_evaluate_supports_condition(conditional_engine, supports));
+    }
+    PoolStats stable = {};
+    pool_get_detailed_stats(doc.document_pool, &stable);
+    EXPECT_EQ(conditional_engine->condition_evaluations, warm_evaluations);
+    EXPECT_GE(conditional_engine->condition_cache_hits, 200u);
+    EXPECT_EQ(stable.live_bytes, warm.live_bytes);
+
+    css_engine_set_viewport(conditional_engine, 0.0, 720.0);
+    EXPECT_FALSE(css_evaluate_media_query(conditional_engine, media));
+    EXPECT_GT(conditional_engine->condition_evaluations, warm_evaluations);
+
+    PoolStats before_uncached = {};
+    pool_get_detailed_stats(doc.document_pool, &before_uncached);
+    EXPECT_TRUE(css_evaluate_media_query(conditional_engine, "(min-height: 1px)"));
+    EXPECT_TRUE(css_evaluate_supports_condition(conditional_engine, "(color: red)"));
+    PoolStats after_uncached = {};
+    pool_get_detailed_stats(doc.document_pool, &after_uncached);
+    // New keys retain only their bounded engine-owned cache text, not parser
+    // scratch or value graphs. Repeating them must add no further storage.
+    EXPECT_LE(after_uncached.live_bytes, before_uncached.live_bytes + 4096u);
+    EXPECT_TRUE(css_evaluate_media_query(conditional_engine, "(min-height: 1px)"));
+    EXPECT_TRUE(css_evaluate_supports_condition(conditional_engine, "(color: red)"));
+    PoolStats repeated_uncached = {};
+    pool_get_detailed_stats(doc.document_pool, &repeated_uncached);
+    EXPECT_EQ(repeated_uncached.live_bytes, after_uncached.live_bytes);
+}
+
+TEST_F(StyleEpochTest, RecascadeRetiresStylesheetCustomPropertyRecords) {
+    DomElement* child = append("child");
+    CssDeclaration* declaration = css_declaration_create(
+        CSS_PROPERTY_UNKNOWN, css_value_create_string(doc.document_pool, "blue"),
+        {}, CSS_ORIGIN_AUTHOR, doc.document_pool);
+    ASSERT_NE(declaration, nullptr);
+    declaration->property_name = pool_strdup(doc.document_pool, "--theme");
+    declaration->value_text = "blue";
+    declaration->value_text_len = 4;
+    CssRule* custom = (CssRule*)pool_calloc(doc.document_pool, sizeof(CssRule));
+    ASSERT_NE(custom, nullptr);
+    custom->type = CSS_RULE_STYLE;
+    custom->pool = doc.document_pool;
+    custom->origin = CSS_ORIGIN_AUTHOR;
+    custom->data.style_rule.declarations = (CssDeclaration**)pool_alloc(
+        doc.document_pool, sizeof(CssDeclaration*));
+    ASSERT_NE(custom->data.style_rule.declarations, nullptr);
+    custom->data.style_rule.declarations[0] = declaration;
+    custom->data.style_rule.declaration_count = 1;
+
+    for (size_t i = 0; i < 32; i++) {
+        dom_element_clear_cascaded_styles(child);
+        apply(document_root, custom, child);
+        size_t records = 0;
+        for (CssCustomProp* prop = child->css_variables; prop; prop = prop->next) records++;
+        EXPECT_EQ(records, 1u);
+    }
+}
+
+TEST_F(StyleEpochTest, RecascadeReclaimsExclusiveOwnedStyleTrees) {
+    DomElement* child = append("child");
+    CssRule* calc = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 20.0, CSS_UNIT_PX));
+
+    // No epoch batch makes this an exclusive, element-owned cascade tree.
+    dom_element_apply_rule(child, calc, {});
+    PoolStats first = {};
+    pool_get_detailed_stats(doc.document_pool, &first);
+    for (size_t i = 0; i < 32; i++) {
+        dom_element_clear_cascaded_styles(child);
+        ASSERT_EQ(dom_element_apply_rule(child, calc, {}), 1);
+    }
+    PoolStats repeated = {};
+    pool_get_detailed_stats(doc.document_pool, &repeated);
+    EXPECT_LE(repeated.live_bytes, first.live_bytes + 4096u);
+}
+
+TEST_F(StyleEpochTest, ColdCanonicalEntriesRespectCacheBudgetAfterCascade) {
+    DomElement* child = append("child");
+    CssRule* variants[8] = {};
+    for (size_t i = 0; i < 8; i++) {
+        variants[i] = rule(CSS_PROPERTY_WIDTH,
+            css_value_create_length(doc.document_pool, 20.0 + (double)i,
+                                    CSS_UNIT_PX), (uint32_t)(i + 1u));
+    }
+
+    // A zero budget makes every unbound canonical snapshot eligible at the
+    // outer cascade boundary while the child remains a live consumer.
+    style_epoch_debug_set_cold_cache_cap(&doc, 0);
+    for (size_t i = 0; i < 8; i++) {
+        dom_element_clear_cascaded_styles(child);
+        apply(document_root, variants[i], child);
+    }
+
+    StyleEpochStats stats = {};
+    style_epoch_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.current_unbound_entry_count, 0u);
+    EXPECT_EQ(stats.current_unbound_bytes, 0u);
+    EXPECT_GT(stats.cache_eviction_count, 0u);
+    EXPECT_TRUE(child->specified_style_shared());
+    EXPECT_NE(dom_element_get_specified_value(child, CSS_PROPERTY_WIDTH), nullptr);
+}
+
+TEST_F(StyleEpochTest, RecascadeRetiresPseudoTreesAfterBorrowersRebind) {
+    DomElement* host = append("host");
+    CssRule* width = rule(CSS_PROPERTY_WIDTH,
+        css_value_create_length(doc.document_pool, 12.0, CSS_UNIT_PX));
+    ASSERT_EQ(dom_element_apply_pseudo_element_rule(host, width, {}, 1), 1);
+    StyleTree* first = host->pseudo_style(PSEUDO_STYLE_BEFORE);
+    ASSERT_NE(first, nullptr);
+
+    DomElement* generated = DomElement::create(&doc, "::before", nullptr);
+    ASSERT_NE(generated, nullptr);
+    dom_element_borrow_specified_style(generated, first);
+    EXPECT_EQ(first->borrow_ref_count, 1u);
+
+    ASSERT_TRUE(dom_element_clear_pseudo_styles(host));
+    StyleTree* second = host->pseudo_style(PSEUDO_STYLE_BEFORE);
+    ASSERT_NE(second, nullptr);
+    EXPECT_NE(second, first);
+    EXPECT_EQ(generated->specified_style, first);
+    EXPECT_TRUE(generated->specified_style_borrowed());
+
+    dom_element_borrow_specified_style(generated, second);
+    EXPECT_EQ(generated->specified_style, second);
+    EXPECT_EQ(second->borrow_ref_count, 1u);
+    dom_element_destroy(generated);
+    EXPECT_EQ(second->borrow_ref_count, 0u);
+
+    ASSERT_EQ(dom_element_apply_pseudo_element_rule(host, width, {}, 1), 1);
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.document_pool, &warm);
+    for (size_t i = 0; i < 32; i++) {
+        ASSERT_TRUE(dom_element_clear_pseudo_styles(host));
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(host, width, {}, 1), 1);
+    }
+    PoolStats stable = {};
+    pool_get_detailed_stats(doc.document_pool, &stable);
+    EXPECT_LE(stable.live_bytes, warm.live_bytes + 4096u);
 }

@@ -808,6 +808,9 @@ typedef enum CssOrigin {
     CSS_ORIGIN_TRANSITION     // CSS transitions
 } CssOrigin;
 
+typedef void (*CssDeclarationPayloadRetainFn)(void* owner);
+typedef void (*CssDeclarationPayloadReleaseFn)(void* owner);
+
 // CSS Declaration with metadata
 typedef struct CssDeclaration {
     CssPropertyCode property_code;
@@ -830,6 +833,9 @@ typedef struct CssDeclaration {
     bool tree_owned_record;   // containing StyleTree may reclaim this declaration record
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
+    void* payload_owner;      // immutable epoch payload shared by cascade records
+    CssDeclarationPayloadRetainFn payload_retain;
+    CssDeclarationPayloadReleaseFn payload_release;
 } CssDeclaration;
 
 // CSS Style Node for cascade resolution

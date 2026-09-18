@@ -26,15 +26,32 @@ typedef struct StyleEpochStats {
     uint64_t collision_count;
     uint64_t cow_count;
     uint64_t released_epoch_count;
+    uint64_t cache_eviction_count;
+    uint64_t current_bound_entry_count;
+    uint64_t current_unbound_entry_count;
+    uint64_t current_payload_count;
+    uint64_t current_payload_ref_count;
     size_t current_reserved_bytes;
     size_t current_live_bytes;
+    size_t current_bound_bytes;
+    size_t current_unbound_bytes;
+    size_t cold_cache_cap_bytes;
     size_t retired_referenced_reserved_bytes;
 } StyleEpochStats;
 
 bool style_epoch_manager_init(DomDocument* doc);
 void style_epoch_manager_destroy(DomDocument* doc);
 
-// Returns true only for the caller that opened the outer cascade batch.
+// The caller clears the target before replacement. Extension retains the
+// target's existing canonical recipe and appends genuinely new placements.
+// Both return true only for the caller that opened the outer cascade batch.
+bool style_epoch_cascade_begin_replace(DomDocument* doc, DomElement* root,
+                                       CssEngine* engine);
+bool style_epoch_cascade_begin_extend(DomDocument* doc, DomElement* root,
+                                      CssEngine* engine);
+
+// Legacy internal entry point retained for focused ownership tests. New
+// callers select replacement or extension explicitly above.
 bool style_epoch_cascade_begin(DomDocument* doc, DomElement* root,
                                CssEngine* engine, bool global_change);
 void style_epoch_cascade_end(DomDocument* doc);
@@ -51,5 +68,8 @@ void style_epoch_get_stats(DomDocument* doc, StyleEpochStats* out);
 
 // Deterministic collision coverage; never enabled by production paths.
 void style_epoch_debug_force_hash_collision(DomDocument* doc, bool enabled);
+
+// Deterministic cache-pressure coverage; production uses its documented default.
+void style_epoch_debug_set_cold_cache_cap(DomDocument* doc, size_t cap_bytes);
 
 #endif

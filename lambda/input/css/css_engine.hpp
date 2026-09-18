@@ -4,6 +4,7 @@
 #include "css_parser.hpp"
 #include "css_style.hpp"
 #include "../../../lib/mempool.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,6 +12,24 @@ extern "C" {
 
 // Forward declarations
 struct CssPropertyValueParser;
+
+enum {
+    CSS_CONDITION_CACHE_CAPACITY = 128,
+    CSS_CONDITION_CACHE_MAX_TEXT_BYTES = 1024,
+};
+
+typedef enum CssConditionKind {
+    CSS_CONDITION_MEDIA,
+    CSS_CONDITION_SUPPORTS,
+} CssConditionKind;
+
+typedef struct CssConditionCacheEntry {
+    const char* condition; // engine-owned copy, never a caller-owned span
+    uint64_t environment_key;
+    uint32_t condition_length;
+    uint8_t kind;
+    uint8_t result;
+} CssConditionCacheEntry;
 
 // CSS Style Engine structure
 typedef struct CssStyleEngine {
@@ -106,6 +125,12 @@ typedef struct CssEngine {
     // Error handling
     size_t parse_errors;
     size_t validation_errors;
+
+    // Condition results are document-engine local and bounded. The environment
+    // key rejects stale entries when a media or capability input changes.
+    CssConditionCacheEntry condition_cache[CSS_CONDITION_CACHE_CAPACITY];
+    uint64_t condition_evaluations;
+    uint64_t condition_cache_hits;
 } CssEngine;
 // CSS Processing Options
 typedef struct CssProcessingOptions {
