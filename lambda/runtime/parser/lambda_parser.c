@@ -1852,11 +1852,7 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
         LambdaToken on = parser->current;
         parser_advance(parser);
         LambdaToken event;
-        // S16.10.2: an event name is a DATA name, so every keyword spelling is
-        // admitted -- `on commit(evt)` is the DOM change-on-blur hook, and the
-        // strict identifier predicate here only worked while no keyword had
-        // ever been an event name.
-        if (!parser_take_name(parser, token_is_name_word,
+        if (!parser_take_name(parser, token_is_identifier,
                 error_expected_event_name, &event)) return 0;
         parser_context(parser, LAMBDA_REDUCTION_FORM_VIEW_HANDLER_BEGIN, (SourceSpan){on.span.start_byte, parser->current.span.start_byte}, event);
         LambdaParseValue handler_parameters = 0;

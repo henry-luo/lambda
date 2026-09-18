@@ -179,6 +179,7 @@ the two test scripts it predicted, and two collisions it did not.
 |---|---|---|
 | `lambda/package/dom/editing.ls` | `pub pn commit(elem)` | `commit_change` |
 | `lambda/package/dom/form.ls` | `editing.commit(~)` | `editing.commit_change(~)` |
+| `lambda/package/dom/form.ls` | `on commit(evt)` hook | `on edit_commit(evt)` (native dispatch `radiant_dispatch_behavior_edit_commit`) |
 | `test/lambda/proc/var_array_param_borrow.ls` | `pn put(…)` | `put_slot` |
 | `test/lambda/proc/cow_rmw_sibling_borrow.ls` | `pn put(…)` | `put_slot` |
 | `test/lambda/proc/tune26_split_string_lane.ls` | `var open` | `parts` |
@@ -191,9 +192,10 @@ the two test scripts it predicted, and two collisions it did not.
 `test/lambda/edit_bridge.ls`. The design did not list this. It first landed with
 a `type` / `type(x)`-style lookahead (`commit` headed the statement only when no
 `(` followed); that was replaced on 2026-09-18 by renaming the editor function
-to `editor_commit()` / `editor_commit(label)` (C symbols `fn_editor_commit0/1`),
-so `commit` is now solely the transaction statement (S1.7: one symbol, one
-concept) and `commit()` is a parse error. `undo()` / `redo()` keep their names —
+to `edit_commit()` / `edit_commit(label)` (C wrappers `fn_edit_commit0/1` over
+the bridge's `edit_commit()`, as `fn_undo` wraps `edit_undo()`), so `commit` is
+now solely the transaction statement (S1.7: one symbol, one concept) and
+`commit()` is a parse error. `undo()` / `redo()` keep their names —
 neither collides with a keyword. The editor's command-name string `"commit"` in
 `edit_session_exec` is protocol, not the sys-function name, and is unchanged.
 
@@ -205,9 +207,13 @@ explicitly, so five new keywords silently broke:
   `<del …>` and an `open:` object-type field all stopped parsing — which took
   out the whole `radiant`/`dom` module interface (`open: bool`, `open: fn()`)
   and 161 tests with it.
-- the `on <name>(…)` event-name position used the strict identifier predicate,
-  so the DOM package's `on commit(evt)` change-on-blur hook stopped parsing.
-  Widened to `token_is_name_word`: an event name is a data name.
+- the `on <name>(…)` event-name position takes a strict identifier, so the DOM
+  package's `on commit(evt)` change-on-blur hook stopped parsing. It was first
+  widened to `token_is_name_word`, but S16.10.2 covers only *container* name
+  positions (map keys, element tags, attribute names) and grammar.js takes
+  `$.identifier` there, so the widening diverged from the reference grammar.
+  Reverted 2026-09-18 when the hook was renamed `on edit_commit(evt)`; event
+  names are identifiers in both parsers again.
 
 ---
 

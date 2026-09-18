@@ -24,12 +24,12 @@ undo()
 redo()
 0
 
-// Test 5: editor_commit() returns version number
-editor_commit()
+// Test 5: edit_commit() returns version number
+edit_commit()
 0
 
-// Test 6: editor_commit with description returns version number
-editor_commit("initial")
+// Test 6: edit_commit with description returns version number
+edit_commit("initial")
 0
 
 // Test 7: edit template with handler compiles

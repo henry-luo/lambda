@@ -3842,9 +3842,11 @@ void radiant_run_behavior_init(DomDocument* doc) {
 // Post-mutation `input` for UA behavior templates. The pre-mutation `input`
 // belongs to app templates that own their text; validation and anything else
 // that must observe the committed value hooks here instead (F3).
-// ESO42: the commit hook. `change` must fire before `blur`, but the decision
-// that gates it is made before either — so a template's `on blur` runs too late
-// to make it. This dispatches a behavior-only `commit` at the decision point.
+// ESO42: the edit_commit hook. `change` must fire before `blur`, but the
+// decision that gates it is made before either — so a template's `on blur` runs
+// too late to make it. This dispatches a behavior-only `edit_commit` at the
+// decision point. (Named `commit` until `commit` became the Tier-3 transaction
+// statement, PTH62.)
 //
 // Behavior-only is what makes it legal: no DOM event has fired yet, so there
 // are no JS listeners to preempt and ES5's after-JS ordering is not in play.
@@ -3855,8 +3857,8 @@ void radiant_run_behavior_init(DomDocument* doc) {
 // Returns whether a template answered at all. When none did, the caller falls
 // back to the native comparison (ES5), so a page with no package behaves as it
 // always has.
-extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* target) {
-    return dispatch_behavior_handler(evcon, target, "commit", nullptr, nullptr);
+extern "C" bool radiant_dispatch_behavior_edit_commit(EventContext* evcon, View* target) {
+    return dispatch_behavior_handler(evcon, target, "edit_commit", nullptr, nullptr);
 }
 
 // F2b: the commit half of <select> activation. The template already owns
@@ -9266,7 +9268,7 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
     // template validates has no :valid/:invalid.
     (void)prev_elem;
     uint64_t change_epoch_before = radiant_change_request_epoch();
-    radiant_dispatch_behavior_commit(evcon, prev_focus);
+    radiant_dispatch_behavior_edit_commit(evcon, prev_focus);
     return radiant_change_request_epoch() != change_epoch_before;
 }
 
