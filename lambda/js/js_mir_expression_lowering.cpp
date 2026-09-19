@@ -4395,6 +4395,45 @@ static void jm_emit_const_assign_error(JsMirTranspiler* mt, const char* name,
 
 // Update lowering owns the differing native and Item result carriers for the
 // assignment expression; callers receive its completed descriptor.
+static bool jm_try_emit_native_number_update(JsMirTranspiler* mt,
+        JsUnaryNode* un, bool decrement, MirValue* value_out) {
+    if (!mt || !un || !value_out || !mt->in_native_func || mt->with_depth ||
+            !un->operand || un->operand->node_type != AST_NODE_IDENT) {
+        return false;
+    }
+    JsIdentifierNode* identifier = (JsIdentifierNode*)un->operand;
+    JsMirVarEntry* variable = jm_find_var_by_binding(mt, identifier->entry);
+    // Native entry guards establish this F64 binding as a JS Number. Captures,
+    // scope cells and promoted module bindings remain Item-valued because their
+    // writeback is observable outside this direct local update (D1.3v3).
+    if (!variable || variable->type_id != LMD_TYPE_FLOAT ||
+            variable->mir_type != MIR_T_D || variable->from_env ||
+            variable->from_shared_env || variable->in_scope_env ||
+            variable->is_iife_module_var_binding || variable->is_state_var ||
+            variable->is_const || variable->tdz_active) {
+        return false;
+    }
+
+    MIR_reg_t old_value = variable->reg;
+    MIR_reg_t expression_value = old_value;
+    if (!un->prefix) {
+        // The binding register is overwritten below. Postfix must retain its
+        // prior Number as a distinct MIR value before that writeback.
+        expression_value = jm_new_reg(mt, decrement ? "dec_old_number" :
+            "inc_old_number", MIR_T_D);
+        jm_emit_dmov(mt, expression_value, old_value);
+    }
+    MIR_reg_t updated = jm_new_reg(mt, decrement ? "dec_number" : "inc_number",
+        MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, decrement ? MIR_DSUB : MIR_DADD,
+        MIR_new_reg_op(mt->ctx, updated), MIR_new_reg_op(mt->ctx, old_value),
+        MIR_new_double_op(mt->ctx, 1.0)));
+    jm_emit_dmov(mt, variable->reg, updated);
+    *value_out = jm_expression_value(mt, (JsAstNode*)un,
+        un->prefix ? updated : expression_value, LMD_TYPE_FLOAT, VALUE_REP_F64);
+    return true;
+}
+
 static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         bool decrement) {
     const char* update_function = decrement ? "js_decrement" : "js_increment";
@@ -4434,6 +4473,11 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         MIR_reg_t result = jm_callr_1(mt, update_function, MIR_T_I64, num_operand);
         jm_emit_put_value(mt, &ref, result);
         return publish(un->prefix ? result : old_value, VALUE_REP_ITEM);
+    }
+
+    MirValue native_update = {};
+    if (jm_try_emit_native_number_update(mt, un, decrement, &native_update)) {
+        return native_update;
     }
 
     MIR_reg_t with_key = 0;

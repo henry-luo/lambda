@@ -495,6 +495,27 @@ static char* read_fixture_mir(const char* name) {
     return read_text(mir_path);
 }
 
+static const char* find_mir_function(const char* mir, const char* marker,
+        const char** end_out) {
+    if (end_out) *end_out = NULL;
+    if (!mir || !marker) return NULL;
+    const char* candidate = mir;
+    while ((candidate = strstr(candidate, marker))) {
+        const char* line = candidate;
+        while (line > mir && line[-1] != '\n') line--;
+        const char* line_end = strchr(line, '\n');
+        const char* function = strstr(line, ":\tfunc\t");
+        if (function && (!line_end || function < line_end)) {
+            const char* end = strstr(function, "\n\tendfunc");
+            if (!end) return NULL;
+            if (end_out) *end_out = end;
+            return line;
+        }
+        candidate++;
+    }
+    return NULL;
+}
+
 static const char* find_last_before(const char* begin, const char* end,
         const char* pattern) {
     if (!begin || !end || !pattern || begin >= end) return NULL;
@@ -859,6 +880,73 @@ TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
     EXPECT_NE(strstr(mir, "call\tjs_add"), nullptr);
     free(mir);
     expect_trace_off_same("mir_number_plan", source, output);
+}
+
+TEST(JsOpt, NativeNumberUpdatesKeepPostfixAndGenericSemantics) {
+    const char* source =
+        "function nativeUpdate(value) {\n"
+        "  let before = value++;\n"
+        "  let after = --value;\n"
+        "  return before * 10 + after;\n"
+        "}\n"
+        "function nativePostfix(value) { return value++; }\n"
+        "function dynamicUpdate(value) { return value++; }\n"
+        "if (nativeUpdate(2.5) !== 27.5 || !Object.is(nativePostfix(-0), -0) ||\n"
+        "    dynamicUpdate('2') !== 2 || dynamicUpdate(1n) !== 1n) {\n"
+        "  throw new Error('native update changed semantics');\n"
+        "}\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("native_number_update", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("native_number_update");
+    ASSERT_NE(mir, nullptr);
+    const char* native_end = NULL;
+    const char* native = find_mir_function(mir, "_js_nativeUpdate_", &native_end);
+    ASSERT_NE(native, nullptr);
+    ASSERT_NE(native_end, nullptr);
+    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
+    EXPECT_NE(strstr(native, "\n\tdsub\t"), nullptr);
+    const char* increment = strstr(native, "\n\tcall\tjs_increment");
+    const char* decrement = strstr(native, "\n\tcall\tjs_decrement");
+    EXPECT_FALSE(increment && increment < native_end);
+    EXPECT_FALSE(decrement && decrement < native_end);
+    free(mir);
+    expect_trace_off_same("native_number_update", source, output);
+}
+
+TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
+    const char* source =
+        "function subtractLoop(x, y) {\n"
+        "  let r = x; let q = 0;\n"
+        "  while (r >= y) { r -= y; q++; }\n"
+        "  return q;\n"
+        "}\n"
+        "if (subtractLoop(12, 3) !== 4 || subtractLoop('12', 3) !== 4 ||\n"
+        "    subtractLoop('12', '3') !== 0 || subtractLoop(12n, 3n) !== 4) {\n"
+        "  throw new Error('alias compound assignment changed semantics');\n"
+        "}\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("native_alias_compound", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("native_alias_compound");
+    ASSERT_NE(mir, nullptr);
+    const char* native_end = NULL;
+    const char* native = find_mir_function(mir, "_js_subtractLoop_", &native_end);
+    ASSERT_NE(native, nullptr);
+    ASSERT_NE(native_end, nullptr);
+    EXPECT_NE(strstr(native, "\n\tdsub\t"), nullptr);
+    const char* subtract = strstr(native, "\n\tcall\tjs_subtract");
+    EXPECT_FALSE(subtract && subtract < native_end);
+    free(mir);
+    expect_trace_off_same("native_alias_compound", source, output);
 }
 
 TEST(JsOpt, MirNativeNumberIndexKeepsKeyUnboxed) {

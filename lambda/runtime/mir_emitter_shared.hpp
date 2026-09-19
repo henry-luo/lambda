@@ -1477,6 +1477,67 @@ static inline MIR_reg_t em_emit_bits_double(MirEmitter* em, MIR_reg_t bits_reg) 
     return dval;
 }
 
+// Both Lambda and LambdaJS represent an admitted non-null IEEE F64 in an Item
+// with the same bit encoding. The caller owns only the cold allocation call:
+// it may need profile-specific completion bookkeeping. Keeping the hot bits,
+// signed-zero and branch layout here prevents the two emitters from drifting.
+typedef MIR_reg_t (*MirF64BoxColdCall)(void* owner, MIR_reg_t value);
+
+static inline MIR_reg_t em_box_f64_to_item(MirEmitter* em, void* owner,
+        MirF64BoxColdCall cold_box, MIR_reg_t value) {
+    if (!em || !cold_box || !value) return 0;
+    MIR_reg_t bits = em_emit_double_bits(em, value);
+    MIR_reg_t in_band = em_new_reg(em, "box_f64_mask", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, in_band), MIR_new_reg_op(em->ctx, bits),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+
+    MIR_reg_t result = em_new_reg(em, "box_f64", MIR_T_I64);
+    MIR_label_t inline_label = em_new_label(em);
+    MIR_label_t zero_label = em_new_label(em);
+    MIR_label_t cold_label = em_new_label(em);
+    MIR_label_t done_label = em_new_label(em);
+
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, inline_label),
+        MIR_new_reg_op(em->ctx, in_band)));
+
+    MIR_reg_t is_zero = em_new_reg(em, "box_f64_zero", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DEQ,
+        MIR_new_reg_op(em->ctx, is_zero), MIR_new_reg_op(em->ctx, value),
+        MIR_new_double_op(em->ctx, 0.0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, zero_label), MIR_new_reg_op(em->ctx, is_zero)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, cold_label)));
+
+    em_emit_label(em, inline_label);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, bits)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, done_label)));
+
+    em_emit_label(em, zero_label);
+    MIR_reg_t sign = em_new_reg(em, "box_f64_sign", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+        MIR_new_reg_op(em->ctx, sign), MIR_new_reg_op(em->ctx, bits),
+        MIR_new_int_op(em->ctx, 63)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, result),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0),
+        MIR_new_reg_op(em->ctx, sign)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, done_label)));
+
+    em_emit_label(em, cold_label);
+    MIR_reg_t boxed = cold_box(owner, value);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, boxed)));
+
+    em_emit_label(em, done_label);
+    return result;
+}
+
 static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
                                                    ScalarReturnClass mode,
                                                    MIR_reg_t item,

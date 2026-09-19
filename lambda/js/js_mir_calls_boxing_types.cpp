@@ -351,8 +351,6 @@ MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt) {
 // Boxing helpers
 // ============================================================================
 
-static MIR_reg_t jm_emit_double_bits(JsMirTranspiler* mt, MIR_reg_t d_reg);
-
 // JavaScript has one number domain, including integral values. Keep an i64 only
 // while it is an unboxed working register; once it becomes an Item, it must use
 // the float representation so an ordinary JS number cannot alias an INT symbol.
@@ -382,53 +380,19 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     return jm_box_int_double(mt, as_double);
 }
 
-static MIR_reg_t jm_emit_double_bits(JsMirTranspiler* mt, MIR_reg_t d_reg) {
-    // Result15: the call edge to the 2-insn helper made numeric loops
-    // placement-sensitive; reinterpret inline via the shared per-function
-    // scratch slot (see em_emit_double_bits for the full rationale).
-    return em_emit_double_bits(&mt->func_em->em, d_reg);
-}
-
 static MIR_reg_t jm_emit_bits_double(JsMirTranspiler* mt, MIR_reg_t bits_reg) {
     return em_emit_bits_double(&mt->func_em->em, bits_reg);
 }
 
-// Box double -> Item; the hot in-band arm is inline.
+static MIR_reg_t jm_box_float_cold(void* owner, MIR_reg_t value) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, value));
+}
+
+// Box double -> Item through the common physical encoding.
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
-    MIR_reg_t bits = jm_emit_double_bits(mt, d_reg);
-    MIR_reg_t in_band = jm_new_reg(mt, "jfdmask", MIR_T_I64);
-    jm_emit_reg_binary_op(mt, MIR_AND, in_band, bits, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
-
-    MIR_reg_t result = jm_new_reg(mt, "boxf", MIR_T_I64);
-    MIR_label_t l_in_band = jm_new_label(mt);
-    MIR_label_t l_zero = jm_new_label(mt);
-    MIR_label_t l_cold = jm_new_label(mt);
-    MIR_label_t l_end = jm_new_label(mt);
-
-    jm_emit_branch(mt, MIR_BT, l_in_band, in_band);
-
-    MIR_reg_t is_zero = jm_new_reg(mt, "jfzero", MIR_T_I64);
-    jm_emit_reg_binary_op(mt, MIR_DEQ, is_zero, d_reg, MIR_new_double_op(mt->ctx, 0.0));
-    jm_emit_branch(mt, MIR_BT, l_zero, is_zero);
-    jm_emit_jmp(mt, l_cold);
-
-    jm_emit_label(mt, l_in_band);
-    jm_emit_mov(mt, result, bits);
-    jm_emit_jmp(mt, l_end);
-
-    jm_emit_label(mt, l_zero);
-    MIR_reg_t sign = jm_new_reg(mt, "jfsign", MIR_T_I64);
-    jm_emit_reg_binary_op(mt, MIR_URSH, sign, bits, MIR_new_int_op(mt->ctx, 63));
-    jm_emit_reg_op_binary(mt, MIR_OR, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0), sign);
-    jm_emit_jmp(mt, l_end);
-
-    jm_emit_label(mt, l_cold);
-    MIR_reg_t boxed = jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
-        MIR_new_reg_op(mt->ctx, d_reg));
-    jm_emit_mov(mt, result, boxed);
-
-    jm_emit_label(mt, l_end);
-    return result;
+    return em_box_f64_to_item(&mt->func_em->em, mt, jm_box_float_cold, d_reg);
 }
 
 bool jm_float_const_is_inline(double value) {

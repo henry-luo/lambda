@@ -1172,7 +1172,7 @@ TEST(JsInterpreter, ReusesFunctionAstTemplateAcrossHeapReplacement) {
     runtime_init(&runtime);
 
     const char source[] =
-        "function cachedHarness(value) { if (!value) throw new Error('failed'); }";
+        "function cachedHarness() { return 'cached realm literal'; } cachedHarness();";
     JsScript* first = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
         "cached-harness.js");
     ASSERT_NE(first, nullptr);
