@@ -188,6 +188,11 @@ LambdaParseStatus lambda_rd_build_reductions(Transpiler* tp, const char* source,
         LambdaParseError* error);
 void lambda_rd_destroy_reductions(LambdaReductionTape* tape);
 
+// Resolve a Lambda source import through the same package/relative rules used
+// by AST construction. The returned `.ls` path is caller-owned.
+char* lambda_resolve_import_module_path(const char* base_directory,
+    StrView module);
+
 // Compatibility composition for callers that require the direct build result.
 LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
         size_t length, AstScript** root_out, LambdaParseError* error);

@@ -561,6 +561,55 @@ TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     EXPECT_EQ(after.module_hits, before.module_hits + 1);
 }
 
+TEST(JsInterpreter, AutoPrebuildsStaticImportClosureAsAst) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    static int prebuild_generation = 0;
+    int generation = ++prebuild_generation;
+    char root_path[128];
+    char left_path[128];
+    char right_path[128];
+    char root_source[512];
+    snprintf(root_path, sizeof(root_path),
+        "temp/js-ast-prebuild-root-%d.mjs", generation);
+    snprintf(left_path, sizeof(left_path),
+        "temp/js-ast-prebuild-left-%d.mjs", generation);
+    snprintf(right_path, sizeof(right_path),
+        "temp/js-ast-prebuild-right-%d.mjs", generation);
+    snprintf(root_source, sizeof(root_source),
+        "import { left } from \"./js-ast-prebuild-left-%d.mjs\";\n"
+        "import { right } from \"./js-ast-prebuild-right-%d.mjs\";\n"
+        "export const answer = left + right;\n", generation, generation);
+    const char left_source[] = "export const left = 19;\n";
+    const char right_source[] = "export const right = 23;\n";
+    ASSERT_EQ(write_binary_file(root_path, root_source, strlen(root_source)), 0);
+    ASSERT_EQ(write_binary_file(left_path, left_source, sizeof(left_source) - 1), 0);
+    ASSERT_EQ(write_binary_file(right_path, right_source, sizeof(right_source) - 1), 0);
+
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("LAMBDA_MODULE_AST_THREADS", "2", 1), 0);
+
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    Item namespace_obj = load_js_module(&runtime, root_path);
+
+    ASSERT_EQ(unsetenv("LAMBDA_MODULE_AST_THREADS"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_get_key_default(namespace_obj, js_make_string("answer")).item,
+        flt2it(42.0).item);
+    runtime_cleanup(&runtime);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.ast_builds, before.ast_builds + 2);
+    EXPECT_GE(after.ast_hits, before.ast_hits + 2);
+    EXPECT_EQ(after.mir_builds, before.mir_builds);
+}
+
 TEST(JsJubeRuntime, DropsPrototypeRootsAcrossFreshRuntimes) {
     const char source[] = "hostobjDemo.create(40).bump(2);";
 

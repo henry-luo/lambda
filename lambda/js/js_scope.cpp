@@ -1,4 +1,5 @@
 #include "js_transpiler.hpp"
+#include "js_interp.hpp"
 #include "js_function.hpp"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
@@ -15,6 +16,11 @@
 #include "../../lib/mem.h"
 
 static void js_script_destroy_extension(Script* base_script);
+
+// The shared indexer sees JavaScript's extension nodes through this immutable
+// profile. Worker parsers may therefore share it without a first-use race.
+LangProfile js_profile = { "js", js_ast_publish_extension_facts,
+    js_ast_visit_extension_children };
 
 static InputScriptRequest js_common_ast_cache_request(const char* source,
         size_t source_length, const char* reference, bool strict,
@@ -40,9 +46,10 @@ static InputScriptRequest js_common_ast_cache_request(const char* source,
 static bool js_common_ast_cache_eligible(const JsScript* script,
         bool typescript_profile) {
     (void)typescript_profile;
-    // Parser output is immutable for every JS shape. Functions, classes,
-    // modules, evals, and TS attach execution facts only to a clone overlay.
-    return script != NULL;
+    // Cache only templates that can begin execution at T0. AUTO falls back to
+    // MIR for the remaining shapes, so retaining them here would make a cache
+    // hit change that execution policy.
+    return script && js_interp_script_is_supported((JsScript*)script);
 }
 
 static void js_common_ast_cache_destroy(void* value) {
@@ -495,10 +502,6 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->strict_mode = false;
     tp->has_errors = false;
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
-    // The shared indexer owns core edges. Install JavaScript's extension-only
-    // adapter before any parse can publish an AstIndex for this profile.
-    js_profile.visit_ext_children = js_ast_visit_extension_children;
-    js_profile.publish_ext_facts = js_ast_publish_extension_facts;
     tp->profile = &js_profile;
     tp->destroy_extension = js_script_destroy_extension;
     tp->runtime = runtime;

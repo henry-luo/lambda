@@ -888,7 +888,7 @@ static bool jm_path_has_known_js_ext(const char* path) {
            jm_path_has_lambda_ext(path);
 }
 
-static bool jm_path_is_lambda_source(const char* path) {
+bool jm_path_is_lambda_source(const char* path) {
     int len = path ? (int)strlen(path) : 0;
     return len >= 3 && strcmp(path + len - 3, ".ls") == 0;
 }
@@ -4115,6 +4115,15 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemError;
     }
     context->runtime = runtime;
+    bool ast_executor_forced = js_ast_interpreter_forced();
+    bool ast_executor_requested = ast_executor_forced ||
+        js_execution_auto_requested();
+    bool ast_closure_ready = false;
+    if (ast_executor_requested &&
+            !runtime->js_ast_backend && filename && filename[0] != '<') {
+        ast_closure_ready = js_module_ast_prebuild_imports(filename, js_source,
+            strlen(js_source));
+    }
     // js_get_global_this() can run while precompiled dependencies initialize.
     // It requires an Input owner for its realm-bound names, so install this
     // module's owner before static imports can initialize the realm (D4.6.2v2).
@@ -4126,6 +4135,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     }
     js_runtime_set_input(module_input);
     size_t source_length = strlen(js_source);
+    if (ast_executor_forced || runtime->js_ast_backend || ast_closure_ready) {
+        JsScript* cached_ast = js_common_ast_cache_lookup(runtime, js_source,
+            source_length, filename, true, false);
+        if (cached_ast) {
+            // The parallel prebuild has only published this immutable AST.
+            // Instantiate and evaluate it in this Runtime, never on a worker.
+            if (js_execution_auto_requested() && ast_closure_ready) {
+                runtime->js_ast_backend = true;
+            }
+            return js_interp_execute_es_module_script(runtime, cached_ast, NULL);
+        }
+    }
     // Closed modules have no dependency or await execution state to retain.
     // A cache hit therefore reconstructs only this Runtime's namespace and
     // slab before entering the immutable image (D8.5.1v2).
@@ -4194,11 +4215,17 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     bool document_ast_too_large = runtime->dom_doc != NULL &&
         mir_large_interp_enabled() &&
         tp->ast_index.count > MIR_RADIANT_AST_NODE_THRESHOLD;
-    bool ast_executor_requested = js_ast_interpreter_requested();
-    if (ast_executor_requested || document_ast_too_large) {
+    bool ast_executor_supported = js_interp_script_is_supported((JsScript*)tp);
+    bool auto_ast_selected = js_execution_auto_requested() &&
+        ast_closure_ready && ast_executor_supported;
+    if ((ast_executor_forced ||
+            (runtime->js_ast_backend && ast_executor_supported) ||
+            auto_ast_selected) || document_ast_too_large) {
         // Static imports bypass the source-script compiler, so select its
         // established AST tier here before MIR lowering scales with the graph.
-        const char* reason = ast_executor_requested ? "requested backend"
+        if (auto_ast_selected) runtime->js_ast_backend = true;
+        const char* reason = (ast_executor_forced || auto_ast_selected)
+            ? "requested backend"
             : "module threshold";
         log_info("js-mir: module AST (%u nodes) uses AST executor (%s)",
             tp->ast_index.count, reason);

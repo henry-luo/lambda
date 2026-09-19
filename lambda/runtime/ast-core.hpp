@@ -1652,7 +1652,9 @@ typedef struct LangProfile {
 
 inline LangProfile lambda_profile = { "lambda", NULL, NULL };
 
-inline LangProfile js_profile = { "js", NULL, NULL };
+// JavaScript owns its extension walkers. Define this profile alongside those
+// walkers so parallel AST builders never mutate shared profile state.
+extern LangProfile js_profile;
 
 static inline LangProfile* lang_profile_for_name(const char* name) {
     if (!name) return &lambda_profile;

@@ -9,12 +9,26 @@
 
 // Tree-walking execution tier. It intentionally shares the JS object/value
 // helpers and the Runtime/EvalContext ownership model with MIR lowering.
-static inline bool js_ast_interpreter_requested(void) {
+static inline bool js_ast_interpreter_forced(void) {
     const char* backend = getenv("JS_EXECUTION_BACKEND");
-    bool environment_requests_ast = backend && (strcmp(backend, "ast") == 0 ||
+    return backend && (strcmp(backend, "ast") == 0 ||
         strcmp(backend, "interpreter") == 0);
-    return environment_requests_ast ||
+}
+
+// A selected AUTO root keeps nested eval and dynamic functions in the AST
+// executor. This is execution state, not an instruction to suppress AUTO's
+// compatibility check for a new root module.
+static inline bool js_ast_interpreter_requested(void) {
+    return js_ast_interpreter_forced() ||
         (context && context->runtime && context->runtime->js_ast_backend);
+}
+
+// AUTO starts a supported unit in the retained AST executor. If the unit is
+// outside that executor's coverage, the caller keeps the established MIR
+// fallback rather than publishing a mixed-tier realm.
+static inline bool js_execution_auto_requested(void) {
+    const char* backend = getenv("JS_EXECUTION_BACKEND");
+    return backend && strcmp(backend, "auto") == 0;
 }
 // Parse, bind, and retain a classic Script without evaluating it. Batch hosts
 // use this to keep a harness AST across fresh per-test realms.

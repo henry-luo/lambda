@@ -749,10 +749,21 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
 
     InputScriptBuildScope ast_cache_build = {};
-    if (js_ast_interpreter_requested()) {
+    bool ast_executor_forced = js_ast_interpreter_forced();
+    bool ast_executor_requested = js_ast_interpreter_requested() ||
+        js_execution_auto_requested();
+    bool ast_closure_ready = false;
+    if (ast_executor_requested && filename && filename[0] != '<') {
+        ast_closure_ready = js_module_ast_prebuild_imports(filename, js_source,
+            js_source_len);
+    }
+    if (ast_executor_forced || runtime->js_ast_backend || ast_closure_ready) {
         JsScript* cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
             filename, typescript_profile, typescript_profile);
         if (cached) {
+            if (js_execution_auto_requested() && ast_closure_ready) {
+                runtime->js_ast_backend = true;
+            }
             uint64_t realm_start = js_realm_init_time_us();
             long execute_start = js_mir_phase_now_us();
             Item result = js_mir_execute_retained_ast_script(runtime, cached, owned_source,
@@ -771,6 +782,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
                 filename, typescript_profile, typescript_profile);
             if (cached) {
+                if (js_execution_auto_requested() && ast_closure_ready) {
+                    runtime->js_ast_backend = true;
+                }
                 uint64_t realm_start = js_realm_init_time_us();
                 long execute_start = js_mir_phase_now_us();
                 Item result = js_mir_execute_retained_ast_script(runtime, cached,
@@ -846,7 +860,13 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             runtime, NULL, true);
     }
 
-    if (js_ast_interpreter_requested()) {
+    bool ast_executor_supported = js_interp_script_is_supported((JsScript*)tp);
+    bool auto_ast_selected = js_execution_auto_requested() &&
+        ast_closure_ready && ast_executor_supported;
+    if (ast_executor_forced ||
+            (runtime->js_ast_backend && ast_executor_supported) ||
+            auto_ast_selected) {
+        if (auto_ast_selected) runtime->js_ast_backend = true;
         // nested eval compiles through the same counters; retain this source's
         // record and separate realm construction from AST execution.
         JsMirPhaseTiming timing = g_last_js_mir_phase_timing;
@@ -861,6 +881,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         timing.total_us = js_mir_phase_now_us() - phase_total_start;
         g_last_js_mir_phase_timing = timing;
         return result;
+    }
+    if (js_execution_auto_requested()) {
+        log_info("js-auto: MIR fallback script=%s", filename ? filename : "<string>");
     }
 
     // Set up the canonical evaluation context early so module objects and

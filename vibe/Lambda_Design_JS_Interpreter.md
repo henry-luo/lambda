@@ -4,7 +4,7 @@
 
 **Status:** PROPOSED — architecture and staged implementation plan; no implementation is claimed by this document.
 
-**Execution-policy revision (USER, 2026-09-16):** **D8.1.3v11 / JSI16v2**
+**Execution-policy revision (USER, 2026-09-16; revised 2026-09-19):** **D8.1.3v12 / JSI16v2**
 requires native execution whenever LambdaJS selects MIR. MIR interpretation is
 retired for JS, including diagnostic and size-based selection. This decision is
 ratified; removal of the existing runtime paths is planned in
@@ -12,6 +12,16 @@ ratified; removal of the existing runtime paths is planned in
 subject to its implementation gates; the formal spec and
 [implementation record](impl/Lambda_Impl_JS_Interpreter.md) describe the already
 landed AST slice.
+
+**Static-module prebuild revision (2026-09-19):** `JS_EXECUTION_BACKEND=auto`
+is now an explicit AST-first module policy. The shared prebuild scheduler
+discovers static imports with the direct parser, publishes only AST templates
+to `InputScriptCache` from isolated worker runtimes, and canonicalizes the
+runtime import lookup before reuse. Interpreter-supported modules execute from
+those templates; unsupported units retain whole-module MIR. Unset remains MIR
+and forced `ast` remains fail-closed. JS function-level P2 promotion is still
+unimplemented; whole-module MIR fallback is not a promotion. This is governed
+by **D8.1.3v12** and **D8.5.1v4**.
 
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
@@ -51,7 +61,7 @@ source
 The AST walker is the JavaScript interpreter. Selecting MIR means executing
 generated native code, whether eagerly generated or reached through an admitted
 native lazy-generation entry. There is no LambdaJS MIR-interpreter execution
-mode, including for diagnostics or large/cold modules (**D8.1.3v11**).
+mode, including for diagnostics or large/cold modules (**D8.1.3v12**).
 
 ### 1.1 Why this is a separate walker
 
@@ -231,7 +241,7 @@ Until heapified interpreter continuations land, generator/async/top-level-await 
 
 ### JSI16v2 — Selected LambdaJS MIR executes native code
 
-Under **D8.1.3v11** (USER, 2026-09-16), the AST walker is LambdaJS's interpreter;
+Under **D8.1.3v12** (USER, 2026-09-16; revised 2026-09-19), the AST walker is LambdaJS's interpreter;
 selected MIR units execute generated native code. Source/module size, document
 context, optimization level, diagnostic switches, and inherited global state
 cannot select MIR interpretation or silently reroute a selected MIR unit to AST.
@@ -1032,8 +1042,9 @@ promotion_count
 
 The support scan examines semantic facts, not only node kinds. A syntactically ordinary function may still be rejected for direct eval, an unsupported class dependency, module/suspension behavior, or a missing binding plan.
 
-In the proposed AUTO tier, rejected scripts enter eager native MIR before
-declaration instantiation. AUTO itself remains unimplemented under **D8.1.3v11**.
+In explicit AUTO, rejected scripts enter eager native MIR before declaration
+instantiation. The shipped AUTO scope is static module AST reuse only; its
+per-function promotion design remains unimplemented under **D8.1.3v12**.
 Forced AST interpretation reports a deterministic unsupported-tier error rather
 than silently compiling; differential tests select each backend explicitly.
 

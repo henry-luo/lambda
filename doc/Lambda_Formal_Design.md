@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 9.1.0 (2026-09-17)
+**Spec version:** 9.2.0 (2026-09-19)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1435,7 +1435,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v9*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v10*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1515,7 +1515,19 @@ loosely across the corpus — context disambiguates, and we live with it.
   content-splicing push.
   `LAMBDA_TIER=interp` pins the run to T0, while `LAMBDA_TIER=jit` explicitly
   selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
-  (**T1**). The REPL and legacy inspection tools
+  (**T1**). *(v10, 2026-09-19)* File-backed static import closures may be
+  discovered serially by the owning first-party parser, then built leaf-to-root
+  in parallel through one language-neutral scheduler. A worker owns a temporary
+  `Runtime` and may publish only a retained AST template through
+  `InputScriptCache`; it neither instantiates a module nor lowers MIR. The
+  receiving runtime clones that template, plans T0, and the ordinary AUTO P2
+  counters decide whether a hot Lambda definition later receives its MIR
+  satellite. An AST shape outside T0's supported surface falls back only on
+  that receiving runtime's established whole-MIR path. Cache identity is
+  canonical file identity plus exact bytes and the language/parser profile;
+  cache single-flight makes concurrent closure walks share one template. The
+  scheduler is common infrastructure, not a shared language parser or
+  evaluator. [D8.5.1v4] The REPL and legacy inspection tools
   may still use the reference Tree-sitter path until their fragment/source-span
   migration is complete. *(Historical: v1 ruled the opposite — "no
   AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
@@ -1532,7 +1544,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   Generated `parser.c` remains a reference artifact regenerated from
   `grammar.js` (never hand-edit `parser.c`). Build config generates the build
   files (never hand-edit the Lua). [CGP5v2, rules 5, 7]
-- **D8.1.3v11*** LambdaJS uses its first-party C lexer and hybrid
+- **D8.1.3v12*** LambdaJS uses its first-party C lexer and hybrid
   recursive-descent/Pratt parser for normal JavaScript and TypeScript
   source admission. It reduces directly into the retained `JsAstNode` graph;
   the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
@@ -1573,6 +1585,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   and script-global lexical changes are synchronized from the realm table to
   the script slab. This is neither an unsupported-unit fallback nor a replay
   of the enclosing script. `JS_EXECUTION_BACKEND=ast` forces this backend.
+  *(v12, 2026-09-19)* `JS_EXECUTION_BACKEND=auto` is an explicit AST-first
+  policy: an interpreter-supported JS unit consumes the same static-import AST
+  closure prebuilt under D8.1.1v10/D8.5.1v4, while an unsupported unit keeps
+  the established whole-module MIR path. The unset JS selector remains MIR,
+  and forced `ast` remains fail-closed. LambdaJS has not yet gained Lambda's
+  P2 per-function MIR satellite boundary: an AST-selected JS function remains
+  AST-executed, so no worker or AUTO fallback may misrepresent whole-module
+  MIR as hot-function promotion.
   A synchronous CommonJS `require()` resolves literal targets against the
   owning `JsScript`, then enters the existing CJS resolver, cache, and runtime
   module registry. Its synthetic wrapper executes in a private module slab
@@ -1597,9 +1617,10 @@ loosely across the corpus — context disambiguates, and we live with it.
   state authority, while Lambda and JavaScript retain separate semantic
   walkers and activation records. Top-level await, async module evaluation,
   generators/async functions, ambiguous star-export resolution, shared T0/T1
-  environments, continuations, and AUTO policy remain excluded. The unset
-  backend remains MIR until the mixed-tier, suspension, and performance gates
-  are complete. LambdaJS's interpreter is the AST backend; selecting MIR always
+  environments, and continuations remain excluded. The unset backend remains
+  MIR; explicit AUTO is limited to the supported retained-AST slice and does
+  not yet provide JS P2 promotion. LambdaJS's interpreter is the AST backend;
+  selecting MIR always
   executes generated native code, through eager or admitted native lazy
   generation. No source/module-size threshold, document context, optimization
   level, diagnostic option, or inherited global mode may select MIR
@@ -1755,7 +1776,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.5 MIR module cache
 
-- **D8.5.1v3*** **L1** is a persistent in-process `InputScriptCache` for
+- **D8.5.1v4*** **L1** is a persistent in-process `InputScriptCache` for
   executable script sources, including main scripts, imports, harnesses, and
   document/hosted-language scripts. Source identity uses exact bytes plus
   canonical identity, source kind, language/parser profile, and resolution
@@ -1769,6 +1790,12 @@ loosely across the corpus — context disambiguates, and we live with it.
   than losing an artifact it still references.
   If recovery closes a scope that owns an unfinished AST/MIR build claim, the
   common service wakes waiters and poisons that key until source invalidation.
+  Static module closure prebuild is an AST-only cache producer: dependency
+  discovery is serial and parse-accurate, while independent imported files may
+  publish templates concurrently; module initialization, execution state, and
+  MIR compilation remain with the receiving runtime. Canonical file paths are
+  used at both prebuild and runtime import boundaries, so a relative spelling
+  cannot bypass the retained AST image. [D8.1.1v10, D8.1.3v12]
   The cache remains source-distributed and in-process; disk/code-image caching
   stays D8.5.2–D8.5.3. L2 lazy codegen remains an approved experiment. [MC1,
   MC2]

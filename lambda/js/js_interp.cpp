@@ -6183,10 +6183,17 @@ static bool js_interp_is_lambda_module_path(const char* filename) {
 
 static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     if (!runtime || !filename) return ItemError;
-    Item specifier = js_make_string(filename);
+    // Prebuild workers publish file-backed ASTs under canonical paths. Resolve
+    // the runtime lookup the same way so one import spelling cannot bypass it.
+    char* canonical_filename = file_realpath(filename);
+    const char* module_filename = canonical_filename ? canonical_filename : filename;
+    Item specifier = js_make_string(module_filename);
     Item existing = js_module_get(specifier);
-    if (get_type_id(existing) != LMD_TYPE_NULL) return existing;
-    if (js_interp_is_lambda_module_path(filename)) {
+    if (get_type_id(existing) != LMD_TYPE_NULL) {
+        mem_free(canonical_filename);
+        return existing;
+    }
+    if (js_interp_is_lambda_module_path(module_filename)) {
         // Publish the loading record directly into the shared registry. This
         // keeps Lambda's compiler and JS linker on one descriptor rather than
         // registering a temporary JS namespace and replacing it afterward.
@@ -6196,23 +6203,32 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
         // event loop would discard callbacks already queued by that turn.
         js_event_loop_attach_lambda_scheduler();
         ModuleDescriptor* loading = module_register_loading_with_namespace_ops_for_runtime(
-            runtime, filename, "lambda", NULL);
-        if (!loading) return ItemError;
-        Script* lambda_script = load_script_mir_direct(runtime, filename, NULL, true);
+            runtime, module_filename, "lambda", NULL);
+        if (!loading) {
+            mem_free(canonical_filename);
+            return ItemError;
+        }
+        Script* lambda_script = load_script_mir_direct(runtime, module_filename, NULL, true);
         ModuleDescriptor* lambda_module = lambda_script
             ? module_get_for_runtime(runtime, lambda_script->reference) : NULL;
         if (!lambda_module) {
+            mem_free(canonical_filename);
             return js_throw_reference_error(js_make_string("Cannot load Lambda module"));
         }
+        mem_free(canonical_filename);
         return lambda_module->namespace_obj;
     }
     size_t source_length = 0;
     char* source = js_load_script_source_from_cache(
-        filename, "js-interpreter-module", "module", true, &source_length);
-    if (!source) return js_throw_reference_error(js_make_string("Cannot find module"));
+        module_filename, "js-interpreter-module", "module", true, &source_length);
+    if (!source) {
+        mem_free(canonical_filename);
+        return js_throw_reference_error(js_make_string("Cannot find module"));
+    }
     Item result = js_interp_execute_es_module_source(runtime, source,
-        source_length, filename, NULL);
+        source_length, module_filename, NULL);
     mem_free(source);
+    mem_free(canonical_filename);
     return result;
 }
 

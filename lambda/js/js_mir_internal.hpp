@@ -780,6 +780,7 @@ void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
+bool jm_path_is_lambda_source(const char* path);
 void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
                            NameEntry* binding, bool is_default);
 // Js52 P1: aliased export — resolve via local_name, publish under export_name.
@@ -807,6 +808,8 @@ char* js_load_script_source_from_cache(const char* path,
 bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
     const char* importer_source, size_t importer_source_length,
     bool record_cache_dependencies);
+bool js_module_ast_prebuild_imports(const char* filename, const char* source,
+    size_t source_length);
 extern "C" Item js_new_function_from_string(Item* args, int argc);
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_normalize_path_separators(char* path);
