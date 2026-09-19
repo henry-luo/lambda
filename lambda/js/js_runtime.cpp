@@ -9940,6 +9940,10 @@ extern "C" void js_reset_template_registry(void) {
     }
     js_template_entries = NULL;
     root_vector_clear(&js_template_values);
+    // Template and parser-image literal values share the current realm's
+    // roots. Clear both before a heap replacement so a reused AST image never
+    // probes root slots from the retired realm.
+    js_ast_literal_cache_clear(&js_runtime_state.ast_literal_cache, false);
 }
 
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state) {

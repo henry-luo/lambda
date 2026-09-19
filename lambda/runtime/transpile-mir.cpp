@@ -4794,7 +4794,13 @@ static MIR_reg_t emit_float_null_lane(MirTranspiler* mt) {
     return lane;
 }
 
-// Box float (double) -> Item; the hot in-band arm is inline.
+static MIR_reg_t emit_box_float_cold(void* owner, MIR_reg_t value) {
+    MirTranspiler* mt = (MirTranspiler*)owner;
+    return emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, value));
+}
+
+// Box float (double) -> Item; the shared physical path is inline.
 static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
     // physical-only: normalize the register itself, not just the bit view;
     // this boxer also
@@ -4803,60 +4809,7 @@ static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
     if (MIR_reg_type(mt->ctx, val_reg, mt->em.func) != MIR_T_D) {
         val_reg = emit_unbox(mt, val_reg, LMD_TYPE_FLOAT);
     }
-    MIR_reg_t bits = emit_double_bits(mt, val_reg);
-    MIR_reg_t in_band = new_reg(mt, "fdmask", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, in_band),
-        MIR_new_reg_op(mt->ctx, bits),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
-
-    MIR_reg_t result = new_reg(mt, "boxf", MIR_T_I64);
-    MIR_label_t l_in_band = new_label(mt);
-    MIR_label_t l_zero = new_label(mt);
-    MIR_label_t l_cold = new_label(mt);
-    MIR_label_t l_end = new_label(mt);
-
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, l_in_band),
-        MIR_new_reg_op(mt->ctx, in_band)));
-
-    MIR_reg_t is_zero = new_reg(mt, "fzero", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
-        MIR_new_reg_op(mt->ctx, is_zero),
-        MIR_new_reg_op(mt->ctx, val_reg),
-        MIR_new_double_op(mt->ctx, 0.0)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, l_zero),
-        MIR_new_reg_op(mt->ctx, is_zero)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cold)));
-
-    emit_label(mt, l_in_band);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, bits)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-    emit_label(mt, l_zero);
-    MIR_reg_t sign = new_reg(mt, "fsign", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-        MIR_new_reg_op(mt->ctx, sign),
-        MIR_new_reg_op(mt->ctx, bits),
-        MIR_new_int_op(mt->ctx, 63)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_FLOAT_P0),
-        MIR_new_reg_op(mt->ctx, sign)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-
-    emit_label(mt, l_cold);
-    MIR_reg_t boxed = emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
-        MIR_new_reg_op(mt->ctx, val_reg));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, boxed)));
-
-    emit_label(mt, l_end);
-    return result;
+    return em_box_f64_to_item(&mt->em, mt, emit_box_float_cold, val_reg);
 }
 
 // float? reserves one quiet-NaN payload for null. Keep that spelling inside

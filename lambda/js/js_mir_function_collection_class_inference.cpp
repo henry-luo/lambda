@@ -918,6 +918,13 @@ static void jm_infer_indexed_node(JsMirTranspiler* mt, JsAstNode* node,
             assignment->op == OPERATOR_JS_RSHIFT_ASSIGN || assignment->op == OPERATOR_JS_URSHIFT_ASSIGN;
         if (!compound_arith && !compound_bit) break;
         int right = jm_infer_find_param(assignment->right, bindings, binding_count);
+        if (compound_arith && left >= 0 && right >= 0) {
+            // A resolved alias on the LHS and a formal RHS form one numeric
+            // candidate edge. The native entry still guards both Number inputs;
+            // BigInt and coercive calls retain the generic assignment path.
+            evidence[left].int_evidence++;
+            evidence[right].int_evidence++;
+        }
         if (right >= 0) {
             if (compound_bit) evidence[right].int_evidence++;
             else if (jm_infer_is_float_literal(assignment->left)) evidence[right].float_evidence++;
