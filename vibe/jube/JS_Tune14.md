@@ -4,10 +4,10 @@
 
 **Date:** 2026-09-19
 
-**Status:** IN PROGRESS — the first T14-2 numeric slice is implemented and has
-focused semantic and paired-release evidence. T14-0, T14-1 and the remaining
-T14-2 through T14-8 outcomes remain open; this is not a performance acceptance
-record.
+**Status:** IN PROGRESS — the first T14-2 numeric slice and a T14-6
+cache/prebuild lifetime repair are implemented. The numeric slice has focused
+semantic and paired-release evidence. T14-0, T14-1 and the remaining T14-2
+through T14-8 outcomes remain open; this is not a performance acceptance record.
 
 **Source audit:** `c5052085ce91026edd94c50cf89c4fd0e539c2ec`.
 
@@ -540,7 +540,7 @@ regression prevents closing this package.
 variant carriers; converge dependency mechanics with core untyped inference.
 Extract equivalent nonnullable boxing only with both live callers migrated.
 
-#### Implementation update — 2026-09-19: shared F64 boxing, native updates and direct alias compound evidence
+#### Implementation update — 2026-09-19: shared F64 boxing, native updates and direct alias-chain compound evidence
 
 The first numeric slice extracts `em_box_f64_to_item` into the common emitter
 and migrates both untyped Lambda's `emit_box_float` and LambdaJS's
@@ -558,17 +558,20 @@ cases. Postfix updates copy the old F64 value before writeback. Generic updates
 remain the semantic path for coercion, BigInt, member/reference targets and
 unproved representations (**S1.11**, **D2.4.1–D2.4.3**).
 
-The indexed collector also records the direct candidate edge from a resolved
-LHS alias to an RHS formal in compound arithmetic. This admits a guarded Number
-entry for `r = x; r -= y`; it is not an unconditional type fact. The native
+The indexed collector also records the candidate edge from a resolved LHS alias
+to an RHS resolved binding in compound arithmetic. Its direct-body worklist is
+bounded by the eligible declarations in that function and advances in source
+order, so `first = x; cursor = first; cursor -= y` resolves through the
+already-published `first` binding without a fixed alias cap. This admits a
+guarded Number entry only; it is not an unconditional type fact. The native
 wrapper guards both F64 inputs, while strings, BigInts and every other miss
 continue through the generic body (**D2.4.1–D2.4.3**, **D8.2.5v2**).
 
 Focused `JsOpt.NativeNumberUpdatesKeepPostfixAndGenericSemantics` verifies
 postfix ordering, `-0`, string coercion, BigInt fallback, trace-off parity and
 the finalized native/generic MIR split. `JsOpt.NativeAliasCompoundAssignmentKeepsGenericSemantics`
-adds the direct-alias case, string relational behavior and BigInt fallback; the
-pre-existing Number-plan contract also passes. The direct-local update slice
+adds direct and chained alias cases, string relational behavior and BigInt
+fallback; the pre-existing Number-plan contract also passes. The direct-local update slice
 alone measured `larceny/diviter` tuned/control ratios 0.744359, 0.742719 and
 0.749489 (median 0.744359; 9,625.095 versus 12,959.271 ms) in an alternating
 release comparison against an isolated `HEAD` control.
@@ -584,21 +587,23 @@ the complete slice ranged from about 0.9845 to 1.0019 tuned/control, with a
 median near 0.9927. No full fixed-population matrix or QuickJS comparison has
 been run.
 
-Bounded propagation through further alias/dependency paths, native integer
-range proof, array regions and the Navier root cause remain open.
+Comparison/join/dependency propagation beyond direct-body aliases, native
+integer range proof, array regions and the Navier root cause remain open.
 
 #### A. Infer a guarded entry candidate through binding relationships
 
-The landed direct edge covers `r = x; r -= y` when both resolved bindings map
-to formals. It does not yet propagate through comparisons, joins or a general
+The landed direct-body chain covers `r = x; r -= y` and
+`first = x; r = first; r -= y` when the resolved bindings lead back to formals.
+It does not yet propagate through comparisons, joins, nested scopes or a general
 alias graph. The solution remains a candidate native entry guarded for Number
 inputs, not treating these operators as proof that every source call receives
 Numbers.
 
 - [~] Express numeric-use dependencies using resolved binding identity and the
-  existing function-owned index. The direct alias compound edge is implemented;
-  propagate further local aliases, compound assignments and comparisons with a
-  bounded fixed point and explicit refusal on unsupported/ambiguous joins.
+  existing function-owned index. Direct-body source-ordered alias chains and
+  compound assignment are implemented; propagate comparisons, joins and other
+  dependencies with a bounded fixed point and explicit refusal on
+  unsupported/ambiguous joins.
 - [~] Establish all required Number guards before specialized effects. The
   current edge relies on the existing native-entry F64 guards; preserve
   the exact original values on the generic entry, including missing arguments,
@@ -775,6 +780,27 @@ temporary allocations. Publish admitted/refused cases and per-family A/B results
 **Primary files:** `em_finalize_semantic_root_write_back` and scalar-home
 planning in `mir_emitter_shared.hpp`, indexed analysis, JS initializer lowering,
 MIR artifact/cache ownership and native-code lifecycle.
+
+#### Implementation update — 2026-09-19: safe cache rejection and parallel AST prebuild
+
+A JavaScript module-cache candidate records copied source and declaration
+metadata, but initially points at the MIR context whose compiled function bodies
+have already been published into the active realm. Cache admission is optional.
+When it is disabled or rejects that candidate, cleanup now releases only the
+candidate-owned copy; ordinary module completion retains the live context in the
+realm's deferred code store. A cross-language exported function therefore cannot
+call an address from a context that candidate cleanup has already destroyed
+(**D5.4.3**, **D8.5.1v4**).
+
+The Lambda script registry mutex also no longer covers a cache single-flight
+claim. A parallel AST-prebuild worker may recursively register an import while
+another worker waits on that claim; holding the receiving runtime's registry
+mutex across the wait deadlocked the closure. The cold global system-function
+maps now publish through `uv_once`, so independent first-import workers cannot
+race initialization (**D8.1.1v10**, **D8.5.1v4**). Focused cache tests cover a
+two-worker shared-import closure and a one-entry cross-language `test-batch`
+manifest with `LAMBDA_SCRIPT_CACHE=off`; the latter previously terminated from
+a freed MIR code context.
 
 - [ ] Attribute bytes and lifetime overlap to AST/index, MIR, CFG, root
   candidates, collecting-call liveness, interference, scalar homes, native code
@@ -1011,11 +1037,11 @@ Starting evidence, with its limits:
 |---|---|---|
 | T14-0 | [ ] Not started | Exact C14, audited manifest/oracles, complete controls and census. |
 | T14-1 | [~] Structural gap traced | Captured boxed kernels and generic-array helpers identified; still need a semantic reproducer, fixed-control recovery and causal repair. |
-| T14-2 | [~] In progress | Extend the landed shared F64 boxer, guarded local `++`/`--` and direct alias compound admission to complete Number/update regions; retain generic parity and add broader compound/range proofs. |
+| T14-2 | [~] In progress | Extend the landed shared F64 boxer, guarded local `++`/`--` and direct-body alias-chain compound admission to complete Number/update regions; retain generic parity and add comparison/join/range proofs. |
 | T14-3 | [ ] Not started | Search/FFT/Int32 coverage, shared physical access with untyped Lambda, complete misses and dynamic hits. |
 | T14-4 | [ ] Not started | Shared scalar/region mechanics, profile-valid invalidation and measured query reduction. |
 | T14-5 | [ ] Not started | Field/name/enumeration coverage and broad paired results. |
-| T14-6 | [ ] Not started | Compiler/memory owner census, scaling fixes/dispositions and cold results. |
+| T14-6 | [~] Stability repair landed | Cache-rejection native-code lifetime and parallel prebuild publication are covered; compiler/memory owner census, scaling fixes/dispositions and cold results remain. |
 | T14-7 | [ ] Not started | Per-family profiles and implemented/no-change/deferred dispositions. |
 | T14-8 | [ ] Not started | Native entry/lifetime audit, two-client reuse ledger, full gates, durable final matrices and milestone status. |
 

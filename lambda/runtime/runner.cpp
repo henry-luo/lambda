@@ -1677,6 +1677,13 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     InputScriptBuildKind build_kind = lambda_tier_selected() == LAMBDA_TIER_JIT &&
         runtime->use_mir_direct && !runtime->mir_cache_disabled
         ? INPUT_SCRIPT_BUILD_MIR : INPUT_SCRIPT_BUILD_AST;
+    // A cache claim may wait for a prebuild worker that recursively loads one
+    // of its imports. The registry lock protects this Runtime's short index
+    // mutations only; holding it across that wait blocks the publisher at its
+    // nested registration and deadlocks the whole prebuild pool.
+#ifndef _WIN32
+    pthread_mutex_unlock(&scripts_mutex);
+#endif
     LambdaScriptBuildClaim build_claim(raw_lease, build_kind,
         cache_artifact_enabled);
     if (build_claim.is_ready()) {
@@ -1691,9 +1698,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
         InputCacheScope* ready_scope = source_lease.release_scope();
         input_script_cache_close_scope(ready_scope);
-#ifndef _WIN32
-        pthread_mutex_unlock(&scripts_mutex);
-#endif
         if (canonical_path) mem_free(canonical_path);
         return load_script(runtime, script_path, source, is_import);
     }
@@ -1705,6 +1709,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     runtime->script_load_misses++;
     log_info("runtime-script-registry: miss path=%s", lookup_path);
     // script not found — create stub and register immediately to prevent duplicates
+#ifndef _WIN32
+    pthread_mutex_lock(&scripts_mutex);
+#endif
     Script *new_script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     new_script->reference = mem_strdup(lookup_path, MEM_CAT_SYSTEM);
     new_script->is_loading = true;

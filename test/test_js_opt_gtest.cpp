@@ -925,9 +925,18 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
         "  while (r >= y) { r -= y; q++; }\n"
         "  return q;\n"
         "}\n"
+        "function chainedSubtract(x, y) {\n"
+        "  let first = x; let cursor = first; let count = 0;\n"
+        "  while (cursor >= y) { cursor -= y; count++; }\n"
+        "  return count;\n"
+        "}\n"
         "if (subtractLoop(12, 3) !== 4 || subtractLoop('12', 3) !== 4 ||\n"
         "    subtractLoop('12', '3') !== 0 || subtractLoop(12n, 3n) !== 4) {\n"
         "  throw new Error('alias compound assignment changed semantics');\n"
+        "}\n"
+        "if (chainedSubtract(12, 3) !== 4 || chainedSubtract('12', 3) !== 4 ||\n"
+        "    chainedSubtract('12', '3') !== 0 || chainedSubtract(12n, 3n) !== 4) {\n"
+        "  throw new Error('chained alias compound assignment changed semantics');\n"
         "}\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
@@ -945,6 +954,14 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
     EXPECT_NE(strstr(native, "\n\tdsub\t"), nullptr);
     const char* subtract = strstr(native, "\n\tcall\tjs_subtract");
     EXPECT_FALSE(subtract && subtract < native_end);
+    const char* chained_end = NULL;
+    const char* chained = find_mir_function(mir, "_js_chainedSubtract_",
+        &chained_end);
+    ASSERT_NE(chained, nullptr);
+    ASSERT_NE(chained_end, nullptr);
+    EXPECT_NE(strstr(chained, "\n\tdsub\t"), nullptr);
+    const char* chained_subtract = strstr(chained, "\n\tcall\tjs_subtract");
+    EXPECT_FALSE(chained_subtract && chained_subtract < chained_end);
     free(mir);
     expect_trace_off_same("native_alias_compound", source, output);
 }

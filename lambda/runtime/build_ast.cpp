@@ -19,6 +19,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/uv_loop.h"
 #include <errno.h>
 #include <stdlib.h>
 
@@ -133,6 +134,8 @@ typedef struct {
 
 static struct hashmap* sys_func_map = NULL;       // (name, arg_count) → SysFuncInfo*
 static struct hashmap* sys_func_name_set = NULL;   // name → exists
+// AST closure workers can reach this cold process-wide table concurrently.
+static uv_once_t sys_func_maps_once = UV_ONCE_INIT;
 
 typedef struct JubeSysFuncRecord {
     SysFuncInfo info;
@@ -376,16 +379,21 @@ static void register_jube_sys_funcs(void) {
 }
 #endif
 
-static void init_sys_func_maps() {
-    if (sys_func_map) return;  // already initialized
-
+static void init_sys_func_maps_once() {
     const size_t count = (size_t)sys_func_def_count;
 
-    sys_func_map = hashmap_new(sizeof(SysFuncEntry), count * 2,
+    struct hashmap* func_map = hashmap_new(sizeof(SysFuncEntry), count * 2,
         0, 0, sys_func_hash, sys_func_compare, NULL, NULL);
-
-    sys_func_name_set = hashmap_new(sizeof(SysFuncNameEntry), count * 2,
+    struct hashmap* name_set = hashmap_new(sizeof(SysFuncNameEntry), count * 2,
         0, 0, sys_func_name_hash, sys_func_name_compare, NULL, NULL);
+    if (!func_map || !name_set) {
+        hashmap_free(func_map);
+        hashmap_free(name_set);
+        log_error("JUBE_AST: failed to initialize system-function maps");
+        return;
+    }
+    sys_func_map = func_map;
+    sys_func_name_set = name_set;
 
     for (size_t i = 0; i < count; i++) {
         register_sys_func_info(&sys_func_defs[i]);
@@ -401,6 +409,10 @@ static void init_sys_func_maps() {
     (void)dynamic_count;
     log_info("sys_func maps initialized: %zu static entries, %d Jube entries, %zu unique names",
              count, dynamic_count, hashmap_count(sys_func_name_set));
+}
+
+static void init_sys_func_maps() {
+    uv_once(&sys_func_maps_once, init_sys_func_maps_once);
 }
 
 void ensure_sys_func_maps_initialized() {

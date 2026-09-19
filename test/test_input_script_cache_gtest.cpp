@@ -71,6 +71,101 @@ static InputScriptRequest cache_test_lifecycle_request(const char* identity,
     return request;
 }
 
+TEST(InputScriptCacheTest, PrebuildSharedImportClosureCompletesWithoutRegistryDeadlock) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    int generation = (int)getpid();
+    char root_path[128];
+    char left_path[128];
+    char right_path[128];
+    char shared_path[128];
+    char leaf_a_path[128];
+    char leaf_b_path[128];
+    char root_source[768];
+    char left_source[256];
+    char right_source[256];
+    snprintf(root_path, sizeof(root_path), "temp/cache_prebuild_root_%d.ls", generation);
+    snprintf(left_path, sizeof(left_path), "temp/cache_prebuild_left_%d.ls", generation);
+    snprintf(right_path, sizeof(right_path), "temp/cache_prebuild_right_%d.ls", generation);
+    snprintf(shared_path, sizeof(shared_path), "temp/cache_prebuild_shared_%d.ls", generation);
+    snprintf(leaf_a_path, sizeof(leaf_a_path), "temp/cache_prebuild_leaf_a_%d.ls", generation);
+    snprintf(leaf_b_path, sizeof(leaf_b_path), "temp/cache_prebuild_leaf_b_%d.ls", generation);
+    snprintf(root_source, sizeof(root_source),
+        "import .cache_prebuild_leaf_a_%d\n"
+        "import .cache_prebuild_leaf_b_%d\n"
+        "import .cache_prebuild_left_%d\n"
+        "import .cache_prebuild_right_%d\n"
+        "leaf_a_value + leaf_b_value + left_value + right_value\n",
+        generation, generation, generation, generation);
+    snprintf(left_source, sizeof(left_source),
+        "import .cache_prebuild_shared_%d\n"
+        "pub let left_value = shared_value + 1\n", generation);
+    snprintf(right_source, sizeof(right_source),
+        "import .cache_prebuild_shared_%d\n"
+        "pub let right_value = shared_value + 2\n", generation);
+    const char shared_source[] = "pub let shared_value = 40\n";
+    // These independent leaves make the first system-function-map lookup run
+    // in parallel, while left/right preserve the shared-import deadlock case.
+    const char leaf_a_source[] = "pub let leaf_a_value = len([0])\n";
+    const char leaf_b_source[] = "pub let leaf_b_value = len([0, 0])\n";
+    ASSERT_EQ(write_binary_file(root_path, root_source, strlen(root_source)), 0);
+    ASSERT_EQ(write_binary_file(left_path, left_source, strlen(left_source)), 0);
+    ASSERT_EQ(write_binary_file(right_path, right_source, strlen(right_source)), 0);
+    ASSERT_EQ(write_binary_file(shared_path, shared_source, sizeof(shared_source) - 1), 0);
+    ASSERT_EQ(write_binary_file(leaf_a_path, leaf_a_source, sizeof(leaf_a_source) - 1), 0);
+    ASSERT_EQ(write_binary_file(leaf_b_path, leaf_b_source, sizeof(leaf_b_source) - 1), 0);
+
+    const char* lambda_exe = "./lambda.exe";
+    const char* args[] = {lambda_exe, root_path, NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_TIER", "auto"},
+        {"LAMBDA_MODULE_AST_THREADS", "2"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 10000;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec(lambda_exe, args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "86"), nullptr);
+    shell_result_free(&result);
+
+    unlink(root_path);
+    unlink(left_path);
+    unlink(right_path);
+    unlink(shared_path);
+    unlink(leaf_a_path);
+    unlink(leaf_b_path);
+}
+
+TEST(InputScriptCacheTest, DisabledCacheKeepsCrossLanguageModuleCodeAlive) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    int generation = (int)getpid();
+    char manifest_path[128];
+    snprintf(manifest_path, sizeof(manifest_path),
+        "temp/cache_cross_language_batch_%d.txt", generation);
+    ASSERT_EQ(write_binary_file(manifest_path,
+        "test/lambda/binary_js_bridge.ls\n", 32), 0);
+    const char* lambda_exe = "./lambda.exe";
+    const char* args[] = {lambda_exe, "test-batch", "--no-log", "--timeout=10", NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_SCRIPT_CACHE", "off"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.stdin_path = manifest_path;
+    options.timeout_ms = 10000;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec(lambda_exe, args, &options);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "BATCH_END 0"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "DEADBEEF"), nullptr);
+    shell_result_free(&result);
+    unlink(manifest_path);
+}
+
 TEST(InputScriptCacheTest, ReusesSourceAndKeepsArtifactsByCompilerKey) {
     const char* previous_value = shell_getenv("LAMBDA_SCRIPT_CACHE");
     char* previous_policy = previous_value
