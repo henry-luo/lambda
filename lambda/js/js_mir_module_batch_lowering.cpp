@@ -3880,6 +3880,18 @@ static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
     js_transpiler_destroy(tp);
 }
 
+// Cache admission is optional, but the current realm has already published
+// function bodies from this context. Drop only the candidate's copied cache
+// metadata when admission fails; the deferred realm owns the live code.
+static void jm_discard_unadmitted_module_artifact(JsModuleMirArtifact* artifact) {
+    if (!artifact) return;
+    artifact->image.owns_compiled_state = false;
+    artifact->image.mir_ctx = NULL;
+    mem_free(artifact->image.source_buffer);
+    artifact->image.source_buffer = NULL;
+    js_module_mir_artifact_destroy(artifact);
+}
+
 class JsModuleMirBuildScope {
 public:
     InputScriptBuildScope build = {};
@@ -4504,7 +4516,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
                 js_transpiler_destroy(tp);
                 return namespace_obj;
             }
-            js_module_mir_artifact_destroy(compiled);
+            jm_discard_unadmitted_module_artifact(compiled);
         }
     }
 

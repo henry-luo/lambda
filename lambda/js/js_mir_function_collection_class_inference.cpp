@@ -1041,8 +1041,31 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // One indexed inference pass covers formals and their direct-body aliases.
     // The prior spelling-based alias re-walk confused shadowed bindings and
     // retained a second full body scan after identity publication.
+    // Direct-body alias chains are keyed by resolved bindings. Count their
+    // possible declarations before allocating the compiler-owned worklist so
+    // `cursor = first` can reuse an earlier `first = param` edge without a
+    // fixed small alias limit.
+    JsBlockNode* body_blk = fn->body &&
+        fn->body->node_type == AST_NODE_BLOCK
+        ? (JsBlockNode*)fn->body : NULL;
+    int direct_alias_capacity = 0;
+    for (JsAstNode* stmt = body_blk ? body_blk->statements : NULL;
+            stmt; stmt = stmt->next) {
+        if (stmt->node_type != AST_NODE_VAR_STAM) continue;
+        for (JsAstNode* decl = ((JsVariableDeclarationNode*)stmt)->declarations;
+                decl; decl = decl->next) {
+            if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* candidate =
+                (JsVariableDeclaratorNode*)decl;
+            if (candidate->id && candidate->id->node_type == AST_NODE_IDENT &&
+                    candidate->init && candidate->init->node_type == AST_NODE_IDENT) {
+                direct_alias_capacity++;
+            }
+        }
+    }
+    int inference_binding_capacity = pc + direct_alias_capacity;
     JmParamInferenceBinding* inference_bindings =
-        (JmParamInferenceBinding*)mem_calloc((size_t)pc * 2,
+        (JmParamInferenceBinding*)mem_calloc((size_t)inference_binding_capacity,
             sizeof(*inference_bindings), MEM_CAT_JS_RUNTIME);
     FnParamEvidence* evidence = (FnParamEvidence*)mem_calloc((size_t)pc,
         sizeof(*evidence), MEM_CAT_JS_RUNTIME);
@@ -1075,19 +1098,19 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
         self_name = jm_var_name(fn->name);
     }
 
-    JsBlockNode* body_blk = fn->body &&
-        fn->body->node_type == AST_NODE_BLOCK
-        ? (JsBlockNode*)fn->body : NULL;
     for (JsAstNode* stmt = body_blk ? body_blk->statements : NULL;
-            stmt && inference_binding_count < pc * 2; stmt = stmt->next) {
+            stmt && inference_binding_count < inference_binding_capacity;
+            stmt = stmt->next) {
         if (stmt->node_type != AST_NODE_VAR_STAM) continue;
         for (JsAstNode* decl = ((JsVariableDeclarationNode*)stmt)->declarations;
-                decl && inference_binding_count < pc * 2; decl = decl->next) {
+                decl && inference_binding_count < inference_binding_capacity;
+                decl = decl->next) {
             if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
             JsVariableDeclaratorNode* alias = (JsVariableDeclaratorNode*)decl;
             if (!alias->id || alias->id->node_type != AST_NODE_IDENT ||
                     !alias->init || alias->init->node_type != AST_NODE_IDENT) continue;
-            int param_index = jm_infer_find_param(alias->init, inference_bindings, pc);
+            int param_index = jm_infer_find_param(alias->init, inference_bindings,
+                inference_binding_count);
             JsIdentifierNode* alias_id = (JsIdentifierNode*)alias->id;
             if (param_index < 0 || !alias_id->entry) continue;
             inference_bindings[inference_binding_count++] = {alias_id->entry,
