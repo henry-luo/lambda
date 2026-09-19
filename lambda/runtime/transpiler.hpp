@@ -122,6 +122,9 @@ struct Runtime {
     bool js_ast_backend;
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // all executable Lambda paths use MIR Direct
+    // Worker-local module prebuilds may create immutable AST cache templates,
+    // but never execute or lower them to MIR.
+    bool ast_prebuild_only;
 
     // SCU14 (D5.4.1): the retained heap, name pool, type list and scheduler
     // are owned by the canonical EvalContext below and reached through the

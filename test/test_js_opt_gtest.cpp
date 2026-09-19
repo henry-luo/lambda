@@ -215,12 +215,11 @@ static char* canonicalize_mir(const char* input) {
                 "lambda_stack_overflow_error,");
             bool is_stack_guard_pointer = stack_guard &&
                 (!line_end || stack_guard < line_end);
-            // MIR pointer operands have host-dependent decimal widths. Literal
-            // shapes now commonly sit above the old ten-digit range, while
-            // tagged language values remain well above the user-space pointer
-            // address range on supported hosts.
+            // MIR pointer operands have host-dependent decimal widths. AArch64
+            // static-recipe addresses may sit above 2^48; tagged Items start
+            // at 2^56, so this still preserves language-value constants.
             bool is_user_pointer = value >= 4300000000ULL &&
-                value < 17592186044416ULL;
+                value < 72057594037927936ULL;
             if (is_stack_guard_pointer || is_user_pointer) {
                 const char* token = "<ptr>";
                 memcpy(output + out, token, 5);

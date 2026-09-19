@@ -249,6 +249,33 @@
               "safepoints": 12
             }
           ]
+        },
+        "linux-debug-v3": {
+          "module_insns": 345,
+          "functions": {
+            "js_main": {
+              "insns": 87
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 2,
+              "root_stores": 7,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 10
+            },
+            {
+              "name": "_js_anon1_#",
+              "occurrence": 0,
+              "roots": 4,
+              "root_stores": 8,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 12
+            }
+          ]
         }
       }
     },
@@ -317,6 +344,9 @@
           "module_insns": 155
         },
         "darwin-debug-v3": {
+          "module_insns": 162
+        },
+        "linux-debug-v3": {
           "module_insns": 162
         }
       }
@@ -434,6 +464,27 @@
               "scalar_homes": 15,
               "number_scratch": 0,
               "safepoints": 2102
+            }
+          ]
+        },
+        "linux-debug-v3": {
+          "module_insns": 16490,
+          "functions": {
+            "js_main": {
+              "insns": 11975
+            },
+            "Tune6ExactCollection_m128_128": {
+              "insns": 5
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 11,
+              "root_stores": 656,
+              "scalar_homes": 15,
+              "number_scratch": 0,
+              "safepoints": 1694
             }
           ]
         },

@@ -300,7 +300,9 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         if (font_box_handle(&temp_font)) {
             float average_metric = font_get_text_control_avg_char_width(
                 font_box_handle(&temp_font));
-            float average_char_w = roundf(average_metric);
+            // The size algorithm uses the face's fractional average advance;
+            // rounding it widens a default 20-column control by almost one glyph.
+            float average_char_w = average_metric;
             if (average_char_w <= 0.0f) {
                 GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
                 average_char_w = zero_glyph.advance_x;

@@ -13217,6 +13217,47 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
     return true;
 }
 
+char* lambda_resolve_import_module_path(const char* base_directory,
+        StrView module) {
+    if (!module.str || module.length == 0) return NULL;
+    StrBuf* path = strbuf_new();
+    if (!path) return NULL;
+    bool relative = module.str[0] == '.';
+    bool shipped_package = !relative &&
+        append_shipped_package_module_path(path, module);
+    if (relative) {
+        const char* base = base_directory ? base_directory : "./";
+        size_t base_len = strlen(base);
+        strbuf_append_format(path, "%s%.*s", base,
+            (int)module.length - 1, module.str + 1);
+        // only the module spec's dots are package separators. The base
+        // directory may legitimately contain a dot component (a checkout under
+        // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
+        for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
+    } else if (!shipped_package) {
+        strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
+        for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
+        char* slash = strchr(path->str + 2, '/');
+        if (slash) {
+            StrBuf* fixed = strbuf_new();
+            const char* home = g_lambda_home;
+            if (!fixed) {
+                strbuf_free(path);
+                return NULL;
+            }
+            if (home[0] == '.' && home[1] == '/') home += 2;
+            strbuf_append_all(fixed, 2, "./", home);
+            strbuf_append_str(fixed, slash);
+            strbuf_free(path);
+            path = fixed;
+        }
+    }
+    strbuf_append_str(path, ".ls");
+    char* resolved = mem_strdup(path->str, MEM_CAT_SYSTEM);
+    strbuf_free(path);
+    return resolved;
+}
+
 static AstNode* build_module_import_from_parts(Transpiler* tp,
         SourceSpan span, StrView alias_view, StrView module) {
     AstImportNode* node = (AstImportNode*)alloc_ast_node_from_span(tp,
@@ -13261,49 +13302,39 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
         }
         return alloc_ast_node_from_span(tp, AST_NODE_NULL, span, sizeof(AstNode));
     }
-    StrBuf* path = strbuf_new();
-    bool relative = module.str[0] == '.';
-    bool shipped_package = !relative &&
-        append_shipped_package_module_path(path, module);
-    if (relative) {
-        const char* base = tp->directory ? tp->directory : "./";
-        size_t base_len = strlen(base);
-        strbuf_append_format(path, "%s%.*s", base,
-            (int)module.length - 1, module.str + 1);
-        // only the module spec's dots are package separators. The base
-        // directory may legitimately contain a dot component (a checkout under
-        // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
-        for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
-    } else if (!shipped_package) {
-        strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
-        for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
-        char* slash = strchr(path->str + 2, '/');
-        if (slash) {
-            StrBuf* fixed = strbuf_new();
-            const char* home = g_lambda_home;
-            if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_all(fixed, 2, "./", home);
-            strbuf_append_str(fixed, slash);
-            strbuf_free(path);
-            path = fixed;
-        }
+    char* path = lambda_resolve_import_module_path(tp->directory, module);
+    if (!path) {
+        record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
+            "failed to resolve Lambda module '%.*s'", (int)module.length,
+            module.str);
+        return (AstNode*)node;
     }
-    strbuf_append_str(path, ".ls");
-    node->is_relative = relative;
-    bool lambda_source_exists = file_exists(path->str);
+    node->is_relative = module.str[0] == '.';
+    bool lambda_source_exists = file_exists(path);
+    if (!lambda_source_exists && tp->runtime && tp->runtime->ast_prebuild_only) {
+        // A worker may retain parser facts only. The JS adapter owns module
+        // initialization and can lower MIR, so defer this import to the
+        // receiving Runtime instead of crossing that boundary.
+        tp->cache_cross_lang_tainted = true;
+        mem_free(path);
+        return (AstNode*)node;
+    }
     bool imported = false;
-    node->script = load_script(tp->runtime, path->str, NULL, true);
+    node->script = load_script(tp->runtime, path, NULL, true);
     if (node->script && node->script->ast_root) {
         declare_module_import(tp, node);
         imported = true;
     } else if (!lambda_source_exists) {
         // A missing Lambda module may resolve to a hosted JavaScript module.
-        path->str[path->length - 2] = 'j';
-        path->str[path->length - 1] = 's';
-        Item namespace_obj = load_js_module(tp->runtime, path->str);
+        size_t path_length = strlen(path);
+        if (path_length >= 2) {
+            path[path_length - 2] = 'j';
+            path[path_length - 1] = 's';
+        }
+        Item namespace_obj = load_js_module(tp->runtime, path);
         if (namespace_obj.item != ItemNull.item) {
             node->script = (Script*)create_module_import_script(
-                path->str, namespace_obj, tp->runtime);
+                path, namespace_obj, tp->runtime);
             node->is_cross_lang = node->script != NULL;
             if (node->script) {
                 declare_module_import(tp, node);
@@ -13314,9 +13345,9 @@ static AstNode* build_module_import_from_parts(Transpiler* tp,
     if (!imported) {
         record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
             "failed to import Lambda module '%.*s' (resolved: %s)",
-            (int)module.length, module.str, path->str);
+            (int)module.length, module.str, path);
     }
-    strbuf_free(path);
+    mem_free(path);
     return (AstNode*)node;
 }
 

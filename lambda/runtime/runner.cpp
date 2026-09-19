@@ -11,6 +11,7 @@
 #include "doc_context.hpp"
 #include "write_set.hpp"
 #include "ast_build.hpp"
+#include "module_ast_prebuild.hpp"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/thread_pool.h"
 #include "../io/mark_builder.hpp"
@@ -54,6 +55,114 @@ extern void free_document(DomDocument* doc);
 
 static __thread LambdaCompilerTiming g_last_lambda_compiler_timing;
 static int g_compiler_timing_enabled = -1;
+
+typedef struct LambdaAstPrebuildDiscoverState {
+    const char* source;
+    size_t source_length;
+    ArrayList* specifiers;
+    LambdaParseValue next_value;
+    bool failed;
+} LambdaAstPrebuildDiscoverState;
+
+static LambdaParseValue lambda_ast_prebuild_discover_reduce(void* opaque,
+        const LambdaParseReduction* reduction) {
+    LambdaAstPrebuildDiscoverState* state =
+        (LambdaAstPrebuildDiscoverState*)opaque;
+    if (!state || !reduction) return 0;
+    if (reduction->kind == LAMBDA_REDUCE_DECLARATION &&
+            reduction->form == LAMBDA_REDUCTION_FORM_IMPORT) {
+        SourceSpan span = reduction->secondary_token.span;
+        if (span.end_byte < span.start_byte || span.end_byte > state->source_length) {
+            state->failed = true;
+            return 0;
+        }
+        char* specifier = mem_dup_n(state->source + span.start_byte,
+            span.end_byte - span.start_byte, MEM_CAT_SYSTEM);
+        if (!specifier || !arraylist_append(state->specifiers, specifier)) {
+            mem_free(specifier);
+            state->failed = true;
+            return 0;
+        }
+    }
+    state->next_value++;
+    return state->next_value;
+}
+
+static ArrayList* lambda_ast_prebuild_discover_imports(void* opaque,
+        const char* source, size_t source_length) {
+    (void)opaque;
+    if (!source) return NULL;
+    ArrayList* specifiers = arraylist_new(4);
+    if (!specifiers) return NULL;
+    LambdaAstPrebuildDiscoverState state = {source, source_length, specifiers,
+        0, false};
+    LambdaParseSink sink = {lambda_ast_prebuild_discover_reduce};
+    LambdaParseError error = {};
+    if (lambda_rd_parse_source(source, source_length, &sink, &state, NULL,
+            &error) != LAMBDA_PARSE_OK || state.failed) {
+        for (int index = 0; index < specifiers->length; index++) {
+            mem_free(specifiers->data[index]);
+        }
+        arraylist_free(specifiers);
+        return NULL;
+    }
+    return specifiers;
+}
+
+static char* lambda_ast_prebuild_importer_directory(const char* path) {
+    if (!path) return NULL;
+    const char* slash = strrchr(path, '/');
+#ifdef _WIN32
+    const char* backslash = strrchr(path, '\\');
+    if (backslash && (!slash || backslash > slash)) slash = backslash;
+#endif
+    return slash ? mem_dup_n(path, (size_t)(slash - path + 1), MEM_CAT_SYSTEM)
+        : mem_strdup("./", MEM_CAT_SYSTEM);
+}
+
+static bool lambda_ast_prebuild_resolve_import(void* opaque,
+        const char* importer_path, const char* specifier,
+        ModuleAstResolvedImport* out) {
+    (void)opaque;
+    if (!out || !importer_path || !specifier || !specifier[0] ||
+            specifier[0] == '\'') return false;
+    char* directory = lambda_ast_prebuild_importer_directory(importer_path);
+    StrView module = strview_from_cstr(specifier);
+    char* path = lambda_resolve_import_module_path(directory, module);
+    mem_free(directory);
+    if (!path || !file_exists(path)) {
+        mem_free(path);
+        return false;
+    }
+    out->path = path;
+    out->language = MODULE_AST_LANGUAGE_LAMBDA;
+    return true;
+}
+
+static bool lambda_ast_prebuild_build_module(void* opaque, const char* path) {
+    (void)opaque;
+    Runtime worker = {};
+    runtime_init(&worker);
+    worker.ast_prebuild_only = true;
+    Script* script = load_script(&worker, path, NULL, true);
+    bool built = script && script->ast_root && !script->jit_context &&
+        (script->cache_owned_template || script->cache_template);
+    runtime_free_all_scripts(&worker);
+    return built;
+}
+
+static bool lambda_ast_prebuild_imports(const char* path) {
+    ModuleAstPrebuildProfile profile = {
+        "lambda", MODULE_AST_LANGUAGE_LAMBDA,
+        lambda_ast_prebuild_discover_imports, lambda_ast_prebuild_resolve_import,
+        lambda_ast_prebuild_build_module, NULL,
+    };
+    ModuleAstPrebuildProfiles profiles = {};
+    profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = &profile;
+    ModuleAstPrebuildStats stats = {};
+    return module_ast_prebuild_imports(&profiles, MODULE_AST_LANGUAGE_LAMBDA,
+        path, NULL, 0, &stats);
+}
 
 static void record_direct_parse_error(Transpiler* tp, const char* script_path,
         const LambdaParseError* parse_error) {
@@ -650,12 +759,12 @@ static size_t lambda_script_cache_artifact_bytes(const void* value) {
 }
 
 static bool lambda_ast_template_is_reusable_shallow(const Script* script) {
-    if (!script || !script->ast_root || !script->interp_supported ||
-            !script->interp_planned || script->jit_context ||
+    if (!script || !script->ast_root || script->jit_context ||
             script->cache_cross_lang_tainted) {
         return false;
     }
-    return true;
+    return script->ast_frontend_only ||
+        (script->interp_supported && script->interp_planned);
 }
 
 static bool lambda_ast_template_dependencies_reusable(const Script* script,
@@ -976,8 +1085,15 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
 // a parent that falls back to MIR cannot link a dependency that was already
 // admitted to T0: MIR imports require the child's generated symbols. Demote
 // the complete loaded cone in post-order before compiling that parent.
+static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
+        Script* script);
+
 static bool interp_force_jit_script(Script* script, Runtime* runtime) {
     if (!script || !runtime) return false;
+    if (script->ast_frontend_only &&
+            !lambda_finalize_ast_template_for_execution(runtime, script)) {
+        return false;
+    }
     if (script->direct_imports) {
         for (int i = 0; i < script->direct_imports->length; i++) {
             Script* dep = (Script*)script->direct_imports->data[i];
@@ -1016,6 +1132,65 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
         if (!interp_force_jit_script(dep, tp->runtime)) return false;
     }
     return true;
+}
+
+static bool lambda_prepare_ast_interpreter(Transpiler* tp) {
+    if (!tp || !tp->ast_root) return false;
+    AstScript* interp_root = (AstScript*)tp->ast_root;
+    if (tp->direct_imports) {
+        arraylist_free(tp->direct_imports);
+        tp->direct_imports = NULL;
+    }
+    for (AstNode* child = interp_root->child; child; child = child->next) {
+        if (child->node_type != AST_NODE_IMPORT) continue;
+        AstImportNode* import_node = (AstImportNode*)child;
+        Script* imported = lambda_ast_overlay_import_script(tp->script_owner,
+            import_node);
+        if (import_node->is_cross_lang) {
+            // Cross-language namespaces are execution-owned. Keeping one in
+            // a Lambda AST image could retain another Runtime's adapter state.
+            tp->cache_cross_lang_tainted = true;
+            continue;
+        }
+        if (!imported) continue;
+        if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
+        if (!tp->direct_imports || !arraylist_append(tp->direct_imports,
+                imported)) return false;
+    }
+    AstNodeType reject = AST_NODE_NULL;
+    bool supported = interp_scan_supported(tp, &reject) && interp_plan_script(tp);
+    if (supported) {
+        tp->interp_supported = true;
+        tp->ast_frontend_only = false;
+        return true;
+    }
+    tp->interp_reject_kind = reject;
+    return false;
+}
+
+static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
+        Script* script) {
+    if (!runtime || !script || !script->ast_frontend_only) return script != NULL;
+    if (runtime->ast_prebuild_only) return true;
+    Transpiler transpiler = {};
+    memcpy(&transpiler, script, sizeof(Script));
+    transpiler.script_owner = script;
+    transpiler.runtime = runtime;
+    script->ast_frontend_only = false;
+    transpiler.ast_frontend_only = false;
+    if (lambda_prepare_ast_interpreter(&transpiler)) {
+        script_adopt_transpiler(script, &transpiler);
+        log_info("module-ast-prebuild: activated Lambda AST template path=%s",
+            script->reference ? script->reference : "<unknown>");
+        return true;
+    }
+    log_info("module-ast-prebuild: execution MIR fallback path=%s reason=node:%s",
+        script->reference ? script->reference : "<unknown>",
+        interp_node_kind_name(transpiler.interp_reject_kind));
+    if (!interp_force_jit_import_cone(&transpiler)) return false;
+    compile_script_as_mir_direct(&transpiler, script, script->reference,
+        NULL, NULL, NULL, NULL, NULL, NULL);
+    return script->jit_context != NULL;
 }
 
 typedef struct LambdaDirectFrontendPassContext {
@@ -1193,21 +1368,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
         if (profiling || compiler_timing) profile_get_time(&plan0);
-        // `direct_imports` is normally filled inside compile_script_as_mir_direct,
-        // which T0 skips — but the cone drives module init order, so record it
-        // here before the tier decision is published.
-        AstScript* interp_root = (AstScript*)tp->ast_root;
-        if (tp->direct_imports) { arraylist_free(tp->direct_imports); tp->direct_imports = NULL; }
-        for (AstNode* child = interp_root ? interp_root->child : NULL; child;
-                child = child->next) {
-            if (child->node_type != AST_NODE_IMPORT) continue;
-            AstImportNode* imp = (AstImportNode*)child;
-            if (imp->is_cross_lang || !imp->script) continue;
-            if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
-            arraylist_append(tp->direct_imports, imp->script);
-        }
-        AstNodeType reject = AST_NODE_NULL;
-        bool supported = interp_scan_supported(tp, &reject) && interp_plan_script(tp);
+        bool supported = lambda_prepare_ast_interpreter(tp);
         if (profiling || compiler_timing) profile_get_time(&plan1);
         if (supported) {
             tp->interp_supported = true;
@@ -1241,10 +1402,18 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 script_path, (unsigned)tp->interp_slab_count);
             return;
         }
-        tp->interp_reject_kind = reject;
+        if (tp->runtime && tp->runtime->ast_prebuild_only) {
+            // The worker retains only validated/indexed front-end facts. The
+            // execution Runtime decides whether this module needs MIR later.
+            tp->ast_frontend_only = true;
+            script_adopt_transpiler(script, tp);
+            log_info("module-ast-prebuild: retained unsupported Lambda AST path=%s reason=node:%s",
+                script_path, interp_node_kind_name(tp->interp_reject_kind));
+            return;
+        }
         interp_run_stats()->scripts_fallback++;
         log_notice("interp: fallback file=%s reason=node:%s",
-            script_path, interp_node_kind_name(reject));
+            script_path, interp_node_kind_name(tp->interp_reject_kind));
         if (!interp_force_jit_import_cone(tp)) return;
     }
 
@@ -1303,6 +1472,15 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
+
+    // Build the static closure before the root enters its Runtime. Workers only
+    // publish AST templates; import initialization and tier selection stay on
+    // this execution path (D8.1.1v10, D8.5.1v4).
+    if (runtime && !runtime->ast_prebuild_only && !is_import && !source &&
+            lambda_tier_selected() != LAMBDA_TIER_JIT &&
+            input_script_cache_ast_enabled(input_manager_global_script_cache())) {
+        (void)lambda_ast_prebuild_imports(script_path);
+    }
 
     // Normalize path to canonical absolute path for reliable deduplication
     // (skip for source-provided scripts like REPL which have synthetic paths)
@@ -1482,6 +1660,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 #ifndef _WIN32
                 pthread_mutex_unlock(&scripts_mutex);
 #endif
+                if (!lambda_finalize_ast_template_for_execution(runtime, instance)) {
+                    log_error("module-ast-prebuild: failed to activate Lambda template %s",
+                        lookup_path);
+                    if (canonical_path) mem_free(canonical_path);
+                    return NULL;
+                }
                 if (canonical_path) mem_free(canonical_path);
                 return instance;
             }
@@ -1622,7 +1806,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     // check for compilation failure — a T0-planned script deliberately has no
     // MIR context, so its success signal is the frame plan instead.
-    if (!new_script->jit_context && !new_script->interp_supported) {
+    if (!new_script->jit_context && !new_script->interp_supported &&
+            !new_script->ast_frontend_only) {
         log_error("Error: Failed to compile script %s", script_path);
         return NULL;
     }

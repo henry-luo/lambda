@@ -4,6 +4,7 @@
 
 #include <re2/re2.h>
 
+#include <math.h>
 #include <string.h>
 
 static const size_t MVP_INITIAL_COLLECTION_BYTES = 64 * 1024;

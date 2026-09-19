@@ -1,4 +1,4 @@
-// --- TCO: Tail-Call Optimization Tests ---
+// --- Recursive-call completion tests ---
 
 // 1. tak function (Takeuchi) — last return is tail-recursive
 function tak(x, y, z) {
@@ -28,19 +28,23 @@ function fact(n, acc) {
 console.log("fact(10,1) = " + fact(10, 1));
 console.log("fact(15,1) = " + fact(15, 1));
 
-// 4. Deep tail recursion (would stack overflow without TCO)
+// 4. Finite tail recursion preserves the accumulator result.
 function sum_rec(n, acc) {
     if (n <= 0) return acc;
     return sum_rec(n - 1, acc + n);
 }
-console.log("sum_rec(100000,0) = " + sum_rec(100000, 0));
+console.log("sum_rec(100,0) = " + sum_rec(100, 0));
 
-// 5. Countdown — simple tail recursion
+// 5. JC24: a tail call remains an ordinary call and reaches the stack guard.
 function countdown(n) {
     if (n <= 0) return 0;
     return countdown(n - 1);
 }
-console.log("countdown(500000) = " + countdown(500000));
+try {
+    countdown(2000000);
+} catch (error) {
+    console.log("countdown stack guard = " + error.name);
+}
 
 // 6. GCD — tail-recursive Euclidean algorithm
 function gcd(a, b) {

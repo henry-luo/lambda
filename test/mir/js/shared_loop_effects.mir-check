@@ -3,12 +3,12 @@
   "description": "D3.3.2v2/D5.3/D8.4.3v2: bitwise coercion stays boxed while proven numeric accumulation uses the native lane.",
   "checks": [
     {
-      "in_func": "_js_constantBits_#_body",
+      "in_func": "_js_constantBits_#_n",
       "expect": ["call\tjs_bitwise_or", "\tdadd\t"],
       "forbid": ["js_double_to_int32"]
     },
     {
-      "in_func": "_js_varyingBits_#_body",
+      "in_func": "_js_varyingBits_#_n",
       "expect": ["call\tjs_bitwise_or", "\tdadd\t"],
       "forbid": ["js_double_to_int32"]
     }
