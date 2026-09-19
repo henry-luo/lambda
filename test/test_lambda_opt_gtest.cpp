@@ -253,6 +253,36 @@ TEST(LambdaOptStrings, TailAccumulatorCopiesLinearBytes) {
     EXPECT_GT(run.profile.get("string_freezes"), 0u);
 }
 
+// Tune28 T28-5: literal string separators search for the next first-byte hit
+// and compare only multi-byte candidates. S17.1.1 keeps the segments and
+// delimiters observable while the structural check pins the non-bytewise scan.
+TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
+    auto run = run_source_fixture("tune28_split_literal_kernel",
+        "test/lambda/proc/tune28_split_literal_kernel.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out,
+        "[\"aXb\", \"c\"]\n[\"aXb\", \"XX\", \"c\"]\n[\"a\", \"b\", \"\", \"c\"]\n\n");
+    char* runtime_text = read_text_file("lambda/runtime/lambda-eval.cpp");
+    ASSERT_NE(runtime_text, nullptr);
+    if (!runtime_text) return;
+    std::string runtime_source(runtime_text);
+    free(runtime_text);
+    // split is a runtime builtin rather than a MIR lowering. Keep the
+    // non-bytewise implementation pinned beside its semantic fixture: scan to
+    // the next first-byte hit, skip memcmp for one-byte delimiters, and compare
+    // only the remaining candidate suffix.
+    size_t kernel_start = runtime_source.find("static size_t split_literal_find(");
+    ASSERT_NE(kernel_start, std::string::npos);
+    size_t kernel_end = runtime_source.find("\n}\n\nstatic int64_t split_literal_match_count",
+        kernel_start);
+    ASSERT_NE(kernel_end, std::string::npos);
+    std::string kernel = runtime_source.substr(kernel_start, kernel_end - kernel_start);
+    EXPECT_NE(kernel.find("memchr(chars + from, first"), std::string::npos);
+    EXPECT_NE(kernel.find("if (separator_len == 1 ||"), std::string::npos);
+    EXPECT_NE(kernel.find("memcmp(hit + 1, separator + 1, separator_len - 1)"),
+        std::string::npos);
+}
+
 // A self-referential record contract with a typed recursive traversal. The
 // declared boundaries here are the `let node: Node` initializer, the `head`
 // stores, and the `depth(n.next)` recursion — 20 nodes' worth per run.

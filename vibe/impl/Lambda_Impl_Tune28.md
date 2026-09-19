@@ -950,6 +950,18 @@ byte-identical to the control on interp, jit and auto. Outputs are identical on
 three_way_merge2, log_pipeline2, knucleotide2, hyphen2, base642 and
 text_search2.
 
+**Permanent regression pin (2026-09-19).** The temporary probe is now the
+checked-in `test/lambda/proc/tune28_split_literal_kernel.ls` fixture and
+`LambdaOptStrings.LiteralSplitKernelAvoidsBytewiseComparisons`. On the JIT
+profile it asserts S17.1.1 output for a multi-byte near miss, the
+keep-delimiter form, and a one-byte delimiter. The test also checks the
+runtime kernel's structure: `memchr` finds the next first-byte hit, a
+one-byte delimiter returns without `memcmp`, and a multi-byte delimiter
+compares only the remaining candidate suffix. The semantic fixture ensures the
+checked shape preserves S17.1.1; this direct source check is necessary because
+`split` is a runtime builtin rather than a MIR lowering. It adds no work to
+the release path.
+
 **Measured** against `temp/t28/lambda-t28-v9.exe`, same HEAD, min of 3
 interleaved runs, taken twice (the runs partly overlapped each other, so each
 is read only for direction and the pair for agreement):

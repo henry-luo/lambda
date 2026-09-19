@@ -454,6 +454,33 @@ ownership-heavy guards were screened on unchanged sources; no new ownership
 rule, snapshot change, root policy or var home transport was introduced.
 This preserves **S9.1.2–S9.1.3**, **D4.4.4v4** and **D5.3.1–D5.3.4**.
 
+### 3.8 Regression-pin audit (2026-09-19)
+
+Every effective T31 mechanism now has a structural pin and a semantic
+fixture. T31-1's `tune31_nested_counter` and
+`tune31_recursive_array_witness` sidecars pin the native counter and
+self-forwarded ArrayNum paths, with the T21 forwarding fixture retaining the
+representation-agnostic COW fallback; the corresponding parity tests run on
+interp, JIT and auto. This holds the S4.1.1-S4.1.5 counter rules and the
+D3.2.1/D3.3.1 inference boundary together. T31-2's direct and nested builder
+fixtures pin the inferred append helper, raw direct consumer, and checked
+outer-boundary fallback under D3.2.1/D3.3.3v3 and S9.2.2. T31-3 has both the
+native Bool-or-null equality positive case and the reassignment negative case,
+which retain S5.1.1/S6.1.2 total equality. T31-0 made no engine change, T31-4
+and T31-5 found no additional implementation target, and T31-6 remains
+deferred.
+
+The immediately preceding effective rounds are also pinned by executed test
+surfaces: Tune27 combines MIR sidecars, three-tier parity fixtures and COW
+profile assertions; Tune28 has module-constant/fixed-index sidecars, its
+place/COW parity cases, and the permanent split-kernel optimization fixture noted
+above; Tune29's required-field, handle, store and flow-join cases have
+sidecars or Lambda optimization counters; Tune30's inlining/store/interval
+sidecars and semantic fixtures are supplemented by the
+`lambda_tune30_libm_no_gc` MIR budget ratchet. Measured-but-reverted or
+timing-neutral proposals are deliberately excluded because no shipped fast
+path needs a performance pin.
+
 ## 4. Measurement and acceptance
 
 ### 4.1 Controls and timing
