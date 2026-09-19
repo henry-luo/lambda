@@ -333,6 +333,63 @@ TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
     }
 }
 
+// Tune31 T31-1: a nested counter initialized from the compact outer counter
+// must retain its native arithmetic in every execution tier (S4.1.1-S4.1.5).
+TEST(LambdaTune31Tests, NestedCounterAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_nested_counter.ls",
+            "test/mir/lambda/tune31_nested_counter.txt", true, tiers[t]);
+    }
+}
+
+TEST(LambdaTune31Tests, RecursiveArrayWitnessAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_recursive_array_witness.ls",
+            "test/mir/lambda/tune31_recursive_array_witness.txt", true, tiers[t]);
+    }
+}
+
+TEST(LambdaTune31Tests, AppendBuilderReturnAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_append_builder_return.ls",
+            "test/mir/lambda/tune31_append_builder_return.txt", true, tiers[t]);
+    }
+}
+
+TEST(LambdaTune31Tests, NestedBuilderReturnAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_nested_builder_return.ls",
+            "test/mir/lambda/tune31_nested_builder_return.txt", true, tiers[t]);
+    }
+}
+
+TEST(LambdaTune31Tests, BoolNullEqualityAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_bool_null_equality.ls",
+            "test/mir/lambda/tune31_bool_null_equality.txt", true, tiers[t]);
+    }
+}
+
+TEST(LambdaTune31Tests, BoolNullEqualityWriteKeepsGenericPath) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file(
+            "test/mir/lambda/tune31_bool_null_equality_reassign.ls",
+            "test/mir/lambda/tune31_bool_null_equality_reassign.txt", true, tiers[t]);
+    }
+}
+
 TEST(LambdaTypedPathTests, ReusesFullArrayContractsAcrossCalls) {
     test_lambda_script_against_file("test/mir/lambda/typed_array_reuse.ls",
         "test/mir/lambda/typed_array_reuse.txt", true);

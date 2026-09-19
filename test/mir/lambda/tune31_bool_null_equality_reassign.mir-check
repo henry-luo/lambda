@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 T31-3 / S5.1.1, S6.1.2: a reassigned nullable comparison binding is not stable, so the generic equality helper remains responsible for total Item equality.",
+  "checks": [
+    {
+      "in_func": "_compare_after_write_#",
+      "expect": [
+        "call\tfn_ne_p, fn_ne"
+      ]
+    }
+  ]
+}
