@@ -3263,6 +3263,9 @@ extern "C" {
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
     Item cow_prepare_write(Item old);
+    // Closed JIT builder path for an unannotated `[]` whose append proof
+    // establishes an int lane; it retains normal COW replacement semantics.
+    Item lambda_array_int_push_inferred_cow(Item owner, Item value);
 
     // LR07-7/LR08-3 root-honesty witness.  Emitted by MIR Direct only when
     // LAMBDA_ROOT_WITNESS is set, at every point the transpiler DECLINES to

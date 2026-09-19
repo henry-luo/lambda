@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "T21-2d: unannotated forwarding helpers remain on the generic COW access path because no declaration-derived certificate proves their element contract; this preserves correctness rather than treating inferred narrowing as a value proof (D3.3.3v3).",
+  "description": "T21-2d / Tune31 T31-1: an inferred witness may reach a self-forwarding var raw entry, whose representation-agnostic COW setter preserves widening and boxed-wrapper fallback without promoting inference to a declared contract (D3.2.1, D3.3.3v3).",
   "checks": [
     {
       "in_func": "_set_row_#",
       "expect": [
-        "call\tfn_array_set_p, fn_array_set"
+        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
       ],
       "forbid": [
         "call\tlambda_array_set_checked_inplace_p, lambda_array_set_checked_inplace",
@@ -15,7 +15,7 @@
     {
       "in_func": "_place_#",
       "expect": [
-        "call\tfn_array_set_p, fn_array_set"
+        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
       ]
     },
     {

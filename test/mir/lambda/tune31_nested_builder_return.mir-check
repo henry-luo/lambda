@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 T31-2 / D3.2.1-D3.3.1, S7.1.3v2: an indexed item from a certified outer builder is admitted at the direct consumer boundary; the raw consumer has no generic index helper.",
+  "checks": [
+    {
+      "in_func": "_sum_codes_#",
+      "forbid": [
+        "call\tfn_index_p, fn_index"
+      ]
+    },
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\tfn_index_p, fn_index",
+        "call\tlambda_type_check_p, lambda_type_check"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 T31-1 / D3.2.1-D3.3.1: an initial numeric fill and self-recursive var forwarding retain the inferred ArrayNum lane. The raw recursive body must use its native store instead of boxed indexing.",
+  "checks": [
+    {
+      "in_func": "_recursive_fill_#",
+      "expect": [
+        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx"
+      ],
+      "forbid": [
+        "call\tfn_index_p, fn_index",
+        "call\tfn_array_set_p, fn_array_set"
+      ]
+    }
+  ]
+}

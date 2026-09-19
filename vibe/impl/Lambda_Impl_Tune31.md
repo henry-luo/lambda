@@ -1,275 +1,614 @@
-# Lambda Impl Proposal: Tune31 — The Runtime-Call Band
+# Lambda Implementation: Tune31 — Untyped Specialization and Runtime Boundaries
 
-- **Status:** PROPOSAL (2026-09-18), not started
-- **Evidence:** `test/benchmark/Overall_Result47.md`, `benchmark_results_v47.json`; comparison script `temp/r47/cmp.py`; Tune30 §6 cluster profiles (`temp/t30/prof/jit_self_table.txt`, R46-era binary)
-- **Predecessors:** `Lambda_Impl_Tune29.md` (record rows, handles, boxed-scalar admission), `Lambda_Impl_Tune30.md` (codegen-bound class)
-- **Rulings cited:** D4.4.4v4 (handle facts), D4.4.6 (place-copy marking), S9.1.2 (two-owner states), D3.2.4v4 (layout facts), D8.3.2–D8.3.3 (member-to-union returns), S4.1.2 (int band), TE-15 (defect containment)
+- **Status:** IMPLEMENTED 2026-09-19. The final code, focused semantic gates
+  and paired release evidence are recorded in §3.7 and §4.4. The broad
+  baseline has an independent graph-runtime blocker recorded in §4.4; it is
+  not counted as a pass.
+- **Scope:** recover native execution in untyped Lambda, close measured
+  regressions, and remove repeated runtime work in both Lambda variants.
+- **Primary evidence:** [Result42–47 analysis](Lambda_Benchmark_Result47_Analysis.md),
+  the checked-in Result42–47 JSONs, the clean `6e1774947` release control
+  archived as `temp/tune31/lambda_tune31_control_6e1774947_release`
+  (`3c75180f…56abd9`), and the final candidate archived as
+  `temp/tune31/lambda_tune31_final_release` (`4e4107d9…c2148`).
+- **Predecessors:** [Tune29](Lambda_Impl_Tune29.md),
+  [Tune30](Lambda_Impl_Tune30.md), and
+  [Tune27](<Lambda_Impl_Tune27 (done).md>).
+- **Authority:** [formal semantics](../../doc/Lambda_Formal_Semantics.md)
+  and [formal design](../../doc/Lambda_Formal_Design.md). This implementation
+  proposal changes no ruling. Track numbers below replace the earlier
+  Tune31 ordering.
 
-## 1. What Result47 says about Tune29 + Tune30
+## 1. Evidence and comparison contract
 
-Both rounds landed between Result46 (`9697f43375`) and Result47 (`fc0755a79d`).
-R46 was load-inflated: the identical C2MIR ports ran 0.914x and Node 0.809x
-of their R46 times in R47, so every Lambda ratio below is **normalised by
-the row's own C2MIR drift** (`tNorm = typed47/typed46 ÷ c2mir47/c2mir46`).
+The round must improve the untyped programs themselves. Annotation-only
+experiments identify information the compiler loses; changing the benchmark
+ports is not an engine optimization.
 
-| measure | R46 | R47 |
-|---|---:|---:|
-| typed / C2MIR geomean (63 rows) | 4.26x | **3.59x** |
-| typed / Node geomean | 0.75x | 0.71x |
-| untyped / Node geomean | 1.20x | 1.26x (Node got faster; untyped norm ≈ 0.93) |
-| typed auto e2e / Node | 0.87x | 0.85x |
-| typed geomean, normalised by C2MIR drift | — | **0.843** (≈16% real) |
-| rows ≤2x C2MIR / 2–5x / 5–20x / >20x | 19 / 14 / 25 / 5 | 21 / 17 / 21 / 4 |
+C2MIR measures independent native C ports through the MIR C frontend, not
+the removed Lambda C-text backend. Both paths use MIR, but the C programs
+often do less ownership, numeric, and boundary work. Their times guide
+investigation; they are not a promise of parity under identical semantics.
 
-### 1.1 Improved (tNorm ≤ 0.8, all attributable)
+### 1.1 Progress after accounting for drift and changed ports
 
-| row | typed/C2MIR R46 → R47 | tNorm | what moved it |
-|---|---:|---:|---|
-| nbody | 7.7 → 2.3 | 0.30 | T30-3 NO_GC libm + loop versioning + float-tree versioning |
-| cd | 37.2 → 12.0 | 0.32 | Tune29 P0: RbtTable + Motion typed (benchmark edit, 57 lines) + LR12-11 root-vs-part |
-| spectralnorm | 5.3 → 2.2 | 0.42 | T30-5 leaf inlining + T30-4 argument intervals (§10.5) |
-| queens | 6.0 → 2.9 | 0.48 | T30-5 inlining of get/set_row_column, LR12-21 sentinel leaves |
-| fft | 6.7 → 3.7 | 0.55 | T30-4 affine/scaling counter intervals |
-| mbrot | 2.1 → 1.2 | 0.58 | T29-5 `cow_path_set_packed_index` |
-| nqueens | 14.7 → 3.4 | 0.23 raw | **port artefact**: C port rewritten (2.63x slower C); Lambda side 2.07 → 1.25 ms = T29-5 cert interning + §18 boxed-scalar admission |
-| deltablue | 31.7 → 21.9 | 0.69 | §18 boxed-scalar admission −12%, §20.2 cert through field −12% |
-| paraffins | 4.6 → 3.2 | 0.71 | T30-4 intervals, T30-5 div/% leaves |
-| ray, navier_stokes, richards, cube3d | 1.6→1.2, 1.9→1.5, 14.4→11.1, 16.7→13.2 | 0.76–0.79 | NO_GC sqrt; P0 typing of richards tasks (−11%) + handles (−5%); T29-5 admission (cube3d −11%) |
+Execution-time geometric means over the same 63 benchmark names:
 
-Tune30's own gate (≤2x on the seven codegen rows) was **not met on any row**;
-spectralnorm/nbody at 2.2/2.3x are the closest. §10.10 bounded the remaining
-index-check cost at <10% and §12 says the rest needs a structural change.
+| Result | Untyped / C2MIR | Typed / C2MIR | Untyped / Node | Typed / Node |
+|---|---:|---:|---:|---:|
+| 42 | 8.06x | 6.53x | 1.56x | 1.27x |
+| 44 | 6.81x | 4.41x | 1.32x | 0.86x |
+| 46 | 6.83x | 4.26x | 1.20x | 0.75x |
+| 47 | 6.35x | 3.59x | 1.26x | 0.71x |
 
-### 1.2 Did not move (tNorm ≥ 0.95) — the whole runtime-call band
+Result46 is load-inflated. Its untyped time is 12.6% above Result44, while
+C2MIR is 12.2% higher. From Result46 to Result47, untyped time falls 15.0%
+and Node falls 19.1%, so worsening untyped/Node is not itself a regression.
 
-| row | typed/C2MIR R47 | tNorm | dominant runtime call (Tune30 §6 profile) |
-|---|---:|---:|---|
-| havlak | 32.7 (was 26.7) | 1.22 | copies are program-level two-owner states (S9.1.2, Tune29 §20.3) + GC 29% |
-| splay | 17.1 (was 15.8) | 1.08 | `cow_prepare_write` 27%, `map_set_cow` 19%, ArrayNum alloc 16% |
-| knucleotide | 17.3 | 1.00 | `vmap_set` 39%, `fn_substring` 20% |
-| crypto_sha1 | 8.2 | 1.01 | `fn_is` 20% (`match {case error … case int}`), `lambda_type_check` 12% |
-| brainfuck | 7.1 | 1.01 | `fn_fill` 51%, `fn_ord` 14% |
-| towers | 11.5 | 0.99 | `lambda_type_check` 33% |
-| hashmap | 13.2 | 0.96 | `cow_path_borrow_impl` 39%, `fn_eq_depth` 11% |
-| levenshtein / base64 / pnpoly | 7.2 / 15.1 / 6.2 | 0.97 / 0.91 / 0.88 | `fn_eq_depth`+`ascii_at` / `fn_strcat_many` / **`fn_ne` 45% on two `bool` locals** |
-| text rows (fast_diff, text_search, three_way_merge, microdiff, log_pipeline) | 10.4 / 3.2 / 1.1 / 22.6 / 6.5 | 0.91–1.00 | `fn_split`, `pn_push`, `fn_join`, generic compares |
-| fannkuch | 2.35 (was 2.0) | **1.17** | 98% JIT self — a Tune30 codegen regression candidate (LR12-21 leaf validity test?) — needs A/B on the archived v46/v47 binaries |
+Per-row C2MIR normalization is a drift screen, not causal attribution.
+Exclude changed sources before interpreting it: the R46→47 C nqueens port
+became 2.63x slower, typed cd changed, and typed three_way_merge changed
+between R44 and R46. Result45 has no C2MIR measurements.
 
-### 1.3 Typed still slower than untyped (gate "typed ≤ untyped" fails on 4 rows)
+| Comparison | Excluded rows | Remaining rows | Normalized untyped time | Normalized typed time |
+|---|---|---:|---:|---:|
+| R42 → R47 | nqueens, cd, three_way_merge | 60 | 0.800 | 0.570 |
+| R44 → R47 | nqueens, cd, three_way_merge | 60 | 0.949 | 0.845 |
+| R46 → R47 | nqueens, cd | 61 | 0.946 | 0.875 |
 
-bounce 1.48x (R46 root cause #1: `var axv: int = abs(bxv[j])` — Item-returning
-builtin into a declared int, `is_truthy` 21%; T29-4's tag-tested store fixed the
-variant, not the row), fannkuch 1.15x (new), fasta 1.14x (R46 #4, nullable
-index read poisoning the int lane; T29-3's null split was timing-neutral),
-microdiff 1.13x.
+Thus the last round gives about **5.4% lower untyped time and 12.5% lower
+typed time** on the stricter population, not an across-the-board 16% engine
+gain. These filters check entry sources/reference ports, not every
+transitive dependency. R47's crypto_sha1 and pidigits Lambda cells use a
+separately repaired release; preserve that provenance in any replay.
 
-### 1.4 MIR evidence (v47 archived binary vs `c2m -S` of the C ports)
+### 1.2 Regression triage
 
-Dumps in `temp/r47/mir/` (`LAMBDA_TIER=jit LAMBDA_MIR_DUMP_PATH=…`), C side in
-`temp/r47/cmir/` (`temp/t30/c2m -Dmain=c2mir_bench_body -S`). Hot function,
-lines / calls, Lambda typed vs C, and what the listing shows:
-
-| row | Lambda hot fn | C hot fn | mechanism in the listing |
-|---|---:|---:|---|
-| pnpoly | `_pnpoly` 559 / 11 calls | `pnpoly` 54 / 0 | `dgt` yields native 0/1; each is **boxed to a bool Item** (`or 0x0300…`, null arm `0x1B00…`), four live registers spilled, `call fn_ne`, result `and 255`, both array data pointers reloaded. `bool != bool` has no native lowering. |
-| crypto_sha1 | `_core_sha1` 1744 / 98 | `hex_sha1` 269 / 6 | `shr(input_len + 64, 9)`, `shl`, `bor`, `bxor` are **`fn_shr_item`/`fn_shl_item` calls on boxed Items** even with a proven int and a literal operand (the literal 9 goes through `int2it_lane`). Their Item results poison the tree: `fn_add` ×5 generic adds, `base_type` ×2. `_safe_add` ×9 / `_rol` ×3 are not inlined (T30-5 rejects `u32` locals and the bitwise builtins); their direct entries take lanes, so the 32 `int2it_lane` / 17 `lambda_item_to_int_lane_c` are boxing *to and from the Item-typed intermediates*, not the call ABI. `fn_is` ×2 = the `match { case error … case int }`. |
-| bounce | `_benchmark` 1738 / 88 | body 165 / 9 | `abs(bxv[j])` is `call fn_abs` on a boxed Item, 5 spills before, 9 reloads after, `ursh 56` tag test to get the `int` back. `if (bx[j] > 500)` on a nullable `int[]` read becomes a **nullable bool Item → `call is_truthy`** ×4. Both R46 root causes still live. |
-| towers | `_move_disks` 302 / 14, `_push_disk` 249 / 10 | `move_disks` 29 / 6 | Every recursive call passes `_array_witness = 3`, so the per-entry `lambda_type_check` sites are **cold arms**; the R46-era "33% type_check" no longer describes this row. What each call pays: all live Items stored to the side-stack frame before the call and reloaded after (`i64:80..160(%r1e5)`), the CW33 `var`-home transport for two array params, and the `_b` wrapper's `cow_prepare_write` ×3 + type checks ×5 on the outer entry. 302 lines against 29 is **call-boundary cost**, not checks. |
-| levenshtein | `_levenshtein` 1514 / 76 | `levenshtein` 85 / 3 | `s1[i-1] == s2[j-1]` = two `fn_string_ascii_at` calls, each **re-boxing the string parameter** (`or 0x0D00…, %p2`) and spilling/reloading 6 slots, then `fn_eq` on two char Items. `cow_bind_var` ×6 inside the loop. |
-| storage | `_build_tree_depth` 313 / 19 | 45 / 4 | `fill(4, …)` boxes its count through `int2it_lane`, calls `fn_fill`, then `fn_array_set` the result into the parent. |
-| fannkuch | `_main` 1890 / 78 | body 184 / 2 | §1.5 |
-
-**What the listings change about the picture.** The R46-era profiles
-attributed these rows to the runtime helper that was called
-(`lambda_type_check`, `fn_ne`, `fn_abs`). The MIR shows the cost sits in the
-**boundary around the helper**: boxing the operands, spilling every live Item
-to the side stack, the call, reloading, and a tag test on the result — 15–30
-instructions per site against the helper's own few. On four of the seven
-rows the helper is a pure scalar builtin (`!=`, `abs`, `shr`, `ascii_at`)
-whose native form is one or two instructions. Removing the call removes the
-boundary; making the helper cheaper would not.
-
-### 1.5 fannkuch regression: bisected to Tune29 §20 (`lambda-items`)
-
-Interleaved `__TIMING__` (5–7 runs, min/median ms): v46 0.305/0.311 → every
-Tune29 binary through `lambda-bsa` (§18 boxed-scalar admission) 0.304–0.312
-→ **`lambda-items` 0.340/0.367** → all Tune30 binaries 0.336–0.355 → v47
-0.336/0.341. The step is the §20 work (LR12-17 `MirCowJoin` / generalised
-loop premark / `MirCowLoopJoin`, CW36 handle admission).
-
-MIR diff of `_main` between `lambda-bsa` and `lambda-items`: same call
-census, **+8 COW shared-bit tests (`u8:4(…) & 1`) and +22 branches** in the
-store sites of `perm`, `perm1`, `count`. Nothing in the loop body hands the
-three `int[]` locals to a second observer (no call takes them, nothing
-aliases them; the only consumers are element reads and stores), so the
-premark or the loop join marks them may-be-shared without a share source.
-A precision defect in §20's join, not a real alias; every typed-array loop
-in the suite pays the same test per store.
-
-## 2. What the round targets
-
-After Tune30 the ≤5x half of the suite (38 rows) is near what guard elision
-reaches, and Tune30 §12 says the rest of that class needs a structural change.
-The 25 rows at ≥5x are runtime-call bound. The MIR review of seven of them
-(§1.4) found four mechanisms, each spanning several rows, and demoted two of
-the R46-era clusters:
-
-| mechanism | rows seen in MIR | rows expected by the same shape (unverified) |
+| Workload | Evidence | Treatment |
 |---|---|---|
-| **M1** scalar builtin with no native lowering on a proven lane: bool `==`/`!=`, `abs`, `shl`/`shr`/`bor`/`bxor`/`band`, `ascii_at`, char `==`, `int()` of an Item | pnpoly, bounce, crypto_sha1, levenshtein | brainfuck (`fn_ord` 14%, `ascii_at` 8%), base64, fasta (`fn_lt` 17%), text rows |
-| **M2** an Item-typed intermediate poisons the rest of the expression tree (crypto's `fn_add` ×5 after one `fn_shr_item`) | crypto_sha1, bounce | any row with an M1 site inside arithmetic |
-| **M3** T30-5 inliner admission gaps: `u32` locals, bitwise builtins | crypto_sha1 | — |
-| **M4** COW facts over-marked in loops (LR12-17 join) | fannkuch | every typed-array loop |
-| **M5** call-boundary cost on recursive `var`-param leaves: spill-all, CW33 home transport, `_b` wrapper | towers | queens (Tune30 §10.9), quicksort, permute |
-| **M6** `fill` temporaries (Cluster C, unchanged) | storage | brainfuck, nqueens, cube3d, raytrace3d |
+| splay, both variants | R46→47: untyped 317.863→341.701 ms, typed 305.914→325.548 ms; all Lambda sample ranges separate, C stays near 19 ms | Highest-priority unresolved regression; responsible change not established. |
+| fannkuch, typed | Earlier intermediate-binary bisection identifies extra loop ownership checks (§1.5) | Reproduce and repair fact precision while retaining the correctness of LR12-17. |
+| towers, untyped | R44→47: 1.177→1.327 ms; typed 0.326→0.322 ms | Replay and inspect the generic wrapper/call path. |
+| permute / pidigits, untyped | R44→47: +8.6% / +12.5%; pidigits delta is only 0.037 ms and uses a repaired cell | Secondary candidates; require sustained or paired confirmation. |
+| puzzle, typed | R42 2.833→R43 16.140→R47 13.898 ms | Correctness repair, not a target to restore by deleting snapshots. |
+| havlak / fib | R46 controls are noisy; R44→47 havlak improves in both variants and typed fib changes only 1% | Expensive workload / weak signal, respectively; neither is an established new regression. |
 
-Not MIR-reviewed this pass, so **not sized**: Cluster B COW rows (puzzle,
-hashmap, richards, splay), the string-heavy rows (json_gen, base64, revcomp,
-three_way_merge, knucleotide), and the type-check rows (raytrace3d, json,
-list, deltablue, prettier_ast). towers shows why they must not be scheduled
-from the R46-era table: its headline helper was a cold arm on v47.
+**S9.1.3** requires a mutated plain parameter to remain a snapshot; only
+`var` parameters borrow the caller's place. Tune27 §2.1 reproduced v42's
+missing snapshot on the typed native-witness edge. Puzzle uses `bool[]`
+plain parameters, not an unexplained `int[]` place-copy pattern.
 
-## 3. Tracks
+The current puzzle census records 174,909 ArrayNum copies. A diagnostic
+`var`-parameter port runs 11.839→2.149 ms with the same answer, but changes
+the ownership contract. Keep the original as a correctness guard; do not
+count that port rewrite as an engine speedup.
 
-### T31-0 — Hygiene (first)
+### 1.3 Fresh evidence for untyped priorities
 
-1. **Fix the LR12-17 loop-join over-marking** (§1.5). Reproduce on
-   `test/benchmark/beng/fannkuch2.ls`: the `bsa`→`items` diff is the
-   fixture; add an emission pin counting `u8:4(` tests in a loop that stores
-   to a local `int[]` nobody else observes (expect 0). Ledger it as a new
-   LR12 item. Gate: fannkuch back to ≤0.315 ms on the v46 machine baseline.
-2. Bisect splay (+8%) and fib (+6%) the same way — `temp/t29/lambda-*.exe`,
-   `temp/t30/lambda-t30*.exe`, interleaved min-of-N, C2MIR column as control.
-3. Run the Tune30 §7 gates that were skipped: corpus JIT output diff vs v46,
-   forced GC (`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 LAMBDA_ROOT_WITNESS=1`).
-4. Port hygiene found in the listings: `text_search`'s `fn_numeric_binary`
-   is an untyped arithmetic site in the typed file; richards' `fn_member_by_id`
-   19% says a member is still read untyped. Fix the ports before measuring.
+Same release binary, alternating source pairs, successful matching output
+for every valid pair. These are diagnostic variants, not shipped gains.
 
-### T31-1 — Native scalar builtins on proven lanes (M1, M2, M6)
+| Isolated change | Control → variant median | Pairs | What it identifies |
+|---|---:|---:|---|
+| nbody: annotate only the two `j = i + 1` locals as `int` | 45.012→27.288 ms | 7 | Nested counter facts are lost despite native float reads/arithmetic. |
+| quicksort: `int[]` on the producer binding and three array parameter positions | 10.387→0.953 ms | 7 | The array witness fails to reach the partition body. |
+| text_search: type only search parameters | 13.186→32.675 s | 3 | Repeated consumer admission can outweigh faster loop code. |
+| text_search: those parameters plus `to_codes(...) int[]` return | 13.004→1.424 s | 3 | Establishing the representation at production removes repeated conversion. |
 
-The widest class in the review. Each item is an emitter fast arm keyed on
-the operand carriers (`mir_value_carrier_type`), with the existing runtime
-call as the cold arm for any other carrier, so no semantic change and every
-item gets a sidecar that forbids the call in the pinned shape.
+Quicksort's parameter-only attempt failed with E207 because an open
+`array` cannot be borrowed as declared `var int[]`; it is excluded from
+timing claims. The producer binding is part of the valid experiment.
 
-1. **`bool` `==`/`!=`** → `eq`/`ne` on the 0/1 lanes (pnpoly: two `dgt`
-   feed `fn_ne`; bounce: `is_truthy` on a compare). A *nullable* compare (one
-   operand from an unproven typed read) keeps the null arm but tests it
-   natively (`eq x, ItemNull`) instead of boxing to a bool Item.
-2. **`abs`, `min`, `max`, `int()`** on `int`/`float` lanes → `cmp`/`neg`,
-   `d2i`, no call (bounce ×4, levenshtein's `min3` already inlines).
-3. **`shl`, `shr`, `bor`, `bxor`, `band`** on int lanes → MIR `lsh`/`ursh`/
-   `or`/`xor`/`and` with the S4.1.2 band re-check on the result only where the
-   shift can leave the band (`shl`); `u32`-declared locals need no band test.
-   crypto's five `fn_add` sites go native by consequence (M2).
-4. **`fn_string_ascii_at` on a string carrier with a proven index** → inline
-   byte load when the `is_ascii` fact (Tune22) holds; char `==` becomes `ne`
-   on two u8 lanes. levenshtein, brainfuck, base64.
-5. **Keep the boxed carrier of a string parameter** so a remaining call does
-   not re-box it per site (levenshtein's `or 0x0D00…, %p2` ×6).
-6. **NO_GC allowlist for pure scalar builtins** that stay as calls
-   (`fn_ord`, `fn_lt` on mixed lanes, …), the T30-3 mechanism, so the
-   spill-all around them disappears.
+Executed counters explain two of these gaps:
 
-Gate: pnpoly ≤ 2x, bounce typed ≤ untyped, crypto_sha1 ≤ 4x, levenshtein ≤ 4x;
-suite geomean ≤ 1.0 on every row.
+- Untyped nbody performs **2,700,000 helper-mediated unique ArrayNum
+  mutations with zero copies**. Typed nbody avoids those mutation helpers.
+- Parameter-only text_search makes **73,728 `fn_mutable_value` calls**:
+  1,536 rounds × eight patterns × three algorithms × two array arguments.
+  Adding the producer return contract reduces that to **nine**, one corpus
+  and eight patterns. Both variants produce checksum 91395120.
 
-### T31-2 — Leaf inlining admission (M3)
+In R47, text_search accounts for 55.9% of summed untyped execution time;
+all seven text rows account for 88.3%. This supports prioritizing it, while
+the geomean must still give every row equal weight.
 
-T30-5 admits named leaves whose bodies are int/float arithmetic, `int()`,
-`div`/`%` by a nonzero literal, and element reads/stores. Add: `u32`
-declared locals and their range tests, the five bitwise builtins (after
-T31-1 item 3 makes them native), and `if`-expression bodies. crypto's
-`safe_add`/`rol` then inline; the sidecar forbids both calls in `_core_sha1`.
-Also admit `int(x)` where `x` is a `u32` lane (the `_rol` return).
+### 1.4 MIR evidence and remaining typed overhead
 
-Gate: crypto_sha1 ≤ 3x (from 8.2x).
+Current dumps and the earlier v47 review agree on the mechanisms below.
+Static call counts include cold branches; do not equate them with executed
+calls or allocation counts.
 
-### T31-3 — `fill` temporaries and `float[]` results (M6, Cluster C)
+| Workload | Evidence | Implication |
+|---|---|---|
+| nbody, untyped | Native array witness and `sqrt` exist, but `j` uses `fn_lt`/`is_truthy`/`fn_add`; stores use `index_assign_cow` and mutation helpers | Fix scalar/body and store-proof propagation together. |
+| quicksort, untyped | `partition` lacks an array witness; nine static `fn_index` and six `fn_array_set` sites; generic comparisons in loops | Recover the producer/recursive-call/element chain. |
+| pnpoly, both | Native comparisons feed boxed `fn_ne` | Native boolean equality removes the surrounding call boundary too. |
+| crypto_sha1, earlier v47 review | Boxed shift/bitwise results feed generic arithmetic; `safe_add`/`rol` fail leaf-inliner admission | Preserve native results first, then inline eligible leaves. |
+| bounce / levenshtein, earlier v47 review | `abs`, nullable conditions and character operations cross helpers with root traffic | Lower proven primitive operations and retain correct nullable/UTF-8 fallbacks. |
+| towers, earlier v47 review | Recursive typed witness checks are cold; live-root traffic, wrappers and `var` homes remain | The old “33% type_check” profile no longer sizes this work. |
 
-Rows from the R46-era profile, storage confirmed by MIR: storage 71%,
-brainfuck 51%, nqueens 49%, cube3d 46%, raytrace3d 15%, splay 16%.
+Typed R47 has 21 rows within 2x C, 17 at 2–5x, 21 at 5–20x, and four
+above 20x. The remaining expensive families include ownership/path work
+(havlak, deltablue, splay, hashmap), construction (cube3d, brainfuck),
+and strings/collections (hyphen, microdiff, knucleotide, base64).
 
-1. **Contract-directed `fill`.** `var r: float[] = fill(n, 0.0)` boxes both
-   arguments, calls `fn_fill`, then admits the result. With the destination
-   contract known at compile time emit `array_num_new(lane, n)` + a native
-   fill loop (memset for zero) with the certificate stamped at construction.
-   No boxing, no admission. Same for `int[]`/`bool[]`.
-2. **Non-escaping fixed-size typed arrays.** cube3d's `vmulti` allocates 102
-   `float[4]` per call. A `var r: float[] = fill(<literal>, …)` whose binding
-   never escapes (`cow_param_root_retained` already answers this for callees)
-   can live in a per-function region reclaimed at exit. **A D4 memory-
-   ownership question (region allocation for non-escaping containers) —
-   propose the ruling before building.** Tune29 §19.2 closed caller-provided
-   storage as a 3-ABI change; the region form needs no ABI change.
+R46-era helper percentages are hypotheses for re-profiling, not current
+attribution. Typed nbody emits more static MIR than untyped but executes
+far fewer hot helper calls. Tune30's register-pressure findings likewise
+require native spill and executed-path measurements, not a raw MIR LOC goal.
 
-Gate: `fn_fill` absent from storage/brainfuck/nqueens; cube3d ≤ 8x.
+### 1.5 Historical fannkuch bisection retained
 
-### T31-4 — Call-boundary cost on recursive `var`-param leaves (M5)
+The original Tune31 investigation recorded 5–7 interleaved runs:
+v46 0.305/0.311 ms min/median; Tune29 through `lambda-bsa` 0.304–0.312;
+`lambda-items` 0.340/0.367; later Tune30 binaries 0.336–0.355; v47
+0.336/0.341. The step falls in Tune29 §20, later committed in `f029ed1a0`,
+covering `MirCowJoin`, loop premarking, `MirCowLoopJoin` and handle work.
 
-towers' checks are cold; what remains per call is the spill of every live
-Item to the side stack, the reload after, and the CW33 `var`-home transport
-(Tune30 §10.9: ~7 instructions per `var` array param, ABI not proof).
-Before any code: profile towers/queens/quicksort on the **v47** binary with
-`temp/t29/prof/jit_attr.py` and read the spill census
-(`temp/t29/census/spill_census.py`). Two candidate levers, both design items:
+The recorded MIR delta is eight extra shared-bit checks and 22 branches
+around stores to `perm`, `perm1`, and `count`, without a changed call
+census. The current typed dump has nine static shared-bit loads, while its
+executed COW census reports no share marks or copies. This corroborates
+a precision problem, but does not reproduce the historical delta.
 
-- a fact "callee cannot publish a replacement when entered with a unique
-  array", which lets the home transport be skipped (touches S9.2.2, Tune30
-  §10.9 says PROPOSE BEFORE BUILDING);
-- T29-7c stack maps (Tune29 §16.3), closed there because the reload was
-  not the cost; towers' listing says it may be on this row.
+The old v46/v47 and `temp/t29`/`temp/t30` archives are absent from the
+reviewed workspace. Recover them or rebuild isolated revisions and label
+them as reconstructions. Do not claim an exact historical replay from a
+different binary, or generalize this defect to every typed-array loop.
 
-Not scheduled for implementation in Tune31 unless the v47 profile puts the
-boundary above 40% of the row.
+## 2. Constraints on the implementation
 
-### T31-5 — The un-reviewed band: profile and MIR-review on v47 first
+| Ruling | Consequence for Tune31 |
+|---|---|
+| **D3.3.2v2–D3.3.4** | Entry specialization is separate from body/result inference. Inferred narrowing stays scoped to its binding; it cannot create a source contract or an explicit array certificate. Preserve legal widening of open arrays. |
+| **D3.3.5, D8.2.5v2–D8.2.6** | Reuse declarative builtin result relations, the shared analysis pipeline, and representation-aware lowering; do not add another ad hoc type oracle. |
+| **D8.3.1v2–D8.3.4v3** | Raw entries need a complete exact key and either static proof or the boxed wrapper's exact guard. Preserve fallback and `var`-home transport. No per-parameter partial dispatch scheme. |
+| **D8.4.1v2** | No mutable inline caches or feedback-driven specialization. |
+| **D2.5.1–D2.5.3, D2.8.1–D2.8.3** | Test the actual carrier's null sentinel; keep null/error values out of native arithmetic. Unproven indexed reads stay nullable. |
+| **S4.1.1–S4.1.5, S4.2.3** | Preserve int saturation, poison behavior, sized-integer wrapping and NaN equality; a native opcode alone is not a semantic proof. |
+| **S9.1.2–S9.1.3, D4.4.4v4–D4.4.6** | Preserve snapshots, borrow publication and handle invalidation. Remove unnecessary checks/copies only with an ownership proof. |
+| **D5.3.1–D5.3.4** | Root dirty live values at collecting calls; `NO_GC` needs transitive mechanical verification. Root policy remains in `MirEmitter`; never restore conservative native-stack scanning. |
 
-For puzzle, hashmap, richards, splay, json, list, deltablue, prettier_ast,
-raytrace3d, json_gen, base64, revcomp, knucleotide, three_way_merge: one
-profile on the v47 binary and one hot-function listing each, in the §1.4
-table format, **before** any track is sized. Hypotheses carried from Tune30
-§6, to be confirmed or retired by the listing:
+Missing effect/defect analysis is not permission to assume a clean lane.
+Retain the existing error channel and the
+[LR12-24](../Lambda_Issue_Ledger.md#lr12-24) containment obligations.
 
-- Cluster A: `lambda_type_check` on certified-field array arguments and
-  returns; the float extension of Tune29 §18's inline tag test.
-- Cluster B: puzzle's `int[]` cloned per store (D4.4.6 place copy — trace
-  the bind first; havlak's was a snapshot bind), hashmap's borrow spine
-  re-navigated per call (D4.4.4v4), richards/splay path stores as one checked
-  call per write. havlak stays out: its copies are program-level two-owner
-  states (S9.1.2, Tune29 §20.3).
-- Cluster D: string `==` as length + memcmp, `fn_string(int)` and
-  `fn_strcat_many` fast paths, `fn_split`/`fn_substring`.
+## 3. Implementation tracks
 
-### T31-6 — Codegen class: the structural proposal (design only)
+T31-0 through T31-5 are complete. T31-6 remains the explicitly deferred
+design work described below; it was not required to ship the established
+specialization and boundary fixes.
 
-Tune30 §12: the seven rows are diffuse at 2.2–3.8x with no item above ~13%.
-Two candidate designs, to be written up under D8 and ratified before code:
-(a) whole-loop proof with a deoptimisation exit — unchecked element access
-inside a loop whose length/ownership guard passed, with the generic body as
-the exit target; (b) a narrower loop-local representation (raw `double`/
-`int64` registers for proven-in-band locals, boxed only at the loop exit).
+### T31-0 — Establish controls and repair confirmed regressions
 
-## 4. Gates for the round
+1. Archive the implementation-start release, commit, source manifest and
+   binary hash. Keep performance artifacts separate from profiling runs.
+2. Replay splay in both variants, then untyped towers/permute and pidigits.
+   For splay, compare allocation/COW counters, mandatory helper paths,
+   frames and native spill behavior; bisect only a reproduced difference.
+3. Reproduce fannkuch on a minimal local-array loop and audit
+   `mir_premark_loop_cow_bindings`, `MirCowJoin` and `MirCowLoopJoin`.
+   Distinguish scalar element reads from escaping container aliases.
+   Refine the transfer/join rules; do not revert the
+   [LR12-17 correctness fix](../Lambda_Issue_Ledger.md#lr12-17).
+4. Pair that fixture with capture-after-store, conditional detach,
+   zero-iteration, nested-loop and real-alias cases. Pin absence of repeated
+   ownership checks in the proven unique body, and their retention where
+   sharing is real. A module-wide “zero COW checks” assertion is not sound.
 
-- typed / C2MIR geomean ≤ 2.8x (from 3.59x); rows in the 5–20x band ≤ 12 (from 21).
-- typed ≤ untyped on **every** row (currently bounce, fannkuch, fasta, microdiff fail).
-- fannkuch, splay, fib back at or below their v46 normalised times.
-- No output diff on the corpus, both tiers; all emission sidecars and MIR
-  budgets green; `make test-lambda-baseline` unchanged (the two pre-existing
-  JS failures excepted).
-- Every landed mechanism gets an emission pin verified to bite (Tune30
-  §10.12's lesson), and every track opened after T31-3 starts from a v47
-  listing, not an R46 profile.
+**Exit evidence:** matched-source regression results, a root-cause record
+for each confirmed fix, mechanism pins and unchanged aliasing outputs.
+Unreproduced candidates remain labelled as such. Replace the old absolute
+0.315 ms and noisy v46-normalized gates with same-session release ratios.
 
-## 5. Method notes
+### T31-1 — Preserve untyped counter and array facts
 
-- `temp/r47/cmp.py` — R46→R47 per row, normalised by the row's C2MIR drift.
-- MIR census one-liners used for §1.4 live in the session log; the reusable
-  ones are `temp/r46/mircensus.py`, `temp/r46/classify.py`,
-  `temp/t30/mir/hotcensus.py`.
-- Intermediate binaries for bisecting: `temp/t29/lambda-{t29,t291,t2934,t295a-c,t297a-b,bsa,sym,items,items2,items3}.exe`,
-  `temp/t30/lambda-t30a..z.exe`, `temp/t30/lambda-t31a.exe`.
-- ⚠ `sed -n "$((n-8)),…"` fails when the arithmetic yields a negative; use
-  `awk -v s= -v e=` for context windows.
+**Pilots:** unchanged untyped nbody and quicksort; guard rows include
+permute, queens, towers, primes and typed twins.
+
+Start at `infer_param_types_batched`, `resolve_inferred_type`,
+`mir_callsite_join_elem`, `mir_callsite_join_specialization_type`, local
+initializer/result inference, and the finite/dense-loop proof consumers in
+[transpile-mir.cpp](../../lambda/runtime/transpile-mir.cpp).
+
+1. Extend the existing specialization diagnostic to explain refusal:
+   unresolved producer/return, conflicting caller, dynamic key, incompatible
+   store, lost witness or unproven ownership. Report the binding/call edge.
+2. Trace nbody's `i + 1 → j → comparison/index/update` facts. Preserve the
+   native integer carrier where the accepted program proves it; make the
+   existing array-store proof consume that information.
+3. Trace quicksort's `fill → binding → quicksort → partition → recursive
+   call` facts, including values written back into the array. Separate
+   “not yet resolved” from a genuinely conflicting/dynamic shape in the
+   existing fixed-point analysis; convergence must remain conservative.
+4. Feed proven inferred carriers into shared typed/native lowerings.
+   Reuse exact entry guards and full boxed fallback; do not just relax
+   the honest mixed-array join or enable speculative-lift flags globally.
+
+**Mechanism gates:** no generic counter comparison/addition in nbody's
+proven integer loop; no per-element mutation helper on its admitted unique
+native store path. Quicksort's admitted partition uses element lanes and
+native comparisons instead of generic index/compare/set work.
+
+**Correctness cases:** recursive forwarding, mixed Array/ArrayNum callers,
+string indices, return-type conflicts, nullable/out-of-range reads,
+representation-changing writes, aliases and `var` write-back. An inferred
+lane must never silently become an enforced `int[]` contract.
+
+### T31-2 — Preserve producer/return representation and avoid repeated admission
+
+**Pilot:** original untyped text_search plus the existing parameter-only
+microbenchmark, the diagnostic producer-return variant and the fully typed
+port. Measure all four separately; source edits are controls only.
+
+The confirmed conversion bottleneck is in the **partially typed** variant.
+The original untyped row primarily exposes missing native element facts.
+The annotation experiment does not prove that an untyped compiler can
+simply attach the typed return's certificate.
+
+1. Trace `to_codes → return → corpus_codes / pattern_codes[index] →
+   search parameters → indexed reads`. Reuse existing producer and
+   result-relation machinery before adding any analysis.
+2. Preserve justified element/carrier facts in the caller's scope and in
+   complete exact entry plans. An open array may use a compact physical
+   representation while retaining legal widening; inferred narrowing must
+   not be installed as an explicit contract certificate (**D3.3.3v3**).
+3. For **explicit** typed boundaries, establish and reuse the full
+   rank/leaf/carrier certificate at an eligible producer, or reuse an
+   admitted replacement within a proven unchanged-value region. Audit
+   `runtime_array_admit_primitive_contract` and
+   `runtime_type_admit_array_env` in
+   [lambda-eval.cpp](../../lambda/runtime/lambda-eval.cpp).
+4. Preserve admission/error timing and evaluation order. Do not move a
+   failing check across effects, replace a caller's observable open array,
+   hoist across a possible write, or add a conversion cache as a substitute
+   for proving lifetime and identity.
+
+**Mechanism gates:** the admitted hot search loop loses generic
+length/index/equality work; conversion in the eligible partial-typing
+fixture scales with produced arrays, not repeated search calls. The
+observed nine conversions are a workload reference, not a hard-coded
+count: vary corpus/pattern counts and repeat count to verify the scaling.
+
+**Correctness cases:** heterogeneous elements, array widening, caller-side
+mutation between searches, aliasing, views/rank, nullable/refined contracts,
+conversion failures and GC during construction. Where the available proof
+is insufficient, retain the existing boundary path and record the gap.
+
+### T31-3 — Remove scalar helper boundaries, then inline eligible leaves
+
+**Pilots:** pnpoly, bounce, crypto_sha1 and levenshtein, both variants.
+First reconfirm the hot sites in the candidate's MIR/profile.
+
+1. Lower `bool == bool` / `bool != bool` directly when both operands
+   have valid native carriers. Nullable comparisons/conditions must follow
+   their semantics and representation: **D2.5.2v3** gives native `bool?`
+   the sentinel **2**, not the boxed `ItemNull` word.
+2. Lower proven scalar `abs`, min/max and numeric conversions using the
+   existing semantic helpers/proofs. Float-to-int is not generally a bare
+   `d2i`; handle rounding, bounds, null and poison correctly.
+3. Lower bitwise operations/shifts only for the proven domain, with correct
+   signedness, shift-count and saturation/wrapping behavior. Neither
+   `shr` nor an `int` annotation by itself justifies unsigned shift or
+   removal of band checks; distinguish `int` from sized integer lanes.
+4. Inline character loads only with a valid ASCII and bounds proof;
+   preserve UTF-8 and out-of-range behavior on the fallback. Keep native
+   results through arithmetic and comparisons to prevent immediate
+   re-boxing; reuse an existing boxed string carrier where appropriate.
+5. Once these bodies are native, extend the existing leaf inliner to
+   eligible sized-integer locals, bitwise operations and small conditional
+   bodies. Preserve error/effect/ownership paths and enforce code budgets.
+
+**Mechanism gates:** eliminate the identified hot helper boundary, not
+merely rename its callee. Pin pnpoly's native boolean comparison and the
+eligible crypto leaf calls. Cover null, poison, signed/unsigned edges,
+shift counts and non-ASCII input in semantic differential tests.
+
+Pure syntax does not establish `NO_GC`. Any remaining helper classified
+`NO_GC` must pass the transitive checker (**D5.3.2**); mixed-type
+comparison and conversion helpers cannot be blanket-allowlisted.
+
+### T31-4 — Profile and reduce ownership, construction and string work
+
+**Priorities:** splay/deltablue/hashmap/richards; cube3d/brainfuck/storage;
+hyphen/microdiff/knucleotide/base64 and the expensive text rows.
+
+Obtain a current profile plus a hot-function MIR listing and executed
+counters before selecting each subtask. Havlak remains eligible for
+profiling; its real snapshots do not imply every surrounding cost is
+unavoidable. Puzzle's required plain-parameter copies stay out of the
+“delete excess COW” target.
+
+- Reuse handle-relative identity/layout/ownership proofs across valid
+  regions; distinguish repeated checking from real sharing and preserve
+  the existing invalidation rules (**D4.4.4v4**).
+- Build the representation required by an explicit array contract using
+  existing constructors/admission helpers. Specializing `fill` must keep
+  count/value/error semantics and GC ownership; zero fill must preserve
+  the actual payload, including floating signed zero.
+- Attribute string cost to traversal, comparison, copying, allocation or
+  dynamic collection dispatch before changing it. Measure copied bytes
+  as well as time; do not assume concatenation always copies after the
+  earlier in-place append work.
+
+**Exit evidence:** a reproducible profile-backed cost removed on unchanged
+sources, with valid certificate/ownership lifetimes and matched outputs.
+Do not require `fn_fill` to disappear merely to satisfy a call-count gate.
+
+Region allocation, stack containers and caller-provided result buffers
+remain deferred if they require new lifetime/ABI rules. Non-escape alone
+does not prove a buffer dead at the next iteration (**D4.1.4v4, D5.2**).
+
+### T31-5 — Reduce proven call-boundary costs
+
+After T31-1/3, re-profile towers, queens, quicksort and permute. Inference
+or native lowering may already have removed the costly calls.
+
+Use the current `MirEmitter` machinery to measure and reduce redundant
+root publication, unnecessary reloads or remaining wrapper transitions.
+The model is dirty **live** roots at `MAY_GC` boundaries, not an assumption
+that every Item is spilled at every call (**D5.3.1–D5.3.4**).
+
+Keep CW33 home transport and replacement publication for `var` arguments.
+Do not remove them because the input happened to be unique in one run.
+Stack maps or a different borrow/call ABI require a separate design
+proposal and are not prerequisites for the primary Tune31 tracks.
+
+### T31-6 — Structural codegen work, deferred
+
+Revisit fft/quicksort/nbody only after the preceding improvements and
+fresh native-code profiles. Tune30 found register pressure and bounded the
+benefit of more index-check removal in its probes; moving a cold block
+does not automatically shorten live ranges across it.
+
+Possible follow-ups are a whole-loop proof with a correct generic exit,
+or tighter loop-local representation/liveness. Any mid-loop transfer must
+preserve completed writes, roots and error timing without replaying
+effects. Document unresolved design obligations before implementation;
+do not promise a large gain from static MIR shrinkage alone.
+
+### 3.7 Implementation closeout
+
+#### T31-0 — control and regression attribution
+
+The clean source control is 6e1774947, built with make release before any
+debug/test build and archived with its SHA-256 above. The candidate was
+rebuilt from the final source with make release and archived separately.
+Every paired artifact names both hashes, the same script hash on each side,
+the execution tier, raw samples, normalized stdout digests and paired
+bootstrap configuration.
+
+The historical splay regression did not reproduce. The 41-pair JIT result
+is 296.380→294.127 ms (untyped ratio 0.9924, one-sided 95% upper bound
+1.0049) and 280.980→282.922 ms (typed 1.0069, upper 1.0184), with identical
+output. Fannkuch's earlier ownership suspicion likewise has no sustained
+regression: untyped is 0.264→0.267 ms (1.0114, upper 1.0228) and typed is
+0.322→0.318 ms (0.9876, upper 1.0063). No COW rule was weakened or reverted.
+
+#### T31-1 — untyped counter and recursive-array facts
+
+mir_matches_compact_loop_add now verifies that the matched i + 1 expression
+is the selected counter assignment, rather than accepting every syntactically
+similar expression inside the loop. This keeps a nested counter initializer
+on its own native lane and preserves the source update semantics required by
+**S4.1.1–S4.1.5**.
+
+The call-site fixed point now ignores only an unknown self-forward of the
+callee's own formal. Such an edge contributes no competing representation
+fact before its first iteration; concrete external evidence and all boxed
+fallbacks remain in the join. This allows fill → recursive var parameter →
+partition/store to retain an inferred ArrayNum witness under **D3.2.1** and
+**D3.3.1**, without turning it into a declared array contract. The existing
+T21 forwarding fixture now pins the resulting representation-agnostic COW
+setter and its widening fallback.
+
+The tune31_nested_counter and tune31_recursive_array_witness sidecars pin
+the corresponding MIR paths. On the final structural census, nbody has no
+generic comparison/addition/truthiness call in its admitted loop, and
+quicksort's recursive partition has no generic index or array-set call on
+its admitted raw path.
+
+#### T31-2 — append-only producer and return facts
+
+An unannotated empty array can now become ArrayNum only when a conservative
+function-local scan proves one owner, homogeneous direct push writes, no
+assignment/index write/alias/escape/nested closure, and a return of the same
+binding. The scan also recognizes a nested array-return builder only at the
+consumer boundary; the outer open-array index remains checked. This retains
+legal widening and the boundary discipline in **D3.2.1**, **D3.3.1** and
+**D3.3.3v3**.
+
+lambda_array_int_push_inferred_cow is the shared COW-preserving runtime
+entry for the proved integer builder. It roots owner and value, prepares a
+write, checks the actual ArrayNum lane, and appends through the ordinary
+integer lane setter. It does not use a conversion cache or change
+admission/error timing. tune31_append_builder_return and
+tune31_nested_builder_return pin the direct producer and the checked nested
+consumer boundary. The original text-search source now produces its code
+arrays once through this path instead of reopening generic collection work on
+every consumer call.
+
+#### T31-3 — nullable Bool equality boundary
+
+Ordered comparisons can return Bool or Null under **S6.1.2**, while equality
+is total under **S5.1.1**. Stable local bindings initialized by a native
+ordered comparison now compare their canonical Bool/Null Items directly.
+The proof rejects ordinary writes, mutable-call transport, nullable/error
+operands and any unproven numeric carrier; native Bool lanes still use their
+separate direct path. Thus the optimization cannot replace null != null or
+null != bool with plain C boolean semantics.
+
+tune31_bool_null_equality covers Bool/Bool, Bool/Null and Null/Null on
+interp, JIT and auto tiers. tune31_bool_null_equality_reassign proves that a
+later write retains the generic fn_ne path. The pnpoly hot raw loop has
+direct canonical Item equality and no mandatory helper call.
+
+#### T31-4 and T31-5 — measured construction and call-boundary work
+
+Fresh paired results attribute the removed work to the T31-1/T31-2
+representation chain rather than to a broad ownership relaxation. The append
+builder removes recurring construction/admission work in text search; the
+counter, recursive witness and Bool equality changes remove the corresponding
+generic call boundaries. Splay, deltablue, hashmap and the other
+ownership-heavy guards were screened on unchanged sources; no new ownership
+rule, snapshot change, root policy or var home transport was introduced.
+This preserves **S9.1.2–S9.1.3**, **D4.4.4v4** and **D5.3.1–D5.3.4**.
+
+## 4. Measurement and acceptance
+
+### 4.1 Controls and timing
+
+Use the same original sources for control and candidate, both built with
+`make release`. Archive the control before tests that may replace
+`lambda.exe` with a debug binary; rebuild release before measuring again.
+Run serially on AC power without concurrent builds. Record commit, binary
+hash, source/dependency identity, environment, raw samples and outputs.
+
+Use [run_paired_benchmarks.py](../../test/benchmark/run_paired_benchmarks.py):
+seven or nine pairs for screening, then 41 pairs for claimed pilot gains
+and suspected regressions. Compare medians and paired uncertainty, not
+min-of-N. A timing failure or output mismatch invalidates the comparison.
+Short rows need an equivalent sustained fixture if timer noise prevents
+a useful conclusion; keep the canonical workload unchanged.
+
+Collect profiles/COW counters separately from timing. Track JIT execution,
+auto end-to-end wall time, and compile/code-size effects separately.
+C2MIR uses the same pinned reference driver and unchanged source on both
+sides; an edited port gets a new comparison boundary, not a drift factor.
+
+### 4.2 Proposed performance objectives
+
+These are initial goals against the implementation-start matched release,
+not extrapolated speedups from annotations or host-specific millisecond
+limits. Any missed goal remains visible in the completion record.
+
+| Scope | Candidate/control time objective | Required evidence |
+|---|---:|---|
+| Untyped nbody | ≤0.65 | Native counter/store mechanism, not annotation edits |
+| Untyped quicksort | ≤0.30 | Array witness reaches partition with correct fallback |
+| Untyped text_search | ≤0.35 | Producer/return/element facts reach search loops |
+| Parameter-only text_search | ≤0.25 | Repeated conversion eliminated in the eligible region |
+| pnpoly, both variants | ≤0.75 | Hot native boolean comparison |
+| Complete 63-row untyped geomean | ≤0.85 | Same sources and all successful output checks |
+| Complete 63-row typed geomean | ≤0.90 | Gains in both affected and guard workloads |
+
+The previous typed/C2MIR ≤2.8x remains a **stretch reference**, reported
+only with the matching C ports. It is not a replacement for same-source
+engine A/B. Report typed/untyped inversions (bounce, fannkuch, fasta,
+microdiff); do not enforce “typed ≤ untyped on every row” as if different
+contracts always did identical work.
+
+No reproducible execution or auto end-to-end regression above 3% is
+accepted on an unchanged row. Use paired confirmation; for claimed
+non-regression on pilots/flagged rows, require the one-sided 95% upper
+ratio bound ≤1.03. An inconclusive bound needs better measurement, not a
+pass declaration. Small rows may require sustained companion fixtures.
+
+### 4.3 Correctness and completion gates
+
+- `make test-lambda-baseline` must pass. Establish the actual current
+  baseline; do not inherit the old document's “two pre-existing failures”
+  exemption or mask failures in a harness.
+- Run affected corpus/fixture comparisons in interp, jit and auto against
+  expected output, including the negative cases for the changed mechanism.
+  A matching old bug is not a correctness oracle.
+- Exercise affected ownership/native-boundary cases with
+  `LAMBDA_GC_FORCE_EVERY=1`, `LAMBDA_GC_POISON_FREED=1` and
+  `LAMBDA_ROOT_WITNESS=1`; preserve precise rooting and containment.
+- Pass affected MIR emission sidecars and the shared MIR ratchet.
+  Each performance mechanism needs a focused pin whose failure can be
+  demonstrated when that mechanism is disabled; distinguish cold arms
+  from the admitted hot path.
+- Add a corresponding expected `.txt` for every new Lambda `.ls`
+  fixture. Keep benchmark-shaped special cases out of implementation.
+- Run the guarded standard snapshot workflow for publication, including
+  its release/instrumentation/Test262 gates, both Lambda variants, and
+  separate end-to-end reporting. Preserve the cached binary and manifest.
+
+A track's closeout records its root cause, shared implementation, semantic
+tests, executed-path evidence, paired results in both variants, unresolved
+gaps and whether its performance objective was met. New defects belong in
+the existing central issue ledger; this document is not another ledger.
+
+### 4.4 Completed evidence
+
+The final JIT confirmation used 41 alternating pairs and one-sided paired
+bootstrap bounds:
+
+| Row | Control → candidate | Ratio, upper 95% | Objective |
+|---|---:|---:|---|
+| untyped AWFY nbody | 46.146→27.291 ms | 0.5914, 0.5949 | met |
+| untyped Larceny quicksort | 10.457→0.588 ms | 0.0562, 0.0566 | met |
+| untyped text_search | 13049.600→1257.970 ms | 0.0964, 0.0969 | met |
+| typed Larceny pnpoly | 10.023→3.086 ms | 0.3079, 0.3130 | met |
+| untyped JetStream splay guard | 296.380→294.127 ms | 0.9924, 1.0049 | no regression |
+| typed JetStream splay guard | 280.980→282.922 ms | 1.0069, 1.0184 | no regression |
+
+The full JIT screen covered 63 workloads × two variants × seven pairs:
+126/126 rows completed with identical normalized output. Its six
+screen-only ratios above 1.03 received 41-pair follow-up. Their medians all
+fell below 1.02; the remaining wide bounds belong to 0.02–1.2 ms rows and
+are timer-resolution limited, not reproduced execution regressions.
+
+Auto-tier confirmation also used 41 pairs for the primary rows. Its
+execution and process-wall median ratios were respectively: untyped nbody
+0.6945 / 0.7415, untyped quicksort 0.3635 / 0.6202, untyped text_search
+0.0956 / 0.1077, typed pnpoly 0.5141 / 0.7277, untyped splay 0.9947 /
+0.9960, and typed splay 1.0006 / 1.0024. Every sample had matching
+normalized output.
+
+Focused acceptance passed after the final test build: all 163 MIR-emission
+checks; six Tune31 interp/JIT/auto parity tests; and the same six with
+LAMBDA_GC_FORCE_EVERY=1, LAMBDA_GC_POISON_FREED=1 and
+LAMBDA_ROOT_WITNESS=1. The new Lambda fixtures all include expected text
+files and MIR sidecars.
+
+make test-lambda-baseline was attempted, but it cannot currently complete
+on this host. Its parallel batch workers stalled after entering the large
+Lambda corpus. A serial reproduction isolates graph_transform_html: it
+reaches the test-batch 60-second limit and its timeout cleanup stalls; a
+direct execution also exceeded two minutes. The archived clean 6e1774947
+control independently exceeded the same 60-second boundary. The runs were
+stopped only after that control comparison. This existing
+graph-runtime/batch-lifecycle blocker is outside the Tune31 representation
+changes and is not represented as a pass or waived by a harness edit.
+
+The recorded artifacts are:
+
+- temp/tune31/paired_confirm_affected_jit_41.json
+- temp/tune31/paired_screen_full_jit_7.json
+- temp/tune31/paired_confirm_screen_outliers_jit_41.json
+- temp/tune31/paired_confirm_primary_auto_untyped_41.json
+- temp/tune31/paired_confirm_primary_auto_typed_41.json
+- temp/tune31/mir_emission_final.log
+- temp/tune31/tune31_final_tiers.log
+- temp/tune31/tune31_final_forced_gc.log
+
+## 5. Evidence and corrections to the earlier proposal
+
+The [Result47 analysis](Lambda_Benchmark_Result47_Analysis.md) retains the
+full calculations and limitations. Supporting artifacts:
+
+- `temp/result47_analysis/history.py` / `history.json`: historical
+  population, drift and source-change accounting.
+- `probe.json`, `mir_census.json`, named `.mir` and `*_cow.tsv`:
+  current release identity, outputs, structural census and executed counts.
+- `source_pairs.json`, `quicksort_chain_pairs.json`,
+  `text_params_pairs.json`, `text_return_pairs.json`: isolated source
+  experiments; the invalid parameter-only quicksort row stays excluded.
+- `text_params_cow.tsv` / `text_params_return_cow.tsv`: 73,728 versus
+  nine conversions, with corresponding output and MIR evidence.
+- Tune27 §2.1: the archived puzzle correctness reproduction.
+  Tune29/Tune30 and §1.5 above retain the earlier implementation evidence.
+
+The rewrite replaces five earlier assumptions: all C ports were unchanged;
+C-normalized ratios established causality; all high-ratio rows were
+runtime-call bound; R46 helper percentages still described R47; and
+annotation-only gains could be obtained by applying more contracts at
+consumers. It also removes the incorrect nullable-bool sentinel recipe,
+unqualified numeric opcode substitutions, and the blanket pure-helper
+`NO_GC` proposal.
+
+Historical `temp/r47`, `temp/t29` and `temp/t30` paths are provenance,
+not guaranteed available tooling. Use the checked-in paired runner and
+`mir_mandatory_census.py`; retain any new probes under `./temp/`.

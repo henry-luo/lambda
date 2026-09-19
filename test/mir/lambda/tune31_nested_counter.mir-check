@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 T31-1 / S4.1.1-S4.1.5: a compact-loop update is the selected counter assignment only. The nested `j = i + 1` initializer stays on the IntLane, so its comparison and increment do not reopen boxed fn_lt/fn_add/is_truthy paths.",
+  "checks": [
+    {
+      "in_func": "_nested_counter_#",
+      "expect": [
+        "lt\t{{r}}",
+        "add\t{{r}}"
+      ],
+      "forbid": [
+        "call\tfn_lt_p, fn_lt",
+        "call\tfn_add_p, fn_add",
+        "call\tis_truthy_p, is_truthy"
+      ]
+    }
+  ]
+}

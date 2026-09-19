@@ -2045,6 +2045,7 @@ JitImport jit_runtime_imports[] = {
     {"cow_place_leaf", FPTR(cow_place_leaf)},
     {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
+    {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},
     {"pn_push_cow", FPTR(pn_push_cow)},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
 
