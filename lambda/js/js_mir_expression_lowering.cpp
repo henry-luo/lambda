@@ -1237,6 +1237,114 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     return ref;
 }
 
+typedef struct JmWriteReferenceRhsScan {
+    bool has_call;
+    bool has_direct_eval;
+} JmWriteReferenceRhsScan;
+
+static void jm_scan_write_reference_rhs(JsAstNode* node,
+        JmWriteReferenceRhsScan* scan);
+
+static void jm_scan_write_reference_rhs_child(JsAstNode* child, void* opaque) {
+    jm_scan_write_reference_rhs(child, (JmWriteReferenceRhsScan*)opaque);
+}
+
+// Function bodies are source text at this point; their writes become live only
+// through a call, which the enclosing scan records separately.
+static void jm_scan_write_reference_rhs(JsAstNode* node,
+        JmWriteReferenceRhsScan* scan) {
+    if (!node || !scan || scan->has_direct_eval) return;
+    switch (node->node_type) {
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+    case AST_NODE_METHOD:
+        return;
+    case AST_NODE_CALL_EXPR: {
+        scan->has_call = true;
+        JsCallNode* call = (JsCallNode*)node;
+        if (!call->optional && call->callee &&
+                call->callee->node_type == AST_NODE_IDENT) {
+            JsIdentifierNode* callee = (JsIdentifierNode*)call->callee;
+            if (callee->name && callee->name->len == 4 &&
+                    memcmp(callee->name->chars, "eval", 4) == 0) {
+                scan->has_direct_eval = true;
+                return;
+            }
+        }
+        break;
+    }
+    case AST_NODE_NEW_EXPR:
+    case JS_AST_NODE_TAGGED_TEMPLATE:
+        scan->has_call = true;
+        break;
+    default:
+        break;
+    }
+    js_ast_visit_children(node, jm_scan_write_reference_rhs_child, scan);
+}
+
+// A direct local identifier is the only ordinary expression producer that can
+// return a mutable compiler home.  Reuse the indexed write census, then retain
+// the snapshot around calls only for bindings that reload from a shared env.
+static bool jm_write_reference_source_needs_capture(JsMirTranspiler* mt,
+        JsAstNode* source, JsAstNode* rhs) {
+    if (!mt || !source || !rhs || mt->with_depth > 0) return true;
+    source = (JsAstNode*)ast_unwrap_primary((AstNode*)source);
+    if (!source || source->node_type != AST_NODE_IDENT) return true;
+    JsIdentifierNode* identifier = (JsIdentifierNode*)source;
+    if (!identifier->entry) return true;
+
+    struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+        jm_name_hash, jm_binding_cmp, NULL, NULL);
+    if (!assigned) return true;
+    jm_collect_indexed_func_assignments(mt, rhs, assigned);
+    bool capture = jm_binding_set_has(assigned, identifier->entry);
+    hashmap_free(assigned);
+    if (capture) return true;
+
+    JmWriteReferenceRhsScan scan = {};
+    jm_scan_write_reference_rhs(rhs, &scan);
+    if (scan.has_direct_eval) return true;
+    if (!scan.has_call) return false;
+
+    JsMirVarEntry* variable = jm_find_var_by_binding(mt, identifier->entry);
+    return !variable || variable->in_scope_env || variable->from_env ||
+        variable->from_shared_env;
+}
+
+// A write Reference is fixed before its RHS runs. Native local registers are
+// mutable compiler homes, so snapshot only a source binding that the RHS can
+// overwrite; member updates retain both parts through their coercion steps.
+static void jm_capture_write_reference(JsMirTranspiler* mt,
+        JsMirReference* ref, JsAstNode* rhs = NULL) {
+    if (!mt || !ref) return;
+    JsMemberNode* member = ref->member;
+    bool capture_base = !rhs || !member ||
+        jm_write_reference_source_needs_capture(mt, member->object, rhs);
+    bool capture_key = !rhs || !member || !member->computed ||
+        jm_write_reference_source_needs_capture(mt, member->property, rhs);
+    if (capture_base && ref->base_reg != 0) {
+        MIR_reg_t base = jm_new_reg(mt, "write_reference_base", MIR_T_I64);
+        jm_emit_mov(mt, base, ref->base_reg);
+        ref->base_reg = base;
+        jm_create_gc_root_slot(mt, base);
+    }
+    if (capture_key && ref->native_key_reg != 0) {
+        MIR_type_t key_type = ref->native_key_type == LMD_TYPE_FLOAT
+            ? MIR_T_D : MIR_T_I64;
+        MIR_reg_t key = jm_new_reg(mt, "write_reference_key", key_type);
+        if (key_type == MIR_T_D) jm_emit_dmov(mt, key, ref->native_key_reg);
+        else jm_emit_mov(mt, key, ref->native_key_reg);
+        ref->native_key_reg = key;
+    } else if (capture_key && ref->key_reg != 0) {
+        MIR_reg_t key = jm_new_reg(mt, "write_reference_key", MIR_T_I64);
+        jm_emit_mov(mt, key, ref->key_reg);
+        ref->key_reg = key;
+        jm_create_gc_root_slot(mt, key);
+    }
+}
+
 static MIR_reg_t jm_emit_reference_name_id(JsMirTranspiler* mt,
         const JsMirReference* ref) {
     if (ref && ref->named_key_id != NAME_ID_NONE) {
@@ -2347,48 +2455,109 @@ static int jm_typed_array_constructor_kind(JsAstNode* expression) {
     if (name->len == 10 && memcmp(name->chars, "Uint8Array", 10) == 0) {
         return JS_TYPED_UINT8;
     }
+    if (name->len == 10 && memcmp(name->chars, "Int32Array", 10) == 0) {
+        return JS_TYPED_INT32;
+    }
     if (name->len == 12 && memcmp(name->chars, "Float64Array", 12) == 0) {
         return JS_TYPED_FLOAT64;
     }
     return -1;
 }
 
-static int jm_typed_array_parameter_kind(JsMirTranspiler* mt,
-        JsIdentifierNode* identifier) {
-    if (!mt || !mt->tp || !mt->current_fc || !mt->current_fc->node ||
-            !identifier || !identifier->entry) return -1;
+enum {
+    JM_TYPED_ARRAY_KIND_UNKNOWN = -1,
+    JM_TYPED_ARRAY_KIND_CYCLE = -2,
+    JM_TYPED_ARRAY_INFERENCE_DEPTH_MAX = 8,
+};
+
+static int jm_typed_array_parameter_index(const JsFunctionNode* function,
+        const NameEntry* binding) {
+    if (!function || !binding) return -1;
     int parameter_index = 0;
-    bool is_parameter = false;
-    for (JsAstNode* parameter = mt->current_fc->node->params; parameter;
+    for (JsAstNode* parameter = function->params; parameter;
             parameter = parameter->next, parameter_index++) {
         JsIdentifierNode* parameter_id =
             js_ast_parameter_binding_identifier(parameter);
-        if (parameter_id && parameter_id->entry == identifier->entry) {
-            is_parameter = true;
-            break;
-        }
+        if (parameter_id && parameter_id->entry == binding) return parameter_index;
     }
-    if (!is_parameter) return -1;
+    return -1;
+}
 
-    // A stable direct call may nominate the element kind, but every body uses
-    // a runtime brand check. A later rebinding or a different caller reaches
-    // the existing generic element operation exactly once.
-    int kind = -1;
+static JsFuncCollected* jm_typed_array_call_owner(JsMirTranspiler* mt,
+        JsCallNode* call) {
+    if (!mt || !mt->tp || !call) return NULL;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId node_id = ast_index_find(index, (AstNode*)call);
+    if (node_id == AST_NODE_ID_INVALID || node_id >= index->count) return NULL;
+    return jm_collected_func_by_id(mt, index->owner_functions[node_id]);
+}
+
+static int jm_typed_array_parameter_kind_impl(JsMirTranspiler* mt,
+        JsFuncCollected* function, NameEntry* binding,
+        NameEntry* const* active_bindings, int active_count);
+
+static int jm_typed_array_argument_kind(JsMirTranspiler* mt, JsCallNode* call,
+        JsAstNode* argument, NameEntry* const* active_bindings, int active_count) {
+    int kind = jm_typed_array_constructor_kind(argument);
+    if (kind >= 0) return kind;
+    argument = argument ? (JsAstNode*)ast_unwrap_primary((AstNode*)argument) : NULL;
+    if (!argument || argument->node_type != AST_NODE_IDENT) {
+        return JM_TYPED_ARRAY_KIND_UNKNOWN;
+    }
+    JsIdentifierNode* identifier = (JsIdentifierNode*)argument;
+    if (!identifier->entry || !identifier->entry->is_parameter) {
+        return JM_TYPED_ARRAY_KIND_UNKNOWN;
+    }
+    JsFuncCollected* caller = jm_typed_array_call_owner(mt, call);
+    return jm_typed_array_parameter_kind_impl(mt, caller, identifier->entry,
+        active_bindings, active_count);
+}
+
+// Follow only stable direct-call parameter forwarding. The runtime kind guard
+// still owns dynamic calls, rebinding, and every unsupported argument source.
+static int jm_typed_array_parameter_kind_impl(JsMirTranspiler* mt,
+        JsFuncCollected* function, NameEntry* binding,
+        NameEntry* const* active_bindings, int active_count) {
+    if (!mt || !mt->tp || !function || !function->node || !binding ||
+            active_count >= JM_TYPED_ARRAY_INFERENCE_DEPTH_MAX) {
+        return JM_TYPED_ARRAY_KIND_UNKNOWN;
+    }
+    int parameter_index = jm_typed_array_parameter_index(function->node, binding);
+    if (parameter_index < 0) return JM_TYPED_ARRAY_KIND_UNKNOWN;
+    for (int i = 0; i < active_count; i++) {
+        if (active_bindings[i] == binding) return JM_TYPED_ARRAY_KIND_CYCLE;
+    }
+
+    NameEntry* next_active[JM_TYPED_ARRAY_INFERENCE_DEPTH_MAX] = {};
+    for (int i = 0; i < active_count; i++) next_active[i] = active_bindings[i];
+    next_active[active_count++] = binding;
+
+    int kind = JM_TYPED_ARRAY_KIND_UNKNOWN;
     int call_count = 0;
     AstIndex* index = &mt->tp->ast_index;
     for (uint32_t node_id = 0; node_id < index->count; node_id++) {
         JsAstNode* node = (JsAstNode*)index->nodes[node_id];
         if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
         JsCallNode* call = (JsCallNode*)node;
-        if (jm_resolve_direct_call_function(mt, call, true) !=
-                mt->current_fc->node) continue;
-        int candidate = jm_typed_array_constructor_kind(
-            jm_call_argument_at(call, parameter_index));
-        if (candidate < 0 || (kind >= 0 && kind != candidate)) return -1;
+        if (jm_resolve_direct_call_function(mt, call, true) != function->node) continue;
+        int candidate = jm_typed_array_argument_kind(mt, call,
+            jm_call_argument_at(call, parameter_index), next_active, active_count);
+        if (candidate == JM_TYPED_ARRAY_KIND_CYCLE) continue;
+        if (candidate < 0 || (kind >= 0 && kind != candidate)) {
+            return JM_TYPED_ARRAY_KIND_UNKNOWN;
+        }
         kind = candidate;
         call_count++;
     }
-    return call_count > 0 ? kind : -1;
+    return call_count > 0 ? kind : JM_TYPED_ARRAY_KIND_UNKNOWN;
+}
+
+static int jm_typed_array_parameter_kind(JsMirTranspiler* mt,
+        JsIdentifierNode* identifier) {
+    if (!mt || !mt->tp || !mt->current_fc || !mt->current_fc->node ||
+            !identifier || !identifier->entry) return -1;
+    return jm_typed_array_parameter_kind_impl(mt, mt->current_fc,
+        identifier->entry, NULL, 0);
 }
 
 static int jm_fixed_typed_array_receiver_kind(JsMirTranspiler* mt,
@@ -2405,6 +2574,27 @@ static int jm_fixed_typed_array_receiver_kind(JsMirTranspiler* mt,
     JsVariableDeclaratorNode* declaration =
         (JsVariableDeclaratorNode*)identifier->entry->node;
     return jm_typed_array_constructor_kind(declaration->init);
+}
+
+bool jm_fixed_typed_array_member_number_candidate(JsMirTranspiler* mt,
+        JsAstNode* node) {
+    if (!mt || !node || node->node_type != AST_NODE_MEMBER_EXPR) return false;
+    JsMemberNode* member = (JsMemberNode*)node;
+    TypeId key_type = member->computed
+        ? jm_get_effective_type(mt, member->property) : LMD_TYPE_ANY;
+    return (key_type == LMD_TYPE_INT || key_type == LMD_TYPE_FLOAT) &&
+        jm_fixed_typed_array_receiver_kind(mt, member) >= 0;
+}
+
+// Typed element helpers share one numeric key spelling so their guarded
+// leaves receive the same Number index without materializing an Item key.
+static MIR_reg_t jm_emit_native_key_as_number(JsMirTranspiler* mt,
+        MIR_reg_t key, TypeId key_type, const char* reg_name) {
+    if (!mt || !key || key_type != LMD_TYPE_INT) return key;
+    MIR_reg_t numeric_key = jm_new_reg(mt, reg_name, MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, numeric_key), MIR_new_reg_op(mt->ctx, key)));
+    return numeric_key;
 }
 
 static MIR_reg_t jm_emit_indexed_assignment_fallback(JsMirTranspiler* mt,
@@ -2497,13 +2687,8 @@ static MIR_reg_t jm_emit_fixed_typed_array_store(JsMirTranspiler* mt,
     // The declaration admits the typed-array setter only as a runtime-checked
     // leaf. It preserves typed-index corner cases (including -0), coercion,
     // detach, and each exotic fallback in the existing runtime operation.
-    MIR_reg_t numeric_key = ref->native_key_reg;
-    if (ref->native_key_type == LMD_TYPE_INT) {
-        numeric_key = jm_new_reg(mt, "typed_store_key", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-            MIR_new_reg_op(mt->ctx, numeric_key),
-            MIR_new_reg_op(mt->ctx, ref->native_key_reg)));
-    }
+    MIR_reg_t numeric_key = jm_emit_native_key_as_number(mt,
+        ref->native_key_reg, ref->native_key_type, "typed_store_key");
 
     MIR_reg_t result = jm_new_reg(mt, "typed_store", MIR_T_I64);
     MIR_label_t miss = jm_new_label(mt);
@@ -2539,13 +2724,8 @@ static MIR_reg_t jm_emit_fixed_typed_array_number_store(JsMirTranspiler* mt,
     int element_type = jm_fixed_typed_array_receiver_kind(mt, ref->member);
     if (element_type < 0) return 0;
 
-    MIR_reg_t numeric_key = ref->native_key_reg;
-    if (ref->native_key_type == LMD_TYPE_INT) {
-        numeric_key = jm_new_reg(mt, "typed_number_store_key", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-            MIR_new_reg_op(mt->ctx, numeric_key),
-            MIR_new_reg_op(mt->ctx, ref->native_key_reg)));
-    }
+    MIR_reg_t numeric_key = jm_emit_native_key_as_number(mt,
+        ref->native_key_reg, ref->native_key_type, "typed_number_store_key");
 
     MIR_reg_t result = jm_new_reg(mt, "typed_number_store", MIR_T_I64);
     MIR_label_t miss = jm_new_label(mt);
@@ -3381,16 +3561,39 @@ static MIR_reg_t jm_emit_predicted_literal_field_store(JsMirTranspiler* mt,
     return result;
 }
 
-static MIR_reg_t jm_emit_fixed_typed_array_load_number(JsMirTranspiler* mt,
-        JsMemberNode* member, MIR_reg_t receiver, MIR_reg_t key,
-        MIR_label_t miss) {
-    int element_type = jm_fixed_typed_array_receiver_kind(mt, member);
-    if (!mt || element_type < 0 || !member || !member->computed) return 0;
+static bool jm_fixed_typed_array_number_layout(int element_type, int* width,
+        MIR_type_t* storage_type, bool* integer) {
+    if (!width || !storage_type || !integer) return false;
+    switch (element_type) {
+    case JS_TYPED_UINT8:
+        *width = 1;
+        *storage_type = MIR_T_U8;
+        *integer = true;
+        return true;
+    case JS_TYPED_INT32:
+        *width = 4;
+        *storage_type = MIR_T_I32;
+        *integer = true;
+        return true;
+    case JS_TYPED_FLOAT64:
+        *width = (int)sizeof(double);
+        *storage_type = MIR_T_D;
+        *integer = false;
+        return true;
+    default:
+        return false;
+    }
+}
 
-    // The declaration selects only the element-kind arm. The leaf validates
-    // receiver, kind, live bounds, and backing pointer as one no-GC snapshot;
-    // the resulting raw borrow is consumed before any call (D8.4.1v2).
-    MirEmitter* emitter = &mt->func_em->em;
+// Validate the exact typed-index snapshot once. Its raw data borrow must be
+// dereferenced before another runtime call (D8.4.1v2).
+static MIR_reg_t jm_emit_fixed_typed_array_data_if_kind(JsMirTranspiler* mt,
+        JsMemberNode* member, MIR_reg_t receiver, MIR_reg_t key,
+        MIR_label_t miss, MIR_reg_t* out_index) {
+    int element_type = jm_fixed_typed_array_receiver_kind(mt, member);
+    if (!mt || element_type < 0 || !member || !member->computed || !out_index) {
+        return 0;
+    }
 
     MIR_reg_t lower = jm_new_reg(mt, "typed_key_lower", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DGE,
@@ -3419,18 +3622,36 @@ static MIR_reg_t jm_emit_fixed_typed_array_load_number(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, data),
         MIR_new_int_op(mt->ctx, 0)));
-    if (element_type == JS_TYPED_UINT8) {
-        MIR_reg_t address = em_element_address(emitter, data, index, 1);
-        MIR_reg_t loaded = em_load_at(emitter, address, 0, MIR_T_U8,
-            "typed_uint8");
-        MIR_reg_t numeric = jm_new_reg(mt, "typed_uint8_f64", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_UI2D,
-            MIR_new_reg_op(mt->ctx, numeric), MIR_new_reg_op(mt->ctx, loaded)));
-        return numeric;
-    }
-    MIR_reg_t address = em_element_address(emitter, data, index,
-        (int)sizeof(double));
-    return em_load_at(emitter, address, 0, MIR_T_D, "typed_float64");
+    *out_index = index;
+    return data;
+}
+
+static MIR_reg_t jm_emit_fixed_typed_array_load_number(JsMirTranspiler* mt,
+        JsMemberNode* member, MIR_reg_t receiver, MIR_reg_t key,
+        MIR_label_t miss) {
+    int element_type = jm_fixed_typed_array_receiver_kind(mt, member);
+    int width = 0;
+    MIR_type_t storage_type = MIR_T_UNDEF;
+    bool integer = false;
+    if (!mt || element_type < 0 || !member || !member->computed ||
+            !jm_fixed_typed_array_number_layout(element_type, &width,
+                &storage_type, &integer)) return 0;
+
+    // The declaration selects only the element-kind arm. The raw borrow is
+    // consumed before any later call (D8.4.1v2).
+    MirEmitter* emitter = &mt->func_em->em;
+    MIR_reg_t index = 0;
+    MIR_reg_t data = jm_emit_fixed_typed_array_data_if_kind(mt, member,
+        receiver, key, miss, &index);
+    if (!data) return 0;
+    MIR_reg_t address = em_element_address(emitter, data, index, width);
+    MIR_reg_t loaded = em_load_at(emitter, address, 0, storage_type,
+        integer ? "typed_integer" : "typed_float64");
+    if (!integer) return loaded;
+    MIR_reg_t numeric = jm_new_reg(mt, "typed_integer_f64", MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, numeric), MIR_new_reg_op(mt->ctx, loaded)));
+    return numeric;
 }
 
 static MIR_reg_t jm_emit_fixed_typed_array_read_impl(JsMirTranspiler* mt,
@@ -3447,7 +3668,7 @@ static MIR_reg_t jm_emit_fixed_typed_array_read_impl(JsMirTranspiler* mt,
     if (!numeric) return 0;
     if (native_number) {
         jm_emit_dmov(mt, result, numeric);
-    } else if (element_type == JS_TYPED_UINT8) {
+    } else if (element_type == JS_TYPED_UINT8 || element_type == JS_TYPED_INT32) {
         jm_emit_mov(mt, result, jm_box_native(mt,
             jm_emit_double_to_int(mt, numeric), LMD_TYPE_INT));
     } else {
@@ -4462,6 +4683,7 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
 
     if (un->operand && un->operand->node_type == AST_NODE_MEMBER_EXPR) {
         JsMirReference ref = jm_emit_reference(mt, un->operand);
+        jm_capture_write_reference(mt, &ref);
         jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
         MIR_reg_t operand = jm_emit_get_value(mt, &ref);
         MIR_reg_t num_operand = jm_callr_1(mt, "js_to_numeric", MIR_T_I64, operand);
@@ -5776,241 +5998,245 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
         }
 
         if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_INT && !var->from_env) {
-            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-            if (rhs_type != LMD_TYPE_INT) {
-                if (asgn->op != OPERATOR_ASSIGN) {
-                    MIR_reg_t boxed_current = jm_box_native(mt, var->reg,
-                        LMD_TYPE_INT);
-                    jm_emit_mov(mt, var->reg, boxed_current);
-                }
-                var->type_id = LMD_TYPE_ANY;
-                var->mir_type = MIR_T_I64;
-            } else {
-                MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right,
+        TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+        if (rhs_type != LMD_TYPE_INT) {
+            if (asgn->op != OPERATOR_ASSIGN) {
+                MIR_reg_t boxed_current = jm_box_native(mt, var->reg,
                     LMD_TYPE_INT);
-                if (asgn->op == OPERATOR_ASSIGN) {
-                    jm_emit_mov(mt, var->reg, rhs);
-                } else {
-                    MIR_insn_code_t op = MIR_ADD;
-                    switch (asgn->op) {
-                    case OPERATOR_JS_ADD_ASSIGN: op = MIR_ADD; break;
-                    case OPERATOR_JS_SUB_ASSIGN: op = MIR_SUB; break;
-                    case OPERATOR_JS_MUL_ASSIGN: op = MIR_MUL; break;
-                    case OPERATOR_JS_DIV_ASSIGN: op = MIR_DIV; break;
-                    case OPERATOR_JS_MOD_ASSIGN: op = MIR_MOD; break;
-                    case OPERATOR_JS_BIT_AND_ASSIGN: op = MIR_AND; break;
-                    case OPERATOR_JS_BIT_OR_ASSIGN: op = MIR_OR; break;
-                    case OPERATOR_JS_BIT_XOR_ASSIGN: op = MIR_XOR; break;
-                    case OPERATOR_JS_LSHIFT_ASSIGN: op = MIR_LSH; break;
-                    case OPERATOR_JS_RSHIFT_ASSIGN: op = MIR_RSH; break;
-                    case OPERATOR_JS_URSHIFT_ASSIGN: op = MIR_URSH; break;
-                    default: break;
-                    }
-                    jm_emit(mt, MIR_new_insn(mt->ctx, op,
-                        MIR_new_reg_op(mt->ctx, var->reg),
-                        MIR_new_reg_op(mt->ctx, var->reg),
-                        MIR_new_reg_op(mt->ctx, rhs)));
-                }
-                jm_emit_native_assignment_var_writeback(mt, var, vname,
-                    LMD_TYPE_INT);
-                return publish(var->reg, VALUE_REP_I64, LMD_TYPE_INT);
+                jm_emit_mov(mt, var->reg, boxed_current);
             }
-        }
-
-        if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
+            var->type_id = LMD_TYPE_ANY;
+            var->mir_type = MIR_T_I64;
+        } else {
+            MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right,
+                LMD_TYPE_INT);
             if (asgn->op == OPERATOR_ASSIGN) {
-                MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right,
-                    LMD_TYPE_FLOAT);
-                jm_emit_dmov(mt, var->reg, rhs);
+                jm_emit_mov(mt, var->reg, rhs);
             } else {
-                Operator numeric_op;
-                MirNumericOpPlan numeric_plan;
-                bool binding_is_proven_number = jm_numeric_binding_type(mt,
-                    id->entry) == LMD_TYPE_FLOAT;
-                if (binding_is_proven_number &&
-                        jm_compound_assign_number_op(asgn->op, &numeric_op) &&
-                        em_numeric_op_plan(numeric_op, &numeric_plan)) {
-                    // The source-body fact has joined every write to this
-                    // binding as Number. Reuse the common scalar plan instead
-                    // of boxing the accumulator just to call a JS helper.
-                    MIR_reg_t rval = jm_transpile_as_native(mt, asgn->right,
-                        LMD_TYPE_FLOAT);
-                    if (numeric_plan.helper_name) {
-                        MIR_reg_t result = jm_call_2(mt, numeric_plan.helper_name,
-                            MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, var->reg),
-                            MIR_T_D, MIR_new_reg_op(mt->ctx, rval));
-                        jm_emit_dmov(mt, var->reg, result);
-                    } else {
-                        jm_emit_reg_binary(mt, numeric_plan.f64_opcode, var->reg,
-                            var->reg, rval);
-                    }
-                    jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
-                        JS_OPT_OUTCOME_TAKEN);
-                } else {
-                    MIR_reg_t old_boxed = jm_box_native(mt, var->reg,
-                        LMD_TYPE_FLOAT);
-                    MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
-                    MIR_reg_t boxed_result = jm_emit_compound_assign(mt, asgn->op,
-                        old_boxed, rval);
-                    jm_emit_dmov(mt, var->reg,
-                        jm_emit_unbox_float(mt, boxed_result));
+                MIR_insn_code_t op = MIR_ADD;
+                switch (asgn->op) {
+                case OPERATOR_JS_ADD_ASSIGN: op = MIR_ADD; break;
+                case OPERATOR_JS_SUB_ASSIGN: op = MIR_SUB; break;
+                case OPERATOR_JS_MUL_ASSIGN: op = MIR_MUL; break;
+                case OPERATOR_JS_DIV_ASSIGN: op = MIR_DIV; break;
+                case OPERATOR_JS_MOD_ASSIGN: op = MIR_MOD; break;
+                case OPERATOR_JS_BIT_AND_ASSIGN: op = MIR_AND; break;
+                case OPERATOR_JS_BIT_OR_ASSIGN: op = MIR_OR; break;
+                case OPERATOR_JS_BIT_XOR_ASSIGN: op = MIR_XOR; break;
+                case OPERATOR_JS_LSHIFT_ASSIGN: op = MIR_LSH; break;
+                case OPERATOR_JS_RSHIFT_ASSIGN: op = MIR_RSH; break;
+                case OPERATOR_JS_URSHIFT_ASSIGN: op = MIR_URSH; break;
+                default: break;
                 }
+                jm_emit(mt, MIR_new_insn(mt->ctx, op,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, rhs)));
             }
             jm_emit_native_assignment_var_writeback(mt, var, vname,
-                LMD_TYPE_FLOAT);
-            return publish(var->reg, VALUE_REP_F64, LMD_TYPE_FLOAT);
+                LMD_TYPE_INT);
+            return publish(var->reg, VALUE_REP_I64, LMD_TYPE_INT);
         }
+    }
 
-        // --- Boxed variable path (original) ---
-        MIR_reg_t rhs;
+    if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
         if (asgn->op == OPERATOR_ASSIGN) {
-            // Set assignment target hint for closure self-capture detection
-            mt->assign_target_binding = id->entry;
-            MIR_reg_t simple_with_key = 0;
-            bool strict_put = jm_strict_put(mt);
-            if (mt->with_depth > 0) {
-                simple_with_key = jm_box_property_name_literal(mt,
-                    id->name->chars, id->name->len);
-                jm_callr_1(mt, "js_capture_with_binding", MIR_T_I64, simple_with_key);
-                jm_emit_error_lane_propagate_check(mt);
-            }
-            rhs = jm_transpile_box_item(mt, asgn->right);
-            mt->assign_target_binding = NULL;
-            // v18: function name inference for simple assignment
-            if (asgn->right && (asgn->right->node_type == AST_NODE_FUNC_EXPR ||
-                                asgn->right->node_type == AST_NODE_ARROW_FUNC)) {
-                JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
-                if (!fn_node->name && id->name) {
-                    jm_emit_set_function_name(mt, rhs, id->name->chars);
+            MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right,
+                LMD_TYPE_FLOAT);
+            jm_emit_dmov(mt, var->reg, rhs);
+        } else {
+            Operator numeric_op;
+            MirNumericOpPlan numeric_plan;
+            bool binding_is_proven_number = jm_numeric_binding_type(mt,
+                id->entry) == LMD_TYPE_FLOAT;
+            if (binding_is_proven_number &&
+                    jm_compound_assign_number_op(asgn->op, &numeric_op) &&
+                    em_numeric_op_plan(numeric_op, &numeric_plan)) {
+                // The source-body fact has joined every write to this
+                // binding as Number. Reuse the common scalar plan instead
+                // of boxing the accumulator just to call a JS helper.
+                MIR_reg_t rval = jm_transpile_as_native(mt, asgn->right,
+                    LMD_TYPE_FLOAT);
+                if (numeric_plan.helper_name) {
+                    MIR_reg_t result = jm_call_2(mt, numeric_plan.helper_name,
+                        MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, var->reg),
+                        MIR_T_D, MIR_new_reg_op(mt->ctx, rval));
+                    jm_emit_dmov(mt, var->reg, result);
+                } else {
+                    jm_emit_reg_binary(mt, numeric_plan.f64_opcode, var->reg,
+                        var->reg, rval);
                 }
+                jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
+                    JS_OPT_OUTCOME_TAKEN);
+            } else {
+                MIR_reg_t old_boxed = jm_box_native(mt, var->reg,
+                    LMD_TYPE_FLOAT);
+                MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
+                MIR_reg_t boxed_result = jm_emit_compound_assign(mt, asgn->op,
+                    old_boxed, rval);
+                jm_emit_dmov(mt, var->reg,
+                    jm_emit_unbox_float(mt, boxed_result));
             }
-            jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
-            var->jube_type = jm_infer_jube_type(mt, asgn->right);
-            if (mt->with_depth > 0) {
-                return publish_item(jm_emit_with_writeback(mt, simple_with_key,
-                    rhs, "lsa_res", strict_put, var, NULL, NULL, vname));
-            }
-        } else if (asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
-                   asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
-            // Logical assignment with short-circuit: do NOT evaluate RHS if condition met
-            // &&= : if current is falsy, return current (don't eval RHS, don't assign)
-            // ||= : if current is truthy, return current (don't eval RHS, don't assign)
-            // ??= : if current is not nullish, return current (don't eval RHS, don't assign)
-            MIR_label_t l_assign = jm_new_label(mt);
-            MIR_label_t l_end = jm_new_label(mt);
+        }
+        jm_emit_native_assignment_var_writeback(mt, var, vname,
+            LMD_TYPE_FLOAT);
+        return publish(var->reg, VALUE_REP_F64, LMD_TYPE_FLOAT);
+    }
 
-            MIR_reg_t cond;
-            if (asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
-                cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, var->reg);
-                // if nullish → evaluate RHS and assign
+    // --- Boxed variable path (original) ---
+    MIR_reg_t rhs;
+    if (asgn->op == OPERATOR_ASSIGN) {
+        // Set assignment target hint for closure self-capture detection
+        mt->assign_target_binding = id->entry;
+        MIR_reg_t simple_with_key = 0;
+        bool strict_put = jm_strict_put(mt);
+        if (mt->with_depth > 0) {
+            simple_with_key = jm_box_property_name_literal(mt,
+                id->name->chars, id->name->len);
+            jm_callr_1(mt, "js_capture_with_binding", MIR_T_I64, simple_with_key);
+            jm_emit_error_lane_propagate_check(mt);
+        }
+        rhs = jm_transpile_box_item(mt, asgn->right);
+        mt->assign_target_binding = NULL;
+        // v18: function name inference for simple assignment
+        if (asgn->right && (asgn->right->node_type == AST_NODE_FUNC_EXPR ||
+                            asgn->right->node_type == AST_NODE_ARROW_FUNC)) {
+            JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
+            if (!fn_node->name && id->name) {
+                jm_emit_set_function_name(mt, rhs, id->name->chars);
+            }
+        }
+        jm_emit_set_class_assignment_name(mt, asgn, rhs, id->name);
+        var->jube_type = jm_infer_jube_type(mt, asgn->right);
+        if (mt->with_depth > 0) {
+            return publish_item(jm_emit_with_writeback(mt, simple_with_key,
+                rhs, "lsa_res", strict_put, var, NULL, NULL, vname));
+        }
+    } else if (asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+               asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
+        // Logical assignment with short-circuit: do NOT evaluate RHS if condition met
+        // &&= : if current is falsy, return current (don't eval RHS, don't assign)
+        // ||= : if current is truthy, return current (don't eval RHS, don't assign)
+        // ??= : if current is not nullish, return current (don't eval RHS, don't assign)
+        MIR_label_t l_assign = jm_new_label(mt);
+        MIR_label_t l_end = jm_new_label(mt);
+
+        MIR_reg_t cond;
+        if (asgn->op == OPERATOR_JS_NULLISH_ASSIGN) {
+            cond = jm_callr_1(mt, "js_is_nullish", MIR_T_I64, var->reg);
+            // if nullish → evaluate RHS and assign
+            jm_emit_branch(mt, MIR_BT, l_assign, cond);
+        } else {
+            cond = jm_emit_is_truthy(mt, jm_item_value(var->reg));
+            if (asgn->op == OPERATOR_JS_AND_ASSIGN) {
+                // &&= : if truthy → evaluate RHS and assign; if falsy → short-circuit
                 jm_emit_branch(mt, MIR_BT, l_assign, cond);
             } else {
-                cond = jm_emit_is_truthy(mt, jm_item_value(var->reg));
-                if (asgn->op == OPERATOR_JS_AND_ASSIGN) {
-                    // &&= : if truthy → evaluate RHS and assign; if falsy → short-circuit
-                    jm_emit_branch(mt, MIR_BT, l_assign, cond);
-                } else {
-                    // ||= : if falsy → evaluate RHS and assign; if truthy → short-circuit
-                    jm_emit_branch(mt, MIR_BF, l_assign, cond);
-                }
+                // ||= : if falsy → evaluate RHS and assign; if truthy → short-circuit
+                jm_emit_branch(mt, MIR_BF, l_assign, cond);
             }
-            // Short-circuit: skip to end, var->reg keeps its current value
-            jm_emit_jmp(mt, l_end);
-
-            // Evaluate RHS and assign
-            jm_emit_label(mt, l_assign);
-            rhs = jm_transpile_box_item(mt, asgn->right);
-            jm_emit_error_lane_propagate_check(mt);
-
-            if (!asgn->lhs_is_parenthesized) {
-                jm_emit_named_evaluation_for_identifier(mt, asgn->right, rhs, id->name);
-            }
-
-            jm_emit_mov(mt, var->reg, rhs);
-            var->jube_type = NULL;
-            jm_emit_assignment_var_writeback(mt, var, vname, var->reg, false);
-
-            jm_emit_label(mt, l_end);
-            return publish_item(var->reg);
-        } else {
-            // Compound assignment: var op= expr -> var = js_op(var, expr)
-            MIR_reg_t old_val = var->reg;
-            if (jm_is_native_type(var->type_id)) {
-                // outer/block-scope numeric vars can reach the generic compound path while still native.
-                old_val = jm_box_native(mt, var->reg, var->type_id);
-            }
-            MIR_reg_t with_key = 0;
-            if (mt->with_depth > 0) {
-                with_key = jm_box_property_name_literal(mt,
-                    id->name->chars, id->name->len);
-                old_val = jm_callr_2(mt, jm_with_binding_get_name(mt), MIR_T_I64, with_key, old_val);
-                jm_emit_error_lane_propagate_check(mt);
-            }
-            int old_spill = jm_preserve_before_expression(mt, old_val, asgn->right);
-            MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
-            if (old_spill >= 0) jm_gen_spill_load(mt, old_val, old_spill);
-            rhs = jm_emit_compound_assign(mt, asgn->op, old_val, rval);
         }
+        // Short-circuit: skip to end, var->reg keeps its current value
+        jm_emit_jmp(mt, l_end);
 
-        if (mt->with_depth > 0 && asgn->op != OPERATOR_ASSIGN && asgn->op != OPERATOR_JS_AND_ASSIGN &&
-            asgn->op != OPERATOR_JS_OR_ASSIGN && asgn->op != OPERATOR_JS_NULLISH_ASSIGN) {
-            MIR_reg_t with_key = jm_box_property_name_literal(mt,
-                id->name->chars, id->name->len);
-            bool strict_put = jm_strict_put(mt);
-            return publish_item(jm_emit_with_writeback(mt, with_key, rhs,
-                "lwa_res", strict_put, var, NULL, NULL, vname));
+        // Evaluate RHS and assign
+        jm_emit_label(mt, l_assign);
+        rhs = jm_transpile_box_item(mt, asgn->right);
+        jm_emit_error_lane_propagate_check(mt);
+
+        if (!asgn->lhs_is_parenthesized) {
+            jm_emit_named_evaluation_for_identifier(mt, asgn->right, rhs, id->name);
         }
 
         jm_emit_mov(mt, var->reg, rhs);
-        var->jube_type = asgn->op == OPERATOR_ASSIGN
-            ? jm_infer_jube_type(mt, asgn->right) : NULL;
+        var->jube_type = NULL;
+        jm_emit_assignment_var_writeback(mt, var, vname, var->reg, false);
 
-        // Write-back to env if this is a captured variable
-        // Write-back keeps captured variables, closure aliases, and arguments synchronized.
-        jm_emit_assignment_var_writeback(mt, var, vname, var->reg, true);
+        jm_emit_label(mt, l_end);
         return publish_item(var->reg);
+    } else {
+        // Compound assignment: var op= expr -> var = js_op(var, expr)
+        MIR_reg_t old_val = var->reg;
+        if (jm_is_native_type(var->type_id)) {
+            // outer/block-scope numeric vars can reach the generic compound path while still native.
+            old_val = jm_box_native(mt, var->reg, var->type_id);
+        }
+        MIR_reg_t with_key = 0;
+        if (mt->with_depth > 0) {
+            with_key = jm_box_property_name_literal(mt,
+                id->name->chars, id->name->len);
+            old_val = jm_callr_2(mt, jm_with_binding_get_name(mt), MIR_T_I64, with_key, old_val);
+            jm_emit_error_lane_propagate_check(mt);
+        }
+        int old_spill = jm_preserve_before_expression(mt, old_val, asgn->right);
+        MIR_reg_t rval = jm_transpile_box_item(mt, asgn->right);
+        if (old_spill >= 0) jm_gen_spill_load(mt, old_val, old_spill);
+        rhs = jm_emit_compound_assign(mt, asgn->op, old_val, rval);
     }
 
-    // Member assignment: obj.prop = expr, obj[key] = expr
-    if (asgn->left->node_type == AST_NODE_MEMBER_EXPR) {
-        JsMemberNode* member = (JsMemberNode*)asgn->left;
-        bool member_is_super = jm_js_ident_name_eq(member->object, "super", 5);
+    if (mt->with_depth > 0 && asgn->op != OPERATOR_ASSIGN && asgn->op != OPERATOR_JS_AND_ASSIGN &&
+        asgn->op != OPERATOR_JS_OR_ASSIGN && asgn->op != OPERATOR_JS_NULLISH_ASSIGN) {
+        MIR_reg_t with_key = jm_box_property_name_literal(mt,
+            id->name->chars, id->name->len);
+        bool strict_put = jm_strict_put(mt);
+        return publish_item(jm_emit_with_writeback(mt, with_key, rhs,
+            "lwa_res", strict_put, var, NULL, NULL, vname));
+    }
 
-        // super.x = val — use shared Reference Record handling for correct
-        // receiver binding and derived-constructor this/key evaluation order.
-        if (asgn->op == OPERATOR_ASSIGN && member_is_super) {
-                JsMirReference ref = jm_emit_reference(mt, asgn->left);
-                jm_emit_error_lane_propagate_check(mt);
-                if (ref.uninitialized_this) {
-                    MIR_reg_t undef = jm_emit_undefined(mt);
-                    jm_emit_put_value(mt, &ref, undef);
-                    jm_emit_error_lane_propagate_check(mt);
-                    return publish_item(undef);
-                }
-                int base_spill = -1;
-                int key_spill = -1;
-                jm_spill_reference_for_suspending_rhs(mt, &ref, asgn->right,
-                                                       &base_spill, &key_spill);
-                MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
-                jm_emit_error_lane_propagate_check(mt);
-                // await resumes in a new state-machine invocation, so the
-                // pre-RHS super reference must come back from its precise env home.
-                jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
-                MIR_reg_t super_set_result = jm_emit_put_value(mt, &ref, new_val);
-                jm_emit_error_lane_propagate_check(mt);
-                return publish_item(super_set_result);
-        }
+    jm_emit_mov(mt, var->reg, rhs);
+    var->jube_type = asgn->op == OPERATOR_ASSIGN
+        ? jm_infer_jube_type(mt, asgn->right) : NULL;
 
-        JsMirReference ref = jm_emit_reference(mt, asgn->left);
-        jm_emit_error_lane_propagate_check(mt);
-        MIR_reg_t packed_number_update = 0;
-        if (jm_try_emit_packed_number_self_update(mt, asgn, &ref,
-                &packed_number_update)) {
-            jm_sync_arguments_param_after_write(mt, member);
-            jm_readback_closure_env(mt);
-            jm_scope_env_reload_vars(mt);
-            return publish_item(packed_number_update);
-        }
+    // Write-back to env if this is a captured variable
+    // Write-back keeps captured variables, closure aliases, and arguments synchronized.
+    jm_emit_assignment_var_writeback(mt, var, vname, var->reg, true);
+    return publish_item(var->reg);
+}
+
+// Member assignment: obj.prop = expr, obj[key] = expr
+if (asgn->left->node_type == AST_NODE_MEMBER_EXPR) {
+    JsMemberNode* member = (JsMemberNode*)asgn->left;
+    bool member_is_super = jm_js_ident_name_eq(member->object, "super", 5);
+
+    // super.x = val — use shared Reference Record handling for correct
+    // receiver binding and derived-constructor this/key evaluation order.
+    if (asgn->op == OPERATOR_ASSIGN && member_is_super) {
+            JsMirReference ref = jm_emit_reference(mt, asgn->left);
+            jm_capture_write_reference(mt, &ref, asgn->right);
+            jm_emit_error_lane_propagate_check(mt);
+            if (ref.uninitialized_this) {
+                MIR_reg_t undef = jm_emit_undefined(mt);
+                jm_emit_put_value(mt, &ref, undef);
+                jm_emit_error_lane_propagate_check(mt);
+                return publish_item(undef);
+            }
+            int base_spill = -1;
+            int key_spill = -1;
+            jm_spill_reference_for_suspending_rhs(mt, &ref, asgn->right,
+                                                   &base_spill, &key_spill);
+            MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+            jm_emit_error_lane_propagate_check(mt);
+            // await resumes in a new state-machine invocation, so the
+            // pre-RHS super reference must come back from its precise env home.
+            jm_restore_suspended_reference(mt, &ref, base_spill, key_spill);
+            MIR_reg_t super_set_result = jm_emit_put_value(mt, &ref, new_val);
+            jm_emit_error_lane_propagate_check(mt);
+            return publish_item(super_set_result);
+    }
+
+    JsMirReference ref = jm_emit_reference(mt, asgn->left);
+    jm_capture_write_reference(mt, &ref,
+        asgn->op == OPERATOR_ASSIGN ? asgn->right : NULL);
+    jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t packed_number_update = 0;
+    if (jm_try_emit_packed_number_self_update(mt, asgn, &ref,
+            &packed_number_update)) {
+        jm_sync_arguments_param_after_write(mt, member);
+        jm_readback_closure_env(mt);
+        jm_scope_env_reload_vars(mt);
+        return publish_item(packed_number_update);
+    }
+    MIR_reg_t result = 0;
         TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
         bool native_number_store = asgn->op == OPERATOR_ASSIGN &&
             !jm_expression_can_suspend(mt, asgn->right) &&
@@ -6022,7 +6248,6 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
             jm_fixed_typed_array_receiver_kind(mt, ref.member) >= 0;
         bool packed_number_store = native_number_store && !fixed_number_store &&
             jm_is_array_literal_candidate(mt, ref.member);
-        MIR_reg_t result = 0;
         if (fixed_number_store || packed_number_store) {
             // Preserve the RHS's Number representation for the assignment
             // result and miss continuation, but pass a raw F64 to the

@@ -270,22 +270,45 @@ static int js_typed_array_current_byte_offset(JsTypedArray* ta) {
     return js_arraybuffer_view_is_out_of_bounds(&ta->base) ? 0 : byte_offset;
 }
 
+static void* js_typed_array_resolve_view_data(JsTypedArray* ta, bool write);
+
 static void* js_typed_array_current_data(JsTypedArray* ta) {
     if (!ta) return NULL;
     if (!ta->base.buffer) return ta->view ? ta->view->data : NULL;
     if (js_typed_array_current_byte_length(ta) == 0) return NULL;
-    return ta->view ? array_num_resolve_data(ta->view, false) : NULL;
+    return js_typed_array_resolve_view_data(ta, false);
 }
 
 static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta);
 
-static void* js_typed_array_prepare_write(JsTypedArray* ta) {
+static void* js_typed_array_resolve_view_data(JsTypedArray* ta, bool write) {
     if (!ta || !ta->view) return NULL;
+    if (!write && ta->base.buffer && !js_arraybuffer_detached(ta->base.buffer)) {
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)ta->view->extra;
+        if (shape && shape->backing_kind == ARRAY_NUM_BACKING_BUFFER_HANDLE &&
+                shape->backing == ta->base.buffer &&
+                shape->resolved_generation == ta->base.buffer->generation &&
+                ta->view->data) {
+            // A matching handle generation keeps the borrowed byte pointer live.
+            return ta->view->data;
+        }
+    }
+    // Writes always resolve through ArrayNum: copy-on-write can replace the
+    // handle storage and advances its generation during this operation.
+    return array_num_resolve_data(ta->view, write);
+}
+
+static void* js_typed_array_prepare_write_current(JsTypedArray* ta) {
+    if (!ta || !ta->view) return NULL;
+    if (js_typed_array_current_byte_length(ta) == 0) return NULL;
+    return js_typed_array_resolve_view_data(ta, true);
+}
+
+static void* js_typed_array_prepare_write(JsTypedArray* ta) {
     // Value coercion may resize the buffer after the initial witness record;
     // refresh live ArrayNum bounds before the write resolver validates them.
     js_typed_array_refresh_arraynum_view(ta);
-    if (js_typed_array_current_byte_length(ta) == 0) return NULL;
-    return array_num_resolve_data(ta->view, true);
+    return js_typed_array_prepare_write_current(ta);
 }
 
 static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
@@ -309,7 +332,7 @@ static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
     }
     array_num_shape_dims(shape)[0] = length;
     array_num_shape_strides(shape)[0] = 1;
-    array_num_resolve_data(ta->view, false);
+    js_typed_array_resolve_view_data(ta, false);
 }
 
 static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
@@ -2323,14 +2346,18 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
     }
 
     double num_val;
+    bool primitive_value = false;
     TypeId vtype = get_type_id(value);
     if (value.item == ITEM_JS_UNDEFINED) {
         num_val = NAN;
+        primitive_value = true;
     } else if (vtype == LMD_TYPE_INT) {
         int64_t iv = it2i(value);
         num_val = (double)iv;
+        primitive_value = true;
     } else if (vtype == LMD_TYPE_FLOAT) {
         num_val = it2d(value);
+        primitive_value = true;
     } else {
         // ES spec: IntegerIndexedElementSet calls ToNumber(value)
         // This throws TypeError for Symbol, which is the spec-required behavior
@@ -2343,7 +2370,10 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
 
     int current_length = js_typed_array_current_length(ta);
     if (idx < 0 || idx >= current_length) return value;
-    void* data = js_typed_array_prepare_write(ta);
+    // Primitive Number conversion cannot run user code, so the witness above
+    // remains current. Coercive values retain the refresh after ToNumber.
+    void* data = primitive_value ? js_typed_array_prepare_write_current(ta) :
+        js_typed_array_prepare_write(ta);
     if (!data) return value;
 
     js_typed_array_store_number_direct(ta->element_type, (char*)data, idx, num_val);
@@ -2413,7 +2443,9 @@ extern "C" bool js_typed_array_set_number_if_kind(Item ta_item,
             JS_OPT_OUTCOME_TAKEN);
         return true;
     }
-    void* data = js_typed_array_prepare_write(ta);
+    // This leaf receives a raw MIR Number and cannot observe a buffer change
+    // between its initial live-view witness and the store.
+    void* data = js_typed_array_prepare_write_current(ta);
     if (!data) {
         js_opt_trace_record(JS_OPT_TYPED_NUMBER_STORE, JS_OPT_REASON_NONE,
             JS_OPT_OUTCOME_TAKEN);

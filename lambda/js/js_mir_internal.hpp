@@ -613,6 +613,8 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id);
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node);
+bool jm_fixed_typed_array_member_number_candidate(JsMirTranspiler* mt,
+    JsAstNode* node);
 JsClassEntry* jm_matching_static_superclass(JsClassEntry* ce, JsAstNode* heritage);
 Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
 

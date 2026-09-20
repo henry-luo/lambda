@@ -6,7 +6,7 @@
       "in_func": "_last_element_#",
       "expect_seq": [
         {
-          "pattern": "\tmul\t"
+          "pattern": "\tlsh\t"
         },
         {
           "pattern": "\tadd\t"

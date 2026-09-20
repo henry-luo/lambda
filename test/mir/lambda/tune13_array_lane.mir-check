@@ -6,7 +6,7 @@
       "in_func": "_tune13_store_#",
       "expect": [
         "call\tlambda_array_set_checked",
-        "mul\t{{r}}, {{r}}, 8"
+        "lsh\t{{r}}, {{r}}, 3"
       ]
     },
     {

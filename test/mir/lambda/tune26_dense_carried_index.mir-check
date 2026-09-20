@@ -9,7 +9,7 @@
           "pattern": "\tbf\tL"
         },
         {
-          "pattern": "mul\t{{r}}, {{r}}, 8"
+          "pattern": "lsh\t{{r}}, {{r}}, 3"
         },
         {
           "pattern": "dmov\t{{r}}, d:({{r}})"

@@ -1343,7 +1343,7 @@ static inline MIR_reg_t em_guard_map_shape(MirEmitter* em, MIR_reg_t item,
     return map;
 }
 
-// The one dense element address calculation for Lambda and JS. Callers own
+// The canonical element address calculation for Lambda and JS. Callers own
 // representation, bounds, presence, mutability and lifetime admission.
 static inline MIR_reg_t em_element_address(MirEmitter* em, MIR_reg_t items,
         MIR_reg_t index, int width) {

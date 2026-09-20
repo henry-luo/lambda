@@ -1,13 +1,18 @@
 # JS Tune14 — Shared native regions and cheaper ordinary operations
 
-**Version:** 1.2.0
+**Version:** 1.4.8
 
-**Date:** 2026-09-19
+**Date:** 2026-09-20
 
-**Status:** IN PROGRESS — the first T14-2 numeric slice and a T14-6
-cache/prebuild lifetime repair are implemented. The numeric slice has focused
-semantic and paired-release evidence. T14-0, T14-1 and the remaining T14-2
-through T14-8 outcomes remain open; this is not a performance acceptance record.
+**Status:** IN PROGRESS — a T14-1 Reference-capture correctness repair, the first
+T14-2 numeric slice including its FFT nested-Number continuation, a T14-3
+shared physical-address migration, guarded Int32Array parameter admission and
+three isolated quicksort changes, plus T14-6 cache/prebuild lifetime and
+direct-scope scaling/stability repairs are implemented. The quicksort and FFT
+slices have positive paired-release evidence; the T14-3 copy-store and
+over-broad FFT experiments were measured and rejected. T14-0 and the remaining
+T14-1 through T14-8
+outcomes remain open; this is not a performance acceptance record.
 
 **Source audit:** `c5052085ce91026edd94c50cf89c4fd0e539c2ec`.
 
@@ -141,6 +146,50 @@ stdout is empty: the canonical one-frame wrapper does not reach the source's
 frame-15 checksum. This confirms repeatable elapsed-time regression but is weak
 semantic-equivalence evidence. T14-0/1 must strengthen the result oracle before
 accepting a fix without changing the canonical timed workload.
+
+### 2.3 Navier frame-15 Reference repair
+
+The canonical JetStream source checks its result only after frame 15. A wrapper
+that runs those 15 frames exposed a MIR checksum of 29, while Node and the AST
+backend produce the required 77. The first `project()` pressure solve diverged
+in its initial `lin_solve()` iteration even though the pre-solve aggregate state
+matched. The one-frame timed workload remains unchanged; this is a semantic
+oracle and no new timing claim.
+
+The cause was a live native MIR register retained as a computed member-write
+key. In `lastX = x[currentRow] = ... x[++currentRow] ...`, RHS evaluation
+updated the local backing `currentRow` register before the deferred store used
+the Reference. Capturing the key manually in source restored the result, which
+identified the missing compiler ownership boundary. The fix makes every member
+update retain its evaluated receiver/key and makes plain `=` retain each direct
+local source only when the RHS can rebind it. The existing indexed assignment
+census proves direct writes; a small RHS walk retains the snapshot for calls
+through a shared closure environment or direct `eval`. Unknown, dynamic and
+`with`-scoped sources retain the conservative path. This preserves the
+evaluated Reference through later coercion, calls or local writes as required
+by **S1.11** and the shared physical-lowering boundary in **D8.2.3–D8.2.6**,
+without adding moves to ordinary literal/arithmetic stores whose source
+compiler homes cannot change.
+
+`JsOpt.NavierStokesWriteReferenceSurvivesRhsIndexUpdates` reads the canonical
+benchmark, appends only the 15-frame driver, and retains the benchmark's own
+checksum. `JsOpt.WriteReferenceRetainsClosureMutation` separately covers a
+pure native-key increment and a call that mutates a captured key before the
+store. The canonical test has a 120-second local child limit because this
+complete debug-host workload takes tens of seconds; recent focused and full
+contract runs took 28.1 and 26.2 seconds. All other fixture limits remain 30
+seconds. The full 55-test JS optimization-contract suite
+passed after the narrowing. Its finalized-MIR ratchet returns
+`js_corpus_array_methods` from the provisional 3,253 to its prior 3,237
+instructions: ordinary literal/arithmetic RHS stores no longer pay Reference
+copies. The update-heavy Tune6 fixture retains its nine receiver snapshots,
+which are required before its observable get/coercion/write steps.
+Final source validation passed `make test-lambda-baseline` at 5,687/5,687 and
+`make test262-baseline` at 40,261/40,261, with zero Test262 batch-unstable,
+slow, failed or baseline-regressed entries. The deterministic finalized-MIR
+ratchet therefore records only the nine required receiver snapshots in the
+affected profile; this is a correctness-repair cost, not a timing acceptance
+claim.
 
 ## 3. Tune13 carryover: retain the unfinished outcomes
 
@@ -540,7 +589,7 @@ regression prevents closing this package.
 variant carriers; converge dependency mechanics with core untyped inference.
 Extract equivalent nonnullable boxing only with both live callers migrated.
 
-#### Implementation update — 2026-09-19: shared F64 boxing, native updates and direct alias-chain compound evidence
+#### Implementation update — 2026-09-19: shared F64 boxing, native updates and direct assignment-alias evidence
 
 The first numeric slice extracts `em_box_f64_to_item` into the common emitter
 and migrates both untyped Lambda's `emit_box_float` and LambdaJS's
@@ -558,20 +607,32 @@ cases. Postfix updates copy the old F64 value before writeback. Generic updates
 remain the semantic path for coercion, BigInt, member/reference targets and
 unproved representations (**S1.11**, **D2.4.1–D2.4.3**).
 
-The indexed collector also records the candidate edge from a resolved LHS alias
-to an RHS resolved binding in compound arithmetic. Its direct-body worklist is
-bounded by the eligible declarations in that function and advances in source
-order, so `first = x; cursor = first; cursor -= y` resolves through the
-already-published `first` binding without a fixed alias cap. This admits a
-guarded Number entry only; it is not an unconditional type fact. The native
-wrapper guards both F64 inputs, while strings, BigInts and every other miss
-continue through the generic body (**D2.4.1–D2.4.3**, **D8.2.5v2**).
+The indexed collector records the candidate edge from a resolved local LHS to
+an RHS resolved binding in compound arithmetic. Its direct-body worklist now
+also accepts a simple immediate-body assignment such as `cursor = first` after
+`first = x`. It advances in source order, removes that relation after a later
+non-alias assignment, and excludes parameters, nested bodies and control-flow
+joins. Thus `let first = x; let cursor = 0; cursor = first; cursor -= y` reaches
+the native candidate without treating a mutable alias as a permanent fact. This
+is still a guarded Number entry: the native wrapper guards both F64 inputs, and
+strings, BigInts and every other miss continue through the generic body
+(**D2.4.1–D2.4.3**, **D8.2.5v2**).
+
+The worklist remains JavaScript-owned because immediate statement order and
+assignment effects are profile semantics. It uses the existing shared
+`FnParamEvidence` and `FnVariantAnalysis` carriers, while untyped Lambda keeps
+its batched recursive walker. The shared F64 boxing leaf remains the completed
+two-live-caller migration; extracting this one-client traversal before a second
+matching consumer would duplicate rather than reuse compiler policy
+(**D1.3v3**, **D8.2.5v2**).
 
 Focused `JsOpt.NativeNumberUpdatesKeepPostfixAndGenericSemantics` verifies
 postfix ordering, `-0`, string coercion, BigInt fallback, trace-off parity and
 the finalized native/generic MIR split. `JsOpt.NativeAliasCompoundAssignmentKeepsGenericSemantics`
-adds direct and chained alias cases, string relational behavior and BigInt
-fallback; the pre-existing Number-plan contract also passes. The direct-local update slice
+now covers declarator aliases, direct assignment aliases, string relational
+behavior, BigInt fallback and an overwritten-alias refusal. Its finalized MIR
+contains `dge` and `dsub` in `assignedSubtract`, while `overwrittenAlias`
+retains `js_compare`; the focused suite passed 55/55. The direct-local update slice
 alone measured `larceny/diviter` tuned/control ratios 0.744359, 0.742719 and
 0.749489 (median 0.744359; 9,625.095 versus 12,959.271 ms) in an alternating
 release comparison against an isolated `HEAD` control.
@@ -587,30 +648,36 @@ the complete slice ranged from about 0.9845 to 1.0019 tuned/control, with a
 median near 0.9927. No full fixed-population matrix or QuickJS comparison has
 been run.
 
-Comparison/join/dependency propagation beyond direct-body aliases, native
-integer range proof, array regions and the Navier root cause remain open.
+Comparison and dependency propagation beyond immediate-body aliases, control-flow
+joins, native integer range proof, array regions and the Navier root cause remain
+open. No benchmark measurement is claimed for the direct-assignment expansion.
+After the expansion, `make test-lambda-baseline` passed 5,683/5,683 and
+`make test262-baseline` passed 40,261/40,261 with zero non-fully-passing,
+failed or regressed tests.
 
 #### A. Infer a guarded entry candidate through binding relationships
 
-The landed direct-body chain covers `r = x; r -= y` and
-`first = x; r = first; r -= y` when the resolved bindings lead back to formals.
-It does not yet propagate through comparisons, joins, nested scopes or a general
-alias graph. The solution remains a candidate native entry guarded for Number
-inputs, not treating these operators as proof that every source call receives
-Numbers.
+The landed immediate-body chain covers `r = x; r -= y`,
+`first = x; r = first; r -= y` and `let r = 0; r = first; r -= y` when resolved
+bindings lead back to formals. A later non-alias direct write clears the last
+relation. It does not propagate through control-flow joins, nested scopes or a
+general alias graph. The solution remains a candidate native entry guarded for
+Number inputs, not treating these operators as proof that every source call
+receives Numbers.
 
 - [~] Express numeric-use dependencies using resolved binding identity and the
-  existing function-owned index. Direct-body source-ordered alias chains and
-  compound assignment are implemented; propagate comparisons, joins and other
-  dependencies with a bounded fixed point and explicit refusal on
-  unsupported/ambiguous joins.
+  existing function-owned index. Immediate-body source-ordered declaration and
+  assignment aliases, including direct-write invalidation, are implemented;
+  propagate comparisons, joins and other dependencies with a bounded fixed
+  point and explicit refusal on unsupported/ambiguous joins.
 - [~] Establish all required Number guards before specialized effects. The
   current edge relies on the existing native-entry F64 guards; preserve
   the exact original values on the generic entry, including missing arguments,
   strings, BigInt, Symbol and objects with coercion hooks.
-- [ ] Track initialization and every reaching write. A mutable alias is not a
-  permanent type certificate; reassignment, capture, `eval`, `with` and unknown
-  effects must invalidate or prevent the relevant proof.
+- [~] Track initialization and every reaching write. Immediate-body direct
+  writes now invalidate the local relation; control-flow, capture, `eval`,
+  `with` and unknown effects still prevent or require a richer proof. A mutable
+  alias is not a permanent type certificate.
 - [ ] Keep variant-local facts with the guarded variant. Do not restore the
   pre-repair publication of speculative F64 facts into the generic boxed body.
   Separately derived unconditional facts may apply there only with their own
@@ -664,6 +731,185 @@ index path and pair its Lambda consumer with the JS access consumer. Keep
 semantic access policies outside the shared leaf; extend existing address and
 storage primitives before adding another helper.
 
+#### Implementation update — 2026-09-19: core physical addresses use the existing shared leaf
+
+`em_element_address` was already the live common physical leaf for LambdaJS's
+fixed typed-view and packed-array reads. Its callers establish JS receiver,
+key, prototype, typed-view and conversion semantics before the leaf receives a
+base pointer, machine index and width. Rather than add a second access-plan API,
+the untyped core now routes its already-admitted checked dynamic load, both
+dense `emit_checked_index_load` arms and certified pointer-array load through
+the same leaf. The caller still owns every array contract, null/OOB result,
+`item_at` fallback, COW and effect decision; this change shares only the
+post-admission address calculation required by **D1.3v3** and **D8.2.3**.
+
+The common width-eight spelling is `lsh index, 3` followed by `add base,
+offset`; non-eight widths retain the physical multiply. Exact MIR checks now
+pin that spelling across typed, dense and pointer storage. In particular,
+`tune21_index_mul_hoist` still requires its independent matrix `mul i, n`, then
+requires `lsh ..., 3` only for the final element address. The full MIR-emission
+suite passed 163/163, the MIR ratchet passed 20/20 (with only its unrelated
+existing corpus-shrink notices), and the 55/55 LambdaJS optimization suite
+passed. This is a two-client code-reuse migration, not an end-to-end JS array
+region or a performance claim; no benchmark result is attributed to it.
+Post-migration `make test-lambda-baseline` passed 5,683/5,683 and
+`make test262-baseline` passed 40,261/40,261, with zero non-fully-passing,
+failed or baseline-regressed Test262 entries.
+
+#### Implementation update — 2026-09-20: guarded Int32Array flow reaches quicksort `partition`
+
+`Int32Array` now joins the existing Uint8/Float64 typed-view lowering through
+one element-layout table: four-byte storage uses `MIR_T_I32`, a signed physical
+load, then `i2d` for JavaScript Number consumers. The existing runtime
+`js_typed_array_set_number_if_kind` remains the sole ToInt32 implementation, so
+truncation and modulo-2^32 wrapping were not copied into MIR. This keeps the
+shared address leaf physical while the JS runtime retains view-conversion policy
+(**D1.3v3**, **D8.2.3**, **D8.4.1v2**).
+
+The receiver-kind evidence now follows only bounded, stable direct-call
+parameter forwarding. Every non-cyclic direct caller must nominate the same
+kind; a self-recursive forwarding call contributes no independent evidence and
+an unknown or conflicting caller refuses admission. The generated leaf still
+checks the live receiver kind, index and data pointer, so an indirect call,
+rebinding or wrong brand reaches the existing generic path (**D3.3.3v3**,
+**D8.2.4–D8.2.6**). This is a JS-specific source/effect proof that reuses the
+existing `FnParamEvidence`/`FnVariantAnalysis` collection rather than copying
+untyped Lambda's traversal.
+
+`JsOpt.TypedArrayStoresUseGuardedNumericKeyLeaf` now covers `-1`,
+2^31, 2^32+1.75 and -1.75, proving exact signed readback and runtime ToInt32
+behavior. New forwarding and conflicting-caller fixtures prove both the
+recursive `main → quicksort → partition` shape and the refusal case. The final
+debug quicksort probe prints `quicksort: PASS`; its native `partition` MIR has
+the expected-kind-4 guard, width-four address multiply and signed `i32` loads.
+The current optimization suite passed 57/57, exact MIR emission 163/163 and
+the MIR ratchet 20/20 (only its pre-existing unrelated corpus-shrink notices).
+
+The paired release control kept the same Int32 support but restored the former
+one-hop parameter rule, leaving `partition` on generic element access. Across
+31 alternating Larceny quicksort pairs, its median workload time was 128.759 ms
+versus 23.623 ms for the transitive-evidence candidate: candidate/control
+0.183468 (one-sided 95% paired-bootstrap upper bound 0.184183), 31/31 candidate
+wins and matching stdout. The exact binaries, source hash and every pair are in
+`temp/tune14/paired_quicksort_transitive_int32.json`. This establishes the
+quicksort admission's causal benefit; it does not compare against QuickJS or
+establish a ResultN-wide geometric mean.
+
+A temporary copy-store leaf was also tested because `partition` swaps values.
+It preserved generic RHS behavior, but it added two typed snapshots before the
+already-guarded setter. The 31-pair release comparison in
+`temp/tune14/paired_quicksort_copy.json` gave candidate/control 1.0933x, zero
+candidate wins and matching stdout. The experiment was removed; it is evidence
+against this guard shape, not a performance claim or a QuickJS comparison.
+
+#### Implementation update — 2026-09-20: primitive typed writes retain their live view witness
+
+`js_typed_array_set_numeric_impl` refreshed the live `ArrayNum` view before
+checking the canonical index, then unconditionally refreshed it again through
+`js_typed_array_prepare_write`. The second refresh is required after a coercive
+`ToNumber`: user code can resize or detach a resizable backing buffer between
+the first witness and the store. It is redundant for `undefined`, compact
+integers and floating Numbers, which cannot run user code. The runtime now
+shares `js_typed_array_prepare_write_current` between the ordinary setter and
+the raw-Number MIR leaf. It uses that current witness only for those primitive
+values; every coercive value keeps the post-`ToNumber` refresh. This preserves
+the live buffer-view contract of **D2.4.1–D2.4.3** while improving a common
+runtime primitive that compiled and interpreted LambdaJS operations both reuse.
+It remains profile-owned: untyped Lambda has no ECMAScript `ToNumber` or
+resizable typed-view policy to share at this boundary.
+
+The extended typed-store contract creates an `Int32Array` over a resizable
+buffer and stores an object whose `valueOf` shrinks that buffer. It observes
+`length === 0` and `data[0] === undefined`, proving the coercive path still
+refreshes after the callback. The complete optimization suite passed 57/57.
+
+The exact pre-change transitive-Int32 release binary was the control for 31
+alternating Larceny quicksort pairs. Its median workload time was 23.988 ms;
+the primitive-witness candidate measured 21.639 ms, candidate/control
+0.902061 (one-sided 95% paired-bootstrap upper bound 0.905694), with 30/31
+candidate wins and matching stdout. The exact binaries, source hashes and all
+pairs are in `temp/tune14/paired_quicksort_primitive_store.json`. This is a
+causal quicksort result for the shared typed-array setter; it neither compares
+LambdaJS with QuickJS nor establishes a ResultN-wide aggregate.
+
+#### Implementation update — 2026-09-20: reuse ArrayNum data only within one handle generation
+
+Every physical typed-array read still validates the receiver kind and live
+index. After those checks, the adapter used to resolve the same `ArrayNum`
+buffer handle on every read even when its cached pointer had already been
+resolved for the current `ByteBufferHandle::generation`. The handle already
+advances that generation on resize, detach, transfer and copy-on-write. The JS
+adapter now reuses a non-null cached read pointer only when its `ArrayNumShape`
+records the same handle and generation. Writes always execute the existing
+`array_num_resolve_data(..., true)` path because the write itself may perform
+copy-on-write and advance the generation. This consumes the common
+`ArrayNum`/`ByteBufferHandle` lifetime contract without creating a parallel
+cache; the JS receiver, typed-view and numeric-index policy remains outside it
+(**D1.3v3**, **D2.4.1–D2.4.3**, **D8.2.3**).
+
+The focused typed-store, typed-parameter and forwarding contracts passed, as
+did `Js54P3TypedArrayLengthTracking` and
+`ArrayNumLoopResizeInvalidatesHoist`. Those resize/detach regressions verify
+that a generation change still resolves the current backing storage rather than
+borrowing a stale pointer.
+
+The primitive-witness release was the exact control for 31 alternating Larceny
+quicksort pairs. Its median workload time was 21.618 ms; the
+generation-validated read candidate measured 17.963 ms, candidate/control
+0.830905 (one-sided 95% paired-bootstrap upper bound 0.833944), with 31/31
+candidate wins and matching stdout. The exact binaries, source hashes and all
+pairs are in `temp/tune14/paired_quicksort_generation_view_cache.json`. A
+separate five-run focused observation measured 17.9 ms for LambdaJS and 19.4
+ms for QuickJS. That single-row observation is faster than QuickJS, but it does
+not establish the complete 63-row cross-engine milestone.
+
+#### Implementation update — 2026-09-20: retain nested typed-view Number carriers only on an admitted hit
+
+FFT's `four1` already had guarded physical `Float64Array` reads, but
+`scale * data[jj] - scale * data[jj + 1]` lost its Number carrier between
+the nested binary nodes. The outer subtraction then boxed both operands and
+missed the existing guarded Number-store leaf. `jm_get_effective_type` now
+retains an F64 carrier for subtraction, multiplication, division, remainder
+and exponentiation only when a native Number peer is paired with an already
+admitted fixed typed-view member whose key is statically numeric. The existing
+guarded typed read supplies the Number hit; its unchanged generic path supplies
+the ECMAScript `ToNumeric` miss. Addition remains excluded because one Number
+operand cannot rule out string concatenation.
+
+A broader version classified every non-add arithmetic node with one native
+Number operand as F64. Although its FFT screen was positive, it increased the
+unrelated `js_corpus_array_methods` finalized-MIR ratchet from 3,237 to 3,255.
+That version was removed. The retained proof is intentionally limited to the
+existing typed-view admission and therefore preserves the profile boundary:
+the physical typed access remains the shared `em_element_address` client, while
+the ECMAScript Number/coercion decision remains LambdaJS-owned
+(**D1.3v3**, **D3.3.3v3**, **D8.2.3–D8.2.6**, **D8.4.1v2**).
+
+`JsOpt.NestedTypedArrayArithmeticRetainsNumberResultAfterGenericMiss` covers
+the native `Float64Array` transform, an ordinary-array fallback and objects
+whose three `valueOf` calls must still occur. It checks the admitted typed
+reads, generic misses, F64 multiply/subtract and guarded Number store. The
+focused contracts passed and the exact previously failing ratchet returned to
+its 3,237 instruction budget.
+
+The exact generation-validated typed-view release binary was the control for
+31 alternating R7RS FFT pairs. The control median was 5.872292 ms and the
+retained candidate was 5.726250 ms: candidate/control 0.975130, one-sided
+95% paired-bootstrap upper bound 0.985491, 25/31 candidate wins, all 31
+samples `ok` and matching stdout. The archive is
+`temp/tune14/paired_fft_nested_number.json`; its control SHA-256 is
+`c064ec5602f7b57f003526a941f38841c71a4165c71bdbc264ca9e9c1dda8084`
+and its candidate SHA-256 is
+`897c5ae588cf9731af8532dd4f56165e1b6bbcbfa350e192e28a495b69c35080`.
+This is a causal single-row result, not a QuickJS comparison or a 63-row
+acceptance result.
+
+Final source validation passed `make test-lambda-baseline` at 5,687/5,687 and
+`make test262-baseline` at 40,261/40,261 fully passing, with zero Test262
+batch-unstable, slow, failed or baseline-regressed entries. The final release
+binary, after the direct-scope repair in T14-6, is SHA-256
+`886598b48c60e328866eb202b8ac09dd48bad2b6a38b4c892ac1d9f92d7792c3`.
+
 - [ ] Produce an admission/refusal map for all three search algorithms, FFT
   `four1`, Navier's inner functions and quicksort `partition`. Account separately
   for receiver kind, key, element value, operator, local join and destination.
@@ -677,10 +923,11 @@ storage primitives before adding another helper.
 - [ ] Wire the existing guarded Number-store leaf into admitted FFT stores.
   Explain each surviving boxed setter; presence of a leaf in the registry is
   not evidence that the workload uses it.
-- [ ] Reuse one physical typed-access plan for supported element kinds. Add
-  `Int32Array` first for quicksort, with signed loads and exact ToInt32 store
-  behavior. Add other kinds only with explicit conversion tests and measured
-  use. Keep clamping, Float32 rounding and BigInt kinds distinct.
+- [~] Reuse one physical typed-access plan for supported element kinds.
+  `Int32Array` now covers quicksort's signed loads and exact runtime ToInt32
+  stores through guarded direct-call forwarding. Add other kinds only with
+  explicit conversion tests and measured use. Keep clamping, Float32 rounding
+  and BigInt kinds distinct.
 - [ ] Preserve ordinary-array holes and indexed descriptors/prototypes. Prove a
   present own element before skipping prototype behavior. A Number element
   guard is not a certificate that every element of an aliased tagged array is
@@ -801,6 +1048,32 @@ race initialization (**D8.1.1v10**, **D8.5.1v4**). Focused cache tests cover a
 two-worker shared-import closure and a one-entry cross-language `test-batch`
 manifest with `LAMBDA_SCRIPT_CACHE=off`; the latter previously terminated from
 a freed MIR code context.
+
+#### Implementation update — 2026-09-20: make direct scope binding linear in its binding count
+
+The direct JS binder preserved its ordered `NameEntry` list for lexical-slot
+planning, but `js_scope_find_entry` linearly scanned that list for every
+predeclared and bound `var`. The two Unicode-10 identifier tests each declare
+8,327 names, so their global-scope reconstruction was quadratic and crossed
+the Test262 three-second timing gate only under the seven-worker batch.
+
+The builder now holds a transient `TypedHashMap` keyed by the existing
+`(JsScope*, interned String*)` identity and maps it to the same `NameEntry`.
+The retained `NameScope` ABI, list order and slot planner are unchanged; an
+allocation failure falls back to the authoritative list. The map is destroyed
+with the `JsTranspiler` tail before AST adoption, so it cannot become retained
+execution state or a mutable runtime cache. This shares the repository's typed
+hash-map substrate but is deliberately JS-builder-local: it does not claim a
+second untyped-Lambda scope implementation or relax JavaScript declaration
+rules (**D1.3v3**, **D8.2.4**, **D8.2.5v2**).
+
+`JsDirectScope.IndexesLargeUnicodeBindingsWithStableSlots` parses 768 mixed
+raw and escaped CJK declarations, verifies all lexical slots retain source
+order and resolves representative bindings through the index. The full
+Test262 run measured the two former slow entries at 2.274625s and 2.121400s,
+then reported 40,261/40,261 fully passing with zero slow or batch-unstable
+entries. This is the stability acceptance evidence; it is not a benchmark
+speedup claim.
 
 - [ ] Attribute bytes and lifetime overlap to AST/index, MIR, CFG, root
   candidates, collecting-call liveness, interference, scalar homes, native code
@@ -1036,14 +1309,14 @@ Starting evidence, with its limits:
 | Package | Current status | Evidence needed to close |
 |---|---|---|
 | T14-0 | [ ] Not started | Exact C14, audited manifest/oracles, complete controls and census. |
-| T14-1 | [~] Structural gap traced | Captured boxed kernels and generic-array helpers identified; still need a semantic reproducer, fixed-control recovery and causal repair. |
-| T14-2 | [~] In progress | Extend the landed shared F64 boxer, guarded local `++`/`--` and direct-body alias-chain compound admission to complete Number/update regions; retain generic parity and add comparison/join/range proofs. |
-| T14-3 | [ ] Not started | Search/FFT/Int32 coverage, shared physical access with untyped Lambda, complete misses and dynamic hits. |
+| T14-1 | [~] Reference repair landed | Frame-15 canonical Navier checksum now exercises the fixed evaluated-Reference boundary; complete the remaining boxed-kernel and generic-array work with fixed-control evidence. |
+| T14-2 | [~] In progress | Extend the landed shared F64 boxer, guarded local `++`/`--`, immediate-body assignment-alias compound admission and the narrow typed-view nested-Number carrier to complete Number/update regions; retain generic parity and add comparison/join/range proofs. |
+| T14-3 | [~] Address migration, typed-view and FFT carrier slices landed | `em_element_address` now serves existing LambdaJS paths and admitted untyped checked, dense and pointer loads. Guarded Int32 direct-call forwarding reaches quicksort `partition` with a 0.183468 paired-release ratio over one-hop evidence; the shared primitive typed-array setter then reached 0.902061 and generation-validated ArrayNum reads 0.830905. The narrow FFT Number-carrier result is 0.975130 (upper 0.985491) against its exact predecessor. The copy-store and over-broad arithmetic variants were rejected. Search coverage, shared checked-access/miss machinery and dynamic hits remain. |
 | T14-4 | [ ] Not started | Shared scalar/region mechanics, profile-valid invalidation and measured query reduction. |
 | T14-5 | [ ] Not started | Field/name/enumeration coverage and broad paired results. |
-| T14-6 | [~] Stability repair landed | Cache-rejection native-code lifetime and parallel prebuild publication are covered; compiler/memory owner census, scaling fixes/dispositions and cold results remain. |
+| T14-6 | [~] Stability repair landed | Cache-rejection native-code lifetime, parallel prebuild publication and the direct-scope index are covered. The index returns the full Test262 batch matrix to 40,261/40,261 with zero unstable/slow entries; compiler/memory owner census, scaling fixes/dispositions and cold results remain. |
 | T14-7 | [ ] Not started | Per-family profiles and implemented/no-change/deferred dispositions. |
-| T14-8 | [ ] Not started | Native entry/lifetime audit, two-client reuse ledger, full gates, durable final matrices and milestone status. |
+| T14-8 | [~] Runtime gates revalidated | Lambda baseline (5,687/5,687) and Test262 baseline (40,261/40,261 fully passing; zero unstable, slow or regressed) pass after the current T14-2, T14-3 and T14-6 work. Native entry/lifetime audit, two-client reuse ledger, durable final matrices and milestone status remain. |
 
 For every landed package record the exact revision/binary, predecessor, changed
 proof or primitive, admitted/refused cases, semantic/GC/MIR checks, paired result

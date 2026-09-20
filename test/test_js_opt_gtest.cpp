@@ -333,7 +333,7 @@ static const char* opt_executable() {
 static bool run_fixture_mode_backend(const char* name, const char* source,
                                      bool trace_enabled, const char* backend,
                                      TraceResult* trace, char* output,
-                                     size_t output_size) {
+                                     size_t output_size, int timeout_ms = 30000) {
     ensure_opt_dir();
     char script_path[512];
     char trace_path[512];
@@ -363,7 +363,7 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
     env[env_count++] = {"LAMBDA_MIR_DUMP_PATH", mir_path};
     ShellOptions options = {};
     options.env = env;
-    options.timeout_ms = 30000;
+    options.timeout_ms = timeout_ms;
     options.merge_stderr = true;
     ShellResult result = shell_exec(executable, args, &options);
     bool ok = result.exit_code == 0 && !result.timed_out;
@@ -410,9 +410,10 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
 }
 
 static bool run_fixture_mode(const char* name, const char* source, bool trace_enabled,
-                             TraceResult* trace, char* output, size_t output_size) {
+                             TraceResult* trace, char* output, size_t output_size,
+                             int timeout_ms = 30000) {
     return run_fixture_mode_backend(name, source, trace_enabled, NULL, trace,
-        output, output_size);
+        output, output_size, timeout_ms);
 }
 
 static bool run_fixture(const char* name, const char* source, TraceResult* trace,
@@ -930,6 +931,14 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
         "  while (cursor >= y) { cursor -= y; count++; }\n"
         "  return count;\n"
         "}\n"
+        "function assignedSubtract(x, y) {\n"
+        "  let first = x; let cursor = 0; cursor = first; let count = 0;\n"
+        "  while (cursor >= y) { cursor -= y; count++; }\n"
+        "  return count;\n"
+        "}\n"
+        "function overwrittenAlias(x, y) {\n"
+        "  let cursor = 0; cursor = x; cursor = '12'; return cursor >= y;\n"
+        "}\n"
         "if (subtractLoop(12, 3) !== 4 || subtractLoop('12', 3) !== 4 ||\n"
         "    subtractLoop('12', '3') !== 0 || subtractLoop(12n, 3n) !== 4) {\n"
         "  throw new Error('alias compound assignment changed semantics');\n"
@@ -937,6 +946,11 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
         "if (chainedSubtract(12, 3) !== 4 || chainedSubtract('12', 3) !== 4 ||\n"
         "    chainedSubtract('12', '3') !== 0 || chainedSubtract(12n, 3n) !== 4) {\n"
         "  throw new Error('chained alias compound assignment changed semantics');\n"
+        "}\n"
+        "if (assignedSubtract(12, 3) !== 4 || assignedSubtract('12', 3) !== 4 ||\n"
+        "    assignedSubtract('12', '3') !== 0 || assignedSubtract(12n, 3n) !== 4 ||\n"
+        "    !overwrittenAlias('not-a-number', 3)) {\n"
+        "  throw new Error('assigned alias compound assignment changed semantics');\n"
         "}\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
@@ -962,6 +976,21 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
     EXPECT_NE(strstr(chained, "\n\tdsub\t"), nullptr);
     const char* chained_subtract = strstr(chained, "\n\tcall\tjs_subtract");
     EXPECT_FALSE(chained_subtract && chained_subtract < chained_end);
+    const char* assigned_end = NULL;
+    const char* assigned = find_mir_function(mir, "_js_assignedSubtract_",
+        &assigned_end);
+    ASSERT_NE(assigned, nullptr);
+    ASSERT_NE(assigned_end, nullptr);
+    EXPECT_NE(strstr(assigned, "\n\tdsub\t"), nullptr);
+    const char* assigned_subtract = strstr(assigned, "\n\tcall\tjs_subtract");
+    EXPECT_FALSE(assigned_subtract && assigned_subtract < assigned_end);
+    const char* overwritten_end = NULL;
+    const char* overwritten = find_mir_function(mir, "_js_overwrittenAlias_",
+        &overwritten_end);
+    ASSERT_NE(overwritten, nullptr);
+    ASSERT_NE(overwritten_end, nullptr);
+    const char* overwritten_compare = strstr(overwritten, "\n\tcall\tjs_compare");
+    EXPECT_TRUE(overwritten_compare && overwritten_compare < overwritten_end);
     free(mir);
     expect_trace_off_same("native_alias_compound", source, output);
 }
@@ -1459,6 +1488,52 @@ TEST(JsOpt, PackedNumberStoreKeepsNativeWriteAndAccessorMiss) {
     expect_trace_off_same("packed_number_store", source, output);
 }
 
+TEST(JsOpt, NavierStokesWriteReferenceSurvivesRhsIndexUpdates) {
+    char* benchmark = read_text("test/benchmark/jetstream/navier-stokes.js");
+    ASSERT_NE(benchmark, nullptr);
+    const char* frames =
+        "\nfor (var frame = 0; frame < 15; frame++) runNavierStokes();\n"
+        "console.log('OPT_OK');\n";
+    size_t source_size = strlen(benchmark) + strlen(frames) + 1;
+    char* source = (char*)malloc(source_size);
+    ASSERT_NE(source, nullptr);
+    snprintf(source, source_size, "%s%s", benchmark, frames);
+    free(benchmark);
+
+    char output[4096];
+    // The canonical 15-frame workload exercises the checksum in a debug host.
+    ASSERT_TRUE(run_fixture_mode("navier_write_reference", source, false,
+        NULL, output, sizeof(output), 120000));
+    expect_ok_output(output);
+    free(source);
+}
+
+TEST(JsOpt, WriteReferenceRetainsClosureMutation) {
+    const char* source =
+        "function directWrite() {\n"
+        "  let values = [0, 0];\n"
+        "  let index = 0;\n"
+        "  values[index] = ++index;\n"
+        "  return values[0] === 1 && values[1] === 0;\n"
+        "}\n"
+        "function closureWrite() {\n"
+        "  let values = [0, 0];\n"
+        "  let index = 0;\n"
+        "  function move() { index = 1; return 7; }\n"
+        "  values[index] = move();\n"
+        "  return values[0] === 7 && values[1] === 0;\n"
+        "}\n"
+        "if (!directWrite() || !closureWrite())\n"
+        "  throw new Error('write Reference changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("write_reference_rhs", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    expect_trace_off_same("write_reference_rhs", source, output);
+}
+
 TEST(JsOpt, PackedNumericStrictEqualityKeepsDirectNumberLoads) {
     const char* source =
         "function equalCount(left, right) {\n"
@@ -1878,13 +1953,17 @@ TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
     const char* source =
         "function fill() {\n"
         "  let bytes = new Uint8Array(4);\n"
+        "  let ints = new Int32Array(4);\n"
         "  let floats = new Float64Array(4);\n"
         "  for (let i = 0; i < 4; i++) {\n"
         "    bytes[i] = i + 1;\n"
         "    floats[i] = i + 0.5;\n"
         "  }\n"
+        "  ints[0] = -1; ints[1] = 2147483648;\n"
+        "  ints[2] = 4294967297.75; ints[3] = -1.75;\n"
         "  bytes[-0] = 9;\n"
-        "  return bytes[0] + ':' + bytes[3] + ':' + floats[0] + ':' + floats[3];\n"
+        "  return bytes[0] + ':' + bytes[3] + ':' + floats[0] + ':' + floats[3] +\n"
+        "    ':' + ints[0] + ':' + ints[1] + ':' + ints[2] + ':' + ints[3];\n"
         "}\n"
         "function reassigned() {\n"
         "  let data = new Uint8Array(1);\n"
@@ -1892,16 +1971,25 @@ TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
         "  data[0] = 7;\n"
         "  return data[0];\n"
         "}\n"
+        "function coerciveResize() {\n"
+        "  let buffer = new ArrayBuffer(4, { maxByteLength: 4 });\n"
+        "  let data = new Int32Array(buffer);\n"
+        "  let value = { valueOf() { buffer.resize(0); return 7; } };\n"
+        "  data[0] = value;\n"
+        "  return data.length + ':' + data[0];\n"
+        "}\n"
         "console.log('typed:' + fill());\n"
         "console.log('fallback:' + reassigned());\n"
+        "console.log('coercion:' + coerciveResize());\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
     ASSERT_TRUE(run_fixture("typed_array_store_leaf", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_NE(strstr(output, "typed:1:4:0.5:3.5"), nullptr) << output;
+    EXPECT_NE(strstr(output, "typed:1:4:0.5:3.5:-1:-2147483648:1:-1"), nullptr) << output;
     EXPECT_NE(strstr(output, "fallback:7"), nullptr) << output;
+    EXPECT_NE(strstr(output, "coercion:0:undefined"), nullptr) << output;
     EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_STORE][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_STORE][2], 0u);
 
@@ -1909,6 +1997,8 @@ TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
     ASSERT_NE(mir, nullptr);
     EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
     EXPECT_NE(strstr(mir, "js_typed_array_data_at_if_kind"), nullptr);
+    // The signed Int32Array read is a physical i32 load before its F64 use.
+    EXPECT_NE(strstr(mir, "i32:("), nullptr);
     free(mir);
     expect_trace_off_same("typed_array_store_leaf", source, output);
 }
@@ -1929,10 +2019,17 @@ TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
         "  for (let i = 0; i < limit; i++) total += scale * data[i];\n"
         "  return total;\n"
         "}\n"
+        "function int32Transform(data, limit) {\n"
+        "  let total = 0;\n"
+        "  for (let i = 0; i < limit; i++) { data[i] = data[i] + 1; total += data[i]; }\n"
+        "  return total;\n"
+        "}\n"
         "let data = new Float64Array(4);\n"
         "for (let i = 0; i < 4; i++) data[i] = i;\n"
         "console.log('sum:' + transform(data, 4));\n"
         "console.log('product:' + multiply(data, 4));\n"
+        "let ints = new Int32Array(3); ints[0] = -2; ints[1] = 2147483647; ints[2] = -1;\n"
+        "console.log('int32:' + int32Transform(ints, 3) + ':' + ints[0] + ':' + ints[1] + ':' + ints[2]);\n"
         "let indirectMultiply = multiply;\n"
         "console.log('wrong-kind:' + indirectMultiply([2], 1));\n"
         "data = [3];\n"
@@ -1946,6 +2043,7 @@ TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
     expect_ok_output(output);
     EXPECT_NE(strstr(output, "sum:8"), nullptr) << output;
     EXPECT_NE(strstr(output, "product:16"), nullptr) << output;
+    EXPECT_NE(strstr(output, "int32:-2147483649:-1:-2147483648:0"), nullptr) << output;
     EXPECT_NE(strstr(output, "wrong-kind:4"), nullptr) << output;
     EXPECT_NE(strstr(output, "fallback:5"), nullptr) << output;
     EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
@@ -1957,8 +2055,107 @@ TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
     // still guards the runtime receiver before taking its physical load path.
     EXPECT_NE(strstr(mir, "js_typed_array_data_at_if_kind"), nullptr);
     EXPECT_NE(strstr(mir, "dmul"), nullptr);
+    EXPECT_NE(strstr(mir, "i32:("), nullptr);
     free(mir);
     expect_trace_off_same("typed_array_parameter_access", source, output);
+}
+
+TEST(JsOpt, NestedTypedArrayArithmeticRetainsNumberResultAfterGenericMiss) {
+    const char* source =
+        "function transform(data) {\n"
+        "  let scale = 5;\n"
+        "  let product = scale * data[0] - scale * data[1];\n"
+        "  data[2] = data[0] - product;\n"
+        "  return product + ':' + data[2];\n"
+        "}\n"
+        "let typed = new Float64Array(3); typed[0] = 2; typed[1] = 3;\n"
+        "console.log('typed:' + transform(typed));\n"
+        "let indirect = transform;\n"
+        "console.log('array:' + indirect([2, 3, 0]));\n"
+        "let coercions = 0;\n"
+        "let objects = [{ valueOf() { coercions++; return 2; } },\n"
+        "               { valueOf() { coercions++; return 3; } }, 0];\n"
+        "console.log('object:' + indirect(objects) + ':' + coercions);\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("nested_typed_array_number_result", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_NE(strstr(output, "typed:-5:7"), nullptr) << output;
+    EXPECT_NE(strstr(output, "array:-5:7"), nullptr) << output;
+    EXPECT_NE(strstr(output, "object:-5:7:3"), nullptr) << output;
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][2], 0u);
+
+    char* mir = read_fixture_mir("nested_typed_array_number_result");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "dmul"), nullptr);
+    EXPECT_NE(strstr(mir, "dsub"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
+    free(mir);
+    expect_trace_off_same("nested_typed_array_number_result", source, output);
+}
+
+TEST(JsOpt, TypedArrayKindFollowsStableDirectParameterForwarding) {
+    const char* source =
+        "function leaf(data) { return data[0]; }\n"
+        "function forward(data, count) {\n"
+        "  return count ? forward(data, count - 1) : leaf(data);\n"
+        "}\n"
+        "let values = new Int32Array(1); values[0] = -3;\n"
+        "if (forward(values, 1) !== -3) throw new Error('forwarded Int32Array changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("typed_array_parameter_forwarding", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
+
+    char* mir = read_fixture_mir("typed_array_parameter_forwarding");
+    ASSERT_NE(mir, nullptr);
+    const char* leaf_end = NULL;
+    const char* leaf = find_mir_function(mir, "_js_leaf_", &leaf_end);
+    ASSERT_NE(leaf, nullptr);
+    ASSERT_NE(leaf_end, nullptr);
+    // The concrete caller nominates Int32Array through one forwarding frame;
+    // its self-call is cyclic evidence and cannot override that concrete kind.
+    // The leaf still retains its runtime receiver guard before its signed load.
+    const char* typed_data = strstr(leaf, "js_typed_array_data_at_if_kind");
+    EXPECT_TRUE(typed_data && typed_data < leaf_end);
+    const char* signed_load = strstr(leaf, "i32:(");
+    EXPECT_TRUE(signed_load && signed_load < leaf_end);
+    free(mir);
+    expect_trace_off_same("typed_array_parameter_forwarding", source, output);
+}
+
+TEST(JsOpt, TypedArrayKindRejectsConflictingDirectCallers) {
+    const char* source =
+        "function leaf(data) { return data[0]; }\n"
+        "let signed = new Int32Array(1); signed[0] = -3;\n"
+        "let unsigned = new Uint8Array(1); unsigned[0] = 5;\n"
+        "if (leaf(signed) !== -3 || leaf(unsigned) !== 5)\n"
+        "  throw new Error('mixed typed callers changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("typed_array_parameter_conflict", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("typed_array_parameter_conflict");
+    ASSERT_NE(mir, nullptr);
+    const char* leaf_end = NULL;
+    const char* leaf = find_mir_function(mir, "_js_leaf_", &leaf_end);
+    ASSERT_NE(leaf, nullptr);
+    ASSERT_NE(leaf_end, nullptr);
+    // A function with competing direct brands must retain the generic path;
+    // selecting either physical layout would make its other caller unsound.
+    const char* typed_data = strstr(leaf, "js_typed_array_data_at_if_kind");
+    EXPECT_FALSE(typed_data && typed_data < leaf_end);
+    free(mir);
+    expect_trace_off_same("typed_array_parameter_conflict", source, output);
 }
 
 TEST(JsOpt, MirLogicalJoinPublishesMergedCarrier) {

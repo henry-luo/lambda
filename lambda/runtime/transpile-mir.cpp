@@ -24496,16 +24496,10 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_ITEMS_OFFSET,
                     arr_ptr, 0, 1)));
         }
-        MIR_reg_t dense_offset = new_reg(mt, "dense_offset", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL,
-            MIR_new_reg_op(mt->ctx, dense_offset),
-            MIR_new_reg_op(mt->ctx, idx_native),
-            MIR_new_int_op(mt->ctx, policy.element_width)));
-        MIR_reg_t dense_element = new_reg(mt, "dense_element", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-            MIR_new_reg_op(mt->ctx, dense_element),
-            MIR_new_reg_op(mt->ctx, dense_items),
-            MIR_new_reg_op(mt->ctx, dense_offset)));
+        // The guarded core and JS typed-view paths share this physical
+        // address calculation once each profile has established its own proof.
+        MIR_reg_t dense_element = em_element_address(&mt->em, dense_items,
+            idx_native, policy.element_width);
         MIR_reg_t dense_loaded = emit_index_storage_load(mt, dense_element,
             policy, "dense_loaded");
         emit_index_result_move(mt, result, dense_loaded,
@@ -24653,12 +24647,8 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
         loaded = em_load_at(&mt->em, items_ptr, fixed_offset, policy.element_type,
             "idx_loaded");
     } else {
-        MIR_reg_t byte_offset = new_reg(mt, "idx_byte_offset", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL, MIR_new_reg_op(mt->ctx, byte_offset),
-            MIR_new_reg_op(mt->ctx, idx_native), MIR_new_int_op(mt->ctx, policy.element_width)));
-        MIR_reg_t element_addr = new_reg(mt, "idx_element", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, element_addr),
-            MIR_new_reg_op(mt->ctx, items_ptr), MIR_new_reg_op(mt->ctx, byte_offset)));
+        MIR_reg_t element_addr = em_element_address(&mt->em, items_ptr,
+            idx_native, policy.element_width);
         // MIR_T_U64 is a memory type only — the helper keeps its destination in the
         // verifier-approved i64 register class while retaining zero-extending loads.
         loaded = emit_index_storage_load(mt, element_addr, policy, "idx_loaded");
@@ -24750,16 +24740,8 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
                 MIR_new_reg_op(mt->ctx, dense_items),
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_ITEMS_OFFSET, arr_ptr, 0, 1)));
         }
-        MIR_reg_t dense_offset = new_reg(mt, "dense_offset", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL,
-            MIR_new_reg_op(mt->ctx, dense_offset),
-            MIR_new_reg_op(mt->ctx, idx_native),
-            MIR_new_int_op(mt->ctx, policy.element_width)));
-        MIR_reg_t dense_element = new_reg(mt, "dense_element", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-            MIR_new_reg_op(mt->ctx, dense_element),
-            MIR_new_reg_op(mt->ctx, dense_items),
-            MIR_new_reg_op(mt->ctx, dense_offset)));
+        MIR_reg_t dense_element = em_element_address(&mt->em, dense_items,
+            idx_native, policy.element_width);
         MIR_reg_t dense_loaded = emit_index_storage_load(mt, dense_element, policy,
             "dense_loaded");
         emit_index_result_move(mt, result, dense_loaded,
@@ -24865,14 +24847,7 @@ static MIR_reg_t emit_generic_pointer_array_load(MirTranspiler* mt,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, items),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_ITEMS_OFFSET, array_ptr, 0, 1)));
-    MIR_reg_t offset = new_reg(mt, "ptr_array_offset", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL,
-        MIR_new_reg_op(mt->ctx, offset), MIR_new_reg_op(mt->ctx, idx_native),
-        MIR_new_int_op(mt->ctx, 8)));
-    MIR_reg_t address = new_reg(mt, "ptr_array_address", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, address), MIR_new_reg_op(mt->ctx, items),
-        MIR_new_reg_op(mt->ctx, offset)));
+    MIR_reg_t address = em_element_address(&mt->em, items, idx_native, 8);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, address, 0, 1)));

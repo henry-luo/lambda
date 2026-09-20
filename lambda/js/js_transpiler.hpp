@@ -127,6 +127,10 @@ struct JsTranspiler : JsScript {
     // outlives its builder in preamble and hot-reload batch mode.
     uint32_t const_unit_id;
     LambdaConstPool* const_pool;
+    // Direct scope construction retains its ordered binding list for durable
+    // slot planning. This builder-only index makes name resolution linear in
+    // lexical depth rather than in every preceding binding in the scope.
+    struct hashmap* scope_binding_index;
 };
 
 // JavaScript type mapping functions

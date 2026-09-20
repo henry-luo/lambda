@@ -1010,8 +1010,23 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         TypeId left_type = jm_get_effective_type(mt, binary->left);
         TypeId right_type = jm_get_effective_type(mt, binary->right);
         switch (binary->op) {
-        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
-        case OPERATOR_DIV: case OPERATOR_MOD: case OPERATOR_JS_EXP:
+        case OPERATOR_ADD:
+            // Addition can concatenate after ToPrimitive, so one Number
+            // operand alone cannot publish a Number result.
+            return jm_is_native_number_type(left_type) &&
+                jm_is_native_number_type(right_type) ? LMD_TYPE_FLOAT : LMD_TYPE_ANY;
+        case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_DIV:
+        case OPERATOR_MOD: case OPERATOR_JS_EXP:
+            // A fixed typed-view peer gives the guarded lowering a Number hit
+            // and a generic ToNumeric miss. Keep the resulting carrier only
+            // for that existing admitted path; arbitrary dynamic arithmetic
+            // must not grow unrelated MIR regions.
+            return (jm_is_native_number_type(left_type) &&
+                    jm_fixed_typed_array_member_number_candidate(mt, binary->right)) ||
+                (jm_is_native_number_type(right_type) &&
+                    jm_fixed_typed_array_member_number_candidate(mt, binary->left)) ||
+                (jm_is_native_number_type(left_type) &&
+                    jm_is_native_number_type(right_type)) ? LMD_TYPE_FLOAT : LMD_TYPE_ANY;
         case OPERATOR_JS_BIT_AND: case OPERATOR_JS_BIT_OR:
         case OPERATOR_JS_BIT_XOR: case OPERATOR_JS_LSHIFT:
         case OPERATOR_JS_RSHIFT: case OPERATOR_JS_URSHIFT:

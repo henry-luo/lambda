@@ -6,7 +6,7 @@
       "in_func": "_tune15_fill_witness_#",
       "expect": [
         "call\tfn_fill_p, fn_fill",
-        "mul\t{{r}}, {{r}}, 8",
+        "lsh\t{{r}}, {{r}}, 3",
         "mov\t{{r}}, i64:({{r}})"
       ],
       "forbid": [

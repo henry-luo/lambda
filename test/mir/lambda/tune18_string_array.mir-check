@@ -1,10 +1,11 @@
 {
   "schema_version": 1,
-  "description": "Tune18 string[] indexing uses its certificate-guarded raw pointer lane and preserves item_at as the representation-safe slow path.",
+  "description": "Tune18 string[] indexing uses its certificate-guarded raw pointer lane, the shared physical element address, and preserves item_at as the representation-safe slow path.",
   "checks": [
     {
       "in_func": "_main_#",
       "expect": [
+        "lsh\t{{r}}, {{r}}, 3",
         "mov\ti64:("
       ],
       "forbid": [

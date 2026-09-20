@@ -10,7 +10,7 @@
         { "pattern": "mov\t{{r}}, i64:40({{r}})" },
         { "pattern": "lt\t{{r}}, %p2, 0" },
         { "pattern": "ge\t{{r}}, %p2, {{r}}" },
-        { "pattern": "mul\t{{r}}, %p2, 8" },
+        { "pattern": "lsh\t{{r}}, %p2, 3" },
         { "pattern": "dmov\t{{r}}, d:({{r}})" }
       ]
     },

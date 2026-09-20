@@ -18,7 +18,7 @@
           "pattern": "add\t{{r}}, {{r}}, {{r}}"
         },
         {
-          "pattern": "mul\t{{r}}, {{r}}, 8"
+          "pattern": "lsh\t{{r}}, {{r}}, 3"
         },
         {
           "pattern": "add\t{{r}}, {{r}}, {{r}}"

@@ -338,6 +338,48 @@ TEST(JsAstStructure, ExtensionChildCatalogIsComplete) {
     EXPECT_TRUE(js_ast_child_catalog_complete());
 }
 
+TEST(JsDirectScope, IndexesLargeUnicodeBindingsWithStableSlots) {
+    const int binding_count = 768;
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    for (int index = 0; index < binding_count; index++) {
+        strbuf_append_str(source, "var ");
+        uint32_t codepoint = 0x4E00u + (uint32_t)index;
+        if ((index & 1) == 0) {
+            ASSERT_TRUE(strbuf_append_utf8(source, codepoint));
+        } else {
+            strbuf_append_format(source, "\\u%04X", (unsigned int)codepoint);
+        }
+        strbuf_append_str(source, " = ");
+        strbuf_append_int(source, index);
+        strbuf_append_str(source, ";\n");
+    }
+
+    JsTranspiler* transpiler = js_transpiler_create(NULL);
+    ASSERT_NE(transpiler, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(transpiler, source->str, source->length,
+        JS_PARSE_AUTO));
+    ASSERT_NE(transpiler->global_scope, nullptr);
+    EXPECT_TRUE(transpiler->global_scope->binding_slots_planned);
+    EXPECT_EQ(transpiler->global_scope->binding_slot_count,
+        (uint32_t)binding_count);
+
+    NameEntry* binding = transpiler->global_scope->first;
+    for (int index = 0; index < binding_count; index++) {
+        ASSERT_NE(binding, nullptr);
+        EXPECT_EQ(binding->slot, index);
+        if (index == 0 || index == binding_count / 2 ||
+                index == binding_count - 1) {
+            EXPECT_EQ(js_scope_lookup(transpiler, binding->name), binding);
+        }
+        binding = binding->next;
+    }
+    EXPECT_EQ(binding, nullptr);
+
+    js_transpiler_destroy(transpiler);
+    strbuf_free(source);
+}
+
 static bool js_test262_append_file(StrBuf* source, const char* path) {
     char* contents = read_text_file(path);
     if (!contents) return false;
