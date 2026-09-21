@@ -1568,11 +1568,17 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
         if (get_type_id(name_item) == LMD_TYPE_STRING) fn->name = it2s(name_item);
     }
     if (source_chars) {
-        Item source_item = js_make_string_len(source_chars, (int)source_length);
-        fn = (JsFunction*)function_root.get().function;
-        if (get_type_id(source_item) == LMD_TYPE_STRING) {
-            JsCallableCode* code = js_fn_code_ensure(fn);
-            if (code) code->source_text = it2s(source_item);
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        // All MIR closures of one definition share this code record. Preserve
+        // their immutable Function#toString source instead of allocating it
+        // again at every closure evaluation.
+        if (code && !code->source_text) {
+            Item source_item = js_make_string_len(source_chars, (int)source_length);
+            fn = (JsFunction*)function_root.get().function;
+            if (get_type_id(source_item) == LMD_TYPE_STRING) {
+                code = js_fn_code_ensure(fn);
+                if (code && !code->source_text) code->source_text = it2s(source_item);
+            }
         }
     }
     if (formal_length >= 0) {

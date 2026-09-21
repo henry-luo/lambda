@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-18
 **Status:** Decided; current syntax/runtime scope implemented
-**Decision IDs:** PTH1v2, PTH2v2, PTH3–PTH15, PTH16v3, PTH17–PTH29
+**Decision IDs:** PTH1v2, PTH2v3, PTH3, PTH4v2, PTH5–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29
+**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S
 **Open issue IDs:** PTH-O1
 
 > **Normative anchors:** [S1.7](../doc/Lambda_Formal_Semantics.md#s1-core-principles)
@@ -29,9 +30,9 @@ hierarchy:
 
 ```lambda
 /.a.b          // rooted reference; a file mount projects it to /a/b
-.a.b           // reference relative to the active reference base
-.~~.a.b        // parent-relative reference; file projection is ../a/b
-.~~.~~.a       // two parent steps; file projection is ../../a
+\.a.b          // reference relative to the active reference base
+\.~~.a.b       // parent-relative reference; file projection is ../a/b
+\.~~.~~.a      // two parent steps; file projection is ../../a
 file./.a.b     // absolute file reference on the current machine
 file.host.a.b  // absolute file reference on machine host
 http.host.a.b  // absolute HTTP-provider reference
@@ -57,10 +58,11 @@ The corresponding root rule is:
 > logical global root. After a value or path, postfix `./` selects the root of
 > that base's hierarchy. Subsequent static steps are again introduced by `.`.**
 
-The old spellings `/a`, `..a`, `value ..`, and `value .._..` are retired.
-There is no permanent compatibility alias.
+The old spellings `/a`, `..a`, `value ..`, and `value .._..` are retired, as
+is the bare-dot relative `.a.b` (S16.9.4). There is no permanent compatibility
+alias.
 
-A path's initial form is exactly one of logical rooted `/`, relative `.`, or
+A path's initial form is exactly one of logical rooted `/`, relative `\.`, or
 an explicit absolute `SchemeName`; after that root choice, every form uses the
 same dotted/indexed steps.
 
@@ -79,7 +81,7 @@ Operation = Key | Root | Parent | Wildcard | DynamicKey
 A reference root is one of:
 
 - the logical global root `/`;
-- the active relative root `.`;
+- the active relative root `\.`;
 - a statically selected namespace root;
 - an explicit absolute provider root such as `file`, `http`, `https`, or
   `sys`, optionally qualified by authority keys such as `http.hostname`;
@@ -139,7 +141,7 @@ known and in what evaluation returns:
 | Source form | Reference class | Evaluation contract |
 |---|---|---|
 | `/.a.b` | Static rooted reference | Qualifies `/` through the resolver and produces a lazy `path`/target handle |
-| `.a.b` | Static relative reference | Retains the active relative base and produces a lazy `path`/target handle |
+| `\.a.b` | Static relative reference | Retains the active relative base and produces a lazy `path`/target handle |
 | `file./.a.b`, `file.host.a`, `http.host.a` | Static absolute reference | Names its provider/authority directly and produces a lazy `path`/target handle |
 | `a` | Static binding reference | Resolves through lexical/import namespace selection and reads the binding |
 | `'a'` | Static name-key reference value | Produces the symbol key; it is not implicitly dereferenced |
@@ -254,7 +256,7 @@ Lambda paths have three root forms:
 | Form | Example | Root selection |
 |---|---|---|
 | Rooted | `/.a.b` | Starts at logical `/`, then uses the active mount table |
-| Relative | `.a.b` | Starts at the active relative reference base |
+| Relative | `\.a.b` | Starts at the active relative reference base |
 | Absolute | `file./.a.b`, `file.host.a.b`, `http.host.a.b` | Names the provider and authority directly |
 
 An absolute path is already provider-qualified. It bypasses the logical `/`
@@ -319,7 +321,7 @@ The syntax has three distinct concepts:
 
 | Concept | Spellings | Meaning |
 |---|---|---|
-| Path root | `/`, `.`, `SchemeName` | Logical rooted, relative, or explicit absolute provider root |
+| Path root | `/`, `\.`, `SchemeName` | Logical rooted, relative, or explicit absolute provider root |
 | Context atom | `~`, `~~`, `^` | Current value, parent of current value, or current handled error |
 | Step | `.name`, `.1`, `.'quoted'`, `.*`, `.**`, `./`, `.~~`, `[expr]` | Name/int key, wildcard, root, parent, or dynamic navigation |
 
@@ -336,9 +338,9 @@ The intended grammar, abstracting the existing set of legal member names, is:
 PathLiteral       ::= RootedPath | RelativePath | AbsolutePath
 
 RootedPath        ::= "/" PostfixStep*
-RelativePath      ::= "."
-                    | "." PathPart PostfixStep*
-                    | "." IndexStep PostfixStep*
+RelativePath      ::= "\."
+                    | "\." PathPart PostfixStep*
+                    | "\." IndexStep PostfixStep*
 AbsolutePath      ::= SchemeName "." PathPart PostfixStep*
 
 PathPart          ::= MemberName
@@ -359,14 +361,15 @@ PostfixRootExpr   ::= PrimaryExpr "." "/" PostfixStep*
 ParentCurrentExpr ::= "~~"                 // desugars to ~.~~
 ```
 
-`/` and `.` are valid bare paths. `./` and `file./` are also complete paths:
-the final slash is a root operation, not a trailing separator. Empty steps and
-a trailing dot separator are not valid: `/.`, `.a.`, and `/.a..b` are errors.
+`/` and `\.` are valid bare paths. `\./` and `file./` are also complete
+paths: the final slash is a root operation, not a trailing separator. Empty
+steps and a trailing dot separator are not valid: `/.`, `\.a.`, and `/.a..b`
+are errors.
 A segment containing a dot or other non-name character remains quoted:
 
 ```lambda
 /.'var'.log.'app.log'       // /var/log/app.log
-.~~.data.'config.dev.json'  // ../data/config.dev.json
+\.~~.data.'config.dev.json' // ../data/config.dev.json
 ```
 
 Dynamic steps retain bracket notation:
@@ -392,22 +395,22 @@ new canonical forms:
 | Meaning | Canonical | Retired |
 |---|---|---|
 | Rooted keys `a/b` | `/.a.b` | `/a.b` |
-| Relative keys `a/b` | `.a.b` | unchanged |
+| Relative keys `a/b` | `\.a.b` | `.a.b` (S16.9.4) |
 | Absolute local-file keys `a/b` | `file./.a.b` | none |
 | Absolute remote-file keys `a/b` on `host` | `file.host.a.b` | none |
 | Absolute HTTP keys `host/a/b` | `http.host.a.b` | unchanged |
 | Root of `value` | `value./` | none |
 | Key `b` from root of `a` | `a./.b` | none |
-| Relative `../a/b` | `.~~.a.b` | `..a.b` |
-| Relative `../../a` | `.~~.~~.a` | `(..)..a`, related compound forms |
+| Relative `../a/b` | `\.~~.a.b` | `..a.b`, `.~~.a.b` |
+| Relative `../../a` | `\.~~.~~.a` | `(..)..a`, related compound forms, `.~~.~~.a` |
 | Parent of `value` | `value.~~` | `value ..` |
 | Two parents of `value` | `value.~~.~~` | `value .._..` |
 
-The leading `.` distinguishes a relative reference from contextual
+The leading `\.` distinguishes a relative reference from contextual
 parent navigation:
 
 ```lambda
-.~~.a       // relative reference; file projection is ../a
+\.~~.a      // relative reference; file projection is ../a
 ~~.a        // parent of contextual ~, then a
 ```
 
@@ -435,14 +438,14 @@ hierarchy anchor (**S2.4.2v4**):
 2. At an absolute provider path, the anchor retains the provider and selected
    authority: `file./`, `file.hostname`, or `http.hostname`.
 3. At a relative root, the anchor is not known until resolution. Static
-   normalization discards preceding relative child steps but retains `./` as
-   the unresolved root-selection operation.
+   normalization discards preceding relative child steps but retains `\./`
+   as the unresolved root-selection operation.
 
 Consequently:
 
 ```lambda
 /.a.b./.c             == /.c
-.a.b./.c              == ./.c
+\.a.b./.c             == \./.c
 file./.a.b./.c        == file./.c
 file.hostname.a./.b   == file.hostname.b
 http.hostname.a./.b   == http.hostname.b
@@ -464,9 +467,9 @@ Consequently:
 /.a.~~.b          == /.b
 /.~~              == /
 
-.a.~~             == .
-.a.~~.~~.b        == .~~.b
-.~~.~~            // ../../
+\.a.~~            == \.
+\.a.~~.~~.b       == \.~~.b
+\.~~.~~           // ../../
 ```
 
 Normalization is semantic, not merely cosmetic: equality, hashing, target
@@ -481,15 +484,15 @@ base from left to right. Root and parent steps therefore affect the base rather
 than being discarded as relative scheme markers:
 
 ```lambda
-/.home.user ++ .docs.file       == /.home.user.docs.file
-/.home.user ++ .~~.shared       == /.home.shared
-file.host.home ++ .docs./.tmp   == file.host.tmp
-.work.build ++ .~~.src          == .work.src
-.work.build ++ .cache./.src     == ./.src
+/.home.user ++ \.docs.file      == /.home.user.docs.file
+/.home.user ++ \.~~.shared      == /.home.shared
+file.host.home ++ \.docs./.tmp  == file.host.tmp
+\.work.build ++ \.~~.src        == \.work.src
+\.work.build ++ \.cache./.src   == \./.src
 ```
 
 A rooted or absolute suffix remains an error where composition requires a
-relative suffix. A bare `.` suffix is the identity.
+relative suffix. A bare `\.` suffix is the identity.
 
 ### 6.3 Provider and OS conversion
 
@@ -508,8 +511,8 @@ mounted to a local file provider:
 
 ```text
 /.a.b       -> file./.a.b -> /a/b
-.a.b        <-> ./a/b
-.~~.a.b     <-> ../a/b
+\.a.b       <-> ./a/b
+\.~~.a.b    <-> ../a/b
 ```
 
 If `/` is mounted to HTTP or another provider, the same logical reference is
@@ -600,7 +603,7 @@ inherits all of `~`'s lexical shadowing rules (**S10.1.3**):
 For the pipe syntactic test in **S10.1.2**, a free `~~` contains an implicit
 free `~` and therefore makes the pipe a mapping pipe. Outside a current-value
 context, bare `~~` is the same semantic error as bare `~`; it does not mean a
-relative path. That form starts with `.`, as in `.~~`.
+relative path. That form starts with `\.`, as in `\.~~`.
 
 ## 8. Context and ownership invariant
 
@@ -702,6 +705,13 @@ current-machine file-authority checks. The intentionally deferred pieces are
 the general immutable mount-table resolver, remote file transport, and network
 hostname discovery; the default resolver maps logical `/` to local `file./`.
 
+**Probed 2026-09-21** (after the `\.a.b` respelling): multi-step relative
+paths, parent/root normalization, `++` composition, and printing all use
+`\.`. Three gaps: the bare paths `\.` and `/` do not parse ("expected a path
+segment" / "expected '.'"); the indexed leading form `\.[1]` (and `/.[1]`) does
+not parse; and `\.1.x` silently evaluates to `file./` — a wrong value, not an
+error.
+
 ## 11. Migration
 
 This is an intentional breaking syntax change. Migration is mechanical but
@@ -710,10 +720,11 @@ share lexical neighborhoods.
 
 ```text
 /a.b             -> /.a.b
-..a.b            -> .~~.a.b
-..                -> .~~
+..a.b            -> \.~~.a.b
+..                -> \.~~
 value ..          -> value.~~
 value .._..       -> value.~~.~~
+.a.b             -> \.a.b         // second step, S16.9.4
 ```
 
 The transition should update grammar, generated parser, AST builders, MIR
@@ -738,14 +749,14 @@ At minimum, implementation tests must cover:
 7. Root normalization for logical, relative, local-authority, and named-host
    paths, including preservation of the provider/authority anchor.
 8. One and repeated `.~~` steps, including root clamping and cancellation.
-9. `base ++ .~~.x` and `base ++ .a./.x` for rooted and relative bases.
+9. `base ++ \.~~.x` and `base ++ \.a./.x` for rooted and relative bases.
 10. `value.~~`, `value.~~.~~`, bare `~~`, and nested current-value scopes.
 11. Bare `~~` causing mapping-pipe classification.
 12. Missing contextual root/parent returning `null` and chaining totality.
 13. Traversal roots/parents carried by a zipper/path with no stored container
     root or parent pointer.
 14. Equality/hash/print parity between literal and dynamically composed paths.
-15. Rejection of `/a`, `..a`, `value ..`, `_..`, and accidental `...`
+15. Rejection of `/a`, `..a`, bare-dot `.a`, `value ..`, `_..`, and accidental `...`
     reinterpretation without rejecting valid `./`.
 16. `/` mount qualification to file, HTTP, and prefix-mounted providers,
     including cycle rejection and no existence-based fallback.
@@ -767,9 +778,9 @@ At minimum, implementation tests must cover:
 | ID | Decision |
 |---|---|
 | **PTH1v2** | Rooted references use `/.a.b`; `/` is the logical global root bound by a resolver context, not intrinsically the filesystem root. |
-| **PTH2v2** | Relative references use `.a.b`; `.` selects the active relative reference base, which a file provider projects to its current directory. |
+| **PTH2v3** | Relative references use `\.a.b`; `\.` selects the active relative reference base, which a file provider projects to its current directory. *(v3, 2026-09-21, S16.9.4.)* |
 | **PTH3** | `~~` is the one parent step and is never a path root. |
-| **PTH4** | Relative parent paths are `.~~.a`; repeated parents are `.~~.~~`. |
+| **PTH4v2** | Relative parent paths are `\.~~.a`; repeated parents are `\.~~.~~`. *(v2, 2026-09-21, S16.9.4.)* |
 | **PTH5** | Expression parent navigation is postfix `.~~`; arbitrary chains use `value.~~.~~`. |
 | **PTH6** | Bare `~~` is exactly `~.~~`, inherits `~` scope, and counts as a free `~` in pipe classification. |
 | **PTH7** | Parent steps normalize left-to-right; relative-root parents are retained and logical-global/qualified roots clamp. |
@@ -786,14 +797,14 @@ At minimum, implementation tests must cover:
 | **PTH18** | The resolver is isolate/EvalContext-owned and capability-aware; no mutable process-global namespace or existence-based provider fallback participates in semantics. |
 | **PTH19** | Address resolution is pure canonicalization and performs no I/O; external target forcing remains a separate effectful operation. |
 | **PTH20** | Static specialization and dynamic lookup use one semantic typed-key/provider protocol and must produce identical results. |
-| **PTH21** | Paths have three root forms: logical rooted `/.a`, relative `.a`, and explicit absolute `SchemeName.a` such as `file./.a` or `http.host.a`. |
+| **PTH21v2** | Paths have three root forms: logical rooted `/.a`, relative `\.a`, and explicit absolute `SchemeName.a` such as `file./.a` or `http.host.a`. *(v2, 2026-09-21, S16.9.4.)* |
 | **PTH22** | An absolute path names its provider and authority directly, bypasses the logical `/` mount, and uses the same typed operations as rooted and relative paths. |
 | **PTH23** | A registered scheme name at the head of a dotted chain is reserved as an absolute-path root; a dedicated grammar production is optional if AST classification is equivalent. |
 | **PTH24** | Rooted and absolute paths retain distinct root kinds and structural path values even when resolution maps them to the same qualified target. |
 | **PTH25** | `/` is the single root-selection operation: initial `/` selects the logical resolution root, while postfix `./` selects the root of its explicit base. |
 | **PTH26** | `value./` is a normal postfix navigation step at member precedence and may be followed by the same dotted/indexed operations as any other reference. |
 | **PTH27** | File absolutes spell the current machine as `file./` and a named machine as `file.hostname`; following operations address data beneath that filesystem root. |
-| **PTH28** | A root operation discards descendant steps while preserving the logical or provider/authority anchor; unresolved relative root selection remains as `./`. |
+| **PTH28v2** | A root operation discards descendant steps while preserving the logical or provider/authority anchor; unresolved relative root selection remains as `\./`. *(v2, 2026-09-21, S16.9.4.)* |
 | **PTH29** | Dynamic root navigation is occurrence-based and uses a navigation path or zipper; it never adds observable root/parent pointers to Lambda values. |
 
 ## 14. Open issues and non-decided options
@@ -802,8 +813,10 @@ At minimum, implementation tests must cover:
 
 Lambda assigns `.1` to the float literal `0.1` under **S4.3.1**; it must remain
 a float. A relative path beginning with `IntKey(1)` therefore uses the indexed
-form `.[1]`. The symbol spelling `.'1'` deliberately remains `NameKey("1")`
-under **S2.4.2v4** and **PTH14**.
+form `\.[1]`. The symbol spelling `\.'1'` deliberately remains `NameKey("1")`
+under **S2.4.2v4** and **PTH14**. *(Respelled 2026-09-21 under S16.9.4. The
+`\` prefix removes the float collision that motivated `[1]`; whether `\.1`
+may now spell `IntKey(1)` directly is unruled.)*
 
 The former `StringKeyInput` option is rejected by **S8.2.1v2** and C5.3b.
 Strings are names, not a second spelling of numeric keys: `"1"` normalizes to
@@ -817,3 +830,21 @@ it must preserve the string-to-`NameKey` rule and cannot restore numeric-string
 coercion. The decided model remains `NameKey | IntKey`; ordinary string and
 symbol inputs normalize to `NameKey`, while only exact integral numeric inputs
 normalize to `IntKey`.
+
+## Appendix S — Superseded Rulings
+
+Superseded ledger wording, kept for the record only. **Nothing here is
+normative.**
+
+### S.1 Bare-dot relative spelling — SUPERSEDED 2026-09-21 by S16.9.4
+
+The relative path was respelled `\.a.b` (Design_Syntax §7.15) because `.name`
+at line start is member continuation (S16.2.4v2) and `./a.b` would collide
+with the postfix root step.
+
+| ID | Superseded wording | Replaced by |
+|---|---|---|
+| PTH2v2 | ~~Relative references use `.a.b`; `.` selects the active relative reference base, which a file provider projects to its current directory.~~ | PTH2v3 |
+| PTH4 | ~~Relative parent paths are `.~~.a`; repeated parents are `.~~.~~`.~~ | PTH4v2 |
+| PTH21 | ~~Paths have three root forms: logical rooted `/.a`, relative `.a`, and explicit absolute `SchemeName.a` such as `file./.a` or `http.host.a`.~~ | PTH21v2 |
+| PTH28 | ~~A root operation discards descendant steps while preserving the logical or provider/authority anchor; unresolved relative root selection remains as `./`.~~ | PTH28v2 |

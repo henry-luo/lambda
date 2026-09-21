@@ -57,9 +57,10 @@ def main():
     parser = argparse.ArgumentParser(description="Verify the Tune14 Navier semantic control")
     parser.add_argument("--lambda", dest="lambda_exe", default="./lambda.exe")
     parser.add_argument("--node", default="node")
+    parser.add_argument("--quickjs", default="qjs")
     parser.add_argument("--manifest", default=MANIFEST_PATH)
     parser.add_argument("--output", default=None,
-                        help="optional JSON artifact recording both engine results")
+                        help="optional JSON artifact recording all engine results")
     args = parser.parse_args()
 
     os.chdir(PROJECT_ROOT)
@@ -83,7 +84,8 @@ def main():
     expected_marker = oracle["expected_stdout_text"]
     node_wrapper = runner["make_jetstream_node_wrapper"]("navier_stokes", source, oracle_id)
     ljs_wrapper = runner["make_jetstream_ljs_wrapper"]("navier_stokes", source, oracle_id)
-    if node_wrapper is None or ljs_wrapper is None:
+    qjs_wrapper = runner["make_jetstream_qjs_wrapper"]("navier_stokes", source, oracle_id)
+    if node_wrapper is None or ljs_wrapper is None or qjs_wrapper is None:
         raise SystemExit("unable to construct the canonical Navier wrapper")
     artifact = {
         "schema_version": 1,
@@ -93,6 +95,8 @@ def main():
         "expected_density_marker": expected_marker,
         "node": run_checked([args.node, node_wrapper], expected_marker),
         "lambdajs": run_checked([args.lambda_exe, "js", ljs_wrapper], expected_marker),
+        "quickjs": run_checked([args.quickjs, "--stack-size", str(runner["QJS_STACK_SIZE"]),
+                                 "--std", "-m", qjs_wrapper], expected_marker),
     }
     if args.output:
         output_path = os.path.abspath(args.output)
@@ -100,11 +104,14 @@ def main():
         with open(output_path, "w", encoding="utf-8") as stream:
             json.dump(artifact, stream, indent=2)
             stream.write("\n")
-    if artifact["node"]["status"] != "ok" or artifact["lambdajs"]["status"] != "ok":
+    if (artifact["node"]["status"] != "ok" or artifact["lambdajs"]["status"] != "ok" or
+            artifact["quickjs"]["status"] != "ok"):
         print("Tune14 Navier oracle failed: Node=" + artifact["node"]["status"] +
-              " LambdaJS=" + artifact["lambdajs"]["status"], file=sys.stderr)
+              " LambdaJS=" + artifact["lambdajs"]["status"] +
+              " QuickJS=" + artifact["quickjs"]["status"], file=sys.stderr)
         return 1
-    print("Tune14 Navier oracle verified: Node and LambdaJS density digest " + expected_marker)
+    print("Tune14 Navier oracle verified: Node, LambdaJS and QuickJS density digest " +
+          expected_marker)
     return 0
 
 

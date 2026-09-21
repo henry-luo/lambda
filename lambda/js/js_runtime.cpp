@@ -8605,6 +8605,9 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
         js_named_fast_profile_no_receiver(object);
     }
     js_named_fast_profile_miss(reason);
+    if (reason == JS_OPT_REASON_NAMED_FAST_NO_ENTRY) {
+        js_opt_trace_named_fast_no_entry(key->chars, key->len);
+    }
     return js_get_reference(object, key_item);
 }
 
@@ -8638,6 +8641,9 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
         reason = JS_OPT_REASON_NAMED_FAST_VALUE_TYPE;
     }
     js_named_fast_profile_miss(reason);
+    if (reason == JS_OPT_REASON_NAMED_FAST_NO_ENTRY) {
+        js_opt_trace_named_fast_no_entry(key->chars, key->len);
+    }
     Item key_item = (Item){.item = s2it(key)};
     // T10-3: try the ordinary-add kernel here rather than three frames deeper.
     // Reaching it through js_set_key_policy -> js_set_key_default ->

@@ -58,6 +58,7 @@ typedef enum JsOptEvent {
     JS_OPT_NAMED_FAST_FUNCTION_DATA,
     JS_OPT_RUNTIME_NUMBER_HEAD_HIT,
     JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK,
+    JS_OPT_RUNTIME_NUMBER_COMPARE_HEAD,
     JS_OPT_RUNTIME_STRING_CONCAT_HEAD,
     JS_OPT_MIR_NUMBER_ADMITTED,
     JS_OPT_MIR_NUMBER_FALLBACK,
@@ -145,6 +146,9 @@ typedef struct JsOptTraceCounter {
 int js_opt_trace_is_enabled(void);
 void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
                          JsOptTraceOutcome outcome);
+// Attribute the ordinary-slot miss to the stable source spelling while the
+// profile build is active. The release stub erases this diagnostic entirely.
+void js_opt_trace_named_fast_no_entry(const char* name, uint32_t length);
 void js_opt_trace_dump(void);
 
 #else
@@ -152,6 +156,7 @@ void js_opt_trace_dump(void);
     static inline return_type name args body
 JS_PROFILE_NOOP(js_opt_trace_is_enabled, int, (void), { return 0; })
 JS_PROFILE_NOOP(js_opt_trace_record, void, (JsOptEvent event, JsOptReason reason, JsOptTraceOutcome outcome), { (void)event; (void)reason; (void)outcome; })
+JS_PROFILE_NOOP(js_opt_trace_named_fast_no_entry, void, (const char* name, uint32_t length), { (void)name; (void)length; })
 JS_PROFILE_NOOP(js_opt_trace_dump, void, (void), {})
 #undef JS_PROFILE_NOOP
 #endif

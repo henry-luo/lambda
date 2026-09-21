@@ -543,6 +543,13 @@ def finish_run_metadata(results):
     meta["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def ensure_output_parent(output_path):
+    """Create the requested result directory before a long benchmark run starts."""
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 def update_run_metadata(results, metadata):
     existing = results.get("_metadata", {})
     existing.update(metadata)
@@ -1351,6 +1358,8 @@ def suite_cooldown(seconds, finished_suite):
 def run_time_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path, fresh,
                   metadata, include_typed=False, cooldown_s=DEFAULT_SUITE_COOLDOWN_S):
     """Execute TIME mode: measure execution time across engines."""
+    if not no_save:
+        ensure_output_parent(output_path)
     # Load existing results (merge mode)
     if os.path.exists(output_path) and not fresh:
         with open(output_path) as f:
@@ -1642,6 +1651,8 @@ def mem_run_single(b, engines, num_runs, timeout_s, results, include_typed=False
 def run_memory_mode(benchmarks, engines, num_runs, timeout_s, no_save, output_path,
                     metadata, include_typed=False):
     """Execute MEMORY mode: measure peak RSS across engines."""
+    if not no_save:
+        ensure_output_parent(output_path)
     results = {}
 
     current_suite = None

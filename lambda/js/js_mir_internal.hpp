@@ -646,6 +646,7 @@ JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt, JsCallNode*
         bool stable = false);
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);
+void jm_plan_literal_field_shapes(JsMirTranspiler* mt);
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item);
 const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt);
 const char* jm_get_param_name(JsAstNode* param_node, int index);
