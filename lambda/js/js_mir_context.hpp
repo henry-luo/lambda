@@ -204,6 +204,9 @@ struct JsFuncCollected {
     const char* body_name;  // NamePool-owned backend body symbol
     MIR_item_t func_item;        // public checked wrapper
     MIR_item_t body_func_item;   // internal boxed implementation body
+    // Immutable compiler-pool recipe for an ordinary function constructor.
+    TypeMap* instance_shape;
+    bool instance_shape_planned;
     // Scope env: shared closure environment for all child closures
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env

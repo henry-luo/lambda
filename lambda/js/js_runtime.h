@@ -254,6 +254,8 @@ struct TypeMap;
 Item js_new_object(void);
 Item js_new_object_with_typemap(struct TypeMap* tm);
 Item js_new_literal_object_with_typemap(struct TypeMap* tm);
+int64_t js_constructor_shape_field_is_initialized(Item object,
+                                                   int64_t byte_offset);
 // A compiler-owned primitive object-literal recipe.  The recipe outlives the
 // MIR code that references it; every invocation still creates fresh strings
 // and a fresh ordinary object.
@@ -308,6 +310,7 @@ Item js_new_class_function(void);
 void js_set_class_constructor(Item class_function, Item constructor_body);
 void js_set_class_instance_prototype(Item class_function, Item prototype);
 void js_set_class_instance_shape(Item class_function, struct TypeMap* shape);
+void js_set_function_instance_shape(Item function, struct TypeMap* shape);
 void js_set_class_superclass(Item class_function, Item superclass);
 Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);

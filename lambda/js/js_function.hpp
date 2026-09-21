@@ -137,6 +137,9 @@ struct JsCallableCode {
     Context* runtime_context;
     // a weak realm table is detached before its owner is destroyed.
     HashMap* intern_table;
+    // Compiler-pool recipe for an ordinary function's own constructor fields.
+    // It belongs to the source definition shared by every closure instance.
+    TypeMap* instance_shape;
 
     // 4-byte group
     int param_count;
