@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "git_commit": "5ce9894d4728d6d8df728c7c59ca4472fadb9d45",
+  "dirty_patch_sha256": "b5b33f8e1a430aca018732bd077d0875828355f063a9e402b0e23056cda7ac1e",
+  "binary": {
+    "path": "temp/tune14/lambda_t14_c14_release.exe",
+    "sha256": "4b140f0c150d631033f896290c051e3536dbfa429d6341b26ed6f941def5d127"
+  },
+  "power_state": "AC Power; battery 80 percent",
+  "build": "make test262-baseline release stage"
+}

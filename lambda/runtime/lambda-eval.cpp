@@ -10981,6 +10981,11 @@ static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
     if (!typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
+    // A Map pointer lane already represents a null child as a null pointer,
+    // which `_map_read_field` reboxes as ItemNull. Keep the immutable recipe
+    // for recursive object-literal base cases instead of creating a null-tagged
+    // transition that makes their guarded field reads miss.
+    if (field_type == LMD_TYPE_MAP && value_type == LMD_TYPE_NULL) return false;
     // FLOAT stores its numeric payload in the same double carrier as INT.
     if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) return false;
     return true;

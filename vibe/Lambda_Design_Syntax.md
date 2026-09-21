@@ -7,13 +7,14 @@ mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
 (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
 (closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
 2026-08-27: handler-arm brace placement reaffirmed with rationale (§5.9,
-ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0).
+ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0).
 
 > **The body states current rulings only.** Superseded wording has been
 > moved out to **Appendix S — Superseded Rulings**, struck through and
 > annotated with what replaced it. Nothing there is normative. Currently
 > held: S.1 the blanket dual-role rule (§3.2/§3.3, replaced by §7.14) and
-> S.2 the `{ ... }` Options 1 and 2 (§5.9, replaced by v3).
+> S.2 the `{ ... }` Options 1 and 2 (§5.9, replaced by v3), and S.3 block value =
+> last expression (§5.9/§3.2, replaced by §7.27).
 >
 > **Ratification erratum (2026-08-22).** §5.9's rejected **Option 2** was
 > ratified into the spec as S16.4.1 by mistake, making `if (c) {a: 1}` a
@@ -33,8 +34,8 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 §5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
-S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7,
-§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3.
+S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7 (v2: now points to S2.6),
+§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -1091,8 +1092,8 @@ rule 1 and rule 3 is a decidable test, not taste:
 **Consequences ruled in:**
 
 - **Block expressions exist** (Rust-style): `{statements}` is legal in any
-  expression position, its value is its last expression, and its `let`s
-  are block-scoped. `let x = { let y = 1 y + 1 }` is legal. This is what
+  expression position, its value is the list of its statements' results
+  (§7.27, S2.5.3), and its `let`s are block-scoped. `let x = { let y = 1 y + 1 }` is legal. This is what
   gives arrow functions block bodies — `(x) => { let y = x + 1 y }` —
   resolving the last §7 audit item with no JS `({...})` quirk.
 - **Arrow bodies are fn context by definition, even inside a `pn`**:
@@ -2535,6 +2536,11 @@ distinction and is tracked as remaining work.
 
 ### 7.23 Script top level is element content (decided — ratified as S16.7)
 
+> **2026-09-21:** the normalization rules below were generalized and moved to
+> the value domain as **S2.6** (§7.27): empty strings are dropped too, lists
+> spread and arrays do not, and adjacent binaries merge like strings.
+> S16.7.2v2/S16.7.3v2 now point there. The top-level model argued here stands.
+
 **Question.** A script body is a sequence of statements whose results are
 observable. Is that sequence a *list* of results, or *content*? The two differ
 observably, because content normalizes and containers do not.
@@ -2841,6 +2847,101 @@ import, not new syntax — recorded as SO37.
 
 ---
 
+### 7.27 Lists, blocks, and the content model (decided 2026-09-21 — ratified as S2.5 + S2.6)
+
+**Question.** S16.7 stated content normalization for the script top level and
+reached elements only through "a script *is* element content". The element —
+the primary case — had no home ruling, and the list/array, binary, and
+empty-string cases were unstated. Where do the rules live, and what are they?
+
+**Ruling (USER, 2026-09-21).** Element content and script top level share one
+content model, ruled in the value domain as **S2.6**, next to the element's
+definition (S2.1.1v3) and the empty-text rule (S2.2.3):
+
+1. Content is in general an array of items with its own normalization rules
+   (S2.6.1). Plain collections never normalize.
+2. `null` items and empty strings `""` are dropped (S2.6.2).
+3. **Lists spread inline; arrays are kept as they are** (S2.6.3, resting on
+   S2.5.1). The spread bit is the whole difference between a list and an
+   array, and a for-loop produces a spreadable list.
+4. Then consecutive strings merge and consecutive binaries merge; every other
+   item is kept as is (S2.6.4). String and binary are Lambda's two array-like
+   scalars, which is why they — and only they — merge. Symbols do not merge;
+   numbers do not merge.
+
+**Follow-up rulings (USER, 2026-09-21)** — closing SO45–SO48 the day they
+were raised:
+
+5. **A range is an array, not a list** — it stays one item (S2.6.3).
+6. **String merges with string, binary with binary; a string never merges
+   with a binary** (S2.6.4).
+7. **Content writes keep content normalized** (S2.6.5). The rules are not a
+   construction-time courtesy: a normalized element must stay normalized, so
+   `e[i] = v`, insertion, and removal renormalize at the write site, and
+   positions after the write may shift.
+8. **Parsed documents are bound by the same model** (S2.6.1). LaTeX keeping
+   consecutive strings unmerged (MarkBuilder's verbatim append, D2.6.5v2) is a
+   temporary workaround; its parser must eventually align. One route: carry a
+   run that must stay apart in a non-merging item, `<cmd ["str", "str"]>`.
+
+**Block and list rulings (USER, 2026-09-21) — S2.5, placed before content.**
+Where lists come from, and what contributes to them, is its own model that
+content builds on, so it was split out as **S2.5 Lists and blocks** and the
+content model moved to **S2.6** (both minted the same day, so the renumber
+touched no published ID):
+
+9. **List versus array** (S2.5.1): a list auto-spreads wherever it lands as
+   an item; an array — and a range — never does.
+10. **A for-loop produces a list** (S2.5.2).
+11. **A block `{}` produces a list** of its statements' results (S2.5.3) —
+    **not** its last expression, which is what §5.9 and §3.2 had said
+    (superseded wording: Appendix S.3). S16.1.2v2 and S16.4.1v4 now point to
+    S2.5.3.
+12. **Declarations produce no item** (S2.5.4): `let`/`var`, `type`, and
+    function declarations are statements that bind and contribute nothing —
+    exactly as `let` inside a list, `(let x = 5, x + 1)`, contributes nothing.
+
+Follow-up rulings (USER, 2026-09-21), closing SO49–SO51 the day they were
+raised:
+
+13. **A list does not normalize its items** (S2.5.1). `(1, null, 2)` keeps
+    three items and `("a", "b")` two strings; normalization is a property of
+    content, applied when a list lands or spreads into element or script
+    content (S2.6).
+14. **One-item and empty lists collapse** (S2.5.5): `(x)` ≡ `x` and
+    `()` ≡ `null`, so `(((expr)))` is always `expr` — grouping parens and a
+    one-item list are indistinguishable by design. Blocks collapse the same
+    way. Collapse counts items after spreading and drops nothing, so
+    `(1, null)` stays two items.
+15. **A `pn` body follows the procedural convention** (S2.5.3, S12.1.2):
+    without `return` it yields its last expression, not a list.
+
+Probed the same day, the runtime conforms to 9–12, 14 (except the literal),
+and 15. Two gaps: a list normalizes its items today (`("a", "b")` is the
+string `"ab"`), against 13; and `()` is a parse error, against 14.
+
+**Why S2, not S16.** Normalization decides which value is built, not which
+program a text denotes; and it applies where there is no source text at all
+(input parsers appending through `list_push`, D2.6.5v2). The ruling therefore
+sits in the value domain, and S16.7 keeps only what is top-level-specific: an
+emptied script's value is a single `null`. S2.5 and S2.6 were appended after S2.4
+Paths rather than inserted earlier, so no existing ruling ID is renumbered.
+
+**Readings applied in the spec.** "Spread inline" is read as: each spliced
+item is normalized as if written in place, recursively — so a list's nulls
+and empties are dropped and its strings merge with their new neighbours. A
+non-merging item (a symbol, a number) keeps its string neighbours apart.
+
+
+**Implementation status (probed 2026-09-21, JIT and interpreter identical).**
+Lists spread recursively with nulls/empties dropped, for-results spread,
+arrays and ranges stay one item, strings merge at construction and never with
+a binary. Gaps, hence the `*` marks: a lone `<e "">` keeps its `""` child;
+adjacent binaries do not merge; content writes do not normalize at all
+(`e[1] = "m"` between two strings leaves three items, `e[1] = null` stores a
+null, a written list is stored as one item, and `push` rejects an element);
+LaTeX keeps unmerged strings.
+
 ## Appendix S — Superseded Rulings
 
 Text that once stated a ruling and no longer does. It is kept for the
@@ -2892,6 +2993,19 @@ mistake, making `if (c) {a: 1}` a syntax error and prescribing
 `if (c) ({a: 1})` as the repair. Any occurrence of that repair anywhere in
 the tree is Option 2 residue — the parens are unnecessary. The C parser
 still implements the erratum for the paren-head spelling (spec Appendix A).
+
+### S.3 Block value = last expression (§5.9, §3.2) — SUPERSEDED by §7.27
+
+> ~~Block expressions exist (Rust-style): `{statements}` is legal in any
+> expression position, its value is its last expression, and its `let`s are
+> block-scoped.~~ (§5.9)
+>
+> ~~A block's value remains its last expression; no separator can discard
+> it.~~ (as ratified in S16.1.2)
+
+**Replacement:** a block produces the list of its statements' results, and
+declarations contribute no item — §7.27 points 11–12, ratified as **S2.5.3,
+S2.5.4** with S16.1.2v2 and S16.4.1v4 (spec v27.0.0, 2026-09-21).
 
 ---
 

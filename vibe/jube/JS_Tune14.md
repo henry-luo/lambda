@@ -1,6 +1,6 @@
 # JS Tune14 — Shared native regions and cheaper ordinary operations
 
-**Version:** 1.4.20
+**Version:** 1.4.28
 
 **Date:** 2026-09-21
 
@@ -11,7 +11,9 @@ three isolated quicksort changes, plus T14-6 cache/prebuild lifetime and
 direct-scope scaling/stability repairs are implemented. T14-0 now has a frozen
 current 63-row contract, executable Navier semantic oracle and a dynamic generic
 helper census. T14-2 also fuses the redundant pre-update `ToNumeric` call when
-an update result is provably discarded. T14-3 now admits a present ordinary
+an update result is provably discarded, takes shared Number-only bitwise
+operations before `ToNumeric`, and shares a primitive-Number relational head
+between the boxed and raw comparison facades. T14-3 now admits a present ordinary
 dense element through a named-property companion without bypassing holes,
 numeric descriptors or scalar-home ownership. Its Navier candidate has a
 bounded, oracle-backed paired-release gain. The quicksort and FFT slices have
@@ -19,9 +21,16 @@ positive paired-release evidence; the T14-2 Number-update leaf, T14-3
 copy-store, companion raw-receiver leaf and over-broad FFT experiments were
 measured and rejected. T14-4's shared-hoister audit established that mutable
 array storage needs a region proof rather than scalar-call hoisting. T14-5 now
-removes impossible receiver-specific setup from ordinary Map named reads, with
-bounded Richards paired-release gains. C14 and the remaining T14-0 through
-T14-8 outcomes remain open; this is not a performance acceptance record.
+removes impossible receiver-specific setup from ordinary Map named reads and
+accepts a guarded recursive literal-return recipe, with bounded Richards and
+binarytrees paired-release gains. Its base-class constructor recipe now admits
+effect-bounded dynamic RHS values through the shared `TypeMap` transition path,
+while refusing receiver-observing RHS values and direct `eval`. C14 now has a frozen release binary,
+same-session 63-row control and three-engine Navier oracle; the C14 LambdaJS /
+QuickJS geomean is 1.120086, while MVP is intentionally unavailable to release
+measurement. T14-7 now reuses immutable definition source across MIR closures
+with an accepted Havlak replay. The remaining T14-0 through T14-8 outcomes
+remain open; this is not a performance acceptance record.
 
 **Source audit:** `c5052085ce91026edd94c50cf89c4fd0e539c2ec`.
 
@@ -254,6 +263,45 @@ oracle. Do not use it to accept a recovery or attribute a regression. R47 and
 the current release form valid semantic controls; a future historical recovery
 reference must also pass the same frame-15/density check (**S1.11**,
 **D8.1.3v11**).
+
+### 2.5 C14 release control — 2026-09-21
+
+[`C14_Manifest_20260921.json`](../../test/benchmark/js_mvp/tune14/C14_Manifest_20260921.json)
+freezes the current release executable at
+`4b140f0c150d631033f896290c051e3536dbfa429d6341b26ed6f941def5d127`,
+derived from commit `5ce9894d4728d6d8df728c7c59ca4472fadb9d45` plus the
+recorded dirty source patch. Its three independent copies — live executable,
+C14 archive and standard-runner cache — matched before and after collection.
+The host was on AC power. The current 63-workload manifest verified before the
+run and the same-session Test262 gate passed 40,261 / 40,261 with no unstable,
+slow or regressed entry.
+
+The generated [C14 matrix](../../test/benchmark/js_mvp/tune14/c14_session1.json)
+and [report](../../test/benchmark/js_mvp/tune14/Overall_C14_Session1.md) contain
+three samples per row. MIR, typed MIR, C2MIR, LambdaJS, QuickJS and Node each
+have 63 `ok` rows. LambdaJS is 8.09x Node and QuickJS is 7.23x Node by their
+63-row matched geomeans; the direct LambdaJS / QuickJS geometric ratio is
+1.120086. This is a control observation, not a cross-session Result46/47
+comparison or a Tune14 acceptance claim.
+
+All 63 MVP cells are explicitly `exit_9`: production builds compile the
+experimental MVP selector out and report “MVP runtime is available only in
+debug builds.” AGENTS.md prohibits debug builds for performance measurement, so
+no artificial debug-MVP timing is substituted. The current `G(full JS / MVP)`
+milestone therefore remains unverified, while the full JS and QuickJS values
+remain valid controls. This preserves the full-JS semantics and selected-native
+backend requirements in **S1.11** and **D8.1.3v11**, rather than narrowing the
+release engine to match a debug-only comparator.
+
+The original collection ran every workload successfully but then failed before
+serialization because `run_benchmarks.py` assumed its requested output parent
+existed. The generic runner now creates that parent before time or memory work
+begins; syntax and nested-output checks passed before the retained rerun. The
+first attempt has no result JSON and is invalid evidence. The retained
+[C14 Navier oracle](../../test/benchmark/js_mvp/tune14/C14_Navier_Oracle_20260921.json)
+passes Node, LambdaJS and QuickJS with one timing marker and the required
+post-timer density digest. It extends the verifier by reusing the standard
+QuickJS wrapper, so all three engines execute the same manifest descriptor.
 
 ## 3. Tune13 carryover: retain the unfinished outcomes
 
@@ -561,11 +609,12 @@ with explicit untyped Lambda consumers and controls where common code changes.
 `run_paired_benchmarks.py`, `verify_js_mvp_manifest.py`, existing optimization
 events in `lambda/js/js_exec_profile.{h,cpp}`, and helper-effect metadata.
 
-- [ ] Build and archive **C14**, the actual current release starting tree. Record
-  full commit, any dirty source patch, build configuration/toolchain, native
-  module identities, binary SHA-256, power state and all backend/cache settings.
-  Verify executed bytes before and after measurements. Result47 is a historical
-  reference, not a substitute for this newer-tree control.
+- [~] Build and archive **C14**, the actual current release starting tree. Its
+  commit, dirty source patch, binary SHA-256 and AC state are durable in the
+  C14 manifest; live, archive and cached executable hashes agree around the
+  retained matrix. Record the remaining toolchain/native-module identities and
+  backend/cache settings with the phase/owner census. Result47 remains a
+  historical reference, not a substitute for this newer-tree control.
 - [ ] Preserve Result46, original Result47 and repaired Result47 as distinct
   immutable artifacts. Use original R47 for reproducing its Navier observation;
   use C14 as the primary optimization control. Do not attribute later changes
@@ -576,12 +625,15 @@ events in `lambda/js/js_exec_profile.{h,cpp}`, and helper-effect metadata.
   preserving MVP v1. Archive its identity with C14 and any published matrix.
 - [~] Audit result oracles before trusting equal stdout. The Navier control now
   retains one canonical timed frame, then requires its source frame-15 checksum
-  and a Node-calibrated full-density digest after the timer. Node and LambdaJS
-  have passed it; run it with QJS and every archived control before acceptance.
-  Any wrapper change remains versioned and applies to every relevant engine.
-- [ ] Run fresh full-JS/MVP/QuickJS/Node controls in the same session. Record
-  every status and supported/unsupported row; do not silently drop MVP misses.
-  Keep native Lambda/C ports as secondary physical-backend references.
+  and a Node-calibrated full-density digest after the timer. The C14 archive,
+  Node, LambdaJS and QuickJS pass it. Run every later archive through the same
+  descriptor before acceptance. Any wrapper change remains versioned and
+  applies to every relevant engine.
+- [~] Run fresh full-JS/MVP/QuickJS/Node controls in the same session. C14 has
+  63 `ok` full-JS, QuickJS and Node cells and records each MVP `exit_9` instead
+  of dropping it; release MVP is debug-only and cannot supply valid performance
+  timings. Keep native Lambda/C ports as secondary physical-backend references
+  and collect a second independent full session for any cross-engine claim.
 - [ ] Produce separate execution, parse/analysis/lowering, native generation,
   teardown and peak-memory censuses. Sample the executing worker after startup;
   a compiler/teardown sample is not evidence for guest-loop cost.
@@ -1182,6 +1234,112 @@ the raw-pointer call boundary. Retain
 ordinary `Item` helper remains the selected path, preserving the same rooted
 ABI and complete fallback (**S1.11**, **D5.3.4**, **D8.2.3–D8.2.6**).
 
+#### Implementation update — 2026-09-21: admit Number-only bitwise pairs
+
+The `crypto_sha1` profile recorded 9,221,600 Number-head fallbacks and
+18,759,825 `js_to_numeric` calls in its canonical wrapper. Its hot SHA-1 rounds
+are bitwise Number operations, but `js_numeric_number_pair` only admitted
+arithmetic opcodes; every `&`, `|`, `^`, `<<`, `>>` and `>>>` therefore entered
+the complete `ToNumeric` kernel twice despite both operands already being JS
+Numbers.
+
+`js_numeric_bitwise_number_pair` now shares the existing `js_to_int32`
+conversion with the generic Number tail and is called only after both operands
+pass the existing Number-like test. Strings, objects, arrays, Functions,
+Symbols and BigInts continue through the complete conversion/error path. The
+expanded Number-head fixture covers all six operators, signed/unsigned shifts,
+string concatenation and `valueOf` coercion fallback (**S1.11**, **D1.3v3**,
+**D6.2.2v2**, **D8.4.1v2**, **D8.4.3v2**).
+
+The release candidate
+`temp/tune14/lambda_t14_bitwise_number_head_release.exe`
+(`4b140f0c150d631033f896290c051e3536dbfa429d6341b26ed6f941def5d127`) was
+replayed against the exact accepted Map-preamble predecessor
+`9bb0ee2a434b9e2e67466d0c33fd413cc31c36f34f08cb37e35c6eb3f9abc601` on
+canonical `jetstream/crypto_sha1`. Across 31 alternating pairs, medians
+improved from 321.452000 to 264.704000 ms (candidate/control 0.823464;
+one-sided 95% paired-bootstrap upper bound 0.824575; 29/31 candidate wins).
+All samples were `ok` with equal stdout. The exact archive is
+`temp/tune14/paired_crypto_sha1_bitwise_number_head.json`. This is a shared
+runtime leaf with one causal workload result, not a full-matrix claim.
+
+Current-source validation passed optimizer 63/63, coercion 15/15 and MIR
+ratchet 20/20. The ratchet again reported only unrelated corpus reductions
+`js_corpus_array_methods` (3237 to 3236), `lambda_corpus_cube3d` (16011 to
+15996) and `lambda_corpus_deltablue` (8998 to 8908), so no budget changed.
+`make test-lambda-baseline` passed 5,717/5,717. `make test262-baseline` passed
+40,261/40,261 fully, with zero batch-unstable, slow, failed or
+baseline-regressed entries; its 169 batches completed in 68.5 seconds.
+
+#### Implementation update — 2026-09-21: share primitive-Number relational comparisons
+
+The Havlak runtime census still entered `js_compare_boxed` 3,056,642 times for
+dynamic relational expressions. Its operands are function parameters and field
+loads, so the compiler correctly keeps their source types open, but the executed
+values are primitive Numbers. `js_relational_number_pair` now sits beneath both
+`js_compare_boxed` and `js_cmp_raw`: after both values pass the existing
+Number-like tag check, it uses the existing `js_get_number` conversion and one
+of the four IEEE relational operators. NaN therefore produces false for every
+relational spelling without touching `ToPrimitive` or `ToNumeric`. Objects,
+strings, Symbols and BigInts still take the complete Abstract Relational
+Comparison kernel, including its original operand order, coercion, completion
+and error behavior (**S1.11**, **D1.3v3**, **D8.4.3v2**).
+
+This is direct reuse of the existing JavaScript Number conversion and raw/boxed
+facade boundary, not a new common physical primitive: untyped Lambda has
+different relational semantics, so extracting this ECMAScript admission into a
+shared compiler helper would create duplicate semantic ownership. The runtime
+profile is correspondingly precise: `runtime_boxed_compare_call` now measures
+only the actual generic tail, while `runtime_number_compare_head` measures the
+effect-free primitive head (**D8.2.3–D8.2.6**, **D8.4.1v2**).
+
+The release-profile Havlak record
+`temp/tune14/havlak_number_compare_head_profile.tsv`
+(`cc59cdbe1a08a602d2869c96ffd90f773fa563dfb2f07dcce3507fb05c1253da`)
+records 11,221,940 primitive comparison-head hits and zero generic boxed
+comparison calls. It includes raw condition-facade traffic that the old boxed
+counter did not measure; it is an admission census, not a timing claim.
+`JsOpt.RuntimeNumberCompareHeadKeepsRelationalCoercion` covers dynamic Number
+arguments, NaN and a `valueOf` object whose four relational operations must
+remain on the generic tail. It passes trace-on/off and also under
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.
+
+The immutable release candidate
+`temp/tune14/lambda_t14_number_compare_head_release.exe`
+(`9643f64873962270fd619ddeaee7d9b36859061d32ef27144543da90ebb7ed1a`) was
+replayed against the exact recursive-record predecessor
+`cb4bf928ffd71156597f19cb44a2d0107e5bd1c73779afe3e31834a398140e1c` on the
+same `awfy/havlak` bundle
+(`32e7e09c936c2a7d131e24aeb2558ce7b775130f35aa8eededd7fabdc9b35f72`).
+Across 31 alternating pairs, all samples were `ok` with equal stdout; the
+median fell from 13,245.162333 to 13,211.574667 ms (candidate/control
+0.997464; one-sided 95% paired-bootstrap upper bound 0.998807; 23/31 candidate
+wins). The exact archive is
+`temp/tune14/paired_havlak_number_compare_head.json`
+(`43587710df4248e4269a52bedb0f19292c083c4e0adc4b45f0979db4d57aec39`). This
+is a small accepted causal result on one workload, not a 63-row or
+QuickJS/MVP comparison.
+
+Final source validation passed the focused Number, comparison and recursive
+literal contract tests; `make test-lambda-baseline` at 5,719/5,719; and `make
+test262-baseline` at 40,261/40,261 fully passing in 169 batches, with zero
+unstable, slow, failed or baseline-regressed entries.
+
+#### Rejected experiment — 2026-09-21: public Number update head
+
+The C14 `hashmap` profile recorded 982,149 complete `ToNumeric` and increment
+entries. A Number-only public `++` / `--` head reduced `ToNumeric` calls to
+180,000 in that profile while preserving the complete conversion path for
+strings and other non-Number values. The exact C14 31-pair alternating replay
+had equal stdout and all `ok` statuses, but its candidate/control median ratio
+was 0.9950999, the one-sided paired-bootstrap upper bound was 1.001581, and it
+won only 16/31 pairs. The branch, its test and its candidate binary were
+therefore rejected and reverted; retain
+`temp/tune14/paired_hashmap_number_update_head.json` as negative evidence. A
+lower helper count alone does not establish a faster public semantic operation:
+the completed ECMAScript conversion must remain the shared fallback (**S1.11**,
+**D1.3v3**).
+
 - [ ] Produce an admission/refusal map for all three search algorithms, FFT
   `four1`, Navier's inner functions and quicksort `partition`. Account separately
   for receiver kind, key, element value, operator, local join and destination.
@@ -1389,16 +1547,86 @@ ratchet 20/20. The ratchet again reported only unrelated corpus reductions
 40,261/40,261 fully, with zero batch-unstable, slow, failed or
 baseline-regressed entries; its 169 batches completed in 77.3 seconds.
 
+#### Implementation update — 2026-09-21: publish recursive literal-return recipes
+
+The existing common `mir_shape_candidate` and `MirFieldAccessPlan` path now
+plans a narrow recursive record family before any function lowers. A candidate
+has at least two return-object literals with the same ordered ordinary own data
+properties; every field is an existing supported scalar or a Map child written
+only as `null` or a direct stable self call; and at least two static field
+receivers trace from a direct returned call or its directly forwarded parameter.
+Each return literal receives one immutable `TypeMap` recipe. A live exact-shape
+and payload-capacity guard still precedes every direct map-slot load, and each
+miss enters the existing `js_get_name_id` property kernel. This is predicted
+specialization with a shared semantic miss, not an IC or feedback cache
+(**S1.11**, **D4.6.1v3–D4.6.2v2**, **D8.2.3–D8.2.6**, **D8.4.1v2**).
+
+The plan reuses untyped Lambda's shape-candidate, guarded-map and physical-slot
+machinery (`mir_shape_candidate`, `em_guard_map_shape`, `em_load_at` and
+`TypeMap`) instead of introducing a parallel JS field planner. LambdaJS retains
+the language-specific boundary: JavaScript descriptor and publication rules
+remain in `js_create_data_property`. During source-order initialization, a
+pre-reserved ordinary literal slot is unobservable, so it can publish through
+the same shared `fn_map_set` path without cloning its immutable recipe. A null
+child already has the native null Map-pointer representation; preserving that
+lane avoids a spurious Map-to-null transition. All observable descriptor,
+accessor, special-name and miss behavior remains on the normal JS path
+(**S1.11**, **D5.3.1–D5.3.5**, **D8.4.1v2**, **D8.4.3v2**).
+
+`JsOpt.RecursiveLiteralReturnShapeUsesGuardedMapSlots` proves the admission,
+shared literal allocator, generic miss presence and trace-on/off parity. Its
+binarytrees diagnostic drops named fast probes from 270,351 (270,348 hits) to
+5 (2 hits, 3 misses), admits three literal-field plans and removes 68,608
+static-object initializers; stdout hashes match. The immutable release candidate
+`temp/tune14/lambda_t14_recursive_literal_shape_release.exe`
+(`cb4bf928ffd71156597f19cb44a2d0107e5bd1c73779afe3e31834a398140e1c`) has
+an accepted exact 31-pair alternating replay on canonical `beng/binarytrees`
+against frozen C14 (`4b140f0c150d631033f896290c051e3536dbfa429d6341b26ed6f941def5d127`):
+35.608417 to 19.519250 ms, candidate/control 0.548164, one-sided 95%
+paired-bootstrap upper bound 0.553640 and 31/31 candidate wins, with all
+statuses `ok` and equal stdout. The archive is
+`temp/tune14/paired_binarytrees_recursive_literal_shape.json`; its candidate
+also passes the three-engine Navier density oracle.
+
+The preceding source validation applies to the recursive literal-return slice.
+The constructor extension is separately covered by
+`JsOpt.DynamicConstructorFieldsReuseReservedShapeTransitions` and
+`JsOpt.ConstructorShapeDeclinesReceiverEscapingRhs`: ordinary dynamic values,
+conditional allocation and source-order property publication preserve the
+shared transition layout, while an RHS that passes `this` to a function which
+defines a later planned property retains generic construction. Both tests pass
+with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. This is a correctness
+and reuse boundary only; its frozen pre-slice release control is
+`temp/tune14/lambda_t14_pre_dynamic_constructor_shape_release.exe`
+(`13dfb3597f017691917eda4f647a3c4bec360e8324ad2396009f0ff24724be34`), but
+no release-profile or paired performance result has been accepted for this
+extension.
+
+Final source validation passed the focused literal tests, including
+`JsOpt.RecursiveLiteralReturnShapeUsesGuardedMapSlots` under
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`, `make
+test-lambda-baseline` at 5,691/5,691 and `make test262-baseline` at
+40,261/40,261 fully passing in 169 batches, with zero batch-unstable, slow,
+failed or baseline-regressed entries. This accepts the recursive-return record
+slice only; constructor assignment, aliases, enumeration and general
+descriptor coverage remain open.
+
 - [ ] Trace NameIds from parser/static linking and enumeration through reference
   creation, own/prototype lookup and stores. Count each spelling/hash/catalog
   reconstruction and remove only redundant boundaries.
 - [ ] Preserve the owning context's ID domain. Materialize observable strings
   at reflection/proxy boundaries; do not make dynamic IDs portable across realms
   or use spelling to identify a JS Symbol (**D4.6.1v3–D4.6.2v2**).
-- [ ] Extend existing shape candidates through analyzable constructor assignments,
-  returned records and local aliases. Account for partial initialization,
-  constructor escape, conditional fields, constructor-returned replacement
-  objects, subclasses and prototype changes.
+- [~] Extend existing shape candidates through analyzable constructor assignments,
+  returned records and local aliases. Base-class, straight-line direct
+  `this.ident = rhs` assignments can reserve nonreceiver-observing dynamic RHS
+  fields as `LMD_TYPE_NULL` placeholders and reuse the shared `TypeMap` /
+  `fn_map_set` transition path; exact supported literals retain their static
+  lane (**D8.2.3–D8.2.6**, **D8.4.1v2**). RHS `this` observation and direct
+  `eval` retain generic construction. Partial initialization, indirect escape,
+  descriptor mutation of a reserved planned field, returned records and local
+  aliases, constructor-returned replacement objects, subclasses and prototype
+  changes remain open.
 - [ ] Guard the live shape, applicable own descriptor and slot representation.
   Use shared direct load/store primitives on a hit; retain the property kernel
   for misses. Keep mutable field values independent of immutable layout facts.
@@ -1515,6 +1743,49 @@ it does not require speculative implementation in every family.
 | Strings | ASCII/non-ASCII paths, repeated UTF-16 index/length scans, substring/concat allocation. | Existing string leaves; immutable index metadata only for a demonstrated scan cost. | UTF-16 code units, lone surrogates, observable coercion/order and correct lifetime. |
 | Allocation/GC | Allocations/bytes, collection time, root/safepoint work and live/retained objects on Hyphen, binarytrees, gcbench and Havlak. | Remove duplicate construction, ownership bookkeeping or temporary objects; audited leaf effects where true. | Precise roots, scalar-home transport, weak/strong edges and cleanup on failure. |
 | Calls | Dispatcher self time vs argument preparation, property lookup, metadata and callee work. | Reuse established direct/light invoke paths and rooted argument spans where their contract permits. | Get-before-arguments, `this`, `new.target`, bound args, proxies, constructors, exceptions and activation observability. |
+
+#### Implementation update — 2026-09-21: share immutable closure source
+
+The C14 Havlak profile records 2,395,949 deferred function finalizations and
+4,791,896 lazy-metadata capability finalizations. Source audit found that each
+MIR closure nevertheless called `js_make_string_len` for its definition-site
+`Function#toString` source, even after its `JsCallableCode` was interned by
+compiled entry, realm and signature. That code record is already traced through
+every live function and its source is immutable for the compiled definition.
+
+`js_finalize_function` now creates `source_text` only when the shared code
+record has none. Function names remain per value because later anonymous-name
+inference is evaluation-specific. The finalizer still roots the fresh function
+across the first allocation and reloads it before publishing the source edge;
+subsequent closures reuse the traced code-owned source without adding a new
+rooting scheme (**S1.11**, **D5.3**, **D6.2.2v2**, **D8.4.3v2**).
+
+The deferred-MIR metadata fixture now creates two closures, verifies their
+independent captured values, descriptors and equal `Function#toString` source.
+It passes with `LAMBDA_GC_FORCE_EVERY=1` and
+`LAMBDA_GC_POISON_FREED=1`. The wider lazy-metadata reflection fixture passes
+normally but fails under that forced schedule on the frozen C14 archive as well
+as this candidate, so it is pre-existing control evidence rather than a result
+of this leaf.
+
+Candidate
+`temp/tune14/lambda_t14_function_source_cache_release.exe`
+(`138ac17d9919e4e6a5d1d862e62c5cfabe9bd930a58abcc10a07ab9ca9510c82`)
+passed the three-engine Navier oracle. Its exact C14 31-pair alternating replay
+on `awfy/havlak` against
+`4b140f0c150d631033f896290c051e3536dbfa429d6341b26ed6f941def5d127`
+has 31 `ok` pairs and equal stdout. Medians improve from 13,811.743 to
+13,267.151 ms (candidate/control 0.960570; one-sided 95%
+paired-bootstrap upper bound 0.963009; 31/31 wins). The archive is
+`temp/tune14/paired_havlak_function_source_cache.json`. This accepts one
+allocation/call residual leaf; it does not close the other T14-7 families or
+establish a full-matrix result.
+
+Post-change validation passed `make test-lambda-baseline` 5,717/5,717,
+including optimizer 63/63 and MIR forced-GC stress 217/217. `make
+test262-baseline` passed 40,261/40,261 in 169 batches in 60.1 seconds, with
+zero batch-unstable, slow, failed or baseline-regressed entries. The Test262
+run rebuilt and executed the same release candidate hash recorded above.
 
 Do not add overlapping inclusive samples into a promised speedup. Do not label
 a generic helper `NO_GC` because its frequent branch is nonallocating. A shared
@@ -1713,15 +1984,15 @@ Starting evidence, with its limits:
 
 | Package | Current status | Evidence needed to close |
 |---|---|---|
-| T14-0 | [~] Current corpus, Navier oracle and helper census landed | Exact C14, archived-control oracle runs, full same-session controls and the remaining phase/owner census. The current Navier helper census directs T14-3 toward guarded ordinary numeric reads, not generic comparisons. |
+| T14-0 | [~] C14 archive, 63-row same-session control and Node/LambdaJS/QuickJS Navier oracle landed | Record remaining toolchain/native-module and phase/owner census, replay later archives under the three-engine oracle, and collect the required independent confirmation session. MVP is release-unavailable, so its milestone remains unverified. The current Navier helper census directs T14-3 toward guarded ordinary numeric reads, not generic comparisons. |
 | T14-1 | [~] Reference repair and archived-oracle audit landed | Frame-15 canonical Navier checksum now exercises the fixed evaluated-Reference boundary. Original R47 and C14 pass the density oracle, while R46 and R47-repair fail, so complete the remaining boxed-kernel/generic-array work with valid-control evidence. |
-| T14-2 | [~] Guarded native/local updates and discarded generic-update fusion landed | Extend the landed shared F64 boxer, guarded local `++`/`--`, discarded full-entry fusion, immediate-body assignment-alias compound admission and both operand orders of the narrow typed-view Number carrier to complete Number/update regions; retain generic parity and add comparison/join/range proofs. The Navier-only fusion result is 0.992072 (upper 0.994343) against its exact predecessor. |
+| T14-2 | [~] Guarded native/local updates, discarded generic-update fusion, Number-pair bitwise head and primitive relational head landed | Extend the landed shared F64 boxer, guarded local `++`/`--`, immediate-body assignment-alias compound admission and both operand orders of the narrow typed-view Number carrier to complete Number/update regions; retain generic parity and add comparison/join/range proofs. The `crypto_sha1` bitwise replay measures 0.823464 (upper 0.824575) against its exact predecessor; the Havlak primitive-comparison replay measures 0.997464 (upper 0.998807; 23/31 wins); and the Navier-only update fusion result is 0.992072 (upper 0.994343). The public Number update head was reverted after `hashmap` reached only 0.995100 (upper 1.001581; 16/31 wins). |
 | T14-3 | [~] Address migration, typed-view, FFT carrier and companion dense-read slices landed | `em_element_address` now serves existing LambdaJS paths and admitted untyped checked, dense and pointer loads. Guarded Int32 direct-call forwarding reaches quicksort `partition` with a 0.183468 paired-release ratio over one-hop evidence; the shared primitive typed-array setter then reached 0.902061 and generation-validated ArrayNum reads 0.830905. The nested FFT carrier result is 0.975130 (upper 0.985491), followed by the symmetric operand-order result of 0.846079 (upper 0.871704) against its exact predecessor. A scalar-safe companion own-element leaf changes the Navier profile from 36,190,970 generic Number-index helper calls to zero and measures 0.357866 (upper 0.359286; 31/31 wins) against its exact update-fusion predecessor. The copy-store and over-broad arithmetic variants were rejected. Broader ordinary-array region evidence remains open. |
 | T14-4 | [~] Shared scalar-hoister audit complete; mutable storage remains unadmitted | Build an effect-bounded witness with profile-valid invalidation and measured query reduction. The raw companion leaf was rejected as a slower immediate read, not retained as a region mechanism. |
-| T14-5 | [~] Ordinary Map named reads skip impossible Function, Window and special-length setup | Three successive Richards replays are accepted. Field-shape, NameId transport, descriptor/enumeration coverage and broad paired results remain. |
+| T14-5 | [~] Ordinary Map named reads skip impossible Function, Window and special-length setup; recursive record-return recipes and effect-bounded dynamic constructor RHS recipes reuse common shape/slot machinery | Three Richards replays and a 31-pair binarytrees recursive-record replay are accepted. Dynamic constructor values now reserve placeholder slots and take shared transitions only when their RHS cannot observe the receiver or invoke direct `eval`; focused normal and forced-GC tests cover admission and refusal. Release profiling and paired measurement, indirect escape/descriptor mutation coverage, constructor/alias propagation, NameId transport, descriptor/enumeration coverage and broad paired results remain. |
 | T14-6 | [~] Stability repair landed | Cache-rejection native-code lifetime, parallel prebuild publication and the direct-scope index are covered. The index returns the full Test262 batch matrix to 40,261/40,261 with zero unstable/slow entries; compiler/memory owner census, scaling fixes/dispositions and cold results remain. |
-| T14-7 | [ ] Not started | Per-family profiles and implemented/no-change/deferred dispositions. |
-| T14-8 | [~] Runtime gates revalidated | Lambda baseline (5,692/5,692) and Test262 baseline (40,261/40,261 fully passing; zero unstable, slow or regressed) pass after the current T14-2, T14-3, T14-5 and T14-6 work. Native entry/lifetime audit, two-client reuse ledger, durable final matrices and milestone status remain. |
+| T14-7 | [~] Havlak closure-source allocation leaf accepted | Profile the RegExp, string and remaining allocation/call families, then record an implementation or no-change/deferred disposition for each. The source-cache replay is 0.960570 (upper 0.963009; 31/31 wins) against C14, but is not a full-matrix claim. |
+| T14-8 | [~] Runtime gates revalidated | Lambda baseline (5,717/5,717) and Test262 baseline (40,261/40,261 fully passing; zero unstable, slow or regressed) pass after the current T14-2, T14-3, T14-5, T14-6 and T14-7 work. Native entry/lifetime audit, two-client reuse ledger, durable final matrices and milestone status remain. |
 
 For every landed package record the exact revision/binary, predecessor, changed
 proof or primitive, admitted/refused cases, semantic/GC/MIR checks, paired result

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 9.2.0 (2026-09-19)
+**Spec version:** 10.0.0 (2026-09-21)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -335,22 +335,26 @@ language-visible counterparts are the semantics spec's SI ledger.
   `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
   no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
   under D2.5.2v3. [SF15]
-- **D2.6.5** **The append API selects content normalization.** Two runtime
+- **D2.6.5v2** **The append API selects content normalization.** Two runtime
   appends exist and they are not interchangeable. `list_push()` is the
-  **content** constructor: it applies S16.7's normalization — a `null` is
-  dropped, a pushed string is concatenated onto a preceding string, and a
-  pushed content list is spliced in — and is correct **only** when building
-  element content or script top-level content. `array_push()` is the
+  **content** constructor: it applies S2.6's normalization — a `null` or `""`
+  is dropped, a pushed content list is spliced in, and a pushed string or
+  binary is concatenated onto a preceding item of the same kind — and is
+  correct **only** when building element content or script top-level
+  content; content writes after construction must preserve the same
+  normalization (S2.6.5). `array_push()` is the
   **collection** constructor: it stores the item verbatim, preserving `null`
   as an element and keeping adjacent strings separate. Every other
   collection — array and vector results, argument and rest lists, split
   segments, zipped pairs — is built with `array_push()`, because for those
   the element count *is* the contract and normalization silently destroys it.
-  Which normalization an input format gets is therefore a property of the
-  **builder it uses**, not of a per-format switch: MarkBuilder appends with
-  `array_append` and never normalizes — which is why LaTeX may hold
-  consecutive strings — while the markup family calls `list_push` and merges
-  them. The choice belongs at the **append site**, which is local and cannot
+  The split is **content versus collection**, never per format: every input
+  parser must yield normalized element content (S2.6.1). MarkBuilder appends
+  with `array_append` and never normalizes, which is why LaTeX holds
+  consecutive strings today — a **transitional deviation**, to be retired by
+  carrying such runs in non-merging items (e.g. `<cmd ["a", "b"]>`) — while
+  the markup family calls `list_push` and merges them. The choice belongs at
+  the **append site**, which is local and cannot
   leak. It must not be re-expressed as ambient state: a process-wide
   "suppress merging" flag stays suspended across every allocation in the
   interval and leaks on any early return that forgets to restore it. Such a
@@ -2083,7 +2087,7 @@ slice; no formal semantic ruling or document semver changes.
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
-| D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
+| D2.6.5v2 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S2.6.4 should not run — yet on 2026-09-21 `<e "a" "b">` merged at run time on both tiers, so this footnote needs re-verification. Not yet implemented at all: dropping a lone `""`, merging adjacent binaries, and normalizing content writes (S2.6.2, S2.6.4, S2.6.5); LaTeX's verbatim content is the transitional deviation named in the ruling. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |

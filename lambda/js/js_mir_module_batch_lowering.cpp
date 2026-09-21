@@ -3000,6 +3000,11 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
     }
 
+    // Plan shared recursive literal recipes before any function body lowers.
+    // Returned objects can then publish the same guarded shape as their later
+    // parameter reads, including when the producer lowers before its consumer.
+    jm_plan_literal_field_shapes(mt);
+
     return 1;
 }
 

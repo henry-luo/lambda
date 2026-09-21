@@ -387,6 +387,43 @@ typedef enum JsNumericBinaryOp {
     JS_NUMERIC_UNSIGNED_RIGHT_SHIFT,
 } JsNumericBinaryOp;
 
+// Keep the shared ToInt32 implementation for Number-only bitwise operators so
+// their fast head and the generic Number tail cannot drift at range edges.
+static Item js_numeric_bitwise_number_pair(double left, double right,
+        JsNumericBinaryOp op) {
+    switch (op) {
+    case JS_NUMERIC_BITWISE_AND: {
+        int32_t li = js_to_int32(left), ri = js_to_int32(right);
+        return js_make_number((double)(li & ri));
+    }
+    case JS_NUMERIC_BITWISE_OR: {
+        int32_t li = js_to_int32(left), ri = js_to_int32(right);
+        return js_make_number((double)(li | ri));
+    }
+    case JS_NUMERIC_BITWISE_XOR: {
+        int32_t li = js_to_int32(left), ri = js_to_int32(right);
+        return js_make_number((double)(li ^ ri));
+    }
+    case JS_NUMERIC_LEFT_SHIFT: {
+        int32_t li = js_to_int32(left);
+        uint32_t ri = (uint32_t)js_to_int32(right) & 0x1F;
+        return js_make_number((double)(li << ri));
+    }
+    case JS_NUMERIC_RIGHT_SHIFT: {
+        int32_t li = js_to_int32(left);
+        uint32_t ri = (uint32_t)js_to_int32(right) & 0x1F;
+        return js_make_number((double)(li >> ri));
+    }
+    case JS_NUMERIC_UNSIGNED_RIGHT_SHIFT: {
+        uint32_t li = (uint32_t)js_to_int32(left);
+        uint32_t ri = (uint32_t)js_to_int32(right) & 0x1F;
+        return js_make_number((double)(li >> ri));
+    }
+    default:
+        return ItemNull;
+    }
+}
+
 // The noncoercing Number pair is a leaf: it runs before root setup, while all
 // non-Number cases continue through the existing conversion/error kernel.
 static bool js_numeric_number_pair(Item left, Item right, JsNumericBinaryOp op,
@@ -402,6 +439,14 @@ static bool js_numeric_number_pair(Item left, Item right, JsNumericBinaryOp op,
     case JS_NUMERIC_MULTIPLY: *out = js_make_number(l * r); return true;
     case JS_NUMERIC_DIVIDE: *out = js_make_number(l / r); return true;
     case JS_NUMERIC_MODULO: *out = js_make_number(fmod(l, r)); return true;
+    case JS_NUMERIC_BITWISE_AND:
+    case JS_NUMERIC_BITWISE_OR:
+    case JS_NUMERIC_BITWISE_XOR:
+    case JS_NUMERIC_LEFT_SHIFT:
+    case JS_NUMERIC_RIGHT_SHIFT:
+    case JS_NUMERIC_UNSIGNED_RIGHT_SHIFT:
+        *out = js_numeric_bitwise_number_pair(l, r, op);
+        return true;
     default: return false;
     }
 }
@@ -464,33 +509,13 @@ static Item js_numeric_binary_slow(Item left, Item right, JsNumericBinaryOp op) 
     case JS_NUMERIC_MULTIPLY: return js_make_number(l * r);
     case JS_NUMERIC_DIVIDE: return js_make_number(l / r);
     case JS_NUMERIC_MODULO: return js_make_number(fmod(l, r));
-    case JS_NUMERIC_BITWISE_AND: {
-        int32_t li = js_to_int32(l), ri = js_to_int32(r);
-        return js_make_number((double)(li & ri));
-    }
-    case JS_NUMERIC_BITWISE_OR: {
-        int32_t li = js_to_int32(l), ri = js_to_int32(r);
-        return js_make_number((double)(li | ri));
-    }
-    case JS_NUMERIC_BITWISE_XOR: {
-        int32_t li = js_to_int32(l), ri = js_to_int32(r);
-        return js_make_number((double)(li ^ ri));
-    }
-    case JS_NUMERIC_LEFT_SHIFT: {
-        int32_t li = js_to_int32(l);
-        uint32_t ri = (uint32_t)js_to_int32(r) & 0x1F;
-        return js_make_number((double)(li << ri));
-    }
-    case JS_NUMERIC_RIGHT_SHIFT: {
-        int32_t li = js_to_int32(l);
-        uint32_t ri = (uint32_t)js_to_int32(r) & 0x1F;
-        return js_make_number((double)(li >> ri));
-    }
-    case JS_NUMERIC_UNSIGNED_RIGHT_SHIFT: {
-        uint32_t li = (uint32_t)js_to_int32(l);
-        uint32_t ri = (uint32_t)js_to_int32(r) & 0x1F;
-        return js_make_number((double)(li >> ri));
-    }
+    case JS_NUMERIC_BITWISE_AND:
+    case JS_NUMERIC_BITWISE_OR:
+    case JS_NUMERIC_BITWISE_XOR:
+    case JS_NUMERIC_LEFT_SHIFT:
+    case JS_NUMERIC_RIGHT_SHIFT:
+    case JS_NUMERIC_UNSIGNED_RIGHT_SHIFT:
+        return js_numeric_bitwise_number_pair(l, r, op);
     case JS_NUMERIC_POWER:
         break;
     }
@@ -933,8 +958,8 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
 
 // v23b / Tune8 §2.1: Comparison facade returning raw int64_t 0/1 for direct use
 // in MIR_BF/BT. Eliminates the box→unbox→branch cycle when a comparison is used
-// as an if/for/while condition. Inlines the fast int-vs-int path; falls back to
-// the full boxed comparison.
+// as an if/for/while condition. It shares the primitive-Number head with the
+// boxed facade and retains the full boxed comparison for every other value.
 //
 // Tune8 §2.1 fold: replaces 4 separate runtime entries (js_lt_raw / js_gt_raw /
 // js_le_raw / js_ge_raw) with one dispatcher. The op parameter is a compile-time
@@ -945,10 +970,39 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
 //
 // op codes:  0=LT (a<b)  1=GT (a>b)  2=LE (a<=b)  3=GE (a>=b)
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
+
+static bool js_relational_number_pair(int64_t op, Item left, Item right,
+        Item* out) {
+    if (!out || op < 0 || op > 3 || !js_number_like_type(get_type_id(left)) ||
+            !js_number_like_type(get_type_id(right))) {
+        return false;
+    }
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    bool result = false;
+    switch (op) {
+    case 0: result = l < r; break;
+    case 1: result = l > r; break;
+    case 2: result = l <= r; break;
+    case 3: result = l >= r; break;
+    default: return false;
+    }
+    // IEEE comparisons make every relational result false for NaN, matching
+    // ECMAScript's Number branch without entering ToPrimitive/ToNumeric.
+    *out = (Item){.item = b2it(result)};
+    js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_COMPARE_HEAD, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+    return true;
+}
+
 static Item js_compare_boxed(int64_t op, Item left, Item right) {
+    if (op < 0 || op > 3) return (Item){.item = b2it(false)};
+    Item number_result = ItemNull;
+    if (js_relational_number_pair(op, left, right, &number_result)) {
+        return number_result;
+    }
     js_opt_trace_record(JS_OPT_RUNTIME_BOXED_COMPARE_CALL, JS_OPT_REASON_NONE,
         JS_OPT_OUTCOME_TAKEN);
-    if (op < 0 || op > 3) return (Item){.item = b2it(false)};
     bool reverse = op == 1 || op == 2;
     bool invert = op >= 2;
     // ARC operand order is observable through ToPrimitive side effects, so only
@@ -960,20 +1014,9 @@ static Item js_compare_boxed(int64_t op, Item left, Item right) {
 }
 
 extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
-    TypeId lt = get_type_id(left), rt = get_type_id(right);
-    bool l_num = js_number_like_type(lt);
-    bool r_num = js_number_like_type(rt);
-    if (l_num && r_num) {
-        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
-        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
-        if (isnan(l) || isnan(r)) return 0;
-        switch (op) {
-        case 0: return l <  r ? 1 : 0;
-        case 1: return l >  r ? 1 : 0;
-        case 2: return l <= r ? 1 : 0;
-        case 3: return l >= r ? 1 : 0;
-        default: return 0;
-        }
+    Item number_result = ItemNull;
+    if (js_relational_number_pair(op, left, right, &number_result)) {
+        return (int64_t)it2b(number_result);
     }
     // Boxed fallback uses the same operation kernel as the boxed facade.
     Item result = js_compare_boxed(op, left, right);
