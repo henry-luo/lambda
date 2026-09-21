@@ -1,4 +1,5 @@
 #include "network_integration.h"
+#include "resource_loaders.h"
 #include "radiant.hpp"
 #include "view.hpp"
 #include "../lambda/network/network_resource_manager.h"
@@ -82,6 +83,18 @@ static bool queue_resolved_http_resource(DomDocument* doc, const char* href,
     return queued;
 }
 
+// The loader can replace a document during script navigation before a window
+// takes ownership. Register manager cleanup with DomDocument so every destroy
+// path cancels its worker-owned resources before the DOM arena disappears.
+static void destroy_document_network_support(void* data) {
+    DomDocument* doc = (DomDocument*)data;
+    if (!doc || !doc->resource_manager) return;
+    resource_manager_cancel_all(doc->resource_manager);
+    resource_manager_destroy(doc->resource_manager);
+    doc->resource_manager = nullptr;
+    doc->fully_loaded = true;
+}
+
 // Initialize network support for a document
 int radiant_init_network_support(DomDocument* doc,
                                   NetworkThreadPool* thread_pool,
@@ -102,6 +115,11 @@ int radiant_init_network_support(DomDocument* doc,
     doc->resource_manager = resource_manager_create(doc, thread_pool, file_cache);
     if (!doc->resource_manager) {
         log_error("network: failed to create resource manager");
+        return -1;
+    }
+    if (!dom_document_add_resource(doc, doc, destroy_document_network_support)) {
+        log_error("network: failed to register document resource manager cleanup");
+        destroy_document_network_support(doc);
         return -1;
     }
 
@@ -253,7 +271,7 @@ static void discover_script_callback(DomElement* script, void* user_data) {
     mem_free(abs_url);
 }
 
-static void discover_document_font_resources(DomDocument* doc) {
+static void discover_document_font_resources(DomDocument* doc, bool attach_faces) {
     if (!doc || !doc->resource_manager ||
         !doc->stylesheets || doc->stylesheet_count <= 0) {
         return;
@@ -286,7 +304,7 @@ static void discover_document_font_resources(DomDocument* doc) {
                               abs_url, faces[f]->family_name ? faces[f]->family_name : "?");
                     NetworkResource* res = resource_manager_load(
                         doc->resource_manager, abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
-                    attach_font_resource_callback(res, faces[f]);
+                    if (attach_faces) attach_font_resource_callback(res, faces[f]);
                     mem_free(abs_url);
                     break;  // only queue first viable URL per @font-face
                 }
@@ -299,7 +317,7 @@ static void discover_document_font_resources(DomDocument* doc) {
                     log_debug("network: discovered @font-face src_url: %s", abs_url);
                     NetworkResource* res = resource_manager_load(
                         doc->resource_manager, abs_url, RESOURCE_FONT, PRIORITY_HIGH, NULL);
-                    attach_font_resource_callback(res, faces[f]);
+                    if (attach_faces) attach_font_resource_callback(res, faces[f]);
                 }
                 mem_free(abs_url);
             }
@@ -321,8 +339,45 @@ void radiant_discover_document_font_resources(DomDocument* doc) {
         return;
     }
 
-    discover_document_font_resources(doc);
+    discover_document_font_resources(doc, true);
     resource_manager_flush_layout_updates(doc->resource_manager);
+}
+
+void radiant_prefetch_document_font_resources(DomDocument* doc) {
+    if (!doc || !doc->resource_manager) return;
+    discover_document_font_resources(doc, false);
+}
+
+typedef struct CssResourcePrefetchContext {
+    DomDocument* doc;
+    int queued;
+} CssResourcePrefetchContext;
+
+static void prefetch_css_resource_url(CssValue* value, void* context) {
+    CssResourcePrefetchContext* prefetch = (CssResourcePrefetchContext*)context;
+    if (!prefetch || !prefetch->doc || !prefetch->doc->resource_manager ||
+        !value || !value->data.url || !radiant_url_is_http(value->data.url)) {
+        return;
+    }
+    if (resource_manager_prefetch(prefetch->doc->resource_manager, value->data.url,
+                                  PRIORITY_LOW)) {
+        prefetch->queued++;
+    }
+}
+
+void radiant_prefetch_document_stylesheet_resources(DomDocument* doc) {
+    if (!doc || !doc->resource_manager || !doc->stylesheets) return;
+
+    CssResourcePrefetchContext context = {doc, 0};
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet) continue;
+        radiant_resolve_stylesheet_resource_urls(sheet);
+        radiant_for_each_stylesheet_resource_url(sheet, prefetch_css_resource_url, &context);
+    }
+    if (context.queued > 0) {
+        log_info("[PREFETCH] queued %d CSS declaration resources", context.queued);
+    }
 }
 
 // Discover and queue all network resources in a document
@@ -355,7 +410,7 @@ void radiant_discover_document_resources(DomDocument* doc) {
     // Note: srcset parsing is simplified — only uses first URL, ignores descriptors
     // Full srcset handling would need viewport/DPR-aware selection
 
-    discover_document_font_resources(doc);
+    discover_document_font_resources(doc, true);
 
     // Process cache hits immediately on the main thread so first layout can
     // see cached CSS/images even when no async wait loop runs.
@@ -390,10 +445,5 @@ void radiant_cleanup_network_support(DomDocument* doc) {
 
     log_debug("network: cleaning up network support");
 
-    // cancel all in-flight downloads before destroying the manager
-    resource_manager_cancel_all(doc->resource_manager);
-
-    resource_manager_destroy(doc->resource_manager);
-    doc->resource_manager = nullptr;
-    doc->fully_loaded = true;
+    destroy_document_network_support(doc);
 }

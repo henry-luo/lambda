@@ -5168,6 +5168,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_TABLE, g_table_layout_time);
     radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_FLEX, g_flex_layout_time);
     radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_GRID, g_grid_layout_time);
+    radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_INTRINSIC,
+                                        lycon.profiler.intrinsic_inclusive_ms);
     radiant::layout_profiler_set_cache(&lycon.profiler, g_layout_cache_hits, g_layout_cache_misses);
     radiant::layout_profiler_report(&lycon);
 

@@ -1649,7 +1649,9 @@ static int collect_flex_item_nodes(LayoutContext* lycon, ViewBlock* container,
     policy.include_text = flex_collect_flattened_text_item;
     policy.skipped_element = rendered_legend;
     policy.initialize_contents = true;
-    policy.reset_styles_resolved = true;
+    // Flattening does not change a DOM child's cascade parent. Preserve its
+    // current style so equivalent flex measurements can reuse its contribution.
+    policy.reset_styles_resolved = false;
     return layout_collect_flattened_item_nodes(
         lycon, container, first_child, nodes, capacity, &policy);
 }
@@ -1808,12 +1810,9 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // CRITICAL: Restore container's font context before processing each flex item
         // This ensures each flex item inherits from the container, not from siblings
         lycon->font = container_font;
-        // Step 1: Create/verify View structure FIRST (resolves CSS styles)
-        // This must happen before measurement so font-size etc. are available
-        // CRITICAL: Clear styles_resolved so CSS is re-resolved against THIS container's
-        if (child->is_element()) {
-            child->as_element()->set_styles_resolved(false);
-        }
+        // Step 1: Create/verify View structure FIRST (resolves CSS styles).
+        // A current child style was resolved against this same parent; clearing it here
+        // discards its generation-local intrinsic cache on every flex measurement pass.
         // CRITICAL: Also invalidate the measurement cache for this child so that
         // (correct container_content_width) after CSS has been re-resolved above.
         // Only invalidate when the container width actually changed — avoids forcing

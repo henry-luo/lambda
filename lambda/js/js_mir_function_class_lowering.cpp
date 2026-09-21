@@ -392,9 +392,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
 
     MIR_reg_t function_item = JM_CAPTURE_COUNT(method->fc) > 0
         ? jm_build_closure_for_method(mt, method->fc, method->param_count)
-        : jm_call_2(mt, "js_new_method_function_mir", MIR_T_I64,
-            MIR_T_I64, MIR_new_ref_op(mt->ctx, method->fc->func_item),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, method->param_count));
+        : jm_create_method_function(mt, method->fc, method->param_count);
     // Class setup invokes several allocating helpers before publishing the
     // method; the JIT register alone is not a precise GC root at those calls.
     jm_create_gc_root_slot(mt, policy->destination);

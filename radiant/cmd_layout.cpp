@@ -62,6 +62,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
 #include "network_integration.h"
+#include "resource_loaders.h"
 #include "radiant.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/io/mark_builder.hpp"
@@ -93,7 +94,9 @@ Element* get_html_root_element(Input* input);
 extern void fontface_cleanup(UiContext* uicon);
 CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root,
                                         CssEngine* engine, const char* base_path, Pool* pool,
-                                        int* stylesheet_count, int* linked_count_out = nullptr);
+                                        int* stylesheet_count, int* linked_count_out = nullptr,
+                                        int* script_prefetch_count_out = nullptr,
+                                        uint64_t* script_prefetch_start_ns_out = nullptr);
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                      Element* html_root, HtmlVersion version,
                                      Url* url, Runtime* runtime);
@@ -175,13 +178,22 @@ struct CssSourceBuffer {
     size_t length;
 };
 
+// CSS parsing runs on the document thread, but its immutable HTTP bytes are
+// supplied by the page's shared network scheduler.
+static thread_local NetworkResourceManager* g_css_resource_manager = nullptr;
+
 static bool css_load_source(const char* path, bool is_http, bool binary,
                             CssSourceBuffer* source) {
     if (!path || !*path || !source) return false;
     source->data = nullptr;
     source->length = 0;
     if (is_http) {
-        source->data = download_http_content_cached(path, &source->length, "./temp/cache");
+        if (g_css_resource_manager) {
+            source->data = resource_manager_copy_resource_content(
+                g_css_resource_manager, path, PRIORITY_HIGH, &source->length);
+        } else {
+            source->data = download_http_content_cached(path, &source->length, "./temp/cache");
+        }
     } else if (binary) {
         source->data = read_binary_file(path, &source->length);
     } else {
@@ -787,6 +799,13 @@ static CssStylesheet* parse_and_collect_stylesheet(
     const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
     int* count, int* capacity, int import_depth);
 
+static bool resolve_css_import_path(const char* import_url, const char* stylesheet_path,
+                                    char* import_path, size_t import_path_size) {
+    return import_url && import_url[0] &&
+        css_resolve_reference_path(import_url, stylesheet_path, false,
+                                   import_path, import_path_size, nullptr);
+}
+
 static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* stylesheet_path,
                                         CssEngine* engine, Pool* pool,
                                         CssStylesheet*** stylesheets, int* count,
@@ -797,18 +816,31 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         return;
     }
 
+    // Request direct imports together before parsing them in source order.
+    // Their bytes may overlap while CSS application remains sequential.
+    if (g_css_resource_manager) {
+        for (size_t i = 0; i < stylesheet->rule_count; i++) {
+            CssRule* rule = stylesheet->rules[i];
+            const char* import_url = rule && rule->type == CSS_RULE_IMPORT
+                ? rule->data.import_rule.url : nullptr;
+            char import_path[1024];
+            if (resolve_css_import_path(import_url, stylesheet_path,
+                                        import_path, sizeof(import_path)) &&
+                css_path_is_http(import_path)) {
+                resource_manager_prefetch(g_css_resource_manager, import_path, PRIORITY_HIGH);
+            }
+        }
+    }
+
     for (size_t i = 0; i < stylesheet->rule_count; i++) {
         CssRule* rule = stylesheet->rules[i];
         if (!rule || rule->type != CSS_RULE_IMPORT) continue;
 
         const char* import_url = rule->data.import_rule.url;
-        if (!import_url || import_url[0] == '\0') continue;
-
-
         // Resolve import path relative to the stylesheet or document URL.
         char import_path[1024];
-        if (!css_resolve_reference_path(import_url, stylesheet_path, false,
-                                        import_path, sizeof(import_path), nullptr)) {
+        if (!resolve_css_import_path(import_url, stylesheet_path,
+                                     import_path, sizeof(import_path))) {
             continue;
         }
 
@@ -842,6 +874,9 @@ static CssStylesheet* parse_and_collect_stylesheet(
     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
     annotate_css_stylesheet_source_file(stylesheet, source_path);
     if (!stylesheet) return nullptr;
+    // Keep CSS declaration URLs in document-global form before loader-stage
+    // prefetching and later paint-time resource lookup.
+    radiant_resolve_stylesheet_resource_urls(stylesheet);
 
     if (!lam::pool_grow_array(pool, stylesheets, capacity, *count + 1, 4)) {
         // stylesheet arrays are dereferenced immediately after append; skip this sheet if the pool cannot grow.
@@ -1056,6 +1091,12 @@ static char* resolve_http_href(const char* href, const char* base_path) {
 static void append_external_resource_url(char* url, char*** out_urls,
                                          int* out_count, int* out_capacity) {
     if (!url || !out_urls || !out_count || !out_capacity) return;
+    for (int i = 0; i < *out_count; i++) {
+        if (strcmp((*out_urls)[i], url) == 0) {
+            mem_free(url);
+            return;
+        }
+    }
     if (*out_count >= *out_capacity) {
         if (!lam::mem_grow_array(out_urls, out_capacity, *out_count + 1, 16,
                                  MEM_CAT_TEMP)) {
@@ -1068,22 +1109,28 @@ static void append_external_resource_url(char* url, char*** out_urls,
     (*out_urls)[(*out_count)++] = url;
 }
 
-// collect external CSS and script URLs for prefetch.
+typedef enum {
+    EXTERNAL_PREFETCH_STYLESHEET,
+    EXTERNAL_PREFETCH_SCRIPT,
+} ExternalPrefetchKind;
+
+// Collect one resource class per pass so stylesheet requests cannot wait on
+// unrelated script transfers before CSS parsing starts.
 static void collect_external_resource_urls(Element* elem, const char* base_path,
                                             char*** out_urls, int* out_count, int* out_capacity,
-                                            int depth) {
+                                            ExternalPrefetchKind kind, int depth) {
     if (!elem || depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type || !type->name.str) goto recurse;
 
-    if (str_ieq_cstr(type->name.str, "link")) {
+    if (kind == EXTERNAL_PREFETCH_STYLESHEET && str_ieq_cstr(type->name.str, "link")) {
         const char* rel = extract_element_attribute(elem, "rel", nullptr);
         const char* href = extract_element_attribute(elem, "href", nullptr);
         if (rel && href && str_ieq_cstr(rel, "stylesheet")) {
             char* abs = resolve_http_href(href, base_path);
             append_external_resource_url(abs, out_urls, out_count, out_capacity);
         }
-    } else if (str_ieq_cstr(type->name.str, "script")) {
+    } else if (kind == EXTERNAL_PREFETCH_SCRIPT && str_ieq_cstr(type->name.str, "script")) {
         const char* src = extract_element_attribute(elem, "src", nullptr);
         if (src) {
             char* abs = resolve_http_href(src, base_path);
@@ -1096,31 +1143,66 @@ recurse:
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
             collect_external_resource_urls(child_item.element, base_path,
-                                            out_urls, out_count, out_capacity, depth + 1);
+                                            out_urls, out_count, out_capacity, kind, depth + 1);
         }
     }
 }
 
-// prefetch external CSS and script resources for remote documents.
-static void prefetch_document_subresources(Element* html_root, const char* base_path) {
-    if (!html_root || !base_path) return;
-    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return;
+// Queue render-blocking stylesheets first, then overlap script transfer with
+// CSS parsing. The resource manager owns every request through document teardown.
+static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
+                                          const char* base_path,
+                                          uint64_t* script_prefetch_start_ns_out) {
+    if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = 0;
+    if (!doc || !doc->resource_manager || !html_root || !base_path) return 0;
+    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return 0;
 
-    char** urls = nullptr;
-    int count = 0;
-    int capacity = 0;
-    collect_external_resource_urls(html_root, base_path, &urls, &count, &capacity, 0);
+    char** stylesheet_urls = nullptr;
+    int stylesheet_count = 0;
+    int stylesheet_capacity = 0;
+    char** script_urls = nullptr;
+    int script_count = 0;
+    int script_capacity = 0;
+    collect_external_resource_urls(html_root, base_path, &stylesheet_urls, &stylesheet_count,
+                                   &stylesheet_capacity, EXTERNAL_PREFETCH_STYLESHEET, 0);
+    collect_external_resource_urls(html_root, base_path, &script_urls, &script_count,
+                                   &script_capacity, EXTERNAL_PREFETCH_SCRIPT, 0);
 
-    if (count > 0) {
-        log_info("[PREFETCH] downloading %d sub-resources in parallel", count);
-        double t0 = (double)clock() / CLOCKS_PER_SEC;
-        http_prefetch_urls_parallel((const char* const*)urls, count, "./temp/cache", 8);
-        double elapsed = (double)clock() / CLOCKS_PER_SEC - t0;
-        log_info("[PREFETCH] completed in %.3fs (cpu)", elapsed);
+    if (stylesheet_count > 0) {
+        uint64_t stylesheet_start = time_now_ns();
+        int loaded = 0;
+        log_info("[PREFETCH] queuing %d render-blocking stylesheets", stylesheet_count);
+        for (int i = 0; i < stylesheet_count; i++) {
+            resource_manager_prefetch(doc->resource_manager, stylesheet_urls[i], PRIORITY_HIGH);
+        }
+        for (int i = 0; i < stylesheet_count; i++) {
+            NetworkResource* res = resource_manager_prefetch(
+                doc->resource_manager, stylesheet_urls[i], PRIORITY_HIGH);
+            if (resource_manager_wait_for_resource(doc->resource_manager, res)) loaded++;
+        }
+        log_info("[PREFETCH] stylesheet requests %d/%d ready in %.1fms wall",
+                 loaded, stylesheet_count,
+                 time_elapsed_ms_f(stylesheet_start, time_now_ns()));
+        (void)loaded; // retained for the debug scheduler completion diagnostic.
     }
 
-    for (int i = 0; i < count; i++) mem_free(urls[i]);
-    if (urls) mem_free(urls);
+    if (script_count > 0) {
+        if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = time_now_ns();
+        int queued = 0;
+        for (int i = 0; i < script_count; i++) {
+            if (resource_manager_prefetch(doc->resource_manager, script_urls[i], PRIORITY_NORMAL)) {
+                queued++;
+            }
+        }
+        log_info("[PREFETCH] started %d script requests alongside CSS parsing", queued);
+        (void)queued; // retained for the debug scheduler admission diagnostic.
+    }
+
+    for (int i = 0; i < stylesheet_count; i++) mem_free(stylesheet_urls[i]);
+    for (int i = 0; i < script_count; i++) mem_free(script_urls[i]);
+    mem_free(stylesheet_urls);
+    mem_free(script_urls);
+    return script_count;
 }
 
 // load one linked stylesheet; document traversal owns source ordering.
@@ -1407,17 +1489,27 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
 // collect linked and inline document stylesheets in source order.
 CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root,
                                         CssEngine* engine, const char* base_path, Pool* pool,
-                                        int* stylesheet_count, int* linked_count_out) {
+                                        int* stylesheet_count, int* linked_count_out,
+                                        int* script_prefetch_count_out,
+                                        uint64_t* script_prefetch_start_ns_out) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
+    if (script_prefetch_count_out) *script_prefetch_count_out = 0;
+    if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = 0;
 
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
     int stylesheet_capacity = 0;
 
-    // Step 0: Pre-fetch external HTTP sub-resources (CSS, scripts) in parallel
-    // so subsequent serial loaders find them already cached on disk.
-    prefetch_document_subresources(html_root, base_path);
+    DomDocument* document = dom_root ? dom_root->doc : nullptr;
+    NetworkResourceManager* previous_manager = g_css_resource_manager;
+    g_css_resource_manager = document ? document->resource_manager : nullptr;
+
+    // Start script transfer only after stylesheet bytes are ready. This lets
+    // CSS parsing overlap script I/O without delaying the first cascade.
+    int script_prefetch_count = prefetch_document_subresources(
+        document, html_root, base_path, script_prefetch_start_ns_out);
+    if (script_prefetch_count_out) *script_prefetch_count_out = script_prefetch_count;
 
     // CSS Cascade §6.4: stylesheet source order follows document order across
     // both <link rel=stylesheet> and <style>. A later external sheet must win
@@ -1426,6 +1518,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     collect_stylesheets_in_document_order(html_root, dom_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
                                           &stylesheet_capacity, &linked_count, 0);
+    g_css_resource_manager = previous_manager;
     if (linked_count_out) *linked_count_out = linked_count;
 
     return stylesheets;
@@ -2152,6 +2245,17 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     dom_doc->services.cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
+    // Create the page-owned scheduler before dependency discovery so CSS,
+    // script, and later DOM consumers share request identities and cache data.
+    if (radiant_url_is_http(url_get_href(html_url)) &&
+        radiant_init_network_support(dom_doc, NULL, NULL) == 0) {
+        resource_manager_set_css_engine(dom_doc->resource_manager, css_engine);
+        // The manager is now ready before CSS discovery; retain the view
+        // lifecycle marker at this earlier ownership boundary.
+        log_notice("view: network support initialized for HTTP document");
+        log_info("[PREFETCH] document resource manager ready before CSS discovery");
+    }
+
     // Load external CSS if provided
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
@@ -2161,11 +2265,13 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Extract and parse <link rel="stylesheet"> and <style> elements
     int inline_stylesheet_count = 0;
+    int script_prefetch_count = 0;
+    uint64_t script_prefetch_start_ns = 0;
     const char* css_base_path = url_get_href(html_url);
     g_css_document_charset = dom_doc->document_charset; // set fallback encoding for CSS files
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, dom_root, css_engine, css_base_path, pool,
-        &inline_stylesheet_count);
+        &inline_stylesheet_count, nullptr, &script_prefetch_count, &script_prefetch_start_ns);
     g_css_document_charset = nullptr; // reset after CSS collection
 
     auto t_css_parse = time_now_ns();
@@ -2199,6 +2305,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                                    external_stylesheet ? 1 : 0,
                                    inline_stylesheets, inline_stylesheet_count, pool);
     }
+    // Font bytes may transfer during cascade; registration waits for UiContext.
+    radiant_prefetch_document_font_resources(dom_doc);
+    radiant_prefetch_document_stylesheet_resources(dom_doc);
     auto t_stylesheet_setup = timing ? time_now_ns() : t_css_parse;
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
@@ -2228,6 +2337,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         // P17: scripts run after the initial cascade so load-time CSSOM reads see
         // resolved styles; if scripts mutate DOM/classes/stylesheets we recascade
         // below while preserving JS inline style writes.
+        if (script_prefetch_count > 0) {
+            log_info("[PREFETCH] %d script requests overlapped CSS parsing for %.1fms wall",
+                     script_prefetch_count,
+                     time_elapsed_ms_f(script_prefetch_start_ns, time_now_ns()));
+        }
         log_mem_stage("load_html: before_scripts");
         execute_document_scripts_profiled(html_root, dom_doc, pool, html_url, script_timing);
         log_mem_stage("load_html: after_scripts");
@@ -5218,47 +5332,8 @@ static int layout_resource_wait_timeout_ms() {
     return 1000;
 }
 
-static bool layout_doc_has_remote_font_face(DomDocument* doc) {
-    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
-
-    for (int s = 0; s < doc->stylesheet_count; s++) {
-        CssStylesheet* sheet = doc->stylesheets[s];
-        if (!sheet || !sheet->rules) continue;
-        for (size_t r = 0; r < sheet->rule_count; r++) {
-            CssRule* rule = sheet->rules[r];
-            if (!rule || rule->type != CSS_RULE_FONT_FACE) continue;
-            const char* content = rule->data.generic_rule.content;
-            if (content && (strstr(content, "http://") || strstr(content, "https://"))) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
-                                                           DomDocument* doc) {
-    if (!ui_context || !doc) return nullptr;
-    if (!layout_doc_has_remote_font_face(doc)) return nullptr;
-
-    // The resource manager changes image/media loading to async mode, so the
-    // layout CLI only enables it for documents that need remote webfont metrics.
-    network_downloader_init_shared();
-    EnhancedFileCache* file_cache = enhanced_cache_create("./temp/cache",
-        100 * 1024 * 1024, 10000);
-    if (!file_cache) {
-        log_warn("[Layout] Network cache unavailable; proceeding without async resources");
-        return nullptr;
-    }
-
-    if (radiant_init_network_support(doc, NULL, file_cache) != 0) {
-        log_warn("[Layout] Network support unavailable; proceeding without async resources");
-        enhanced_cache_destroy(file_cache);
-        return nullptr;
-    }
-
-    resource_manager_set_ui_context(doc->resource_manager, ui_context);
-    radiant_discover_document_font_resources(doc);
+static void layout_wait_for_network_resources(DomDocument* doc) {
+    if (!doc || !doc->resource_manager) return;
 
     int waited_ms = 0;
     const int poll_ms = 10;
@@ -5280,6 +5355,60 @@ static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context
                                &completed_resources, &failed_resources);
     log_info("[Layout] Network resources total=%d completed=%d failed=%d waited=%dms",
              total_resources, completed_resources, failed_resources, waited_ms);
+}
+
+static bool layout_doc_has_remote_font_face(DomDocument* doc) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet || !sheet->rules) continue;
+        for (size_t r = 0; r < sheet->rule_count; r++) {
+            CssRule* rule = sheet->rules[r];
+            if (!rule || rule->type != CSS_RULE_FONT_FACE) continue;
+            const char* content = rule->data.generic_rule.content;
+            if (content && (strstr(content, "http://") || strstr(content, "https://"))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
+                                                           DomDocument* doc) {
+    if (!ui_context || !doc) return nullptr;
+
+    // Remote HTML now creates its manager during loader-stage dependency
+    // discovery; do not replace that request/cache identity before layout.
+    if (doc->resource_manager) {
+        resource_manager_set_ui_context(doc->resource_manager, ui_context);
+        radiant_discover_document_font_resources(doc);
+        layout_wait_for_network_resources(doc);
+        return nullptr;
+    }
+    if (!layout_doc_has_remote_font_face(doc)) return nullptr;
+
+    // The resource manager changes image/media loading to async mode, so the
+    // layout CLI only enables it for documents that need remote webfont metrics.
+    network_downloader_init_shared();
+    EnhancedFileCache* file_cache = enhanced_cache_create("./temp/cache",
+        100 * 1024 * 1024, 10000);
+    if (!file_cache) {
+        log_warn("[Layout] Network cache unavailable; proceeding without async resources");
+        return nullptr;
+    }
+
+    if (radiant_init_network_support(doc, NULL, file_cache) != 0) {
+        log_warn("[Layout] Network support unavailable; proceeding without async resources");
+        enhanced_cache_destroy(file_cache);
+        return nullptr;
+    }
+
+    resource_manager_set_ui_context(doc->resource_manager, ui_context);
+    radiant_discover_document_font_resources(doc);
+
+    layout_wait_for_network_resources(doc);
     return file_cache;
 }
 

@@ -33,7 +33,9 @@ typedef enum {
     RESOURCE_IMAGE,
     RESOURCE_FONT,
     RESOURCE_SVG,
-    RESOURCE_SCRIPT
+    RESOURCE_SCRIPT,
+    // byte-only request used by the document loader before DOM delivery.
+    RESOURCE_PREFETCH
 } ResourceType;
 
 // Resource states
@@ -98,6 +100,7 @@ typedef struct NetworkResourceManager {
     NetworkThreadPool* thread_pool;
     struct NetworkScheduler* scheduler;
     EnhancedFileCache* file_cache;
+    bool owns_file_cache;
     
     // CSS parsing context (for processing network-loaded stylesheets)
     struct CssEngine* css_engine;
@@ -115,6 +118,7 @@ typedef struct NetworkResourceManager {
     void* pending_repaints;         // ArrayList of DomElement*
     
     pthread_mutex_t mutex;          // Protects resource list
+    pthread_cond_t resource_state_cond; // Signals state transitions for byte consumers
 
     // Cross-thread wake callback, e.g. GLFW empty event or uv_async_send
     NetworkWakeCallback wake_callback;
@@ -156,6 +160,23 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
                                       ResourceType type,
                                       ResourcePriority priority,
                                       struct DomElement* owner);
+
+// Queue a byte-only request. The caller may later attach a typed consumer to
+// the same URL without creating a second transfer.
+NetworkResource* resource_manager_prefetch(NetworkResourceManager* mgr,
+                                           const char* url,
+                                           ResourcePriority priority);
+bool resource_manager_wait_for_resource(NetworkResourceManager* mgr,
+                                        NetworkResource* res);
+char* resource_manager_copy_resource_content(NetworkResourceManager* mgr,
+                                             const char* url,
+                                             ResourcePriority priority,
+                                             size_t* out_size);
+// Read an already-completed request without admitting a new blocking transfer.
+char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
+                                                   const char* url,
+                                                   size_t* out_size);
+EnhancedFileCache* resource_manager_get_file_cache(const NetworkResourceManager* mgr);
 
 void resource_manager_cancel(NetworkResourceManager* mgr, NetworkResource* res);
 void resource_manager_cancel_for_element(NetworkResourceManager* mgr, struct DomElement* elmt);

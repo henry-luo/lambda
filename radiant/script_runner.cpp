@@ -507,7 +507,8 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
  *                       Caller must free() the returned string.
  */
 static char* load_script_content(const char* resolved_path, bool is_http,
-                                 bool module_mode) {
+                                 bool module_mode, NetworkResourceManager* resource_manager,
+                                 ResourcePriority priority) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
         // Layout snapshots avoid the full harness, but must run synchronous
@@ -578,6 +579,15 @@ static char* load_script_content(const char* resolved_path, bool is_http,
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver-vendor.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
+    if (is_http && resource_manager) {
+        content = resource_manager_copy_resource_content(resource_manager, resolved_path,
+                                                         priority, NULL);
+        if (content) {
+            log_debug("script_runner: loaded external URL from document resource manager: %s",
+                      resolved_path);
+        }
+        return content;
+    }
     size_t source_length = 0;
     content = js_load_script_source_from_cache(
         resolved_path, "radiant-external",
@@ -593,12 +603,15 @@ static char* load_script_content(const char* resolved_path, bool is_http,
 }
 
 static char* load_script_content_profiled(const char* resolved_path, bool is_http,
-                                          bool module_mode) {
+                                          bool module_mode,
+                                          NetworkResourceManager* resource_manager,
+                                          ResourcePriority priority) {
 #ifndef NDEBUG
     bool timing_enabled = script_task_timing_enabled();
     long load_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
-    char* content = load_script_content(resolved_path, is_http, module_mode);
+    char* content = load_script_content(resolved_path, is_http, module_mode,
+                                        resource_manager, priority);
 #ifndef NDEBUG
     if (timing_enabled) {
         log_notice("script_runner_timing: phase=source-load kind=%s status=%s wall_us=%ld bytes=%zu src=%s",
@@ -1244,7 +1257,8 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
  * Recursively walk the Element* tree, collecting <script> source text
  * (both inline and external) and the body onload handler in document order.
  */
-static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url, int depth) {
+static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url,
+                                      NetworkResourceManager* resource_manager, int depth) {
     if (!elem) return;
 
     // guard against stack overflow from deeply nested DOM (fuzzer-found): this
@@ -1351,8 +1365,11 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
             if (strcmp(task->resolved_url, "builtin:wpt-testharness.js") == 0) {
                 collection->testharness_seen = true;
             }
-            char* content = load_script_content_profiled(task->resolved_url, is_http,
-                                                         task->kind == JS_SCRIPT_TASK_MODULE);
+            ResourcePriority priority = (task->async_attr || task->defer_attr ||
+                task->kind == JS_SCRIPT_TASK_MODULE) ? PRIORITY_NORMAL : PRIORITY_HIGH;
+            char* content = load_script_content_profiled(
+                task->resolved_url, is_http, task->kind == JS_SCRIPT_TASK_MODULE,
+                resource_manager, priority);
             if (content) {
                 task->source = content;
                 task->source_len = strlen(content);
@@ -1390,7 +1407,8 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
         Item child = elem->items[i];
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_ELEMENT) {
-            collect_scripts_recursive(child.element, collection, base_url, depth + 1);
+            collect_scripts_recursive(child.element, collection, base_url,
+                                      resource_manager, depth + 1);
         }
     }
 }
@@ -2129,7 +2147,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_error("execute_document_scripts: failed to initialize script task collection");
         return;
     }
-    collect_scripts_recursive(html_root, &script_tasks, base_url, 0);
+    collect_scripts_recursive(html_root, &script_tasks, base_url,
+                              dom_doc->resource_manager, 0);
     log_script_task_diagnostics(&script_tasks);
     if (timing) timing->collect_us += time_now_us() - phase_start_us;
 

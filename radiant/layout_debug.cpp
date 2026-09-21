@@ -186,6 +186,15 @@ void layout_profiler_note_cache_miss(LayoutProfiler* profiler) {
     if (profiler) profiler->cache_misses++;
 }
 
+void layout_profiler_note_intrinsic_request(LayoutProfiler* profiler, bool cache_hit,
+                                            bool reentrant) {
+    if (!profiler) return;
+    profiler->intrinsic_requests++;
+    if (cache_hit) profiler->intrinsic_cache_hits++;
+    else profiler->intrinsic_cache_misses++;
+    if (reentrant) profiler->intrinsic_reentrant++;
+}
+
 void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t misses) {
     if (!profiler) return;
     profiler->cache_hits = hits;
@@ -200,6 +209,12 @@ void layout_profiler_report(LayoutContext* lycon) {
         p->block_ms, p->inline_ms, p->text_ms, p->flex_ms, p->grid_ms, p->table_ms,
         p->intrinsic_ms, p->style_ms, p->image_ms,
         (long long)p->cache_hits, (long long)p->cache_misses);
+    log_notice("[LAYOUT_PROFILE] intrinsic: requests=%llu hits=%llu misses=%llu reentrant=%llu inclusive=%.1fms exclusive=%.1fms",
+        (unsigned long long)p->intrinsic_requests,
+        (unsigned long long)p->intrinsic_cache_hits,
+        (unsigned long long)p->intrinsic_cache_misses,
+        (unsigned long long)p->intrinsic_reentrant,
+        p->intrinsic_inclusive_ms, p->intrinsic_exclusive_ms);
 
     for (int i = 0; i < p->top_node_count; i++) {
         const LayoutProfileNode* entry = &p->top_nodes[i];

@@ -44,6 +44,14 @@ void radiant_discover_document_resources(DomDocument* doc);
  */
 void radiant_discover_document_font_resources(DomDocument* doc);
 
+// Queue remote @font-face bytes during loader-stage CSS parsing. Registration
+// remains deferred until the UiContext is available on the page thread.
+void radiant_prefetch_document_font_resources(DomDocument* doc);
+
+// Queue remote CSS declaration URL bytes after stylesheet parsing. These are
+// paint dependencies, so they must not compete with CSS or font transfers.
+void radiant_prefetch_document_stylesheet_resources(DomDocument* doc);
+
 /**
  * Check if document is fully loaded (all network resources completed).
  * 
