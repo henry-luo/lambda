@@ -123,6 +123,30 @@ static void xhr_clear_response(XhrState* xhr) {
     xhr_clear_response_headers(xhr);
 }
 
+static void xhr_copy_response_headers(XhrState* xhr,
+                                      const FetchResponse* response) {
+    if (!xhr || !response || response->response_header_count <= 0 ||
+            !response->response_headers) return;
+
+    int header_count = response->response_header_count;
+    char** copied = (char**)mem_calloc(header_count, sizeof(char*),
+                                        MEM_CAT_JS_RUNTIME);
+    if (!copied) {
+        log_error("xhr: unable to allocate response headers");
+        return;
+    }
+    for (int i = 0; i < header_count; i++) {
+        copied[i] = mem_strdup(response->response_headers[i], MEM_CAT_JS_RUNTIME);
+        if (copied[i]) continue;
+        for (int j = 0; j < i; j++) mem_free(copied[j]);
+        mem_free(copied);
+        log_error("xhr: unable to copy response header");
+        return;
+    }
+    xhr->resp_headers = copied;
+    xhr->resp_header_count = header_count;
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -673,24 +697,9 @@ extern "C" Item js_xhr_send(Item body_arg) {
     if (header_strs) mem_free(header_strs);
 
     if (resp) {
-        // store response headers for getResponseHeader/getAllResponseHeaders
-        xhr->resp_headers = resp->response_headers;
-        xhr->resp_header_count = resp->response_header_count;
+        // callbacks can reopen this XHR, so it must own headers before events run.
+        xhr_copy_response_headers(xhr, resp);
         xhr_complete_response(xhr, resp->status_code, resp->data, resp->size);
-
-        // Don't free response yet — headers may be queried later.
-        // We copy data above, so we can free the response body and struct
-        // but keep response_headers alive until XHR reset.
-        // Actually, let's copy headers too so we can free_fetch_response cleanly.
-        if (resp->response_header_count > 0 && resp->response_headers) {
-            char** copied = (char**)mem_calloc(resp->response_header_count, sizeof(char*), MEM_CAT_JS_RUNTIME);
-            for (int i = 0; i < resp->response_header_count; i++) {
-                copied[i] = mem_strdup(resp->response_headers[i], MEM_CAT_JS_RUNTIME);
-            }
-            xhr->resp_headers = copied;
-            xhr->resp_header_count = resp->response_header_count;
-        }
-
         free_fetch_response(resp);
 
         log_debug("xhr: done status=%ld, %zu bytes", xhr->status, xhr->response_size);

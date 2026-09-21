@@ -16,6 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
 
 // Network layout tests use fork/kill/waitpid which are Unix-only
@@ -197,6 +201,23 @@ protected:
         snprintf(url, sizeof(url), "http://localhost:%d/%s", server_port, file.c_str());
         return url;
     }
+
+    static ShellResult headless_view_with_memtrack(const char* page) {
+        char url[256];
+        snprintf(url, sizeof(url), "http://localhost:%d/%s", server_port,
+                 page);
+        const char* args[] = {
+            "./lambda.exe", "view", url, "--headless", "--no-log", NULL,
+        };
+        const ShellEnvEntry env[] = {
+            {"VIEW_MEM_STAGES", "1"},
+            {NULL, NULL},
+        };
+        ShellOptions options = {0};
+        options.env = env;
+        options.merge_stderr = true;
+        return shell_exec("./lambda.exe", args, &options);
+    }
 };
 
 // static member initialization
@@ -233,6 +254,26 @@ TEST_F(NetworkLayoutTest, LayoutWithHttpUrl) {
     // verify view_tree.txt was created
     EXPECT_TRUE(fileExists("view_tree.txt"))
         << "view_tree.txt should be generated";
+}
+
+TEST_F(NetworkLayoutTest, ViewXhrCallbackCanReopenRequest) {
+    ShellResult result = headless_view_with_memtrack("xhr_response_headers.html");
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr)
+        << output;
+    shell_result_free(&result);
+}
+
+TEST_F(NetworkLayoutTest, ViewStyleProjectionIsNotNode) {
+    ShellResult result = headless_view_with_memtrack("dom_style_not_node.html");
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr)
+        << output;
+    shell_result_free(&result);
 }
 
 /**

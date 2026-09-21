@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 Phase III B2 / D3.3.3v3: pair-character fusion requires an explicit string boundary. An inferred string lane retains its established index and equality helpers until a separate source-identical regression gate certifies it.",
+  "checks": [
+    {
+      "in_func": "_tune31_inferred_char_pair_#",
+      "expect": ["call\tfn_string_ascii_at_p, fn_string_ascii_at"],
+      "forbid": ["call\tfn_string_char_eq_p, fn_string_char_eq"]
+    }
+  ]
+}

@@ -6,6 +6,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <stdio.h>
 #include <cstring>
 
 #include "../radiant/render.hpp"
@@ -15,6 +16,7 @@ extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/image.h"
+#include "../lib/memtrack.h"
 }
 
 // Stubs for unresolved symbols in standalone test builds
@@ -96,6 +98,17 @@ static const unsigned char STATIC_GIF[] = {
 };
 static const size_t STATIC_GIF_LEN = sizeof(STATIC_GIF);
 
+// a 1x1 RGBA PNG with an invalid IDAT zlib header. libpng reports the error
+// only after image_load_scaled has allocated its output and row pointers.
+static const unsigned char CORRUPT_PNG[] = {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+    0x0d, 0x49, 0x44, 0x41, 0x54, 0x00, 0x1d, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+    0x1f, 0x00, 0x05, 0x80, 0x02, 0x3f, 0x49, 0xc2, 0xe4, 0xb4, 0x00, 0x00,
+    0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+};
+
 // ============================================================================
 // GIF Detection Tests
 // ============================================================================
@@ -136,6 +149,35 @@ TEST(GifDetection, AnimatedGifReturnsFrames) {
     ASSERT_NE(frames, nullptr);
     EXPECT_EQ(frames->frame_count, 2);
     image_gif_free(frames);
+}
+
+TEST(PngScaledDecode, CorruptImageReleasesBuffers) {
+    const char* path = "./temp/test_gif_player_corrupt_scaled.png";
+    FILE* file = fopen(path, "wb");
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(sizeof(CORRUPT_PNG), fwrite(CORRUPT_PNG, 1,
+                                           sizeof(CORRUPT_PNG), file));
+    fclose(file);
+
+    bool owns_memtrack = memtrack_get_mode() == MEMTRACK_MODE_OFF;
+    if (owns_memtrack) ASSERT_TRUE(memtrack_init(MEMTRACK_MODE_DEBUG));
+
+    MemtrackCategoryStats before = {0};
+    MemtrackCategoryStats after = {0};
+    memtrack_get_category_stats(MEM_CAT_IMAGE, &before);
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    unsigned char* pixels = image_load_scaled(path, 1, 1, &width, &height,
+                                              &channels);
+    EXPECT_EQ(nullptr, pixels);
+    if (pixels) image_free(pixels);
+    memtrack_get_category_stats(MEM_CAT_IMAGE, &after);
+    EXPECT_EQ(before.current_bytes, after.current_bytes);
+    EXPECT_EQ(before.current_count, after.current_count);
+    if (owns_memtrack) EXPECT_EQ(0u, memtrack_shutdown());
+
+    remove(path);
 }
 
 // ============================================================================

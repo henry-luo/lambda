@@ -2607,6 +2607,8 @@ extern "C" {
     Item list_get(List *list, int64_t index);
     Item fn_string_ascii_at(Item str, int64_t index);
     uint8_t fn_string_char_eq_ascii(Item str, int64_t index, uint8_t expected);
+    uint8_t fn_string_char_eq(Item left, int64_t left_index,
+                              Item right, int64_t right_index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item object_get(Object* obj, Item key);
@@ -3067,6 +3069,12 @@ extern "C" {
 
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
+    String *fn_strcat3(String *part0, String *part1, String *part2);
+    String *fn_strcat4(String *part0, String *part1, String *part2, String *part3);
+    String *fn_strcat5(String *part0, String *part1, String *part2, String *part3,
+        String *part4);
+    String *fn_strcat6(String *part0, String *part1, String *part2, String *part3,
+        String *part4, String *part5);
     enum { LAMBDA_STRING_CONCAT_MAX_PARTS = 64 };
     String *fn_strcat_many(int64_t owned, int64_t count, ...);
     String *fn_string_freeze(String *str);
@@ -3301,6 +3309,10 @@ extern "C" {
     // CW25: bounded descriptor form for compiler-known member/int paths.
     Item cow_path_borrow_fixed(Item owner, int64_t count,
         Item key0, Item key1, Item key2);
+    // Tune31 Phase III A1: shape-checked direct field borrow with the fixed
+    // descriptor retained as the mismatch path.
+    Item cow_path_borrow_typed_map_field(Item owner, struct TypeMap* expected_shape,
+        struct ShapeEntry* expected_field, Item fallback_key);
     // builtin mutator place (push/splice/set): spine detach; a non-container
     // link is returned as the value for the mutator to reject
     Item cow_place_leaf(Item owner, Item path);

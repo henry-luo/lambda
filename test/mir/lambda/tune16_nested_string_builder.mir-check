@@ -5,7 +5,7 @@
     {
       "in_func": "_main_#",
       "expect": [
-        "fn_strcat_many"
+        "fn_strcat5"
       ],
       "forbid": [
         "call\tfn_join_p, fn_join"

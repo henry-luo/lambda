@@ -9,6 +9,11 @@
   are recorded in §3.7 and §4.4. The full Phase II baseline passes, as
   recorded in §6.5. Three follow-on typed source ports are recorded in §7;
   they are intentionally separate from the Tune31 engine results.
+  The post-Phase-II typed engine review is in §8. **Phase III is COMPLETE**
+  in §9: B1 fixed-arity owned string append, B2 typed character-pair equality
+  and A1 typed field borrows are implemented and release-confirmed; A2, C and
+  D1 are rejected, and D2/E are deferred with evidence. The full-suite typed
+  objective was missed and the row-level regression guard is inconclusive.
 - **Scope:** recover native execution in untyped Lambda, close measured
   regressions, and remove repeated runtime work in both Lambda variants.
 - **Primary evidence:** [Result42–47 analysis](Lambda_Benchmark_Result47_Analysis.md),
@@ -1037,9 +1042,11 @@ candidate profile has 333,406 string append calls carrying 1,333,506 pieces;
 finalized MIR has four static fn_strcat_many call sites: the hot encode site
 passes the owned accumulator plus all four Base64 characters in one call.
 Thus the source's four-character quantum is already one append boundary, not
-four nested concatenations. Removing that boundary would require an
-encoding-specific emitter or a second string builder, neither of which is a
-generic helper reduction under **S7.1.1v3–S7.1.2**. No C change is retained.
+four nested concatenations. No C change is retained. The later review in §8
+identifies a generic remaining opportunity: specialize the existing builder's
+known-arity, capacity-fit path. This does not require an encoding-specific
+emitter or a second string builder; flattening alone did not establish that
+the surviving append boundary was cheap.
 
 **D closure — scalar boundaries require a domain proof.** Forced-JIT bounce
 has no array COW events and completes its timed body in 0.149 ms, although
@@ -1126,8 +1133,8 @@ close without a safe, measured generic change.
 These benchmark-source rewrites apply the same representation discipline as
 the typed Hyphen port. They do not change the runtime and must not be folded
 into a Tune31 engine geomean. **D3.3.3v3** permits an explicit source
-representation to retain its established carrier; **S7.1.2** keeps string
-indexing and slicing semantic rather than requiring a byte-output buffer.
+representation to retain its established carrier; **S7.1.1v3–S7.1.2** keeps
+string indexing and slicing semantic rather than requiring a byte-output buffer.
 Each port keeps its external text output and canonical oracle.
 
 | Typed source | Rewritten hot representation | JIT control → candidate | Ratio, upper 95% | Pairs |
@@ -1164,3 +1171,928 @@ with the canonical checksum. The archived release evidence is under
 `paired_knucleotide_typed_table_jit_81.json`,
 `paired_fast_diff_code_tables_jit_41.json`, the matching `profiles/` TSVs,
 and the Fast Diff `mir/` dumps.
+
+## 8. Typed engine review after Phase II (2026-09-21)
+
+**Status:** diagnostic review informing the Phase III proposal in §9; no new
+engine implementation or paired speedup is claimed here. Sources are the tree at
+`a6f14956e`; new probes use the immutable final Phase II release
+`temp/tune31_phase2/lambda-phase2-var-path-release`, SHA-256
+`2b875a393b51be8ef93ec073ac6f4851615250c3db9ced4632af729d57e260ec`.
+No formal ruling changes.
+
+### 8.1 Why typed execution has plateaued
+
+Phase I's typed same-source suite ratio is **0.9778**, or 2.22% less execution
+time. Excluding pnpoly it is **0.9962**, or only 0.38% less. Its largest
+untyped changes recover native counters, array witnesses and producer/return
+facts that the typed entries already possessed. The typed 41-pair ratios for
+quicksort and text_search are **0.9967** and **1.0005**, respectively; the
+large untyped improvements do not describe these typed kernels.
+
+Phase II's confirmed typed engine improvement is the isolated hashmap
+root-preparation change: **38.950 → 37.653 ms**, ratio **0.9667**, upper 95%
+**0.9878**. The roughly fivefold nbody inferred-store gain is untyped. Hyphen
+and §7's three source ports change the workload's internal representation and
+are reported separately. B and E retained no engine implementation, and C/D
+closed without one. Phase II therefore did not yet deliver the broad typed
+ownership, construction and helper removal originally envisaged.
+
+There is no matched full-suite Phase II engine replay from which to calculate
+a measured combined Phase I + II geomean. Such a replay is possible by keeping
+sources fixed across binaries; the source rewrites do not make it impossible.
+For scale only, a 3.33% gain in one of 63 equally weighted rows contributes
+about **0.054%** to the suite geomean if all other rows are unchanged. Ten
+independent twofold row gains would lower it by about 10.4%. Broadly reused
+mechanisms are needed to meet the original typed-suite objective.
+
+An annotation establishes a type/carrier contract, not automatically a proof
+of unique ownership, stable field location, valid index range, finite numeric
+values or temporary lifetime. Existing typed arithmetic and packed arrays
+already remove much dynamic dispatch. The remaining cost lies at the places
+where those additional facts are unavailable or lost across a call, borrow,
+store or loop (**D3.3.3v3–D3.3.4**, **D4.4.4v4**, **D5.3.1–D5.3.4**).
+
+### 8.2 Fresh executed evidence
+
+Eleven canonical forced-JIT runs completed with matching output/oracles.
+Eight separate repeated-entry CPU probes sampled the final Phase II release
+at 1 ms intervals for three seconds each. All sampled source bodies are
+unchanged from Phase I. The two rewritten sources included in the canonical
+census, log_pipeline2 and fast_diff2, are not used to attribute an engine gain.
+
+The counts below cover the complete canonical script, including setup. CPU
+shares are approximate diagnostic samples, not isolated benchmark-timer
+shares or paired timing results. Repeated entry changes heap history, some
+internal symbols are unresolved, and inclusive shares overlap; do not add
+them or turn them directly into promised speedups.
+
+| Typed row | Final Phase II evidence | Remaining target |
+|---|---|---|
+| hashmap | Zero copies; 4 root-map and 450,000 child-array preparations. `cow_prepare_write` ~1.3%, `fn_index` ~26.2%, type checking ~16.5% | Typed field-borrow traversal and repeated array admission, rather than more root share-bit tuning |
+| prettier_ast | 6,615,040 union admissions, with 6,615,034 union-map representation cache hits. Member access ~32.4%, type checking ~19.8% | Eliminate proven redundant boundary calls and specialize known field layouts |
+| base64 | 333,406 append calls; 332,400 reuse capacity. `fn_strcat_many` ~49.3%, including ~45.8% self; GC <1% | Existing append helper's per-call/per-piece cost |
+| cube3d | `fn_fill` ~30.7%, type checking ~15.2%, GC ~13.7%; no COW copies | Small-array construction, admission and result lifetime |
+| splay | 951,168 map copies, 61,825,920 copied bytes; write preparation ~35.6%, GC ~29.7% | Avoidable capture/detach and repeated typed path operations |
+| havlak | 65,876 map + 44,999 array copies, 7,502,280 bytes; write preparation ~23.8%, GC ~21.6%, type checking ~15.5% | Ownership/path facts and contract propagation |
+| text_search | ~82.8% JIT self, ~0.1% type checking; raw lane reads still have repeated bounds/sentinel checks in MIR | Native loop range and value-domain proofs |
+| three_way_merge | 20,803,304 unique array preparations but zero copies; preparation ~1.7%, split ~39.4%, array_push ~19.5% | Split/result construction, rather than COW based on call count alone |
+
+Splay and havlak's copy counts are unchanged from the Phase I census.
+Deltablue also retains **38,980 ArrayNum copies / 3,409,760 bytes**. These
+are actual copies, unlike hashmap's cheap uniqueness tests. Not every copy
+is removable: the compiler must establish that the old value has no observer
+before suppressing a snapshot (**S9.1.2–S9.1.3**, **D4.4.6**).
+
+The independent C2MIR ports commonly have fixed field offsets, direct array
+loads/stores and caller-owned buffers. Lambda still traverses generic paths,
+re-establishes contracts and constructs GC-managed results in these cases.
+Splay additionally uses a different rotation/mutation organization. Historical
+Result47 typed/C ratios identify the scale, not a newly measured Phase II gap:
+hashmap and cube3d about 13x, base64 15x, splay 17x, havlak 33x, and text_search
+3.2x. Three-way merge was already about 1.06x. Equal results do not imply equal
+memory workloads, and these ratios are not all removable compiler overhead.
+
+### 8.3 Proposed next engine work, in priority order
+
+**1. Carry typed field and admission facts through a borrow/call.** Start
+with hashmap, then the union-record consumers in prettier/havlak. The current
+`mir_emit_cow_path_borrow` avoids the redundant root preparation, but
+`cow_path_borrow_impl` still calls `fn_index` for each path link and prepares
+the child. Extend the existing typed field plan to load a proven field lane
+directly, test the child's current carrier/ownership and retain the shared
+detach/relink fallback. Preserve the admitted array contract into the callee
+when the proof survives the call boundary. This targets the measured lookup
+and admission costs that Phase II A left intact.
+
+Prettier's almost perfect cache-hit rate demonstrates why adding another
+cache is not the solution: millions of successful runtime transitions still
+cost time. Extend existing `mir_member_read_proves_contract` /
+`mir_call_result_proves_contract` facts to justified union edges. For field
+access use a proved common layout or a static shape guard with fallback.
+Its current `kind: string` fields are not literal discriminants, so a
+`kind == "text"` test alone must not be treated as proof of a record shape.
+Respect current-carrier certificates, invalidation by mutation/resharing,
+caller-home writeback, and pointer reloads after allocation
+(**D3.3.3v3**, **D4.4.4v4**, **D5.3.1–D5.3.4**). Use no call-site inline cache
+(**D8.4.1v2**).
+
+**2. Remove generic work from the existing string fast paths.** Base64's
+concat tree is already flattened and its accumulator normally has capacity;
+there is no evidence for a new builder or integer output buffer. The current
+`fn_strcat_many` still materializes varargs and uses the variable-count
+`string_buffer_join<0>` path. Specialize known arity through the shared helper
+template, then evaluate a compiler-emitted capacity-fit path when lengths,
+ownership and overlap are proved. Keep allocation/growth/freezing on the
+existing slow path. A successful nonallocating branch can avoid the helper
+transition and its safepoint traffic; the allocating branch retains precise
+roots (**D5.3.1–D5.3.4**).
+
+Also fuse scalar string consumers such as `ord(s[i])` and `s[i] == t[j]`.
+Literal-character equality already has an allocation-free helper, but two
+indexed characters can still cross two string helpers and generic equality.
+Use guarded ASCII byte loads where valid and retain Unicode, null and bounds
+semantics (**S7.1.1v3**, **D3.3.4**). This lets ordinary string source recover
+part of the benefit obtained manually by Fast Diff's code-table rewrite.
+Measure on the archived original source as well as source-port guards. Module
+string-table lanes must be validated in auto/T0 as well as forced JIT: the
+current module-slot carrier is not interchangeable with a packed pointer lane
+(**D3.3.3v3**).
+
+**3. Add relational range proofs to already-native loops.** Text search is
+the strongest freshly sampled candidate. Its `naive_search` MIR has raw
+integer loads yet repeats index guards, int53 arithmetic checks and nullable
+element handling in the inner loop. Prove relationships such as
+`0 <= position <= n - m`, `0 <= offset < m`, and hence
+`position + offset < n`; carry invariant lengths only while the arrays are
+stable. Eliminate redundant read guards and checked counter arithmetic where
+these proofs suffice. Range safety and element-value safety are separate:
+`int[]` does not establish that every element is finite or in 0..255. Removing
+element sentinel handling needs a producer/domain proof or a guarded fallback
+(**S4.1.1–S4.1.5**, **S4.2.3**, **S7.1.1v3**, **D3.3.4**).
+
+Reuse the analysis for quicksort and the rewritten Fast Diff numeric loop,
+then measure each unchanged source. Inspect native instructions before
+attributing any residual cost to register spills or MIR register allocation;
+a large MIR dump alone is not evidence for either.
+
+**4. Fuse small-array production with its established contract.** Cube3d
+already receives packed numeric storage from fill and has
+`mir_fill_proves_nonempty_numeric_array_contract` plus a narrow numeric
+admission helper. This is not an unimplemented packed-array path. Remove
+remaining redundant producer/consumer checks by constructing storage with
+its valid contract and propagating that fact through returns. Next consider
+destination construction or scalar replacement for the returned 3/4/16-lane
+temporaries, only with an escape/lifetime and full-overwrite proof. C's reused
+buffers explain the opportunity, but neither deleting initialization nor
+turning every result into an inout parameter is justified
+(**D3.3.3v3**, **D4.1.4v4**, **D5.2**, **S9.1.2–S9.1.3**). The rejected
+literal and FFT-var experiments already show that fewer copies or more
+explicit source can still cost more.
+
+**5. Extend ownership/liveness analysis where actual copies dominate.**
+Splay, havlak and deltablue offer a larger structural opportunity but require
+more analysis than skipping an extra unique-root check. Attribute remaining
+share marks to their binding/call sites and establish which old values are
+dead before a rotation or nested update. Extend the existing synthesized-place
+and move/store-back analysis for those proved cases, sharing the static
+decision between tiers. Retain fallback copies for observed snapshots and
+invalidate borrowed facts at conflicting writes, escaping captures and
+resharing (**S9.1.2–S9.1.3**, **D4.4.4v4–D4.4.6**). Reduce allocation demand
+before proposing GC tuning; a GC percentage alone does not identify a collector
+defect.
+
+### 8.4 Evidence gates for the follow-up
+
+Each candidate needs an unchanged-source release A/B, an executed-cost change
+and a semantic/optimization pin. Useful pins are mandatory loop-helper
+absence on a proved path, bounded admission counts, reduced attributable
+copy/allocation counts, and preservation of the slow path. Cover shared-child
+detachment and reborrowing, contract invalidation, null/out-of-range reads,
+Unicode strings, growth/aliasing and forced precise GC as applicable. Do not
+substitute static instruction reduction or cache hits for a measured gain.
+
+Use short alternating pairs for discovery and longer confirmation when the
+observed variance requires it; 41 is not a semantic requirement. After the
+accepted candidates, replay all 63 typed rows with fixed sources against both
+the Phase I control and final release, retaining untyped regression guards.
+Report the measured engine geomeans, source-port gains, JIT execution and
+auto/process-wall results separately. No combined phase result is inferred
+from the isolated hashmap experiment.
+
+Reproducibility artifacts are under `temp/tune31_typed_review/`:
+`canonical_profiles.json` retains all eleven canonical runs and counters;
+`profiles.json` and `profiles_text.json` retain the release/source/wrapper
+hashes for eight successful samples; `*.sample.txt`, `*.tsv` and `*.mir`
+retain the raw evidence. `probe.py`, `sample_current.py` and `summary.json`
+retain the diagnostic procedure and extracted attribution.
+
+## 9. Phase III — Typed engine optimization proposal
+
+**Added:** 2026-09-21. **Status:** COMPLETE; B1, B2 and A1 are implemented
+and independently confirmed below; A2, C and D1 were rejected by measurement,
+and D2 and E are deferred with their proof reasons recorded in §9.10. The
+full-suite typed objective was not met, as recorded in §9.11.
+The diagnostic baseline is §8, and the following tracks elaborate §8.3.
+This phase targets engine gains on unchanged typed sources. §7's completed
+source ports remain separate results, even though their existing artifact
+directory is named `temp/tune31_phase3/`. New Phase III engine artifacts go
+under `temp/tune31_phase3_engine/` to keep those experiments distinguishable.
+
+**Objective:** remove repeated generic operations where an existing typed
+contract plus a valid ownership, layout, range or lifetime proof can establish
+the result. Target a **≤0.90 typed execution geomean against the Phase III
+start release**, with confirmed improvements in multiple workload families
+and no confirmed >3% unchanged-row regression. This is a planning objective,
+not a prediction from inclusive CPU percentages. Report a missed objective
+explicitly; individual pilot wins do not satisfy the suite objective.
+
+### 9.1 Scope, order and common implementation rules
+
+| Track | First implementation slice | Primary unchanged pilots | Required mechanism evidence |
+|---|---|---|---|
+| A1 | Direct typed field-borrow path | hashmap | Generic lookup absent on the proved path; shared-child detach still correct |
+| A2 | Contract propagation through calls and union fields | hashmap, prettier_ast, havlak | Repeated admission calls decline, not merely cache misses |
+| B1 | Known-arity and capacity-fit string append | base64 | Lower append-path work; copied bytes and growth remain bounded |
+| B2 | Fused scalar string consumers | archived pre-rewrite fast_diff, current string workloads | Eligible character reads avoid temporary string/helper chains |
+| C | Relational loop bounds and separate numeric-domain proofs | text_search, quicksort, current fast_diff | Redundant checks disappear inside the proved loop region |
+| D1 | Typed numeric producer/admission fusion | cube3d | Fewer admission boundaries without extra construction/copies |
+| D2 | Destination construction or scalar replacement | cube3d | Fewer temporary allocations, with escape and initialization proofs |
+| E | Broader place/liveness analysis | splay, havlak, deltablue | Attributable share marks, actual copies and copied bytes decline |
+
+Implement A1, B1 and C's bounds slice first: they address directly observed
+costs with relatively bounded proof requirements. Follow with A2, B2 and D1.
+Begin E's attribution early, but implement its ownership changes only after
+identifying a specific removable capture pattern. D2 depends on D1's result
+and an explicit lifetime proof. Each slice has its own release comparison;
+do not combine unmeasured changes and then infer which one helped.
+
+Extend the existing semantic and MIR analysis facilities. In particular:
+
+- Use current typed field/path plans, contract proof helpers, interval facts
+  and `MirEmitter` events. Do not create a parallel type authority or another
+  builder/ownership subsystem. Extract shared logic before adding another
+  near-identical lane or arity case.
+- Keep semantic contract, physical carrier, nullability, index validity,
+  element domain and uniqueness as distinct facts. **D3.3.3v3** requires the
+  certificate to match the current carrier; **D3.3.4** keeps an unproved read
+  nullable. An annotation or a previous cache hit cannot substitute for a
+  missing proof.
+- Record a fact's origin, scope and invalidation conditions. Merge only facts
+  valid on every incoming path. Rebinding, prefix mutation, representation
+  change, escaping aliases and writer calls invalidate affected facts under
+  **D4.4.4v4**. Reload data pointers after possible allocation.
+- Preserve evaluation order, observable snapshots, inout publication and
+  error behavior. **S9.1.2–S9.1.3**, **S7.1.1v3** and **S7.1.3v2** continue
+  to govern optimized and fallback paths.
+- Rooting remains owned by `MirEmitter` and precise runtime frames. Remove
+  unnecessary allocating boundaries rather than deleting required root
+  publication. A `NO_GC` helper requires the transitive verification specified
+  by **D5.3.2**; all allocating fallbacks retain **D5.3.1–D5.3.4**.
+- Use compile-time facts and static guards, not runtime call-site feedback or
+  inline caches (**D8.4.1v2**). Work stays in Lambda's MIR Direct/runtime code;
+  this proposal requires no MIR vendor changes or C-text backend.
+
+### 9.2 A — Typed field borrows and admission propagation
+
+**Starting points:** `mir_emit_cow_path_borrow`, the existing direct field
+load/store plans and `mir_member_read_proves_contract` /
+`mir_call_result_proves_contract` in `lambda/runtime/transpile-mir.cpp`;
+`cow_path_borrow_impl` and contract admission in
+`lambda/runtime/lambda-eval.cpp`. Existing reuse and union tests in
+`test/test_lambda_opt_gtest.cpp` establish the starting behavior.
+
+**A1 implementation sequence.**
+
+1. Trace the typed `int_slot_set(var slots: int[], ...)` call from each
+   HashMap field. Record where the field's layout and admitted array carrier
+   cease to be available. Keep the Phase II root-preparation elimination.
+2. Extend the existing field plan for an admitted record and a statically
+   named container field. Load the child from its proved storage lane, check
+   the child's ownership/current carrier, and borrow directly on the valid
+   unique path. Begin with one field; compose longer paths only through the
+   same shared machinery.
+3. Reuse the canonical path helper for shared/static storage, incompatible
+   carriers or unresolved paths. Detachment must relink the replacement into
+   the owner before the mutation, preserve caller-home publication and retain
+   error-path visibility. A parent being unique never proves its child unique.
+4. Carry stable field/contract facts into the local callee only where the
+   existing entry mechanism can honor the proof. An unknown/public entry
+   still checks its arguments. Re-establish facts after a body-side capture,
+   replacement or writer call; do not cache a raw data pointer across GC.
+
+**A2 implementation sequence.**
+
+1. Classify the surviving array/union admissions by producer, field read,
+   parameter and result boundary. Separate a necessary first admission from
+   repeated validation of an unchanged admitted value.
+2. Extend existing contract propagation for those specific edges. For a
+   union field, every possible surviving arm must establish the required
+   field contract, or a static shape guard must select a proved arm and leave
+   a checked fallback. Nullable receivers need their existing null treatment.
+3. Reuse a common field offset only when the physical layout agrees across
+   the proved arms. Prettier's `kind: string` is not a literal discriminator;
+   equality with `"text"` alone cannot authorize a record-specific offset.
+4. Carry a proved return contract to its consumer without another admission,
+   preserving raised-error and null branches. Do not globally mark a semantic
+   union or boxed array as having a native physical representation.
+
+**Optimization and semantic pins.** Extend the existing
+`VarPathBorrowAvoidsRepeatedUniqueRootPreparation`,
+`BorrowedNumericArrayRetainsStoreLane` and union-field tests with focused
+fixtures. A unique typed field loop should have no mandatory generic field
+lookup and no admission count proportional to iteration count when its
+contract remains valid. A shared-child fixture must still detach exactly at
+the first necessary write; a later capture must re-enable preparation.
+Include prefix replacement, callee rebind, nullable/missing fields, malformed
+open-union children and a semantically compatible but physically boxed array.
+Check caller and retained snapshot outputs in interp/JIT/auto and forced GC.
+
+**Acceptance.** Confirm hashmap improvement beyond the Phase II A release.
+For A2, demonstrate reduced executed admissions and gains on at least one
+additional applicable pilot. Hashmap's 450,000 unique child events need not
+all disappear: success is cheaper proved traversal/transport, not a counter
+target that suppresses necessary ownership checks. A cache-hit improvement
+without fewer boundary calls or a timing gain does not meet this track.
+
+### 9.3 B — Existing string append and scalar consumers
+
+**Starting points:** `mir_emit_string_concat_tree`,
+`mir_ascii_char_index_expr` and `emit_ascii_char_literal_compare` in
+`transpile-mir.cpp`; `string_buffer_join<fixed_count>`, `fn_strcat_many` and
+the shared copy/reserve functions in `lambda-eval.cpp`; character access
+helpers in `lambda-data-runtime.cpp`. Strings remain the public and output
+representation under **S7.1.1v3–S7.1.2**.
+
+**B1 implementation sequence.**
+
+1. Add a bounded known-arity entry strategy using the current join template.
+   Select it from the concat tree's actual operand count. Avoid hand-copied
+   per-arity reserve/copy implementations; use the generic path outside the
+   supported static cases. This first slice can reduce varargs and loop work
+   without changing allocation semantics.
+2. Measure that slice before attempting an inline fast path. If the remaining
+   helper cost warrants it, emit the existing capacity-fit operation for an
+   owned accumulator when operand types, lengths and overlap checks permit
+   it. Evaluate operands once, in order, before updating the accumulator.
+3. Preserve required-length overflow checks, terminator, byte length, ASCII
+   flag, freeze/share behavior and alias handling. A repeated accumulator
+   operand must retain the old contents. Growth and unsupported cases use the
+   same shared runtime implementation with normal precise roots.
+4. Keep profiling meaningful when the fast path moves: distinguish append
+   operations from runtime helper invocations. Reuse the disabled-by-default
+   profiling infrastructure so fewer counted helper calls cannot hide extra
+   copying, freezing or allocation.
+
+**B2 implementation sequence.**
+
+1. Recognize scalar consumers of indexed strings: start with `ord(s[i])`,
+   then two indexed-character equality. Reuse literal-character comparison
+   policy instead of adding an unrelated ASCII subsystem.
+2. For proved strings with valid finite indices, emit the appropriate bounds
+   and ASCII guards, then consume character bytes directly. Keep the existing
+   general semantics for non-ASCII input, invalid indices and other values;
+   invalid reads must retain their `null` behavior and subsequent consumer
+   semantics. `ord` yields the character value, not an arbitrary UTF-8 byte.
+3. Hoist stable ASCII/length facts only when the receiver cannot change.
+   Exclude effectful operands from rewrites that would duplicate, reorder or
+   suppress their evaluation. Do not predecode fixture text before its timer
+   as part of an engine comparison.
+4. Audit module string-array constants in forced JIT and auto/T0. If a direct
+   lane is unavailable because the current module carrier differs, either
+   prove that carrier or retain its generic access. A declaration alone does
+   not justify interpreting boxed Item slots as string pointers.
+
+**Optimization and semantic pins.** Extend `LambdaOptStrings` growth and
+copy-volume tests. Cover all selected arities, empty pieces, capacity fit,
+growth, frozen accumulators, self-concat, repeated operands, aliased snapshots,
+embedded NUL and non-ASCII characters. Pin helper absence only inside the
+eligible fast region; exercise growth/Unicode fallbacks independently.
+Scalar-consumer fixtures cover negative/out-of-range/null/poison indices and
+side-effect order in addition to ASCII output. Every fixture has a `.txt`
+golden; representation and allocation changes run with precise GC stress.
+
+**Acceptance.** B1 must improve unchanged base64 without increasing copy
+complexity or regressing existing string-builder guards. B2 uses the archived
+pre-rewrite Fast Diff source on both binaries to measure the engine's recovery
+of ordinary-string performance; current Fast Diff and Hyphen are regression
+guards. Archive dependencies as well as the entry script. Report B1 and B2
+separately. No encoding-specific emitter or integer output buffer is needed.
+
+### 9.4 C — Relational bounds for native loops
+
+**Starting points:** `mir_int_lane_interval`,
+`mir_index_statically_in_bounds`, existing finite-int facts and dense-loop
+index proofs in `transpile-mir.cpp`. Extend their common proof consumers;
+do not special-case a benchmark function name or copy the loop emitter.
+
+**Implementation sequence.**
+
+1. Extend the bounded-loop analysis to retain simple affine relationships
+   between induction variables, stable lengths and offsets. Start with
+   nested counted `while` loops whose updates and exits are understood.
+   Intersect facts at joins and restore the prior environment on loop exit.
+2. In the text-search pattern, establish `0 <= m <= n`, the valid outer
+   position range and `0 <= offset < m`. Prove `position + offset < n` and
+   `offset < m` without evaluating potentially overflowing arithmetic in the
+   proof guard itself. Empty or longer patterns must retain their original
+   behavior. If guards are needed, evaluate them once before a fast loop and
+   retain the canonical checked loop on a miss.
+3. Feed those facts into the existing indexed read and integer arithmetic
+   lowering. Eliminate only the proven redundant sign, upper-bound and
+   counter-overflow checks. Account for the update at the final iteration;
+   an in-range body does not by itself prove the terminating increment safe.
+4. Treat finite element values as a separate slice. A producer's closed
+   domain may justify native equality/arithmetic after its stores are proved,
+   but `int[]` contains more than ordinary finite machine integers. Retain
+   poison/null handling unless an independent scoped proof removes it under
+   **S4.1.1–S4.1.5**, **S4.2.3** and **D3.3.4**.
+5. Invalidate affected length, carrier or element facts on rebind, resizing,
+   uncertain stores and writer calls. Reuse the same analysis on quicksort
+   and current Fast Diff where their loop shapes qualify; declining an
+   unproved case is preferable to adding a workload-specific exception.
+
+**Optimization and semantic pins.** Add positive nested-loop fixtures with
+variable lengths and offsets, plus negatives for non-unit/unknown updates,
+early breaks, receiver mutation, aliasing, zero lengths, longer patterns,
+negative indices and finite-limit/poison arithmetic. Pin bounds/overflow
+instruction removal in a scoped MIR region, and require the checked sibling
+when runtime guards remain. A generic helper census alone is insufficient:
+these loops were already mostly native. Verify interpreter/JIT/auto outputs
+and retain the existing nullable-bool and int-lane regression fixtures.
+
+**Acceptance.** Require an unchanged text_search paired gain, not just fewer
+MIR instructions. Record native instruction/code-size evidence for the hot
+loop and check compile time when cloning a loop. A result attributed to fewer
+spills must include native evidence; do not infer register-allocation costs
+from MIR size. Quicksort/Fast Diff provide both applicability and regression
+checks, not a requirement that every loop qualify.
+
+### 9.5 D — Typed construction and temporary lifetime
+
+**Starting points:** `mir_fill_proves_nonempty_numeric_array_contract`,
+`emit_fill_numeric_array_declaration_boundary`,
+`lambda_array_admit_numeric_contract` and the existing packed constructors.
+Cube3d already has packed fill; preserve that baseline rather than replacing
+it with the rejected source-literal experiment.
+
+**D1 implementation sequence.**
+
+1. Attribute repeated checks to fill production, declaration, parameter and
+   return boundaries. Use existing counters where available; add a narrow
+   profiling counter only when it identifies a missing cost category.
+2. Fuse the producer and its explicit numeric contract through a shared
+   constructor/admission facility. The returned value must actually have
+   the certified rank, leaf contract and physical carrier. Preserve zero
+   length, invalid length, error propagation and nullable-element cases.
+3. Carry that established fact through known results and consumers using
+   track A2's proof machinery. Avoid replacing a cheap admission with another
+   generic call or a second allocation. Generalize lane handling through
+   shared helpers, not copied int/float/bool branches.
+
+**D2 is a separately measured lifetime slice.** Examine the 3/4/16-element
+results only after D1. Scalar replacement is eligible where the allocation
+does not escape and every observed lane can retain its proper value. Direct
+destination construction additionally needs compatible ownership, complete
+initialization and safe input/output aliasing. A value retained across calls
+cannot share a reused result buffer. Exceptions, partial writes and early
+returns must preserve the values visible before an exit. Keep ordinary
+allocation for unproved cases; use no unsafe stack allocation of escaping
+containers or conservative stack GC. Authority is **D3.3.3v3**, **D4.1.4v4**,
+**D5.2**, **D5.3** and **S9.1.2–S9.1.3**.
+
+**Optimization and semantic pins.** Test producer-contract reuse across a
+local return, zero-size arrays, mismatched/nullable fill values, boxed carrier
+fallbacks and a caller that keeps multiple returned arrays alive. For D2,
+include partial initialization, input/destination overlap, nested calls and
+forced allocation during result construction. Require fewer admission calls
+for D1 and fewer attributable allocations for D2; zero COW copies alone is
+not an allocation measurement. Extend existing admission/constructor tests.
+
+**Acceptance.** Confirm unchanged cube3d improvement with separate D1/D2
+results and allocation evidence. Retain FFT, nbody and ordinary numeric-array
+tests as guards. An inout rewrite or a fill-to-literal source change cannot
+be credited to this engine track. Close an unsuccessful experiment with its
+negative evidence, rather than assuming that buffer reuse must help.
+
+### 9.6 E — Ownership and liveness for copy-heavy structures
+
+**Starting points:** `lambda_ast_plan_place_handles`, `rmw_branch_local` and
+the place-copy lifetime analysis in `lambda/runtime/build_ast.cpp`, plus
+their interpreter/MIR consumers. The relevant authority is
+**D4.4.4v4–D4.4.6** and **S9.1.2–S9.1.3**, not a new aliasing convention.
+
+**Implementation sequence.**
+
+1. Attribute Splay/Havlak/Deltablue's surviving share marks and copies to
+   specific bindings, rotations and nested calls. Reuse existing COW
+   profiling; if aggregate counters cannot identify a cause, add an opt-in
+   site/reason diagnostic. Keep attribution runs outside timing measurements.
+2. Select a concrete pattern where the previous value has no observer by the
+   time a place is updated. Extend the existing last-use/store-back analysis
+   for that shape. A last syntactic reference is insufficient if the value
+   escaped, survives in a closure or was stored in another container.
+3. Decide eligibility once in shared AST analysis for both tiers. Carry the
+   existing runtime spine test and store-back-or-mark obligations onto every
+   writing path, including branches, nested calls and error exits. Loop-carried
+   values need facts valid across the back edge; an unknown writer invalidates
+   the affected borrow.
+4. Reuse track A's stable typed path information within the proved region.
+   Preserve child-sharing checks and reload moved data after allocation.
+   Reduce unnecessary capture/detachment before considering collector tuning.
+
+**Optimization and semantic pins.** Extend the existing sibling-handle,
+move-out and place-mutator tests with branch-local rotations, recursive calls,
+loop-carried handles and caller-root rebinds. Positive cases pin the specific
+copy reduction. Paired negative cases retain an old node, store it elsewhere,
+capture it or observe it after a writer call, and must still see the snapshot.
+Include early return/error publication and forced GC/poisoning/root-witness
+runs on both ownership implementations. Do not replace a copy assertion with
+a looser threshold merely to accommodate a regression.
+
+**Acceptance.** At least one unchanged copy-heavy pilot must show both an
+attributed copy/byte reduction and a confirmed timing gain. Expand the pattern
+to another eligible workload through the same analysis. A lower GC percentage
+without allocation/copy evidence does not establish why performance changed,
+and C's pointer-rotation algorithm is not a license to change Lambda's source
+or snapshot semantics.
+
+### 9.7 Optimization regression tests
+
+Use the existing `test/test_lambda_opt_gtest.cpp`,
+`test/test_mir_emission_gtest.cpp` and `test/mir/lambda/` infrastructure.
+Candidate fixture names may use `tune31_phase3_*`; all such fixtures in this
+proposal are planned, not already present. Every new `.ls` gets a matching
+`.txt`; emitted-code checks use `.mir-check` sidecars where appropriate.
+
+Each retained optimization needs a positive mechanism assertion and a
+fallback/invalidation negative, in addition to output correctness. Prefer
+iteration-independent admission counts, attributable copy/allocation bounds
+and scoped instruction assertions over exact full-function MIR snapshots.
+The existing sidecar `in_range` support can distinguish a fast arm from its
+checked sibling. Use `mir_mandatory_census.py` for mandatory loop calls;
+neither its absence result nor a whole-function static count proves that a
+helper is never executed. Pair it with the canonical executed census.
+
+Audit earlier assertions when a stronger implementation supersedes them.
+For example, `tune31_var_path_borrow.mir-check` currently *requires*
+`cow_path_borrow_fixed`; A1 may legitimately replace its eligible path.
+Update that assertion to pin direct access, necessary fallback behavior and
+root-preparation elimination. Similarly, an admission test that currently
+requires cache hits may need a new positive assertion for eliminated calls,
+while retaining its malformed-input fallback. Replace the old mechanism with
+a stronger measured invariant, not simply removal of the failing assertion.
+
+For retained engine changes, run focused tests, relevant MIR/GC tests and
+`make test-lambda-baseline`. Re-establish any failure on the actual control;
+do not inherit historical exemptions or mask failures in a harness. Timing
+thresholds belong in paired release reports, not unit-test wall clocks.
+
+### 9.8 Release measurement and phase attribution
+
+**Freeze the comparison before implementation.** Archive a `make release`
+binary and manifest for the Phase III start, identifying whether its engine
+matches the final Phase II binary or includes later engine commits. Record
+binary/engine commit, source and transitive dependency hashes, fixture data,
+tier, environment, output digests and raw samples. Preserve original and
+rewritten source populations explicitly; a matching entry-file hash alone
+does not establish workload identity.
+
+| Comparison | Fixed source population | Meaning |
+|---|---|---|
+| Phase III start → each slice/final | Frozen current 63-row suite | Incremental Phase III engine effect |
+| Phase I final → Phase II final → Phase III final | One identical compatible frozen suite on every binary | Measured later-phase effects, including the missing Phase II suite result |
+| Pre-Tune31 release → Phase III final | Preserved original Tune31 sources/dependencies on both | Combined Phase I–III engine effect |
+| Old source → rewritten source on one binary | Separate source-pair manifests | Source rewrite effect only |
+| Typed Lambda → C2MIR | Pinned independent ports, data and reference driver | Remaining cross-language gap, with workload differences identified |
+
+Do not multiply geomeans from different populations to obtain a combined
+result. If an older binary cannot run a current source, use a compatible
+archived population for the entire historical comparison. If the complete
+source/dependency closure is unavailable, report that comparison unavailable;
+do not silently omit a row or substitute a new workload. The primary Phase
+III start/final comparison must still include all 63 typed rows, with the full
+untyped suite as the regression guard.
+
+**Discovery and confirmation.** Use the checked-in
+`test/benchmark/run_paired_benchmarks.py` with alternating control/candidate
+order. Seven or nine pairs are suitable for discovery. Choose the confirmation
+count from pilot variance before starting that run; 41 is a default, not a
+requirement or guarantee. Keep discovery separate from confirmation, and do
+not repeatedly extend a run until a confidence bound passes. If uncertainty
+remains, report it or plan a new independent confirmation. Preserve every
+valid sample and disclose invalid/output-failing runs.
+
+For a claimed pilot gain require a candidate/control median ratio below one
+and a one-sided paired-bootstrap 95% upper bound below one, plus its mechanism
+evidence. For pilots and flagged regressions, the non-regression gate remains
+an upper bound ≤1.03. Confirm suspected >3% regressions; an inconclusive bound
+is not a pass. Short kernels may use a separately reported sustained companion
+fixture for attribution, while the canonical source remains the suite result.
+
+Time uninstrumented release processes. Collect COW/admission/string/allocation
+counters and CPU samples in separate runs. Report JIT execution, compilation,
+auto execution and process-wall effects separately; record code size for loop
+cloning or expanded inline paths. Test output and GC behavior in all relevant
+tiers, even when the proposed gain is forced-JIT only. Publish raw per-row
+ratios, uncertainty, improved/regressed/unchanged rows and the full geomean.
+
+The typed geomean target is **≤0.90 versus Phase III start**. Claim a broad
+typed improvement only when the full-suite data supports it and gains extend
+beyond a single row. Historical C2MIR ratios in §8 are context until a matched
+reference rerun; they are not the denominator of an engine A/B claim.
+
+### 9.9 Deliverables and completion record
+
+Maintain a per-slice record with status **PROPOSED**, **IMPLEMENTED**,
+**REJECTED BY MEASUREMENT**, or **DEFERRED WITH REASON**. Initially all A1/A2,
+B1/B2, C, D1/D2 and E are PROPOSED. An investigation without retained code is
+not an implemented optimization. A missed target or deferred dependency
+remains visible rather than being relabeled complete.
+
+The final record must contain:
+
+1. Each retained change's proof, implementation locations and positive plus
+   negative optimization tests; shared analysis/helpers used by related cases.
+2. Before/after executed costs and fixed-source release confirmation for each
+   claimed pilot, including unsuccessful construction/ownership experiments.
+3. The 63-row typed and untyped comparison, auto/process-wall guards, and
+   separate historical engine and source-rewrite attribution where available.
+4. Actual baseline/MIR/GC validation results, binary/source manifests and
+   reproducible commands under `temp/tune31_phase3_engine/`.
+5. Remaining bottlenecks from final profiles, the suite objective's measured
+   outcome, and an explicit explanation for every rejected or deferred slice.
+
+Phase III is not complete merely because a smaller MIR dump was emitted, a
+helper was cached, a copy counter fell, or one benchmark improved. Completion
+requires the disposition of every proposed slice and validation of every
+retained change; achieving the performance objective is reported separately.
+
+### 9.10 Live implementation record
+
+| Track | Status | Result and next gate |
+|---|---|---|
+| A1 | IMPLEMENTED | Shape-checked one-field `var` borrow; confirmed on unchanged typed hashmap. Expand only through the same descriptor/fallback mechanism after an independent path shape qualifies. |
+| A2 | REJECTED BY MEASUREMENT | Proven `Doc[]` literals reduced union admissions, but the certificate publication made the unchanged prettier_ast pilot 1.0198× slower. The implementation was removed. |
+| B1 | IMPLEMENTED | Fixed owned string append arities 2–6; confirmed on unchanged typed base64. Capacity-fit inlining remains a separate measured follow-up. |
+| B2 | IMPLEMENTED | An explicit-string pair comparator preserves UTF-8 and absent-read equality without materializing character strings; confirmed on the archived typed-string Fast Diff control. |
+| C | REJECTED BY MEASUREMENT | The safe typed `i < len(values)` proof erased its matched bounds branches, but the unchanged workload pilots were 0.9897× on text_search and 1.0303× on Fast Diff. The implementation was removed. |
+| D1 | REJECTED BY MEASUREMENT | The exact typed `fill` fusion removed the two emitted JIT calls, but its rooted combined helper regressed unchanged cube3d to 1.0145×. The implementation was removed. |
+| D2 | DEFERRED WITH REASON | Cube3d's 3/4/16-element results cross user-call/return boundaries and remain observable; after D1’s rejected fusion no measured construction path justifies a new escape-analysis/stack-representation slice. |
+| E | DEFERRED WITH REASON | Fresh forced-JIT attribution reproduced the copy-heavy pilots, but every hot shape retains an observer through a caller, child slot or work list. No sound shared capture rule is identified. |
+
+**B1 — implemented and confirmed.** The concat-tree owner arm now selects
+`fn_strcat`, `fn_strcat3`, `fn_strcat4`, `fn_strcat5` or `fn_strcat6` for two
+through six known pieces. Those entries share `string_buffer_join`, preserving
+capacity, growth, aliases and precise roots; non-owner and larger expressions
+retain `fn_strcat_many`. The positive MIR fixtures are
+`tune31_phase3_string_arity`, `tune22_concat_chain` and
+`tune16_nested_string_builder`; the focused MIR set (16 cases) and focused
+string/admission/COW set (9 cases) passed before the release comparison.
+
+The archived Phase III start binary is
+`temp/tune31_phase3_engine/lambda_phase3_start_release`
+(`755951f3fe0e9a940a1907b94e5107a0f0f7528bc93e1e3fb3fc0ffac4d772e2`), and
+the B1 control/candidate archive is recorded in
+`paired_b1_base64_jit_41.json`. On the unchanged typed base64 source, the
+41-pair JIT candidate/control median ratio was **0.69325**, with identical
+stdout in all pairs. A separate COW profile has identical append, growth,
+copy-byte and freeze rows before and after, establishing that the improvement
+is ABI/join-loop work rather than changed string allocation semantics.
+
+**B2 — implemented and confirmed.** `fn_string_char_eq` compares two
+indexed, explicitly typed strings without materializing either character. For
+ASCII strings it compares the selected bytes; otherwise it compares the exact
+UTF-8 character spans. Two absent indexed reads compare equal, preserving the
+ordinary `null == null` result. The helper is a no-GC leaf only after the
+MIR-side explicit `string` certificate; inferred string lanes retain their
+existing `fn_string_ascii_at` lowering. This is required by **D3.3.3v3** and
+preserves **S7.1.1v3** indexing and equality behavior without a source
+representation rewrite.
+
+`tune31_string_char_pair` covers ASCII, UTF-8, unequal and both-absent reads,
+and requires `fn_string_char_eq` while forbidding the two index helpers and
+generic equality. `tune31_inferred_string_char_pair` is the complementary
+negative case: it forbids the new helper and requires the established inferred
+string index helper. The focused emission suite (including the prior literal
+and inferred-string fixtures) and the focused string/COW optimization suite
+passed. The final archive
+`lambda_phase3_b2_declared_release`
+(`f6dbe625e22aa46ec69b089c1ed266e2fcc372f2beca209114d8dfa91916c8d9`)
+also preserves the checksum under JIT forced collection and freed-memory
+poisoning, JIT root-witness level 2, and auto execution.
+
+Against `lambda_phase3_a1_release`, the source-identical archived
+`fast_diff2_before_code_tables.ls` control (entry SHA-256
+`dd5691dce71f39323338585ce624fa93773b90676cbd74bf9d3ef884bf5db234`, source
+tree `d07772ec4795a77d0031ff9f56d7cdadc7a8348cf16c2defe6473f1d86b013f1`)
+was **89.002 ms / 128.656 ms = 0.69178×** in
+`paired_b2_declared_typed_string_fast_diff_jit_41.json`; the one-sided
+paired-bootstrap 95% upper bound was **0.73082**, with 41/41 candidate wins
+and identical normalized stdout. The earlier unrestricted experiment is kept
+separately because inferred-string matching gave an inconclusive untyped guard;
+the retained implementation is the explicitly certified form. The final
+untyped Fast Diff guard centers at 0.99630× but has a 1.06683 upper bound;
+the A1-vs-A1 control has a similarly broad 1.03734 upper bound. Since the new
+helper is structurally absent from that source, these high-variance guard runs
+are not attributed to B2; the full untyped suite remains the final regression
+gate.
+
+**A1 — implemented and confirmed.**
+`mir_emit_cow_typed_map_field_borrow` recognizes a one-segment member place
+only when the root has a trusted fixed record contract and the selected slot
+has a container storage lane. It calls
+`cow_path_borrow_typed_map_field`, which verifies the current Map/TypeMap
+identity and slot capacity, reads the slot through the canonical shaped-field
+reader, and otherwise calls `cow_path_borrow_fixed`. The helper roots owner,
+key and child; if detaching the child can collect, it reloads the rooted map
+and packed data before the canonical lane writer reinstalls the child. This
+retains **D3.3.3v3** current-carrier certification, **D4.4.4v4** invalidation
+and reload requirements, and **D5.3.1–D5.3.4** precise-root obligations. The
+generic helper remains the carrier-mismatch and malformed-child route, so
+**S9.1.2–S9.1.3** ownership publication and **S7.1.3v2** error behavior do
+not depend on the fast arm.
+
+`tune31_var_path_borrow.mir-check` now requires the direct helper and forbids
+the generic fixed helper in its eligible loop; its output and COW assertions
+retain the shared-root/child-detach observation. Focused MIR checks (4 cases)
+and the focused Lambda optimization suite (9 cases) passed. Forced collection
+with `LAMBDA_GC_FORCE_EVERY=1`, `LAMBDA_GC_POISON_FREED=1` passed in JIT and
+interpreter tiers; the JIT root-witness level-2 sweep passed as well.
+
+Against the archived B1 release
+`lambda_phase3_b1_release`
+(`a2b1947ab09a2573504f62297f0580039d0d4c9ccbb4ecf161e2c651cdffc4e7`), the
+A1 release
+`lambda_phase3_a1_release`
+(`408af01f2c982c070d2547345c2659436f85cc371ddb735c8337990f5a13a38b`) used
+the identical `hashmap2.ls` source/tree hash recorded in the paired artifacts.
+The 41-pair JIT result in `paired_a1_hashmap_jit_41.json` was **25.814 ms /
+35.822 ms = 0.72062**, with a one-sided paired-bootstrap 95% upper bound of
+**0.76449**, 41/41 candidate wins and identical stdout. The 41-pair auto
+result in `paired_a1_hashmap_auto_41.json` was **46.582 ms / 56.253 ms =
+0.82808**, upper bound **0.88904**, 39/41 wins and identical stdout.
+`hashmap2_a1_{control,candidate}_profile.tsv` are byte-identical: 450,000
+ArrayNum unique mutations, four Map unique mutations and zero copies. The
+gain is therefore the removed generic field resolution, while all necessary
+ownership events remain present.
+
+**A2 — rejected by measurement.** The canonical `prettier_ast2` profile
+located the residual union work at direct `Doc[]` literal arguments to
+`concat_docs`, rather than at the five `_b` transition entries. A bounded
+trial recognized a nonempty, non-spreading literal only when every element had
+an existing `Doc` boundary proof, then installed an exact ordinary-Array
+certificate once after construction. Its positive and open-element-negative
+MIR fixtures proved the compiler selection and fallback; JIT/interpreter,
+forced-GC/freed-memory poisoning and JIT root-witness checks all preserved the
+checksum. The construction rule followed **D3.3.3v3** and the allocation-safe
+certificate publication/rooting rule in **D3.3.4**.
+
+The mechanism did reduce executed union admissions from **6,615,040** to
+**6,182,144** per canonical run (6.5%; cache misses remained six), but it
+also added a certificate-cache call for each eligible literal. The archived
+trial release `lambda_phase3_a2_release`
+(`b47d97b482eca006c49e52332c34b7da6c65678e82b6e7c162d2d1ca64ebbe87`) was
+compared with the B2 archive on the identical source entry/tree recorded in
+`paired_a2_prettier_ast_jit_9.json`. Its 9-pair JIT median was **561.781 ms /
+550.897 ms = 1.01976×**, with a one-sided paired-bootstrap 95% upper bound
+of **1.08148**, only 4/9 candidate wins, and identical normalized stdout.
+The warm union-map proof is cheaper than the added helper call on this path,
+so the runtime helper, compiler selection and trial fixtures were removed;
+the profile and paired artifact remain under `temp/tune31_phase3_engine/`.
+
+**D1 — rejected by measurement.** Cube3d's remaining typed construction
+sites already use packed `ArrayNum` results, but each eligible `fill(n,
+scalar)` emitted the public `fn_fill` call followed by
+`lambda_array_admit_numeric_contract` to publish its rank-one certificate.
+A shared fused helper reused those two existing implementations, rooted the
+two source items and fresh result across allocations, and was selected only
+when the existing primitive, non-null `T[]` proof qualified. Positive and
+untyped-negative MIR fixtures pinned selection/fallback, and JIT/interpreter,
+forced-GC/freed-memory poisoning and JIT root-witness runs passed. This kept
+the certificate, allocation and error rules required by **D3.3.3v3**,
+**D3.3.4** and **S9.2.2**.
+
+The MIR dump reduced all 15 cube3d typed-fill sites to one fused call and
+removed the two public calls from those sites, but the required root frame and
+combined entry were slower than two specialized JIT crossings. The archived
+trial `lambda_phase3_d1_release`
+(`81c5cc4bef14414abf4dcf100ded5bb817c2c2e474867f9998bacddabd00b332`) was
+compared with the B2 archive on the unchanged cube3d entry SHA-256
+`8e070abd68f312196ba6967ff2ed44ec6dbc6b007d815eb5e1dc1d5613538707` and tree
+`2b7219ffa483db023f421f1441b19a5fe4abf3e1d6674dc1a47a3a43afef73b7`. The
+9-pair JIT artifact `paired_d1_cube3d_jit_9.json` measured **6.856 ms /
+6.758 ms = 1.01450×**, one-sided 95% upper bound **1.04611**, one candidate
+win out of nine, and identical normalized stdout. The helper, compiler hint
+and trial fixtures were removed.
+
+**D2 — deferred with reason.** The current cube3d profile has no COW copies,
+and its repeated 3/4/16-element values are not a nonescaping temporary class:
+`mat4_mul`, `vmulti`, `vmulti2`, `calc_cross` and `calc_normal` publish
+returned arrays; callers retain them, forward them through additional calls,
+or observe their elements after later allocation. Reusing a stack buffer or a
+single destination would violate the value/snapshot lifetime and precise-root
+requirements of **D4.1.4v4**, **D5.2**, **D5.3** and **S9.1.2–S9.1.3**.
+The safe candidate first needed D1’s construction gain, which was rejected.
+No separate D2 implementation is retained until a future profile identifies
+an actually nonescaping result class with its full lifetime proof.
+
+**C — rejected by measurement.** A temporary compiler slice recognized an
+admitted typed array in a zero-origin `index < len(values)` loop, required the
+counter's sole `+ 1` assignment to be the final body statement, and scanned
+the body for resizing calls, rebinding, mutable lending and capture. It then
+removed the matching direct read's negative and upper-bound branches. The
+temporary `tune31_dynamic_array_bound` MIR fixture proved that the direct
+load remained after the loop-head test, and its JIT semantic fixture preserved
+the result. This was a valid application of **D3.3.3v3**'s certificate carrier
+and **S7.1.1v3**'s in-bounds read condition, but it did not recover enough
+work to satisfy §9.8's measured pilot gate.
+
+The archived trial binary
+`lambda_phase3_c_release`
+(`2c9bc77bddf9f99eb65d8b6e1ee84dbafc57aaafdbabdddc6ed4edd848dbceae`) was
+compared against the A1 archive on identical source trees. The 9-pair JIT
+artifact `paired_c_text_search_jit_9.json` recorded **0.9897×** with 9/9
+candidate wins and identical normalized stdout; its independently selected
+Fast Diff cross-check in `paired_c_fast_diff_jit_9.json` recorded **1.0303×**
+with only 5/9 candidate wins and identical normalized stdout. The slice was
+therefore removed rather than retaining extra loop-analysis complexity for an
+inconsequential, non-general gain. The raw artifacts remain under
+`temp/tune31_phase3_engine/` for reproducibility.
+
+**E — deferred with reason.** The fresh forced-JIT diagnostic runs in
+`e_{splay,havlak,deltablue}_debug_jit.tsv` reproduce the canonical release
+copy census byte-for-byte: Splay has **951,168** Map copies
+(**61,825,920** bytes), Havlak has **65,876** Map and **44,999** Array copies
+(**7,502,280** bytes combined), and Deltablue has **38,980** ArrayNum copies
+(**3,409,760** bytes). These are diagnostic runs only, not timing evidence.
+Their companion MIR dumps identify the high-density ownership regions:
+`splay_node` has 20 capture/prepare sites for recursive branches and
+rotations; Havlak concentrates them in `hlf_find_loops`,
+`hlf_process_edges`, `hlf_step_e`, `cfg_add_edge` and
+`lsg_calc_nesting`; Deltablue concentrates them in plan propagation/removal
+and constraint satisfaction.
+
+Inspection of those source regions identifies no eligible last-use pattern.
+Splay's `left`/`right`/`branch` values are reattached to the rotated tree or
+returned through a `var` caller root; skipping their capture would expose a
+later child/root update to an earlier observer. Havlak reads nested `l0`/
+`c1`/`c2` arrays and graph nodes, then stores them back into their owning
+indexed structure while other graph paths remain live. Deltablue deliberately
+uses the handle-store `World`; its mutable `todo`, `sources`, plan and
+constraint vectors preserve inputs or work-list observers across a removal or
+propagation call. These are precisely the binding/construction copies and
+sole-`var` sharing rule of **S9.1.2–S9.1.3**, and the residual Splay rotation
+case recorded by **D4.4.4v4**. A syntactic final reference cannot overrule
+those reachable observers.
+
+An E implementation would therefore need a new call-site move or general
+escape/liveness convention, rather than an extension of the existing
+store-back proof. That would require a separate formal design and semantic
+proposal; it cannot be admitted as a Tune31 optimization under
+**D4.4.4v4–D4.4.6**. No ownership code is retained, and the existing
+snapshot, branch-local and COW-counter tests remain the regression guards.
+
+### 9.11 Completion record
+
+**Retained implementation.** B1 adds fixed owned string joins for two through
+six pieces; B2 adds the explicitly certified, UTF-8-correct indexed-string
+pair comparison; and A1 adds the rechecked one-field typed-map borrow. The
+positive and fallback pins are the new `tune31_phase3_string_arity`,
+`tune31_string_char_pair`, `tune31_inferred_string_char_pair`,
+`tune31_var_path_borrow` and `tune31_var_path_reborrow_shared` MIR fixtures.
+The latter now requires root preparation followed by the direct
+typed-field helper, so the shared-root case cannot silently regress to the
+retired generic path.
+
+**Validation.** `make build-test` completed; 17 focused MIR-emission cases,
+29 string/COW/admission optimization tests and seven selected forced-GC corpus
+cases passed. `make test-lambda-baseline` passed **5,718 / 5,718** tests,
+including 172 MIR-emission and 220 forced-GC cases. The final `make release`
+binary is `lambda_phase3_final_release` with SHA-256
+`8438e17efe4de93814df5fb3a62afaa051ef36822ce273b6d205b777ee2eca19`;
+its commit, source diff and hash manifest are retained under
+`temp/tune31_phase3_engine/`. No release timing used a debug binary.
+
+**Frozen full-suite result.**
+`paired_phase3_final_full_jit_9.json` compares the archived Phase III start
+with this final release over all 63 untyped and 63 typed rows, nine alternating
+pairs per row. Every normalized stdout hash matches. The execution-time
+geomean is **0.97827× typed** and **1.00443× untyped**; the process-wall
+geomean is **0.99323× typed** and **1.00164× untyped**. The typed execution
+objective of **≤0.90×** is therefore **missed**. The accepted targeted wins
+remain separately established by their 41-pair fixed-source artifacts: B1
+base64 **0.69325×**, A1 hashmap **0.72062×**, and B2's archived explicit-string
+Fast Diff **0.69178×**. They do not justify claiming a broad 63-row engine
+gain.
+
+`paired_phase3_final_full_auto_3.json` is the auto/compilation and
+process-wall guard across the same 126 rows. It also has matching stdout in
+every process. Its execution geomeans are **0.98949× typed** and **1.00470×
+untyped**; process-wall geomeans are **0.99709× typed** and **1.00118×
+untyped**. Three pairs are a guard, not a row-level confirmation.
+
+**Regression interpretation.** The JIT discovery pass had several apparent
+greater-than-3% rows, so the preselected 41-pair confirmation artifact
+`paired_phase3_final_regression_confirm_jit_41.json` was run. It retained
+apparent typed Bounce (**1.0460×**) and Fasta (**1.0322×**) changes and
+untyped Bounce (**1.0339×**), Havlak (**1.0346×**) and Array1 (**1.1150×**)
+changes. However, the independent stability control
+`paired_phase3_start_self_jit_41.json` compares the Phase III start binary to
+itself and still yields typed Fasta **1.0413×** with upper bound **1.0913**,
+and multiple upper bounds above 1.03. The archive bisection likewise reverses
+the Array1 direction between valid 9-pair batches. These sources do not call
+the newly retained hot helpers in their timed regions, and the same-scale
+movement occurs without an engine change. Per §9.8 this is an **inconclusive
+non-regression guard, not a pass**; no source or engine regression is
+attributed to B1, B2 or A1. A future broad-tuning cycle needs a quieter host
+or longer fixed-source sustained forms before it can apply a ≤1.03
+row-specific gate reliably.
+
+**Result.** Every Phase III track has a recorded implementation, rejection or
+deferral; rejected trials have been removed from the source tree. The remaining
+bottleneck is not a missing type annotation or generic field lookup: copy-heavy
+graphs still require the observable snapshots in **S9.1.2–S9.1.3**, while the
+unresolved broad cost is the aggregate of typed representation, construction,
+admission and ownership work described in §8. A future move/escape convention
+must be proposed against **D4.4.4v4–D4.4.6** before revisiting E.
