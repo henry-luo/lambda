@@ -1,9 +1,14 @@
-# Lambda Implementation: Tune31 — Untyped Specialization and Runtime Boundaries
+# Lambda Implementation: Tune31 — Specialization and Typed Runtime Boundaries
 
-- **Status:** IMPLEMENTED 2026-09-19. The final code, focused semantic gates
-  and paired release evidence are recorded in §3.7 and §4.4. The broad
-  baseline has an independent graph-runtime blocker recorded in §4.4; it is
-  not counted as a pass.
+- **Status:** Phase I IMPLEMENTED 2026-09-19; Phase II typed tuning added
+  2026-09-20 (§6). Phase II's typed Hyphen source rewrite and inferred-store
+  engine track are implemented, as is the ownership/path A track; B's
+  and E's source experiments are rejected by their paired results, while C
+  and D close without speculative engine changes.
+  Phase I's final code, focused semantic gates and paired release evidence
+  are recorded in §3.7 and §4.4. The full Phase II baseline passes, as
+  recorded in §6.5. Three follow-on typed source ports are recorded in §7;
+  they are intentionally separate from the Tune31 engine results.
 - **Scope:** recover native execution in untyped Lambda, close measured
   regressions, and remove repeated runtime work in both Lambda variants.
 - **Primary evidence:** [Result42–47 analysis](Lambda_Benchmark_Result47_Analysis.md),
@@ -378,8 +383,9 @@ Every paired artifact names both hashes, the same script hash on each side,
 the execution tier, raw samples, normalized stdout digests and paired
 bootstrap configuration.
 
-The historical splay regression did not reproduce. The 41-pair JIT result
-is 296.380→294.127 ms (untyped ratio 0.9924, one-sided 95% upper bound
+The implementation-start/final comparison shows no material new splay
+regression; it does not bisect the earlier R44→R47 change. The 41-pair JIT
+result is 296.380→294.127 ms (untyped ratio 0.9924, one-sided 95% upper bound
 1.0049) and 280.980→282.922 ms (typed 1.0069, upper 1.0184), with identical
 output. Fannkuch's earlier ownership suspicion likewise has no sustained
 regression: untyped is 0.264→0.267 ms (1.0114, upper 1.0228) and typed is
@@ -590,15 +596,14 @@ LAMBDA_GC_FORCE_EVERY=1, LAMBDA_GC_POISON_FREED=1 and
 LAMBDA_ROOT_WITNESS=1. The new Lambda fixtures all include expected text
 files and MIR sidecars.
 
-make test-lambda-baseline was attempted, but it cannot currently complete
-on this host. Its parallel batch workers stalled after entering the large
-Lambda corpus. A serial reproduction isolates graph_transform_html: it
-reaches the test-batch 60-second limit and its timeout cleanup stalls; a
-direct execution also exceeded two minutes. The archived clean 6e1774947
-control independently exceeded the same 60-second boundary. The runs were
-stopped only after that control comparison. This existing
-graph-runtime/batch-lifecycle blocker is outside the Tune31 representation
-changes and is not represented as a pass or waived by a harness edit.
+At the time this Phase I record was made, make test-lambda-baseline could
+not complete: its parallel batch workers stalled after entering the large
+Lambda corpus. A serial reproduction isolated graph_transform_html at the
+test-batch 60-second limit, and its timeout cleanup stalled; a direct
+execution also exceeded two minutes. The archived clean 6e1774947 control
+independently exceeded that same boundary. This was a host/batch-lifecycle
+observation, not a standing exemption: the Phase II final validation in
+§6.5 subsequently completes the full baseline without a harness change.
 
 The recorded artifacts are:
 
@@ -639,3 +644,523 @@ unqualified numeric opcode substitutions, and the blanket pure-helper
 Historical `temp/r47`, `temp/t29` and `temp/t30` paths are provenance,
 not guaranteed available tooling. Use the checked-in paired runner and
 `mir_mandatory_census.py`; retain any new probes under `./temp/`.
+
+## 6. Phase II — Typed Lambda ownership, construction and strings
+
+**Added:** 2026-09-20. **Status:** typed Hyphen source port, the
+inferred-store engine track and the ownership/path A track are implemented.
+B and E's source experiments are rejected; C and D were re-profiled and
+closed without speculative engine changes:
+Phase II does not claim an ownership, construction, string or code-structure
+change unless it satisfies its own executed-cost and paired-timing gate.
+Phase I's completion record above does not claim completion of this new
+phase. No formal semantic or design ruling changes.
+
+### 6.1 Motivation and measured starting point
+
+Recomputation of Phase I's full 63-row, seven-pair JIT screen gives an
+untyped execution geomean ratio of **0.8675** and a typed ratio of
+**0.9778**. Both miss §4.2's original suite objectives, respectively 0.85
+and 0.90. Excluding typed pnpoly leaves **0.9962** over 62 typed rows;
+52/63 typed rows remain within ±3%. The large quicksort/text-search gains
+mostly recover paths their typed twins already had. T31-4/5 shipped no
+additional ownership or construction implementation, and T31-6 was deferred.
+
+The [post-Tune31 analysis](../../temp/tune31_analysis/report.md) uses the
+archived final release `4e4107d9…c2148`. Canonical executed counters and
+separate sustained samples identify the following costs:
+
+| Typed pilot | Canonical executed evidence | Sustained sample evidence | Phase II target |
+|---|---|---|---|
+| splay | 951,168 map copies; 61,825,920 copied bytes | 37.5% write preparation; 29.9% GC; 5.7% JIT self | Avoid provably unnecessary share/detach operations and repeated path work |
+| havlak | 44,999 array + 65,876 map copies; 7,502,280 bytes | 28.7% write preparation; 28.3% GC; 15.1% type checking | Nested ownership facts and admission reuse |
+| deltablue | 38,980 ArrayNum copies; 3,409,760 bytes | Fresh timing attribution still needed | Shared-child borrows and repeated checked boundaries |
+| hashmap | Zero copies, but 450,000 array and 450,004 map unique-mutation helper events | Fresh timing attribution still needed | Remove repeated prepare/borrow/publish work on proven unique paths |
+| cube3d | Repeated returned 3/4/16-element arrays | 31.0% fill; 15.1% admission; 13.9% GC | Construct admitted storage directly and prove temporary lifetimes |
+| base64 | 333,406 appends; 332,400 in-place; 2,966,183 copied bytes | 48.6% under `fn_strcat_many`; <1% GC | Reduce per-piece and per-call work in existing string append paths |
+| hyphen, old typed entry | Dynamic JSON trie/core shared with untyped entry | Whole-entry: 30.9% member lookup, ~16% map-set paths, ~8% `fn_lt` | A real typed port, then residual string/array boundary work |
+
+The sample percentages are inclusive, can overlap, and are not additive.
+Repeated-entry probes change heap history; Hyphen includes parsing and
+verification outside its benchmark timer. Use these results to select a
+mechanism, then re-profile on the actual candidate before assigning exact
+timed-kernel shares. Raw data, binary identity and scripts are retained in
+`temp/tune31_analysis/`.
+
+Text rows account for 79.3% of summed typed execution medians after Phase I.
+This is a workload-priority view, not an application mix or a suite geomean.
+Profile typed log_pipeline, three_way_merge, text_search and prettier_ast
+individually; do not transfer Hyphen/base64's percentages to those kernels.
+
+C2MIR remains an independent native C port. Splay uses pointer mutation,
+cube3d uses caller-owned buffers, and microdiff uses fixed-capacity result
+storage. These differences matter under **S9.1.2–S9.1.3** and **D4.1.4v4**.
+Report the remaining gap as semantic/representation work plus removable
+compiler/runtime work; a common checksum does not establish identical
+memory operations. The R47 3.59x typed/C geomean is historical context,
+not a measured Phase II ratio.
+
+### 6.2 Typed Hyphen rewrite — implemented source track
+
+The old [hyphen2.ls](../../test/benchmark/text/hyphen2.ls) only called the
+dynamic core. The typed entry now calls
+[hyphen_typed.ls](../../lambda/benchmark/hyphen_typed.ls), with these choices:
+
+1. **Flat typed trie tables.** Node first/count/level, edge code/child,
+   level offset/count/value and exception marker arrays are `int[]`, held
+   in a declared `HyphenTables` record. The existing
+   [fixture generator](../../test/benchmark/text/generate_hyphen_fixture.js)
+   derives them from the same library data as the JSON and C header.
+   No patterns, cases or expected results are substituted for computation.
+2. **Admission once at setup.** Generated `hyphen_tables.json` is loaded
+   into the declared record before verification/timing. Its generated
+   [table module](../../lambda/benchmark/hyphen_tables.ls) defines the
+   explicit contract and loader. This uses **D3.3.3v3**'s declared
+   representation boundary; it does not attach a certificate to an inferred
+   open array. An initial static-Lambda-literal prototype added about two
+   seconds of JIT startup and was replaced by this setup-time load. The hot
+   traversal still uses typed arrays, while data size stays out of emitted
+   initialization code.
+3. **Typed caches.** String keys and string results use `string[]`;
+   marker results use `int[][]`. A shared typed linear key lookup replaces
+   dynamic map access, following the C reference's lookup strategy. Cache
+   storage grows normally, without fixture-specific capacity assumptions.
+   Writers take `var` cache parameters under **S9.1.3**; stored marker
+   arrays retain ordinary snapshot/capture behavior.
+4. **Strings throughout.** Input, words, cache values and output remain
+   `string`. Use indexed characters, `slice`, and the existing owned-string
+   append lowering. Append whole spans between hyphen positions and copy
+   unchanged markup/punctuation as spans. There is **no integer/byte output
+   buffer and no final decoding step**. Virtual leading/trailing dots avoid
+   allocating padded word strings. Preserve **S7.1.1v3–S7.1.2** indexing
+   and slice semantics and all ordinary alias/snapshot behavior.
+5. **Shared oracle and lexical helpers.**
+   [hyphen_common.ls](../../lambda/benchmark/hyphen_common.ls) owns the
+   unchanged 13 input/expected pairs and shared character/tag predicates.
+   Both cores import it; the untyped core retains dynamic trie traversal.
+   Both retain 32 rounds, fresh caches each round, exact output verification,
+   and checksum **1183296**. Fixture loading and admission precede the timer;
+   all scanning, cache population and result-string construction remain timed.
+
+This is a **benchmark source/representation improvement**, not an engine
+gain. Measure it on one immutable release against an archived copy of the
+original core. For later engine A/B, run the rewritten source on both
+binaries and also retain the old dynamic port as a guard. Re-measure C2MIR
+with its pinned driver before publishing a new Lambda/C ratio.
+
+The generator's pre-existing source marker was stale (`hyphen_texts = [`
+became `hyphen_cases = [`); extraction now stops at the current case table.
+Regeneration leaves the existing JSON and C header unchanged.
+
+Correctness is pinned by
+[`tune31_hyphen_typed.ls`](../../test/lambda/proc/tune31_hyphen_typed.ls)
+and its expected `.txt`: all 13 exact outputs, empty text, Unicode
+preservation, markup attributes, an unterminated tag and existing hyphens.
+The canonical benchmark separately exercises cache reuse and reset.
+
+### 6.3 Engine tracks — evidence-gated
+
+#### A. Carry ownership and path facts through valid regions — implemented for typed var field borrows
+
+Start with typed splay/havlak/deltablue, then hashmap. Attribute executed
+copies and helper events to the actual source operations; separate real
+two-observer snapshots from facts lost at joins, nested handles and calls.
+Extend the existing shared analysis for eligible nested/recursive
+store-backs and reuse identity/layout/uniqueness until an invalidating
+write, escape or replacement. **D4.4.4v4** supplies the optimization rule;
+**D4.4.6** and **S9.1.2–S9.1.3** preserve observable snapshots.
+
+For a unique owner, remove redundant preparation/path navigation only when
+the same proof also preserves replacement publication and `var` home
+transport. Reload movable data buffers after allocation as required by
+**D4.3.1**. Do not infer that zero copies means zero ownership cost.
+
+**Gate:** a paired gain plus fewer executed copies/bytes or unique-owner
+helper events on the identified path. Pin positive cases and invalidation
+cases: live aliases, shared children, recursive replacement, branch joins,
+zero iterations and error exits. A shorter static MIR listing alone fails
+this gate. Historical splay regression attribution requires a separate
+matched-revision replay; the Phase I control/final comparison did not bisect it.
+
+The first safe instance is the typed var record path used by hashmap:
+the direct caller has already detached an unmarked root before the callee
+starts, so a later var borrow of record.field need not call
+cow_prepare_write on that same root again. The child path walker remains
+unchanged and still prepares the selected field. A capture, alias, retained
+argument or other body-side share sets cow_marked in emission order, so the
+next path borrow restores root preparation and write-back. This is the
+existing ownership fact, narrowed to **S9.1.2**, **S9.2.2** and
+**D4.4.4v4**; it introduces no new uniqueness inference.
+
+#### B. Construct typed arrays in their final representation
+
+Use cube3d's matrix/vector producers, with storage/brainfuck as guards.
+Avoid an intermediate open allocation followed by conversion/admission
+where the declared destination contract proves the final representation.
+Reuse existing fill, constructor and certificate machinery, retaining
+count/value/error behavior, null/poison and floating signed zero.
+
+Then assess scalar replacement or caller-provided result storage where
+lifetimes prove it safe. A non-escaping allocation can still be live across
+the next iteration; **D4.1.4v4, D5.2** require an actual lifetime/rooting
+argument. Any new lifetime/return ABI needs its own design before code.
+
+**Gate:** reduced executed allocation/admission work and paired typed gains;
+cover returned values kept across iterations, aliases, exceptions and GC.
+Do not require `fn_fill` to disappear when an efficient direct typed fill
+is the correct remaining operation.
+
+#### C. Reduce string and collection helper boundaries
+
+Re-profile base64 and rewritten Hyphen first. Base64 already reuses its
+string storage, so target append argument preparation, repeated validation,
+small-piece handling and avoidable calls through the existing shared helper.
+For proven string/index cases, preserve native character/comparison facts
+through consumers, retaining UTF-8 and out-of-range behavior. Hyphen's
+span-based string construction is the source-level model; do not introduce
+an integer output buffer or another parallel builder subsystem.
+
+For the high-total-time text rows, select changes from fresh profiles of
+traversal, equality, collection construction, copied bytes and runtime
+calls. Static shape and representation proofs must preserve dynamic misses;
+**D8.4.1v2** excludes feedback-driven mutable inline caches.
+
+**Gate:** helper/copy/allocation reductions on executed paths and matching
+outputs. Cover ASCII and multibyte strings, empty slices, string aliases,
+builder escape/freeze, cache misses/hits and repeated cache resets. Preserve
+the existing string-append semantics under **S9.1.2**.
+
+#### D. Remove remaining scalar and call boundaries
+
+Revisit typed bounce, crypto_sha1, levenshtein and towers after A–C. Select
+actual hot abs/bitwise/character/conversion or wrapper operations. Extend
+the existing representation-aware lowering and leaf inliner only when the
+numeric, nullable and error domains are proven (**S4.1.1–S4.1.5,
+D2.5.1–D2.5.3, D2.8.1–D2.8.3**).
+
+Root traffic is a multiplier on those calls: eliminating a boundary can
+remove boxing, dirty-live-root publication and layout reloads together.
+Use the shared emitter under **D5.3.1–D5.3.4**; a `NO_GC` classification
+requires transitive mechanical verification. Keep collecting setter and
+admission paths rooted, and preserve the existing defect/error channel.
+
+**Gate:** the hot helper/wrapper boundary disappears, with positive/negative
+MIR pins, semantic parity and forced-GC coverage; no blanket NO_GC allowlist.
+
+#### E. Native code structure after helper costs fall — re-profiled, no retained change
+
+Re-profile typed fft/quicksort/nbody with machine-code samples and spill
+counts. Improve loop-local liveness, redundant carrier temporaries and
+fallback placement only when the executed code demonstrates the cost.
+Use the existing MIR Direct backend; no vendor edits or C-text backend.
+T30's old spill percentages are hypotheses, not new evidence.
+
+**Gate:** fewer executed spills/reloads or a shorter measured hot path,
+with paired gains and stable compilation/end-to-end costs. Do not trade
+unbounded loop/version duplication for a static instruction-count claim.
+
+#### F. Carry forward Phase I's inferred-store omission — implemented
+
+Untyped nbody still performs 2.7M unique mutation helpers with zero copies,
+and its final time is 8.7x its typed twin. Its counter fix did not satisfy
+T31-1's native-store objective. When improving shared store lowering, carry
+the inferred float lane into a guarded direct write with the existing
+widening/error/COW fallback (**D3.3.3v3, S7.1.3v2**). Keep this as an
+explicit secondary deliverable; its improvement cannot substitute for
+Phase II's typed goals.
+
+**Gate:** remove the repeated mutation helper on the admitted path, retain
+mixed/widened/null/out-of-bounds/shared fallbacks, and pin stores as well as
+the previously pinned counter arithmetic.
+
+### 6.4 Measurement and acceptance for Phase II
+
+1. Archive an implementation-start release and manifest before engine work.
+   Record source/dependency and data hashes, binary SHA, tier, outputs and
+   raw pairs. Preserve source-only Hyphen evidence separately from engine
+   A/B; freeze both old and rewritten ports in the engine comparison.
+2. Use seven/nine pairs for discovery and 41 for claimed gains or flagged
+   regressions, following §4.1. Measure execution and auto process-wall time
+   separately. Collect profiles/counters outside timing runs. Compare the
+   unchanged 63-row population on both sides; expose the Hyphen source
+   change as its own column/experiment rather than folding it into an
+   engine geomean.
+3. Retain the typed-suite **≤0.90 candidate/control geomean as a planning
+   objective**, with no reproducible >3% regression under §4.2's confidence
+   gate. This is a target, not a predicted result. Require confirmed gains
+   in ownership, construction or text families beyond pnpoly; report every
+   missed objective explicitly. Treat untyped as a full-suite guard.
+4. Every shipped engine mechanism gets an executed optimization assertion
+   or a focused MIR sidecar, including fallback/invalidation negatives.
+   Pair those with expected-output fixtures and interp/JIT/auto parity.
+   Exercise ownership/representation changes with forced GC, poisoning and
+   the root witness. Keep `.txt` goldens for every new test script.
+5. Run the applicable baseline/MIR suites for engine changes and the normal
+   release publication gates for a new benchmark snapshot. Re-establish
+   any baseline blocker on the actual control; Phase I's old blocker is
+   not a standing exemption. Source-only Hyphen validation is recorded
+   independently and does not claim a new engine baseline run.
+
+### 6.5 Phase II implementation evidence
+
+The typed Hyphen port has passed its benchmark golden and the new fixture
+on interp, JIT and auto; the untyped benchmark also passes all three tiers.
+The fixture also passes all three tiers with forced GC, freed-memory
+poisoning and the root witness. The targeted LambdaOptStrings suite passes
+4/4, including the new
+`TypedHyphenUsesStringSpansAndOneTableAdmission` optimization test. That
+test bounds appends below 15,000 and table-record admissions at two or
+fewer; the observed candidate is **11,092 appends and one admission**.
+The original core's **71,086 appends** exceeds the budget, so reverting to
+character-by-character output is observable without timing assertions.
+Generator replays are byte-identical, and every generated node, edge,
+level and exception agrees with the existing fixture.
+
+The archived-source comparison uses one immutable release and preserves the
+original core as its control. Across 41 alternating pairs, typed Hyphen moves
+from **57.908 to 11.376 ms** on JIT (**0.1964×**, upper bound **0.2029×**;
+**41/41** wins) and from **59.550 to 12.727 ms** on auto (**0.2137×**,
+upper bound **0.2256×**; **41/41** wins), with the checksum equal on every
+pair. The matching untyped entry is **0.9809×** JIT and **0.9905×** auto,
+within its paired uncertainty. The gain is consequently attributable to the
+typed table/cache/span representation rather than a changed oracle or shared
+benchmark harness.
+
+**F — inferred native float stores.** The generic indexed-store lowering had
+two independent losses on AWFY nbody. First, an inferred parameter's AST
+carrier remained 'any' even when its live MirVarEntry held an admitted
+ArrayNum; it therefore could not enter the existing guarded direct-store
+emitter. Second, nbody's unannotated delta, distance and mag temporaries
+broke the nullable-F64 producer proof, even though their unmodified
+initializers and native integer loop indices preserved that lane.
+
+The store now uses a direct identifier's live admitted ArrayNum witness only
+to select the successful representation arm. It does not fabricate a source
+T[] contract: COW, view, element-kind, null, bounds, widening and error
+misses still reach the existing checked setters. The nullable-F64 proof
+follows an unmodified local initializer and recognizes an integer carrier for
+an inferred index. This is the representation-scoped rule in **D3.3.3v3**,
+with the hard-write boundary in **S7.1.3v2** and var write-back in
+**S9.1.3**.
+
+The release COW_EXEC_PROFILE census on the unchanged AWFY source records
+**2,700,000** array[num] unique mutations in the archived
+lambda_tune31_final_release control and no array[num] mutation row in the
+Phase II candidate. The checksums/output match. The 41-pair, alternating JIT
+run has control/candidate medians **27.292 / 5.475 ms** (**0.2006×**;
+one-sided paired-bootstrap upper bound **0.2025×**; **41/41** candidate
+wins). The nine-pair auto run is **45.682 / 32.378 ms** (**0.7088×**, upper
+bound **0.7254×**; **9/9** wins). These are the secondary untyped-F results
+required by §6.3 F; they are intentionally not counted as a typed-suite
+result.
+
+Three fixtures make the optimization durable:
+
+1. tune31_inferred_float_store pins a repeatedly written inferred ArrayNum
+   with a live snapshot.
+2. tune31_inferred_var_float_store models the nbody shape: a caller-visible
+   inferred var array, dynamic indices and nullable floating intermediates.
+   Its COW assertion observes one shared detach and zero unique-mutation
+   helpers.
+3. tune31_inferred_float_store_fallback proves that a null assignment stays
+   on fn_array_set and an out-of-range native float assignment reaches
+   array_num_set_cow_idx, with matching interpreter/JIT/auto results.
+
+Each fixture has a .txt golden and a focused MIR sidecar. The Tier parity,
+MIR emission, COW-counter and forced-GC suites pass for all three. This pins
+the native success arm and the null/out-of-bounds/shared fallback arms
+without a timing assertion.
+
+**A — exclusive typed var field borrows.** mir_emit_cow_path_borrow
+previously called cow_prepare_write for every nested var argument,
+including an unmarked record parameter which had already been detached by
+its caller. Hashmap makes five such field borrows for every insertion. The
+emitter now skips only that repeated root preparation for an unmarked
+is_var_param; cow_path_borrow_fixed still prepares and relinks the child
+array. A body-side capture retains cow_marked, therefore preserves the
+root preparation before the next borrow. This retains caller-home
+publication, snapshot isolation and all shared-child handling under
+**S9.1.2**, **S9.2.2** and **D4.4.4v4**.
+
+The release COW census on unchanged typed hashmap2 source records the
+pre-A Phase II binary's **450,004** map unique-mutation preparations with
+zero map copies. The A candidate records **4** map preparations, also with
+zero map copies; its 450,000 ArrayNum child preparations remain because
+each selected array must still test its own ownership state. The four map
+events are the direct HashMap field assignments, not the removed nested
+borrow path.
+
+The isolated release A/B uses lambda-phase2-final as control and
+lambda-phase2-var-path-release as candidate, with the same hashmap2
+source. Across 121 alternating JIT pairs it moves from **38.950 to
+37.653 ms** (**0.9667×**, one-sided paired-bootstrap upper bound
+**0.9878×**; **95/121** wins), with equal output in every pair. The
+nine-pair auto discovery replay is 0.9630× but its 1.0303 upper bound is not
+claimed as an auto result. A separate comparison to the older Phase I
+release is directionally similar but has a 1.0163 upper bound, so it is not
+used to attribute this A-only change.
+
+Four focused tests make the ownership claim durable:
+
+1. tune31_var_path_borrow verifies interp/JIT/auto snapshot isolation
+   through repeated typed record-field borrows.
+2. Its MIR sidecar requires cow_path_borrow_fixed and forbids a
+   root cow_prepare_write inside the unmarked callee loop.
+3. tune31_var_path_reborrow_shared takes a body-side snapshot, verifies
+   the caller sees the detached update, and requires root preparation before
+   the field borrow in its MIR sidecar.
+4. LambdaOptCow.VarPathBorrowAvoidsRepeatedUniqueRootPreparation pins
+   one root copy, zero unique map preparations and one child ArrayNum copy
+   on the positive case.
+
+The targeted Lambda tier-parity, MIR-emission and COW-profile tests pass.
+Final post-implementation validation with make test-lambda-baseline passes
+**5,707/5,707** tests: **2,104/2,104** input-parser and **3,603/3,603**
+Lambda-runtime tests. This clears the historical Phase I batch observation
+without a test-harness exemption.
+
+**B experiment rejected.** A source-only cube3d experiment replaced
+zero-filled four-element vectors that were immediately overwritten with
+typed literals, including its line-drawn flag array. It preserved output but
+regressed: the 41-pair JIT source comparison was **1.0336×** (five candidate
+wins) and the nine-pair auto comparison was **1.0634×** (zero wins). The
+candidate source was removed. This demonstrates that its existing fill path
+is cheaper than per-member literal admission for this workload, so Phase II
+does not retain an aesthetic construction rewrite in place of a paired gain.
+The control/candidate scripts and raw pairs remain under
+temp/tune31_phase2/cube3d_source/ and
+temp/tune31_phase2/paired_cube3d_source_*.json.
+
+**C closure — base64 already reaches the shared-builder shape.** The forced-JIT
+candidate profile has 333,406 string append calls carrying 1,333,506 pieces;
+332,400 append in place, only 1,006 grow, and six generic joins remain. The
+finalized MIR has four static fn_strcat_many call sites: the hot encode site
+passes the owned accumulator plus all four Base64 characters in one call.
+Thus the source's four-character quantum is already one append boundary, not
+four nested concatenations. Removing that boundary would require an
+encoding-specific emitter or a second string builder, neither of which is a
+generic helper reduction under **S7.1.1v3–S7.1.2**. No C change is retained.
+
+**D closure — scalar boundaries require a domain proof.** Forced-JIT bounce
+has no array COW events and completes its timed body in 0.149 ms, although
+its four static abs sites still call the boxed helper. A typed indexed read
+can yield the int-lane null sentinel, so replacing that call needs a
+null/error-preserving integer abs lowering rather than a raw machine abs
+instruction. Forced-JIT crypto_sha1 completes in 24.420 ms and retains
+representative boxed shift and bitwise calls in its string/word conversion
+paths. Their values cross the int, u32 and error domains; static call removal
+does not prove the needed result carrier. The next candidate is a shared
+module-constant/native-lane proof followed by executed helper attribution,
+under **S4.1.1–S4.1.5** and **D2.4.1–D2.4.3**. Tune31 adds no D shortcut
+without that proof and a paired result.
+
+**E experiment rejected.** Typed fft initially snapshots its plain
+four1 float-array parameter once: the forced-JIT profile records one
+32,840-byte ArrayNum copy. Making the work-buffer parameter var removes the
+copy and preserves output, but its caller-home transport costs more. On the
+same immutable release, 121 alternating JIT source pairs move from 0.087 to
+0.109 ms (1.2529x; one-sided paired-bootstrap upper bound 1.3448x; five
+candidate wins), with equal output on every pair. The var source was removed.
+The same forced-JIT census records no COW copies for typed quicksort2 or
+awfy nbody2; their existing representation paths do not identify an E
+candidate. This is the semantic/ABI distinction from C pointer mutation:
+**S9.1.2–S9.1.3** requires an inout transport, and a removed copy alone is
+not a performance win.
+
+The Phase II artifacts are:
+
+- temp/tune31_phase2/{candidate,final}.sha256 and
+  lambda-phase2-{candidate,final}: candidate binary identities.
+- paired_awfy_nbody_{jit_41,auto_9}.json: interleaved same-source engine
+  comparison and paired uncertainty.
+- awfy_nbody_{control,candidate}_profile.tsv: exact executed COW census.
+- paired_hashmap2_var_path_isolated_jit_121.json: isolated A-only release
+  comparison; paired_hashmap2_var_path_{jit_41,jit_121,auto_9}.json retain
+  the discovery and historical-control replays.
+- hashmap2_{pre_var_path_release,var_path_release}_cow.tsv: pre/post-A
+  executed COW census; var_path_release.sha256 identifies the candidate.
+- hyphen_typed_release.out: release checksum/timer confirmation.
+- hyphen_source_{jit,auto}_41.json: archived-source typed and untyped Hyphen
+  comparison, including the source/dependency hashes and output digests.
+- paired_cube3d_source_{jit_41,auto_9}.json: retained negative source
+  experiment, excluded from any gain.
+- base642_jit.tsv and base642_jit.mir: C's forced-JIT shared-builder census
+  and flattened concat evidence; bounce2_jit.tsv, crypto_sha12_jit.tsv and
+  their MIR dumps retain D's executed probes.
+- fft2_jit.tsv, quicksort2_jit.tsv and awfy_nbody2_jit.tsv: E's
+  forced-JIT ownership census; paired_fft_var_buffer_jit_121.json retains
+  its rejected inout source experiment.
+
+Both sides of these **source-only** comparisons use the immutable Phase I
+release `4e4107d9…c2148`; the control keeps the original core and inline
+oracle/helpers. Every sample matches the canonical checksum:
+
+| Variant / mode | Pairs | Execution median, before → after | Ratio / upper 95% | Process-wall median, before → after |
+|---|---:|---:|---:|---:|
+| Typed JIT | 41 | 57.908 → 11.376 ms | **0.1964 / 0.2029** | 102.163 → 65.774 ms |
+| Typed auto | 41 | 59.550 → 12.727 ms | **0.2137 / 0.2256** | 107.918 → 70.548 ms |
+| Untyped JIT shared-helper guard | 81 | 60.362 → 59.665 ms | 0.9885 / 1.0104 | recorded in raw pairs |
+| Untyped auto shared-helper guard | 41 | 60.907 → 60.327 ms | 0.9905 / 1.0222 | 104.375 → 106.080 ms |
+
+Typed wins all 41 pairs in both modes: about **5.1x faster JIT execution**
+and 4.7x faster auto execution. Median process-wall ratios are 0.6438 and
+0.6537 respectively; these are separate from the execution confidence
+bounds in the table. The initial 41-pair untyped JIT upper bound was 1.0344,
+so the longer 81-pair replay establishes the execution non-regression gate.
+
+Artifacts under `temp/tune31_phase2/`:
+
+- `source_manifest.json`, `control/`, `data_hashes.json`;
+- `hyphen_source_jit_41.json`, `hyphen_source_auto_41.json`,
+  `hyphen_untyped_jit_81.json`;
+- `checks.json`, `gc_checks.json`, `opt_strings.log`;
+- `hyphen_typed_cow.tsv`, `hyphen_original_cow.tsv` and corresponding output.
+
+The Hyphen source comparison does not claim an engine result. The separate
+inferred-store and exclusive-field-borrow implementations are the Phase II F
+and A engine results; B and E are rejected by paired results, while C and D
+close without a safe, measured generic change.
+
+## 7. Follow-on typed source ports (2026-09-21)
+
+These benchmark-source rewrites apply the same representation discipline as
+the typed Hyphen port. They do not change the runtime and must not be folded
+into a Tune31 engine geomean. **D3.3.3v3** permits an explicit source
+representation to retain its established carrier; **S7.1.2** keeps string
+indexing and slicing semantic rather than requiring a byte-output buffer.
+Each port keeps its external text output and canonical oracle.
+
+| Typed source | Rewritten hot representation | JIT control → candidate | Ratio, upper 95% | Pairs |
+|---|---|---:|---:|---:|
+| `log_pipeline2.ls` | direct string spans and scalar aggregate state instead of a `LogRecord` map per row | 3410.830 → 1778.870 ms | 0.5215, 0.5259 | 41/41 wins |
+| `knucleotide2.ls` | fixed 20-lane A/C/G/T one- and two-mer table; longer requested literals remain string scans | 4.258 → 0.647 ms | 0.1519, 0.1557 | 81/81 wins |
+| `fast_diff2.ls` | fixed source strings admitted once as `int[]` code tables before the repeated LCS loop | 124.564 → 48.754 ms | 0.3914, 0.4050 | 41/41 wins |
+
+The changes imitate the useful part of the C2MIR ports: the repeated work
+uses its closed, native-friendly representation. They do not claim an
+identical general-purpose parser or container API. Log Pipeline still scans
+all generated fields and checks its scalar schema; Knucleotide emits the same
+formatted strings and performs its longer queries as strings; Fast Diff
+converts the static fixture before timing and retains string output. None uses
+an integer output buffer.
+
+The source rewrite pins are deliberately mechanism-specific:
+
+- `LambdaOptStrings.TypedLogPipelineStreamsWithoutRecordMapTraffic` checks
+  the checksum and zero map admissions/mutations.
+- `LambdaOptStrings.TypedKnucleotideUsesClosedAlphabetTables` compares the
+  normalized full golden output and requires the closed 20-slot table.
+- `LambdaOptStrings.TypedFastDiffPrecodesStaticTextBeforeLcsLoop` checks the
+  checksum and the static `string → int[]` admission boundary.
+- `tune31_typed_text_code_loop` has its `.txt` golden and MIR sidecar. The
+  sidecar requires raw integer equality in the repeated loop and forbids both
+  `fn_string_ascii_at` and `fn_eq` there.
+
+The three Lambda optimization tests and the new MIR fixture pass after
+`make build-test`. Knucleotide and Fast Diff also pass JIT forced collection,
+freed-memory poisoning and the root witness; Fast Diff passes interp and auto
+with the canonical checksum. The archived release evidence is under
+`temp/tune31_phase3/`: `paired_log_pipeline_typed_stream_jit_41.json`,
+`paired_knucleotide_typed_table_jit_81.json`,
+`paired_fast_diff_code_tables_jit_41.json`, the matching `profiles/` TSVs,
+and the Fast Diff `mir/` dumps.

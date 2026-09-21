@@ -353,6 +353,39 @@ TEST(LambdaTune31Tests, RecursiveArrayWitnessAgreesOnEveryTier) {
     }
 }
 
+// Tune31 Phase II F / D3.3.3v3: the raw witness is an implementation fact,
+// so the inferred parameter's output and snapshot semantics must agree across
+// interpreter, direct JIT, and automatic tier selection.
+TEST(LambdaTune31Tests, InferredFloatStoreAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_inferred_float_store.ls",
+            "test/mir/lambda/tune31_inferred_float_store.txt", true, tiers[t]);
+    }
+}
+
+TEST(LambdaTune31Tests, InferredVarFloatStoreAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/tune31_inferred_var_float_store.ls",
+            "test/mir/lambda/tune31_inferred_var_float_store.txt", true, tiers[t]);
+    }
+}
+
+// Tune31 Phase II F / S7.1.3v2: the inferred fast arm must never bypass a
+// null widening or an out-of-range error path.
+TEST(LambdaTune31Tests, InferredFloatStoreFallbacksAgreeOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file(
+            "test/mir/lambda/tune31_inferred_float_store_fallback.ls",
+            "test/mir/lambda/tune31_inferred_float_store_fallback.txt", true, tiers[t]);
+    }
+}
+
 TEST(LambdaTune31Tests, AppendBuilderReturnAgreesOnEveryTier) {
     static const char* const tiers[] = {"interp", "jit", "auto"};
     for (size_t t = 0; t < 3; t++) {
@@ -488,6 +521,16 @@ TEST(LambdaTypedPathTests, LazilySnapshotsPlainBoolArrayParameter) {
 TEST(LambdaTypedPathTests, ReusesExclusiveTypedVarReborrow) {
     test_lambda_script_against_file("test/mir/lambda/tune26_typed_reborrow.ls",
         "test/mir/lambda/tune26_typed_reborrow.txt", true);
+}
+
+TEST(LambdaTune31Tests, VarPathBorrowKeepsSnapshotIsolated) {
+    test_lambda_script_against_file("test/mir/lambda/tune31_var_path_borrow.ls",
+        "test/mir/lambda/tune31_var_path_borrow.txt", true);
+}
+
+TEST(LambdaTune31Tests, VarPathBorrowPreparesAfterBodySideShare) {
+    test_lambda_script_against_file("test/mir/lambda/tune31_var_path_reborrow_shared.ls",
+        "test/mir/lambda/tune31_var_path_reborrow_shared.txt", true);
 }
 
 TEST(LambdaTypedPathTests, PublishesNestedTypedVarArrayDetach) {

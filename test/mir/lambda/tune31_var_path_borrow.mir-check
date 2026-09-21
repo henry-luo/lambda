@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 Phase II A: an exclusive var record re-borrow keeps the child path helper but does not prepare the already-detached root in the loop body.",
+  "checks": [
+    {
+      "in_func": "_tune31_repeat_#",
+      "expect": [
+        "call\tcow_path_borrow_fixed_p, cow_path_borrow_fixed"
+      ],
+      "forbid": [
+        "call\tcow_prepare_write_p, cow_prepare_write"
+      ]
+    }
+  ]
+}

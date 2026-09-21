@@ -1,6 +1,18 @@
 // Typed text benchmark: deterministic LCS diff over source-like text edits.
+// The static ASCII fixture is admitted once as code arrays before timing, so
+// the LCS loop carries the same native integer comparison lane as C2MIR.
 
-pn score_diff(left: string, right: string) int {
+pn text_codes(text: string) int[] {
+    var codes: int[] = fill(len(text), 0)
+    var index: int = 0
+    while (index < len(text)) {
+        codes[index] = ord(text[index])
+        index = index + 1
+    }
+    codes
+}
+
+pn score_diff(left: int[], right: int[]) int {
     let n: int = len(left)
     let m: int = len(right)
     let cols: int = m + 1
@@ -59,21 +71,37 @@ pn score_diff(left: string, right: string) int {
 }
 
 pn main() {
-    let pairs = [
-        ["function parse(input) {\n  return input.trim();\n}\n", "function parse(source) {\n  const value = source.trim();\n  return normalize(value);\n}\n"],
-        ["const config = {\n  retries: 2,\n  timeout: 1000\n};\n", "const config = {\n  retries: 3,\n  timeout: 1500,\n  backoff: true\n};\n"],
-        ["class Renderer {\n  render(node) {\n    return node.text;\n  }\n}\n", "class Renderer {\n  render(node) {\n    return escapeHtml(node.text);\n  }\n\n  flush() {\n    return true;\n  }\n}\n"],
-        ["import { readFile } from \"fs\";\n\nexport function load(path) {\n  return readFile(path);\n}\n", "import { readFile } from \"fs/promises\";\n\nexport async function load(path) {\n  const source = await readFile(path, \"utf8\");\n  return source;\n}\n"],
-        ["line one\nline two\nline three\nline four\n", "line zero\nline one\nline 2 changed\nline three\nline four\nline five\n"],
-        ["The quick brown fox jumps over the lazy dog.\nThis paragraph is stable.\n", "The quick red fox leaps over the sleepy dog.\nThis paragraph has changed.\n"]
+    let left_text: string[] = [
+        "function parse(input) {\n  return input.trim();\n}\n",
+        "const config = {\n  retries: 2,\n  timeout: 1000\n};\n",
+        "class Renderer {\n  render(node) {\n    return node.text;\n  }\n}\n",
+        "import { readFile } from \"fs\";\n\nexport function load(path) {\n  return readFile(path);\n}\n",
+        "line one\nline two\nline three\nline four\n",
+        "The quick brown fox jumps over the lazy dog.\nThis paragraph is stable.\n"
     ]
+    let right_text: string[] = [
+        "function parse(source) {\n  const value = source.trim();\n  return normalize(value);\n}\n",
+        "const config = {\n  retries: 3,\n  timeout: 1500,\n  backoff: true\n};\n",
+        "class Renderer {\n  render(node) {\n    return escapeHtml(node.text);\n  }\n\n  flush() {\n    return true;\n  }\n}\n",
+        "import { readFile } from \"fs/promises\";\n\nexport async function load(path) {\n  const source = await readFile(path, \"utf8\");\n  return source;\n}\n",
+        "line zero\nline one\nline 2 changed\nline three\nline four\nline five\n",
+        "The quick red fox leaps over the sleepy dog.\nThis paragraph has changed.\n"
+    ]
+    var left_codes: int[][] = []
+    var right_codes: int[][] = []
+    var pair: int = 0
+    while (pair < len(left_text)) {
+        push(left_codes, text_codes(left_text[pair]))
+        push(right_codes, text_codes(right_text[pair]))
+        pair = pair + 1
+    }
     var checksum: int = 0
     var round: int = 0
     let t0 = clock()
     while (round < 256) {
         var index: int = 0
-        while (index < len(pairs)) {
-            checksum = checksum + score_diff(pairs[index][0], pairs[index][1])
+        while (index < len(left_codes)) {
+            checksum = checksum + score_diff(left_codes[index], right_codes[index])
             index = index + 1
         }
         round = round + 1

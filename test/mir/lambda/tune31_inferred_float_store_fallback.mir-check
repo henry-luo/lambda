@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 Phase II F / S7.1.3v2: the inferred witness adds only a guarded native float success arm. Null preserves the generic setter and an out-of-range float store retains array_num_set_cow_idx for its checked miss.",
+  "checks": [
+    {
+      "in_func": "_write_null_#",
+      "expect": [
+        "fn_array_set"
+      ]
+    },
+    {
+      "in_func": "_write_oob_#",
+      "expect": [
+        "array_num_set_cow_idx"
+      ]
+    }
+  ]
+}
