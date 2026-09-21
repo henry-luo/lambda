@@ -1,10 +1,10 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Last verified against tree:** 2026-09-14
+> **Last verified against tree:** 2026-09-21
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
-> **Primary sources:** `radiant/render.hpp`, `radiant/rdt_vector_tvg.cpp`, `radiant/rdt_vector_cg.mm`, `radiant/render_svg_inline.cpp`, `radiant/render_svg.cpp`, `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `lambda/package/graph/layout.ls`, `lambda/package/graph/dagre.ls`, `lambda/package/graph/transform.ls`, and `radiant/graph_bridge.cpp`.
+> **Primary sources:** `radiant/render.hpp`, `radiant/rdt_vector_tvg.cpp`, `radiant/rdt_vector_cg.mm`, `radiant/render_svg_inline.cpp`, `radiant/render_svg.cpp`, `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `radiant/graph_format.cpp`, `lambda/package/graph/document.ls`, `lambda/package/graph/layout.ls`, `lambda/package/graph/dagre.ls`, and `lambda/package/graph/transform.ls`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -129,7 +129,7 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 
 `graph.transform.paint` converts routed edge points into immutable `<svg>` elements returned as custom-layout `paint_layers`. Radiant roots those elements for the document lifetime and merges generated layers with normal node child views using one stable signed-z sequence. SVG, PDF, and raster backends consume the same sequence; hit testing consumes it in reverse while skipping generated layers, which are initially non-interactive.
 
-`radiant/graph_bridge.cpp` builds a small Lambda document that imports the transform package, parses the source with the appropriate graph flavor, installs `lambda-graph`, and returns `to_html()`. `render`, `view`, `layout`, and the generic document loader all use this bridge. Final SVG/PDF/PNG/JPEG output is produced by normal Radiant rendering; there is no direct C graph-to-SVG path.
+`LambdaDocumentTransformConfig` selects `lambda.graph.document.to_html`; the native loader parses the graph input, passes typed `theme`/`view_key` options, and invokes that public package export. `render`, `view`, `layout`, and generic document loading share this route without generating Lambda source. This is an ordinary shipped-package invocation under **D7.2.1–D7.2.2**. Final SVG/PDF/PNG/JPEG output is produced by normal Radiant rendering; there is no direct C graph-to-SVG path.
 
 ---
 
@@ -157,7 +157,7 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 | `radiant/render_path.cpp`, `radiant/render_vector_path.cpp` | Rounded-rect/clip path construction and CSS `VectorPathProp` rendering through `rdt_*`. |
 | `lambda/package/graph/layout.ls`, `dagre.ls` | Pure canonical graph geometry, ranking, coordinates, and edge routing. |
 | `lambda/package/graph/transform.ls`, `transform/*` | Semantic HTML, custom-layout installation, themes, and generated SVG edge layers. |
-| `radiant/graph_bridge.cpp` | Shared graph-file to Lambda-document bridge for render, view, layout, and generic loading. |
+| `radiant/graph_format.cpp` / `lambda/package/graph/document.ls` | Graph syntax detection plus the shared configured package transform for render, view, layout, and generic loading. |
 | `radiant/stacking_order.cpp` | Stable signed-z merge of generated layers and measured node views. |
 
 ## Appendix B — Related documents

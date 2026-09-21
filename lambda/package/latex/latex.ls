@@ -59,9 +59,9 @@ pub fn render(ast, options) {
     }
 }
 
-// Native document-loader entry point keeps the interactive standalone shell.
+// Native document-loader entry point keeps standalone output as the view default.
 pub fn render_document(ast, options) {
-    render(ast, {standalone: true})
+    render(ast, if (options == null) {standalone: true} else options)
 }
 
 fn is_standalone(options) {

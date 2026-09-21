@@ -42746,6 +42746,7 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.pdf.pdf", "pdf_to_html"},
     {"latex", "lambda.latex.latex", "render_document"},
     {"graph", "lambda.graph.document", "to_html"},
+    {"math", "lambda.doc.math.math", "render_math"},
 };
 
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
@@ -42763,21 +42764,39 @@ const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
 
 Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
         const LambdaDocumentTransformConfig* transform) {
-    if (!runtime || !input_target || !transform || !transform->input_type ||
-            !transform->package_module || !transform->function_name) {
-        log_error("document-transform: incomplete transform configuration");
+    return run_lambda_document_transform_with_options(runtime, input_target, transform,
+        NULL, 0);
+}
+
+Input* run_lambda_package_module(Runtime* runtime, const char* package_module,
+        Script** out_package) {
+    if (out_package) *out_package = NULL;
+    if (!runtime || !package_module || !package_module[0]) {
+        log_error("package-loader: incomplete package configuration");
         return NULL;
     }
     char* package_path = lambda_resolve_import_module_path("./",
-        strview_from_cstr(transform->package_module));
+        strview_from_cstr(package_module));
     if (!package_path) {
-        log_error("document-transform: could not resolve package '%s'",
-            transform->package_module);
+        log_error("package-loader: could not resolve package '%s'", package_module);
+        return NULL;
+    }
+    Input* output = run_script_mir(runtime, NULL, package_path, false, out_package);
+    mem_free(package_path);
+    return output;
+}
+
+Input* run_lambda_document_transform_with_options(Runtime* runtime,
+        const char* input_target, const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count) {
+    if (!runtime || !input_target || !transform || !transform->input_type ||
+            !transform->package_module || !transform->function_name || option_count < 0 ||
+            (option_count > 0 && !options)) {
+        log_error("document-transform: incomplete transform configuration");
         return NULL;
     }
     Script* package = NULL;
-    Input* output = run_script_mir(runtime, NULL, package_path, false, &package);
-    mem_free(package_path);
+    Input* output = run_lambda_package_module(runtime, transform->package_module, &package);
     if (!output || !package) return output;
 
     EvalContext* eval_context = runtime_get_eval_context(runtime);
@@ -42788,19 +42807,54 @@ Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
         return output;
     }
     RuntimeExecutionScope execution_scope(eval_context);
-    RootFrame roots(4);
+    RootFrame roots(7);
     Rooted<Item> target(roots, (Item){.item = s2it(heap_strcpy(input_target,
         (int64_t)strlen(input_target)))});
     Rooted<Item> type(roots, (Item){.item = s2it(heap_strcpy(transform->input_type,
         (int64_t)strlen(transform->input_type)))});
     Rooted<Item> document(roots, fn_input2(target.get(), type.get()));
+    Rooted<Item> option_map(roots, ItemNull);
+    Rooted<Item> option_name(roots, ItemNull);
+    Rooted<Item> option_value(roots, ItemNull);
+    Rooted<Item> result(roots, ItemNull);
     if (item_is_error(document.get())) {
         output->root = document.get();
         return output;
     }
-    Item args[2] = {document.get(), ItemNull};
-    Rooted<Item> result(roots, interp_call_module_export(runtime, package,
-        transform->function_name, args, 2));
+    if (option_count > 0) {
+        option_map.set(vmap_new());
+        if (get_type_id(option_map.get()) != LMD_TYPE_VMAP) {
+            log_error("document-transform: could not create transform options");
+            output->root = ItemError;
+            return output;
+        }
+        for (int index = 0; index < option_count; index++) {
+            const LambdaDocumentTransformOption* option = &options[index];
+            if (!option->name || !option->name[0] ||
+                    (option->kind != LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING &&
+                     option->kind != LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL) ||
+                    (option->kind == LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING &&
+                     !option->string_value)) {
+                log_error("document-transform: invalid transform option at index %d", index);
+                output->root = ItemError;
+                return output;
+            }
+            option_name.set((Item){.item = s2it(heap_strcpy(option->name,
+                (int64_t)strlen(option->name)))});
+            option_value.set(option->kind == LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL
+                ? (Item){.item = b2it(option->bool_value ? 1 : 0)}
+                : (Item){.item = s2it(heap_strcpy(option->string_value,
+                    (int64_t)strlen(option->string_value)))});
+            if (item_is_error(vmap_set(option_map.get(), option_name.get(),
+                    option_value.get()))) {
+                log_error("document-transform: could not set transform option '%s'", option->name);
+                output->root = ItemError;
+                return output;
+            }
+        }
+    }
+    Item args[2] = {document.get(), option_map.get()};
+    result.set(interp_call_module_export(runtime, package, transform->function_name, args, 2));
     output->root = result.get();
     return output;
 }

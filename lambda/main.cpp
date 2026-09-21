@@ -880,11 +880,6 @@ extern int view_doc_in_window_with_events(const char* doc_file, const char* even
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
                                            bool enable_event_log = false,
                                            bool enable_state_dump = false);
-extern int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
-                                                           const char* event_file, bool headless,
-                                                           const char** font_dirs = nullptr, int font_dir_count = 0,
-                                                           bool enable_event_log = false,
-                                                           bool enable_state_dump = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
@@ -1265,51 +1260,6 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     return 0;  // success
 }
 
-static char* build_latex_to_html_bridge_script(const char* latex_file,
-                                               bool full_document,
-                                               const char* font_option,
-                                               const char* log_prefix) {
-    char* escaped_latex = mem_escape_lambda_literal(latex_file, MEM_CAT_TEMP);
-    if (!escaped_latex) {
-        log_error("[%s] LaTeX package: failed to escape input path", log_prefix);
-        return nullptr;
-    }
-
-    const char* standalone = full_document ? "true" : "false";
-    const char* font = font_option ? font_option : "default";
-    bool has_options = full_document || font_option;
-    const char* format = has_options ?
-        "import latex: .lambda.latex.latex\n"
-        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
-        "latex.render_to_html(ast, {standalone: %s, font_option: \"%s\"})\n" :
-        "import latex: .lambda.latex.latex\n"
-        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
-        "latex.render_to_html(ast, null)\n";
-    int needed = has_options
-        ? snprintf(nullptr, 0, format, escaped_latex, standalone, font)
-        : snprintf(nullptr, 0, format, escaped_latex);
-    if (needed <= 0) {
-        mem_free(escaped_latex);
-        log_error("[%s] LaTeX package: failed to size bridge script", log_prefix);
-        return nullptr;
-    }
-
-    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
-    if (!script_buf) {
-        mem_free(escaped_latex);
-        log_error("[%s] LaTeX package: failed to allocate bridge script", log_prefix);
-        return nullptr;
-    }
-    if (has_options) {
-        snprintf(script_buf, (size_t)needed + 1, format,
-            escaped_latex, standalone, font);
-    } else {
-        snprintf(script_buf, (size_t)needed + 1, format, escaped_latex);
-    }
-    mem_free(escaped_latex);
-    return script_buf;
-}
-
 void run_assertions() {
 #ifdef __cplusplus
     static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -1339,17 +1289,15 @@ void run_assertions() {
     assert(-1.0/0.0 == -INFINITY);
 }
 
-static StrBuf* exec_convert_lambda_html(const char* script_source, const char* temp_prefix) {
-    if (!script_source || !temp_prefix) return NULL;
-    char* script_path = file_temp_path(temp_prefix, ".ls");
-    if (!script_path) return NULL;
-    write_text_file(script_path, script_source);
-
+// Invoke configured package transforms directly and preserve their HTML output.
+static StrBuf* run_document_transform_html(const char* input_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count) {
+    if (!input_file || !transform) return nullptr;
     Runtime runtime;
     runtime_init(&runtime);
-    runtime.current_dir = const_cast<char*>("./");
-    runtime.import_base_dir = "./";
-    Input* result = run_script_mir(&runtime, nullptr, script_path, false);
+    Input* result = run_lambda_document_transform_with_options(&runtime, input_file,
+        transform, options, option_count);
     StrBuf* output = NULL;
     if (result && get_type_id(result->root) != LMD_TYPE_NULL &&
         get_type_id(result->root) != LMD_TYPE_ERROR) {
@@ -1361,15 +1309,18 @@ static StrBuf* exec_convert_lambda_html(const char* script_source, const char* t
                 strbuf_free(output);
                 output = NULL;
             }
+        } else if (get_type_id(result->root) == LMD_TYPE_STRING) {
+            String* html = result->root.get_string();
+            if (html) strbuf_append_str(output, html->chars);
+            else {
+                strbuf_free(output);
+                output = NULL;
+            }
         } else {
             print_root_item(output, result->root);
         }
     }
     runtime_cleanup(&runtime);
-    // Generated package scripts are invocation-scoped; retaining them makes
-    // repeated conversions accumulate stale executable inputs in ./temp.
-    file_delete(script_path);
-    mem_free(script_path);
     return output;
 }
 
@@ -1607,7 +1558,7 @@ int exec_convert(int argc, char* argv[]) {
             // Also check the actual input type used
             is_latex_input = true;
         }
-        bool is_graph_input = graph_bridge_path_is_graph(input_file) ||
+        bool is_graph_input = graph_path_is_graph(input_file) ||
             (from_format && (strcmp(from_format, "graph") == 0 ||
                 strncmp(from_format, "graph:", 6) == 0));
 
@@ -1644,25 +1595,34 @@ int exec_convert(int argc, char* argv[]) {
             // Check if input is LaTeX and route to Lambda package converter
             if (is_graph_input) {
                 printf("Using Lambda graph package pipeline\n");
-                char* script_source = build_graph_to_html_bridge_script(
-                    input_file, nullptr, graph_view_key, "convert");
-                if (script_source) {
-                    full_doc_output = exec_convert_lambda_html(
-                        script_source, "convert_graph_bridge");
-                    mem_free(script_source);
+                const LambdaDocumentTransformConfig* transform =
+                    lambda_document_transform_for_input_type("graph");
+                LambdaDocumentTransformOption options[1] = {};
+                int option_count = 0;
+                if (graph_view_key) {
+                    options[option_count++] = {"view_key",
+                        LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
                 }
+                full_doc_output = run_document_transform_html(input_file, transform,
+                    options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda graph package - HTML conversion failed\n");
                 }
             } else if (is_latex_input) {
                 printf("Using Lambda LaTeX package pipeline\n");
-                char* script_buf = build_latex_to_html_bridge_script(
-                    input_file, full_document, font_option, "convert");
-                if (script_buf) {
-                    full_doc_output = exec_convert_lambda_html(
-                        script_buf, "convert_latex_bridge");
-                    mem_free(script_buf);
+                const LambdaDocumentTransformConfig* transform =
+                    lambda_document_transform_for_input_type("latex");
+                LambdaDocumentTransformOption options[2] = {
+                    {"standalone", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL, nullptr,
+                     full_document},
+                };
+                int option_count = 1;
+                if (font_option) {
+                    options[option_count++] = {"font_option",
+                        LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, font_option, false};
                 }
+                full_doc_output = run_document_transform_html(input_file, transform,
+                    options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
                     LambdaError* last_error = get_persistent_last_error();
@@ -3523,26 +3483,29 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         const char* input_ext = file_path_ext(html_file);
-        bool is_graph_input = graph_bridge_path_is_graph(html_file);
+        bool is_graph_input = graph_path_is_graph(html_file);
 
         log_debug("Rendering input '%s' to output '%s' with viewport %dx%d, output_scale=%.2f, device_scale=%.2f",
                   html_file, output_file, viewport_width, viewport_height, output_scale, device_scale);
 
-        char* render_package_temp_input = nullptr;
+        const LambdaDocumentTransformConfig* render_transform = nullptr;
+        LambdaDocumentTransformOption render_options[2] = {};
+        int render_option_count = 0;
         if (is_graph_input) {
-            char* graph_bridge_source = build_graph_to_html_bridge_script(
-                html_file, theme_name, graph_view_key, "render");
-            render_package_temp_input = file_temp_path("render_graph_bridge", ".ls");
-            if (!graph_bridge_source || !render_package_temp_input) {
-                printf("Error: Failed to prepare graph render bridge for '%s'\n", html_file);
-                if (graph_bridge_source) mem_free(graph_bridge_source);
-                if (render_package_temp_input) mem_free(render_package_temp_input);
+            render_transform = lambda_document_transform_for_input_type("graph");
+            if (!render_transform) {
+                printf("Error: Graph document transform is not configured\n");
                 return lambda_main_finish(1);
             }
-            write_text_file(render_package_temp_input, graph_bridge_source);
-            mem_free(graph_bridge_source);
-            html_file = render_package_temp_input;
-            log_info("GRAPH_RENDER_BRIDGE: rendering '%s' through Lambda graph transform", html_file);
+            if (theme_name) {
+                render_options[render_option_count++] = {"theme",
+                    LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, theme_name, false};
+            }
+            if (graph_view_key) {
+                render_options[render_option_count++] = {"view_key",
+                    LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
+            }
+            log_info("GRAPH_RENDER_TRANSFORM: rendering '%s' through Lambda graph transform", html_file);
         }
 
         const char* output_ext = file_path_ext(output_file);
@@ -3566,10 +3529,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         if (ext && strcmp(ext, ".dvi") == 0) {
             printf("Error: DVI output is no longer supported. Use .svg, .pdf, .png, or .jpg instead.\n");
-            if (render_package_temp_input) {
-                file_delete(render_package_temp_input);
-                mem_free(render_package_temp_input);
-            }
             return lambda_main_finish(1);
         } else if (ext && (strcmp(ext, ".pdf") == 0 ||
                            strcmp(ext, ".svg") == 0 ||
@@ -3577,22 +3536,17 @@ static int lambda_main_impl(int argc, char *argv[]) {
                            strcmp(ext, ".jpg") == 0 ||
                            strcmp(ext, ".jpeg") == 0)) {
             log_debug("Detected render output format: %s", ext);
-            exit_code = render_html_to_output_target(html_file, output_file,
-                viewport_width, viewport_height, output_scale, device_scale, 85);
+            exit_code = render_transform
+                ? render_document_transform_to_output_target(html_file, render_transform,
+                    render_options, render_option_count, output_file, viewport_width,
+                    viewport_height, output_scale, device_scale, 85)
+                : render_html_to_output_target(html_file, output_file,
+                    viewport_width, viewport_height, output_scale, device_scale, 85);
         }
         else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
-            if (render_package_temp_input) {
-                file_delete(render_package_temp_input);
-                mem_free(render_package_temp_input);
-            }
             return lambda_main_finish(1);
-        }
-
-        if (render_package_temp_input) {
-            file_delete(render_package_temp_input);
-            mem_free(render_package_temp_input);
         }
 
         log_debug("render completed with result: %d", exit_code);
@@ -3858,21 +3812,22 @@ static int lambda_main_impl(int argc, char *argv[]) {
         int exit_code;
 
         // Check if this is a graph file that needs conversion
-        bool is_graph_file = graph_bridge_path_is_graph(filename);
+        bool is_graph_file = graph_path_is_graph(filename);
 
         if (is_graph_file && graph_view_key) {
-            char* graph_bridge_source = build_graph_to_html_bridge_script(
-                filename, nullptr, graph_view_key, "view");
-            if (!graph_bridge_source) {
-                printf("Error: Failed to prepare graph view bridge for '%s'\n", filename);
+            const LambdaDocumentTransformConfig* transform =
+                lambda_document_transform_for_input_type("graph");
+            LambdaDocumentTransformOption option = {"view_key",
+                LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
+            if (!transform) {
+                printf("Error: Graph document transform is not configured\n");
                 return lambda_main_finish(1);
             }
 
-            log_info("GRAPH_VIEW_BRIDGE: viewing '%s' through Lambda graph transform", filename);
-            exit_code = view_lambda_script_source_in_window_with_events(
-                filename, graph_bridge_source, event_file, headless,
-                font_dirs, font_dir_count, event_log, state_dump);
-            mem_free(graph_bridge_source);
+            log_info("GRAPH_VIEW_TRANSFORM: viewing '%s' through Lambda graph transform", filename);
+            exit_code = view_lambda_document_transform_with_events(filename, transform,
+                &option, 1, event_file, headless, font_dirs, font_dir_count,
+                event_log, state_dump);
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);

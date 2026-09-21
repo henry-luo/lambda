@@ -291,12 +291,11 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
 void reflow_html_doc(DomDocument* doc);
 void update_window_title(const char* title);
 void repaint_window(void);
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
-                                   const char* script_source);
-int view_lambda_script_source_in_window_with_events(const char* script_name,
-                                                    const char* script_source,
-                                                    const char* event_file,
-                                                    bool headless);
+int view_lambda_document_transform_with_events(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    const char* event_file, bool headless, const char** font_dirs,
+    int font_dir_count, bool enable_event_log, bool enable_state_dump);
 int view_doc_in_window(const char* doc_file);
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
