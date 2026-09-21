@@ -647,6 +647,8 @@ JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt, JsCallNode*
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);
 void jm_plan_literal_field_shapes(JsMirTranspiler* mt);
+TypeMap* jm_plain_function_instance_shape_for_function(JsMirTranspiler* mt,
+                                                        JsFunctionNode* function);
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item);
 const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt);
 const char* jm_get_param_name(JsAstNode* param_node, int index);
@@ -785,6 +787,11 @@ void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
+// Resolve an inline document script through the page URL rather than its
+// synthetic diagnostic label. Returns false for ordinary file/URL scripts.
+bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,
+                                     const char* specifier, int spec_len,
+                                     char* out, int out_size);
 bool jm_path_is_lambda_source(const char* path);
 void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
                            NameEntry* binding, bool is_default);

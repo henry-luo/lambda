@@ -2,8 +2,8 @@
 
 // First-party Lambda source parser POC. The core has a C ABI so the lexer and
 // recursive-descent/Pratt parser stay small and are usable without Tree-sitter.
-// Type-pattern and static-path interiors remain delegated to their existing
-// Lambda-side parsers during the direct-AST phase.
+// Type-pattern interiors remain delegated to the Lambda-side type parser;
+// paths are built from this parser's own tokens (no second path grammar).
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -34,10 +34,10 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_DATETIME,
     LAMBDA_TOK_NAMED_VALUE,
     LAMBDA_TOK_PATTERN_ISLAND,
-    // §7.15: `\.` introduces a RELATIVE path. `\` reads as the escape
-    // character — "this dot is not member access, it introduces a path" — which
-    // is what frees a line-start `.ident` to mean member access and nothing
-    // else. The rooted form `/.a` is unchanged.
+    // §7.15: `\` is the RELATIVE path root, as `/` is the logical one, so a
+    // relative path reads `\.a.b` or `\[1]`. Respelling it away from a bare
+    // `.` is what frees a line-start `.ident` to mean member access and
+    // nothing else. The rooted form `/.a` is unchanged.
     LAMBDA_TOK_PATH_REL,
 
     LAMBDA_TOK_LET,
@@ -167,6 +167,9 @@ typedef struct LambdaLexer {
     size_t offset;
     uint32_t line;
     uint32_t column;
+    // set by a step dot: the number that follows is an IntKey step, so
+    // `a.1.2` and `\.1.2` are keys 1 then 2, never key 1.2.
+    bool after_step_dot;
 } LambdaLexer;
 
 typedef enum LambdaParseStatus {
@@ -381,6 +384,10 @@ typedef struct LambdaParseSink {
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
+// Re-reads a dot-led number (`.1`) as a `.` step introducer and returns that
+// DOT token; the lexer resumes after the dot. The parser calls it after a
+// leading root `/`, the one place only syntax can tell a step from a float.
+LambdaToken lambda_lexer_rescan_dot_step(LambdaLexer* lexer, LambdaToken number);
 // true when the word may not name a binding: a declaration/statement keyword,
 // a base-type name, or a named value. Clause words and infix word operators
 // are capture-safe and return false. See S16.10.1v2.

@@ -7,7 +7,6 @@
 #include "ast_build.hpp"
 #include "write_set.hpp"
 #include "parse_type_pattern.hpp"
-#include "parse_path_expr.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
 #include "../jube/jube_language.h"
@@ -2054,6 +2053,13 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         AstFieldNode* field = (AstFieldNode*)node;
         collect_captures_from_node(tp, field->object, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, field->field, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_PATH_INDEX_EXPR: {
+        // `\.a[n]` inside a closure reads `n`; missing it left `n` undefined
+        AstPathIndexNode* path = (AstPathIndexNode*)node;
+        collect_captures_from_node(tp, path->base_path, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, path->segment_expr, fn_scope, global_scope, captures);
         break;
     }
     case AST_NODE_LIST:
@@ -4558,6 +4564,10 @@ bool has_current_item_ref(AstNode* node) {
                has_current_item_ref(((AstFieldNode*)node)->field);
     case AST_NODE_NAVIGATION_EXPR:
         return has_current_item_ref(((AstNavigationNode*)node)->object);
+    case AST_NODE_PATH_INDEX_EXPR:
+        // `d |> \.p[~]` maps: the path key reads the current item
+        return has_current_item_ref(((AstPathIndexNode*)node)->base_path) ||
+            has_current_item_ref(((AstPathIndexNode*)node)->segment_expr);
     case AST_NODE_ARRAY: {
         AstNode* item = ((AstArrayNode*)node)->item;
         while (item) {
@@ -6008,6 +6018,12 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         validate_enforcing_calls_in_expression(tp, field->field, false, return_acknowledgment);
         return;
     }
+    case AST_NODE_PATH_INDEX_EXPR: {
+        AstPathIndexNode* path = (AstPathIndexNode*)node;
+        validate_enforcing_calls_in_expression(tp, path->base_path, false, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, path->segment_expr, false, return_acknowledgment);
+        return;
+    }
     case AST_NODE_CONTENT:
     case AST_NODE_LIST:
     case AST_NODE_ARRAY:
@@ -6152,6 +6168,9 @@ static bool ast_reads_binding(AstNode* node, String* name) {
         return ast_reads_binding(field->object, name) ||
             ast_reads_binding(field->field, name);
     }
+    case AST_NODE_PATH_INDEX_EXPR:
+        return ast_reads_binding(((AstPathIndexNode*)node)->base_path, name) ||
+            ast_reads_binding(((AstPathIndexNode*)node)->segment_expr, name);
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         return ast_reads_binding(branch->cond, name) ||
@@ -6385,6 +6404,10 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             scan_invalidated_bindings(state, field->field);
             break;
         }
+        case AST_NODE_PATH_INDEX_EXPR:
+            scan_invalidated_bindings(state, ((AstPathIndexNode*)node)->base_path);
+            scan_invalidated_bindings(state, ((AstPathIndexNode*)node)->segment_expr);
+            break;
         case AST_NODE_VARIABLE_DECLARATOR:
             scan_invalidated_bindings(state, ((AstDeclaratorNode*)node)->init);
             break;
@@ -6801,6 +6824,10 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         walk_lambda_ast(field->field, visitor, data, descend_functions);
         break;
     }
+    case AST_NODE_PATH_INDEX_EXPR:
+        walk_lambda_ast(((AstPathIndexNode*)node)->base_path, visitor, data, descend_functions);
+        walk_lambda_ast(((AstPathIndexNode*)node)->segment_expr, visitor, data, descend_functions);
+        break;
     case AST_NODE_LOOP: {
         // every clause of the one loop tag (D8.2.2) can hold a call or a write
         AstLoopControlNode* loop = (AstLoopControlNode*)node;
@@ -8510,6 +8537,164 @@ static AstNode* direct_member_field(Transpiler* tp, LambdaToken token) {
     // system-function node (D4.6.1v2).
     field->type = set_type_any(tp, ANY_DYNAMIC_NAME);
     return (AstNode*)field;
+}
+
+// ---- path literals, built from the parser's own tokens --------------------
+// A path root reduction carries the root token, `/` or `\`; each step arrives
+// as a member or index reduction that extends the path.
+// The former text re-parser was a second path grammar that disagreed with the
+// parser: it silently rejected `\.1`, and the stand-in node ran as `file./`.
+
+// S2.4.5v2/PTH23: a registered scheme heading a dotted chain is an absolute root.
+static bool direct_path_scheme(StrView name, PathScheme* out) {
+    if (strview_equal(&name, "file")) { *out = PATH_SCHEME_FILE; return true; }
+    if (strview_equal(&name, "http")) { *out = PATH_SCHEME_HTTP; return true; }
+    if (strview_equal(&name, "https")) { *out = PATH_SCHEME_HTTPS; return true; }
+    if (strview_equal(&name, "sys")) { *out = PATH_SCHEME_SYS; return true; }
+    // PTH44v2: `temp.'name'` addresses an in-memory document; the call form
+    // `temp(name, content)` creates one, and `temp.` / `temp(` never overlap.
+    if (strview_equal(&name, "temp")) { *out = PATH_SCHEME_TEMP; return true; }
+    return false;
+}
+
+// One step from its token (S2.4.2v5): a name or quoted symbol is a NameKey, a
+// decimal integer an IntKey, `*`/`**` wildcards, `~~` parent and `/` root.
+static bool direct_path_step(Transpiler* tp, LambdaToken token,
+        AstPathSegment* out) {
+    memset(out, 0, sizeof(*out));
+    switch (token.kind) {
+    case LAMBDA_TOK_SLASH: out->type = LPATH_SEG_ROOT; return true;
+    case LAMBDA_TOK_PARENT: out->type = LPATH_SEG_PARENT; return true;
+    case LAMBDA_TOK_STAR: out->type = LPATH_SEG_WILDCARD; return true;
+    case LAMBDA_TOK_STAR_STAR: out->type = LPATH_SEG_WILDCARD_REC; return true;
+    case LAMBDA_TOK_INTEGER: {
+        StrView digits = direct_token_text(tp, token);
+        int64_t value = 0;
+        for (size_t i = 0; i < digits.length; i++) {
+            char ch = digits.str[i];
+            if (ch < '0' || ch > '9') {
+                record_semantic_error_span(tp, token.span, ERR_INVALID_LITERAL,
+                    "invalid path step: an integer key must be decimal");
+                return false;
+            }
+            int digit = ch - '0';
+            if (value > (INT64_MAX - digit) / 10) {
+                record_semantic_error_span(tp, token.span, ERR_INVALID_LITERAL,
+                    "invalid path step: integer key is out of range");
+                return false;
+            }
+            value = value * 10 + digit;
+        }
+        out->type = LPATH_SEG_INT;
+        out->int_value = value;
+        return true;
+    }
+    default:
+        out->type = LPATH_SEG_NORMAL;
+        out->name = name_pool_create_strview(tp->name_pool,
+            direct_key_text(tp, token));
+        return true;
+    }
+}
+
+// A fresh step array per reduction: `base` steps plus an optional appended one.
+static AstPathSegment* direct_path_steps(Transpiler* tp,
+        const AstPathSegment* base, int base_count, const AstPathSegment* step,
+        int* count_out) {
+    *count_out = base_count + (step ? 1 : 0);
+    if (!*count_out) return NULL;
+    AstPathSegment* steps = (AstPathSegment*)pool_calloc(tp->pool,
+        sizeof(AstPathSegment) * (size_t)*count_out);
+    if (base_count) memcpy(steps, base, sizeof(AstPathSegment) * (size_t)base_count);
+    if (step) steps[base_count] = *step;
+    return steps;
+}
+
+static AstNode* direct_path_node(Transpiler* tp, SourceSpan span,
+        PathScheme scheme, String* authority, const AstPathSegment* base,
+        int base_count, const AstPathSegment* step) {
+    AstPathNode* path = (AstPathNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PATH_EXPR, span, sizeof(AstPathNode));
+    path->scheme = scheme;
+    path->authority = authority;
+    path->segments = direct_path_steps(tp, base, base_count, step,
+        &path->segment_count);
+    path->type = &TYPE_PATH;
+    return (AstNode*)path;
+}
+
+// A computed `[k]` step of a path literal, with the static steps written after
+// it. Typed `any`: a key that names nothing makes the whole literal null.
+static AstNode* direct_path_index_node(Transpiler* tp, SourceSpan span,
+        AstNode* base_path, AstNode* key, const AstPathSegment* base,
+        int base_count, const AstPathSegment* step) {
+    AstPathIndexNode* path = (AstPathIndexNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_PATH_INDEX_EXPR, span, sizeof(AstPathIndexNode));
+    path->base_path = base_path;
+    path->segment_expr = key;
+    path->segments = direct_path_steps(tp, base, base_count, step,
+        &path->segment_count);
+    path->type = &TYPE_ANY;
+    return (AstNode*)path;
+}
+
+static bool direct_is_path_literal(AstNode* node) {
+    return node && (node->node_type == AST_NODE_PATH_EXPR ||
+        node->node_type == AST_NODE_PATH_INDEX_EXPR);
+}
+
+// S2.4.1v2: the roots `/` and `\` are complete paths; steps extend them.
+static AstNode* direct_path_root(Transpiler* tp, SourceSpan span,
+        LambdaToken root) {
+    return direct_path_node(tp, span, root.kind == LAMBDA_TOK_SLASH
+        ? PATH_SCHEME_LOGICAL : PATH_SCHEME_REL, NULL, NULL, 0, NULL);
+}
+
+// S2.4.2v5: `[k]` on a path literal is a key step of that literal (`\[1]` is
+// `\.1`); on any other value it stays an ordinary index. Parenthesizing ends
+// the literal, since its AST is a PRIMARY wrapper.
+static AstNode* direct_path_index_step(Transpiler* tp, SourceSpan span,
+        AstNode* object, AstNode* key) {
+    if (!direct_is_path_literal(object) || !key || key->next) return NULL;
+    return direct_path_index_node(tp, span, object, key, NULL, 0, NULL);
+}
+
+// A dotted step on a path literal extends it, and on a registered scheme name
+// it starts an absolute path. Anything else is member access and returns NULL
+// -- including a parenthesized path, whose AST is a PRIMARY wrapper, so
+// `(\.a).name` still reads the path value's `name` property. After a computed
+// key the step is still a key step: `\[1].name` is `\.1.name`.
+static AstNode* direct_path_member_step(Transpiler* tp, SourceSpan span,
+        AstNode* object, LambdaToken step_token) {
+    if (!object) return NULL;
+    PathScheme scheme = PATH_SCHEME_REL;
+    if (!direct_is_path_literal(object) &&
+            !direct_path_scheme(ast_node_source(tp, object), &scheme)) {
+        return NULL;
+    }
+    AstPathSegment step;
+    bool valid = direct_path_step(tp, step_token, &step);
+    AstNode* path;
+    if (object->node_type == AST_NODE_PATH_INDEX_EXPR) {
+        AstPathIndexNode* base = (AstPathIndexNode*)object;
+        path = direct_path_index_node(tp, span, base->base_path,
+            base->segment_expr, base->segments, base->segment_count,
+            valid ? &step : NULL);
+    } else if (object->node_type == AST_NODE_PATH_EXPR) {
+        AstPathNode* base = (AstPathNode*)object;
+        path = direct_path_node(tp, span, base->scheme, base->authority,
+            base->segments, base->segment_count, valid ? &step : NULL);
+        if (base->type == &TYPE_ERROR) valid = false;
+    } else if (scheme == PATH_SCHEME_FILE && valid && step.type == LPATH_SEG_NORMAL) {
+        // S2.4.5v2: after `file.` a name selects the host (`file.host.a`),
+        // while `./` selects the current machine (`file./.a`).
+        path = direct_path_node(tp, span, scheme, step.name, NULL, 0, NULL);
+    } else {
+        path = direct_path_node(tp, span, scheme, NULL, NULL, 0,
+            valid ? &step : NULL);
+    }
+    if (!valid) path->type = &TYPE_ERROR;
+    return path;
 }
 
 static AstNode* direct_type_from_value(Transpiler* tp, SourceSpan span,
@@ -13556,6 +13741,10 @@ static void direct_rebind_join_ident(AstNode* node, String* name,
             direct_rebind_join_ident(field->field, name, entry);
         return;
     }
+    case AST_NODE_PATH_INDEX_EXPR:
+        direct_rebind_join_ident(((AstPathIndexNode*)node)->base_path, name, entry);
+        direct_rebind_join_ident(((AstPathIndexNode*)node)->segment_expr, name, entry);
+        return;
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
         direct_rebind_join_ident(call->function, name, entry);
@@ -14365,14 +14554,8 @@ static LambdaParseValue direct_ast_reduce(void* context,
         if (!reduction->child_count) break;
         AstNode* object = child0;
         if (reduction->form == LAMBDA_REDUCTION_FORM_MEMBER) {
-            StrView source = source_span_text(tp, reduction->span);
-            const char* builtin_module = NULL;
-            StrView builtin_member = {0};
-            bool builtin_member_path = resolve_builtin_module_member(source,
-                &builtin_module, &builtin_member);
-            AstNode* path = builtin_member_path ? NULL
-                : try_parse_path_expr_text_span(tp, source.str,
-                    source.str + source.length, reduction->span);
+            AstNode* path = direct_path_member_step(tp, reduction->span, object,
+                reduction->detail_token);
             if (path) return direct_ast_value(path);
             if (reduction->detail_token.kind == LAMBDA_TOK_SLASH) {
                 // A slash after an existing value is the navigation root
@@ -14394,6 +14577,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 fields = direct_append(fields,
                     direct_ast_node(reduction->children[i]));
             }
+            AstNode* path = direct_path_index_step(tp, reduction->span, object,
+                fields);
+            if (path) return direct_ast_value(path);
             return direct_ast_value(build_field_node_from_parts(tp,
                 reduction->span, AST_NODE_INDEX_EXPR, object, fields));
         }
@@ -14548,23 +14734,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
         statement_noop->type = &TYPE_NULL;
         return direct_ast_value(statement_noop);
     }
-    case LAMBDA_REDUCE_PATH_SLOT: {
-        StrView source = source_span_text(tp, reduction->span);
-        AstNode* node = parse_path_expr_text_span(tp, source.str,
-            source.str + source.length, reduction->span);
-        if (!node) {
-            // Keep a committed path reduction alive after a semantic path
-            // rejection; the enclosing expression must report the error
-            // rather than dereference a null reduction value (D8.1.1v3).
-            // must be a full AstPathNode: the node is tagged AST_NODE_PATH_EXPR,
-            // so the transpiler casts and reads `authority` — a bare AstNode
-            // allocation left that read past the end of the object.
-            node = alloc_ast_node_from_span(tp, AST_NODE_PATH_EXPR,
-                reduction->span, sizeof(AstPathNode));
-            node->type = &TYPE_ERROR;
-        }
-        return direct_ast_value(node);
-    }
+    case LAMBDA_REDUCE_PATH_SLOT:
+        return direct_ast_value(direct_path_root(tp, reduction->span,
+            reduction->detail_token));
     case LAMBDA_REDUCE_ASSIGNMENT:
         if (reduction->child_count == 2) {
             AstNode* assignment = build_assignment_statement_from_parts(tp,

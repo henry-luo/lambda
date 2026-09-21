@@ -144,7 +144,11 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
         if (entry->desc) {
             // Descriptors are native allocations, so unregister their exact
             // namespace roots before the owning heap is retired.
-            if (entry->desc->roots_epoch == js_get_heap_epoch()) {
+            // AST-prebuild workers may create descriptors before any document
+            // heap exists, so no root epoch was ever assigned to them.
+            if (entry->desc->roots_epoch != 0 && context && context->heap &&
+                    context->heap->gc &&
+                    entry->desc->roots_epoch == js_get_heap_epoch()) {
                 heap_unregister_gc_root(&entry->desc->namespace_obj.item);
                 heap_unregister_gc_root(&entry->desc->specifier_item.item);
                 heap_unregister_gc_root(&entry->desc->awaited_target.item);

@@ -176,6 +176,7 @@ test/lambda/match_expr.ls	direct
 test/lambda/match_string_pattern.ls	direct
 test/lambda/math_native_lowering_edges.ls	direct
 test/lambda/math_random.ls	direct
+test/lambda/member_int_steps.ls	direct
 test/lambda/method_call.ls	direct
 test/lambda/mir_value_bool_item_boundary.ls	direct
 test/lambda/mir_value_dynamic_string_call.ls	direct
@@ -209,6 +210,9 @@ test/lambda/parent_access.ls	direct
 test/lambda/parse.ls	direct
 test/lambda/parse_error_convention.ls	direct
 test/lambda/path.ls	direct
+test/lambda/path_index_capture.ls	direct
+test/lambda/path_line_continuation.ls	direct
+test/lambda/path_roots_steps.ls	direct
 test/lambda/path_v2.ls	direct
 test/lambda/phase2_last_index.ls	direct
 test/lambda/phase2_operator_comparability.ls	direct
@@ -651,6 +655,7 @@ test/lambda/proc/proc_view_mutable.ls	run
 test/lambda/proc/radiant_dom_set.ls	run
 test/lambda/proc/recursive_record_contract.ls	run
 test/lambda/proc/recursive_record_links.ls	run
+test/lambda/proc/return_relative_path.ls	run
 test/lambda/proc/shr_literal_native_lane.ls	run
 test/lambda/proc/tail_call_proc.ls	run
 test/lambda/proc/test_io_module.ls	run

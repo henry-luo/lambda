@@ -154,6 +154,16 @@ framing (LR07-3) now reads as a plain MIR Direct gap rather than a backend
 divergence.
 This is consistent with CLAUDE.md rule 14.
 
+### Semantics gap survey — 2026-09-21
+
+A seven-area survey of runtime behaviour against `doc/Lambda_Formal_Semantics.md`
+(probes under `temp/spec_survey/`) surfaced eight defects that return a **wrong
+value with no error**. Each was re-reproduced on both tiers before filing:
+[LR03-11](#lr03-11), [LR04-9](#lr04-9), [LR05-9](#lr05-9), [LR07-17](#lr07-17),
+[LR07-18](#lr07-18), [LR10-7](#lr10-7), [LR10-8](#lr10-8), [LR12-27](#lr12-27).
+The survey's spec gaps (behaviour no `S#` ruling covers) are not filed here —
+they need rulings, not fixes.
+
 ---
 
 
@@ -314,6 +324,15 @@ unproven Item to NaN. It is retained for callers that have already established a
 numeric source; migrating every such native/guest call to a fallible boundary is
 separate work.
 
+<a id="lr03-11"></a>**LR03-11 · Sized-int and literal-union contracts admit wrong values · OPEN (found 2026-09-21)**
+`fn f(x: u8) { x }; f(-1)` returns `255` and `fn g(x: 1 | 2) { x }; g(3)`
+returns `3`, on both tiers. `let x: i8 = 300` is `44` on the interpreter; the
+JIT rejects it, but with the internal name `expected num_sized, got int 300`.
+A sized boundary wraps where **S11.4.5** requires value-aware admission and
+**S11.4.1v3** forbids a wrong value (see also **S4.2.4**); an integer
+literal-union contract is not checked at all (a string literal union such as
+`"a" | "b"` is).
+
 ---
 
 
@@ -350,6 +369,17 @@ Division-by-zero and invalid decimal results can still collapse to a generic
 are the finest precision. Out-of-range construction yields
 `DATETIME_MAKE_ERROR()`.
 
+<a id="lr04-9"></a>**LR04-9 · `int()` truncates to 32 bits, returns non-`int` kinds, and splits by tier · OPEN (found 2026-09-21)**
+`int("3000000000")` is `-1294967296` and `int("9007199254740991")` is `-1`:
+the string arm parses into an `int32_t` (`lambda-eval-num.cpp:1525`, in
+`fn_int` at `:1465`). `int("3.7")` returns a `decimal` (the unparsed tail
+falls back to `decimal_from_string`). Out-of-band floats diverge by tier —
+`int(1e20)` is `inf` on the JIT and `9223372036854776000` on the interpreter,
+`int(nan)` is `nan` versus `0`, and `type(int(1e10))` is `int` versus
+`float`. Contradicts **S4.1.1** (in-band values are exact), the S4 ingress
+rule (a failed cast reports `error()`), and **S1.6**. The result type,
+rounding, and accepted string grammar of `int()` are themselves unruled.
+
 ---
 
 
@@ -365,6 +395,15 @@ hard-codes 256 bins in a stack `int64_t h[256]` (`:4501`).
 Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
+
+<a id="lr05-9"></a>**LR05-9 · `++` on numeric arrays of different element types reinterprets bits · OPEN (found 2026-09-21)**
+`[1,2] ++ [3.5]` is `[1, 2, inf]`, `[1.5] ++ [2]` is `[1.5, 1e-323]`, and
+`[1i8,2i8] ++ [300]` is `[1, 2, 44]`, on both tiers. `fn_join`'s same-type
+shortcut (`lambda-eval.cpp:527`) tests only that both sides are
+`LMD_TYPE_ARRAY_NUM`, then builds the result with the **left** element type
+and copies the right payload's bytes under it. Contradicts **S5.3.1** (a
+numeric array is representation only); the `++` operand table itself has no
+ruling.
 
 ---
 
@@ -453,6 +492,24 @@ callee's declaration, which a dynamic call does not have. Either reject named
 arguments on a dynamic callee or resolve them against the runtime signature
 (`Function::fn_type`).
 
+<a id="lr07-17"></a>**LR07-17 · JIT: an imported `pub let` holding an int literal reads `0` · OPEN (found 2026-09-21)**
+A module with `pub let A = 10` and `pub let B = 1 + 2`, imported with
+`import .m`, gives `[A, B]` = `[0, 3]` on the JIT and `[10, 3]` on the
+interpreter. Computed values, floats, strings, and arrays import correctly, and
+`A` reads correctly inside the module's own functions. Probable site:
+`load_module_var_slots` (`transpile-mir.cpp:7733`) — the literal never reaches
+its slot. The survey also reports, unverified here, that a module whose
+annotated init fails is still importable on the JIT (reads `0`, exit 0) while
+the interpreter aborts, contradicting **D7.2.2**. Violates **S1.6**.
+
+<a id="lr07-18"></a>**LR07-18 · JIT turns error values into the string `"<error>"` · OPEN (found 2026-09-21)**
+`let m = max(["b","a","c"]); [type(m), m is error]` is `[string, false]` on the
+JIT and `[error, true]` on the interpreter; `slice("hello", 1.5, 3)` does the
+same. An error reaching a string-typed unboxing adapter becomes the static
+7-character string `"<error>"` (`lambda/core/lambda-data.cpp:562`, `it2s`; the
+same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
+(errors are never ordinary values) and **S1.6**.
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -515,6 +572,21 @@ surface only as a JIT import-resolution miss (`mir.c` logs
 `failed to resolve native fn`), not as a build error.
 
 ## 10. Error handling (LR_10)
+
+<a id="lr10-7"></a>**LR10-7 · Error values do not own their `code` / `message` · OPEN (found 2026-09-21)**
+`let a = error("A"); let b = error("B"); [a.message, b.message]` is
+`["B", "B"]` on both tiers: the `.code` and `.message` members read
+`context->last_error`, not the value (`lambda-eval.cpp:5617`–`5630`), so every
+error reports whichever error was constructed last. Contradicts **S7.4.4**
+(an error carries its code, message, and source location). The survey also
+found `error({code: 42, message: "m"})` reading back as `318` / `"Error"`.
+
+<a id="lr10-8"></a>**LR10-8 · JIT: `raise` of a non-error value escapes the declared return type · OPEN (found 2026-09-21)**
+`fn f(x) int^ { if (x < 0) raise "s" else x }; let v = f(-1) ^ { 0 }` binds
+`v = "s"` (`string`) on the JIT. The interpreter rejects the value at the
+function return (E201) and the handler yields `0`. A binding declared `int`
+holds a string — violates **SI14** and **S1.6**. What `raise` may accept is
+itself unruled.
 
 ## 11. Mark data API (LR_11)
 
@@ -1032,6 +1104,16 @@ context breaks three reliance sites: `lambda/package/dom/edit_history.ls`
 `test/lambda/proc/type_binder_proc_raw.ls` (module-level calls to `pn`s), and
 `test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the
 module top level's colour, which no S#/D# point states (see C20.6).
+
+<a id="lr12-27"></a>**LR12-27 · `push` onto an unannotated number array is a silent no-op; out-of-range writes do not raise · OPEN (found 2026-09-21)**
+In a `pn`, `var a = [1, 2, 3]; push(a, 4)` leaves `a` as `[1, 2, 3]` on both
+tiers: the literal is an uncertified `ArrayNum` and `push` returns a soft error
+that nothing surfaces (`collection_runtime.cpp:240`, "an uncertified ArrayNum
+has no append contract"). `int[]`, string, and mixed arrays append correctly.
+Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
+(`lambda-eval.cpp:8200`) and the procedure continues with exit 0. Both
+contradict **S7.1.3v2** (writes are checked and raise through the `T^`
+channel).
 
 ## 13. Schema validator (LR_13)
 

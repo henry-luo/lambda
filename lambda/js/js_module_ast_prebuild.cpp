@@ -3,6 +3,7 @@
 #include "js_transpiler.hpp"
 #include "../input/input-script-cache.h"
 #include "../runtime/module_ast_prebuild.hpp"
+#include "../runtime/transpiler.hpp"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
 
@@ -94,7 +95,7 @@ static bool js_ast_prebuild_build_module(void* opaque, const char* path) {
     bool built = script && script->ast_root &&
         js_interp_script_is_supported(script) &&
         (script->cache_owned_template || script->cache_template);
-    runtime_free_all_scripts(&worker);
+    runtime_cleanup_ast_prebuild_worker(&worker);
     mem_free(source);
     return built;
 }

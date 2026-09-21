@@ -4399,42 +4399,7 @@
   {
     "type": "path_expr",
     "named": true,
-    "fields": {
-      "field": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "base_type",
-            "named": true
-          },
-          {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "path_parent",
-            "named": true
-          },
-          {
-            "type": "path_root",
-            "named": true
-          },
-          {
-            "type": "path_wildcard",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      }
-    }
+    "fields": {}
   },
   {
     "type": "primary_expr",
@@ -5789,10 +5754,6 @@
   },
   {
     "type": "\\",
-    "named": false
-  },
-  {
-    "type": "\\.",
     "named": false
   },
   {

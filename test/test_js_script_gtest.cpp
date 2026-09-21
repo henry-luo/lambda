@@ -652,6 +652,20 @@ TEST(JsInterpreter, AutoPrebuildsStaticImportClosureAsAst) {
     EXPECT_EQ(after.mir_builds, before.mir_builds);
 }
 
+TEST(RuntimePrebuild, CleansWorkerModuleRegistry) {
+    Runtime worker = {};
+    runtime_init(&worker);
+    module_register_for_runtime(&worker, "temp/prebuild-worker-cleanup.ls",
+        "lambda", ItemNull, NULL);
+    ASSERT_NE(module_registry_first_for_runtime(&worker), nullptr);
+
+    runtime_cleanup_ast_prebuild_worker(&worker);
+
+    EXPECT_EQ(module_registry_first_for_runtime(&worker), nullptr);
+    EXPECT_EQ(worker.scripts, nullptr);
+    EXPECT_EQ(worker.loaded_script_index, nullptr);
+}
+
 TEST(JsJubeRuntime, DropsPrototypeRootsAcrossFreshRuntimes) {
     const char source[] = "hostobjDemo.create(40).bump(2);";
 
@@ -1350,6 +1364,91 @@ TEST(JsInterpreter, LazyGlobalsPreserveOwnDescriptorsAndReplacements) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, PublishesWebStreamConstructorsToGlobalThis) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var readable = new ReadableStream({}); "
+        "var writable = new WritableStream({}); "
+        "var transform = new TransformStream({}); "
+        "var encoder = new TextEncoderStream(); "
+        "var decoder = new TextDecoderStream(); "
+        "var piped = readable.pipeThrough(new TextEncoderStream()); "
+        "typeof ReadableStream === 'function' && "
+        "typeof WritableStream === 'function' && "
+        "typeof TransformStream === 'function' && "
+        "typeof TextEncoderStream === 'function' && "
+        "typeof TextDecoderStream === 'function' && "
+        "typeof readable.getReader === 'function' && "
+        "typeof readable.pipeTo === 'function' && "
+        "typeof readable.pipeThrough === 'function' && "
+        "typeof piped.getReader === 'function' && "
+        "typeof writable.getWriter === 'function' && "
+        "typeof transform.readable.getReader === 'function' && "
+        "typeof transform.writable.getWriter === 'function' && "
+        "typeof encoder.writable.getWriter === 'function' && "
+        "typeof decoder.readable.getReader === 'function';";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "web-stream-globals.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RetainsExternalClassicCallbackArgumentsAcrossUnits) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_ast_backend = true;
+
+    const char preamble_source[] = "var window = globalThis;";
+    JsPreambleState preamble = {};
+    uint64_t result_home = 0;
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir_preamble_len(&runtime,
+        preamble_source, sizeof(preamble_source) - 1,
+        "classic-preamble.js", &preamble, &result_home)));
+    uint32_t preamble_state_id = preamble.module_state_id;
+    ASSERT_TRUE(lambda_module_state_reserve_and_activate(
+        (uint32_t)preamble.module_var_count));
+    ASSERT_TRUE(lambda_module_state_copy_var_prefix(preamble_state_id,
+        lambda_active_module_state_id(), (uint32_t)preamble.module_var_count));
+
+    const char loader_source[] =
+        "var modules = { gitbook: 41 }; "
+        "window.require = function(items, callback) { "
+        "items = items.map(function(name) { "
+        "name = name.toLowerCase(); "
+        "if (!modules[name]) { throw new Error('unknown module'); } "
+        "return modules[name]; "
+        "}); "
+        "callback.apply(null, items); "
+        "};";
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+        loader_source, sizeof(loader_source) - 1,
+        "classic-loader.js", &preamble, &result_home)));
+
+    const char sync_source[] =
+        "if (typeof window !== 'undefined') { "
+        "var globalSyncTick = 1; "
+        "}";
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+        sync_source, sizeof(sync_source) - 1,
+        "classic-global-sync.js", &preamble, &result_home)));
+
+    const char consumer_source[] =
+        "require(['gitbook'], function(value) { "
+        "globalThis.__cachedClassicResult = value + 1; "
+        "}); "
+        "if (globalThis.__cachedClassicResult !== 42) { "
+        "throw new Error('cached classic callback lost its argument'); "
+        "}";
+    EXPECT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+        consumer_source, sizeof(consumer_source) - 1,
+        "classic-consumer.js", &preamble, &result_home)));
+
+    preamble_state_destroy(&preamble);
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, RetainedTypedArrayAndPropertyHelpersKeepStrictnessAndIsolation) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1556,7 +1655,7 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
+TEST(JsInterpreter, SupportsModuleMetadataAndInlineDynamicImports) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
@@ -1572,9 +1671,10 @@ TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
         "globalThis.__interp_dynamic_counter = 0; "
         "import('./dep.mjs').then(function(ns) { "
         "globalThis.__interp_dynamic_counter = ns.counter; });";
+    runtime.js_document_base_url = "test/js/interp_esm/document.html";
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
     Item result = transpile_js_to_mir(&runtime, source,
-        "test/js/interp_esm/dynamic.js", NULL);
+        "<inline-script-0>", NULL);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(result));
@@ -1804,6 +1904,28 @@ TEST(JsInterpreter, RejectsDynamicImportCoercionWithTheThrownValue) {
         js_make_string("__interp_dynamic_error_name"));
     EXPECT_EQ(js_strict_equal(observed_name, js_make_string("TypeError")).item,
         b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleDynamicImportsResolveFromDocumentReference) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+        "module-dynamic-import-setup.js", NULL)));
+
+    const char source[] =
+        "import('./dep.mjs').then(function(ns) { "
+        "globalThis.__module_dynamic_counter = ns.counter; });";
+    Item namespace_obj = transpile_js_module_to_mir(&runtime, source,
+        "test/js/interp_esm/document.html");
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item dynamic_value = js_get_key_default(js_get_global_this(),
+        js_make_string("__module_dynamic_counter"));
+    EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
+        nullptr);
 
     runtime_cleanup(&runtime);
 }
@@ -4499,6 +4621,23 @@ TEST(JsInterpreter, RetainsPrivateClassIdentityForEscapedClosuresAcrossGc) {
     Item result = js_call_function(reader, make_js_undefined(), NULL, 0);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(7.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PublishesNavigatorServiceWorkerRegistrations) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var worker = navigator.serviceWorker; "
+        "typeof worker.getRegistrations === 'function' && "
+        "worker.getRegistrations() instanceof Promise;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "navigator-service-worker.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
 
     runtime_cleanup(&runtime);
 }

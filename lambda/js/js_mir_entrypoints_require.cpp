@@ -2283,6 +2283,10 @@ extern "C" Item js_dynamic_import(Item specifier) {
     if (base_file && base_file[0] && base_file[0] != '<') {
         jm_resolve_module_path(base_file, spec->chars, (int)spec->len,
                                resolved_path, (int)sizeof(resolved_path));
+    } else if (jm_resolve_document_module_path(context ? context->runtime : NULL,
+            base_file, spec->chars, (int)spec->len, resolved_path,
+            (int)sizeof(resolved_path))) {
+        // The shared resolver selected the active document URL.
     } else {
         snprintf(resolved_path, sizeof(resolved_path), "%.*s",
                  (int)spec->len, spec->chars);

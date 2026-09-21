@@ -5323,105 +5323,26 @@
       ]
     },
     "path_expr": {
-      "type": "PREC_RIGHT",
-      "value": 0,
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "/"
-              },
-              {
-                "type": "STRING",
-                "value": "."
-              },
-              {
-                "type": "FIELD",
-                "name": "field",
-                "content": {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "SYMBOL",
-                      "name": "identifier"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "symbol"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "integer"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "path_wildcard"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "base_type"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "path_parent"
-                    }
-                  ]
-                }
-              }
-            ]
-          },
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\."
-              },
-              {
-                "type": "FIELD",
-                "name": "field",
-                "content": {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "SYMBOL",
-                      "name": "identifier"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "symbol"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "integer"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "path_wildcard"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "base_type"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "path_parent"
-                    },
-                    {
-                      "type": "SYMBOL",
-                      "name": "path_root"
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        ]
-      }
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "/"
+            },
+            {
+              "type": "STRING",
+              "value": "\\"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_root_boundary"
+        }
+      ]
     },
     "current_parent_expr": {
       "type": "TOKEN",
@@ -11183,17 +11104,8 @@
         "type": "SEQ",
         "members": [
           {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "."
-              },
-              {
-                "type": "STRING",
-                "value": "\\"
-              }
-            ]
+            "type": "STRING",
+            "value": "."
           },
           {
             "type": "SYMBOL",
@@ -11215,17 +11127,8 @@
             "type": "SEQ",
             "members": [
               {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": "."
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "\\"
-                  }
-                ]
+                "type": "STRING",
+                "value": "."
               },
               {
                 "type": "SYMBOL",
@@ -11599,6 +11502,10 @@
     {
       "type": "SYMBOL",
       "name": "_expr_body_start"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_root_boundary"
     },
     {
       "type": "SYMBOL",

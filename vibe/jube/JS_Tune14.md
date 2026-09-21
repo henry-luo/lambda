@@ -1,6 +1,6 @@
 # JS Tune14 — Shared native regions and cheaper ordinary operations
 
-**Version:** 1.4.29
+**Version:** 1.4.30
 
 **Date:** 2026-09-21
 
@@ -17,7 +17,7 @@ between the boxed and raw comparison facades. T14-3 now admits a present ordinar
 dense element through a named-property companion without bypassing holes,
 numeric descriptors or scalar-home ownership. Its Navier candidate has a
 bounded, oracle-backed paired-release gain. The quicksort and FFT slices have
-positive paired-release evidence; the T14-2 Number-update leaf, T14-3
+positive paired-release evidence; two T14-2 Number-update leaves, the T14-3
 copy-store, companion raw-receiver leaf and over-broad FFT experiments were
 measured and rejected. T14-4's shared-hoister audit established that mutable
 array storage needs a region proof rather than scalar-call hoisting. T14-5 now
@@ -848,6 +848,32 @@ The full optimizer suite passed 61/61, coercion 15/15, MIR ratchet 20/20,
 release Lambda baseline 5,690/5,690 and Test262 40,261/40,261 fully passing
 with zero unstable, slow, failed or regressed entries. The only ratchet notices
 were independent reductions in Lambda corpus probes; no budget was changed.
+
+#### Experiment not retained — 2026-09-21: runtime primitive-Number update head
+
+The prior discarded-result change removes a redundant MIR call only when demand
+proves the old result is unobserved. A separate runtime experiment instead put a
+primitive `INT`/`FLOAT`/sized-Number check inside the complete `js_increment`
+and `js_decrement` entries, so boxed JS Numbers would skip their otherwise
+redundant `ToNumeric` call. Strings, booleans, nullish values, Symbols, objects
+and BigInts still used the existing complete conversion path. The focused
+captured-closure fixture proved that generic Number calls skipped the conversion
+while coercing-object coverage retained its calls, but this only established
+semantic admissibility under **S1.11** and **D8.4.1v2**.
+
+The exact control and candidate release binaries differed only by that runtime
+head. Their 11 alternating, Navier-oracle-checked pairs all returned `ok`, had
+equal normalized stdout and matched the required frame-15 density digest, but
+the candidate median was 182.988 ms versus 183.337 ms (ratio 0.998096;
+one-sided 95% paired-bootstrap upper bound 1.002682; 6/11 wins). The archived
+control and candidate SHA-256 values are
+`e36d750c9b19429d57d3f333787e58fb49e40d9d5c35405fbc64b34224e99704` and
+`232005913487bc79ad599a007fc2e9627571e56706ae4732bba0ae6796e761d9`; the
+complete record is
+[`navier_numeric_update_exact_paired.json`](../../temp/tune14/navier_numeric_update_exact_paired.json).
+An earlier comparison against the older frozen Tune14 binary looked faster but
+was not attributable to this leaf, so it is not used here. The runtime branch
+and its fixture were removed; retain the artifact as no-change evidence.
 
 #### A. Infer a guarded entry candidate through binding relationships
 

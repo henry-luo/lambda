@@ -5249,6 +5249,12 @@ Item fn_index(Item item, Item index_item) {
         if (vm && (vm->host_type || vm->vtable)) return vmap_get_by_item(vm, index_item);
         return ItemNull;
     }
+    if (item_type == LMD_TYPE_PATH) {
+        // S2.4.2v5: a subscript on a path is the dotted step, `(/)[1]` is `/.1`.
+        // It used to force the target and index its content instead, so
+        // `p[1]` and `p.1` named different things.
+        return fn_member(item, index_item);
+    }
 
     // Arithmetic-derived semantic integers are decimal-backed Items. Sequence
     // access must consume their exact value instead of rejecting the storage tag.
@@ -5270,7 +5276,6 @@ Item fn_index(Item item, Item index_item) {
         case LMD_TYPE_STRING:
         case LMD_TYPE_SYMBOL:
         case LMD_TYPE_BINARY:
-        case LMD_TYPE_PATH:
         case LMD_TYPE_VMAP:
             return item_at(item, index);
         default:
@@ -5563,6 +5568,45 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     return ItemNull;
 }
 
+// A Path is a container pointer and so its own Item carrier.
+static inline Item path_step_item(Path* path) {
+    return path ? (Item){.item = (uint64_t)(uintptr_t)path} : ItemNull;
+}
+
+Item fn_path_key(Item path_item, Item key) {
+    if (get_type_id(path_item) != LMD_TYPE_PATH || !path_item.path) return ItemNull;
+    Pool* pool = context ? context->pool : NULL;
+    // S2.4.2v5 through S8.2.1v4: an exact non-negative integral key is one
+    // IntKey step, so `p.1`, `p[1]` and `p[1.0]` agree; a negative or
+    // fractional number names no key and reads as null.
+    int64_t int_key = -1;
+    if (lambda_item_to_int64_exact(key, &int_key)) {
+        if (int_key < 0) return ItemNull;
+        return path_step_item(path_extend_int(pool, path_item.path, int_key));
+    }
+    if (is_text_type_id(key._type_id) && key.get_chars()) {
+        return path_step_item(path_extend(pool, path_item.path, key.get_chars()));
+    }
+    return ItemNull;
+}
+
+Item fn_path_step(Item path_item, int64_t step_type, const char* name,
+        int64_t int_value) {
+    if (get_type_id(path_item) != LMD_TYPE_PATH || !path_item.path) return ItemNull;
+    Pool* pool = context ? context->pool : NULL;
+    Path* path = path_item.path;
+    Path* next;
+    switch ((LPathSegmentType)step_type) {
+    case LPATH_SEG_WILDCARD: next = path_wildcard(pool, path); break;
+    case LPATH_SEG_WILDCARD_REC: next = path_wildcard_recursive(pool, path); break;
+    case LPATH_SEG_PARENT: next = path_select_parent(pool, path); break;
+    case LPATH_SEG_ROOT: next = path_select_root(pool, path); break;
+    case LPATH_SEG_INT: next = path_extend_int(pool, path, int_value); break;
+    default: next = path_extend(pool, path, name ? name : ""); break;
+    }
+    return path_step_item(next);
+}
+
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
 
@@ -5587,16 +5631,7 @@ Item fn_member(Item item, Item key) {
                 const char* k = key.get_chars();
                 if (k && path_is_property_name(k)) return path_property_get(path, k);
             }
-            Pool* pool = context ? context->pool : NULL;
-            if (get_type_id(key) == LMD_TYPE_INT && key.int_val >= 0) {
-                return {.item = (uint64_t)(uintptr_t)path_extend_int(pool, path, key.int_val)};
-            }
-            if (get_type_id(key) == LMD_TYPE_INT64 && key.get_int64() >= 0) {
-                return {.item = (uint64_t)(uintptr_t)path_extend_int(pool, path, key.get_int64())};
-            }
-            if (is_text_type_id(key._type_id) && key.get_chars()) {
-                return {.item = (uint64_t)(uintptr_t)path_extend(pool, path, key.get_chars())};
-            }
+            return fn_path_key(item, key);
         }
         return ItemNull;
     }

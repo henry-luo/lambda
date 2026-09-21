@@ -497,6 +497,17 @@ static inline Item interp_ptr_item(void* ptr) {
     return ptr ? (Item){.item = (uint64_t)(uintptr_t)ptr} : ItemNull;
 }
 
+// Static path steps through the runtime's step helper, the one the JIT calls
+// too. The accumulator is re-read and re-rooted because every step allocates.
+static void interp_apply_path_steps(Scratch& acc, const AstPathSegment* steps,
+        int count) {
+    for (int i = 0; i < count; i++) {
+        const AstPathSegment* step = &steps[i];
+        acc.set(fn_path_step(acc.get(), (int64_t)step->type,
+            step->name ? step->name->chars : NULL, step->int_value));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Bindings
 // ---------------------------------------------------------------------------
@@ -4866,8 +4877,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
 
     // ---- P1.3: paths and queries ----
     case AST_NODE_PATH_EXPR: {
-        // path_new + one path_extend / wildcard per segment. Path* is a
-        // container pointer, so it is its own Item carrier.
+        // path_new, then one runtime step per segment. Path* is a container
+        // pointer, so it is its own Item carrier.
         AstPathNode* path_node = (AstPathNode*)node;
         Pool* pool = f->st->ctx->pool;
         Scratch acc(f);
@@ -4875,48 +4886,24 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             ? path_new_authority(pool, (int)path_node->scheme, path_node->authority->chars)
             : path_new(pool, (int)path_node->scheme);
         acc.set(interp_ptr_item(initial));
-        for (int i = 0; i < path_node->segment_count; i++) {
-            AstPathSegment* seg = &path_node->segments[i];
-            // Re-read the accumulator: every extension allocates.
-            Path* base = (Path*)(uintptr_t)acc.get().item;
-            Path* next;
-            if (seg->type == LPATH_SEG_WILDCARD) {
-                next = path_wildcard(pool, base);
-            } else if (seg->type == LPATH_SEG_WILDCARD_REC) {
-                next = path_wildcard_recursive(pool, base);
-            } else if (seg->type == LPATH_SEG_PARENT) {
-                next = path_select_parent(pool, base);
-            } else if (seg->type == LPATH_SEG_ROOT) {
-                next = path_select_root(pool, base);
-            } else if (seg->type == LPATH_SEG_INT) {
-                next = path_extend_int(pool, base, seg->int_value);
-            } else {
-                next = path_extend(pool, base, seg->name ? seg->name->chars : "");
-            }
-            acc.set(interp_ptr_item(next));
-        }
+        interp_apply_path_steps(acc, path_node->segments, path_node->segment_count);
         return acc.get();
     }
     case AST_NODE_PATH_INDEX_EXPR: {
+        // S2.4.2v5: a computed `[k]` step of a path literal, then the static
+        // steps written after it; the JIT calls the same two helpers.
         AstPathIndexNode* pix = (AstPathIndexNode*)node;
         Item base_value = eval_expr(f, pix->base_path);
         if (interp_frame_pending(f)) return base_value;
-        Scratch base(f);
-        base.set(base_value);
-        Item segment = eval_expr(f, pix->segment_expr);
-        if (interp_frame_pending(f)) return segment;
-        Scratch seg_slot(f);
-        seg_slot.set(segment);
-        Item key = seg_slot.get();
-        Path* base_path = (Path*)(uintptr_t)base.get().item;
-        if (get_type_id(key) == LMD_TYPE_INT && key.int_val >= 0) {
-            return interp_ptr_item(path_extend_int(f->st->ctx->pool, base_path, key.int_val));
-        }
-        if (get_type_id(key) == LMD_TYPE_INT64 && key.get_int64() >= 0) {
-            return interp_ptr_item(path_extend_int(f->st->ctx->pool, base_path, key.get_int64()));
-        }
-        const char* text = fn_to_cstr(key);
-        return interp_ptr_item(path_extend(f->st->ctx->pool, base_path, text));
+        Scratch acc(f);
+        acc.set(base_value);
+        Item key_value = eval_expr(f, pix->segment_expr);
+        if (interp_frame_pending(f)) return key_value;
+        Scratch key(f);
+        key.set(key_value);
+        acc.set(fn_path_key(acc.get(), key.get()));
+        interp_apply_path_steps(acc, pix->segments, pix->segment_count);
+        return acc.get();
     }
     case AST_NODE_NAVIGATION_EXPR: {
         AstNavigationNode* nav = (AstNavigationNode*)node;
