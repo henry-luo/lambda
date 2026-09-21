@@ -1998,6 +1998,9 @@ JitImport jit_runtime_imports[] = {
     {"path_wildcard", FPTR(path_wildcard)},
     {"path_wildcard_recursive", FPTR(path_wildcard_recursive)},
     {"path_resolve_for_iteration", FPTR(path_resolve_for_iteration)},
+    // computed `[k]` steps of a path literal and the static steps after them
+    {"fn_path_key", FPTR(fn_path_key)},
+    {"fn_path_step", FPTR(fn_path_step)},
 
     // ========================================================================
     // Variadic support

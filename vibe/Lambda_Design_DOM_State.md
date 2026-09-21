@@ -95,7 +95,7 @@ Everything below exists and is exercised by the todo2 app, the `rte_prototype.ls
   ambient `set_selection()` runtime callback is retired (D7.5.3, D5.3.3; see
   [Lambda DOM Editable](Lambda_Design_DOM_Editable.md)).
 - **Route arbitration**: the editing subsystem already arbitrates per-surface between JS and Lambda handlers (`EDITING_ROUTE_DOM_SCRIPT` vs `EDITING_ROUTE_RADIANT_TEMPLATE`) through a priority-ordered, route-masked, generation-checked registry (`editing_action_registry_*`, `editing_template_handler.cpp`) — the proven pattern this proposal generalizes.
-- **Runtime embedding**: the full Lambda runtime + MIR JIT is linked into Radiant; `DomDocument` retains `lambda_runtime`; Radiant already loads four `lambda/*` packages from C++ by generating `import pkg: lambda.<name>.<entry>` source and calling `run_script_mir` (`cmd_layout.cpp` math/latex/pdf, `graph_bridge.cpp` graph).
+- **Runtime embedding**: the full Lambda runtime + MIR JIT is linked into Radiant; `DomDocument` retains `lambda_runtime`. Document and behavior packages load by their resolved package paths and native callers invoke configured public exports with typed values (`cmd_layout.cpp`, `event.cpp`, `transpile-mir.cpp`), preserving the ordinary package boundary required by **D7.2.1–D7.2.2** rather than synthesizing Lambda source.
 
 ### 2.3 The gaps this proposal must close
 

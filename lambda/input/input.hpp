@@ -202,6 +202,11 @@ void resolve_graph_structurizr_local_includes(Input* input, const char* root_pat
 const char* input_detect_structurizr_flavor(const char* pathname,
                                             const char* source,
                                             size_t source_len);
+// Returns the parser flavor only for recognized graph sources; other files
+// stay on the regular MIME detection path.
+const char* input_detect_graph_flavor(const char* pathname,
+                                      const char* source,
+                                      size_t source_len);
 
 // HTML element extraction functions (from input.cpp)
 // Get the <html> element from #document tree built by HTML5 parser

@@ -32,11 +32,67 @@ typedef struct RenderOutputReplayResult {
 
 static int render_output_render_html_file_to_target(const char* html_file,
                                                     RenderOutputTarget* target);
+static int render_output_render_document_transform_to_target(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    RenderOutputTarget* target);
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
                                           const char* output_file);
 static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
                                            int total_width, int total_height);
+
+typedef DomDocument* (*RenderExportDocumentLoader)(RenderExportSession* session,
+    int layout_width, int layout_height, void* request);
+
+typedef struct RenderExportHtmlRequest {
+    const char* html_file;
+} RenderExportHtmlRequest;
+
+typedef struct RenderExportTransformRequest {
+    const char* document_file;
+    const LambdaDocumentTransformConfig* transform;
+    const LambdaDocumentTransformOption* options;
+    int option_count;
+} RenderExportTransformRequest;
+
+static DomDocument* render_export_load_html_document(RenderExportSession* session,
+        int layout_width, int layout_height, void* request) {
+    RenderExportHtmlRequest* html_request = (RenderExportHtmlRequest*)request;
+    return html_request && html_request->html_file
+        ? load_html_doc(session->base_url, (char*)html_request->html_file,
+            layout_width, layout_height)
+        : nullptr;
+}
+
+static DomDocument* render_export_load_transform_document(RenderExportSession* session,
+        int layout_width, int layout_height, void* request) {
+    RenderExportTransformRequest* transform_request = (RenderExportTransformRequest*)request;
+    if (!transform_request || !transform_request->document_file || !transform_request->transform) {
+        return nullptr;
+    }
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "render.document_transform");
+    if (!pool) return nullptr;
+    Url* document_url = url_parse_with_base(transform_request->document_file, session->base_url);
+    if (!document_url) {
+        pool_destroy(pool);
+        return nullptr;
+    }
+    DomDocument* doc = load_lambda_document_transform_doc(document_url,
+        transform_request->transform, transform_request->options,
+        transform_request->option_count, layout_width, layout_height, pool);
+    if (!doc) {
+        url_destroy(document_url);
+        pool_destroy(pool);
+        return nullptr;
+    }
+    if (!dom_document_finalize_loader_pool(doc, pool)) {
+        log_error("render document transform: could not transfer loader pool");
+        free_document(doc);
+        return nullptr;
+    }
+    return doc;
+}
 
 static void init_render_pool_once() {
     g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER); // OBJ_HEAP_OK: process render worker pool singleton.
@@ -161,11 +217,12 @@ StrBuf* render_encode_surface_png(ImageSurface* surface) {
 }
 
 static bool render_export_session_begin_internal(
-        RenderExportSession* session, const char* html_file,
+        RenderExportSession* session,
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
-        float device_scale, bool raster_surface) {
-    if (!session || !html_file) return false;
+        float device_scale, bool raster_surface,
+        RenderExportDocumentLoader loader, void* request) {
+    if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
 
     bool auto_width = viewport_width == 0;
@@ -212,10 +269,9 @@ static bool render_export_session_begin_internal(
         return false;
     }
 
-    session->document = load_html_doc(
-        session->base_url, (char*)html_file, layout_width, layout_height);
+    session->document = loader(session, layout_width, layout_height, request);
     if (!session->document) {
-        log_error("[EXPORT_SESSION] Could not load HTML file: %s", html_file);
+        log_error("[EXPORT_SESSION] Could not load export document");
         render_export_session_end(session);
         return false;
     }
@@ -252,18 +308,31 @@ static bool render_export_session_begin_internal(
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale) {
-    return render_export_session_begin_internal(session, html_file,
+    RenderExportHtmlRequest request = {html_file};
+    return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false);
+        output_scale, 1.0f, false, render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_raster(RenderExportSession* session,
                                         const char* html_file,
                                         int viewport_width, int viewport_height,
                                         float output_scale, float device_scale) {
-    return render_export_session_begin_internal(session, html_file,
+    RenderExportHtmlRequest request = {html_file};
+    return render_export_session_begin_internal(session,
         viewport_width, viewport_height, 1200, 800, output_scale,
-        device_scale, true);
+        device_scale, true, render_export_load_html_document, &request);
+}
+
+bool render_export_session_begin_document_transform(RenderExportSession* session,
+        const char* document_file, const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        int viewport_width, int viewport_height, int fallback_width,
+        int fallback_height, float output_scale, float device_scale, bool raster_surface) {
+    RenderExportTransformRequest request = {document_file, transform, options, option_count};
+    return render_export_session_begin_internal(session,
+        viewport_width, viewport_height, fallback_width, fallback_height, output_scale,
+        device_scale, raster_surface, render_export_load_transform_document, &request);
 }
 
 void render_export_session_end(RenderExportSession* session) {
@@ -688,6 +757,45 @@ static int render_output_render_html_file_to_target(const char* html_file,
     return 1;
 }
 
+static int render_output_render_document_transform_to_target(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        RenderOutputTarget* target) {
+    if (!document_file || !transform || !target || !target->output_file) {
+        log_error("render document transform: invalid export job");
+        return 1;
+    }
+
+    float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
+    float device_scale = target->device_scale > 0 ? target->device_scale : 1.0f;
+    int viewport_width = target->viewport_width;
+    int viewport_height = target->viewport_height;
+    switch (target->kind) {
+        case RENDER_OUTPUT_PDF:
+            return render_document_transform_to_pdf(document_file, transform, options,
+                option_count, target->output_file, viewport_width, viewport_height, output_scale);
+        case RENDER_OUTPUT_SVG:
+            return render_document_transform_to_svg(document_file, transform, options,
+                option_count, target->output_file, viewport_width, viewport_height, output_scale);
+        case RENDER_OUTPUT_PNG:
+        case RENDER_OUTPUT_TILED_PNG:
+            return render_document_transform_to_png(document_file, transform, options,
+                option_count, target->output_file, viewport_width, viewport_height,
+                output_scale, device_scale);
+        case RENDER_OUTPUT_JPEG:
+            return render_document_transform_to_jpeg(document_file, transform, options,
+                option_count, target->output_file,
+                target->jpeg_quality > 0 ? target->jpeg_quality : 85,
+                viewport_width, viewport_height, output_scale, device_scale);
+        case RENDER_OUTPUT_SCREEN:
+            log_error("render document transform: screen target needs a UiContext");
+            return 1;
+    }
+
+    log_error("render document transform: unknown output target kind %d", target->kind);
+    return 1;
+}
+
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
@@ -700,6 +808,22 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
     target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
     return render_output_render_html_file_to_target(html_file, &target);
+}
+
+int render_document_transform_to_output_target(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        const char* output_file, int viewport_width, int viewport_height,
+        float output_scale, float device_scale, int jpeg_quality) {
+    RenderOutputTarget target;
+    render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
+    target.viewport_width = viewport_width;
+    target.viewport_height = viewport_height;
+    target.output_scale = output_scale;
+    target.device_scale = device_scale;
+    target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
+    return render_output_render_document_transform_to_target(document_file, transform, options,
+        option_count, &target);
 }
 
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {

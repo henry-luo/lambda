@@ -278,8 +278,8 @@ static void path_print_name(StrBuf* out, const char* seg) {
     if (needs_quote) strbuf_append_char(out, '\'');
 }
 
-static void path_print_op(StrBuf* out, Path* op, bool separator) {
-    if (separator) strbuf_append_char(out, '.');
+static void path_print_op(StrBuf* out, Path* op) {
+    strbuf_append_char(out, '.');
     switch (PATH_GET_SEG_TYPE(op)) {
         case LPATH_SEG_WILDCARD: strbuf_append_char(out, '*'); break;
         case LPATH_SEG_WILDCARD_REC: strbuf_append_str(out, "**"); break;
@@ -306,12 +306,13 @@ void path_to_string(Path* path, void* out_ptr) {
     if (scheme == PATH_SCHEME_LOGICAL) {
         strbuf_append_char(out, '/');
     } else if (scheme == PATH_SCHEME_REL) {
-        // S16.9.4: a relative path is spelled `\.a.b`. The escape is load-bearing,
-        // not cosmetic — printed bare, `.rect` re-parses as part of a qualified
-        // name, so `<svg \.rect>` would silently come back as tag `svg.rect`.
+        // S16.9.4: the relative root is `\`, so a relative path prints `\.a.b`
+        // and the empty one `\`. The escape is load-bearing, not cosmetic —
+        // printed bare, `.rect` re-parses as part of a qualified name, so
+        // `<svg \.rect>` would silently come back as tag `svg.rect`.
         // OS/filesystem rendering is unaffected: path_to_os_path builds its own
         // `./` form and never routes through here.
-        strbuf_append_str(out, "\\.");
+        strbuf_append_char(out, '\\');
     } else if (scheme == PATH_SCHEME_FILE) {
         strbuf_append_str(out, "file.");
         if (root->authority_kind == PATH_AUTHORITY_NAMED) {
@@ -328,9 +329,9 @@ void path_to_string(Path* path, void* out_ptr) {
         strbuf_append_str(out, scheme_names[scheme]);
     }
 
+    // every step follows its root with a dot, as `/.a` and `\.a` read
     for (int i = ops->length - 1; i >= 0; i--) {
-        bool separator = !(scheme == PATH_SCHEME_REL && i == ops->length - 1);
-        path_print_op(out, (Path*)arraylist_get(ops, i), separator);
+        path_print_op(out, (Path*)arraylist_get(ops, i));
     }
     arraylist_free(ops);
 }

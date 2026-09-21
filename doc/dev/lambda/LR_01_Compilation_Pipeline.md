@@ -1,10 +1,10 @@
 # Lambda Runtime — Compilation Pipeline, CLI & REPL
 
-> **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-09-21
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the end-to-end path from a `.ls` source file (or a REPL line) to a printed result: how `main()` dispatches CLI subcommands, how the default *functional* run path threads through `run_script_mir` → `load_script` → `transpile_script` → `execute_script_and_create_output`, how the *procedural* `run` path differs by a single flag, how the C hybrid recursive-descent + Pratt parser builds the normal file/module AST directly, how module imports are resolved/deduplicated/precompiled in parallel and checked for cycles, and how the view/edit template registry and reactive template-state store are wired into the run.
 >
-> **Primary sources:** `lambda/main.cpp` (`main()` dispatch, `run_script_file`, `run_repl`, the bridge-script builders), `lambda/main-repl.cpp` (statement-completeness checking, prompts, readline wrappers), `lambda/runtime/runner.cpp` (`transpile_script`, `load_script`, `runner_setup_context`, `execute_script_and_create_output`, `init_module_import`, `runtime_init`/`runtime_cleanup`/`runtime_reset_heap`, `lambda_home_*`), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp` (direct parser sink), `lambda/runtime/transpile-mir.cpp` (`run_script_mir`, `compile_script_as_mir_direct`), `lambda/runtime/transpiler.hpp` (`Runtime`, `Runner`, `Heap`, function decls), `lambda/runtime/module_registry.cpp/.h`, `lambda/runtime/template_registry.cpp/.h`, `lambda/runtime/template_state.cpp/.h`, `lambda/runtime/target.cpp`.
+> **Primary sources:** `lambda/main.cpp` (`main()` dispatch, `run_script_file`, `run_repl`, document-transform callers), `lambda/main-repl.cpp` (statement-completeness checking, prompts, readline wrappers), `lambda/runtime/runner.cpp` (`transpile_script`, `load_script`, `runner_setup_context`, `execute_script_and_create_output`, `init_module_import`, `runtime_init`/`runtime_cleanup`/`runtime_reset_heap`, `lambda_home_*`), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp` (direct parser sink), `lambda/runtime/transpile-mir.cpp` (`run_script_mir`, package and document-transform loading, `compile_script_as_mir_direct`), `lambda/runtime/transpiler.hpp` (`Runtime`, `Runner`, `Heap`, function decls), `lambda/runtime/module_registry.cpp/.h`, `lambda/runtime/template_registry.cpp/.h`, `lambda/runtime/template_state.cpp/.h`, `lambda/runtime/target.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. The former C2MIR backend is removed from Lambda; no supported build defines `LAMBDA_C2MIR`.
 
 ---
@@ -68,7 +68,7 @@ All dispatch happens inside `main()` (`main.cpp:1309`) as a sequence of `strcmp(
 - **Procedural run.** `run` (`:4158`, §4).
 - **Fallthrough.** Script-option parsing (`:4247`): `--mir`/`--mir-interp`, `--max-errors N`, `--optimize=N` and `-O0..-O3`, `--dry-run`; a bare file → `run_script_file` (`:4351`); otherwise → `run_repl` (`:4359`).
 
-Several subcommands synthesize a small Lambda script and feed it back through the pipeline — e.g. `build_pdf_to_html_bridge_script` (`main.cpp:792`) and the inline LaTeX→HTML bridge (`main.cpp:1123`) construct Lambda source text into a fixed buffer and run it (see [LR01-3](../../../vibe/Lambda_Issue_Ledger.md) for an escaping inconsistency between the two).
+Document transforms do not synthesize Lambda source. `LambdaDocumentTransformConfig` selects the input type, shipped package, and public export; native code loads the package by its resolved file path, parses the input natively, and invokes that export with typed options. This uses the ordinary package compilation unit and public export boundary required by **D7.2.1–D7.2.2** and preserves the package's own relative-import base.
 
 ---
 

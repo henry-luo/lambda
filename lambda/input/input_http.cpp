@@ -9,6 +9,7 @@
 #include "../../lib/byte_builder.h"
 #include "input.hpp"
 #include "../network/http_client.h"
+#include "../network/enhanced_file_cache.h"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -40,6 +41,8 @@ static void http_set_request_body(CURL* curl, const FetchConfig* config) {
 
 // Maximum response size (50 MB) — prevents unbounded memory growth from large pages
 #define HTTP_MAX_RESPONSE_SIZE (50 * 1024 * 1024)
+#define HTTP_CACHE_MAX_SIZE (100 * 1024 * 1024)
+#define HTTP_CACHE_MAX_ENTRIES 10000
 
 // Callback function to write response data
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
@@ -76,11 +79,6 @@ const char* content_type_to_extension(const char* content_type) {
         log_debug("HTTP: Unknown content-type '%s', defaulting to .html", content_type);
     }
     return ".html";
-}
-
-// Generate cache filename from URL — delegates to lib/file
-static char* generate_cache_filename(const char* url, const char* cache_dir) {
-    return file_cache_path(url, cache_dir, ".cache");
 }
 
 // Download HTTP/HTTPS resource and return content in memory
@@ -199,98 +197,71 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     return (char*)byte_builder_take(&response.body, NULL);
 }
 
-// Download HTTP/HTTPS resource to cache, return local file path or memory buffer
-char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path) {
-    if (!url || !cache_dir) {
-        return NULL;
+// Keep synchronous consumers on the same durable SHA-256 cache format as the
+// resource manager. A fresh cache object restores an existing native entry.
+static char* download_http_content_with_enhanced_cache(const char* url,
+                                                       size_t* content_size,
+                                                       const char* cache_dir,
+                                                       char** out_cache_path,
+                                                       bool require_cache_path) {
+    if (content_size) *content_size = 0;
+    if (out_cache_path) *out_cache_path = NULL;
+    if (!url || !cache_dir) return NULL;
+
+    EnhancedFileCache* cache = enhanced_cache_create(
+        cache_dir, HTTP_CACHE_MAX_SIZE, HTTP_CACHE_MAX_ENTRIES);
+    if (!cache) {
+        log_debug("HTTP: enhanced cache unavailable for %s", url);
+        return require_cache_path ? NULL : download_http_content(url, content_size, NULL);
     }
 
-    // Ensure cache directory exists
-    if (!create_dir(cache_dir)) {
-        return NULL;
-    }
-
-    // Generate cache filename
-    char* cache_filename = generate_cache_filename(url, cache_dir);
-    if (!cache_filename) {
-        return NULL;
-    }
-
-    // Check if file already exists in cache
-    if (file_exists(cache_filename)) {
-        log_debug("HTTP: Using cached file %s", cache_filename);
-
-        // Read cached file
+    char* cache_path = enhanced_cache_lookup(cache, url);
+    if (cache_path) {
         size_t cached_size = 0;
-        char* content = read_binary_file(cache_filename, &cached_size);
+        char* content = read_binary_file(cache_path, &cached_size);
         if (content) {
-            if (out_cache_path) {
-                *out_cache_path = cache_filename;
-            } else {
-                mem_free(cache_filename); // from file_cache_path() - mem_alloc
-            }
+            log_debug("HTTP: native cache hit for %s (%zu bytes)", url, cached_size);
+            if (content_size) *content_size = cached_size;
+            enhanced_cache_destroy(cache);
+            if (out_cache_path) *out_cache_path = cache_path;
+            else mem_free(cache_path);
             return content;
+        }
+        mem_free(cache_path);
+        cache_path = NULL;
+    }
+
+    size_t downloaded_size = 0;
+    char* content = download_http_content(url, &downloaded_size, NULL);
+    if (content) {
+        cache_path = enhanced_cache_store(cache, url, content, downloaded_size, NULL);
+        if (cache_path) {
+            log_debug("HTTP: stored native cache entry for %s", url);
+        } else if (require_cache_path) {
+            // Callers such as the package installer require a durable path.
+            mem_free(content);
+            content = NULL;
         }
     }
 
-    // Download content
-    size_t content_size;
-    char* content = download_http_content(url, &content_size, NULL);
-    if (!content) {
-        mem_free(cache_filename); // from file_cache_path() - mem_alloc
-        return NULL;
-    }
-
-    // Save to cache
-    if (file_cache_write_url_entry(cache_filename, url, content, content_size)) {
-        log_debug("HTTP: Cached content to %s", cache_filename);
-    } else {
-        log_error("HTTP: Failed to write cache file %s", cache_filename);
-    }
-
-    if (out_cache_path) {
-        *out_cache_path = cache_filename;
-    } else {
-        mem_free(cache_filename); // from file_cache_path() - mem_alloc
-    }
-
+    enhanced_cache_destroy(cache);
+    if (content_size && content) *content_size = downloaded_size;
+    if (out_cache_path) *out_cache_path = cache_path;
+    else mem_free(cache_path);
     return content;
+}
+
+// Download HTTP/HTTPS resource to the native cache and optionally return its path.
+char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path) {
+    return download_http_content_with_enhanced_cache(
+        url, NULL, cache_dir, out_cache_path, out_cache_path != NULL);
 }
 
 // Cache-aware synchronous download (returns content + size). Checks disk cache first.
 char* download_http_content_cached(const char* url, size_t* content_size, const char* cache_dir) {
-    if (!url) return NULL;
     const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
-
-    // ensure cache directory exists
-    if (!create_dir(effective_cache_dir)) {
-        // fall back to direct download if cache unavailable
-        return download_http_content(url, content_size, NULL);
-    }
-
-    char* cache_filename = generate_cache_filename(url, effective_cache_dir);
-    if (cache_filename && file_exists(cache_filename)) {
-        size_t cached_size = 0;
-        char* content = read_binary_file(cache_filename, &cached_size);
-        if (content) {
-            log_debug("HTTP: cache hit for %s (%zu bytes)", url, cached_size);
-            if (content_size) *content_size = cached_size;
-            mem_free(cache_filename);
-            return content;
-        }
-    }
-
-    // download and populate cache
-    size_t size = 0;
-    char* content = download_http_content(url, &size, NULL);
-    if (content && cache_filename) {
-        if (!file_cache_write_url_entry(cache_filename, url, content, size)) {
-            log_debug("HTTP: failed to write cache file %s", cache_filename);
-        }
-    }
-    if (cache_filename) mem_free(cache_filename);
-    if (content_size) *content_size = size;
-    return content;
+    return download_http_content_with_enhanced_cache(
+        url, content_size, effective_cache_dir, NULL, false);
 }
 
 // Returns an Input* for HTTP/HTTPS URL, using memory and file cache

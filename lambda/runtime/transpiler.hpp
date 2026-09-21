@@ -238,7 +238,38 @@ void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
 
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
-                      bool run_main = false);
+                      bool run_main = false, Script** out_script = nullptr);
+// Load and initialize a file-backed package without synthesizing an import script.
+Input* run_lambda_package_module(Runtime* runtime, const char* package_module,
+                                 Script** out_package = nullptr);
+struct LambdaDocumentTransformConfig {
+    const char* input_type;
+    const char* package_module;
+    const char* function_name;
+};
+
+enum LambdaDocumentTransformOptionKind {
+    LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
+    LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL,
+};
+
+// Native callers pass typed transform options without constructing Lambda source.
+struct LambdaDocumentTransformOption {
+    const char* name;
+    LambdaDocumentTransformOptionKind kind;
+    const char* string_value;
+    bool bool_value;
+};
+
+const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
+    const char* input_type);
+// Loads a file-backed package, parses the source through `input()`, and calls
+// its configured public transform without synthesizing a Lambda bridge script.
+Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
+                                     const LambdaDocumentTransformConfig* transform);
+Input* run_lambda_document_transform_with_options(Runtime* runtime,
+    const char* input_target, const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count);
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,

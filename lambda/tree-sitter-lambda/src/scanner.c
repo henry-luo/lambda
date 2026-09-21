@@ -79,6 +79,11 @@ enum TokenType {
     // four positions, not to every identifier, to keep the scanner's blast
     // radius small (see the §7.17 note on scanner fragility).
     EXPR_BODY_START,
+    // S2.4.1v2: emitted (zero-width) after a bare path root `/` or `\` only when
+    // whitespace, a step (`.`, `[`), a separator, a closer, or the end follows.
+    // Withholding it makes `/b` -- the retired `/a` spelling -- an error instead
+    // of the root plus a silently juxtaposed statement `b`.
+    ROOT_BOUNDARY,
     // Never emitted. Tree-sitter marks every external token valid during error
     // recovery; this sentinel is valid nowhere in the grammar, so seeing it
     // means recovery is running and the scanner should decline.
@@ -247,6 +252,24 @@ bool tree_sitter_lambda_external_scanner_scan(
         return true;
     }
 
+    // The same adjacency test after a bare path root, mirroring the C
+    // parser's `parse_path_slot`: `.` and `[` begin a step (though `.?` is a
+    // query, not a step), and whitespace, separators, closers and the end
+    // finish the path. Anything else touching the root is rejected.
+    if (valid_symbols[ROOT_BOUNDARY]) {
+        int32_t c = lexer->lookahead;
+        lexer->mark_end(lexer);
+        if (c == '.') {
+            lexer->advance(lexer, false);
+            if (lexer->lookahead == '?') { return false; }
+        } else if (!(lexer->eof(lexer) || is_space(c) || c == '[' || c == ';' ||
+                c == ',' || c == ')' || c == ']' || c == '}' || c == '>')) {
+            return false;
+        }
+        lexer->result_symbol = ROOT_BOUNDARY;
+        return true;
+    }
+
     // Skip whitespace and comments, remembering whether a line break was
     // crossed. This is the one thing grammar rules cannot see for themselves.
     bool saw_newline = false;
@@ -394,8 +417,8 @@ bool tree_sitter_lambda_external_scanner_scan(
         }
     }
 
-    // `.` member access. S16.2.4v2 (§7.15): now that the relative path is
-    // spelled `\.`, a `.` followed by an identifier has no start reading left —
+    // `.` member access. S16.2.4v3 (§7.15): now that the relative path is
+    // rooted at `\`, a `.` followed by an identifier has no start reading left —
     // member access is its only meaning — so it continues across a line break
     // for ANY member, not just the `.ident(` call form. That is what enables
     // full leading-dot fluent chains. `.digit` remains dual-role, because
@@ -409,7 +432,11 @@ bool tree_sitter_lambda_external_scanner_scan(
         // statement, so neither reading may win.
         if (is_digit(after) && saw_newline) { return false; }
         lexer->mark_end(lexer);
-        if (saw_newline && !is_identifier_start(after)) { return false; }
+        // S16.2.4v3: every other step has no start reading, so it continues
+        // across the break -- a name, `'sym'`, `*`/`**`, `~~` or `/`.
+        bool step_start = is_identifier_start(after) || after == '\'' ||
+            after == '*' || after == '~' || after == '/';
+        if (saw_newline && !step_start) { return false; }
         lexer->result_symbol = MEMBER_DOT;
         return true;
     }

@@ -164,19 +164,15 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float raster_scale,
     return true;
 }
 
-int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float output_scale, float device_scale) {
+static int render_export_session_to_png(RenderExportSession* session, const char* png_file) {
+    if (!session) return 1;
     uint64_t t_start = time_now_ns();
 
-    RenderExportSession session;
-    if (!render_export_session_begin_raster(&session, html_file,
-            viewport_width, viewport_height, output_scale, device_scale)) {
-        return 1;
-    }
-    UiContext* ui_context = session.ui_context;
-    DomDocument* doc = session.document;
-    float raster_scale = session.raster_scale;
-    int output_width = (int)(session.content_width * raster_scale);
-    int output_height = (int)(session.content_height * raster_scale);
+    UiContext* ui_context = session->ui_context;
+    DomDocument* doc = session->document;
+    float raster_scale = session->raster_scale;
+    int output_width = (int)(session->content_width * raster_scale);
+    int output_height = (int)(session->content_height * raster_scale);
 
     // pixel threshold above which tiled rendering is used to avoid OOM on huge pages
     // (32 M pixels × 4 bytes = 128 MB; e.g. 1200-px wide → ~26 000 px tall)
@@ -192,11 +188,11 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     int content_max_x = 0, content_max_y = 0;
     if (render_png_resolve_auto_size(doc, raster_scale,
-            session.auto_width, session.auto_height,
+            session->auto_width, session->auto_height,
             &output_width, &output_height, &content_max_x, &content_max_y)) {
         log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, output_scale=%.2f, device_scale=%.2f)",
-                 output_width, output_height, session.output_scale,
-                 session.device_scale);
+                 output_width, output_height, session->output_scale,
+                 session->device_scale);
 
         if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
             // Large page: render in tiles to avoid allocating a single huge surface
@@ -206,7 +202,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             render_output_target_init(&target, RENDER_OUTPUT_TILED_PNG, png_file);
             target.width = output_width;
             target.height = output_height;
-            render_output_target_apply_session(&target, &session);
+            render_output_target_apply_session(&target, session);
             render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
             rendered = true;
         } else {
@@ -220,44 +216,93 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             RenderOutputTarget target;
             render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
             target.surface = ui_context->surface;
-            render_output_target_apply_session(&target, &session);
+            render_output_target_apply_session(&target, session);
             render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
         } else {
-            render_export_session_end(&session);
             return 1;
         }
     }
 
     log_info("[TIMING] TOTAL: %.1fms", time_elapsed_ms_f(t_start, time_now_ns()));
-    render_export_session_end(&session);
     return 0;
 }
 
-// Main function to layout HTML and render to JPEG
-// output_scale is export density; device_scale is platform pixel density.
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float output_scale, float device_scale) {
+int render_html_to_png(const char* html_file, const char* png_file, int viewport_width,
+        int viewport_height, float output_scale, float device_scale) {
     RenderExportSession session;
     if (!render_export_session_begin_raster(&session, html_file,
             viewport_width, viewport_height, output_scale, device_scale)) {
         return 1;
     }
-    UiContext* ui_context = session.ui_context;
-    DomDocument* doc = session.document;
+    int result = render_export_session_to_png(&session, png_file);
+    render_export_session_end(&session);
+    return result;
+}
+
+int render_document_transform_to_png(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        const char* png_file, int viewport_width, int viewport_height,
+        float output_scale, float device_scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin_document_transform(&session, document_file, transform,
+            options, option_count, viewport_width, viewport_height, 1200, 800,
+            output_scale, device_scale, true)) {
+        return 1;
+    }
+    int result = render_export_session_to_png(&session, png_file);
+    render_export_session_end(&session);
+    return result;
+}
+
+// Main function to layout HTML and render to JPEG
+// output_scale is export density; device_scale is platform pixel density.
+static int render_export_session_to_jpeg(RenderExportSession* session,
+        const char* jpeg_file, int quality) {
+    if (!session) return 1;
+    UiContext* ui_context = session->ui_context;
+    DomDocument* doc = session->document;
 
     if (doc && doc->view_tree) {
         RenderOutputTarget target;
         render_output_target_init(&target, RENDER_OUTPUT_JPEG, jpeg_file);
         target.surface = ui_context->surface;
         target.jpeg_quality = quality;
-        render_output_target_apply_session(&target, &session);
+        render_output_target_apply_session(&target, session);
         render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
     } else {
-        render_export_session_end(&session);
         return 1;
     }
 
-    render_export_session_end(&session);
     return 0;
+}
+
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality,
+        int viewport_width, int viewport_height, float output_scale, float device_scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin_raster(&session, html_file,
+            viewport_width, viewport_height, output_scale, device_scale)) {
+        return 1;
+    }
+    int result = render_export_session_to_jpeg(&session, jpeg_file, quality);
+    render_export_session_end(&session);
+    return result;
+}
+
+int render_document_transform_to_jpeg(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        const char* jpeg_file, int quality, int viewport_width, int viewport_height,
+        float output_scale, float device_scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin_document_transform(&session, document_file, transform,
+            options, option_count, viewport_width, viewport_height, 1200, 800,
+            output_scale, device_scale, true)) {
+        return 1;
+    }
+    int result = render_export_session_to_jpeg(&session, jpeg_file, quality);
+    render_export_session_end(&session);
+    return result;
 }
 
 /**

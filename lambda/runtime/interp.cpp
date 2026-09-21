@@ -12,6 +12,7 @@
 #include "write_set.hpp"
 #include "runtime-state.h"
 #include "recovery_frame.h"
+#include "lambda-stack.h"
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
@@ -27,10 +28,14 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
 #include <stdlib.h>
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
 extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
                                               void* type_list);
+extern __thread Context* input_context;
 
 // ---------------------------------------------------------------------------
 // Tier selection
@@ -490,6 +495,17 @@ static inline void interp_clear_loop_signal(InterpFrame* f) {
 // expect).
 static inline Item interp_ptr_item(void* ptr) {
     return ptr ? (Item){.item = (uint64_t)(uintptr_t)ptr} : ItemNull;
+}
+
+// Static path steps through the runtime's step helper, the one the JIT calls
+// too. The accumulator is re-read and re-rooted because every step allocates.
+static void interp_apply_path_steps(Scratch& acc, const AstPathSegment* steps,
+        int count) {
+    for (int i = 0; i < count; i++) {
+        const AstPathSegment* step = &steps[i];
+        acc.set(fn_path_step(acc.get(), (int64_t)step->type,
+            step->name ? step->name->chars : NULL, step->int_value));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4861,8 +4877,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
 
     // ---- P1.3: paths and queries ----
     case AST_NODE_PATH_EXPR: {
-        // path_new + one path_extend / wildcard per segment. Path* is a
-        // container pointer, so it is its own Item carrier.
+        // path_new, then one runtime step per segment. Path* is a container
+        // pointer, so it is its own Item carrier.
         AstPathNode* path_node = (AstPathNode*)node;
         Pool* pool = f->st->ctx->pool;
         Scratch acc(f);
@@ -4870,48 +4886,24 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             ? path_new_authority(pool, (int)path_node->scheme, path_node->authority->chars)
             : path_new(pool, (int)path_node->scheme);
         acc.set(interp_ptr_item(initial));
-        for (int i = 0; i < path_node->segment_count; i++) {
-            AstPathSegment* seg = &path_node->segments[i];
-            // Re-read the accumulator: every extension allocates.
-            Path* base = (Path*)(uintptr_t)acc.get().item;
-            Path* next;
-            if (seg->type == LPATH_SEG_WILDCARD) {
-                next = path_wildcard(pool, base);
-            } else if (seg->type == LPATH_SEG_WILDCARD_REC) {
-                next = path_wildcard_recursive(pool, base);
-            } else if (seg->type == LPATH_SEG_PARENT) {
-                next = path_select_parent(pool, base);
-            } else if (seg->type == LPATH_SEG_ROOT) {
-                next = path_select_root(pool, base);
-            } else if (seg->type == LPATH_SEG_INT) {
-                next = path_extend_int(pool, base, seg->int_value);
-            } else {
-                next = path_extend(pool, base, seg->name ? seg->name->chars : "");
-            }
-            acc.set(interp_ptr_item(next));
-        }
+        interp_apply_path_steps(acc, path_node->segments, path_node->segment_count);
         return acc.get();
     }
     case AST_NODE_PATH_INDEX_EXPR: {
+        // S2.4.2v5: a computed `[k]` step of a path literal, then the static
+        // steps written after it; the JIT calls the same two helpers.
         AstPathIndexNode* pix = (AstPathIndexNode*)node;
         Item base_value = eval_expr(f, pix->base_path);
         if (interp_frame_pending(f)) return base_value;
-        Scratch base(f);
-        base.set(base_value);
-        Item segment = eval_expr(f, pix->segment_expr);
-        if (interp_frame_pending(f)) return segment;
-        Scratch seg_slot(f);
-        seg_slot.set(segment);
-        Item key = seg_slot.get();
-        Path* base_path = (Path*)(uintptr_t)base.get().item;
-        if (get_type_id(key) == LMD_TYPE_INT && key.int_val >= 0) {
-            return interp_ptr_item(path_extend_int(f->st->ctx->pool, base_path, key.int_val));
-        }
-        if (get_type_id(key) == LMD_TYPE_INT64 && key.get_int64() >= 0) {
-            return interp_ptr_item(path_extend_int(f->st->ctx->pool, base_path, key.get_int64()));
-        }
-        const char* text = fn_to_cstr(key);
-        return interp_ptr_item(path_extend(f->st->ctx->pool, base_path, text));
+        Scratch acc(f);
+        acc.set(base_value);
+        Item key_value = eval_expr(f, pix->segment_expr);
+        if (interp_frame_pending(f)) return key_value;
+        Scratch key(f);
+        key.set(key_value);
+        acc.set(fn_path_key(acc.get(), key.get()));
+        interp_apply_path_steps(acc, pix->segments, pix->segment_count);
+        return acc.get();
     }
     case AST_NODE_NAVIGATION_EXPR: {
         AstNavigationNode* nav = (AstNavigationNode*)node;
@@ -6031,6 +6023,223 @@ public:
     InterpStateGuard(const InterpStateGuard&) = delete;
     InterpStateGuard& operator=(const InterpStateGuard&) = delete;
 };
+
+#ifndef _WIN32
+#define INTERP_WORKER_STACK_SIZE (128U * 1024U * 1024U)
+
+struct InterpLargeStackArgs {
+    EvalContext* eval;
+    InterpLargeStackCall call;
+    void* opaque;
+    Item result;
+    bool initialized;
+};
+
+static void* interp_large_stack_entry(void* opaque) {
+    InterpLargeStackArgs* args = (InterpLargeStackArgs*)opaque;
+    if (!args || !args->eval || !args->call || !eval_context_init(args->eval)) return NULL;
+    args->initialized = true;
+    input_context = (Context*)args->eval;
+    lambda_stack_init();
+    args->eval->stack_limit = lambda_stack_recoverable_limit();
+    if (!lambda_side_stack_bind()) {
+        log_error("interp-worker: failed to bind side-stack regions");
+        args->result = ItemError;
+    } else {
+        args->result = args->call(args->opaque);
+    }
+    if (!eval_context_shutdown(args->eval)) {
+        log_error("interp-worker: failed to release evaluator context");
+    }
+    // The worker owns a thread-local alternate signal stack until it exits.
+    lambda_stack_cleanup();
+    return NULL;
+}
+
+Item interp_run_on_large_stack(EvalContext* eval,
+        InterpLargeStackCall call, void* opaque) {
+    if (!eval || !call || !eval_context_shutdown(eval)) return ItemError;
+    InterpLargeStackArgs args = {eval, call, opaque, ItemError, false};
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        log_error("interp-worker: failed to configure large stack");
+        eval_context_init(eval);
+        input_context = (Context*)eval;
+        return ItemError;
+    }
+    if (pthread_attr_setstacksize(&attr, INTERP_WORKER_STACK_SIZE) != 0) {
+        log_error("interp-worker: failed to configure large stack");
+        pthread_attr_destroy(&attr);
+        eval_context_init(eval);
+        input_context = (Context*)eval;
+        return ItemError;
+    }
+    pthread_t worker;
+    int create_status = pthread_create(&worker, &attr, interp_large_stack_entry, &args);
+    pthread_attr_destroy(&attr);
+    if (create_status != 0) {
+        log_error("interp-worker: failed to create large-stack worker");
+        eval_context_init(eval);
+        input_context = (Context*)eval;
+        return ItemError;
+    }
+    pthread_join(worker, NULL);
+    if (!eval_context_init(eval)) {
+        log_error("interp-worker: failed to restore evaluator context");
+        return ItemError;
+    }
+    input_context = (Context*)eval;
+    if (!lambda_side_stack_bind()) {
+        log_error("interp-worker: failed to restore side-stack regions");
+        return ItemError;
+    }
+    return args.initialized ? args.result : ItemError;
+}
+#else
+Item interp_run_on_large_stack(EvalContext* eval, InterpLargeStackCall call,
+        void* opaque) {
+    (void)eval;
+    return call ? call(opaque) : ItemError;
+}
+#endif
+
+Item interp_call_module_export(Runtime* runtime, Script* module,
+        const char* export_name, const Item* args, int argc) {
+    if (!runtime || !module || !module->ast_root || !export_name || argc < 0 ||
+            argc > LAMBDA_MAX_FUNCTION_ARGS) {
+        log_error("document-transform: invalid module export invocation");
+        return ItemError;
+    }
+    EvalContext* eval_context = runtime_get_eval_context(runtime);
+    if (!eval_context) {
+        log_error("document-transform: module '%s' has no evaluation context",
+            module->reference ? module->reference : "<unknown>");
+        return ItemError;
+    }
+    AstScript* root = (AstScript*)module->ast_root;
+    NameEntry* export_entry = NULL;
+    AstNode* node = root->child;
+    while (node) {
+        if (node->node_type == AST_NODE_CONTENT) {
+            node = ((AstListNode*)node)->item;
+            continue;
+        }
+        if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+                node->node_type == AST_NODE_PROC) {
+            AstFuncNode* function = (AstFuncNode*)node;
+            TypeFunc* signature = (TypeFunc*)function->type;
+            if (signature && signature->is_public && function->name &&
+                    strcmp(function->name->chars, export_name) == 0) {
+                // Cached AST clones rebind this scope, not AstFuncNode::entry.
+                for (NameEntry* entry = root->global_vars
+                        ? root->global_vars->first : NULL;
+                        entry; entry = entry->next) {
+                    if (entry->name && strcmp(entry->name->chars, export_name) == 0) {
+                        export_entry = entry;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        node = node->next;
+    }
+    if (!export_entry || !export_entry->storage_assigned ||
+            export_entry->binding_storage != BINDING_STORAGE_MODULE ||
+            export_entry->slot < 0) {
+        log_error("document-transform: module '%s' has no public function '%s'",
+            module->reference ? module->reference : "<unknown>", export_name);
+        return ItemError;
+    }
+    RuntimeModuleStateScope module_state(eval_context);
+    if (!module_state.activate(module->module_state_id)) {
+        log_error("document-transform: could not activate module '%s'",
+            module->reference ? module->reference : "<unknown>");
+        return ItemError;
+    }
+    RootFrame roots(1);
+    Rooted<Item> callable(roots, lambda_active_module_var_at(
+        (uint32_t)export_entry->slot));
+    if (get_type_id(callable.get()) != LMD_TYPE_FUNC || !callable.get().function) {
+        log_error("document-transform: export '%s' is not callable", export_name);
+        return ItemError;
+    }
+    return interp_call_runtime_function(runtime, callable.get().function, args, argc);
+}
+
+static Item interp_call_runtime_function_direct(Runtime* runtime, Function* function,
+        const Item* args, int argc) {
+    if (!runtime || !function || argc < 0 || argc > LAMBDA_MAX_FUNCTION_ARGS) {
+        log_error("interp: invalid retained callback invocation");
+        return ItemError;
+    }
+    EvalContext* eval_context = runtime_get_eval_context(runtime);
+    Script* module = function->def_module;
+    if (!eval_context || !module) {
+        log_error("interp: retained callback has no runtime module");
+        return ItemError;
+    }
+    RuntimeExecutionScope execution_scope(eval_context);
+    RuntimeCurrentFileScope current_file(eval_context, module->reference);
+    RuntimeModuleStateScope module_state(eval_context);
+    if (!module_state.activate(module->module_state_id)) {
+        log_error("interp: could not activate retained callback module '%s'",
+            module->reference ? module->reference : "<unknown>");
+        return ItemError;
+    }
+    RootFrame roots(1);
+    Rooted<Item> callable(roots, (Item){.function = function});
+    // Retained callbacks run after their initiating top-level activation has
+    // unwound, so recreate only the interpreter state that T0 dispatch needs.
+    InterpStateGuard state_guard((Context*)eval_context);
+    if (!state_guard.get()) {
+        log_error("interp: could not enter retained callback state");
+        return ItemError;
+    }
+    List call_args = {.length = argc, .items = (Item*)args};
+    return fn_call(callable.get().function, argc ? &call_args : NULL);
+}
+
+Item interp_call_runtime_function(Runtime* runtime, Function* function,
+        const Item* args, int argc) {
+    return interp_call_runtime_function_direct(runtime, function, args, argc);
+}
+
+struct InterpRuntimeFunctionCall {
+    Runtime* runtime;
+    Function* function;
+    const Item* args;
+    int argc;
+    InterpLargeStackThreadHook worker_enter;
+    InterpLargeStackThreadHook worker_leave;
+    void* worker_context;
+};
+
+static Item interp_runtime_function_worker_call(void* opaque) {
+    InterpRuntimeFunctionCall* call = (InterpRuntimeFunctionCall*)opaque;
+    if (!call) return ItemError;
+    if (call->worker_enter) call->worker_enter(call->worker_context);
+    Item result = interp_call_runtime_function_direct(call->runtime, call->function,
+        call->args, call->argc);
+    if (call->worker_leave) call->worker_leave(call->worker_context);
+    return result;
+}
+
+Item interp_call_runtime_function_large_stack(Runtime* runtime, Function* function,
+        const Item* args, int argc, InterpLargeStackThreadHook worker_enter,
+        InterpLargeStackThreadHook worker_leave, void* worker_context) {
+#ifndef _WIN32
+    EvalContext* eval_context = runtime ? runtime_get_eval_context(runtime) : NULL;
+    InterpRuntimeFunctionCall call = {runtime, function, args, argc, worker_enter,
+        worker_leave, worker_context};
+    return interp_run_on_large_stack(eval_context, interp_runtime_function_worker_call, &call);
+#else
+    if (worker_enter) worker_enter(worker_context);
+    Item result = interp_call_runtime_function_direct(runtime, function, args, argc);
+    if (worker_leave) worker_leave(worker_context);
+    return result;
+#endif
+}
 
 // const accepts only literal scalar syntax. The same eval_expr walker still
 // performs the operation, but this narrow admission guarantees a fold cannot

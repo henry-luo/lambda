@@ -1894,29 +1894,22 @@ static bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
     return true;
 }
 
-// Main function to layout HTML and render to PDF
-int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width, int viewport_height, float scale) {
-
-    RenderExportSession session;
-    if (!render_export_session_begin(
-            &session, html_file, viewport_width, viewport_height, 800, 1200, scale)) {
-        return 1;
-    }
-    UiContext* ui_context = session.ui_context;
-    DomDocument* doc = session.document;
+static int render_export_session_to_pdf(RenderExportSession* session, const char* pdf_file) {
+    if (!session) return 1;
+    UiContext* ui_context = session->ui_context;
+    DomDocument* doc = session->document;
 
     // Render to PDF (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // PDF output dimensions are scaled; coordinates inside are in CSS pixels with transform
-        float pdf_width = session.content_width * session.output_scale;
-        float pdf_height = session.content_height * session.output_scale;
+        float pdf_width = session->content_width * session->output_scale;
+        float pdf_height = session->content_height * session->output_scale;
         HPDF_Doc pdf_doc = render_view_tree_to_pdf(ui_context, doc->view_tree->root,
                                                    pdf_width, pdf_height);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
                 log_info("Successfully rendered HTML to PDF: %s", pdf_file);
                 HPDF_Free(pdf_doc);
-                render_export_session_end(&session);
                 return 0;
             } else {
                 HPDF_Free(pdf_doc);
@@ -1926,9 +1919,35 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
     } else {
     }
 
-    // Cleanup
-    render_export_session_end(&session);
     return 1;
+}
+
+// Main function to layout HTML and render to PDF.
+int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width,
+        int viewport_height, float scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin(
+            &session, html_file, viewport_width, viewport_height, 800, 1200, scale)) {
+        return 1;
+    }
+    int result = render_export_session_to_pdf(&session, pdf_file);
+    render_export_session_end(&session);
+    return result;
+}
+
+int render_document_transform_to_pdf(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        const char* pdf_file, int viewport_width, int viewport_height, float scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin_document_transform(&session, document_file, transform,
+            options, option_count, viewport_width, viewport_height, 800, 1200, scale,
+            1.0f, false)) {
+        return 1;
+    }
+    int result = render_export_session_to_pdf(&session, pdf_file);
+    render_export_session_end(&session);
+    return result;
 }
 
 // ============================================================================

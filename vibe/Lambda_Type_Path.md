@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-18
 **Status:** Decided; current syntax/runtime scope implemented
-**Decision IDs:** PTH1v2, PTH2v3, PTH3, PTH4v2, PTH5–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29
-**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S
+**Decision IDs:** PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH13, PTH13.1–PTH13.2, PTH14–PTH15, PTH16v3, PTH17–PTH20, PTH21v2, PTH22–PTH27, PTH28v2, PTH29
+**Revised:** 2026-09-21 — the relative path is spelled `\.a.b` (S16.9.4, [Design_Syntax §7.15](Lambda_Design_Syntax.md)); PTH2, PTH4, PTH21, PTH28 revised, prior wording in Appendix S. Later the same day (USER): PTH2v4 (the relative root is `\`, like `/`, so `\[1]` is the relative index step and `\.` alone is an error), PTH13.1 (a subscript on a path is the dotted step, `(/)[1]` is `/.1`, and every step inside a path literal is a key step), and PTH13.2 (an integer key may be the first step, `\.1`, `/.1`), closing PTH-O1's residue (S2.4.2v5, S16.2.4v3)
 **Open issue IDs:** PTH-O1
 
 > **Normative anchors:** [S1.7](../doc/Lambda_Formal_Semantics.md#s1-core-principles)
@@ -62,7 +62,7 @@ The old spellings `/a`, `..a`, `value ..`, and `value .._..` are retired, as
 is the bare-dot relative `.a.b` (S16.9.4). There is no permanent compatibility
 alias.
 
-A path's initial form is exactly one of logical rooted `/`, relative `\.`, or
+A path's initial form is exactly one of logical rooted `/`, relative `\`, or
 an explicit absolute `SchemeName`; after that root choice, every form uses the
 same dotted/indexed steps.
 
@@ -81,7 +81,7 @@ Operation = Key | Root | Parent | Wildcard | DynamicKey
 A reference root is one of:
 
 - the logical global root `/`;
-- the active relative root `\.`;
+- the active relative root `\`;
 - a statically selected namespace root;
 - an explicit absolute provider root such as `file`, `http`, `https`, or
   `sys`, optionally qualified by authority keys such as `http.hostname`;
@@ -321,7 +321,7 @@ The syntax has three distinct concepts:
 
 | Concept | Spellings | Meaning |
 |---|---|---|
-| Path root | `/`, `\.`, `SchemeName` | Logical rooted, relative, or explicit absolute provider root |
+| Path root | `/`, `\`, `SchemeName` | Logical rooted, relative, or explicit absolute provider root |
 | Context atom | `~`, `~~`, `^` | Current value, parent of current value, or current handled error |
 | Step | `.name`, `.1`, `.'quoted'`, `.*`, `.**`, `./`, `.~~`, `[expr]` | Name/int key, wildcard, root, parent, or dynamic navigation |
 
@@ -338,9 +338,7 @@ The intended grammar, abstracting the existing set of legal member names, is:
 PathLiteral       ::= RootedPath | RelativePath | AbsolutePath
 
 RootedPath        ::= "/" PostfixStep*
-RelativePath      ::= "\."
-                    | "\." PathPart PostfixStep*
-                    | "\." IndexStep PostfixStep*
+RelativePath      ::= "\" PostfixStep*
 AbsolutePath      ::= SchemeName "." PathPart PostfixStep*
 
 PathPart          ::= MemberName
@@ -361,10 +359,25 @@ PostfixRootExpr   ::= PrimaryExpr "." "/" PostfixStep*
 ParentCurrentExpr ::= "~~"                 // desugars to ~.~~
 ```
 
-`/` and `\.` are valid bare paths. `\./` and `file./` are also complete
+`/` and `\` are valid bare paths. `\./` and `file./` are also complete
 paths: the final slash is a root operation, not a trailing separator. Empty
-steps and a trailing dot separator are not valid: `/.`, `\.a.`, and `/.a..b`
-are errors.
+steps and a trailing dot separator are not valid: `/.`, `\.`, `\.a.`, and
+`/.a..b` are errors. A trailing dot is an incomplete expression, so a step on
+the next line continues it (S16.2.1): `\.` ⏎ `a` is `\.a`, as `\. a` is
+(S16.1.1). A line-start `.step` other than `.digit` continues a path too
+(S16.2.4v3).
+
+An `IndexStep` is the dotted step with a computed key (**PTH13.1**,
+**S2.4.2v5**): `/[1]` is `(/)[1]`, the same path as `/.1`, and `\[1]` is
+`\.1`. The same holds for a path held in a variable, `p[1]` ≡ `p.1`; a
+subscript never forces the target. Inside a path literal every step is a key
+step, including the steps after a computed one: `\[1].name` is `\.1.name`,
+never the path's `name` property. A dot is always followed by a `PathPart`,
+so `.[` is an error anywhere — `/.[1]`, `\.[1]`, `a.[1]` — like `/.`. An
+integer may be the first key (**PTH13.2**): `\.1` and `/.1` are `IntKey(1)`,
+and `\.1.2` is keys 1 then 2. Only syntax can tell `/.1` from `x /.5`
+(division by 0.5), so the parser, not the lexer, re-reads `.1` after a
+leading root `/` as a step; after `\` the lexer can tell on its own.
 A segment containing a dot or other non-name character remains quoted:
 
 ```lambda
@@ -406,7 +419,7 @@ new canonical forms:
 | Parent of `value` | `value.~~` | `value ..` |
 | Two parents of `value` | `value.~~.~~` | `value .._..` |
 
-The leading `\.` distinguishes a relative reference from contextual
+The leading `\` distinguishes a relative reference from contextual
 parent navigation:
 
 ```lambda
@@ -432,7 +445,7 @@ part of the path algebra; neither introduces another path form.
 ### 6.1 Root and parent normalization
 
 The postfix root operation discards descendant steps back to the current
-hierarchy anchor (**S2.4.2v4**):
+hierarchy anchor (**S2.4.2v5**):
 
 1. At the logical-global root, the anchor is `/`.
 2. At an absolute provider path, the anchor retains the provider and selected
@@ -467,7 +480,7 @@ Consequently:
 /.a.~~.b          == /.b
 /.~~              == /
 
-\.a.~~            == \.
+\.a.~~            == \
 \.a.~~.~~.b       == \.~~.b
 \.~~.~~           // ../../
 ```
@@ -492,7 +505,7 @@ file.host.home ++ \.docs./.tmp  == file.host.tmp
 ```
 
 A rooted or absolute suffix remains an error where composition requires a
-relative suffix. A bare `\.` suffix is the identity.
+relative suffix. A bare `\` suffix is the identity.
 
 ### 6.3 Provider and OS conversion
 
@@ -603,7 +616,7 @@ inherits all of `~`'s lexical shadowing rules (**S10.1.3**):
 For the pipe syntactic test in **S10.1.2**, a free `~~` contains an implicit
 free `~` and therefore makes the pipe a mapping pipe. Outside a current-value
 context, bare `~~` is the same semantic error as bare `~`; it does not mean a
-relative path. That form starts with `\.`, as in `\.~~`.
+relative path. That form starts with `\`, as in `\.~~`.
 
 ## 8. Context and ownership invariant
 
@@ -707,10 +720,63 @@ hostname discovery; the default resolver maps logical `/` to local `file./`.
 
 **Probed 2026-09-21** (after the `\.a.b` respelling): multi-step relative
 paths, parent/root normalization, `++` composition, and printing all use
-`\.`. Three gaps: the bare paths `\.` and `/` do not parse ("expected a path
-segment" / "expected '.'"); the indexed leading form `\.[1]` (and `/.[1]`) does
-not parse; and `\.1.x` silently evaluates to `file./` — a wrong value, not an
-error.
+`\.`. The probe reported three gaps: the bare roots did not parse ("expected
+a path segment" / "expected '.'"); the indexed leading form did not parse;
+and `\.1.x` silently evaluated to `file./` — a wrong value, not an error.
+(It spelled the gaps `\.`, `\.[1]`, and `/.[1]`. Under the USER rulings of
+the same day the relative root is `\` and `.[` is an error anywhere, so the
+bare roots are `/` and `\`, and the indexed forms are `\[1]` and `/[1]`.)
+
+**Fixed the same day**, identically on both tiers:
+
+- **Root cause of `file./`:** two path grammars. The C parser accepted `\.1`,
+  but build_ast re-parsed the path's source text with a separate character
+  parser (a Reduce5 leftover from when Tree-sitter owned paths). That parser
+  rejected a leading digit without a diagnostic, and the stand-in node it left
+  (scheme 0, `PATH_SCHEME_FILE`) ran as `file./`. `/ .a` failed the same way.
+  The re-parser is deleted. `parse_path_slot` reduces only the root token,
+  `/` or `\`; every step is an ordinary member or index reduction; and
+  build_ast builds the path from those tokens. Scheme chains (`http.h.a`,
+  `file./.a`) are recognised structurally, with no text re-parse.
+- **One root grammar (S2.4.1v2):** the lexer emits `\` alone as the relative
+  root, so `\.a`, `\[1]`, and bare `\` mirror `/.a`, `/[1]`, and `/`. `\.`
+  alone and `.[` anywhere are E100. Only a step (`.`, `[`), a separator, a
+  closer, or the end may touch a bare root: `/b` — the retired `/a`
+  spelling, which a bare `/` briefly let split into `/` and a statement `b` —
+  is E100 again, as are `\a` and `/1`. The reference grammar enforces the
+  same rule with a zero-width `_root_boundary` token, the way `_num_boundary`
+  guards `123abc`. The printer spells the empty relative path `\`, which
+  re-parses.
+- **Index steps (PTH13.1):** a `[k]` step on a path literal builds
+  `AST_NODE_PATH_INDEX_EXPR`, which the CST cleanup (24e74b45ee) had stopped
+  constructing. Static steps written after it stay key steps: `\[1].name` is
+  `\.1.name`, and `\.a['name']` is `\.a.name`. Both tiers call the runtime
+  helpers `fn_path_key` (S8.2.1v4 key normalization; a key naming nothing
+  yields null) and `fn_path_step` (null stays null). On a path value,
+  `fn_index` delegates to `fn_member`, so `p[1]` ≡ `p.1`. Before this, `p[1]`
+  forced the target and indexed its content, which is why `\.a[1]` read
+  `null`.
+- **Integer steps (PTH13.2):** after a step dot the lexer reads a number as
+  an integer key, so `\.1.2` and `a.1.2` are keys 1 then 2. `.digit` also
+  continues a chain after `\`, `~`, `~~`, `./`, `.*` and `.**`. That last gap
+  had split `file./.1`, `\.~~.1` and `\.a.*.1` into a path plus a juxtaposed
+  float 0.1. After a leading `/` the parser rescans `.1`, since `x /.5`
+  divides.
+- **Line breaks (S16.1.1, S16.2.1, S16.2.4v3):** each broken path was checked
+  against its joined line. A trailing `.` continues (`\.` ⏎ `a` is `\.a`,
+  like `\. a`), and the step flag survives the break (`\.` ⏎ `1.2` is
+  `\.1.2`). A line-start `.~~`, `./`, `.*`, `.**` or `.'sym'` continues like
+  `.ident`. A line-start `.digit` or `[` is still an error. An interim build
+  made `\.` ⏎ `b` two statements while `\. b` was one path — an S16.1.1
+  violation, now gone.
+- **`return \.a`** returned null: `\` was missing from the tokens that start
+  a return value.
+
+Tests: `test/lambda/path_roots_steps.ls`, `path_line_continuation.ls`,
+`member_int_steps.ls`, `proc/return_relative_path.ls`, four negative syntax
+fixtures, and S2.4 rows in both S16 conformance harnesses. A parenthesized
+path is a value, not a literal, so `(\.a).name` still reads the `name`
+property, as `p.name` does for a variable.
 
 ## 11. Migration
 
@@ -778,7 +844,7 @@ At minimum, implementation tests must cover:
 | ID | Decision |
 |---|---|
 | **PTH1v2** | Rooted references use `/.a.b`; `/` is the logical global root bound by a resolver context, not intrinsically the filesystem root. |
-| **PTH2v3** | Relative references use `\.a.b`; `\.` selects the active relative reference base, which a file provider projects to its current directory. *(v3, 2026-09-21, S16.9.4.)* |
+| **PTH2v4** | Relative references use `\.a.b`. The relative root is `\`, as the logical root is `/`: it selects the active relative reference base, which a file provider projects to its current directory. Its steps are ordinary `.part` and `[key]` steps, so `\[1]` is `\.1` and `\.` alone is an error. *(v4, 2026-09-21, USER; S2.4.1v2.)* |
 | **PTH3** | `~~` is the one parent step and is never a path root. |
 | **PTH4v2** | Relative parent paths are `\.~~.a`; repeated parents are `\.~~.~~`. *(v2, 2026-09-21, S16.9.4.)* |
 | **PTH5** | Expression parent navigation is postfix `.~~`; arbitrary chains use `value.~~.~~`. |
@@ -790,6 +856,8 @@ At minimum, implementation tests must cover:
 | **PTH11** | Printers emit only the new forms; old spellings are retired without permanent aliases. |
 | **PTH12** | The runtime represents parent traversal as a typed operation/segment, not solely `PATH_SCHEME_PARENT`; C2MIR remains frozen. |
 | **PTH13** | Every hierarchical address is a typed root plus ordered operations; ordinary keys are `NameKey` or `IntKey`. |
+| **PTH13.1** | A subscript on a path is the same key operation as the dotted step and never forces the target: `p[k]` ≡ `p.k`, so `(/)[1]`, `/[1]`, and `/.1` are one path, as are `\[1]` and `\.1`. Inside a path literal every step is a key step: `\[1].name` is `\.1.name`, never a property read. A dot is always followed by a step, so `.[` is an error anywhere (`/.[1]`, `\.[1]`). *(USER, 2026-09-21; S2.4.2v5.)* |
+| **PTH13.2** | An integer key may be a path's first step: `\.1` and `/.1` are `IntKey(1)`. `.1` is the float 0.1 only outside a step position (S4.3.1). *(USER, 2026-09-21; S2.4.2v5; resolves PTH-O1's residue.)* |
 | **PTH14** | Names and symbols share `NameKey` identity in one scope; integer keys stay typed and `a.1` differs from `a.'1'`. |
 | **PTH15** | Paths, names, and symbols are static reference plans; member expressions have a runtime base and are dynamically resolved. Their forcing policies remain distinct. |
 | **PTH16v3** | A bare name is statically qualified to its selected lexical/import namespace (`a` → `ns.a`); in element tag/attribute name position the complete dotted namespace-qualified name is maximal. Relative-path content is spelled `<svg \.rect>` and takes **no** boundary delimiter — S16.9.4 respelled the relative path `\.a.b` (dissolving the ambiguity that motivated the old `;`), and the S16.9.3 boundary comma is a biconditional that forbids a comma when the element has no attributes. Both `<svg; .rect>` (v2's spelling) and `<svg, \.rect>` are errors. Global resolution never bypasses visibility or exports. *(v3, 2026-08-28, with S2.4.3v3.)* |
@@ -811,12 +879,13 @@ At minimum, implementation tests must cover:
 
 ### PTH-O1: leading relative integer key and string-key input — RESOLVED
 
-Lambda assigns `.1` to the float literal `0.1` under **S4.3.1**; it must remain
-a float. A relative path beginning with `IntKey(1)` therefore uses the indexed
-form `\.[1]`. The symbol spelling `\.'1'` deliberately remains `NameKey("1")`
-under **S2.4.2v4** and **PTH14**. *(Respelled 2026-09-21 under S16.9.4. The
-`\` prefix removes the float collision that motivated `[1]`; whether `\.1`
-may now spell `IntKey(1)` directly is unruled.)*
+A path's first key may be an integer, spelled directly (**PTH13.2**): `\.1`
+and `/.1` are `IntKey(1)`. **S4.3.1** keeps `.1` the float 0.1 only outside a
+step position. The indexed form names the same path, because a subscript on a
+path is the dotted step (**PTH13.1**): `\[1]` ≡ `\.1` and `/[1]` ≡ `(/)[1]` ≡
+`/.1`. `.[` is an error anywhere, so `\.[1]` and `/.[1]` are rejected. The symbol spelling `\.'1'` deliberately remains
+`NameKey("1")` under **S2.4.2v5** and **PTH14**. *(USER, 2026-09-21. Earlier
+wording in Appendix S.2.)*
 
 The former `StringKeyInput` option is rejected by **S8.2.1v2** and C5.3b.
 Strings are names, not a second spelling of numeric keys: `"1"` normalizes to
@@ -848,3 +917,22 @@ with the postfix root step.
 | PTH4 | ~~Relative parent paths are `.~~.a`; repeated parents are `.~~.~~`.~~ | PTH4v2 |
 | PTH21 | ~~Paths have three root forms: logical rooted `/.a`, relative `.a`, and explicit absolute `SchemeName.a` such as `file./.a` or `http.host.a`.~~ | PTH21v2 |
 | PTH28 | ~~A root operation discards descendant steps while preserving the logical or provider/authority anchor; unresolved relative root selection remains as `./`.~~ | PTH28v2 |
+
+### S.2 Leading integer key only by index — SUPERSEDED 2026-09-21 by PTH13.1–PTH13.2
+
+The USER ruled `\.1` a valid relative path and `/.1` the same path as
+`(/)[1]`, so a subscript on a path became the dotted step (PTH13.1) and an
+integer may be the first key (PTH13.2).
+
+| ID | Superseded wording | Replaced by |
+|---|---|---|
+| PTH-O1 | ~~Lambda assigns `.1` to the float literal `0.1` under **S4.3.1**; it must remain a float. A relative path beginning with `IntKey(1)` therefore uses the indexed form `\.[1]`. The symbol spelling `\.'1'` deliberately remains `NameKey("1")` under **S2.4.2v4** and **PTH14**. *(Respelled 2026-09-21 under S16.9.4. The `\` prefix removes the float collision that motivated `[1]`; whether `\.1` may now spell `IntKey(1)` directly is unruled.)*~~ | PTH13.1, PTH13.2 |
+
+### S.3 `\.` as the relative root — SUPERSEDED 2026-09-21 by PTH2v4
+
+The USER ruled `\.[1]` invalid like `/.[1]` (`.[` is an error everywhere)
+and `\[1]` the relative index step, which makes `\` — not `\.` — the root.
+
+| ID | Superseded wording | Replaced by |
+|---|---|---|
+| PTH2v3 | ~~Relative references use `\.a.b`; `\.` selects the active relative reference base, which a file provider projects to its current directory. *(v3, 2026-09-21, S16.9.4.)*~~ | PTH2v4 |

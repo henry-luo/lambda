@@ -137,8 +137,6 @@ bool radiant_advance_js_event_loop(UiContext* uicon, double delta_ms, int frame_
 void render(GLFWwindow* window);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
-                                           int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 bool radiant_editing_animation_active(DocState* state);
@@ -281,6 +279,11 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
     // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
     if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
         log_debug("Loading as remote HTML document (HTTP/HTTPS)");
+        return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+    }
+
+    if (graph_path_is_graph(filename)) {
+        log_debug("Loading as graph document");
         return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
     }
 
@@ -987,15 +990,17 @@ static void window_write_memory_profile(DomDocument* doc, const char* input_file
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
-static int view_doc_in_window_with_events_internal(const char* doc_file, const char* doc_source,
+static int view_doc_in_window_with_events_internal(const char* doc_file,
+                                                   const LambdaDocumentTransformConfig* transform,
+                                                   const LambdaDocumentTransformOption* options,
+                                                   int option_count,
                                                    const char* event_file, bool headless,
                                                    const char** font_dirs, int font_dir_count,
                                                    bool enable_event_log,
                                                    bool enable_state_dump) {
     log_init_wrapper();
-    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, source: %s, event_file: %s, headless: %d",
-             doc_file ? doc_file : "NULL", doc_source ? "memory" : "file",
-             event_file ? event_file : "NULL", headless);
+    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
+             doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
 
     // Load fixture metrics before constructing fonts and the raster surface.
     // Event coordinates remain logical; device scale controls only the device side.
@@ -1130,8 +1135,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         script_runner_set_retain_js_state(needs_interactive_js);
         script_runner_set_execute_external_scripts(needs_interactive_js);
 
-        // Load document based on file extension, or evaluate an in-memory
-        // Lambda document script supplied by a caller such as PDF view.
+        // Load the document using its detected file format.
         Url* log_doc_url = url_parse_with_base(file_to_load, cwd);
         const char* log_doc_href = log_doc_url ? url_get_href(log_doc_url) : file_to_load;
         log_notice("view: loading document: %s", log_doc_href ? log_doc_href : file_to_load);
@@ -1151,14 +1155,21 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             false
         };
         DomDocument* doc = nullptr;
-        if (doc_source) {
-            Url* script_url = url_parse_with_base(file_to_load, cwd);
-            if (!script_url) {
-                log_error("Failed to parse in-memory script URL: %s", file_to_load);
-                window_cleanup_load_failure(pool, cwd, &ui_context, true);
-                return -1;
+        if (transform) {
+            Url* document_url = url_parse_with_base(file_to_load, cwd);
+            if (!document_url) {
+                log_error("document-transform: failed to parse document URL: %s", file_to_load);
+            } else {
+                doc = load_lambda_document_transform_doc(document_url, transform, options,
+                    option_count, css_width, css_height, pool);
+                if (!doc) {
+                    url_destroy(document_url);
+                } else if (!dom_document_finalize_loader_pool(doc, pool)) {
+                    log_error("document-transform: could not transfer loader pool to document");
+                    free_document(doc);
+                    doc = nullptr;
+                }
             }
-            doc = load_lambda_script_source_doc(script_url, doc_source, css_width, css_height, pool);
         } else {
             doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
                                      &js_host_config);
@@ -1503,18 +1514,20 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                     const char** font_dirs, int font_dir_count,
                                     bool enable_event_log, bool enable_state_dump) {
-    return view_doc_in_window_with_events_internal(doc_file, nullptr, event_file, headless,
+    return view_doc_in_window_with_events_internal(doc_file, nullptr, nullptr, 0,
+                                                   event_file, headless,
                                                    font_dirs, font_dir_count, enable_event_log,
                                                    enable_state_dump);
 }
 
-int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
-                                                    const char* event_file, bool headless,
-                                                    const char** font_dirs, int font_dir_count,
-                                                    bool enable_event_log, bool enable_state_dump) {
-    return view_doc_in_window_with_events_internal(script_name, script_source, event_file, headless,
-                                                   font_dirs, font_dir_count, enable_event_log,
-                                                   enable_state_dump);
+int view_lambda_document_transform_with_events(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        const char* event_file, bool headless, const char** font_dirs,
+        int font_dir_count, bool enable_event_log, bool enable_state_dump) {
+    return view_doc_in_window_with_events_internal(document_file, transform, options,
+        option_count, event_file, headless, font_dirs, font_dir_count,
+        enable_event_log, enable_state_dump);
 }
 
 // Wrapper for backward compatibility

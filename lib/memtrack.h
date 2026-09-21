@@ -230,9 +230,6 @@ char* mem_join3(const char* first, size_t first_len,
                 const char* second, size_t second_len,
                 const char* third, size_t third_len, MemCategory category);
 
-/** escape a C string for use inside a double-quoted Lambda literal. */
-char* mem_escape_lambda_literal(const char* value, MemCategory category);
-
 /**
  * Duplicate string with tracking
  */
@@ -261,7 +258,6 @@ char* mem_join3_loc(const char* first, size_t first_len,
                     const char* second, size_t second_len,
                     const char* third, size_t third_len,
                     MemCategory category, int line);
-char* mem_escape_lambda_literal_loc(const char* value, MemCategory category, int line);
 char* mem_strdup_loc(const char* str, MemCategory category, int line);
 char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line);
 
@@ -278,8 +274,6 @@ char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int
     mem_join2_loc(a, a_len, b, b_len, cat, __LINE__)
 #define mem_join3(a, a_len, b, b_len, c, c_len, cat) \
     mem_join3_loc(a, a_len, b, b_len, c, c_len, cat, __LINE__)
-#define mem_escape_lambda_literal(value, cat) \
-    mem_escape_lambda_literal_loc(value, cat, __LINE__)
 #define mem_strdup(str, cat)           mem_strdup_loc(str, cat, __LINE__)
 #define mem_strndup(str, max_len, cat) mem_strndup_loc(str, max_len, cat, __LINE__)
 

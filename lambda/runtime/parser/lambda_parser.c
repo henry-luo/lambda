@@ -153,6 +153,7 @@ static const char* const error_block_body_close = "expected '}' after block";
 static const char* const error_expected_relative_import_component = "expected a relative import component";
 static const char* const error_expected_import_module = "expected an import module";
 static const char* const error_expected_import_component = "expected an import component";
+static const char* const error_import_separator = "import paths separate names with '.'";
 static const char* const error_pub_declaration = "'pub' modifies a declaration; write 'pub let'";
 // S16.10.1: an import alias is a binding, so it takes no keyword and no
 // quoted spelling — a quoted use site would be a symbol, which never reads a
@@ -466,8 +467,10 @@ static bool token_starts_return_type(LambdaTokenKind kind) {
     return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE;
 }
 
+// PATH_REL must be here: without it `return \.a` parsed as a bare `return`
+// followed by a separate `\.a` statement, so the procedure returned null.
 static bool token_starts_expression(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
 }
 
 typedef bool (*LambdaTokenKindPredicate)(LambdaTokenKind kind);
@@ -776,28 +779,57 @@ static LambdaParseValue parse_primary_type_slot(LambdaRdParser* parser) {
     return parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT, LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
 }
 
+// The one step set shared by paths and member access (S2.4.2v5): a name, a
+// quoted symbol or `*`, an integer key, `**`, the parent `~~` and the root `/`.
+static bool token_is_path_step(LambdaTokenKind kind) {
+    return token_is_key(kind) || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_SLASH ||
+        kind == LAMBDA_TOK_INTEGER || kind == LAMBDA_TOK_STAR_STAR;
+}
+
 static bool parse_path_segment(LambdaRdParser* parser) {
-    if (!token_is_key(parser->current.kind) && parser->current.kind != LAMBDA_TOK_PARENT && parser->current.kind != LAMBDA_TOK_SLASH && parser->current.kind != LAMBDA_TOK_INTEGER && parser->current.kind != LAMBDA_TOK_STAR_STAR) {
+    if (!token_is_path_step(parser->current.kind)) {
         return parser_fail(parser, error_expected_path_segment, LAMBDA_TOK_IDENTIFIER);
     }
     parser_advance(parser);
     return true;
 }
 
+// `/.1`: the lexer read `.1` as the float 0.1, since only syntax can tell a
+// leading root from division (`x /.5`). This slash began a path, so an
+// adjacent dot-led number is re-read as the `.` step and its IntKey.
+static void parser_rescan_root_step(LambdaRdParser* parser, LambdaToken root) {
+    LambdaToken number = parser->current;
+    if (!token_is_dot_led_number(parser, &number) ||
+            number.span.start_byte != root.span.end_byte) return;
+    parser->current = lambda_lexer_rescan_dot_step(&parser->lexer, number);
+    parser->next = parser_next_significant(parser);
+}
+
+// S2.4.1v2: the root of a path literal, `/` or `\`, each a complete path on
+// its own. Every step is an ordinary postfix step on it -- `.a` (member) or
+// `[k]` (index) -- so the two roots share one grammar: `/.a` and `\.a`, `/[1]`
+// and `\[1]` (the same paths as `/.1` and `\.1`). A dot always needs a step,
+// so `\.` alone and `.[` anywhere are errors, and a trailing `.` continues
+// onto the next line (S16.2.1). build_ast builds the path from these tokens.
 static LambdaParseValue parse_path_slot(LambdaRdParser* parser) {
-    LambdaToken first = parser->current;
-    if (parser_accept(parser, LAMBDA_TOK_SLASH)) {
-        if (!parser_expect(parser, LAMBDA_TOK_DOT)) return 0;
-    } else if (!parser_expect(parser, LAMBDA_TOK_PATH_REL)) {
-        // §7.15: the relative introducer is `\.`, not a bare dot.
-        return 0;
+    LambdaToken root = parser->current;
+    parser_advance(parser);
+    if (root.kind == LAMBDA_TOK_SLASH) parser_rescan_root_step(parser, root);
+    // A bare root touches only a step or the end of the path. Anything else
+    // pressed against it is the retired `/a` spelling or a typo, and must not
+    // split silently into `/` and a second statement `a` (S16.1.1).
+    LambdaTokenKind touching = parser->current.kind;
+    if (parser->current.span.start_byte == root.span.end_byte &&
+            touching != LAMBDA_TOK_DOT && touching != LAMBDA_TOK_LBRACKET &&
+            touching != LAMBDA_TOK_SEMICOLON && touching != LAMBDA_TOK_COMMA &&
+            touching != LAMBDA_TOK_RPAREN && touching != LAMBDA_TOK_RBRACKET &&
+            touching != LAMBDA_TOK_RBRACE && touching != LAMBDA_TOK_GT &&
+            touching != LAMBDA_TOK_EOF) {
+        return parser_fail(parser, error_expected_dot, LAMBDA_TOK_DOT);
     }
-    if (!parse_path_segment(parser)) return 0;
-    while (parser_accept(parser, LAMBDA_TOK_DOT)) {
-        if (!parse_path_segment(parser)) return 0;
-    }
-    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
-    return parser_reduce_token(parser, LAMBDA_REDUCE_PATH_SLOT, LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
+    SourceSpan span = {root.span.start_byte, parser->current.span.start_byte};
+    return parser_reduce_token(parser, LAMBDA_REDUCE_PATH_SLOT, LAMBDA_REDUCTION_FORM_TOKEN,
+        span, root, NULL, 0);
 }
 
 static LambdaParseValue parse_array(LambdaRdParser* parser) {
@@ -1597,7 +1629,7 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser, LambdaParseValue l
         // continue this expression. The one exception is S16.2.4's `.ident(`
         // member call, which no path body or float literal can spell.
         if (first.nl_before && token_is_dual_role(first.kind)) {
-            // S16.2.4v2 (§7.15): with the relative path respelled `\.`, a
+            // S16.2.4v3 (§7.15): with the relative path rooted at `\`, a
             // line-start `.ident` has no start reading left, so member access
             // continues across the break for ANY member — full leading-dot
             // fluent chains, not just the `.ident(` call form. `.digit` stays
@@ -1609,9 +1641,13 @@ static LambdaParseValue parse_postfix(LambdaRdParser* parser, LambdaParseValue l
             // whose name is a type keyword (`.map(`, `.int(`, `.string(`) lexes
             // as LAMBDA_TOK_BASE_TYPE, so the guard rejected the very chains the
             // member parser would then have accepted on one line (LR02-11).
-            // `token_is_key` is that shared set; INTEGER/SLASH/PARENT/STAR_STAR
-            // stay out because each still has a non-member reading at line start.
-            bool member_chain = first.kind == LAMBDA_TOK_DOT && token_is_key(parser->next.kind);
+            // S16.2.4v3: no statement starts with `.~~`, `./` or `.**` either,
+            // so a path continues across the break just as the joined line
+            // reads (S16.1.1). Only a digit keeps a start reading -- `.5` is a
+            // float -- so an INTEGER step stays out.
+            bool member_chain = first.kind == LAMBDA_TOK_DOT &&
+                token_is_path_step(parser->next.kind) &&
+                parser->next.kind != LAMBDA_TOK_INTEGER;
             if (!member_chain) return left;
         }
         LambdaParseValue children[65] = {0};
@@ -2049,18 +2085,26 @@ static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
     return parser_reduce(parser, LAMBDA_REDUCE_IF, span, children, child_count);
 }
 
+// S16.9.6: `.` is the only import separator (`import .a.b`). The parser used
+// to take `/` as well, undocumented, and `import .a/b` resolved only because
+// the resolver passes `/` through.
 static bool parser_parse_import_module(LambdaRdParser* parser, LambdaToken* first_out, LambdaToken* last_out) {
     LambdaToken first = parser->current;
     LambdaToken last = first;
-    bool relative = first.kind == LAMBDA_TOK_DOT || first.kind == LAMBDA_TOK_SLASH;
+    bool relative = first.kind == LAMBDA_TOK_DOT;
     if (relative) parser_advance(parser);
     if (!parser_take_name(parser, token_is_key, relative
             ? error_expected_relative_import_component : error_expected_import_module, &last)) return false;
     if (!relative) first = last;
-    while (parser->current.kind == LAMBDA_TOK_DOT || parser->current.kind == LAMBDA_TOK_SLASH) {
+    while (parser->current.kind == LAMBDA_TOK_DOT) {
         parser_advance(parser);
         if (!parser_take_name(parser, token_is_key,
                 error_expected_import_component, &last)) return false;
+    }
+    // a `/` on the next line starts a rooted path statement (closed tail,
+    // S16.1.3v2); on the same line it can only be a mistaken separator
+    if (parser->current.kind == LAMBDA_TOK_SLASH && !parser->current.nl_before) {
+        return parser_fail(parser, error_import_separator, LAMBDA_TOK_DOT);
     }
     *first_out = first;
     *last_out = last;

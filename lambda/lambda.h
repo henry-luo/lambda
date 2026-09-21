@@ -2691,6 +2691,11 @@ extern "C" {
     Item fn_index_set(Item item, Item index, Item value);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
+    // S2.4.2v5: one key step of a path -- an IntKey or NameKey through
+    // S8.2.1v4, never a property read; null when the key names nothing.
+    Item fn_path_key(Item path, Item key);
+    // One static step (LPathSegmentType) on a computed path; null stays null.
+    Item fn_path_step(Item path, int64_t step_type, const char* name, int64_t int_value);
     // S12.3.3v2: object member access (key domain, then the type's method
     // chain), shared by the ANY and static member lanes.
     Item lambda_object_member(Item self, const char* key);

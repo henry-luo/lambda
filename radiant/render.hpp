@@ -3433,9 +3433,19 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 int render_html_to_png(const char* html_file, const char* png_file,
                        int viewport_width, int viewport_height,
                        float output_scale = 1.0f, float device_scale = 1.0f);
+int render_document_transform_to_png(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    const char* png_file, int viewport_width, int viewport_height,
+    float output_scale, float device_scale);
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality,
                         int viewport_width, int viewport_height,
                         float output_scale = 1.0f, float device_scale = 1.0f);
+int render_document_transform_to_jpeg(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    const char* jpeg_file, int quality, int viewport_width, int viewport_height,
+    float output_scale, float device_scale);
 
 // Render existing UiContext with state (caret/selection) to image file
 int render_uicontext_to_png(UiContext* uicon, const char* png_file);
@@ -3514,6 +3524,11 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
 bool render_export_session_begin_raster(RenderExportSession* session, const char* html_file,
                                         int viewport_width, int viewport_height,
                                         float output_scale, float device_scale);
+bool render_export_session_begin_document_transform(RenderExportSession* session,
+    const char* document_file, const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    int viewport_width, int viewport_height, int fallback_width, int fallback_height,
+    float output_scale, float device_scale, bool raster_surface);
 void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
@@ -3521,12 +3536,14 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float output_scale, float device_scale,
                                  int jpeg_quality);
+int render_document_transform_to_output_target(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    const char* output_file, int viewport_width, int viewport_height,
+    float output_scale, float device_scale, int jpeg_quality);
 
-// Graph syntax files enter Radiant through an in-memory Lambda transform document.
-bool graph_bridge_path_is_graph(const char* graph_file);
-const char* graph_bridge_flavor_for_path(const char* graph_file);
-char* build_graph_to_html_bridge_script(const char* graph_file, const char* theme_name,
-                                        const char* view_key, const char* log_prefix);
+// Detect graph syntax inputs before routing through the native transform configuration.
+bool graph_path_is_graph(const char* graph_file);
 
 // ===== render_overlay.hpp =====
 struct RenderContext;
@@ -3538,6 +3555,10 @@ void render_ui_overlays(struct RenderContext* rdcon, DocState* state);
 int render_html_to_pdf(const char* html_file, const char* pdf_file,
                        int viewport_width, int viewport_height,
                        float scale = 1.0f);
+int render_document_transform_to_pdf(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    const char* pdf_file, int viewport_width, int viewport_height, float scale);
 
 // ===== render_raster.hpp =====
 typedef struct RasterPaintContext {
@@ -3562,6 +3583,10 @@ bool render_selection_contains_view(DocState* state, View* view);
 int render_html_to_svg(const char* html_file, const char* svg_file,
                        int viewport_width, int viewport_height,
                        float scale = 1.0f);
+int render_document_transform_to_svg(const char* document_file,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    const char* svg_file, int viewport_width, int viewport_height, float scale);
 
 // Function to render a view tree to SVG string
 char* render_view_tree_to_svg(UiContext* uicon, View* root_view,

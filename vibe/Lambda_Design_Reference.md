@@ -147,7 +147,7 @@ PTH30 records what ships:
   alias `symbol | path` in the sys namespace (S17.2.1), user-first shadowable
   (S12.3.7).
 - The S6.2.1 band becomes `… < datetime < symbol < path < string < …`,
-  bytewise within the `path` band by canonical spelling (S2.4.2v4).
+  bytewise within the `path` band by canonical spelling (S2.4.2v5).
 - `==` across symbol and path is false by type, as between symbol and string.
 - `x is path` must resolve; today it warns `unresolved type name 'path'`.
 
@@ -658,7 +658,7 @@ open t = temp('scratch') { put t.rows.2.x = 1; commit }   // Tier 3: the documen
 - A new operator, joining the S16.2.2v2 continuation set beside `==`.
 - Identity-less operands compare **false**, never a compile error (S1.9:
   equality is total) — this settles the SO39 sub-question.
-- `&a == &b` is path equality under S2.4.2v4 plus fragment equality. Rooted
+- `&a == &b` is path equality under S2.4.2v5 plus fragment equality. Rooted
   and absolute spellings of one target are distinct paths (PTH24), so `===`
   across a rooted and an absolute load of the same file is false — the
   price of context-free value equality (S5.1.4), recorded, not hidden.

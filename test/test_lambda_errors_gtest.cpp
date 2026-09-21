@@ -1652,6 +1652,31 @@ TEST_F(NegativeScriptTest, SyntaxError_OversizedIntegerLiteral) {
     ExpectErrorCode("test/lambda/negative/syntax/oversized_integer_literal.ls", "error[E108]");
 }
 
+TEST_F(NegativeScriptTest, SyntaxError_PathDotBeforeIndex) {
+    ExpectErrorCode("test/lambda/negative/syntax/path_dot_before_index.ls", "error[E100]");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_PathRelativeDotBeforeIndex) {
+    ExpectErrorCode("test/lambda/negative/syntax/path_rel_dot_before_index.ls", "error[E100]");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_PathTrailingDot) {
+    ExpectErrorCode("test/lambda/negative/syntax/path_trailing_dot.ls", "error[E100]");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_PathRetiredRooted) {
+    ExpectErrorCode("test/lambda/negative/syntax/path_retired_rooted.ls", "error[E100]");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_ImportSlashSeparator) {
+    ExpectErrorMessage("test/lambda/negative/syntax/import_slash_separator.ls",
+        "import paths separate names with '.'");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_PathIntegerKeyRange) {
+    ExpectErrorCode("test/lambda/negative/syntax/path_integer_key_range.ls", "error[E103]");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_RetiredDecimalSuffix) {
     ExpectErrorWithoutCrash("test/lambda/negative/syntax/retired_decimal_suffix.ls");
 }

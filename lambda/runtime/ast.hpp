@@ -47,11 +47,16 @@ typedef struct AstPathNode : AstNode {
     AstPathSegment* segments;    // array of segment info (allocated in pool)
 } AstPathNode;
 
-// Path index expression: path[expr] - adds a dynamic segment to the path
-// Unlike regular index_expr, this extends the path with a runtime-computed segment
+// Path index expression: a computed `[k]` step inside a path literal (`\[k]`,
+// `/.a[k]`), plus the static steps written after it (`\[k].name`). Every step
+// of the literal is a key step (S2.4.2v5): unlike member access on a path
+// value, `.name` here never reads the path's `name` property. The result is
+// a path, or null when `k` names no key.
 typedef struct AstPathIndexNode : AstNode {
-    AstNode* base_path;      // the base path expression
-    AstNode* segment_expr;   // expression for the dynamic segment
+    AstNode* base_path;      // the path literal so far: PATH_EXPR or PATH_INDEX_EXPR
+    AstNode* segment_expr;   // expression for the computed key
+    int segment_count;       // static steps after the computed key
+    AstPathSegment* segments;
 } AstPathIndexNode;
 
 typedef struct AstNavigationNode : AstNode {

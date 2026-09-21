@@ -2,7 +2,7 @@
 
 Status: **IMPLEMENTED** — decisions VR1–VR14 and phases R0–R7 completed 2026-07-18. The measured adoption set is retained reset/scratch separation, canonical `InlineProp` sharing, DOM liveness and arena retirement, tree-wide exact Inline interning, and canonical style epochs. Evidence-gated Font sharing and a custom `TextRect` cache were not adopted.
 Scope: DOM node storage, view-prop lifecycle, layout/render scratch, canonical prop sharing, and per-element/canonical `specified_style` storage.
-Extends: `vibe/radiant/Radiant_Design_Dom_View_Struct.md` (DV1–DV16 complete).
+Extends: `vibe/radiant/Radiant_Design_View_Struct.md` (DV1–DV16 complete).
 Related: `Radiant_Design_Memory.md`, `Radiant_Design_Robustness.md` (T7 stale pointers), `vibe/Lambda_Design_Memory_Model.md`, and the completed DOM/view impl plan's alias ledger and memory profile.
 
 ---
