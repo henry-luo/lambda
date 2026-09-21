@@ -16,9 +16,16 @@ reference columns.
   hidden by the library cache. The cases cover ordinary patterns, dictionary
   exceptions and no-break exceptions, HTML tags/attributes, entities, explicit
   hyphens, apostrophes, repeated words, capitalization, and malformed markup.
-  `hyphen_patterns.json` and `c2mir/hyphen_patterns_data.h` are generated from
-  the checked-in en-US library data by `generate_hyphen_fixture.js`; regenerate
-  both whenever `hyphen.js` changes its embedded pattern data.
+  `hyphen_patterns.json`, `c2mir/hyphen_patterns_data.h`, `hyphen_tables.json`
+  and `lambda/benchmark/hyphen_tables.ls` are generated from the checked-in
+  en-US library data by `generate_hyphen_fixture.js`; regenerate them whenever
+  `hyphen.js` changes its embedded pattern data. The typed entry uses flat
+  `int[]` trie tables, typed caches and string spans in
+  `lambda/benchmark/hyphen_typed.ls`. Table loading/admission occurs before
+  timing; scanning, cache population and output construction remain timed.
+  Both Lambda cores share the exact cases and lexical predicates in
+  `lambda/benchmark/hyphen_common.ls`. The typed representation rewrite is a
+  source change; measure its gain separately from compiler/runtime tuning.
 - prettier_ast.js: a Prettier/Babel `Program` AST loaded from
   `prettier_ast.json` and printed through a small document IR, 256 rounds.
 - text_search.js: repeated naive, KMP, and Boyer–Moore searches over a generated

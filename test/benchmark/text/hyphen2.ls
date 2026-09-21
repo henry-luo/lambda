@@ -1,6 +1,5 @@
-// Typed entry point for the shared Liang-pattern hyphenation benchmark.
-// The core owns dynamic JSON trie traversal, which the library requires.
-import test.benchmark.hyphen_core
+// typed trie/caches with direct string processing; same 13 cases and 32 rounds.
+import test.benchmark.hyphen_typed
 
 pn main() {
     let completed = run_hyphen_benchmark()

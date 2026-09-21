@@ -253,6 +253,59 @@ TEST(LambdaOptStrings, TailAccumulatorCopiesLinearBytes) {
     EXPECT_GT(run.profile.get("string_freezes"), 0u);
 }
 
+// Tune31 Phase II: S7.1.2 string spans avoid a call per character, and
+// D3.3.3v3 admits the flat table record once before the repeated traversal.
+TEST(LambdaOptStrings, TypedHyphenUsesStringSpansAndOneTableAdmission) {
+    auto run = run_source_fixture("tune31_hyphen_typed_benchmark",
+        "test/benchmark/text/hyphen2.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_NE(strstr(run.std_out.c_str(), "hyphen: CHECKSUM:1183296\n"), nullptr);
+    EXPECT_EQ(strstr(run.std_out.c_str(), "FAIL"), nullptr);
+    ASSERT_TRUE(run.profile.has("string_append_calls"));
+    ASSERT_TRUE(run.profile.has("map_admit_calls"));
+    // 11,092 appends after the span rewrite, versus 71,086 in the old core.
+    // Leave headroom for boundary changes while rejecting character-by-character output.
+    EXPECT_LT(run.profile.get("string_append_calls"), 15000u);
+    EXPECT_LE(run.profile.get("map_admit_calls"), 2u);
+}
+
+// Tune31 Phase II F: an inferred numeric parameter does not gain a source
+// contract, but its proven raw ArrayNum witness must keep loop stores out of
+// the representation-agnostic COW setter after the one snapshot detach.
+TEST(LambdaOptStores, InferredFloatArrayKeepsNativeStoreHotPath) {
+    auto run = run_source_fixture("tune31_inferred_float_store",
+        "test/mir/lambda/tune31_inferred_float_store.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "5 1 1\n\n");
+    EXPECT_EQ(run.profile.get("array_num_shared_copies"), 1u);
+    EXPECT_EQ(run.profile.get("array_num_unique_mutations"), 0u);
+}
+
+// Tune31 Phase II F: a caller-visible inferred `var` array keeps the same
+// native success arm after nullable intermediate arithmetic, while the first
+// write still detaches its snapshot through the established COW fallback.
+TEST(LambdaOptStores, InferredVarFloatArrayKeepsNativeStoreHotPath) {
+    auto run = run_source_fixture("tune31_inferred_var_float_store",
+        "test/mir/lambda/tune31_inferred_var_float_store.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[2, 3, 4] [3, 4, 5]\n\n");
+    EXPECT_EQ(run.profile.get("array_num_shared_copies"), 1u);
+    EXPECT_EQ(run.profile.get("array_num_unique_mutations"), 0u);
+}
+
+// Tune31 Phase II A: a snapshot causes one root detach at the outer `var`
+// call boundary. The repeated field re-borrow must then prepare only its
+// ArrayNum child; a no-op map preparation per loop trip is a regression.
+TEST(LambdaOptCow, VarPathBorrowAvoidsRepeatedUniqueRootPreparation) {
+    auto run = run_source_fixture("tune31_var_path_borrow",
+        "test/mir/lambda/tune31_var_path_borrow.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "4 0\n\n");
+    EXPECT_EQ(run.profile.get("map_shared_copies"), 1u);
+    EXPECT_EQ(run.profile.get("map_unique_mutations"), 0u);
+    EXPECT_EQ(run.profile.get("array_num_shared_copies"), 1u);
+}
+
 // Tune28 T28-5: literal string separators search for the next first-byte hit
 // and compare only multi-byte candidates. S17.1.1 keeps the segments and
 // delimiters observable while the structural check pins the non-bytewise scan.

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 Phase II A: after a body-side var-root capture, a nested var field borrow reintroduces root COW preparation before the child walk.",
+  "checks": [
+    {
+      "in_func": "_tune31_share_then_increment_#",
+      "expect_seq": [
+        { "pattern": "call\tcow_prepare_write_p, cow_prepare_write" },
+        { "pattern": "call\tcow_path_borrow_fixed_p, cow_path_borrow_fixed" }
+      ]
+    }
+  ]
+}

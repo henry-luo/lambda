@@ -8410,7 +8410,15 @@ static bool mir_cow_path_has_fixed_borrow_descriptor(MirTranspiler* mt,
 // borrow error returns from the enclosing function.
 static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
         const AstCowPath* path, bool value_leaf) {
-    (void)mir_prepare_cow_root(mt, root);
+    // A direct `var` root is detached at its caller boundary before this
+    // activation starts. Re-preparing that unmarked root for every nested
+    // borrow only rechecks the same clear share bit; the child walker below
+    // still detaches each selected field. A body-side capture records
+    // cow_marked in emission order, so a re-borrow after sharing retains the
+    // root preparation (S9.1.2, S9.2.2, D4.4.4v4).
+    if (!root->is_var_param || root->cow_marked) {
+        (void)mir_prepare_cow_root(mt, root);
+    }
     if (mir_cow_path_has_fixed_borrow_descriptor(mt, path)) {
         MIR_reg_t keys[3];
         for (int i = 0; i < 3; i++) {
@@ -33720,6 +33728,19 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
 
         MIR_reg_t obj = transpile_box_item(mt, ca->object);
         TypeId obj_tid = mir_expr_carrier_type(mt, ca->object);
+        AstNode* direct_object = ast_unwrap_primary(ca->object);
+        MirVarEntry* direct_object_var = direct_object &&
+                direct_object->node_type == AST_NODE_IDENT
+            ? mir_var_for_ident(mt, (AstIdentNode*)direct_object) : NULL;
+        if (obj_tid == LMD_TYPE_ANY && direct_object_var &&
+                direct_object_var->type_id == LMD_TYPE_ARRAY_NUM &&
+                direct_object_var->elem_type != LMD_TYPE_ANY) {
+            // An inferred parameter has no source-level T[] contract, but its
+            // current binding still owns the admitted ArrayNum carrier. Keep
+            // that live representation through this direct store; its guarded
+            // miss remains on the checked setter (D3.3.3v3, S7.1.3v2).
+            obj_tid = LMD_TYPE_ARRAY_NUM;
+        }
         // Object must be a pointer (Array*), unbox if boxed
         MIR_reg_t arr_ptr = mir_container_item_is_pointer(obj_tid)
             ? obj : emit_unbox_container(mt, obj);
@@ -33744,19 +33765,10 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         TypeId assign_obj_elem = LMD_TYPE_ANY;
         bool assign_elem_guarded = false;
         MirVarEntry* assign_obj_var = NULL;
-        if (obj_tid == LMD_TYPE_ARRAY_NUM) {
-            AstNode* obj_unwrapped = ca->object;
-            while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
-                obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
-            if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
-                AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
-                MirVarEntry* ov = mir_var_for_ident(mt, obj_ident);
-                if (ov) {
-                    assign_obj_var = ov;
-                    assign_obj_elem = ov->elem_type;
-                    assign_elem_guarded = ov->elem_type_guarded;
-                }
-            }
+        if (obj_tid == LMD_TYPE_ARRAY_NUM && direct_object_var) {
+            assign_obj_var = direct_object_var;
+            assign_obj_elem = direct_object_var->elem_type;
+            assign_elem_guarded = direct_object_var->elem_type_guarded;
         }
         // CW32v2: only a root the emitter knows crossed a sharing boundary
         // consults the shared bit; every other binding keeps today's fully
@@ -35822,13 +35834,38 @@ static bool mir_expr_proves_native_float_lane_or_null(MirTranspiler* mt,
     if (!node) return false;
     if (mir_expr_proves_native_return_lane(mt, node, LMD_TYPE_FLOAT)) return true;
 
+    if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        MirVarEntry* value = mir_var_for_ident(mt, ident);
+        if (value && value->type_id == LMD_TYPE_FLOAT &&
+                value->mir_type == MIR_T_D) {
+            // The live binding retains the nullable F64 carrier selected by
+            // its initializer or prior same-lane assignment. Its consumer
+            // still emits the sentinel guard before a raw store.
+            return true;
+        }
+        AstNode* binding = ident->entry ? ident->entry->node : NULL;
+        if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                (!ident->entry->is_mutable || !mir_binding_has_reassignment(mt,
+                    (AstDeclaratorNode*)binding))) {
+            // An unmodified local preserves the nullable lane of its
+            // initializer; without this, nbody's `mag` temporary broke the
+            // proof chain and every final velocity store boxed (D2.2.2,
+            // D3.3.3v3).
+            return mir_expr_proves_native_float_lane_or_null(mt,
+                ((AstDeclaratorNode*)binding)->init);
+        }
+    }
+
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* field = (AstFieldNode*)node;
         TypeId index_type = mir_decl_type_id(field->field ? field->field->type : NULL);
+        TypeId index_carrier = mir_expr_carrier_type(mt, field->field);
         LambdaNumericKind index_kind = lambda_numeric_kind_from_type(
             field->field ? field->field->type : NULL);
         return mir_known_index_element_type(mt, field->object) == LMD_TYPE_FLOAT &&
-            (is_integer_type_id(index_type) || index_kind == LAMBDA_NUM_INT ||
+            (is_integer_type_id(index_type) || is_integer_type_id(index_carrier) ||
+             index_kind == LAMBDA_NUM_INT ||
              index_kind == LAMBDA_NUM_INTEGER);
     }
 
