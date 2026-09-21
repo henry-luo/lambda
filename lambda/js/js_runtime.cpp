@@ -294,7 +294,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static void js_set_prototype_fresh(Item object, Item prototype);
-static bool js_class_instance_shape_is_admissible(TypeMap* shape);
+static bool js_constructor_instance_shape_is_admissible(TypeMap* shape);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 extern "C" bool js_promise_vmap_is(Item value);
@@ -2241,7 +2241,15 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     Rooted<Item> aux_one_root(roots, ItemNull);
     Rooted<Item> aux_two_root(roots, ItemNull);
     if (!roots.valid()) return ItemNull;
-    object_root.set(js_new_object());
+    JsFunction* constructor_fn = get_type_id(callee_root.get()) == LMD_TYPE_FUNC
+        ? (JsFunction*)callee_root.get().function : NULL;
+    // Only an unredirected ordinary source constructor owns this recipe. A
+    // bound wrapper or a distinct newTarget must retain generic allocation.
+    TypeMap* instance_shape = constructor_fn &&
+            target_root.get().item == callee_root.get().item
+        ? js_fn_code(constructor_fn)->instance_shape : NULL;
+    object_root.set(js_constructor_instance_shape_is_admissible(instance_shape)
+        ? js_new_literal_object_with_typemap(instance_shape) : js_new_object());
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         // Bound construction substitutes the ultimate target only when the
@@ -3572,7 +3580,7 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
         }
         TypeMap* instance_shape = class_fn
             ? js_fn_class(class_fn)->instance_shape : NULL;
-        object_root.set(js_class_instance_shape_is_admissible(instance_shape)
+        object_root.set(js_constructor_instance_shape_is_admissible(instance_shape)
             ? js_new_literal_object_with_typemap(instance_shape) : js_new_object());
         // Subclass builtin detection: walk the prototype chain of instance_proto
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
@@ -3677,13 +3685,23 @@ extern "C" void js_set_class_constructor(Item class_function, Item constructor_b
 extern "C" void js_set_class_instance_shape(Item class_function,
         TypeMap* shape) {
     if (get_type_id(class_function) != LMD_TYPE_FUNC ||
-            !js_class_instance_shape_is_admissible(shape)) return;
+            !js_constructor_instance_shape_is_admissible(shape)) return;
     JsFunction* fn = (JsFunction*)class_function.function;
     if (!fn) return;
     JsClassData* klass = js_fn_class_ensure(fn);
     if (!klass) return;
     // The recipe belongs to the retained compiler Input, never to this class.
     klass->instance_shape = shape;
+}
+
+extern "C" void js_set_function_instance_shape(Item function, TypeMap* shape) {
+    if (get_type_id(function) != LMD_TYPE_FUNC ||
+            !js_constructor_instance_shape_is_admissible(shape)) return;
+    JsFunction* fn = (JsFunction*)function.function;
+    // Pending MIR functions already own their definition record. Do not make
+    // this post-finalization publication allocate across an unrooted boundary.
+    if (!fn || !fn->code) return;
+    fn->code->instance_shape = shape;
 }
 
 #define JS_SET_CLASS_ITEM(name, field) \
@@ -3950,7 +3968,7 @@ extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm) {
     return object;
 }
 
-static bool js_class_instance_shape_is_admissible(TypeMap* shape) {
+static bool js_constructor_instance_shape_is_admissible(TypeMap* shape) {
     if (!shape || !typemap_ptr_is_plausible(shape) ||
             !shape->is_transition_shared_shape || shape->js_meta ||
             shape->length <= 0 || shape->length > 16) {
@@ -3968,6 +3986,12 @@ static bool js_class_instance_shape_is_admissible(TypeMap* shape) {
         count++;
     }
     return count == shape->length && offset == shape->byte_size;
+}
+
+extern "C" int64_t js_constructor_shape_field_is_initialized(Item object,
+        int64_t byte_offset) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return 0;
+    return map_ctor_offset_is_reserved(object.map, byte_offset) ? 0 : 1;
 }
 
 // Forward declaration for prototype chain support
