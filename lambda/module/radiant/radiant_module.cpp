@@ -2,7 +2,6 @@
 #include "../../input/css/dom_element.hpp"
 #include "../../io/input-allocation-context.h"
 #include "../../runtime/lambda-error.h"
-#include "../../runtime/interp.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
@@ -76,6 +75,13 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
 
 extern "C" Item vmap_new(void);
 extern "C" Item vmap_set(Item vmap_item, Item key, Item value);
+#ifdef __APPLE__
+extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
+                                               uint64_t* result_home) asm("_fn_call3_into");
+#else
+extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
+                                               uint64_t* result_home) asm("fn_call3_into");
+#endif
 Item vmap_get_by_item(VMap* vm, Item key);
 
 #define RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY 64
@@ -89,7 +95,6 @@ typedef struct RadiantCustomLayoutEntry {
     char name[RADIANT_CUSTOM_LAYOUT_NAME_CAP];
     Heap* owner_heap;
     Item fn;
-    Item callback_args[3];
     bool rooted;
 } RadiantCustomLayoutEntry;
 
@@ -115,17 +120,6 @@ static RadiantCustomLayoutEntry g_radiant_custom_layouts[RADIANT_CUSTOM_LAYOUT_M
 static int g_radiant_custom_layout_count = 0;
 static uint64_t g_radiant_velmt_next_pass_id = 1;
 static THREAD_LOCAL uint64_t g_radiant_velmt_active_pass_id = 0;
-
-static void radiant_custom_layout_worker_enter(void* opaque) {
-    const uint64_t* pass_id = (const uint64_t*)opaque;
-    // Velmt handles are valid only for their layout pass, including worker callbacks.
-    g_radiant_velmt_active_pass_id = pass_id ? *pass_id : 0;
-}
-
-static void radiant_custom_layout_worker_leave(void* opaque) {
-    (void)opaque;
-    g_radiant_velmt_active_pass_id = 0;
-}
 
 RADIANT_C_API const void* radiant_velmt_host_type(void);
 
@@ -1118,27 +1112,18 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
 
     bool ok = false;
     {
-        // Build callback arguments on the caller thread, then retain them in
-        // registry roots while the bounded worker owns the Runtime context.
-        RootFrame roots(3);
+        // A layout callback is reentrant in the document's active script call;
+        // handing that EvalContext to a worker tears down the parent activation.
+        RootFrame roots(5);
+        Rooted<Item> rooted_fn(roots, entry->fn);
         Rooted<Item> rooted_parent(roots, radiant_layout_parent_item(context));
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
-        entry->callback_args[0] = rooted_parent.get();
-        entry->callback_args[1] = rooted_children.get();
-        entry->callback_args[2] = rooted_layout_context.get();
-    }
-    // No RootFrame may span the evaluator handoff: each thread has its own
-    // side-stack cursor, while the registry slots remain precise GC roots.
-    Item callback_result = interp_call_runtime_function_large_stack(runtime,
-        entry->fn.function, entry->callback_args, 3,
-        radiant_custom_layout_worker_enter, radiant_custom_layout_worker_leave, &pass_id);
-    entry->callback_args[0] = ItemNull;
-    entry->callback_args[1] = ItemNull;
-    entry->callback_args[2] = ItemNull;
-    {
-        RootFrame roots(1);
-        Rooted<Item> rooted_result(roots, callback_result);
+        Rooted<Item> rooted_result(roots, ItemNull);
+        LAMBDA_SCALAR_HOME(callback_result_home);
+        rooted_result.set(radiant_lambda_fn_call3_into(rooted_fn.get().function,
+            rooted_parent.get(), rooted_children.get(), rooted_layout_context.get(),
+            &callback_result_home));
         if (get_type_id(rooted_result.get()) == LMD_TYPE_ERROR) {
             log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         } else {
@@ -3315,9 +3300,6 @@ RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item) {
         entry->owner_heap = owner_heap;
         entry->fn = ItemNull;
         radiant_host_api->gc->register_root(&entry->fn.item);
-        for (int index = 0; index < 3; index++) {
-            radiant_host_api->gc->register_root(&entry->callback_args[index].item);
-        }
         entry->rooted = true;
     }
 
@@ -3426,9 +3408,6 @@ static void radiant_module_shutdown(void) {
         RadiantCustomLayoutEntry* entry = &g_radiant_custom_layouts[i];
         if (entry->rooted && radiant_host_api && radiant_host_api->gc) {
             radiant_host_api->gc->unregister_root(&entry->fn.item);
-            for (int index = 0; index < 3; index++) {
-                radiant_host_api->gc->unregister_root(&entry->callback_args[index].item);
-            }
         }
         memset(entry, 0, sizeof(*entry));
     }
@@ -3446,9 +3425,6 @@ static void radiant_custom_layout_heap_cleanup(void* heap_ptr) {
             // Registry slots are process-stable, but callback values are only
             // valid for the runtime heap that JIT-compiled their functions.
             gc_unregister_root(heap->gc, &entry->fn.item);
-            for (int index = 0; index < 3; index++) {
-                gc_unregister_root(heap->gc, &entry->callback_args[index].item);
-            }
         }
         memset(entry, 0, sizeof(*entry));
     }

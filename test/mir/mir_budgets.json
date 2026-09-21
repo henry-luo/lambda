@@ -444,7 +444,7 @@
       "name": "js_tune6_exact_collection",
       "script": "test/mir/js/tune6_exact_collection.js",
       "language": "js",
-      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3). Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-19 (Tune14): +9 deterministic receiver snapshots hold the evaluated write Reference through its RHS (S1.11, D8.2.3).",
+      "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3). Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-19 (Tune14): +9 deterministic receiver snapshots hold the evaluated write Reference through its RHS (S1.11, D8.2.3). Re-baseline 2026-09-22 (Tune14 final method analysis): darwin-debug adds one js_finalize_function transaction (+5 MIR instructions, +1 safepoint) for each of the fixture's 129 class methods, publishing compiler-known facts for js_call_entry_mir_this capability selection (D6.2.2v2). The zero-slack profile therefore records +645 module/js_main instructions and +129 safepoints; roots, root stores, and scalar homes are unchanged.",
       "budgets": {
         "linux-debug": {
           "module_insns": 14166,
@@ -489,10 +489,10 @@
           ]
         },
         "darwin-debug": {
-          "module_insns": 16499,
+          "module_insns": 17144,
           "functions": {
             "js_main": {
-              "insns": 11984
+              "insns": 12629
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 5
@@ -505,7 +505,7 @@
               "root_stores": 656,
               "scalar_homes": 15,
               "number_scratch": 0,
-              "safepoints": 1694
+              "safepoints": 1823
             }
           ]
         },
