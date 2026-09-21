@@ -108,6 +108,8 @@ extern Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern Item js_increment(Item value);
 extern Item js_decrement(Item value);
+extern Item js_increment_numeric(Item numeric);
+extern Item js_decrement_numeric(Item numeric);
 extern Item js_number_function(Item value);
 extern Item js_typed_array_set_numeric_key(Item ta, double index, Item value);
 // BigInt creation (lambda-decimal.cpp)
@@ -2130,6 +2132,8 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), 0, JIT_EXCEPTION_PRESERVES}},
     {"js_increment", FPTR(js_increment)},
     {"js_decrement", FPTR(js_decrement)},
+    {"js_increment_numeric", FPTR(js_increment_numeric)},
+    {"js_decrement_numeric", FPTR(js_decrement_numeric)},
     {"js_number_function", FPTR(js_number_function)},
     // addition retains its existing per-call reclaim; the other arithmetic
     // helpers retain their existing caller-extent lifetime with an explicit audit.
@@ -2400,6 +2404,12 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_elements_get_number", FPTR(js_elements_get_number),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_array_get_existing_own_dense_with_props_or_missing",
+     FPTR(js_array_get_existing_own_dense_with_props_or_missing),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
@@ -3675,6 +3685,10 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // This existing-slot write excludes growth, holes, scalar homes, and
         // descriptor overlays before mutating direct packed storage.
         "js_array_set_existing_number_no_gc",
+        // This read admits only a direct present own dense element through an
+        // existing companion map; it rejects scalar homes, holes and numeric
+        // descriptor overlays.
+        "js_array_get_existing_own_dense_with_props_or_missing",
         "js_async_iterator_close_needs_await",
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
         "fn_min2_u",

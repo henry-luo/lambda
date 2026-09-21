@@ -240,6 +240,11 @@ Item js_unsigned_right_shift(Item left, Item right); // >>>
 Item js_unary_plus(Item operand);   // +x (convert to number)
 Item js_unary_minus(Item operand);  // -x (negate)
 Item js_typeof(Item value);         // typeof x
+Item js_increment(Item operand);
+Item js_decrement(Item operand);
+// Internal MIR/interpreter entries: the caller has already applied ToNumeric.
+Item js_increment_numeric(Item numeric);
+Item js_decrement_numeric(Item numeric);
 
 // =============================================================================
 // Object Functions
@@ -366,6 +371,11 @@ Item js_elements_set_int(Item array, int64_t index, Item value);
 // kernels. They accept only a present ordinary dense slot and cannot allocate.
 bool js_array_try_get_existing_own_dense_no_gc(Item array, int64_t index,
                                                Item* out_value);
+// Returns an existing direct Item through an ArrayProps companion, or the
+// internal hole sentinel when scalar homes, descriptors, holes or another array
+// kind require the complete element read.
+Item js_array_get_existing_own_dense_with_props_or_missing(Item array,
+                                                            int64_t index);
 bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t index,
                                                Item value);
 // Stores an already-native Number only into an existing ordinary packed slot.

@@ -4885,9 +4885,10 @@ extern "C" int radiant_dom_window_get_property(Item object, Item key, Item* out)
 
 static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
     // The only host-backed reads in this kernel belong to the realm's Window
-    // object, which is always an ordinary Map. Arrays and scalar receivers
-    // cannot acquire those hooks, so avoid preparing realm state for them.
-    if (get_type_id(object) != LMD_TYPE_MAP) return false;
+    // object, which is its global Map. Ordinary Maps cannot acquire those
+    // hooks, so avoid preparing global and Radiant state for every field read.
+    if (get_type_id(object) != LMD_TYPE_MAP ||
+            !js_is_global_this_object_value(object)) return false;
     if (js_is_window_event_global_property(object, key)) {
         if (out) *out = js_get_window_event_global_value();
         return true;
@@ -6532,6 +6533,24 @@ extern "C" bool js_array_try_get_existing_own_dense_no_gc(Item object,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     *out = value;
     return true;
+}
+
+extern "C" Item js_array_get_existing_own_dense_with_props_or_missing(
+        Item object, int64_t index) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY || !object.array ||
+            !js_array_has_props(object.array) || object.array->extra != 0) {
+        return (Item){.item = JS_DELETED_SENTINEL_VAL};
+    }
+    Item value = ItemNull;
+    if (!js_array_try_get_existing_own_dense_no_gc(object, index, &value)) {
+        return (Item){.item = JS_DELETED_SENTINEL_VAL};
+    }
+    // The caller cannot allocate to re-home a borrowed wide scalar. Let the
+    // complete Get establish its transient scalar ownership instead (D5.3.4).
+    if (lambda_item_uses_scalar_home(value)) {
+        return (Item){.item = JS_DELETED_SENTINEL_VAL};
+    }
+    return value;
 }
 
 // Fast path for writing an existing own dense data element of a normal Array.
@@ -8544,28 +8563,37 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
         return ItemNull;
     }
     Item key_item = (Item){.item = s2it(key)};
-    Item array_length = ItemNull;
-    if (js_try_get_array_length_name_no_gc(object, key_item, &array_length)) {
-        js_named_fast_profile_hit();
-        return array_length;
+    TypeId object_type = get_type_id(object);
+    // An ordinary non-global Map cannot observe Array/String virtual lengths,
+    // Window hooks, or Function metadata. Keep the full preamble for globals
+    // and all other receivers before their shared property lookup.
+    if (object_type != LMD_TYPE_MAP || js_is_global_this_object_value(object)) {
+        Item array_length = ItemNull;
+        if (js_try_get_array_length_name_no_gc(object, key_item, &array_length)) {
+            js_named_fast_profile_hit();
+            return array_length;
+        }
+        string_length = ItemNull;
+        if (js_try_get_primitive_string_length_name_no_gc(object, key_item,
+                &string_length)) {
+            js_opt_trace_record(JS_OPT_NAMED_FAST_STRING_LENGTH,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+            js_named_fast_profile_hit();
+            return string_length;
+        }
+        Item host_value = ItemNull;
+        // host-backed names are live state; the placeholder shape must never win.
+        if (js_get_host_dynamic_property(object, key_item, &host_value)) {
+            js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_HOST_DYNAMIC);
+            return host_value;
+        }
+        // Only Functions can lazily publish name/length. Ordinary Map receivers
+        // dominate named reads, so avoid building the materializer's root frame
+        // before its immediate non-Function rejection.
+        if (object_type == LMD_TYPE_FUNC) {
+            js_function_materialize_lazy_metadata_property(object, key_item);
+        }
     }
-    string_length = ItemNull;
-    if (js_try_get_primitive_string_length_name_no_gc(object, key_item,
-            &string_length)) {
-        js_opt_trace_record(JS_OPT_NAMED_FAST_STRING_LENGTH,
-            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-        js_named_fast_profile_hit();
-        return string_length;
-    }
-    Item host_value = ItemNull;
-    // host-backed names are live state; the placeholder shape must never win.
-    if (js_get_host_dynamic_property(object, key_item, &host_value)) {
-        js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_HOST_DYNAMIC);
-        return host_value;
-    }
-    // First observation materializes the ordinary metadata shape, allowing
-    // the existing NameId descriptor leaf to serve subsequent reads.
-    js_function_materialize_lazy_metadata_property(object, key_item);
     Item value = ItemNull;
     JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_RECEIVER;
     if (js_named_fast_lookup(object, key, name_id, NULL, NULL, NULL,
@@ -9239,6 +9267,8 @@ extern "C" Item js_elements_get(Item array, Item index) {
 }
 
 extern "C" Item js_elements_get_number(Item array, double index) {
+    js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
     RootFrame roots(2);
     Rooted<Item> array_root(roots, array);
     Rooted<Item> key_root(roots, ItemNull);
@@ -9267,6 +9297,8 @@ extern "C" Item js_string_get_int(Item str_item, int64_t index) {
 
 extern "C" Item js_elements_get_int(Item array, int64_t index) {
     if (js_is_ordinary_numeric_array(array)) {
+        js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_NUMERIC_ARRAY,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
         if (index >= 0 && index < array.array_num->length &&
                 index < container_dense_capacity((Array*)array.array_num)) {
             return array_num_read_item(array.array_num, index);
@@ -9274,6 +9306,24 @@ extern "C" Item js_elements_get_int(Item array, int64_t index) {
         return js_get_key_default(array, (Item){.item = i2it(index)});
     }
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
+        js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_ARRAY,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        Array* tagged = array.array;
+        if (js_array_has_props(tagged)) {
+            js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_WITH_PROPS,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        } else if (container_js_elements_kind((Container*)tagged) ==
+                JS_ELEMENTS_PACKED_TAGGED) {
+            js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_PACKED_PLAIN,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        } else if (container_js_elements_kind((Container*)tagged) ==
+                JS_ELEMENTS_HOLEY_TAGGED) {
+            js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_HOLEY_PLAIN,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        } else {
+            js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_OTHER,
+                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        }
         // Live DOM collections share array storage but must refresh before any
         // indexed read; optimized MIR array access calls this fallback directly.
         if (index < 0 || index > 0xFFFFFFFELL) {
@@ -9286,6 +9336,8 @@ extern "C" Item js_elements_get_int(Item array, int64_t index) {
     }
     // fast path for typed arrays: avoid going through js_get_reference
     if (js_is_typed_array(array)) {
+        js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_TYPED_ARRAY,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
         if (index < (int64_t)INT32_MIN || index > (int64_t)INT32_MAX) {
             // Typed-array storage uses a signed native offset. Preserve the
             // canonical numeric-index/property distinction outside that ABI
@@ -9294,6 +9346,8 @@ extern "C" Item js_elements_get_int(Item array, int64_t index) {
         }
         return js_typed_array_get(array, (Item){.item = i2it(index)});
     }
+    js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_OTHER,
+        JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     if (get_type_id(array) == LMD_TYPE_STRING && index >= 0) {
         return js_string_get_int(array, index);
     }

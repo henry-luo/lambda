@@ -382,6 +382,8 @@ Item js_unary_plus(Item operand);
 Item js_unary_minus(Item operand);
 Item js_increment(Item operand);
 Item js_decrement(Item operand);
+Item js_increment_numeric(Item numeric);
+Item js_decrement_numeric(Item numeric);
 
 // Type conversion functions
 Item js_to_primitive(Item value, const char* hint);
