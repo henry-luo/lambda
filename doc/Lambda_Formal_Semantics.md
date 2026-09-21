@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 27.0.0 (2026-09-21)
+**Spec version:** 28.0.0 (2026-09-21)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -42,7 +42,7 @@ C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md));
 surface syntax
 ([`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md));
 OB1–OB22 ([`Lambda_Type_Object.md`](../vibe/Lambda_Type_Object.md)).
-PTH1v2, PTH2v3, PTH3, PTH4v2, PTH5–PTH15, PTH16v3, PTH17–PTH20, PTH21v2,
+PTH1v2, PTH2v4, PTH3, PTH4v2, PTH5–PTH15, PTH13.1–PTH13.2, PTH16v3, PTH17–PTH20, PTH21v2,
 PTH22–PTH27, PTH28v2, PTH29
 ([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
@@ -258,11 +258,18 @@ harnesses.
   the parent step, never a root: `\.~~.a` is parent-relative and `\.~~.~~.a`
   applies two parent steps. The retired `/a`, `..a`, bare-dot `.a.b`, and
   compound `_..` spellings do not exist. Quoted, wildcard, and dynamic steps
-  retain their ordinary dotted/indexed forms. [PTH1v2, PTH2v3, PTH3, PTH4v2,
+  retain their ordinary dotted/indexed forms. [PTH1v2, PTH2v4, PTH3, PTH4v2,
   PTH11, PTH17, S16.9.4]
-- **S2.4.2v4*** Every hierarchical reference is a typed root plus ordered
-  operations. Ordinary keys are `NameKey` or non-negative `IntKey`; a dynamic
-  subscript is evaluated and normalized through S8.2.1v4 before lookup.
+- **S2.4.2v5*** Every hierarchical reference is a typed root plus ordered
+  operations; a root alone is a complete path (`/`, `\`). Ordinary keys are
+  `NameKey` or non-negative `IntKey`, and an integer key may come first:
+  `\.1` and `/.1` are `IntKey(1)`. A subscript on a path is the dotted step
+  with a computed key and never forces the target: `p[k]` ≡ `p.k`, so
+  `(/)[1]`, `/[1]`, and `/.1` are one path, as are `\[1]` and `\.1`. Inside
+  a path literal every step is a key step: `\[1].name` is `\.1.name`, never
+  a property read. A dot is always followed by a step, so `\.` alone and
+  `.[` anywhere (`/.[1]`, `\.[1]`) are errors. A dynamic subscript is
+  evaluated and normalized through S8.2.1v4 before lookup.
   A key-domain mismatch is an invalid member access: its read yields `null`
   under S7.1.1v3 and its write raises through the hard `T^` channel under
   S7.1.3v2/S7.4.2. It never implies container conversion. Root, parent, and
@@ -273,7 +280,7 @@ harnesses.
   accumulate at the relative root, and clamp at an anchored root. Equality,
   hashing, printing, target resolution, and
   `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v4,
-  PTH7–PTH9, PTH12–PTH14, PTH25, PTH28v2]
+  PTH7–PTH9, PTH12–PTH14, PTH13.1–PTH13.2, PTH25, PTH28v2]
 - **S2.4.3v3*** Paths, names, symbols, and member expressions use this one
   reference scheme but retain distinct evaluation contracts. Paths are
   static root-selected plans and produce lazy target handles; names are
@@ -322,7 +329,7 @@ harnesses.
   `range` is an array. *The spread bit is the whole difference.* A list does
   **not** normalize its items: `(1, null, 2)` keeps three and `("a", "b")`
   two; normalization happens only where a list lands in content (S2.6).
-- **S2.5.2** **A for-expression produces a list**, so its results spread
+- **S2.5.2*** **A for-expression produces a list**, so its results spread
   where it lands: `[for (i in 1 to 2) (i, i)]` has four items.
 - **S2.5.3** **A block `{…}` produces a list** of its statements' results, in
   order — not merely its last expression: `{ 1; 2 }` is the list `(1, 2)`.
@@ -1245,7 +1252,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 - **S10.4.1*** Postfix `.~~` is the parent-navigation step at the ordinary
   member/index precedence tier; it chains left-to-right (`value.~~.~~.name`).
   A value domain or active traversal context supplies the parent relation;
-  absence of one yields `null` and chains by S7.1.1v3. Path values use S2.4.2v4.
+  absence of one yields `null` and chains by S7.1.1v3. Path values use S2.4.2v5.
   A field named `.parent` remains an ordinary member, not a syntactic alias.
   [PTH3, PTH5, PTH9]
 - **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
@@ -1827,12 +1834,14 @@ below by its section.
   end of the previous line to continue). This is what makes S16.1.1 hold:
   the parser never guesses, so a line break can never silently split or
   merge. [Design_Syntax §3.1, §3.3]
-- **S16.2.4v2*** One carve-out: `.` `ident` at line start is **member
-  continuation**, sanctioning full leading-dot fluent chains — widened from
-  `.ident(` calls once the relative path was respelled `\.a.b` (S16.9.4),
-  which vacated the ambiguity. `.` is sub-classified, not retired: `.digit`
-  stays dual-role, since `a.5` is member access with an integer field.
-  [Design_Syntax §3.4, §7.15]
+- **S16.2.4v3*** One carve-out: `.` followed by a step other than a digit
+  — a name, `'sym'`, `*`, `**`, `~~`, or `/` — at line start is **member or
+  path continuation**, sanctioning full leading-dot fluent chains and
+  broken paths (`\.a` ⏎ `.~~` is `\.a.~~`): once the relative path was
+  respelled `\.a.b` (S16.9.4), no statement can start with any of them, so
+  the joined line means the same (S16.1.1). `.` is sub-classified, not
+  retired: `.digit` stays dual-role, since `a.5` is member access with an
+  integer field. [Design_Syntax §3.4, §7.15]
 - **S16.2.5*** `return` followed by a line break and a start token returns
   that value: `return` ⏎ `42` is `return 42`. A bare return is `return`
   followed by a separator or the closing brace. The JS restricted-production
@@ -2061,17 +2070,21 @@ below by its section.
   `<div a:1, "text">` requires one; `<div a:1 "text">` and `<div, "text">`
   are errors. This retires the language's last optional delimiter, so
   S16.1.2v2 has no exception. [Design_Syntax §7.11]
-- **S16.9.4*** **The relative path is spelled `\.a.b`** (rooted `/.a.b`
-  unchanged): `\` already carries path flavour from its import-separator
-  role, and unlike `./a.b` it does not collide with S10.5.1's postfix root
-  step. Vacating `.name` is what widens S16.2.4v2. `import .mod` is
-  unaffected — its keyword introducer leaves no ambiguity to escape.
+- **S16.9.4** **The relative path is spelled `\.a.b`** (rooted `/.a.b`
+  unchanged): `\` is the relative root as `/` is the logical one, and unlike
+  `./a.b` the spelling does not collide with S10.5.1's postfix root step.
+  Vacating `.name` is what widens S16.2.4v3. `import .mod` is unaffected —
+  its keyword introducer leaves no ambiguity to escape.
   [Design_Syntax §7.15]
 - **S16.9.5** **`a?: T` marks an optional field** — the whole field may be
   absent — which is distinct from `a: T?`, where the field is present and
   its value nullable. The marker applies in every type-field position:
   object-type fields, pattern position, and map-type items.*
   [Design_Syntax §7.22]
+- **S16.9.6** **`.` is the only import separator**: `import .a.b` and
+  `import a.b`. Neither `\` nor `/` separates import names (`import .a\b`,
+  `import .a/b` and `import \a` are errors), so a module path reads the same
+  as a dotted name. [Design_Syntax §7.15]
 
 ### S16.10 Keywords as names
 
@@ -2125,7 +2138,7 @@ below by its section.
   to its call sites. [Design_Syntax §7.24]
 - **S16.10.3*** **Member steps admit keywords.** After `.`, a keyword is an
   ordinary member name: `m.type`, `x.if`, `v.int` read data members —
-  including in line-start member continuation (S16.2.4v2). Subscripts are
+  including in line-start member continuation (S16.2.4v3). Subscripts are
   expression space, not name space: `a["type"]` is a string key and `last`
   keeps its S7.2.2 subscript meaning. [Design_Syntax §7.24]
 
@@ -2186,7 +2199,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S2.4.1v2, S2.4.2v4, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v4 key normalization remain deferred. |
+| S2.4.1v2, S2.4.2v5, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. **S2.4.2v5 conformant as of 2026-09-21** (JIT and interpreter identical): the bare roots `/` and `\`, and `\` prints as the empty relative path; integer first keys `\.1` and `/.1`; index steps (`/[1]` ≡ `/.1`, `\[1]` ≡ `\.1`, `p[k]` ≡ `p.k`, numeric keys normalized through S8.2.1v4); key steps throughout a path literal (`\[1].name` is `\.1.name`, `\.a['name']` is `\.a.name`); integer steps after `.`, `\`, `./`, `~~` and `.*` (`\.1.2`, `file./.1`). `\.` alone and `.[` anywhere are E100. Broken path lines were checked against S16.1.1. That day's probe defect, `\.1.x` evaluating to `file./`, is fixed ([Type_Path §10.1](../vibe/Lambda_Type_Path.md)). Fixtures: `path_roots_steps.ls`, `path_line_continuation.ls`, `path_index_capture.ls`, `member_int_steps.ls`, `proc/return_relative_path.ls`, and four negative syntax fixtures. S16 harnesses: C parser 197/197, reference grammar 180/180. Lambda baseline 3632/3633; the one failure is an unrelated JS trace-parser test. Still deferred: the default resolver qualifies logical roots to local `file./`, and generalized immutable mount tables, remote transport, network hostname discovery, and S8.2.1v4 key normalization outside path subscripts are not built. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
@@ -2232,19 +2245,19 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
-| S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24** (C 123/123, Tree-sitter 118/118). The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Residue: O3 (sibling Tree-sitter scanners), §7.17 (comment vs line-start guard, benign), and the O4 doc sweep — all in [Design_Syntax §4.5/§6](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
+| S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24** (C 123/123, Tree-sitter 118/118). S16.2.4v3 was verified on 2026-09-21 in both front ends, with S16.1.1 checked by joining each broken path line: C 197/197, Tree-sitter 180/180. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Residue: O3 (sibling Tree-sitter scanners), §7.17 (comment vs line-start guard, benign), and the O4 doc sweep — all in [Design_Syntax §4.5/§6](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S16.4.1v4 | **v2 core conformant as of 2026-08-22; the v3 computed-key head (one balanced `[…]` group before the colon) is not implemented — tracked with S16.8.9.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
 | S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. |
 | S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
-| S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
+| S16.8.4, S16.8.8, S16.9.2 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.9.4 was probed on 2026-09-21 on both tiers and in both front ends, and ships unmarked. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S12.3.7 | **Conformant as of 2026-08-27.** Module-local bindings win over same-named system functions, including non-callable shadows, and the compiler emits the required warning; explicit `lambda.sys.*` qualification remains the escape from that shadow under S17.2.2. Regression and implementation record: [LR02-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr02-15>). |
 | S16.8.9 | **Ruled 2026-09-05, not implemented.** Grammar `_key` (covers `map_item` and `attr_name`), the C parser's `parse_map`/`parse_element` and the two lookahead predicates (`braced_expression_is_map`, `element_attribute_starts`) that must skip one balanced `[…]` group, and a computed variant of the key-expression AST node lowered on both tiers through the keyed-spread path. Design record: [Design_Syntax §7.26](../vibe/Lambda_Design_Syntax.md). |
 | S17.2.1, S17.2.2 | **Conformant as of 2026-09-08.** `lambda.sys.*` resolves to the existing system-function registry, including the S12.3.7 shadow escape; `lambda.math`/`lambda.io` share the built-in module rows with their bare aliases; the shipped package tree uses the canonical `lambda.*` paths with math typesetting under `lambda.doc.math`; and `lambda` is rejected as a binding name by the direct lexer reservation check. Regression: `test/lambda/lambda_namespace.ls` plus `test/lambda/negative/semantic/lambda_namespace_root.ls`; focused probes passed on qualified built-ins and the document package. |
 | S16.10 | **Ruled 2026-08-27, largely not implemented.** Current divergences: element tags reject keywords (`<if a:1>` errors, legal under S16.10.2); `import edit:` parses and every use fails; `import 'edit':` parses and creates an unreachable binding (use is silently null); `let if = 1` parses and uses fail; `let type = 1` parses and `type` silently reads the base type — the silent misread is the priority defect. E201 exists for `last` and the reserved namespace root `lambda`; it must extend to the remaining table in the C parser and the reference grammar. Migration: ~55 keyword-named corpus bindings (breakdown in [Design_Syntax §7.24](../vibe/Lambda_Design_Syntax.md)). Tracked as [LR02-14](../vibe/Lambda_Issue_Ledger.md). |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). The prior `INT64_ERROR` collision is resolved in [LR03-R4](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-r4>). Residue: ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
-| S2.5.1, S2.5.5 | **Ruled 2026-09-21; probed the same day (JIT and interpreter identical).** S2.5.2–S2.5.4 conform: lists — `(…)`, for-expressions, functional blocks — spread into lists, array literals, and content (`[(1, 2), 3]` has three items); arrays and ranges stay one item; `let`/`type`/`fn` declarations contribute no item; a `pn` body without `return` yields its last expression. One-item and empty lists already collapse (`{ let k = 1; 7 }` is `7`, `{ let z = 3 }` is `null`). Gaps: (1) **a list normalizes its items today** — `("a", "b")` is the string `"ab"` and `(1, null, 2)` has two items, where S2.5.1 keeps two strings and three items; (2) the empty-list literal `()` is a parse error ("expected an expression inside parentheses"), where S2.5.5 makes it `null`. |
+| S2.5.1, S2.5.2, S2.5.5 | **Ruled 2026-09-21; probed the same day (JIT and interpreter identical); corrected the same day** after a fuller survey (`temp/spec_survey/listarray/`). Conformant: `(…)` literals and functional blocks spread into lists, array literals, and content; arrays stay one item; `let`/`type`/`fn` declarations contribute no item; blocks collapse (`{ let k = 1; 7 }` is `7`, `{ let z = 3 }` is `null`); a `pn` body without `return` yields its last expression. Gaps: (1) **a for-expression result is not a spreading list once bound** — `let r = for (x in [1,2]) x; [r, 9]` is `[[1,2],9]` — because the runtime has two list flags (`is_content`, `is_spreadable`) and an array literal spreads a for-style list only when a sibling is written as a `for` or `*` (a syntactic decision); (2) for-expressions do not collapse: an empty one is not `null` and a one-item one is `[v]`, not `v`; (3) a list normalizes its items today (`("a", "b")` is `"ab"`, `(1, null, 2)` has two items); (4) the empty-list literal `()` is a parse error. |
 | S2.2.3, S2.6.1, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; probed the same day on the JIT and interpreter tiers (identical).** S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Gaps: (1) a lone `""` is kept as a child — `<e "">` has one item and prints `<e "">` (it vanishes only when merged into an adjacent string); (2) adjacent binaries are not merged (`<e b'\x01' b'\x02'>` has two items); (3) **content writes do not normalize** — `e[1] = "m"` on `<e "x" 1 "y">` leaves three items, `e[1] = null` stores a null child, `e[0] = ""` stores an empty string, `e[0] = (3, 4)` stores the list as one item, and `push` rejects an element outright; (4) LaTeX input keeps consecutive strings unmerged (MarkBuilder's verbatim append, D2.6.5v2) — a transitional workaround until the LaTeX parser carries such runs in non-merging items. D2.6.5v2's footnote that string merging needs an input context looks stale — `<e "a" "b">` merges at run time on both tiers. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
 
 ## Appendix B — Open Design Issues

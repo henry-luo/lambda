@@ -89,11 +89,26 @@ static bool lexer_is_ident_continue(const LambdaLexer* lexer) {
         lexer_unicode_escape_length(lexer) != 0;
 }
 
+// `.digit` continues a member/path chain when the byte before the dot ends a
+// step. Besides names, quotes, `]` and `)`, that is the relative root `\`
+// (`\.1`), `~` (`~.1`, `\.~~.1`), a postfix root `./` (`file./.1`) and a
+// wildcard `.*`/`.**`. Missing those made `\.~~.1` lex as the path `\.~~` plus
+// a juxtaposed float 0.1 (S2.4.2v5). A slash or star NOT after a dot stays an
+// operator: `x /.5`, `x *.5`; a leading root `/.1` is rescanned by the parser.
 static bool lexer_dot_continues_member_target(const LambdaLexer* lexer, size_t start) {
     if (!start) return false;
-    char previous = lexer->source[start - 1];
-    return lexer_is_ident_continue_byte(previous) || previous == '\'' ||
-        previous == ']' || previous == ')';
+    const char* source = lexer->source;
+    char previous = source[start - 1];
+    if (lexer_is_ident_continue_byte(previous) || previous == '\'' ||
+            previous == ']' || previous == ')' || previous == '~' ||
+            previous == '\\') return true;
+    if (previous == '/') return start >= 2 && source[start - 2] == '.';
+    if (previous == '*') {
+        size_t star = start - 1;
+        if (star >= 1 && source[star - 1] == '*') star--;
+        return star >= 1 && source[star - 1] == '.';
+    }
+    return false;
 }
 
 static void lexer_advance_ident_unit(LambdaLexer* lexer) {
@@ -113,6 +128,9 @@ static LambdaToken lexer_make_token(LambdaTokenKind kind, size_t start,
     token.span.end_byte = end > UINT32_MAX ? UINT32_MAX : (uint32_t)end;
     token.line = line;
     token.column = column;
+    // only the parser's token pump sets this; raw lexer callers (the top-level
+    // function predeclaration scan) read it too and must not see garbage
+    token.nl_before = false;
     return token;
 }
 
@@ -337,6 +355,17 @@ static bool lexer_scan_binary(LambdaLexer* lexer, bool datetime) {
     return true;
 }
 
+// S2.4.1v2: `\` is the relative root, as `/` is the logical one, and its steps
+// follow as `.a` or `[k]` (`\.a`, `\[1]`). It stands alone only before a step,
+// a separator, a closer, or the end: `\a` or `\1` (a missing dot) stays a lexer
+// error rather than splitting into `\` plus a second statement.
+static bool lexer_backslash_is_relative_root(const LambdaLexer* lexer) {
+    char next = lexer_peek(lexer, 1);
+    return next == '.' || next == '[' || next == '\0' || lexer_is_horizontal_space(next) ||
+        next == '\r' || next == '\n' || next == ';' || next == ',' || next == ')' ||
+        next == ']' || next == '}' || next == '>';
+}
+
 static bool lexer_scan_island(LambdaLexer* lexer) {
     if (lexer_peek(lexer, 0) != '\\') return false;
     lexer_advance_byte(lexer);
@@ -395,7 +424,9 @@ static bool lexer_scan_exponent(LambdaLexer* lexer) {
     return true;
 }
 
-static LambdaTokenKind lexer_scan_number(LambdaLexer* lexer) {
+// `integer_step`: the number follows a step introducer, so its `.digit` tail is
+// the next step (`a.1.2`), not a fraction.
+static LambdaTokenKind lexer_scan_number(LambdaLexer* lexer, bool integer_step) {
     bool floating = false;
     bool hexadecimal = false;
     if (lexer_peek(lexer, 0) == '.') {
@@ -411,7 +442,8 @@ static LambdaTokenKind lexer_scan_number(LambdaLexer* lexer) {
         lexer_scan_digits(lexer, true);
     } else {
         lexer_scan_digits(lexer, false);
-        if (lexer_peek(lexer, 0) == '.' && lexer_is_digit(lexer_peek(lexer, 1))) {
+        if (!integer_step && lexer_peek(lexer, 0) == '.' &&
+                lexer_is_digit(lexer_peek(lexer, 1))) {
             floating = true;
             lexer_advance_byte(lexer);
             lexer_scan_digits(lexer, false);
@@ -461,13 +493,29 @@ void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length) {
     lexer->offset = 0;
     lexer->line = 1;
     lexer->column = 0;
+    lexer->after_step_dot = false;
+}
+
+LambdaToken lambda_lexer_rescan_dot_step(LambdaLexer* lexer, LambdaToken number) {
+    // the dot is one byte on the number's own line, so only the column moves
+    lexer->offset = (size_t)number.span.start_byte + 1;
+    lexer->line = number.line;
+    lexer->column = number.column + 1;
+    lexer->after_step_dot = true;
+    LambdaToken dot = lexer_make_token(LAMBDA_TOK_DOT, number.span.start_byte,
+        number.line, number.column, lexer->offset);
+    dot.nl_before = number.nl_before;
+    return dot;
 }
 
 LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     if (!lexer || !lexer->source || lexer->length > UINT32_MAX) {
-        LambdaLexer fallback = {"", 0, 0, 1, 0};
+        LambdaLexer fallback = {"", 0, 0, 1, 0, false};
         return lexer_error_token(lexer ? lexer : &fallback, 0, 1, 0);
     }
+    // a step introducer governs only the very next token
+    bool integer_step = lexer->after_step_dot;
+    lexer->after_step_dot = false;
 
     size_t start = lexer->offset;
     uint32_t line = lexer->line;
@@ -482,6 +530,9 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
     }
     if (lexer_is_newline(lexer)) {
         lexer_advance_newline(lexer);
+        // a trailing `.` continues across the break (S16.2.1), so the number
+        // on the next line is still its step: `\.` ⏎ `1.2` is `\.1.2`
+        lexer->after_step_dot = integer_step;
         return lexer_make_token(LAMBDA_TOK_NEWLINE, start, line, column, lexer->offset);
     }
 
@@ -496,11 +547,10 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
         return valid ? lexer_make_token(ch == 'b' ? LAMBDA_TOK_BINARY : LAMBDA_TOK_DATETIME,
             start, line, column, lexer->offset) : lexer_error_token(lexer, start, line, column);
     }
-    // A Unicode escape is an identifier unit; only the remaining backslash
-    // forms begin a pattern island.
+    // A Unicode escape is an identifier unit; a relative root stands alone;
+    // only the remaining backslash forms begin a pattern island.
     if (ch == '\\' && lexer_unicode_escape_length(lexer) == 0) {
-        if (lexer_peek(lexer, 1) == '.') {  // §7.15 relative-path introducer
-            lexer_advance_byte(lexer);
+        if (lexer_backslash_is_relative_root(lexer)) {
             lexer_advance_byte(lexer);
             return lexer_make_token(LAMBDA_TOK_PATH_REL, start, line, column, lexer->offset);
         }
@@ -510,10 +560,11 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
         return lexer_error_token(lexer, start, line, column);
     }
     // `.1` is a float only at an expression boundary; after an adjacent
-    // member target it is the path segment in `record.1` / `.a.1`.
+    // member target it is the path segment in `record.1` / `\.a.1`.
     if (lexer_is_digit(ch) || (ch == '.' && lexer_is_digit(lexer_peek(lexer, 1)) &&
             !lexer_dot_continues_member_target(lexer, start))) {
-        LambdaTokenKind kind = lexer_scan_number(lexer);
+        LambdaTokenKind kind = lexer_scan_number(lexer,
+            integer_step && lexer_is_digit(ch));
         if (lexer_number_runs_into_identifier(lexer)) {
             return lexer_error_token(lexer, start, line, column);
         }
@@ -565,6 +616,7 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             return lexer_make_token(LAMBDA_TOK_ELLIPSIS, start, line, column, lexer->offset);
         }
         lexer_advance_byte(lexer);
+        lexer->after_step_dot = true;
         return lexer_make_token(LAMBDA_TOK_DOT, start, line, column, lexer->offset);
     }
     if (ch == '~') {
@@ -682,7 +734,7 @@ const char* lambda_token_kind_name(LambdaTokenKind kind) {
     switch (kind) {
     case LAMBDA_TOK_EOF: return "eof";
     case LAMBDA_TOK_ERROR: return "error";
-    case LAMBDA_TOK_PATH_REL: return "\\.";
+    case LAMBDA_TOK_PATH_REL: return "\\";
     case LAMBDA_TOK_NEWLINE: return "newline";
     case LAMBDA_TOK_IDENTIFIER: return "identifier";
     case LAMBDA_TOK_BASE_TYPE: return "base_type";

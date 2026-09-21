@@ -210,12 +210,14 @@ TEST(LambdaRdParserPoc, KeepsTypeAndStaticPathAsCommittedSourceSlots) {
     LambdaParseSink sink = {record_parser_seam};
     EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
         &metrics, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
-    // The Phase 1 parser records seams, while Phase 2 will hand these exact
-    // spans to the existing Lambda type/path AST parsers.
+    // Type slots hand their exact span to the Lambda type-pattern parser. A
+    // path slot is only its root token, `\\`; `.records`, `.~~` and `.id`
+    // follow as ordinary member reductions.
     EXPECT_EQ(recorder.type_count, 2);
     EXPECT_EQ(recorder.path_count, 1);
     EXPECT_EQ(strncmp(source + recorder.type_span.start_byte, "int", 3), 0);
-    EXPECT_EQ(strncmp(source + recorder.path_span.start_byte, "\\.records.~~.id", 15), 0);
+    EXPECT_EQ(recorder.path_span.end_byte - recorder.path_span.start_byte, 1u);
+    EXPECT_EQ(source[recorder.path_span.start_byte], '\\');
 }
 
 TEST(LambdaRdParserPoc, PublishesCommittedTokenFormsAndCompletePrattSpans) {

@@ -32783,27 +32783,31 @@ static MirValue transpile_path_value(MirTranspiler* mt, AstNode* node) {
         break;
     }
     case AST_NODE_PATH_INDEX_EXPR: {
+        // S2.4.2v5: a computed `[k]` step of a path literal, then the static
+        // steps after it, through the runtime helpers the interpreter calls
+        // too. The key kind is decided at run time -- an `any` holding 1 is
+        // IntKey 1 -- and a key naming nothing yields null, which the later
+        // steps keep, so the result is an Item.
         AstPathIndexNode* index = (AstPathIndexNode*)node;
-        MIR_reg_t pool = emit_runtime_pool(mt);
         MirValue base = em_require_rep(&mt->em,
-            transpile_expr_value(mt, index->base_path), VALUE_REP_RAW_GC_POINTER);
-        MirValue segment = transpile_expr_value(mt, index->segment_expr);
-        if (mir_value_carrier_type(segment) == LMD_TYPE_INT) {
-            MirValue int_segment = em_require_rep(&mt->em, segment, VALUE_REP_INT_LANE);
-            reg = emit_call_3(mt, "path_extend_int", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, base.reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, int_segment.reg));
-        } else {
-            MirValue boxed_segment = em_require_rep(&mt->em, segment, VALUE_REP_ITEM);
-            MIR_reg_t segment_cstr = emit_call_1(mt, "fn_to_cstr", MIR_T_P,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_segment.reg));
-            reg = emit_call_3(mt, "path_extend", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, pool),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, base.reg),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, segment_cstr));
+            transpile_expr_value(mt, index->base_path), VALUE_REP_ITEM);
+        MirValue key = em_require_rep(&mt->em,
+            transpile_expr_value(mt, index->segment_expr), VALUE_REP_ITEM);
+        reg = emit_call_2(mt, "fn_path_key", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, base.reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key.reg));
+        for (int i = 0; i < index->segment_count; i++) {
+            AstPathSegment* step = &index->segments[i];
+            MIR_op_t name = step->name
+                ? MIR_new_reg_op(mt->ctx, emit_load_string_literal(mt, step->name->chars))
+                : MIR_new_int_op(mt->ctx, 0);
+            reg = emit_call_4(mt, "fn_path_step", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)step->type),
+                MIR_T_P, name,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, step->int_value));
         }
-        result_rep = VALUE_REP_RAW_GC_POINTER;
+        result_rep = VALUE_REP_ITEM;
         break;
     }
     case AST_NODE_NAVIGATION_EXPR: {

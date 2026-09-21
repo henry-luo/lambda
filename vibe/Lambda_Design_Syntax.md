@@ -29,12 +29,12 @@ expression continuation in Lambda surface syntax.
 **Spec linkage**: This document is the decision record; **`S16` is the
 authority.** Cite `S16.#` in discussion and downstream docs, not this
 document's section numbers. Map: §3.1 → S16.1.1, §3.2 → S16.1.2–S16.1.3v2 +
-S16.2.1, §3.3 → S16.2.2v2–S16.2.3v2 + S16.2.5, §3.4 → S16.2.4v2, §3.6 →
+S16.2.1, §3.3 → S16.2.2v2–S16.2.3v2 + S16.2.5, §3.4/§7.15 → S16.2.4v3, §3.6 →
 S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 §5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
-S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7 (v2: now points to S2.6),
+S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7 (v2: now points to S2.6),
 §7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
@@ -2127,7 +2127,7 @@ human even where the parser knows better.
 | `*.a.b` | rejected | breaks the §7.10 wildcard doctrine — `*` is the unit wildcard, so `*.a.b` reads as a glob ("any one first segment, then a.b"), not "relative from here" |
 | `..a.b` | rejected | lexically free, but `..` means PARENT everywhere in the world, while Lambda's parent step is `~~` — a permanent teaching tax |
 | `./a.b` | rejected (was front-runner) | the universal relative spelling, but it collides with S10.5.1's postfix root step `value./.name`: `./` would then appear in BOTH line-start and postfix position, one dot apart |
-| **`\.a.b`** | **ADOPTED** | lexically free (today `\` appears only in the `\(` / `\symbol(` pattern-island tags and as the alternative import-path separator); `\` already carries a path flavour from that import role; and it leaves `./` untouched, so the postfix-root-step collision never arises |
+| **`\.a.b`** | **ADOPTED** | lexically free (today `\` appears only in the `\(` / `\symbol(` pattern-island tags); and it leaves `./` untouched, so the postfix-root-step collision never arises |
 
 The decisive point over `./a.b` is the last one: choosing `./` for the
 relative introducer would have created the very ambiguity this ruling
@@ -2150,32 +2150,55 @@ sub-classifies `.` by its next character, so this costs no new machinery.
 (A follow-on could retire integer member fields in favour of `[n]`
 indexing, which would let `.` leave the set completely — not ruled here.)
 
-**The mental model: `\` escapes the dot out of member access.** Reading
-`\.` as an escaped dot is not a hazard to be tolerated — it is exactly the
-right intuition, and the reason the spelling works. A bare `.` means member
-access; prefixing the escape character says *this dot is not member
-access, it introduces a path*. (`\.` also shares its first character with
-the pattern-island tags `\(` / `\symbol(`, which diverge at the second
-character, so no lexical conflict arises.)
+**The mental model: `\` is the relative root, as `/` is the logical one**
+(USER, 2026-09-21; the earlier "escaped dot" model is in Appendix S.4).
+Both roots are complete paths on their own, and every step after either is
+an ordinary step: `.part` or `[key]`. So `\.a.b` is `\` then `.a` then
+`.b`, and `\[1]` is `\` then `[1]` — the path `\.1`, just as `/[1]` is
+`/.1`. A dot always needs a step: `\.` alone is an error like `/.`, and
+`.[` is an error anywhere (`\.[1]`, `/.[1]`, `a.[1]`). A trailing dot is
+an incomplete expression, so `\.` ⏎ `b` is `\.b` (S16.2.1), exactly what
+`\. b` means (S16.1.1). (`\` shares its first character with the
+pattern-island tags `\(` / `\symbol(`; a lone `\` is the root only before
+`.`, `[`, a separator, a closer, or the end, so `\a` stays an error rather
+than splitting into `\` plus a statement `a`.)
 
 **Imports keep `.mod` (decided).** The escape is needed only where the
 ambiguity is: EXPRESSION position, where `.` collides with member access.
 An import has a keyword introducer, so `import .mod` can only be a module
-path — nothing to disambiguate and nothing to escape. `import .mod` and
-`import \mod` both stand as they are; the new introducer does not
-propagate there. This keeps `\.` meaning precisely one thing — "path,
-not member" — rather than becoming a general relative-path decoration.
+path — nothing to disambiguate and nothing to escape. `import .mod` stands
+as it is; the relative root does not propagate there. **`.` is the only
+import separator (S16.9.6, USER 2026-09-21):** `import .a\b`, `import \a`
+and `import .a/b` are errors.
+
+*(Corrected 2026-09-21: this section first justified `\` by "the alternative
+import-path separator" and kept `import \mod`. No ruling or user document
+ever specified a `\` separator. It existed only in the reference grammar's
+import rule, from the first import commit (2025-06-03), untested, and the C
+parser never accepted it. The C parser in turn accepted an equally
+undocumented `/` separator, which resolved only because the module resolver
+passes `/` through. Both separators are retired.)*
 
 **Spec impact.** `S2.4.1` takes a **v3** at batch ratification (the
 relative form respelled), and S16.2.4 takes a v2 (the carve-out widened
 from `.ident(` to any `.ident`).
 
-**Implementation status: DONE in both front ends.** Tree-sitter spells the
-relative form `\\.` in `path_expr`; the C lexer emits a dedicated
-`LAMBDA_TOK_PATH_REL` for it. Both widen the member-dot carve-out to any
-`.ident` across a line break while keeping `.digit` dual-role — on the C
-side that needed an extra test, since the lexer folds `.5` into a single
-FLOAT token, so the token KIND alone cannot see the leading dot.
+**Implementation status: DONE in both front ends.** Tree-sitter's
+`path_expr` is the bare root `'/'` or `'\\'`; the C lexer emits
+`LAMBDA_TOK_PATH_REL` for the lone `\`. Steps are ordinary member/index
+postfixes in both. Both widen the member-dot carve-out across a line break
+while keeping `.digit` dual-role — on the C side that needed an extra test,
+since the lexer folds `.5` into a single FLOAT token, so the token KIND
+alone cannot see the leading dot.
+
+**Revision 2026-09-21 (USER): S16.2.4 takes a v3.** Checked against
+S16.1.1 — a line break must mean what a space there means — a line-start
+`.~~`, `./`, `.*`, `.**` or `.'sym'` continues the expression above just as
+`.ident` does: no statement can start with any of them, so continuing is
+the only reading and the joined line means the same. `\.a` ⏎ `.~~` is
+`\.a.~~`. Only `.digit` keeps a start reading (`.5` is a float) and stays
+dual-role. The earlier rule admitted only names, so a path broken before a
+`.~~` step was a syntax error that its joined line was not.
 
 A further ambiguity dissolved as a side effect: `<svg .rect>` versus
 `<svg, .rect>` (qualified tag versus tag-plus-path-child, S2.4.3v2's
@@ -2916,9 +2939,15 @@ raised:
 15. **A `pn` body follows the procedural convention** (S2.5.3, S12.1.2):
     without `return` it yields its last expression, not a list.
 
-Probed the same day, the runtime conforms to 9–12, 14 (except the literal),
-and 15. Two gaps: a list normalizes its items today (`("a", "b")` is the
-string `"ab"`), against 13; and `()` is a parse error, against 14.
+Probed the same day, `(…)` literals and blocks conform to 9, 11, 12, 14
+(except the literal), and 15. A fuller survey the same day corrected the
+earlier "conforms to 9–12": **for-expression results do not behave as lists**
+— bound with `let`, `[r, 9]` gives `[[1,2],9]`; an empty one is not `null`;
+a one-item one is `[v]` — against 9, 10, and 14. Root cause: two list flags
+(`is_content` for `(…)`/blocks, `is_spreadable` for `for`) and an array
+literal that decides spreading syntactically. Other gaps: a list normalizes
+its items today (`("a", "b")` is the string `"ab"`), against 13; and `()` is a
+parse error, against 14.
 
 **Why S2, not S16.** Normalization decides which value is built, not which
 program a text denotes; and it applies where there is no source text at all
@@ -3008,6 +3037,22 @@ declarations contribute no item — §7.27 points 11–12, ratified as **S2.5.3,
 S2.5.4** with S16.1.2v2 and S16.4.1v4 (spec v27.0.0, 2026-09-21).
 
 ---
+
+### S.4 `\.` as an escaped-dot introducer (§7.15) — SUPERSEDED 2026-09-21 by the `\` root
+
+~~**The mental model: `\` escapes the dot out of member access.** Reading
+`\.` as an escaped dot is not a hazard to be tolerated — it is exactly the
+right intuition, and the reason the spelling works. A bare `.` means member
+access; prefixing the escape character says *this dot is not member
+access, it introduces a path*. (`\.` also shares its first character with
+the pattern-island tags `\(` / `\symbol(`, which diverge at the second
+character, so no lexical conflict arises.)~~
+
+Replaced because a two-character `\.` introducer made `\.[1]` read as
+"introducer, then index" although `.[` is an error everywhere else, made
+`\.` a complete path while `/.` is not, and gave `\.` ⏎ `b` a different
+meaning from `\. b` (S16.1.1). With `\` as the root, both roots share one
+step grammar.
 
 ## Appendix K — Keyword reference: which words may name a binding
 

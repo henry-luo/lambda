@@ -188,6 +188,10 @@ module.exports = grammar({
     // S16.6.6: zero-width, withheld when an unbraced expression body starts
     // with `return`/`break`/`continue`.
     $._expr_body_start,
+    // S2.4.1v2: zero-width, emitted after a bare path root `/` or `\` only when
+    // a step or the end of the path follows, so `/b` (the retired `/a`
+    // spelling) is an error rather than `/` plus a juxtaposed statement `b`.
+    $._root_boundary,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -714,22 +718,21 @@ module.exports = grammar({
       )),
     ),
 
-    // S2.4.1v2: rooted `/.a` and relative `.a`. A path expression may only
+    // S2.4.1v2: rooted `/.a` and relative `\.a`. A path expression may only
     // begin a statement — never continue one — which is why a line-start `.`
     // is an S16.2.3 error unless it is the `.ident(` member-call form.
-    // §7.15: the RELATIVE path is introduced by `\.` — `\` reads as the escape
-    // character, saying "this dot is not member access, it introduces a path".
-    // The rooted form `/.a` is unchanged. Retiring the bare-`.` relative path is
-    // what lets `.ident` at a line start mean member access and nothing else,
-    // which in turn widens the S16.2.4 carve-out to full leading-dot chains.
-    // (`./` was the front-runner but collides with S10.5.1's postfix root step
-    // `value./.name`; `\.` leaves that spelling untouched.)
-    path_expr: $ => prec.right(choice(
-      seq('/', '.', field('field', choice($.identifier, $.symbol,
-        $.integer, $.path_wildcard, $.base_type, $.path_parent))),
-      seq('\\.', field('field', choice($.identifier, $.symbol,
-        $.integer, $.path_wildcard, $.base_type, $.path_parent, $.path_root))),
-    )),
+    // §7.15: the RELATIVE path is rooted at `\`, as the logical one is at `/`.
+    // Retiring the bare-`.` relative path is what lets `.ident` at a line start
+    // mean member access and nothing else, which in turn widens the S16.2.4
+    // carve-out to full leading-dot chains. (`./` was the front-runner but
+    // collides with S10.5.1's postfix root step `value./.name`; `\` leaves that
+    // spelling untouched.)
+    // S2.4.1v2 + S2.4.2v5: the roots `/` and `\` are complete paths, and every
+    // step is an ordinary member/index step on the path -- `\.a` is `\` then
+    // `.a`, `/[1]` and `\[1]` are the paths `/.1` and `\.1`, and `.[` is an
+    // error anywhere. `_root_boundary` rejects anything else touching the
+    // root (`/b`). This mirrors the C parser's `parse_path_slot`.
+    path_expr: $ => seq(choice('/', '\\'), $._root_boundary),
 
     current_parent_expr: _ => token(prec(4, '~~')),
     path_wildcard: _ => token(choice('**', '*')),
@@ -1307,10 +1310,9 @@ module.exports = grammar({
 
     // ============================== Imports ===============================
 
-    relative_name: $ => repeat1(seq(choice('.', '\\'), $.identifier)),
-    absolute_name: $ => seq(
-      $.identifier, repeat(seq(choice('.', '\\'), $.identifier)),
-    ),
+    // S16.9.6: `.` is the only import separator (`import .a.b`).
+    relative_name: $ => repeat1(seq('.', $.identifier)),
+    absolute_name: $ => seq($.identifier, repeat(seq('.', $.identifier))),
     import_module: $ => choice(
       field('module', choice($.absolute_name, $.relative_name, $.symbol)),
       seq(field('alias', $.identifier), ':',
