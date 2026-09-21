@@ -6032,6 +6032,80 @@ public:
     InterpStateGuard& operator=(const InterpStateGuard&) = delete;
 };
 
+Item interp_call_module_export(Runtime* runtime, Script* module,
+        const char* export_name, const Item* args, int argc) {
+    if (!runtime || !module || !module->ast_root || !export_name || argc < 0 ||
+            argc > LAMBDA_MAX_FUNCTION_ARGS) {
+        log_error("document-transform: invalid module export invocation");
+        return ItemError;
+    }
+    EvalContext* eval_context = runtime_get_eval_context(runtime);
+    if (!eval_context) {
+        log_error("document-transform: module '%s' has no evaluation context",
+            module->reference ? module->reference : "<unknown>");
+        return ItemError;
+    }
+    AstScript* root = (AstScript*)module->ast_root;
+    NameEntry* export_entry = NULL;
+    AstNode* node = root->child;
+    while (node) {
+        if (node->node_type == AST_NODE_CONTENT) {
+            node = ((AstListNode*)node)->item;
+            continue;
+        }
+        if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+                node->node_type == AST_NODE_PROC) {
+            AstFuncNode* function = (AstFuncNode*)node;
+            TypeFunc* signature = (TypeFunc*)function->type;
+            if (signature && signature->is_public && function->name &&
+                    strcmp(function->name->chars, export_name) == 0) {
+                // Cached AST clones rebind this scope, not AstFuncNode::entry.
+                for (NameEntry* entry = root->global_vars
+                        ? root->global_vars->first : NULL;
+                        entry; entry = entry->next) {
+                    if (entry->name && strcmp(entry->name->chars, export_name) == 0) {
+                        export_entry = entry;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        node = node->next;
+    }
+    if (!export_entry || !export_entry->storage_assigned ||
+            export_entry->binding_storage != BINDING_STORAGE_MODULE ||
+            export_entry->slot < 0) {
+        log_error("document-transform: module '%s' has no public function '%s'",
+            module->reference ? module->reference : "<unknown>", export_name);
+        return ItemError;
+    }
+    RuntimeExecutionScope execution_scope(eval_context);
+    RuntimeCurrentFileScope current_file(eval_context, module->reference);
+    RuntimeModuleStateScope module_state(eval_context);
+    if (!module_state.activate(module->module_state_id)) {
+        log_error("document-transform: could not activate module '%s'",
+            module->reference ? module->reference : "<unknown>");
+        return ItemError;
+    }
+    RootFrame roots(1);
+    Rooted<Item> callable(roots, lambda_active_module_var_at(
+        (uint32_t)export_entry->slot));
+    if (get_type_id(callable.get()) != LMD_TYPE_FUNC || !callable.get().function) {
+        log_error("document-transform: export '%s' is not callable", export_name);
+        return ItemError;
+    }
+    // Native document loading starts outside an interpreter activation. The
+    // guard supplies one so auto-tier functions retain their normal T0 path.
+    InterpStateGuard state_guard((Context*)eval_context);
+    if (!state_guard.get()) {
+        log_error("document-transform: could not enter interpreter state");
+        return ItemError;
+    }
+    List call_args = {.length = argc, .items = (Item*)args};
+    return fn_call(callable.get().function, argc ? &call_args : NULL);
+}
+
 // const accepts only literal scalar syntax. The same eval_expr walker still
 // performs the operation, but this narrow admission guarantees a fold cannot
 // read a binding, call user code, allocate a container, or publish an effect.

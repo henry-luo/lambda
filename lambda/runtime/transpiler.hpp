@@ -238,7 +238,18 @@ void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
 
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
-                      bool run_main = false);
+                      bool run_main = false, Script** out_script = nullptr);
+struct LambdaDocumentTransformConfig {
+    const char* input_type;
+    const char* package_module;
+    const char* function_name;
+};
+const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
+    const char* input_type);
+// Loads a file-backed package, parses the source through `input()`, and calls
+// its configured public transform without synthesizing a Lambda bridge script.
+Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
+                                     const LambdaDocumentTransformConfig* transform);
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,

@@ -327,6 +327,12 @@ Item interp_run_script(Runner* runner, bool run_main);
 // persistent module slab; earlier top-level nodes are not re-run.
 Item interp_run_repl_fragment(Runner* runner, AstNode* fragment);
 
+// Calls an initialized public module function from a native document loader.
+// The module's own slab and T0 dispatch state remain authoritative.
+Item interp_call_module_export(Runtime* runtime, Script* module,
+                               const char* export_name,
+                               const Item* args, int argc);
+
 bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime);
 void interp_repl_session_destroy(InterpReplSession* session);
 Item interp_repl_session_eval(InterpReplSession* session, const char* source);
