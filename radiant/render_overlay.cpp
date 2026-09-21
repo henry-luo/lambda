@@ -99,14 +99,19 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
     if (w <= 0 || h <= 0) return;
     float s = ctx->scale;
-    DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context ? ctx->rdcon->ui_context->document : nullptr;
-    ViewBlock* root = nullptr;
-    if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        root = lam::view_require_block(doc->view_tree->root);
-    }
-    RdtLogicalPoint point = view_geometry_apply_external_viewport(
-        {x, y}, root, {ctx->iframe_offset_x, ctx->iframe_offset_y},
-        scroll_state_resolve_view_geometry);
+    DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context
+        ? ctx->rdcon->ui_context->document : nullptr;
+    ViewBlock* root = doc && doc->view_tree && doc->view_tree->root &&
+        doc->view_tree->root->view_type == RDT_VIEW_BLOCK
+        ? lam::view_require_block(doc->view_tree->root) : nullptr;
+    float root_scroll_x = 0.0f;
+    float root_scroll_y = 0.0f;
+    scroll_state_resolve_view_geometry(root, &root_scroll_x, &root_scroll_y, nullptr);
+    // Range rects are viewport-relative, while the stored iframe offset was
+    // captured from document coordinates. Restore this root scroll once when
+    // joining those coordinate spaces.
+    RdtLogicalPoint point = {x + ctx->iframe_offset_x + root_scroll_x,
+                             y + ctx->iframe_offset_y + root_scroll_y};
     float px = point.x * s;
     float py = point.y * s;
     float pw = w * s;
