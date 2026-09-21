@@ -895,6 +895,28 @@ TEST_F(CssParserUnitTest, FontFace_NumericWeightPreservesDistinctFace) {
     css_font_face_descriptor_free(regular);
 }
 
+TEST_F(CssParserUnitTest, FontFace_LocalSourcesAreNotTreatedAsRemoteUrls) {
+    CssFontFaceDescriptor* local_only = css_parse_font_face_content(
+        "{ font-family: LocalOnly; src: local('System Sans'), local(Arial); }", nullptr);
+    CssFontFaceDescriptor* mixed = css_parse_font_face_content(
+        "{ font-family: Mixed; src: local('System Sans'), url(remote.woff2) format('woff2'); }",
+        nullptr);
+
+    ASSERT_NE(local_only, nullptr);
+    EXPECT_STREQ(local_only->src_local, "System Sans");
+    EXPECT_EQ(local_only->src_count, 0);
+    EXPECT_EQ(local_only->src_url, nullptr);
+
+    ASSERT_NE(mixed, nullptr);
+    EXPECT_STREQ(mixed->src_local, "System Sans");
+    ASSERT_EQ(mixed->src_count, 1);
+    EXPECT_STREQ(mixed->src_urls[0].url, "remote.woff2");
+    EXPECT_STREQ(mixed->src_url, "remote.woff2");
+
+    css_font_face_descriptor_free(local_only);
+    css_font_face_descriptor_free(mixed);
+}
+
 TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeList) {
     CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
         "{ font-family: Subset; src: url(subset.woff2); "

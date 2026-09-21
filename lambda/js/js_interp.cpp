@@ -25,8 +25,6 @@ extern __thread EvalContext* context;
 extern int js_dynamic_import_suppress_module_drain;
 extern Item js_make_number(double value);
 extern "C" Item bigint_from_string(const char* value, int length);
-void jm_resolve_module_path(const char* base_file, const char* specifier,
-    int spec_len, char* output, int output_size);
 bool js_activate_runtime_name_pool(void);
 
 enum JsInterpCompletionKind : uint8_t {
@@ -808,6 +806,16 @@ static JsScript* js_interp_script_for_reference(Runtime* runtime,
     return NULL;
 }
 
+static void js_interp_resolve_script_module_path(Runtime* runtime,
+        const char* script_reference, const char* specifier, int spec_len,
+        char* out, int out_size) {
+    if (!jm_resolve_document_module_path(runtime, script_reference,
+            specifier, spec_len, out, out_size)) {
+        jm_resolve_module_path(script_reference ? script_reference : ".",
+            specifier, spec_len, out, out_size);
+    }
+}
+
 static void js_interp_propagate_reexports(Runtime* runtime, const char* source_ref,
         String* source_name, Item value, int depth) {
     if (!runtime || !source_ref || !source_name || depth > 64) return;
@@ -823,7 +831,7 @@ static void js_interp_propagate_reexports(Runtime* runtime, const char* source_r
                 continue;
             }
             char resolved[512];
-            jm_resolve_module_path(candidate->reference, binding->source->chars,
+            js_interp_resolve_script_module_path(runtime, candidate->reference, binding->source->chars,
                 (int)binding->source->len, resolved, (int)sizeof(resolved));
             if (strcmp(resolved, source_ref) != 0) continue;
             js_set_key_default(module->namespace_obj,
@@ -848,7 +856,7 @@ static Item js_interp_read_module_export(Runtime* runtime, const char* reference
             continue;
         }
         char resolved[512];
-        jm_resolve_module_path(reference, binding->source->chars,
+        js_interp_resolve_script_module_path(runtime, reference, binding->source->chars,
             (int)binding->source->len, resolved, (int)sizeof(resolved));
         if (binding->namespace_binding) return js_module_get(js_make_string(resolved));
         return js_interp_read_module_export(runtime, resolved, binding->local_name,
@@ -866,7 +874,8 @@ static Item js_interp_read_import_binding(JsScript* script,
         JsInterpModuleBinding* binding) {
     if (!script || !binding) return ItemError;
     char resolved[512];
-    jm_resolve_module_path(script->reference, binding->source->chars,
+    js_interp_resolve_script_module_path(context ? context->runtime : NULL,
+        script->reference, binding->source->chars,
         (int)binding->source->len, resolved, (int)sizeof(resolved));
     Item namespace_obj = js_module_get(js_make_string(resolved));
     if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {
@@ -2692,7 +2701,11 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         call->function->node_type == AST_NODE_IDENT &&
         js_interp_identifier_is((JsAstNode*)call->function, "require") &&
         ((JsIdentifierNode*)call->function)->entry == NULL &&
-        !js_with_depth_active();
+        !js_with_depth_active() &&
+        // A browser bundle can publish an AMD loader as window.require. Only
+        // an unbound identifier is Lambda's implicit CommonJS require.
+        !js_global_binding_exists(js_interp_name_key(
+            ((JsIdentifierNode*)call->function)->name));
     bool intrinsic_dynamic_import = !construct && call->function &&
         call->function->node_type == AST_NODE_IDENT &&
         js_interp_identifier_is((JsAstNode*)call->function, "import") &&
@@ -2853,8 +2866,8 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         if (item_is_error(string_value)) JS_INTERP_CALL_RETURN(js_interp_throw(string_value));
         String* requested = it2s(string_value);
         char resolved[512];
-        jm_resolve_module_path(frame->script && frame->script->reference
-            ? frame->script->reference : ".", requested->chars,
+        js_interp_resolve_script_module_path(context ? context->runtime : NULL,
+            frame->script ? frame->script->reference : NULL, requested->chars,
             (int)requested->len, resolved, (int)sizeof(resolved));
         value_root.set(js_interp_load_es_module(context ? context->runtime : NULL,
             resolved));
@@ -4707,7 +4720,8 @@ static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
     Rooted<Item> key_root(roots, ItemNull);
     if (exported->source) {
         char resolved[512];
-        jm_resolve_module_path(frame->script->reference, exported->source->chars,
+        js_interp_resolve_script_module_path(context ? context->runtime : NULL,
+            frame->script->reference, exported->source->chars,
             (int)exported->source->len, resolved, (int)sizeof(resolved));
         source_namespace_root.set(js_module_get(js_make_string(resolved)));
         if (get_type_id(source_namespace_root.get()) == LMD_TYPE_NULL) {
@@ -6246,7 +6260,7 @@ static Item js_interp_load_static_imports(Runtime* runtime, JsScript* script) {
         }
         if (!source) continue;
         char resolved[512];
-        jm_resolve_module_path(script->reference, source->chars,
+        js_interp_resolve_script_module_path(runtime, script->reference, source->chars,
             (int)source->len, resolved, (int)sizeof(resolved));
         Item namespace_obj = js_interp_load_es_module(runtime, resolved);
         if (item_is_error(namespace_obj) || get_type_id(namespace_obj) == LMD_TYPE_NULL) {
@@ -6277,7 +6291,7 @@ static Item js_interp_validate_star_exports(Runtime* runtime, JsScript* script) 
         JsExportNode* exported = (JsExportNode*)statement;
         if (!exported->is_star || exported->is_namespace || !exported->source) continue;
         char resolved[512];
-        jm_resolve_module_path(script->reference, exported->source->chars,
+        js_interp_resolve_script_module_path(runtime, script->reference, exported->source->chars,
             (int)exported->source->len, resolved, (int)sizeof(resolved));
         Item namespace_obj = js_module_get(js_make_string(resolved));
         if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {

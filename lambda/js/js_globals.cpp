@@ -14347,6 +14347,19 @@ extern "C" Item js_get_global_this() {
             js_set_key_cstr(js_global_this_obj, "TextDecoder", decoder_ctor.get());
         }
 
+        // Web Streams are already implemented for the Node stream surface;
+        // publish the same constructors for browser scripts as well.
+        js_install_native_constructor(js_global_this_obj, "ReadableStream",
+            js_readable_stream_new);
+        js_install_native_constructor(js_global_this_obj, "WritableStream",
+            js_writable_stream_new);
+        js_install_native_constructor(js_global_this_obj, "TransformStream",
+            js_transform_stream_new);
+        js_install_native_constructor(js_global_this_obj, "TextEncoderStream",
+            js_text_encoder_stream_new);
+        js_install_native_constructor(js_global_this_obj, "TextDecoderStream",
+            js_text_decoder_stream_new);
+
         // globalThis.performance shares the document clock used by rAF/events.
         {
             extern Item js_performance_observer_new(Item callback);
@@ -17872,20 +17885,48 @@ static Item js_web_stream_key(const char* name) {
     return js_name_item(name, (int)strlen(name));
 }
 
+static Item js_readable_stream_pipe_writer_call(Item writer, const char* method,
+        Item* args, int arg_count) {
+    Item function = js_get_key_cstr(writer, method);
+    if (!js_is_callable(function)) {
+        return js_throw_type_error("stream destination writer is unavailable");
+    }
+    return js_call_function(function, writer, args, arg_count);
+}
+
 static Item js_readable_stream_controller_enqueue(Item env_item, Item chunk) {
     JS_ENV_OR_UNDEFINED(env, env_item);
-    Item chunks = js_get_key_cstr(env[0], "__chunks__");
+    RootFrame roots(3);
+    Rooted<Item> stream_root(roots, env[0]);
+    Rooted<Item> chunk_root(roots, chunk);
+    Rooted<Item> writer_root(roots, ItemNull);
+    Item chunks = js_get_key_cstr(stream_root.get(), "__chunks__");
     if (get_type_id(chunks) != LMD_TYPE_ARRAY) {
         chunks = js_array_new(0);
-        js_set_key_cstr(env[0], "__chunks__", chunks);
+        js_set_key_cstr(stream_root.get(), "__chunks__", chunks);
     }
-    js_array_push(chunks, chunk);
+    Item appended = js_array_push(chunks, chunk_root.get());
+    if (item_is_error(appended)) return appended;
+    writer_root.set(js_get_key_cstr(stream_root.get(), "__pipe_writer__"));
+    if (js_is_callable(js_get_key_cstr(writer_root.get(), "write"))) {
+        Item args[] = {chunk_root.get()};
+        Item write_result = js_readable_stream_pipe_writer_call(writer_root.get(), "write", args, 1);
+        if (item_is_error(write_result)) return write_result;
+    }
     return make_js_undefined();
 }
 
 static Item js_readable_stream_controller_close(Item env_item) {
     JS_ENV_OR_UNDEFINED(env, env_item);
-    js_set_key_cstr(env[0], "__closed__", (Item){.item = b2it(true)});
+    RootFrame roots(2);
+    Rooted<Item> stream_root(roots, env[0]);
+    Rooted<Item> writer_root(roots,
+        js_get_key_cstr(stream_root.get(), "__pipe_writer__"));
+    js_set_key_cstr(stream_root.get(), "__closed__", (Item){.item = b2it(true)});
+    if (js_is_callable(js_get_key_cstr(writer_root.get(), "close"))) {
+        Item close_result = js_readable_stream_pipe_writer_call(writer_root.get(), "close", NULL, 0);
+        if (item_is_error(close_result)) return close_result;
+    }
     return make_js_undefined();
 }
 
@@ -18021,26 +18062,88 @@ static Item js_readable_stream_get_reader_stub(Item options) {
     return reader;
 }
 
+static Item js_readable_stream_pipe_to_destination(Item source, Item destination) {
+    RootFrame roots(6);
+    Rooted<Item> source_root(roots, source);
+    Rooted<Item> destination_root(roots, destination);
+    Rooted<Item> get_writer_root(roots,
+        js_get_key_cstr(destination_root.get(), "getWriter"));
+    Rooted<Item> writer_root(roots, ItemNull);
+    Rooted<Item> chunks_root(roots,
+        js_get_key_cstr(source_root.get(), "__chunks__"));
+    Rooted<Item> chunk_root(roots, ItemNull);
+    if (!js_is_callable(get_writer_root.get())) {
+        return js_throw_type_error("pipeTo destination is not a WritableStream");
+    }
+    writer_root.set(js_call_function(get_writer_root.get(), destination_root.get(), NULL, 0));
+    if (item_is_error(writer_root.get())) return writer_root.get();
+    Item bound = js_set_key_cstr(source_root.get(), "__pipe_writer__", writer_root.get());
+    if (item_is_error(bound)) return bound;
+    int64_t start = 0;
+    Item index = js_get_key_cstr(source_root.get(), "__read_index__");
+    if (get_type_id(index) == LMD_TYPE_INT) start = it2i(index);
+    int64_t count = get_type_id(chunks_root.get()) == LMD_TYPE_ARRAY
+        ? js_array_length(chunks_root.get()) : 0;
+    for (int64_t current = start; current < count; current++) {
+        chunk_root.set(js_elements_get_int(chunks_root.get(), current));
+        if (item_is_error(chunk_root.get())) return chunk_root.get();
+        Item args[] = {chunk_root.get()};
+        Item write_result = js_readable_stream_pipe_writer_call(
+            writer_root.get(), "write", args, 1);
+        if (item_is_error(write_result)) return write_result;
+    }
+    js_set_key_cstr(source_root.get(), "__read_index__", (Item){.item = i2it(count)});
+    if (js_web_stream_item_is_true(js_get_key_cstr(source_root.get(), "__closed__"))) {
+        Item close_result = js_readable_stream_pipe_writer_call(
+            writer_root.get(), "close", NULL, 0);
+        if (item_is_error(close_result)) return close_result;
+    }
+    return js_promise_resolve(make_js_undefined());
+}
+
+static Item js_readable_stream_pipe_to(Item destination) {
+    return js_readable_stream_pipe_to_destination(js_get_this(), destination);
+}
+
+static Item js_readable_stream_pipe_through(Item transform) {
+    RootFrame roots(3);
+    Rooted<Item> source_root(roots, js_get_this());
+    Rooted<Item> transform_root(roots, transform);
+    Rooted<Item> writable_root(roots,
+        js_get_key_cstr(transform_root.get(), "writable"));
+    Item pipe_result = js_readable_stream_pipe_to_destination(source_root.get(),
+        writable_root.get());
+    if (item_is_error(pipe_result)) return pipe_result;
+    return js_get_key_cstr(transform_root.get(), "readable");
+}
+
 extern "C" Item js_readable_stream_new(Item underlying_source) {
-    Item obj = js_new_object_with_class(JS_CLASS_READABLE_STREAM);
-    js_set_key_cstr(obj, "__chunks__", js_array_new(0));
-    js_set_key_cstr(obj, "__closed__", (Item){.item = b2it(false)});
-    js_set_key_cstr(obj, "__read_index__", (Item){.item = i2it(0)});
+    RootFrame roots(4);
+    Rooted<Item> obj_root(roots, js_new_object_with_class(JS_CLASS_READABLE_STREAM));
+    Rooted<Item> get_reader_root(roots,
+        js_new_native_function(js_readable_stream_get_reader_stub));
+    Rooted<Item> pipe_to_root(roots, js_new_native_function(js_readable_stream_pipe_to));
+    Rooted<Item> pipe_through_root(roots,
+        js_new_native_function(js_readable_stream_pipe_through));
+    js_set_key_cstr(obj_root.get(), "__chunks__", js_array_new(0));
+    js_set_key_cstr(obj_root.get(), "__closed__", (Item){.item = b2it(false)});
+    js_set_key_cstr(obj_root.get(), "__read_index__", (Item){.item = i2it(0)});
     Item get_reader_key = js_name_item("getReader");
-    Item get_reader_fn = js_new_native_function(js_readable_stream_get_reader_stub);
-    js_set_key_default(obj, get_reader_key, get_reader_fn);
-    js_set_key_cstr(obj, "__source__", underlying_source);
-    js_set_key_cstr(obj, "__pull__", js_get_key_cstr(underlying_source, "pull"));
+    js_set_key_default(obj_root.get(), get_reader_key, get_reader_root.get());
+    js_set_key_cstr(obj_root.get(), "pipeTo", pipe_to_root.get());
+    js_set_key_cstr(obj_root.get(), "pipeThrough", pipe_through_root.get());
+    js_set_key_cstr(obj_root.get(), "__source__", underlying_source);
+    js_set_key_cstr(obj_root.get(), "__pull__", js_get_key_cstr(underlying_source, "pull"));
 
     Item start_fn = js_get_key_cstr(underlying_source, "start");
     if (js_is_callable(start_fn)) {
-        Item* env = js_alloc_env1(obj);
+        Item* env = js_alloc_env1(obj_root.get());
         Item controller = js_new_object();
         js_set_key_cstr(controller, "enqueue", js_new_native_closure(js_readable_stream_controller_enqueue, 1, env, 1));
         js_set_key_cstr(controller, "close", js_new_native_closure(js_readable_stream_controller_close, 0, env, 1));
         js_call_function(start_fn, underlying_source, &controller, 1);
     }
-    return obj;
+    return obj_root.get();
 }
 
 static Item js_writable_stream_writer_write(Item env_item, Item chunk) {
@@ -18083,4 +18186,145 @@ extern "C" Item js_writable_stream_new(Item underlying_sink) {
     Item get_writer_fn = js_new_native_function(js_writable_stream_get_writer_stub);
     js_set_key_default(obj, get_writer_key, get_writer_fn);
     return obj;
+}
+
+static Item js_transform_stream_controller_terminate(Item env_item) {
+    return js_readable_stream_controller_close(env_item);
+}
+
+static Item js_transform_stream_make_controller(Item readable) {
+    RootFrame roots(4);
+    Rooted<Item> readable_root(roots, readable);
+    Rooted<Item> controller_root(roots, js_new_object());
+    Item* env = js_alloc_env1(readable_root.get());
+    Rooted<Item> enqueue_root(roots, js_new_native_closure(
+        js_readable_stream_controller_enqueue, 1, env, 1));
+    Rooted<Item> terminate_root(roots, js_new_native_closure(
+        js_transform_stream_controller_terminate, 0, env, 1));
+    js_set_key_cstr(controller_root.get(), "enqueue", enqueue_root.get());
+    js_set_key_cstr(controller_root.get(), "terminate", terminate_root.get());
+    return controller_root.get();
+}
+
+static Item js_transform_stream_enqueue(Item readable, Item chunk) {
+    Item* env = js_alloc_env1(readable);
+    if (!env) return make_js_undefined();
+    return js_readable_stream_controller_enqueue(
+        (Item){.item = (uint64_t)(uintptr_t)env}, chunk);
+}
+
+static Item js_transform_stream_close_readable(Item readable) {
+    Item* env = js_alloc_env1(readable);
+    if (!env) return make_js_undefined();
+    return js_readable_stream_controller_close(
+        (Item){.item = (uint64_t)(uintptr_t)env});
+}
+
+static Item js_transform_stream_sink_write(Item env_item, Item chunk) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(5);
+    Rooted<Item> transformer_root(roots, env[0]);
+    Rooted<Item> readable_root(roots, env[1]);
+    Rooted<Item> chunk_root(roots, chunk);
+    Rooted<Item> controller_root(roots,
+        js_transform_stream_make_controller(readable_root.get()));
+    Rooted<Item> transform_root(roots,
+        js_get_key_cstr(transformer_root.get(), "transform"));
+    if (js_is_callable(transform_root.get())) {
+        Item args[] = {chunk_root.get(), controller_root.get()};
+        return js_call_function(transform_root.get(), transformer_root.get(), args, 2);
+    }
+    return js_transform_stream_enqueue(readable_root.get(), chunk_root.get());
+}
+
+static Item js_transform_stream_sink_close(Item env_item) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(4);
+    Rooted<Item> transformer_root(roots, env[0]);
+    Rooted<Item> readable_root(roots, env[1]);
+    Rooted<Item> controller_root(roots,
+        js_transform_stream_make_controller(readable_root.get()));
+    Rooted<Item> flush_root(roots,
+        js_get_key_cstr(transformer_root.get(), "flush"));
+    if (js_is_callable(flush_root.get())) {
+        Item args[] = {controller_root.get()};
+        Item flush_result = js_call_function(flush_root.get(), transformer_root.get(), args, 1);
+        if (item_is_error(flush_result)) return flush_result;
+    }
+    return js_transform_stream_close_readable(readable_root.get());
+}
+
+extern "C" Item js_transform_stream_new(Item transformer) {
+    RootFrame roots(8);
+    Rooted<Item> transformer_root(roots, transformer);
+    Rooted<Item> source_root(roots, js_new_object());
+    Rooted<Item> readable_root(roots, js_readable_stream_new(source_root.get()));
+    Rooted<Item> sink_root(roots, js_new_object());
+    Item* env = js_alloc_env2(transformer_root.get(), readable_root.get());
+    Rooted<Item> write_root(roots, js_new_native_closure(
+        js_transform_stream_sink_write, 1, env, 2));
+    Rooted<Item> close_root(roots, js_new_native_closure(
+        js_transform_stream_sink_close, 0, env, 2));
+    js_set_key_cstr(sink_root.get(), "write", write_root.get());
+    js_set_key_cstr(sink_root.get(), "close", close_root.get());
+    Rooted<Item> writable_root(roots, js_writable_stream_new(sink_root.get()));
+    Rooted<Item> stream_root(roots, js_new_object());
+    js_set_key_cstr(stream_root.get(), "readable", readable_root.get());
+    js_set_key_cstr(stream_root.get(), "writable", writable_root.get());
+    return stream_root.get();
+}
+
+static Item js_text_encoder_stream_transform(Item env_item, Item chunk,
+                                             Item controller) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(5);
+    Rooted<Item> encoder_root(roots, env[0]);
+    Rooted<Item> chunk_root(roots, chunk);
+    Rooted<Item> controller_root(roots, controller);
+    Rooted<Item> encoded_root(roots,
+        js_text_encoder_encode(encoder_root.get(), chunk_root.get()));
+    Rooted<Item> enqueue_root(roots,
+        js_get_key_cstr(controller_root.get(), "enqueue"));
+    if (!js_is_callable(enqueue_root.get())) return make_js_undefined();
+    Item args[] = {encoded_root.get()};
+    return js_call_function(enqueue_root.get(), controller_root.get(), args, 1);
+}
+
+static Item js_text_decoder_stream_transform(Item env_item, Item chunk,
+                                             Item controller) {
+    JS_ENV_OR_UNDEFINED(env, env_item);
+    RootFrame roots(5);
+    Rooted<Item> decoder_root(roots, env[0]);
+    Rooted<Item> chunk_root(roots, chunk);
+    Rooted<Item> controller_root(roots, controller);
+    Rooted<Item> decoded_root(roots,
+        js_text_decoder_decode(decoder_root.get(), chunk_root.get()));
+    Rooted<Item> enqueue_root(roots,
+        js_get_key_cstr(controller_root.get(), "enqueue"));
+    if (!js_is_callable(enqueue_root.get())) return make_js_undefined();
+    Item args[] = {decoded_root.get()};
+    return js_call_function(enqueue_root.get(), controller_root.get(), args, 1);
+}
+
+extern "C" Item js_text_encoder_stream_new(void) {
+    RootFrame roots(3);
+    Rooted<Item> encoder_root(roots, js_text_encoder_new());
+    Rooted<Item> transformer_root(roots, js_new_object());
+    Item* env = js_alloc_env1(encoder_root.get());
+    Rooted<Item> transform_root(roots, js_new_native_closure(
+        js_text_encoder_stream_transform, 2, env, 1));
+    js_set_key_cstr(transformer_root.get(), "transform", transform_root.get());
+    return js_transform_stream_new(transformer_root.get());
+}
+
+extern "C" Item js_text_decoder_stream_new(Item encoding, Item options) {
+    RootFrame roots(3);
+    Rooted<Item> decoder_root(roots,
+        js_text_decoder_new(encoding, options));
+    Rooted<Item> transformer_root(roots, js_new_object());
+    Item* env = js_alloc_env1(decoder_root.get());
+    Rooted<Item> transform_root(roots, js_new_native_closure(
+        js_text_decoder_stream_transform, 2, env, 1));
+    js_set_key_cstr(transformer_root.get(), "transform", transform_root.get());
+    return js_transform_stream_new(transformer_root.get());
 }

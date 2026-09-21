@@ -147,7 +147,7 @@ static bool lambda_ast_prebuild_build_module(void* opaque, const char* path) {
     Script* script = load_script(&worker, path, NULL, true);
     bool built = script && script->ast_root && !script->jit_context &&
         (script->cache_owned_template || script->cache_template);
-    runtime_free_all_scripts(&worker);
+    runtime_cleanup_ast_prebuild_worker(&worker);
     return built;
 }
 
@@ -2504,6 +2504,14 @@ void runtime_free_all_scripts(Runtime* runtime) {
         runtime->loaded_script_index = NULL;
     }
     runtime_module_state_clear_unit_index(runtime);
+}
+
+void runtime_cleanup_ast_prebuild_worker(Runtime* runtime) {
+    if (!runtime) return;
+    // Cross-language prebuild imports can register namespace roots against
+    // this worker even though it never owns an EvalContext.
+    module_registry_cleanup_for_runtime(runtime);
+    runtime_free_all_scripts(runtime);
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
