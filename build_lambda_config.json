@@ -5185,7 +5185,9 @@
           {
             "source": "test/test_network_layout_gtest.cpp",
             "name": "Network Layout Tests",
-            "dependencies": [],
+            "dependencies": [
+              "lambda-lib"
+            ],
             "libraries": [
               "gtest",
               "gtest_main"

@@ -83,6 +83,13 @@ static ImageType get_image_type_from_file(const char* filename) {
     return get_image_type(filename);
 }
 
+// free buffers whose ownership remains with a PNG decode after libpng errors.
+static void png_free_decode_buffers(png_bytep* row_pointers,
+                                    unsigned char* image_data) {
+    if (row_pointers) mem_free(row_pointers);
+    if (image_data) mem_free(image_data);
+}
+
 // Load PNG image using libpng
 static unsigned char* load_png(const char* filename, int* width, int* height, int* channels, int req_channels) {
     (void)req_channels; // Mark as unused for compatibility
@@ -115,8 +122,14 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
         return NULL;
     }
 
+    // libpng errors longjmp over allocations made during decode, so these
+    // pointers must retain their values for the cleanup branch.
+    unsigned char* volatile image_data = NULL;
+    png_bytep* volatile row_pointers = NULL;
     if (setjmp(png_jmpbuf(png_ptr))) {
         log_error("Error during PNG reading");
+        png_free_decode_buffers((png_bytep*)row_pointers,
+                                (unsigned char*)image_data);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         fclose(fp);
         return NULL;
@@ -160,7 +173,7 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
 
     // Allocate memory for image data
     *channels = 4; // Always return RGBA
-    unsigned char* image_data = mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
+    image_data = mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for PNG image data");
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -169,20 +182,20 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
     }
 
     // Read the image data
-    png_bytep* row_pointers = mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
+    row_pointers = mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
     for (int y = 0; y < *height; y++) {
         row_pointers[y] = image_data + y * *width * 4;
     }
 
-    png_read_image(png_ptr, row_pointers);
+    png_read_image(png_ptr, (png_bytep*)row_pointers);
     png_read_end(png_ptr, NULL);
 
     // Clean up
-    mem_free(row_pointers);
+    mem_free((png_bytep*)row_pointers);
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
 
-    return image_data;
+    return (unsigned char*)image_data;
 }
 
 // Save an 8-bit, row-contiguous image buffer (`channels` bytes/pixel) to a PNG file.
@@ -210,10 +223,11 @@ int image_save_png(const char* filename, const unsigned char* data,
     png_infop info_ptr = png_create_info_struct(png_ptr);
     if (!info_ptr) { png_destroy_write_struct(&png_ptr, NULL); fclose(fp); return 0; }
 
-    png_bytep* row_pointers = NULL;
+    // libpng errors longjmp over the row allocation below.
+    png_bytep* volatile row_pointers = NULL;
     if (setjmp(png_jmpbuf(png_ptr))) {
         log_error("image_save_png: libpng error while writing %s", filename);
-        if (row_pointers) mem_free(row_pointers);
+        if (row_pointers) mem_free((png_bytep*)row_pointers);
         png_destroy_write_struct(&png_ptr, &info_ptr);
         fclose(fp);
         return 0;
@@ -234,10 +248,10 @@ int image_save_png(const char* filename, const unsigned char* data,
         // libpng does not write through these pointers, so dropping const is safe
         row_pointers[y] = (png_bytep)(data + (size_t)y * row_bytes);
     }
-    png_write_image(png_ptr, row_pointers);
+    png_write_image(png_ptr, (png_bytep*)row_pointers);
     png_write_end(png_ptr, NULL);
 
-    mem_free(row_pointers);
+    mem_free((png_bytep*)row_pointers);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
     return 1;
@@ -756,18 +770,20 @@ static unsigned char* load_png_scaled(const char* filename,
     png_infop info_ptr = png_create_info_struct(png_ptr);
     if (!info_ptr) { png_destroy_read_struct(&png_ptr, NULL, NULL); fclose(fp); return NULL; }
 
-    unsigned char* image_data = NULL;
-    png_bytep* row_pointers = NULL;
-    unsigned char* row_buf = NULL;
-    uint32_t* accum = NULL;
+    // libpng errors longjmp over decode allocations, so retain every cleanup
+    // pointer that changes after setjmp.
+    unsigned char* volatile image_data = NULL;
+    png_bytep* volatile row_pointers = NULL;
+    unsigned char* volatile row_buf = NULL;
+    uint32_t* volatile accum = NULL;
 
     if (setjmp(png_jmpbuf(png_ptr))) {
         // libpng longjmps after partial allocation on corrupt IDAT data; clean
         // buffers here so lazy decode failures do not leak cached image memory.
-        if (accum) mem_free(accum);
-        if (row_buf) mem_free(row_buf);
-        if (row_pointers) mem_free(row_pointers);
-        if (image_data) mem_free(image_data);
+        if (accum) mem_free((uint32_t*)accum);
+        if (row_buf) mem_free((unsigned char*)row_buf);
+        png_free_decode_buffers((png_bytep*)row_pointers,
+                                (unsigned char*)image_data);
         log_error("Error during PNG reading (scaled): %s", filename);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         fclose(fp);
@@ -819,9 +835,9 @@ static unsigned char* load_png_scaled(const char* filename,
         for (int y = 0; y < natural_h; y++) {
             row_pointers[y] = image_data + (size_t)y * natural_w * 4;
         }
-        png_read_image(png_ptr, row_pointers);
+        png_read_image(png_ptr, (png_bytep*)row_pointers);
         png_read_end(png_ptr, NULL);
-        mem_free(row_pointers);
+        mem_free((png_bytep*)row_pointers);
         row_pointers = NULL;
     } else {
         // Box-average downsample: read step rows at a time, accumulate, write one row.
@@ -861,15 +877,15 @@ static unsigned char* load_png_scaled(const char* filename,
             }
         }
         png_read_end(png_ptr, NULL);
-        mem_free(accum);
-        mem_free(row_buf);
+        mem_free((uint32_t*)accum);
+        mem_free((unsigned char*)row_buf);
         log_debug("[image] PNG scaled decode: %dx%d -> %dx%d (step=%d) %s",
                   natural_w, natural_h, out_w, out_h, step, filename);
     }
 
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     fclose(fp);
-    return image_data;
+    return (unsigned char*)image_data;
 }
 
 // Decode a JPEG using libjpeg-turbo's native DCT scaling. Picks the smallest
