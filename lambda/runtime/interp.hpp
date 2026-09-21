@@ -333,6 +333,24 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
                                const char* export_name,
                                const Item* args, int argc);
 
+// Invokes a retained Lambda callback after its original T0 activation ended.
+// The callback's defining module owns both its slab and interpreter state.
+Item interp_call_runtime_function(Runtime* runtime, Function* function,
+                                  const Item* args, int argc);
+// Runs a retained callback on the interpreter's bounded large-stack worker.
+// The caller must keep callback arguments rooted until this synchronous call returns.
+typedef void (*InterpLargeStackThreadHook)(void* opaque);
+Item interp_call_runtime_function_large_stack(Runtime* runtime, Function* function,
+                                              const Item* args, int argc,
+                                              InterpLargeStackThreadHook worker_enter = nullptr,
+                                              InterpLargeStackThreadHook worker_leave = nullptr,
+                                              void* worker_context = nullptr);
+typedef Item (*InterpLargeStackCall)(void* opaque);
+// Transfers one Runtime context to the bounded interpreter worker, invokes the
+// callback synchronously, then restores the context to the originating thread.
+Item interp_run_on_large_stack(EvalContext* eval, InterpLargeStackCall call,
+                               void* opaque);
+
 bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime);
 void interp_repl_session_destroy(InterpReplSession* session);
 Item interp_repl_session_eval(InterpReplSession* session, const char* source);

@@ -3860,7 +3860,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check if this is a graph file that needs conversion
         bool is_graph_file = graph_bridge_path_is_graph(filename);
 
-        if (is_graph_file) {
+        if (is_graph_file && graph_view_key) {
             char* graph_bridge_source = build_graph_to_html_bridge_script(
                 filename, nullptr, graph_view_key, "view");
             if (!graph_bridge_source) {
@@ -3878,7 +3878,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(exit_code);
         }
 
-        if (ext && (strcmp(ext, ".pdf") == 0 ||
+        if (is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
@@ -3891,7 +3891,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
                     strcmp(ext, ".txt") == 0 || strcmp(ext, ".csv") == 0 ||
                     strcmp(ext, ".ini") == 0 || strcmp(ext, ".conf") == 0 ||
-                    strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
+                    strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0))) {
             // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
             exit_code = view_doc_in_window_with_events(filename, event_file, headless,

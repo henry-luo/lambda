@@ -42395,20 +42395,15 @@ static ArrayList* collect_import_cone(Script* main_script) {
 // row. Run the interpreter on a bounded worker stack so the existing recovery
 // boundary can report a language fault instead of receiving a raw guard-page
 // hit (D5.3.3, S7.4.3).
-#define INTERP_WORKER_STACK_SIZE (128U * 1024U * 1024U)
-
 struct InterpWorkerArgs {
     Runner* runner;
     bool run_main;
-    Item result;
-    bool initialized;
 };
 
-static void* interp_worker_entry(void* opaque) {
+static Item interp_worker_run_script(void* opaque) {
     InterpWorkerArgs* args = (InterpWorkerArgs*)opaque;
-    if (!args || !args->runner || !args->runner->context) return NULL;
+    if (!args || !args->runner || !args->runner->context) return ItemError;
     EvalContext* eval = args->runner->context;
-    if (!eval_context_init(eval)) return NULL;
     // The large-stack worker has independent JS TLS; bind the shared capsule
     // before an async bridge (for example toPromise) can allocate GC-owned JS
     // values, preserving the owner/thread invariant (D5.3.3).
@@ -42416,71 +42411,20 @@ static void* interp_worker_entry(void* opaque) {
         js_runtime_state_init(eval);
     if (!js_state_initialized) {
         log_error("interp-worker: failed to bind JavaScript runtime state");
-        eval_context_shutdown(eval);
-        return NULL;
+        return ItemError;
     }
-    args->initialized = true;
-    input_context = (Context*)eval;
-    lambda_stack_init();
-    eval->stack_limit = lambda_stack_recoverable_limit();
-    if (!lambda_side_stack_bind()) {
-        log_error("interp-worker: failed to bind side-stack regions");
-        args->result = ItemError;
-    } else {
-        args->result = interp_run_script(args->runner, args->run_main);
-    }
+    Item result = interp_run_script(args->runner, args->run_main);
     if (js_state_initialized && js_runtime_state_for(eval) &&
             !js_runtime_state_shutdown(eval)) {
         log_error("interp-worker: failed to release JavaScript runtime state");
     }
-    if (!eval_context_shutdown(eval)) {
-        log_error("interp-worker: failed to release evaluator context");
-    }
-    // the worker owns a thread-local alternate signal stack until it exits
-    lambda_stack_cleanup();
-    return NULL;
+    return result;
 }
 
 static Item interp_run_with_worker_stack(Runner* runner, bool run_main) {
     if (!runner || !runner->context) return ItemError;
-    EvalContext* eval = runner->context;
-    if (!eval_context_shutdown(eval)) return ItemError;
-
-    InterpWorkerArgs args = {runner, run_main, ItemError, false};
-    pthread_attr_t attr;
-    if (pthread_attr_init(&attr) != 0) {
-        log_error("interp-worker: failed to configure large stack");
-        eval_context_init(eval);
-        input_context = (Context*)eval;
-        return ItemError;
-    }
-    if (pthread_attr_setstacksize(&attr, INTERP_WORKER_STACK_SIZE) != 0) {
-        log_error("interp-worker: failed to configure large stack");
-        pthread_attr_destroy(&attr);
-        eval_context_init(eval);
-        input_context = (Context*)eval;
-        return ItemError;
-    }
-    pthread_t worker;
-    int create_status = pthread_create(&worker, &attr, interp_worker_entry, &args);
-    pthread_attr_destroy(&attr);
-    if (create_status != 0) {
-        log_error("interp-worker: failed to create large-stack worker");
-        eval_context_init(eval);
-        input_context = (Context*)eval;
-        return ItemError;
-    }
-    pthread_join(worker, NULL);
-    if (!eval_context_init(eval)) {
-        log_error("interp-worker: failed to restore evaluator context");
-        return ItemError;
-    }
-    input_context = (Context*)eval;
-    if (!lambda_side_stack_bind()) {
-        log_error("interp-worker: failed to restore side-stack regions");
-        return ItemError;
-    }
-    return args.initialized ? args.result : ItemError;
+    InterpWorkerArgs args = {runner, run_main};
+    return interp_run_on_large_stack(runner->context, interp_worker_run_script, &args);
 }
 
 typedef struct InterpStackScan {
@@ -42800,6 +42744,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.pdf.pdf", "pdf_to_html"},
+    {"latex", "lambda.latex.latex", "render_document"},
+    {"graph", "lambda.graph.document", "to_html"},
 };
 
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(

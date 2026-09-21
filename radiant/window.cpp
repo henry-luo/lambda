@@ -284,6 +284,11 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
     }
 
+    if (graph_bridge_path_is_graph(filename)) {
+        log_debug("Loading as graph document");
+        return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+    }
+
     DocFormat format = detect_doc_format(filename);
 
     switch (format) {

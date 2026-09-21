@@ -2485,29 +2485,16 @@ static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
                                               viewport_width, viewport_height, pool);
 }
 
-static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
-                                          int viewport_height, Pool* pool) {
-    if (!graph_url) return nullptr;
-    char* graph_path = url_to_local_path(graph_url);
-    const char* graph_source = graph_path ? graph_path : url_get_href(graph_url);
-    if (!graph_source || !graph_source[0]) {
-        log_error("[load_html_doc] GRAPH_BRIDGE_PATH: failed to resolve input path");
-        if (graph_path) mem_free(graph_path);
+static DomDocument* load_graph_transform_doc(Url* graph_url, int viewport_width,
+                                              int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("graph");
+    if (!transform) {
+        log_error("document-transform: graph runtime configuration is missing");
         return nullptr;
     }
-
-    char* bridge_source = build_graph_to_html_bridge_script(
-        graph_source, nullptr, nullptr, "load_html_doc");
-    if (!bridge_source) {
-        if (graph_path) mem_free(graph_path);
-        return nullptr;
-    }
-
-    DomDocument* doc = load_lambda_script_source_doc(graph_url, bridge_source,
-                                                     viewport_width, viewport_height, pool);
-    mem_free(bridge_source);
-    if (graph_path) mem_free(graph_path);
-    return doc;
+    return load_lambda_document_transform_doc(graph_url, transform,
+                                              viewport_width, viewport_height, pool);
 }
 
 typedef DomDocument* (*LayoutFormatLoader)(Url*, int, int, Pool*);
@@ -2574,7 +2561,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
 
     if (graph_bridge_path_is_graph(path)) {
         if (handled) *handled = true;
-        return load_graph_bridge_doc(url, width, height, pool);
+        return load_graph_transform_doc(url, width, height, pool);
     }
 
     const char* ext = file_path_ext(path);
@@ -3370,134 +3357,15 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         "wiki", "Lambda Wiki", "input/wiki.css", "wiki stylesheet");
 }
 
-// convert LaTeX through the Lambda package, then style the generated DOM.
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
-    if (!latex_url || !pool) {
-        log_error("load_latex_doc: invalid parameters");
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("latex");
+    if (!transform) {
+        log_error("document-transform: LaTeX runtime configuration is missing");
         return nullptr;
     }
-
-    LayoutTempPathGuard latex_path_guard = { url_to_local_path(latex_url) };
-    char* latex_filepath = latex_path_guard.path;
-    if (!latex_filepath) {
-        log_error("load_latex_doc: failed to resolve LaTeX file URL");
-        return nullptr;
-    }
-    log_info("[Lambda LaTeX] Loading LaTeX document via Lambda package pipeline: %s", latex_filepath);
-
-    // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
-    // Build a Lambda script that imports the LaTeX package and renders to HTML
-    char safe_path[1024];
-    snprintf(safe_path, sizeof(safe_path), "%s", latex_filepath);
-    for (char* p = safe_path; *p; p++) {
-        if (*p == '\\') *p = '/';
-    }
-
-    char script_buf[4096];
-    snprintf(script_buf, sizeof(script_buf),
-        "import latex: lambda.latex.latex\n"
-        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
-        "latex.render(ast, {standalone: true})\n",
-        safe_path);
-
-    Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
-    if (!result_pool) {
-        log_error("[Lambda LaTeX] Failed to create result pool");
-        return nullptr;
-    }
-
-    Input* result_input = Input::create(result_pool, latex_url);
-    if (!result_input) {
-        log_error("[Lambda LaTeX] Failed to create result input");
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-    result_input->ui_mode = true;
-
-    Runtime* latex_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
-    if (!latex_runtime) {
-        log_error("[Lambda LaTeX] Failed to allocate runtime");
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-    runtime_init(latex_runtime);
-    latex_runtime->current_dir = const_cast<char*>("./");
-    latex_runtime->import_base_dir = "./";  // resolve imports from project root
-    latex_runtime->ui_mode = true;
-    latex_runtime->result_arena = result_input->arena;
-    Input* script_result = run_script_mir(latex_runtime, script_buf, (char*)"<latex_render>", false);
-
-    if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL
-        || get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-        log_error("[Lambda LaTeX] Lambda LaTeX package - HTML rendering failed for: %s", latex_filepath);
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-    Element* html_root = nullptr;
-    TypeId result_type = get_type_id(script_result->root);
-    if (result_type == LMD_TYPE_ELEMENT) {
-        result_input->root = script_result->root;
-        html_root = script_result->root.element;
-    } else {
-        log_error("[Lambda LaTeX] Lambda package returned non-element type: %d", result_type);
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-    input_context = nullptr;
-
-    if (!html_root) {
-        log_error("[Lambda LaTeX] Failed to get HTML root element from LaTeX conversion");
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-
-    DomElement* dom_root = nullptr;
-    CssEngine* css_engine = nullptr;
-    DomDocument* dom_doc = create_layout_css_document(
-        result_input, html_root, "LaTeX", DOM_PAGE_KIND_GENERATED, latex_runtime,
-        viewport_width, viewport_height, pool, &dom_root, &css_engine);
-    if (!dom_doc) {
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-    CssStylesheet* latex_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
-    // The compact article sheet does not follow base.css's @import, so load the
-    // combined faces directly before TeX metrics participate in layout.
-    CssStylesheet* cmu_font_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/latex/fonts/cmu-combined.css", "Lambda LaTeX", "CMU font stylesheet", false);
-    CssStylesheet* katex_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
-
-    int inline_stylesheet_count = 0;
-    CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, dom_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
-
-    CssStylesheet* latex_stylesheets[3] = {latex_stylesheet, cmu_font_stylesheet, katex_stylesheet};
-    int latex_sheet_count = 0;
-    CssStylesheet** all_latex_stylesheets = layout_merge_css_sources(
-        pool, latex_stylesheets, 3, inline_stylesheets, inline_stylesheet_count,
-        &latex_sheet_count);
-    layout_apply_css_stylesheets(dom_doc, dom_root, all_latex_stylesheets,
-                                 latex_sheet_count, pool, css_engine);
-
-    apply_inline_styles_to_tree(dom_root, pool);
-
-
-    store_document_stylesheets(dom_doc, latex_stylesheets, 3,
-                               inline_stylesheets, inline_stylesheet_count, pool);
-
-    populate_layout_document(dom_doc, dom_root, html_root, HTML5,
-                             latex_url, latex_runtime);
-
-    return dom_doc;
+    return load_lambda_document_transform_doc(latex_url, transform,
+                                              viewport_width, viewport_height, pool);
 }
 
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {

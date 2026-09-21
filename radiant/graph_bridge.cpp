@@ -6,29 +6,24 @@
 #include <cstdio>
 #include <cstring>
 
+static const char* graph_bridge_detect_flavor(const char* graph_file) {
+    if (!graph_file) return nullptr;
+    const char* flavor = input_detect_graph_flavor(graph_file, nullptr, 0);
+    if (flavor) return flavor;
+    char* source = read_text_file(graph_file);
+    if (!source) return nullptr;
+    flavor = input_detect_graph_flavor(graph_file, source, strlen(source));
+    mem_free(source);
+    return flavor;
+}
+
 const char* graph_bridge_flavor_for_path(const char* graph_file) {
-    const char* ext = file_path_ext(graph_file);
-    if (ext && strcmp(ext, ".mmd") == 0) return "mermaid";
-    if (ext && strcmp(ext, ".d2") == 0) return "d2";
-    if (ext && (strcmp(ext, ".dsl") == 0 || strcmp(ext, ".structurizr") == 0))
-        return "structurizr";
-    return "dot";
+    const char* flavor = graph_bridge_detect_flavor(graph_file);
+    return flavor ? flavor : "dot";
 }
 
 bool graph_bridge_path_is_graph(const char* graph_file) {
-    const char* ext = file_path_ext(graph_file);
-    if (!ext) return false;
-    if (strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
-            strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0 ||
-            strcmp(ext, ".structurizr") == 0) return true;
-    if (strcmp(ext, ".dsl") != 0) return false;
-    char* source = read_text_file(graph_file);
-    if (!source) return false;
-    // Share auto-input's boundary-safe detector so arbitrary DSL files remain ordinary text.
-    bool structurizr = input_detect_structurizr_flavor(
-        graph_file, source, strlen(source)) != nullptr;
-    mem_free(source);
-    return structurizr;
+    return graph_bridge_detect_flavor(graph_file) != nullptr;
 }
 
 char* build_graph_to_html_bridge_script(const char* graph_file, const char* theme_name,
