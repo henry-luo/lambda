@@ -1,13 +1,14 @@
 {
   "schema_version": 1,
-  "description": "Tune31 Phase II A: an exclusive var record re-borrow keeps the child path helper but does not prepare the already-detached root in the loop body.",
+  "description": "Tune31 Phase III A1: a declared var record field uses the shape-checked direct borrow helper; the generic fixed descriptor remains the carrier-mismatch fallback inside that helper.",
   "checks": [
     {
       "in_func": "_tune31_repeat_#",
       "expect": [
-        "call\tcow_path_borrow_fixed_p, cow_path_borrow_fixed"
+        "call\tcow_path_borrow_typed_map_field_p, cow_path_borrow_typed_map_field"
       ],
       "forbid": [
+        "call\tcow_path_borrow_fixed_p, cow_path_borrow_fixed",
         "call\tcow_prepare_write_p, cow_prepare_write"
       ]
     }

@@ -3211,6 +3211,49 @@ extern "C" uint8_t fn_string_char_eq_ascii(Item str_item, int64_t index,
     return byte_offset + char_len <= str->len && char_len == 1 &&
         (uint8_t)str->chars[byte_offset] == expected;
 }
+
+// Return the exact UTF-8 span selected by Lambda string indexing without
+// materializing its one-character String result. A missing character leaves
+// `chars` null; the caller retains `null == null` semantics (S7.1.1v3).
+static bool string_char_span(String* str, int64_t index, const char** chars,
+        size_t* length) {
+    *chars = NULL;
+    *length = 0;
+    if (!str || index < 0) return false;
+    if (str->is_ascii) {
+        if ((uint64_t)index >= str->len) return false;
+        *chars = str->chars + index;
+        *length = 1;
+        return true;
+    }
+    size_t byte_offset = str_utf8_char_to_byte(str->chars, str->len,
+        (size_t)index);
+    if (byte_offset == STR_NPOS) return false;
+    size_t char_len = str_utf8_char_len((unsigned char)str->chars[byte_offset]);
+    if (char_len == 0) char_len = 1;
+    if (byte_offset + char_len > str->len) return false;
+    *chars = str->chars + byte_offset;
+    *length = char_len;
+    return true;
+}
+
+// The MIR caller has certified both operands as strings. This leaf has no
+// allocation or re-entry, so it can compare their indexed character spans
+// directly while preserving absence and UTF-8 equality (D3.3.3v3, S7.1.1v3).
+extern "C" uint8_t fn_string_char_eq(Item left_item, int64_t left_index,
+        Item right_item, int64_t right_index) {
+    String* left = left_item.get_safe_string();
+    String* right = right_item.get_safe_string();
+    const char* left_chars = NULL;
+    const char* right_chars = NULL;
+    size_t left_len = 0;
+    size_t right_len = 0;
+    bool has_left = string_char_span(left, left_index, &left_chars, &left_len);
+    bool has_right = string_char_span(right, right_index, &right_chars, &right_len);
+    if (has_left != has_right) return 0;
+    if (!has_left) return 1;
+    return left_len == right_len && memcmp(left_chars, right_chars, left_len) == 0;
+}
 // Get attribute by name from an Item (for map/element attribute access)
 Item item_attr(Item data, const char* key) {
     if (!data.item || !key) { return ItemNull; }

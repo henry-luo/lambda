@@ -380,6 +380,29 @@ String *fn_strcat(String *left, String *right) {
     return string_buffer_join<2>(parts, 2, true);
 }
 
+// The MIR owner path knows its exact arity. These entries retain the shared
+// builder implementation while avoiding the variadic ABI and dynamic-count
+// join loop for common multi-piece appends.
+#define LAMBDA_STRING_FIXED_APPEND(name, count, parameters, ...) \
+    String *name parameters { \
+        String* joined[] = {__VA_ARGS__}; \
+        return string_buffer_join<count>(joined, count, true); \
+    }
+
+LAMBDA_STRING_FIXED_APPEND(fn_strcat3, 3,
+    (String *part0, String *part1, String *part2), part0, part1, part2)
+LAMBDA_STRING_FIXED_APPEND(fn_strcat4, 4,
+    (String *part0, String *part1, String *part2, String *part3),
+    part0, part1, part2, part3)
+LAMBDA_STRING_FIXED_APPEND(fn_strcat5, 5,
+    (String *part0, String *part1, String *part2, String *part3, String *part4),
+    part0, part1, part2, part3, part4)
+LAMBDA_STRING_FIXED_APPEND(fn_strcat6, 6,
+    (String *part0, String *part1, String *part2, String *part3, String *part4,
+        String *part5), part0, part1, part2, part3, part4, part5)
+
+#undef LAMBDA_STRING_FIXED_APPEND
+
 String *fn_strcat_many(int64_t owned, int64_t count, ...) {
     if (count < 2 || count > LAMBDA_STRING_CONCAT_MAX_PARTS) return &STR_ERROR;
     String* parts[LAMBDA_STRING_CONCAT_MAX_PARTS];
@@ -10570,6 +10593,51 @@ Item cow_path_borrow(Item owner, Item path) {
 Item cow_path_borrow_fixed(Item owner, int64_t count, Item key0, Item key1,
         Item key2) {
     return cow_path_borrow_impl(owner, ItemNull, count, key0, key1, key2);
+}
+
+// Tune31 Phase III A1: a typed `var record.field` borrow can read its known
+// packed field directly. A changed carrier retains the fixed generic walk, so
+// the layout is still checked at the runtime boundary (D3.3.3v3, D4.4.4v4).
+Item cow_path_borrow_typed_map_field(Item owner, TypeMap* expected_shape,
+        ShapeEntry* expected_field, Item fallback_key) {
+    if (get_type_id(owner) != LMD_TYPE_MAP || !owner.map ||
+            owner.map->type != expected_shape || !expected_field ||
+            expected_field->byte_offset < 0 || !owner.map->data ||
+            !shape_entry_storage_fits_data(expected_field, owner.map->data_cap)) {
+        return cow_path_borrow_fixed(owner, 1, fallback_key, ItemNull, ItemNull);
+    }
+
+    RootFrame roots(4);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, fallback_key);
+    Rooted<Item> rooted_child(roots, map_shape_field_to_item(owner.map->data,
+        expected_field));
+    if (!cow_item_is_container(rooted_child.get())) {
+        // Preserve the ordinary helper's diagnostic and error transport for a
+        // malformed typed carrier instead of treating it as an unchecked slot.
+        return cow_path_borrow_fixed(rooted_owner.get(), 1, rooted_key.get(),
+            ItemNull, ItemNull);
+    }
+
+    Item pre_detach = rooted_child.get();
+    rooted_child.set(cow_prepare_write(rooted_child.get()));
+    if (get_type_id(rooted_child.get()) == LMD_TYPE_ERROR) return ItemError;
+    if (rooted_child.get().item == pre_detach.item) return rooted_child.get();
+
+    // `cow_prepare_write` may collect. Reload the rooted map and its data
+    // before storing the detached child (D4.4.4v4, D5.3.1-4).
+    Map* live_owner = rooted_owner.get().map;
+    if (!live_owner || live_owner->type != expected_shape || !live_owner->data ||
+            !shape_entry_storage_fits_data(expected_field, live_owner->data_cap)) {
+        return ItemError;
+    }
+    void* field_ptr = map_field_ptr(live_owner->data, expected_field);
+    if (!map_shape_field_store_native_lane(field_ptr, expected_field,
+            rooted_child.get()) && !map_field_store(field_ptr, rooted_child.get(),
+            shape_entry_storage_type_id(expected_field))) {
+        return ItemError;
+    }
+    return rooted_child.get();
 }
 
 // S9.2.2 for builtin in-place mutators: the same spine detach as a `var`
