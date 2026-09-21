@@ -3737,21 +3737,45 @@ static bool jm_plain_constructor_source(JsFunctionNode* function) {
         function->node_type == AST_NODE_FUNC_EXPR);
 }
 
-static JsFunctionNode* jm_plain_constructor_for_prototype_method(
-        JsMirTranspiler* mt, JsFunctionNode* method) {
-    if (!mt || !mt->tp || !method || method->is_arrow) return NULL;
+static JsFunctionNode* jm_plain_constructor_for_new_call(JsMirTranspiler* mt,
+        JsCallNode* call) {
+    JsFunctionNode* direct = jm_resolve_direct_call_function(mt, call, true);
+    if (direct || !mt || !mt->tp || !call || !call->callee ||
+            call->callee->node_type != AST_NODE_IDENT) {
+        return direct;
+    }
     AstIndex* index = &mt->tp->ast_index;
-    JsAstNode* property = (JsAstNode*)ast_index_parent(index, (AstNode*)method);
-    if (!property || property->node_type != AST_NODE_PROPERTY ||
-            ((JsPropertyNode*)property)->value != (JsAstNode*)method) return NULL;
-    JsAstNode* object = (JsAstNode*)ast_index_parent(index, (AstNode*)property);
-    if (!object || object->node_type != AST_NODE_MAP) return NULL;
-    JsAstNode* assignment = (JsAstNode*)ast_index_parent(index, (AstNode*)object);
-    if (!assignment || assignment->node_type != AST_NODE_ASSIGN ||
-            ((JsAssignmentNode*)assignment)->right != object) return NULL;
-    JsMemberNode* target = ((JsAssignmentNode*)assignment)->left &&
-            ((JsAssignmentNode*)assignment)->left->node_type == AST_NODE_MEMBER_EXPR
-        ? (JsMemberNode*)((JsAssignmentNode*)assignment)->left : NULL;
+    JsIdentifierNode* alias = (JsIdentifierNode*)call->callee;
+    AstBindingId alias_id = ast_index_binding_id(index, (AstNode*)alias);
+    NameEntry* alias_entry = ast_index_binding(index, alias_id);
+    AstNode* alias_definition = ast_index_binding_definition(index, alias_id);
+    if (!alias_entry || !alias_entry->is_const || !alias_definition ||
+            ((JsAstNode*)alias_definition)->node_type !=
+                AST_NODE_VARIABLE_DECLARATOR ||
+            alias_definition->source_span.end_byte > call->source_span.start_byte) {
+        return NULL;
+    }
+    JsAstNode* initializer = ((JsVariableDeclaratorNode*)alias_definition)->init;
+    initializer = initializer ? (JsAstNode*)ast_unwrap_primary(
+        (AstNode*)initializer) : NULL;
+    if (!initializer || initializer->node_type != AST_NODE_IDENT) return NULL;
+    AstBindingId target_id = ast_index_binding_id(index, (AstNode*)initializer);
+    NameEntry* target_entry = ast_index_binding(index, target_id);
+    AstNode* target_definition = ast_index_binding_definition(index, target_id);
+    if (!target_entry || !target_definition) return NULL;
+    JsFunctionNode* target = jm_plain_constructor_function_for_binding(target_entry);
+    if (!target) return NULL;
+    if (((JsAstNode*)target_definition)->node_type == AST_NODE_FUNC) {
+        return jm_function_decl_is_direct_binding(target, false) ? target : NULL;
+    }
+    return target_entry->is_const &&
+            ((JsAstNode*)target_definition)->node_type ==
+                AST_NODE_VARIABLE_DECLARATOR
+        ? target : NULL;
+}
+
+static JsFunctionNode* jm_plain_constructor_for_prototype_target(
+        JsMemberNode* target) {
     if (!target || target->computed || !target->object || !target->property ||
             target->object->node_type != AST_NODE_IDENT ||
             target->property->node_type != AST_NODE_IDENT) {
@@ -3766,25 +3790,66 @@ static JsFunctionNode* jm_plain_constructor_for_prototype_method(
         ((JsIdentifierNode*)target->object)->entry);
 }
 
-static bool jm_plain_constructor_new_receiver_matches(JsMirTranspiler* mt,
-        JsAstNode* receiver, JsFunctionNode* constructor) {
-    receiver = receiver ? (JsAstNode*)ast_unwrap_primary((AstNode*)receiver) : NULL;
-    if (!receiver || !constructor) return false;
-    if (receiver->node_type == AST_NODE_NEW_EXPR) {
-        return jm_resolve_direct_call_function(mt, (JsCallNode*)receiver, true) ==
-            constructor;
+static JsFunctionNode* jm_plain_constructor_for_prototype_method(
+        JsMirTranspiler* mt, JsFunctionNode* method) {
+    if (!mt || !mt->tp || !method || method->is_arrow) return NULL;
+    AstIndex* index = &mt->tp->ast_index;
+    JsAstNode* property = (JsAstNode*)ast_index_parent(index, (AstNode*)method);
+    if (property && property->node_type == AST_NODE_PROPERTY &&
+            ((JsPropertyNode*)property)->value == (JsAstNode*)method) {
+        JsAstNode* object = (JsAstNode*)ast_index_parent(index, (AstNode*)property);
+        JsAstNode* assignment = object
+            ? (JsAstNode*)ast_index_parent(index, (AstNode*)object) : NULL;
+        if (!object || object->node_type != AST_NODE_MAP || !assignment ||
+                assignment->node_type != AST_NODE_ASSIGN ||
+                ((JsAssignmentNode*)assignment)->right != object) {
+            return NULL;
+        }
+        JsAstNode* left = ((JsAssignmentNode*)assignment)->left;
+        return left && left->node_type == AST_NODE_MEMBER_EXPR
+            ? jm_plain_constructor_for_prototype_target((JsMemberNode*)left) : NULL;
     }
-    if (receiver->node_type != AST_NODE_IDENT) return false;
+    JsAstNode* assignment = property;
+    if (!assignment || assignment->node_type != AST_NODE_ASSIGN ||
+            ((JsAssignmentNode*)assignment)->right != (JsAstNode*)method) {
+        return NULL;
+    }
+    JsAstNode* left = ((JsAssignmentNode*)assignment)->left;
+    JsMemberNode* method_target = left && left->node_type == AST_NODE_MEMBER_EXPR
+        ? (JsMemberNode*)left : NULL;
+    if (!method_target || method_target->computed || !method_target->property ||
+            method_target->property->node_type != AST_NODE_IDENT ||
+            !method_target->object ||
+            method_target->object->node_type != AST_NODE_MEMBER_EXPR) {
+        return NULL;
+    }
+    return jm_plain_constructor_for_prototype_target(
+        (JsMemberNode*)method_target->object);
+}
+
+static JsFunctionNode* jm_plain_constructor_for_new_receiver(JsMirTranspiler* mt,
+        JsAstNode* receiver, int alias_depth = 3) {
+    receiver = receiver ? (JsAstNode*)ast_unwrap_primary((AstNode*)receiver) : NULL;
+    if (!receiver) return NULL;
+    if (receiver->node_type == AST_NODE_NEW_EXPR) {
+        return jm_plain_constructor_for_new_call(mt, (JsCallNode*)receiver);
+    }
+    if (alias_depth <= 0 || receiver->node_type != AST_NODE_IDENT) return NULL;
     JsIdentifierNode* identifier = (JsIdentifierNode*)receiver;
     JsAstNode* definition = identifier->entry
         ? (JsAstNode*)identifier->entry->node : NULL;
     if (!definition || definition->node_type != AST_NODE_VARIABLE_DECLARATOR) {
-        return false;
+        return NULL;
     }
     JsAstNode* initializer = ((JsVariableDeclaratorNode*)definition)->init;
-    return initializer && initializer->node_type == AST_NODE_NEW_EXPR &&
-        jm_resolve_direct_call_function(mt, (JsCallNode*)initializer, true) ==
-            constructor;
+    return jm_plain_constructor_for_new_receiver(mt, initializer,
+        alias_depth - 1);
+}
+
+static bool jm_plain_constructor_new_receiver_matches(JsMirTranspiler* mt,
+        JsAstNode* receiver, JsFunctionNode* constructor) {
+    return constructor && jm_plain_constructor_for_new_receiver(mt, receiver) ==
+        constructor;
 }
 
 static int jm_plain_constructor_shape_static_field_use_count(
@@ -3867,8 +3932,8 @@ static void* jm_literal_shape_candidate_direct(void* owner, AstNode* node) {
         return jm_literal_shape_for_object(mt, (JsObjectNode*)node);
     }
     if (node->node_type == AST_NODE_NEW_EXPR) {
-        JsFunctionNode* constructor = jm_resolve_direct_call_function(mt,
-            (JsCallNode*)node, true);
+        JsFunctionNode* constructor = jm_plain_constructor_for_new_call(mt,
+            (JsCallNode*)node);
         return jm_plain_function_instance_shape_for_function(mt, constructor);
     }
     if (node->node_type == AST_NODE_IDENT) {
@@ -3882,6 +3947,11 @@ static void* jm_literal_shape_candidate_direct(void* owner, AstNode* node) {
                 memcmp(receiver->name->chars, "this", 4) == 0) {
             return jm_current_plain_prototype_instance_shape(mt);
         }
+        // Keep constructor aliases out of the shared generic traversal: a
+        // wider generic depth changes unrelated collection field plans.
+        JsFunctionNode* constructor = jm_plain_constructor_for_new_receiver(mt,
+            (JsAstNode*)receiver);
+        return jm_plain_function_instance_shape_for_function(mt, constructor);
     }
     return NULL;
 }

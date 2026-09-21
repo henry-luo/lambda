@@ -588,11 +588,26 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         if (item_is_error(harness_result)) return harness_result;
     }
     if (inline_module_source) {
+        // Test262 module jobs must honor the selected backend. Running their
+        // body through MIR after an AST harness crosses realm ownership and
+        // makes an AST-only result neither backend's semantics.
+        if (js_ast_interpreter_requested()) {
+            return js_interp_execute_es_module_source(runtime, source, source_len,
+                filename, result_home);
+        }
         return transpile_js_module_to_mir(runtime, source, filename);
     }
-    if (test262_native_harness && js_ast_interpreter_requested()) {
-        return transpile_js_to_mir_test262_native_len(runtime, source, source_len,
-            filename, result_home);
+    if (js_ast_interpreter_requested()) {
+        // The harness and its test body must share the requested execution
+        // engine. Compiling a classic test body through MIR here made
+        // `--ast-only` a mixed-backend run.
+        Item result = js_interp_execute_test262_source(runtime, source, source_len,
+            filename, test262_native_harness, result_home);
+        // The retained AST executor returns at script completion; finish its
+        // host turn before Test262 observes the async $DONE sentinel.
+        js_event_loop_drain_script_turn(runtime && runtime->dom_doc != NULL,
+            true);
+        return result;
     }
     if (has_preamble) {
         return transpile_js_to_mir_with_preamble_len(runtime, source, source_len,

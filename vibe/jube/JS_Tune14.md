@@ -1,6 +1,6 @@
 # JS Tune14 — Shared native regions and cheaper ordinary operations
 
-**Version:** 1.4.30
+**Version:** 1.5.0
 
 **Date:** 2026-09-21
 
@@ -31,10 +31,20 @@ QuickJS geomean is 1.120086, while MVP is intentionally unavailable to release
 measurement. T14-7 now reuses immutable definition source across MIR closures
 with an accepted Havlak replay. Its strict-receiver call entry reaches Havlak
 but has only an inconclusive paired result, so it remains an open residual.
-The remaining T14-0 through T14-8 outcomes
-remain open; this is not a performance acceptance record.
+Plain-function constructor prefixes, bounded local aliases, one immutable
+constructor alias and separately assigned prototype methods are now implemented
+with semantic/GC coverage, but have no accepted paired performance result.
+The scope reassessment in §1.2 prioritizes measured search and property costs,
+defers the general region framework and uncommon specialization extensions,
+and retains correctness and release-measurement closeout. These dispositions
+do not mark the remaining packages complete. The latest Lambda baseline is
+not green (§6); this is not a final performance acceptance record.
 
-**Source audit:** `c5052085ce91026edd94c50cf89c4fd0e539c2ec`.
+**Initial source audit:** `c5052085ce91026edd94c50cf89c4fd0e539c2ec`.
+
+**Scope reassessment:** 2026-09-21, source tree
+`9cf661cdef300351b823577221173cfe7a67ce98`; recorded C14 and paired results
+reviewed without collecting new timings.
 
 **Scope:** full LambdaJS MIR Direct compilation, its runtime operations, and
 shared compiler/runtime primitives where a measured cause requires changes.
@@ -50,26 +60,34 @@ This implementation plan lives at the owner's requested `vibe/jube/` path.
 
 ## 1. Objective and implementation decision
 
-Make common full-JavaScript operations small enough that native execution
-consistently beats QuickJS across the canonical benchmark population and
-approaches the synchronous MVP's performance, while preserving full JS semantics.
+Reduce common full-JavaScript execution costs and beat QuickJS across the
+canonical benchmark population while preserving full JS semantics. The MVP
+comparison remains an optional, currently unverified milestone until a valid
+release comparator exists; its availability is not a Tune14 implementation task.
 
-The next unit of optimization is a **complete native region**: entry facts,
-local values, indices, loads, arithmetic, comparisons, updates, stores and exits
+For a measured hot loop, the useful unit of optimization is a **complete native
+region**: entry facts, local values, indices, loads, arithmetic, comparisons,
+updates, stores and exits
 retain their useful representations together. Merely emitting a native function
 variant, adding a fast helper, or removing one runtime query does not meet this
 objective when surrounding operations still box, resolve names, publish roots
 and call generic helpers on every iteration.
 
-The implementation order is:
+The revised implementation order is:
 
-1. Establish a fresh fixed control and repair the confirmed Navier regression.
-2. Complete Number inference and native local updates.
-3. Complete ordinary/typed array regions and reuse proofs within valid effects.
-4. Broaden ordinary fields, NameId continuity and cheap property inspection.
-5. Finish measured compiler-memory/startup work inherited from Tune13.
-6. Address remaining built-in, call and allocation costs when profiles support
-   them, then close the full correctness and performance gates.
+1. Measure the unaccepted constructor/alias and receiver-call changes against
+   their exact predecessors; resolve baseline failures or establish their
+   pre-change provenance without calling a failing gate complete.
+2. Refresh the complete release matrix and profiles on an identified current
+   candidate, retaining C14 as the fixed cumulative control.
+3. Address the strongest measured search-loop cost with bounded Number and
+   ordinary-array producer/consumer coverage.
+4. Address the strongest measured property, name, descriptor or allocation
+   cost; expand constructor coverage only after its landed slice pays off.
+5. Attribute cold/startup/RSS costs and implement diagnosed scaling fixes.
+   Give other candidates an evidence-backed no-change or deferred disposition.
+6. Close the native-contract, reuse, correctness and full-matrix gates. Further
+   specialization is not required merely to exhaust a list of possible cases.
 
 This plan changes no semantic, execution-policy or ownership ruling. It uses
 the existing MIR backend, `Item`, `MirValue`, `FnAnalysis`/`FnVariantAnalysis`,
@@ -93,6 +111,70 @@ indexed binding facts, helper catalog, property kernels and precise-root model.
 Sources: [formal design](../../doc/Lambda_Formal_Design.md),
 [formal semantics](../../doc/Lambda_Formal_Semantics.md), and
 [documentation convention](../../doc/Doc_Convention.md).
+
+### 1.2 Scope reassessment — 2026-09-21
+
+This section and the revised package exits govern the remaining work. Earlier
+implementation and experiment records below remain evidence for their named
+sources and binaries, not measurements of the latest tree.
+
+The paired results support extending useful fast-path coverage and removing
+repeated work. Candidate/control ratios are 0.183468 for quicksort parameter
+admission, 0.357866 for Navier companion dense reads and 0.548164 for recursive
+binarytrees records. Three Richards setup reductions each save about 2.6–3.3%,
+and shared closure source saves 3.9% on Havlak. In contrast, the copy-store
+experiment is 9.3% slower, the raw-receiver companion leaf is 1.5% slower,
+and several Number-update experiments do not establish a gain. Their exact
+predecessors differ; these ratios cannot be added into an aggregate speedup.
+
+Recalculation from the durable [C14 matrix](../../test/benchmark/js_mvp/tune14/c14_session1.json)
+gives this cost distribution. It is the recorded complete control, not a fresh
+ranking of the latest implementation.
+
+| Workload | C14 LambdaJS workload time | Share of summed LambdaJS time | LambdaJS / QuickJS |
+|---|---:|---:|---:|
+| `text/text_search` | 59,339.234 ms | 47.76% | 1.518x |
+| `text/log_pipeline` | 14,248.852 ms | 11.47% | 1.500x |
+| `awfy/havlak` | 13,869.436 ms | 11.16% | 4.232x |
+| `text/three_way_merge` | 9,958.395 ms | 8.02% | 1.625x |
+
+These four rows account for 78.41% of summed workload time. Separately,
+`text/microdiff` is 7.49x QuickJS and `jetstream/hashmap` is 4.63x, supporting
+targeted property-cost investigation. Historical priorities have changed:
+in C14, `diviter` is 609.820 ms versus QuickJS's 26,555.423 ms, and quicksort is
+17.659 ms versus 19.405 ms. Preserve those gains as controls; a further
+extension needs a newly measured cost. Navier retains its density oracle and
+184.661 ms C14 observation, not an obligation to beat an invalid R46 control.
+
+Track both aggregate measures in §5.2. Hypothetically halving search alone
+would reduce the C14 time sum by 23.88%, but improve the equally weighted
+63-row geomean by only 1.09%. Neither is a prediction. C14's full-JS/QuickJS
+geomean is 1.120086; isolated package wins do not establish the latest ratio.
+
+| Work | Disposition | Evidence required before further implementation |
+|---|---|---|
+| T14-2/3 search Number/array coverage | Highest implementation priority | Current hot-loop profile, admission/refusal map and a bounded missing producer/consumer path. |
+| T14-5 names, descriptors and common fields | Targeted investigation | Attribute repeated conversion, allocation or lookup on Havlak, microdiff, hashmap and relevant text workloads. |
+| Landed constructor/alias and T14-7 receiver-call slices | Measure before expansion | Dynamic hit/miss or helper-traffic evidence, exact paired releases, code/compile cost and semantic parity. |
+| T14-4 general region witness; general capture/alias/range analysis | Deferred | Reopen for one bounded loop only if metadata or proof limitations remain a material measured cost after simpler coverage work. |
+| Uncommon constructors, more typed-array kinds, additional FFT store paths | Conditional; no blanket coverage obligation | Demonstrated hot use, an explicit semantic proof and paired benefit. |
+| T14-6 compiler/startup/memory | Required measurement; conditional implementation | Phase/owner attribution and scaling evidence before changing planners or storage. |
+| T14-7 remaining built-ins/allocation/calls | Conditional | A measured residual and a bounded change; no-change/deferred dispositions are valid. |
+| T14-0/1/8 correctness, controls and acceptance | Required closeout | Valid semantic controls, failure attribution, final baselines, durable full matrices and native-entry/reuse evidence. |
+
+Correct behavior for descriptors, proxies, constructor escape/returns,
+subclasses and prototype mutation remains mandatory. Optimizing each case is
+optional: a tested miss into the full property kernel satisfies the semantic
+boundary (**S1.11**, **D8.4.1v2**). Deferred specialization is not missing JS
+functionality. Existing implementation and required fallback tests cannot be
+declared complete solely because an extension is deferred.
+
+For each new candidate, record the current cost, expected general mechanism,
+existing owner, proof boundary and paired result. Keep low-complexity measured
+wins; retire unsuccessful performance-only additions while preserving any
+independently necessary correctness repair. Reopen rejected experiments only
+with a different causal hypothesis. A no-change decision needs measurement;
+a deferral records its cost/risk rationale and concrete reopening condition.
 
 ## 2. What Results 46/47 establish
 
@@ -123,14 +205,14 @@ the selected JS sources replace `process.hrtime.bigint()` timing with
 requires an explicit new manifest and fresh comparison, not an overwritten v1
 acceptance record. Selected JS sources did not change between Results46 and 47.
 
-### 2.1 Priority workloads
+### 2.1 Historical priority workloads
 
 QuickJS and MVP columns in this table are historical comparators, not a
-same-session Result47 comparison.
+same-session Result47 comparison. Use §1.2 for the revised priorities.
 
 | Workload | JS46 | JS47 | QuickJS46 | MVP session 2 | Why it matters |
 |---|---:|---:|---:|---:|---|
-| `jetstream/navier_stokes` | 213.933 | 565.384 | 99.084 | 57.513 | Confirmed 2.646x archived-binary regression; numeric/indexed code expansion. |
+| `jetstream/navier_stokes` | 213.933 | 565.384 | 99.084 | 57.513 | Historical 2.646x timing observation; R46 later fails the stronger semantic oracle (§2.4). |
 | `larceny/diviter` | 16,262.958 | 12,688.846 | 33,091.976 | 688.598 | 9.38% of JS47 median sum; incomplete Number inference and updates. |
 | `text/text_search` | 57,560.615 | 53,625.015 | 38,949.416 | 22,254.900 | 39.63% of median sum; character-code array loops remain partly generic. |
 | `awfy/havlak` | 22,277.617 | 14,336.525 | 4,446.140 | 7,719.698 | 10.59% of median sum; object/name/field coverage. |
@@ -307,20 +389,21 @@ QuickJS wrapper, so all three engines execute the same manifest descriptor.
 
 ## 3. Tune13 carryover: retain the unfinished outcomes
 
-**Yes: substantial Tune13 work is worth carrying forward.** Carry the remaining
-outcomes and validation debt, not a fresh implementation of mechanisms already
-present. Tune13 remains a partial historical implementation record; creating
-this plan does not mark it complete.
+Carry forward Tune13's correctness and validation debt, and the measured
+optimization candidates selected by §1.2. The remaining mechanism proposals are
+conditional, not a requirement to finish every specialization. Tune13 remains
+a partial historical implementation record; this reassessment does not mark
+it complete.
 
 | Tune13 package | Already present / retain | Outstanding work worth carrying | Tune14 owner and priority |
 |---|---|---|---|
-| T13-0: controls and census | Historical matrices, opt-event infrastructure, focused profiles. | Actual starting-tree control; fresh full-JS/MVP/QuickJS population; correct source/binary provenance; dynamic refusal/miss and phase/owner census. | T14-0, required first. |
+| T13-0: controls and census | Historical matrices, opt-event infrastructure, focused profiles. | Current-candidate and fixed C14 controls; full-JS/QuickJS population; source/binary provenance; focused dynamic and phase/owner evidence. MVP stays conditional on release availability. | T14-0, required closeout. |
 | T13-1: native-only MIR | Main native compilation paths and JS `--mir-interp` rejection. | Full entry/lifetime matrix and actual-backend evidence. Audit the remaining document-module size branch described below. | T14-0 inventory and T14-8 conformance gate. |
 | T13-2: compiler scaling | Call-only root liveness storage; compact admitted numeric-array literal construction. | Quantify remaining interference/IR/native-generation peaks; scaling evidence, retained-context lifetimes and measured initializer expansion. | T14-6, required census and disposition; implement diagnosed costs. |
-| T13-3: native arrays | Parameter/local dense candidates; typed read snapshot; guarded Number-store leaf; native variants. | End-to-end producer/consumer coverage, native updates, mixed parameter facts, missing typed kinds, real search/FFT hits. | T14-2/3, highest tuning priority. |
-| T13-4: reuse metadata | Dense `reduce` read and pre-rooted callback span with revalidation. | General effect-bounded length/data/receiver witnesses; correct alias kills and reuse across several operations. | T14-4, high priority. |
-| T13-5: names/descriptors | One-pass classifier, fewer catalog probes, one outer dynamic-key canonicalization, ordinary enumerability inspection, lazy pending-function metadata. | End-to-end NameId continuity, remaining conversion/miss census, enumeration coverage and broad workload evidence. | T14-5, high priority. |
-| T13-6: fields/calls | Predicted field infrastructure, light MIR calls, receiver-only bound-argument forwarding. | Constructor/returned-record field coverage and native field consumers. Further call changes need separately attributed cost. | Fields in T14-5 required; further call tuning in T14-7 conditional. |
+| T13-3: native arrays | Parameter/local dense candidates; typed read snapshot; guarded Number-store leaf; native variants. | Search producer/consumer coverage selected by current profiles; further typed kinds and FFT stores only with measured need. | T14-2/3, search first. |
+| T13-4: reuse metadata | Dense `reduce` read and pre-rooted callback span with revalidation. | Preserve revalidation; reopen a bounded region witness only for a measured repeated-query cost. | T14-4, general framework deferred. |
+| T13-5: names/descriptors | One-pass classifier, fewer catalog probes, one outer dynamic-key canonicalization, ordinary enumerability inspection, lazy pending-function metadata. | Attribute remaining NameId reconstruction and descriptor allocations; preserve enumeration semantics in every admitted path. | T14-5, targeted investigation. |
+| T13-6: fields/calls | Predicted field infrastructure, light MIR calls, receiver-only bound-argument forwarding. | Measure landed constructor/alias coverage and receiver-call entry; native field consumers are a candidate if hits are frequent. | T14-5/7, evidence before expansion; uncommon cases deferred. |
 | T13-7: strings/RegExp | Existing bulk paths and URI-cache admission narrowing. | Reprofile regexredux/revcomp/Hyphen; immutable classifier ownership and UTF-16 indexing only if measured. | T14-7, conditional implementation with required disposition. |
 | T13-8: ownership/closeout | Intrusive external-array ownership and a narrow GC-data allocation path. | Allocation/GC attribution, regression resolution, full baselines, paired/full matrix, cold/RSS evidence and cleanup. | T14-6/7/8; final gates mandatory. |
 
@@ -351,7 +434,7 @@ CLI path alone. No backend-policy change is proposed here.
 
 ### 3.2 Alignment with untyped Lambda: reuse the optimization, retain the semantics
 
-**Further alignment is a required part of Tune14.** Full LJS and untyped Lambda
+**Reuse remains required for selected implementation work.** Full LJS and untyped Lambda
 already share enough infrastructure that a second JS-specific implementation
 of each physical optimization is unnecessary. The useful boundary is:
 
@@ -384,9 +467,11 @@ scalar loop-invariant hoisting. Extend these owners; do not introduce another
 JS optimization framework, parallel fact database or native-value ABI
 (**D1.3v3**, **D8.2.3–D8.2.6**, **D5.3.4**).
 
-The outstanding work is incomplete use of these shared mechanisms plus some
-physical emission still embedded in profile code. Sharing a header alone is
-insufficient: the useful native producer and consumer must both reach it.
+The original source-owner map below records incomplete use of shared mechanisms
+and physical emission embedded in profile code. Later package updates record
+completed migrations; §1.2 governs which remaining extensions are worth doing.
+Sharing a header alone is insufficient: the useful native producer and consumer
+must both reach it.
 
 | Area and current source evidence | Reuse decision | Tune14 owner |
 |---|---|---|
@@ -419,8 +504,9 @@ rewrite. Land each at the point its two clients and measured need exist.
 **A. Numeric facts and physical representations — T14-2.**
 
 1. Trace an unannotated Lambda parameter-to-alias-to-update chain alongside
-   the `diviter` JS chain. Record current candidate discovery, variant admission,
-   actual representation and the first consumer that materializes an Item.
+   the selected hot JS loop; retain `diviter` as a control. Record candidate
+   discovery, variant admission, actual representation and the first consumer
+   that materializes an Item.
 2. Use the indexed binding/use/def relationships for the new dependency
    propagation. If both profiles need the same propagation mechanics, extract
    those mechanics and replace the corresponding existing core path in the
@@ -474,6 +560,9 @@ widening/COW or view-conversion rules. Use the same machinery for both operand
 orders and compound updates instead of adding a new lowering family per shape.
 
 **C. Region proofs and hoisting — T14-4.**
+
+The mutable-storage work below is deferred under §1.2. It defines the proof
+obligations if a bounded experiment is reopened, not an unconditional deliverable.
 
 Keep the already-shared scalar hoister for immutable scalar observations.
 Its current admission requires a registered pure/loop-stable scalar call,
@@ -589,19 +678,20 @@ replace it, and they do not require a semantic or formal-design rule change.
 | Package | Outcome | Dependencies |
 |---|---|---|
 | T14-0 | Fixed controls, population/oracle repair, census and backend inventory | None |
-| T14-1 | Diagnose the Navier observation and resolve a valid regression | T14-0 |
-| T14-2 | Complete Number facts, native local updates and profitable admission | T14-0; preserve T14-1 evidence |
-| T14-3 | End-to-end ordinary/typed array native regions | T14-2 |
-| T14-4 | Effect-bounded proof and metadata reuse | T14-3 |
-| T14-5 | NameId continuity and broader guarded field/enumeration coverage | T14-0; reuse T14-2/3 carriers |
+| T14-1 | Preserve Navier correctness and close valid-control regression evidence | T14-0 |
+| T14-2 | Bounded Number facts that unlock measured hot-loop coverage | T14-0; preserve T14-1 controls |
+| T14-3 | Search-first native producer/consumer coverage | T14-0 profiles; T14-2 only where facts are missing |
+| T14-4 | Deferred region reuse; bounded experiment only after measured need | T14-3 and a material repeated-query cost |
+| T14-5 | Measure landed fields; remove attributed name/descriptor costs | T14-0; reuse existing carriers |
 | T14-6 | Measured compiler/startup/memory scaling improvements | T14-0; remeasure after MIR-changing packages |
 | T14-7 | Profile-gated built-in, allocation and call residuals | Relevant T14-2–6 packages |
 | T14-8 | Native contract audit, consolidation and full acceptance | All required packages and conditional dispositions |
 
-T14-1 investigation comes first, but its fix may be a narrowly isolated portion
-of T14-2/3. Do not force a temporary rollback merely to satisfy package order.
-Keep each causal experiment against its immediate predecessor and the fixed
-starting control. Source, semantic tests and measurements travel together.
+Follow §1.2: measure unaccepted changes and refresh the current matrix before
+selecting more implementation. T14-1 remains a correctness/regression control;
+it does not require completing general closure-aware numeric regions.
+Keep each causal experiment against its immediate predecessor and C14.
+Source, semantic tests and measurements travel together.
 Apply §3.2–3.5 within each package: reuse/extraction is part of its delivery,
 with explicit untyped Lambda consumers and controls where common code changes.
 
@@ -631,14 +721,17 @@ events in `lambda/js/js_exec_profile.{h,cpp}`, and helper-effect metadata.
   Node, LambdaJS and QuickJS pass it. Run every later archive through the same
   descriptor before acceptance. Any wrapper change remains versioned and
   applies to every relevant engine.
-- [~] Run fresh full-JS/MVP/QuickJS/Node controls in the same session. C14 has
+- [~] Run fresh full-JS/QuickJS/Node controls in the same session. C14 has
   63 `ok` full-JS, QuickJS and Node cells and records each MVP `exit_9` instead
-  of dropping it; release MVP is debug-only and cannot supply valid performance
-  timings. Keep native Lambda/C ports as secondary physical-backend references
-  and collect a second independent full session for any cross-engine claim.
+  of dropping it. MVP is debug-only in that build: retain the unavailable status
+  and measure it only if a valid release comparator later exists. Keep native
+  Lambda/C ports as secondary physical-backend references and collect a second
+  independent full session for any claimed cross-engine milestone.
 - [ ] Produce separate execution, parse/analysis/lowering, native generation,
-  teardown and peak-memory censuses. Sample the executing worker after startup;
-  a compiler/teardown sample is not evidence for guest-loop cost.
+  teardown and peak-memory measurements on the selected hot and compile-heavy
+  workloads. Expand attribution only where a material cost remains unexplained.
+  Sample the executing worker after startup; a compiler/teardown sample is not
+  evidence for guest-loop cost.
 - [ ] Extend existing opt diagnostics only as needed: refusal reasons, native
   producer/consumer continuity, guard hits/misses, NameId reconstruction,
   descriptor materialization, repeated metadata queries, helper calls,
@@ -681,7 +774,7 @@ generic helper bookkeeping without a demonstrated benefit.
 has a non-vacuous correctness oracle and an evidence category: confirmed cause,
 structural gap, sampled hypothesis, or not yet measured.
 
-### T14-1 — Resolve Navier's regression without discarding semantic fixes
+### T14-1 — Preserve Navier correctness and close valid-control evidence
 
 **Primary files:** `js_mir_expression_lowering.cpp`,
 `js_mir_function_collection_class_inference.cpp`,
@@ -690,16 +783,17 @@ structural gap, sampled hypothesis, or not yet measured.
 
 #### Structural trace — 2026-09-19
 
-The current release MIR shows that `lin_solve`, `lin_solve2`, `advect`,
-`project`, `set_bnd` and `addFields` have only boxed `_body` functions, with
+The release MIR at the 2026-09-19 audit showed that `lin_solve`, `lin_solve2`,
+`advect`, `project`, `set_bnd` and `addFields` had only boxed `_body` functions, with
 no `_n` variant. Each captures mutable solver state (`width`, `height`,
-`rowSize`, `iterations` or related fields), while current native-entry
-admission deliberately requires zero captures. Their hot loops consequently
-retain `js_to_numeric`, `js_increment`, generic arithmetic and generic ordinary
+`rowSize`, `iterations` or related fields), while native-entry
+admission at that audit deliberately required zero captures. Their hot loops
+retained `js_to_numeric`, `js_increment`, generic arithmetic and generic ordinary
 array operations. This is a structural admission gap, not evidence that the
-landed direct-local update regressed Navier. A closure-aware ABI and an
-effect-valid ordinary-array region belong to T14-2/T14-3; they must preserve
-live captured bindings and ordinary-array semantics (**D2.4.1–D2.4.3**,
+landed direct-local update regressed Navier. A closure-aware ABI and a general
+ordinary-array region are now deferred, not required follow-ups to that trace.
+Any reopened work must preserve live captured bindings and ordinary-array
+semantics (**D2.4.1–D2.4.3**,
 **D3.3.3v3**, **D8.2.4–D8.2.6**).
 
 - [~] Reproduce archived R46/R47 with the stronger oracle from T14-0. R46 and
@@ -707,29 +801,24 @@ live captured bindings and ordinary-array semantics (**D2.4.1–D2.4.3**,
   JSON records and do not treat R46 as a semantic recovery control. C14 remains
   a separate starting-tree artifact because later native-fact work can change
   generated code without explaining the historical observation.
-- [ ] Diff finalized MIR by function and semantic operation. Count instructions,
-  static calls, guard branches, box/unbox sequences, scalar homes, roots and
-  safepoints; measure native bytes/spills where available. Focus first on
-  `lin_solve`, `lin_solve2`, `advect`, `project` and `addFields`.
-- [ ] Profile actual hot paths and determine whether time is spent in redundant
-  guards/conversions, fallback frequency, generic operations, root publication,
-  native spills/code size, or a runtime helper regression.
-- [ ] Bisect or ablate independently while retaining the repaired generic
-  BigInt path. Capture a small semantic reproducer for the responsible lowering
-  shape. A larger MIR dump alone is not sufficient causal attribution.
-- [ ] Fix the admitted operation/region. Keep unknown sites compact; evaluate
-  operands once and preserve error/ownership joins. A size/profitability rule
-  must use general code/effect facts, never a workload/function-name whitelist.
-- [ ] Pair a fix with R47 and C14, plus only a recovery reference that passes
-  the same oracle. Run search, FFT, numeric controls and mixed/exotic misses to
-  detect displaced cost.
+- [~] Retain the companion-read cause and accepted 31-pair result in T14-3:
+  515.726 to 184.561 ms with the frame-15/density oracle. Preserve the evaluated
+  Reference repair and generic BigInt behavior.
+- [ ] Validate the final candidate with the same oracle and include Navier in
+  the final C14 paired matrix. Record the valid-control residual and investigate
+  any new repeatable regression, including displaced cost in search, FFT and
+  numeric controls.
+- [ ] If that comparison exposes a new regression, use finalized MIR, dynamic
+  profiles and isolated ablation to identify it before changing code. Counts of
+  boxed kernels alone do not require another optimization or a closure ABI.
 
-**Exit:** the causal change is identified, the reproducer remains correct, the
-2.646x loss is removed or any remaining delta has a measured explanation, and
-the full-JS semantic repair remains intact. A remaining unexplained confirmed
-regression prevents closing this package.
+**Exit:** the final candidate preserves the Reference and density checks,
+accepted companion-read evidence is archived, and valid-control regressions
+have a disposition. The historical 2.646x R47/R46 timing observation is not a
+recovery target because R46 fails the stronger oracle. General capture-aware
+numeric/array specialization is deferred unless a new profile justifies it.
 
-### T14-2 — Complete Number facts and native local updates
+### T14-2 — Target Number facts and native updates at measured gaps
 
 **Primary symbols:** `jm_infer_indexed_node`, `jm_infer_param_types`,
 `jm_populate_numeric_binding_facts`, `jm_numeric_binding_type`,
@@ -739,6 +828,11 @@ regression prevents closing this package.
 **Reuse requirement:** §3.3A. Reuse common numeric operation selection and
 variant carriers; converge dependency mechanics with core untyped inference.
 Extract equivalent nonnullable boxing only with both live callers migrated.
+
+**Disposition:** selective implementation for measured search or other hot-loop
+gaps. General capture/alias graphs, integer range analysis and blanket variant
+expansion are deferred. The checklists below describe proof obligations for
+selected changes; they do not require every possible admission extension.
 
 #### Implementation update — 2026-09-19: shared F64 boxing, native updates and direct assignment-alias evidence
 
@@ -888,8 +982,8 @@ receives Numbers.
 - [~] Express numeric-use dependencies using resolved binding identity and the
   existing function-owned index. Immediate-body source-ordered declaration and
   assignment aliases, including direct-write invalidation, are implemented;
-  propagate comparisons, joins and other dependencies with a bounded fixed
-  point and explicit refusal on unsupported/ambiguous joins.
+  extend comparisons/joins only where the current profile identifies a useful
+  blocked path, with bounded propagation and refusal on ambiguous joins.
 - [~] Establish all required Number guards before specialized effects. The
   current edge relies on the existing native-entry F64 guards; preserve
   the exact original values on the generic entry, including missing arguments,
@@ -902,8 +996,9 @@ receives Numbers.
   pre-repair publication of speculative F64 facts into the generic boxed body.
   Separately derived unconditional facts may apply there only with their own
   sound proof (**D3.3.2v2**, **D2.4.1–D2.4.3**).
-- [ ] Broaden admission beyond numeric return types where local regions justify
-  it. Explain zero-numeric-parameter and capture-bearing refusals; admit only
+- [ ] **Conditional:** broaden admission beyond numeric return types where a
+  measured local region justifies it. Record zero-numeric-parameter and
+  capture-bearing refusals; admit only
   effect/entry shapes supported by the existing ownership contract, rather than
   removing eligibility restrictions globally.
 
@@ -931,14 +1026,16 @@ captured updates, `eval`/`with`, coercion throwing once, BigInt, signed zero,
 NaN/infinities and large Number rounding. Add a compact `diviter`-shaped fixture
 whose hot loop's MIR excludes generic arithmetic/update helpers.
 
-**Targets/controls:** `diviter`, `mbrot`, search induction and quicksort;
-preserve `sum`, `sumfp`, `fib`, `fibfp`, `mandelbrot`, `collatz` and `pidigits`.
+**Targets/controls:** search induction and any newly attributed Number cost;
+retain `diviter`, quicksort, `mbrot`, `sum`, `sumfp`, `fib`, `fibfp`,
+`mandelbrot`, `collatz` and `pidigits` as controls.
 
-**Exit:** both diviter kernels have appropriate guarded native coverage, the
-proved loop updates/arithmetic stay native, generic calls preserve full JS
-behavior, and paired release evidence supports the improvement.
+**Exit:** selected hot-loop gaps have measured improvements or explicit
+no-change/deferred dispositions, with generic parity and native continuity
+verified for retained changes. Existing diviter gains are preserved; further
+diviter or general inference expansion is not a completion requirement.
 
-### T14-3 — Complete ordinary and typed array regions
+### T14-3 — Extend native array coverage, search first
 
 **Primary symbols/files:** `jm_is_array_literal_candidate`,
 `jm_emit_packed_array_read_impl`, `jm_emit_fixed_typed_array_load_number`,
@@ -950,6 +1047,10 @@ dense/typed store helpers in `js_runtime.cpp`.
 index path and pair its Lambda consumer with the JS access consumer. Keep
 semantic access policies outside the shared leaf; extend existing address and
 storage primitives before adding another helper.
+
+**Disposition:** search is the first implementation target. Preserve landed
+quicksort/Navier coverage; additional typed kinds, FFT stores and write-path
+splits require fresh evidence of material hot traffic.
 
 #### Implementation update — 2026-09-19: core physical addresses use the existing shared leaf
 
@@ -1368,9 +1469,10 @@ lower helper count alone does not establish a faster public semantic operation:
 the completed ECMAScript conversion must remain the shared fallback (**S1.11**,
 **D1.3v3**).
 
-- [ ] Produce an admission/refusal map for all three search algorithms, FFT
-  `four1`, Navier's inner functions and quicksort `partition`. Account separately
-  for receiver kind, key, element value, operator, local join and destination.
+- [ ] Produce a current admission/refusal map for all three search algorithms.
+  Use FFT `four1`, Navier's inner functions and quicksort `partition` as
+  controls; deepen their analysis only for a measured residual or regression.
+  Account for receiver kind, key, element value, operator, join and destination.
 - [~] Extend producer/consumer continuity to both operand positions and nested
   expressions. The admitted typed-view Number shape now shares one lowering for
   both operand orders and preserves the already-evaluated reference on a miss.
@@ -1379,9 +1481,9 @@ the completed ECMAScript conversion must remain the shared fallback (**S1.11**,
 - [ ] Keep numeric lengths/indices, loaded Numbers, arithmetic/comparison
   results and writable destinations native. Materialize Items at actual generic
   consumers, representation merges, boxed ABI edges or semantic misses.
-- [ ] Wire the existing guarded Number-store leaf into admitted FFT stores.
-  Explain each surviving boxed setter; presence of a leaf in the registry is
-  not evidence that the workload uses it.
+- [ ] **Conditional:** wire the existing Number-store leaf into FFT stores if
+  executed boxed setters remain a material cost. Presence of a leaf in the
+  registry or a setter in MIR does not establish dynamic cost.
 - [~] Reuse one physical typed-access plan for supported element kinds.
   `Int32Array` now covers quicksort's signed loads and exact runtime ToInt32
   stores through guarded direct-call forwarding. Add other kinds only with
@@ -1392,9 +1494,9 @@ the completed ECMAScript conversion must remain the shared fallback (**S1.11**,
   numeric overlays, holes and scalar-home values before the generic Get. Extend
   this only with an equally local proof; it is not a certificate that every
   element of an aliased tagged array is numeric.
-- [ ] Separate overwriting an existing writable slot from creating/growing a
-  property so the former does not inherit irrelevant growth checks. Retain the
-  established scalar-home/store ownership primitive.
+- [ ] **Conditional:** separate existing-slot overwrites from property growth
+  if profiles show repeated irrelevant growth checks. Retain the established
+  scalar-home/store ownership primitive.
 - [ ] Keep index semantics exact: numeric `-0`, string `"-0"`, fractions,
   NaN/infinities, bounds, holes, detached/resizable views and coercing stores.
   Receiver/source hints select a guarded arm, never prove a runtime brand.
@@ -1404,12 +1506,13 @@ ordinary mixed arrays; holes with inherited getters; descriptor changes;
 proxy/host/wrong-brand receivers; detached/resized views; coercing RHS; thrown
 keys; signed and wrapping Int32 stores; fast/miss ownership joins under GC.
 
-**Exit:** the diagnosed search and FFT regions consume native values through
-their hot operations, Int32Array quicksort has guarded coverage, and dynamic
-hit/miss evidence plus paired release measurements confirm benefit. List any
-remaining boxed operations explicitly. Helpers on cold miss arms are allowed.
+**Exit:** measured search gaps have retained improvements or evidence-backed
+dispositions; dynamic hits/misses and paired releases support every new retained
+path. Existing Int32Array, FFT and Navier gains survive the controls. Further
+typed kinds and FFT/store extensions may be deferred with reopening criteria.
+List remaining boxed hot operations and their costs; cold misses remain valid.
 
-### T14-4 — Reuse guards and metadata within valid effect regions
+### T14-4 — Deferred: reuse metadata within valid effect regions
 
 **Primary files:** existing loop/effect analysis,
 `lambda/runtime/mir_loop_invariants.hpp`, array lowering and helper catalog.
@@ -1417,6 +1520,12 @@ remaining boxed operations explicitly. Helpers on cold miss arms are allowed.
 **Reuse requirement:** §3.3C. Extend the common scalar hoister for scalar
 invariants; converge memory-witness handling separately. Do not copy Lambda's
 typed dense-loop scanner and treat its conclusions as JS admission facts.
+
+**Disposition: DEFERRED.** A general memory-witness framework is not required
+for Tune14 closeout. Reopen one bounded loop only if the post-T14-3 profile
+attributes material cost to repeated metadata queries/guards, and simpler
+operation-local changes cannot remove it. The conditions below remain mandatory
+if that experiment is selected (**D3.3.3v3**, **D5.3.1–D5.3.5**).
 
 **2026-09-21 audit disposition:** LambdaJS already calls the shared
 `em_hoist_loop_scalar_calls` helper. Its registered admission requires a pure,
@@ -1448,16 +1557,24 @@ does not satisfy this package's measured-benefit requirement (**S1.11**,
   predecessor, not only against C14. Bound guard/code expansion for miss-heavy
   loops and preserve compact generic lowering where specialization is unhelpful.
 
-**Exit:** at least the diagnosed ordinary-array search and typed FFT regions
-reuse justified metadata beyond a single leaf call, with invalidation fixtures,
-fewer executed queries and no rooting/evaluation-order regression.
+**Exit/disposition:** retain the audit and this explicit deferral with its
+reopening condition. If reopened, accept only a bounded witness with fewer
+executed queries, paired benefit, invalidation fixtures and preserved rooting
+and evaluation order. A general witness or whole-loop versioning framework is
+not an additional delivery requirement.
 
-### T14-5 — Preserve names and broaden guarded ordinary fields
+### T14-5 — Measure guarded fields and target property costs
 
 **Primary files:** `lambda/core/name_pool.cpp`, `js_props.cpp`,
 `js_property_attrs.cpp`, `js_runtime.cpp`, `js_globals.cpp`, and
 `jm_plan_predicted_literal_field` with the existing `MirFieldAccessPlan` and
 shape-candidate planner.
+
+**Disposition:** measure landed constructor/alias coverage before expanding it.
+Investigate names/descriptors on the current hot workloads. Native numeric field
+consumers are a candidate if direct-slot hits are frequent; uncommon constructor
+forms remain deferred. Correct kernel fallback is required for all forms
+(**S1.11**, **D8.4.1v2**).
 
 #### Implementation update — 2026-09-21: bypass lazy-function metadata for ordinary names
 
@@ -1636,12 +1753,36 @@ Final source validation passed the focused literal tests, including
 test-lambda-baseline` at 5,691/5,691 and `make test262-baseline` at
 40,261/40,261 fully passing in 169 batches, with zero batch-unstable, slow,
 failed or baseline-regressed entries. This accepts the recursive-return record
-slice only; constructor assignment, aliases, enumeration and general
-descriptor coverage remain open.
+slice only. Later constructor and alias correctness coverage is recorded below;
+its performance acceptance, enumeration and general descriptor work are separate.
 
-- [ ] Trace NameIds from parser/static linking and enumeration through reference
-  creation, own/prototype lookup and stores. Count each spelling/hash/catalog
-  reconstruction and remove only redundant boundaries.
+#### Implementation update — 2026-09-21: plain constructors and bounded aliases
+
+`jm_plain_function_instance_shape_for_function` now plans guarded ordinary
+function-constructor prefixes, including `Entry` and the nonreceiver-observing
+`HashMap` prefix. Candidate discovery also follows one source-ordered `const`
+constructor alias, bounded declarator aliases of the instance, and separately
+assigned non-computed `Ctor.prototype.method = function...` methods. The shared
+generic candidate walk retains its previous depth. Exact shape/capacity checks
+and `js_constructor_shape_field_is_initialized` protect reads of reserved slots;
+an inherited setter may leave a planned own field absent, requiring the kernel
+miss (**S1.11**, **D8.4.1v2**).
+
+The four `JsOpt.PlainFunction*` fixtures cover those forms, source-order own
+properties, inherited setters and trace-on/off parity; the last implementation
+session passed them with forced GC and poisoned freed memory. The full optimizer
+and Test262 results, and the failing Lambda baseline, are recorded in §6.
+`JS_OPT_MIR_LITERAL_FIELD_ADMITTED` is recorded by `jm_emit_compile_profile`
+during compilation: these assertions establish emitted specialization, not
+runtime hit frequency or speedup. Obtain dynamic hit/miss or reduced-helper
+evidence and paired releases on hashmap/Havlak/Richards before adding more
+alias/prototype/constructor cases. No performance result is accepted for this
+plain-constructor extension yet.
+
+- [ ] Trace NameIds across the hot parser/static-linking, reference,
+  own/prototype lookup, store and enumeration boundaries. Count redundant
+  spelling/hash/catalog reconstruction and remove boundaries with measured
+  cost; exhaustive transport refactoring is not a completion requirement.
 - [ ] Preserve the owning context's ID domain. Materialize observable strings
   at reflection/proxy boundaries; do not make dynamic IDs portable across realms
   or use spelling to identify a JS Symbol (**D4.6.1v3–D4.6.2v2**).
@@ -1651,15 +1792,19 @@ descriptor coverage remain open.
   fields as `LMD_TYPE_NULL` placeholders and reuse the shared `TypeMap` /
   `fn_map_set` transition path; exact supported literals retain their static
   lane (**D8.2.3–D8.2.6**, **D8.4.1v2**). RHS `this` observation and direct
-  `eval` retain generic construction. Partial initialization, indirect escape,
-  descriptor mutation of a reserved planned field, returned records and local
-  aliases, constructor-returned replacement objects, subclasses and prototype
-  changes remain open.
+  `eval` retain generic construction. Recursive returned records, ordinary
+  constructor prefixes and the bounded aliases above are implemented.
+  Broader returned-record/alias propagation, indirect escape, replacement
+  objects, subclasses and prototype changes are deferred specialization
+  candidates. Partial initialization and descriptor mutation must continue to
+  preserve publication and fallback semantics; test those boundaries without
+  requiring that they gain a fast path.
 - [ ] Guard the live shape, applicable own descriptor and slot representation.
   Use shared direct load/store primitives on a hit; retain the property kernel
   for misses. Keep mutable field values independent of immutable layout facts.
-- [ ] Preserve native numeric field values into native consumers/destinations.
-  Avoid wrapping a direct field load in the generic numeric protocol immediately.
+- [ ] **Conditional:** if direct numeric field hits are frequent and boxing is
+  costly, preserve their values into native consumers/destinations before
+  expanding uncommon constructor forms.
 - [ ] Extend the existing nonallocating internal descriptor inspection where
   profiles find remaining materialization. Preserve for-in liveness, deletion,
   re-addition, shadowing, ordering and array index/length rules. Public reflection
@@ -1675,15 +1820,22 @@ stores, symbol keys, enumeration mutation, cross-context cache reuse and GC.
 **Targets:** Havlak, Richards, DeltaBlue, CD, microdiff, JetStream hashmap,
 Prettier AST, log pipeline and merge workloads.
 
-**Exit:** constructor/returned-record fields have demonstrated guarded coverage,
-targeted names avoid repeat resolution, and descriptor inspection avoids measured
-temporary allocations. Publish admitted/refused cases and per-family A/B results.
+**Exit:** landed field changes have semantic/GC and dynamic/paired evidence or
+an explicit retain/revise/retire decision. Attributed name/descriptor costs have
+measured improvements or no-change/deferred dispositions. Publish admitted and
+generic cases; uncommon constructor specialization is not required for closure.
 
-### T14-6 — Finish compiler, cold-start and memory scaling work
+### T14-6 — Attribute compiler, cold-start and memory costs
 
 **Primary files:** `em_finalize_semantic_root_write_back` and scalar-home
 planning in `mir_emitter_shared.hpp`, indexed analysis, JS initializer lowering,
 MIR artifact/cache ownership and native-code lifecycle.
+
+**Disposition:** phase/owner measurements and regression checks are required;
+planner/storage changes are conditional on a diagnosed cost. C14 `fast_diff`
+has roughly 638 ms between its outer-process and workload medians, demonstrating
+a cost to attribute, not proving it is compilation. Start with selected cold,
+retained-context and scaling probes; expand the census where peaks warrant it.
 
 #### Implementation update — 2026-09-19: safe cache rejection and parallel AST prebuild
 
@@ -1764,6 +1916,11 @@ an unmeasured or unresolved large peak cannot be declared complete.
 
 This package requires profiling and an explicit disposition for each family;
 it does not require speculative implementation in every family.
+
+Prioritize measured allocation elimination. Pause further receiver-call
+specialization until the existing inconclusive replay below has a disposition.
+RegExp and string changes require a current attributed residual; a measured
+no-change result is a valid package outcome.
 
 | Family | First measurements | Permitted next step | Required semantic guards |
 |---|---|---|---|
@@ -1850,9 +2007,11 @@ compared it with frozen pre-change release
 All 11 pairs were `ok` with equal stdout; medians were 49,128.529 ms control
 and 49,716.951 ms candidate (ratio 1.011977, 7/11 candidate wins), but the
 one-sided paired-bootstrap upper bound was 1.062753. This is insufficient to
-confirm either a gain or a greater-than-3% regression. Retain the code and
-artifact for a longer isolated replay; do not count it as a T14-7 performance
-acceptance.
+confirm either a gain or a greater-than-3% regression. Resolve this experiment
+before extending the entry: inspect build/source identity and current call
+cost, then use an isolated paired replay to decide whether to retain, revise
+or retire the performance-only path. Preserve any independently required
+metadata correctness fix. Dynamic reach alone is insufficient acceptance.
 
 **Exit:** each family has either an attributed implementation with paired
 evidence, or a measured no-change/deferred disposition that names the remaining
@@ -1926,12 +2085,15 @@ profile-specific zero-slack budget edit (**D8.6.1–D8.6.3**).
    accounting and paired uncertainty. Increase pairs where the estimate is
    uncertain; do not keep only favorable reruns.
 3. Before closeout, pair all 63 full-JS rows against C14, and collect a fresh
-   same-session complete full-JS/MVP/QuickJS matrix with at least three process
+   same-session complete full-JS/QuickJS/Node matrix with at least three process
    samples per engine/row. Use a second independent complete session to confirm
-   any claimed cross-engine milestone.
+   any claimed cross-engine milestone. Add MVP only when a valid release
+   comparator is available; otherwise keep its milestone explicitly unverified.
 4. Preserve the standard runner's build, profile, power, output and Test262
-   gates. Explicitly request QuickJS and MVP: the current default engine list
-   omits them. Run timed processes without concurrent build/profiling load.
+   gates. Explicitly request QuickJS: the current default engine list omits it.
+   Never substitute debug MVP timings or expand implementation scope to make
+   that comparator available. Run timed processes without concurrent
+   build/profiling load.
 5. Report startup/lowering/native generation and outer process time separately
    from workload time. Include peak RSS, retained bytes, cold/reused contexts
    and native code volume. A warm-loop win cannot erase a cold-start regression.
@@ -1957,11 +2119,11 @@ guaranteed consequences of any individual package.
 
 | Milestone | Target | Required qualification |
 |---|---|---|
-| Structural completion | All required package exits and current correctness gates pass. | List conditional dispositions and remaining unsupported specializations. |
+| Structural completion | Required exits within the reassessed scope and current correctness gates pass. | Record deferred/conditional dispositions and reopening criteria; no obligation to implement every proposed specialization. |
 | Beat QuickJS | Fresh `G(full JS / QuickJS) < 1.00`. | Complete 63 rows in both confirmation sessions; publish `T`, suites and losses. This is an aggregate claim, not faster on every row. |
 | Tune13 stretch carried forward | Fresh `G(full JS / QuickJS) <= 0.80`. | Same population/protocol; do not retain an obsolete historical gap as the baseline. |
-| Close to MVP, Tune14 planning target | Fresh `G(full JS / MVP) <= 1.20`. | Same audited source/input/work; all 63 supported and valid, with full JS semantics retained. Unsupported MVP rows must be resolved or the milestone remains unverified. |
-| Absolute workload cost | Reduce `T(candidate/C14)` and publish `T(full JS/MVP)` and `T(full JS/QuickJS)`. | No unsupported promise that one geomean target implies the same sum ratio. |
+| Close to MVP, optional target | Fresh `G(full JS / MVP) <= 1.20` when a valid release comparator exists. | Same audited source/input/work and all 63 valid rows, with full JS semantics retained. Unavailable/unsupported MVP rows leave this milestone unverified, not implementation-blocking. |
+| Absolute workload cost | Reduce `T(candidate/C14)` and publish `T(full JS/QuickJS)`; include MVP only when valid. | Track the sum and equally weighted geomean independently; neither target implies the other. |
 | Regression/operational gate | No unresolved confirmed correctness regression; investigate timing, startup and RSS regressions. | More than 3% repeatable elapsed regression requires root-cause analysis; smaller systematic losses remain visible. |
 
 If the mandatory implementation work is finished but a performance target is
@@ -1998,7 +2160,7 @@ python3 test/benchmark/run_paired_benchmarks.py \
   --output temp/tune14/final_paired.json
 
 python3 test/benchmark/run_standard_benchmarks.py \
-  --engines mir,c2mir,lambdajs,mvpjs,quickjs,nodejs \
+  --engines mir,c2mir,lambdajs,quickjs,nodejs \
   --suite r7rs,awfy,beng,kostya,larceny,jetstream,text \
   --runs 3 --timeout 180 --cooldown 10 --typed \
   --results-output test/benchmark/js_mvp/tune14/final_session1.json \
@@ -2012,6 +2174,9 @@ The standard runner may rebuild/archive independently; verify its recorded hash
 against the paired candidate, rather than assuming a shared filename or commit
 means identical executable content. Confirm current runner/report support for
 the complete engine list before the long run, without disabling its guards.
+The template omits release-unavailable MVP. Add `mvpjs` only after its release
+availability and common-work oracle are established; retain its unavailable
+status in the milestone report otherwise.
 
 ## 6. Evidence storage and progress record
 
@@ -2046,17 +2211,47 @@ Starting evidence, with its limits:
 
 | Package | Current status | Evidence needed to close |
 |---|---|---|
-| T14-0 | [~] C14 archive, 63-row same-session control and Node/LambdaJS/QuickJS Navier oracle landed | Record remaining toolchain/native-module and phase/owner census, replay later archives under the three-engine oracle, and collect the required independent confirmation session. MVP is release-unavailable, so its milestone remains unverified. The current Navier helper census directs T14-3 toward guarded ordinary numeric reads, not generic comparisons. |
-| T14-1 | [~] Reference repair and archived-oracle audit landed | Frame-15 canonical Navier checksum now exercises the fixed evaluated-Reference boundary. Original R47 and C14 pass the density oracle, while R46 and R47-repair fail, so complete the remaining boxed-kernel/generic-array work with valid-control evidence. |
-| T14-2 | [~] Guarded native/local updates, discarded generic-update fusion, Number-pair bitwise head and primitive relational head landed | Extend the landed shared F64 boxer, guarded local `++`/`--`, immediate-body assignment-alias compound admission and both operand orders of the narrow typed-view Number carrier to complete Number/update regions; retain generic parity and add comparison/join/range proofs. The `crypto_sha1` bitwise replay measures 0.823464 (upper 0.824575) against its exact predecessor; the Havlak primitive-comparison replay measures 0.997464 (upper 0.998807; 23/31 wins); and the Navier-only update fusion result is 0.992072 (upper 0.994343). The public Number update head was reverted after `hashmap` reached only 0.995100 (upper 1.001581; 16/31 wins). |
-| T14-3 | [~] Address migration, typed-view, FFT carrier and companion dense-read slices landed | `em_element_address` now serves existing LambdaJS paths and admitted untyped checked, dense and pointer loads. Guarded Int32 direct-call forwarding reaches quicksort `partition` with a 0.183468 paired-release ratio over one-hop evidence; the shared primitive typed-array setter then reached 0.902061 and generation-validated ArrayNum reads 0.830905. The nested FFT carrier result is 0.975130 (upper 0.985491), followed by the symmetric operand-order result of 0.846079 (upper 0.871704) against its exact predecessor. A scalar-safe companion own-element leaf changes the Navier profile from 36,190,970 generic Number-index helper calls to zero and measures 0.357866 (upper 0.359286; 31/31 wins) against its exact update-fusion predecessor. The copy-store and over-broad arithmetic variants were rejected. Broader ordinary-array region evidence remains open. |
-| T14-4 | [~] Shared scalar-hoister audit complete; mutable storage remains unadmitted | Build an effect-bounded witness with profile-valid invalidation and measured query reduction. The raw companion leaf was rejected as a slower immediate read, not retained as a region mechanism. |
-| T14-5 | [~] Ordinary Map named reads skip impossible Function, Window and special-length setup; recursive record-return recipes and effect-bounded dynamic constructor RHS recipes reuse common shape/slot machinery | Three Richards replays and a 31-pair binarytrees recursive-record replay are accepted. Dynamic constructor values now reserve placeholder slots and take shared transitions only when their RHS cannot observe the receiver or invoke direct `eval`; focused normal and forced-GC tests cover admission and refusal. Release profiling and paired measurement, indirect escape/descriptor mutation coverage, constructor/alias propagation, NameId transport, descriptor/enumeration coverage and broad paired results remain. |
-| T14-6 | [~] Stability repair landed | Cache-rejection native-code lifetime, parallel prebuild publication and the direct-scope index are covered. The index returns the full Test262 batch matrix to 40,261/40,261 with zero unstable/slow entries; compiler/memory owner census, scaling fixes/dispositions and cold results remain. |
-| T14-7 | [~] Havlak closure-source allocation leaf accepted | Profile the RegExp, string and remaining allocation/call families, then record an implementation or no-change/deferred disposition for each. The source-cache replay is 0.960570 (upper 0.963009; 31/31 wins) against C14, but is not a full-matrix claim. |
-| T14-8 | [~] Runtime gates revalidated | Lambda baseline (5,717/5,717) and Test262 baseline (40,261/40,261 fully passing; zero unstable, slow or regressed) pass after the current T14-2, T14-3, T14-5, T14-6 and T14-7 work. Native entry/lifetime audit, two-client reuse ledger, durable final matrices and milestone status remain. |
+| T14-0 | [~] Frozen C14, 63-row control and three-engine Navier oracle recorded | Refresh the current release matrix and priority profiles; finish provenance/phase ownership and final C14 pairs. Cross-engine claims need an independent confirmation session. MVP remains optional/unverified. |
+| T14-1 | [~] Reference repair, archived-oracle audit and companion-read gain recorded | Preserve the frame-15 density oracle and valid-control paired evidence on the final tree. R46/R47-repair fail that oracle; recovery to their historical timing is not a target. |
+| T14-2 | [~] Shared boxing, guarded updates, FFT Number carriers and primitive helper heads implemented | Add only the bounded Number facts needed by measured search loops. Preserve diviter and other numeric controls. General capture/alias/range analysis is deferred; comparison/join proofs remain mandatory for any selected specialization. |
+| T14-3 | [~] Shared address, quicksort, FFT and companion dense-read gains recorded | Search-first admission/refusal and native producer/consumer evidence, then paired acceptance or an evidence-backed disposition. Further typed kinds, FFT stores and metadata reuse are conditional; keep quicksort/Navier controls and rejected experiments visible. |
+| T14-4 | Deferred; scalar-hoister audit complete, no mutable-storage witness admitted | Reopen one bounded loop only for a material repeated-query cost after simpler coverage work. General framework implementation is not required for closeout. |
+| T14-5 | [~] Richards and recursive-record gains accepted; dynamic/plain constructors, bounded aliases and assigned prototype methods implemented with semantic/GC coverage | Obtain dynamic coverage and exact paired evidence for the unaccepted constructor slices before expansion. Attribute name/descriptor costs; prefer native numeric consumers if hit frequency and boxing cost justify them. Uncommon optimized cases are deferred, not their correctness/fallback obligations. |
+| T14-6 | [~] Cache/prebuild lifetime and direct-scope stability repairs implemented | Attribute cold/startup/RSS owners and size scaling; implement diagnosed costs or record measured no-change dispositions. Do not redesign planners solely to exhaust the original checklist. |
+| T14-7 | [~] Havlak source-cache gain accepted; strict receiver-call entry inconclusive | Resolve the receiver-call experiment before expansion. Prioritize attributed allocation work; remaining RegExp/string/call families need a measured change or no-change/deferred disposition. |
+| T14-8 | [~] Focused optimizer/GC and Test262 pass; latest Lambda baseline fails | Resolve or establish provenance for the 14 recorded Lambda-baseline failures below; the aggregate gate is not closed. Finish native entry/lifetime and reuse evidence, experiment cleanup, final matrices and milestone reporting. |
+
+### Latest recorded validation — 2026-09-21
+
+These are the last implementation-session results, not tests rerun for this
+scope reassessment. Earlier green totals elsewhere in this document belong to
+their named intermediate candidates and do not supersede this record.
+
+- Optimizer contracts: 73/73; the four plain-function-constructor fixtures
+  also passed with forced GC and poisoned freed memory.
+- Test262 baseline: 40,261/40,261 fully passing, with zero non-fully-passing
+  entries or baseline regressions.
+- Lambda baseline: **5,730/5,744**, comprising 2,104/2,104 input tests and
+  3,626/3,640 runtime tests. The 14 failures comprise one JS document-context
+  timeout, the `js_tune6_exact_collection` MIR ratchet, and 12
+  Radiant/Mermaid/Graphviz/Structurizr output mismatches. The JS timeout passed
+  when rerun individually; that does not turn the aggregate run green.
+- The MIR ratchet reports the previously observed +645 module instructions
+  and +129 safepoints. Inspect finalized emission and justify any narrow budget
+  adjustment under **D8.6.1–D8.6.3**; do not waive it as incidental.
+- One Radiant mismatch was independently reproduced, but pre-change A/B
+  attribution has not been established for every failure. Untouched source
+  files alone do not prove that a failure is unrelated to tuning.
+
+Session logs are `temp/js_opt_full_constructor_target_alias.log`,
+`temp/test262_constructor_target_alias.log` and
+`temp/lambda_baseline_constructor_alias.log`; the runtime failure list is in
+`test_output/test_summary.json`. These scratch records need durable provenance
+for final acceptance. Constructor release performance remains unaccepted, and
+the strict receiver-call replay remains inconclusive (T14-7).
 
 For every landed package record the exact revision/binary, predecessor, changed
 proof or primitive, admitted/refused cases, semantic/GC/MIR checks, paired result
-and uncertainty, code/compile/RSS impact and remaining work. No implementation
-or runtime validation is claimed by this planning document itself.
+and uncertainty, code/compile/RSS impact and remaining work. This reassessment
+changes no runtime code and collects no new tests or timings; it records the
+scope decisions and existing evidence, not final Tune14 acceptance.
