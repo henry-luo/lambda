@@ -785,6 +785,11 @@ void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
+// Resolve an inline document script through the page URL rather than its
+// synthetic diagnostic label. Returns false for ordinary file/URL scripts.
+bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,
+                                     const char* specifier, int spec_len,
+                                     char* out, int out_size);
 bool jm_path_is_lambda_source(const char* path);
 void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
                            NameEntry* binding, bool is_default);

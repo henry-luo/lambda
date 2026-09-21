@@ -1060,23 +1060,36 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         // live global properties instead of a stale preamble-local undefined.
         // PointerEvent is installed natively; advertise the matching touch
         // capability so libraries select their pointer branch in headless UI.
-        "var navigator = {\n"
-        "  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',\n"
-        // SVG libraries retain the legacy appName probe when selecting their
-        // browser path; the preamble replaces navigator, so it must preserve
-        // that standard string property as well as the native global does.
-        "  appName: 'Netscape',\n"
-        // Navigator.appVersion is legacy but still synchronously string-sniffed
-        // by established UI libraries such as noUiSlider.
-        "  appVersion: '5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',\n"
-        "  vendor: '', platform: 'MacIntel', language: 'en-US',\n"
-        "  languages: ['en-US', 'en'], maxTouchPoints: 1\n"
-        "};\n"
+        // Extend the native Navigator instead of replacing it. The realm
+        // installs clipboard and permissions before this preamble runs, and
+        // third-party scripts also feature-detect serviceWorker on that same
+        // object.
+        "var navigator = window.navigator || {};\n"
+        "navigator.userAgent = navigator.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0';\n"
+        "navigator.appName = navigator.appName || 'Netscape';\n"
+        "navigator.appVersion = navigator.appVersion || '5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0';\n"
+        "navigator.vendor = navigator.vendor || '';\n"
+        "navigator.platform = navigator.platform || 'MacIntel';\n"
+        "navigator.language = navigator.language || 'en-US';\n"
+        "navigator.languages = navigator.languages || ['en-US', 'en'];\n"
+        "navigator.maxTouchPoints = navigator.maxTouchPoints || 1;\n"
         "navigator.sendBeacon = navigator.sendBeacon || function(){ return false; };\n"
         // Java applets are unavailable in the embedded browser surface, but
         // the legacy Navigator API must still be callable for feature probes.
         "navigator.javaEnabled = navigator.javaEnabled || function(){ return false; };\n"
         "window.navigator = navigator;\n"
+        // Older widget bundles still publish AMD modules. Retain their module
+        // records until a page-provided loader consumes them instead of
+        // throwing before the document can finish loading.
+        "window.__lambda_amd_modules = window.__lambda_amd_modules || {};\n"
+        "window.define = window.define || function(name, deps, factory) {\n"
+        "  if (typeof name !== 'string') { factory = deps; deps = name; name = null; }\n"
+        "  if (typeof deps === 'function') { factory = deps; deps = []; }\n"
+        "  if (typeof factory !== 'function') return;\n"
+        "  var module = { deps: deps || [], factory: factory };\n"
+        "  if (name) window.__lambda_amd_modules[name] = module;\n"
+        "};\n"
+        "window.define.amd = window.define.amd || {};\n"
         "window.document = document;\n"
         "document.hidden = false;\n"
         "document.prerendering = false;\n"
@@ -1776,8 +1789,12 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         Item result;
         DocumentCurrentScriptScope current_script(runtime, task);
         if (task->kind == JS_SCRIPT_TASK_MODULE) {
+            // An inline module's URL is the containing document, while its
+            // task label remains only a diagnostic identity.
+            const char* module_reference = !task->external && runtime->js_document_base_url
+                ? runtime->js_document_base_url : filename;
             result = execute_js_module_source(
-                runtime, source, task->source_len, filename);
+                runtime, source, task->source_len, module_reference);
         } else if (task->external && s_js_mir_lease_session && !s_retain_js_state &&
                    !runtime->js_ast_backend) {
             result = execute_cached_external_classic(
@@ -2200,6 +2217,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     runtime_init(runtime);
     runtime->dom_doc = (void*)dom_doc;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
+    runtime->js_document_base_url = dom_doc->url ? url_get_href(dom_doc->url) :
+        (base_url ? url_get_href(base_url) : nullptr);
     // Browser documents use the AST executor throughout one DOM realm. This
     // avoids a throwaway parse merely to select a backend and keeps callbacks
     // on one closure ABI.
@@ -2764,6 +2783,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     dom_doc->js.runtime = nullptr;
     runtime->dom_doc = nullptr;
     runtime->dom_ui_context = nullptr;
+    runtime->js_document_base_url = nullptr;
     runtime_cleanup(runtime);
     mem_free(runtime);
 

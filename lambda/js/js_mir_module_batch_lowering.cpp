@@ -998,6 +998,18 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
     }
 }
 
+bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,
+        const char* specifier, int spec_len, char* out, int out_size) {
+    if (!runtime || !runtime->js_document_base_url || !runtime->js_document_base_url[0] ||
+            (script_reference && script_reference[0] != '<')) {
+        return false;
+    }
+    // Inline page scripts have synthetic labels for diagnostics, but the web
+    // platform resolves their module specifiers from the document URL.
+    jm_resolve_module_path(runtime->js_document_base_url, specifier, spec_len, out, out_size);
+    return true;
+}
+
 // Forward declarations for module loading
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,

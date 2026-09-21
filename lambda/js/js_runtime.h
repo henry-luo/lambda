@@ -1099,6 +1099,9 @@ Item js_url_construct(Item input);
 Item js_url_construct_with_base(Item input, Item base);
 Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
+Item js_transform_stream_new(Item transformer);
+Item js_text_encoder_stream_new(void);
+Item js_text_decoder_stream_new(Item encoding, Item options);
 
 // Symbol API
 // JS Symbols use the core pointer-backed LMD_TYPE_SYMBOL representation.

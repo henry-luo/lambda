@@ -158,16 +158,13 @@ static char* extract_format_value(const char* str, Pool* pool) {
     return css_font_face_dup(pool, fmt_start, len);
 }
 
-// Helper: extract URL from "url( path )" format
+// Helper: extract URL from "url( path )" format.
 static char* extract_url_value(const char* src_value, Pool* pool) {
     if (!src_value) return nullptr;
 
     // Find "url("
     const char* url_start = strstr(src_value, "url(");
-    if (!url_start) {
-        // Try without parentheses - plain path
-        return trim_and_unquote(src_value, strlen(src_value), pool);
-    }
+    if (!url_start) return nullptr;
 
     url_start += 4; // skip "url("
 
@@ -192,6 +189,36 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
 
     size_t len = url_end - url_start;
     return css_font_face_dup(pool, url_start, len);
+}
+
+// Extract the first local() font name without treating it as a loadable URL.
+static char* extract_local_value(const char* src_value, Pool* pool) {
+    if (!src_value) return nullptr;
+
+    const char* local_start = strstr(src_value, "local(");
+    if (!local_start) return nullptr;
+    local_start += 6; // skip "local("
+    local_start = str_skip_line_space(local_start);
+
+    char quote_char = 0;
+    if (*local_start == '"' || *local_start == '\'') {
+        quote_char = *local_start++;
+    }
+
+    const char* local_end = local_start;
+    if (quote_char) {
+        while (*local_end && *local_end != quote_char) local_end++;
+    } else {
+        while (*local_end && *local_end != ')') local_end++;
+        while (local_end > local_start &&
+               (local_end[-1] == ' ' || local_end[-1] == '\t' ||
+                local_end[-1] == '\n' || local_end[-1] == '\r' ||
+                local_end[-1] == '\f')) {
+            local_end--;
+        }
+    }
+
+    return css_font_face_dup(pool, local_start, (size_t)(local_end - local_start));
 }
 
 // Parse all src entries from a src declaration value
@@ -524,8 +551,10 @@ CssFontFaceDescriptor* css_parse_font_face_content(const char* content, Pool* po
 
             // Also keep first URL in src_url for backwards compatibility
             descriptor->src_url = extract_url_value(temp_val, pool);
+            descriptor->src_local = extract_local_value(temp_val, pool);
             if (!pool && temp_val) mem_free(temp_val);
-            log_debug("[CSS FontFace]   src (first): '%s'", descriptor->src_url);
+            log_debug("[CSS FontFace]   src (first): '%s', local: '%s'", descriptor->src_url,
+                      descriptor->src_local ? descriptor->src_local : "(none)");
         }
         else if (prop_len >= 10 && strncmp(prop_start, "font-style", 10) == 0) {
             char* val = trim_and_unquote(val_start, val_len, pool);

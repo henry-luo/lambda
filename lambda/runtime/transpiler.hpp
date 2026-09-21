@@ -117,6 +117,9 @@ struct Runtime {
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     void* dom_ui_context; // UiContext* borrowed by the document execution realm (NULL outside DOM sessions)
+    // Borrowed canonical document URL. Synthetic inline script labels resolve
+    // browser module specifiers against this URL while the document is alive.
+    const char* js_document_base_url;
     // A document chooses one JS execution tier before its preamble runs;
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
@@ -361,6 +364,9 @@ bool runtime_type_list_is_script_owned(Runtime* runtime);
 // Free every Script a runtime owns, with its script list and path index.
 // runtime_cleanup calls this; hosts that tear a runtime down by hand must too.
 void runtime_free_all_scripts(Runtime* runtime);
+// AST-prebuild workers create no EvalContext, but can register cross-language
+// module descriptors against their temporary Runtime.
+void runtime_cleanup_ast_prebuild_worker(Runtime* runtime);
 void runtime_teardown_batch_scripts(Runtime* runtime);
 // Release every Script and module slab created after a batch checkpoint. The
 // caller must have cleared all heap-owned references before this operation.
