@@ -36,6 +36,13 @@ static void cache_entry_evict(const char* url, void* value, size_t bytes, void* 
     EnhancedFileCache* cache = (EnhancedFileCache*)udata;
     if ((!cache || cache->remove_files_on_evict) && meta->cache_path) {
         file_delete(meta->cache_path);
+        if (meta->legacy_cache_entry) {
+            char* key_path = file_cache_key_path(meta->cache_path);
+            if (key_path) {
+                file_delete(key_path);
+                mem_free(key_path);
+            }
+        }
     }
     mem_free(meta->cache_path);
     mem_free(meta->etag);
@@ -46,6 +53,58 @@ static bool enhanced_cache_evict_lru_locked(EnhancedFileCache* cache) {
     if (!cache || lru_cache_count(cache->entries) == 0) return false;
     lru_cache_evict_one(cache->entries);
     return true;
+}
+
+static void enhanced_cache_make_space_locked(EnhancedFileCache* cache,
+                                             CacheMetadata* replacement,
+                                             size_t size) {
+    size_t retained_bytes = lru_cache_bytes(cache->entries) -
+        (replacement ? replacement->content_size : 0);
+    while ((!replacement && cache->max_entries > 0 &&
+            lru_cache_count(cache->entries) >= (size_t)cache->max_entries) ||
+           (cache->max_size_bytes > 0 &&
+            (retained_bytes > cache->max_size_bytes ||
+             size > cache->max_size_bytes - retained_bytes) &&
+            lru_cache_count(cache->entries) > (replacement ? 1u : 0u))) {
+        if (!enhanced_cache_evict_lru_locked(cache)) break;
+        retained_bytes = lru_cache_bytes(cache->entries) -
+            (replacement ? replacement->content_size : 0);
+    }
+}
+
+static CacheMetadata* enhanced_cache_adopt_legacy_entry_locked(EnhancedFileCache* cache,
+                                                                 const char* url) {
+    char* legacy_path = file_cache_path(url, cache->cache_dir, ".cache");
+    if (!legacy_path) return NULL;
+
+    // The old eight-hex-name cache can collide.  Only a sidecar written with
+    // the response proves that this payload belongs to this URL.
+    int64_t legacy_size = file_size(legacy_path);
+    if (legacy_size < 0 || !file_cache_url_entry_matches(legacy_path, url)) {
+        mem_free(legacy_path);
+        return NULL;
+    }
+
+    enhanced_cache_make_space_locked(cache, NULL, (size_t)legacy_size);
+    CacheMetadata* meta = (CacheMetadata*)mem_calloc(1, sizeof(CacheMetadata), MEM_CAT_NETWORK);
+    if (!meta) {
+        mem_free(legacy_path);
+        return NULL;
+    }
+    meta->cache_path = legacy_path;
+    meta->content_size = (size_t)legacy_size;
+    meta->created_at = time(NULL);
+    meta->last_accessed = meta->created_at;
+    meta->legacy_cache_entry = true;
+    if (!lru_cache_put(cache->entries, url, meta, meta->content_size)) {
+        mem_free(meta->cache_path);
+        mem_free(meta);
+        return NULL;
+    }
+
+    // The enhanced index now owns eviction of this verified legacy payload.
+    log_debug("cache: adopted legacy entry for %s -> %s", url, legacy_path);
+    return meta;
 }
 
 static bool cache_metadata_expired(const CacheMetadata* meta, time_t now) {
@@ -151,6 +210,7 @@ char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url) {
 
     pthread_rwlock_wrlock(&cache->rwlock);
     CacheMetadata* meta = (CacheMetadata*)lru_cache_get(cache->entries, url);
+    if (!meta) meta = enhanced_cache_adopt_legacy_entry_locked(cache, url);
     bool valid = meta && meta->cache_path && file_exists(meta->cache_path) &&
         !cache_metadata_expired(meta, time(NULL));
     char* result = valid ? mem_strdup(meta->cache_path, MEM_CAT_NETWORK) : NULL;
@@ -178,18 +238,7 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     // Touch a replacement before eviction so its metadata stays live while
     // capacity pressure removes older entries.
     CacheMetadata* meta = (CacheMetadata*)lru_cache_get(cache->entries, url);
-    size_t retained_bytes = lru_cache_bytes(cache->entries) -
-        (meta ? meta->content_size : 0);
-    while ((!meta && cache->max_entries > 0 &&
-            lru_cache_count(cache->entries) >= (size_t)cache->max_entries) ||
-           (cache->max_size_bytes > 0 &&
-            (retained_bytes > cache->max_size_bytes ||
-             size > cache->max_size_bytes - retained_bytes) &&
-            lru_cache_count(cache->entries) > (meta ? 1u : 0u))) {
-        if (!enhanced_cache_evict_lru_locked(cache)) break;
-        retained_bytes = lru_cache_bytes(cache->entries) -
-            (meta ? meta->content_size : 0);
-    }
+    enhanced_cache_make_space_locked(cache, meta, size);
 
     // compute hash for filename
     unsigned char hash[32];

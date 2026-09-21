@@ -79,32 +79,22 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
 
 // CSS resource handler
 
-// resolve one declaration's nested URL values against its stylesheet origin
-static void resolve_css_value_urls(CssValue* value, const Url* base_url, Pool* pool) {
-    if (!value || !base_url || !pool) return;
-
+static void visit_css_value_urls(CssValue* value, RadiantCssUrlVisitor visitor,
+                                 void* context) {
+    if (!value || !visitor) return;
     if (value->type == CSS_VALUE_TYPE_URL && value->data.url) {
-        if (!url_is_absolute_url(value->data.url)) {
-            Url* resolved = url_parse_with_base(value->data.url, base_url);
-            if (resolved) {
-                const char* href = url_get_href(resolved);
-                if (href) {
-                    value->data.url = pool_strdup(pool, href);
-                }
-                url_destroy(resolved);
-            }
-        }
+        visitor(value, context);
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         CssFunction* func = value->data.function;
-        if (func->name && strcmp(func->name, "url") == 0) {
-            for (int i = 0; i < func->arg_count; i++) {
-                resolve_css_value_urls(func->args[i], base_url, pool);
-            }
+        for (int i = 0; i < func->arg_count; i++) {
+            visit_css_value_urls(func->args[i], visitor, context);
         }
     } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
         for (int i = 0; i < value->data.list.count; i++) {
-            resolve_css_value_urls(value->data.list.values[i], base_url, pool);
+            visit_css_value_urls(value->data.list.values[i], visitor, context);
         }
+    } else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.fallback) {
+        visit_css_value_urls(value->data.custom_property.fallback, visitor, context);
     }
 }
 
@@ -113,13 +103,37 @@ typedef struct CssUrlResolveContext {
     Pool* pool;
 } CssUrlResolveContext;
 
-static void resolve_css_declaration_urls(CssDeclaration* declaration, void* context) {
+static void resolve_css_url_value(CssValue* value, void* context) {
     CssUrlResolveContext* resolve = (CssUrlResolveContext*)context;
-    if (!declaration || !resolve) return;
-    resolve_css_value_urls(declaration->value, resolve->base_url, resolve->pool);
+    if (!value || !value->data.url || !resolve || !resolve->base_url || !resolve->pool) return;
+    if (url_is_absolute_url(value->data.url)) return;
+    Url* resolved = url_parse_with_base(value->data.url, resolve->base_url);
+    if (!resolved) return;
+    const char* href = url_get_href(resolved);
+    if (href) value->data.url = pool_strdup(resolve->pool, href);
+    url_destroy(resolved);
 }
 
-static void resolve_stylesheet_urls(CssStylesheet* sheet) {
+typedef struct CssUrlVisitContext {
+    RadiantCssUrlVisitor visitor;
+    void* context;
+} CssUrlVisitContext;
+
+static void visit_css_declaration_urls(CssDeclaration* declaration, void* context) {
+    CssUrlVisitContext* visit = (CssUrlVisitContext*)context;
+    if (!declaration || !visit) return;
+    visit_css_value_urls(declaration->value, visit->visitor, visit->context);
+}
+
+void radiant_for_each_stylesheet_resource_url(CssStylesheet* sheet,
+                                              RadiantCssUrlVisitor visitor,
+                                              void* context) {
+    if (!sheet || !visitor) return;
+    CssUrlVisitContext visit = {visitor, context};
+    radiant_for_each_css_declaration(sheet, visit_css_declaration_urls, &visit);
+}
+
+void radiant_resolve_stylesheet_resource_urls(CssStylesheet* sheet) {
     if (!sheet || !sheet->origin_url || !sheet->pool) return;
 
     // skip resolution for local file stylesheets
@@ -129,7 +143,7 @@ static void resolve_stylesheet_urls(CssStylesheet* sheet) {
     if (!base_url) return;
 
     CssUrlResolveContext context = {base_url, sheet->pool};
-    radiant_for_each_css_declaration(sheet, resolve_css_declaration_urls, &context);
+    radiant_for_each_stylesheet_resource_url(sheet, resolve_css_url_value, &context);
     url_destroy(base_url);
 }
 
@@ -183,7 +197,7 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     log_debug("network: parsed CSS stylesheet with %zu rules", sheet->rule_count);
 
     // resolve relative url() values against the stylesheet's source URL
-    resolve_stylesheet_urls(sheet);
+    radiant_resolve_stylesheet_resource_urls(sheet);
 
     // add stylesheet to document
     if (!add_stylesheet_to_document(doc, sheet)) {
@@ -604,6 +618,10 @@ void handle_resource_failure(NetworkResource* res, struct DomDocument* doc) {
         case RESOURCE_SCRIPT:
             log_warn("network: Script load failed: %s", res->url);
             // Script won't execute
+            break;
+
+        case RESOURCE_PREFETCH:
+            // Loader-stage consumers handle their own optional fallback.
             break;
     }
 }

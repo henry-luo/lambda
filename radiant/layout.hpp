@@ -1261,6 +1261,12 @@ typedef struct LayoutProfiler {
     double image_ms;
     int64_t cache_hits;
     int64_t cache_misses;
+    uint64_t intrinsic_requests;
+    uint64_t intrinsic_cache_hits;
+    uint64_t intrinsic_cache_misses;
+    uint64_t intrinsic_reentrant;
+    double intrinsic_inclusive_ms;
+    double intrinsic_exclusive_ms;
 
     bool enabled;
     LayoutProfileNode top_nodes[8];
@@ -1283,6 +1289,8 @@ void layout_profiler_record_node(LayoutProfiler* profiler, LayoutProfileBucket b
                                  const DomNode* node, double elapsed_ms);
 void layout_profiler_note_cache_hit(LayoutProfiler* profiler);
 void layout_profiler_note_cache_miss(LayoutProfiler* profiler);
+void layout_profiler_note_intrinsic_request(LayoutProfiler* profiler, bool cache_hit,
+                                            bool reentrant);
 void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t misses);
 void layout_profiler_report(LayoutContext* lycon);
 double layout_profiler_now_ms();

@@ -183,6 +183,13 @@ int file_ensure_dir(const char* dir_path);
 // Result is "<cache_dir>/<hex_hash>.<ext>".  Caller must free().
 char* file_cache_path(const char* key, const char* cache_dir, const char* ext);
 
+// Legacy URL-cache entries retain their full key in a sidecar file.  Callers
+// that bridge into a collision-resistant cache must verify this key first.
+char* file_cache_key_path(const char* cache_path);
+bool file_cache_write_url_entry(const char* cache_path, const char* url,
+                                const char* data, size_t size);
+bool file_cache_url_entry_matches(const char* cache_path, const char* url);
+
 #ifdef __cplusplus
 }
 #endif

@@ -242,7 +242,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     }
 
     // Save to cache
-    if (write_binary_file(cache_filename, content, content_size) == 0) {
+    if (file_cache_write_url_entry(cache_filename, url, content, content_size)) {
         log_debug("HTTP: Cached content to %s", cache_filename);
     } else {
         log_error("HTTP: Failed to write cache file %s", cache_filename);
@@ -284,83 +284,13 @@ char* download_http_content_cached(const char* url, size_t* content_size, const 
     size_t size = 0;
     char* content = download_http_content(url, &size, NULL);
     if (content && cache_filename) {
-        if (write_binary_file(cache_filename, content, size) != 0) {
+        if (!file_cache_write_url_entry(cache_filename, url, content, size)) {
             log_debug("HTTP: failed to write cache file %s", cache_filename);
         }
     }
     if (cache_filename) mem_free(cache_filename);
     if (content_size) *content_size = size;
     return content;
-}
-
-// ----- Parallel prefetch implementation (lib/thread_pool) -----------------
-#include "../../lib/thread_pool.h"
-#include "../../lib/atomic.h"
-
-typedef struct {
-    const char* url;
-    const char* cache_dir;
-    atomic_int32* success_count;
-} PrefetchJob;
-
-static void prefetch_one(void* arg) {
-    PrefetchJob* j = (PrefetchJob*)arg;
-    const char* url = j->url;
-    if (!url) return;
-    // skip non-HTTP urls
-    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) return;
-
-    char* cache_filename = generate_cache_filename(url, j->cache_dir);
-    if (cache_filename && file_exists(cache_filename)) {
-        mem_free(cache_filename);
-        atomic_inc32(j->success_count);
-        return;
-    }
-
-    size_t sz = 0;
-    char* content = download_http_content(url, &sz, NULL);
-    if (content) {
-        if (cache_filename) write_binary_file(cache_filename, content, sz);
-        mem_free(content);
-        atomic_inc32(j->success_count);
-    }
-    if (cache_filename) mem_free(cache_filename);
-}
-
-int http_prefetch_urls_parallel(const char* const* urls, int count, const char* cache_dir, int max_threads) {
-    if (!urls || count <= 0) return 0;
-    const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
-    if (!create_dir(effective_cache_dir)) return 0;
-    if (max_threads <= 0) max_threads = 8;
-    if (max_threads > count) max_threads = count;
-    if (max_threads > 32) max_threads = 32;
-
-    atomic_int32 success_count = {0};
-
-    log_debug("HTTP: prefetching %d urls with %d threads", count, max_threads);
-    double t0 = (double)clock() / CLOCKS_PER_SEC;
-
-    ThreadPool* tp = tp_create(max_threads);
-    if (!tp) return 0;
-    PrefetchJob* jobs = (PrefetchJob*)mem_calloc((size_t)count, sizeof(PrefetchJob), MEM_CAT_NETWORK);
-    if (!jobs) {
-        tp_destroy(tp);
-        return 0;
-    }
-    for (int i = 0; i < count; i++) {
-        jobs[i].url = urls[i];
-        jobs[i].cache_dir = effective_cache_dir;
-        jobs[i].success_count = &success_count;
-        tp_submit(tp, prefetch_one, &jobs[i]);
-    }
-    tp_wait_all(tp);
-    tp_destroy(tp);
-    mem_free(jobs);
-
-    int final_count = atomic_load32(&success_count);
-    double elapsed = (double)clock() / CLOCKS_PER_SEC - t0;
-    log_debug("HTTP: prefetched %d/%d urls in %.3fs (cpu)", final_count, count, elapsed);
-    return final_count;
 }
 
 // Returns an Input* for HTTP/HTTPS URL, using memory and file cache

@@ -177,11 +177,6 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
 // Returns content (caller mem_free()s) and sets *content_size.
 char* download_http_content_cached(const char* url, size_t* content_size, const char* cache_dir);
 
-// Pre-fetch a list of URLs in parallel into the disk cache.
-// Returns number successfully populated. Each URL is downloaded at most once.
-// Safe to call before download_http_content_cached / download_to_cache.
-int http_prefetch_urls_parallel(const char* const* urls, int count, const char* cache_dir, int max_threads);
-
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
 Input* input_from_http_with_name_parent(const char* url, const char* type,
     const char* flavor, const char* cache_dir, NamePool* name_parent);

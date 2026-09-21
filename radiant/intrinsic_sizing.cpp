@@ -37,6 +37,43 @@ IntrinsicFontScope::~IntrinsicFontScope() {
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+// Intrinsic sizing is recursive. Attribute nested work to both inclusive and
+// exclusive time so a large container does not hide its expensive descendants.
+struct IntrinsicProfileScope {
+    LayoutContext* lycon;
+    DomElement* element;
+    IntrinsicProfileScope* parent;
+    uint64_t start_ns;
+    uint64_t child_ns;
+    bool active;
+
+    explicit IntrinsicProfileScope(LayoutContext* context, DomElement* node)
+        : lycon(context), element(node), parent(nullptr), start_ns(0), child_ns(0), active(false) {
+        if (!lycon || !lycon->profiler.enabled) return;
+        parent = active_scope;
+        active_scope = this;
+        start_ns = time_now_ns();
+        active = true;
+    }
+
+    ~IntrinsicProfileScope() {
+        if (!active) return;
+        uint64_t elapsed_ns = time_now_ns() - start_ns;
+        uint64_t exclusive_ns = elapsed_ns > child_ns ? elapsed_ns - child_ns : 0;
+        if (parent) parent->child_ns += elapsed_ns;
+        radiant::LayoutProfiler* profiler = &lycon->profiler;
+        profiler->intrinsic_inclusive_ms += (double)elapsed_ns / 1000000.0;
+        profiler->intrinsic_exclusive_ms += (double)exclusive_ns / 1000000.0;
+        radiant::layout_profiler_record_node(profiler, radiant::LAYOUT_PROFILE_INTRINSIC,
+                                             element, (double)exclusive_ns / 1000000.0);
+        active_scope = parent;
+    }
+
+    static thread_local IntrinsicProfileScope* active_scope;
+};
+
+thread_local IntrinsicProfileScope* IntrinsicProfileScope::active_scope = nullptr;
+
 static bool layout_parse_aspect_ratio_number(const char* text, double* out_value) {
     if (!text || !out_value) return false;
     const char* cursor = text;
@@ -2986,15 +3023,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         (element->layout_cache->intrinsic_measurement_valid_mask & intrinsic_basis_mask) &&
         element->layout_cache->intrinsic_measurement_generation[intrinsic_basis] ==
             measurement_generation) {
+        radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, true, false);
         assert(element->layout_cache);
         return {element->layout_cache->intrinsic_min_content_width[intrinsic_basis],
                 element->layout_cache->intrinsic_max_content_width[intrinsic_basis]};
     }
 
     if (element->measuring_intrinsic_width()) {
+        radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, true);
         return {0, 0};
     }
+    radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
     IntrinsicMeasureScope measure_scope(lycon, element);
+    IntrinsicProfileScope profile_scope(lycon, element);
 
     uint64_t t_measure_start = time_now_ns();
 
@@ -5978,7 +6019,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (cache) {
             cache->intrinsic_min_content_width[intrinsic_basis] = sizes.min_content;
             cache->intrinsic_max_content_width[intrinsic_basis] = sizes.max_content;
-            // Intrinsic contributions depend on this pass's computed style, font context, and basis.
             cache->intrinsic_measurement_generation[intrinsic_basis] = measurement_generation;
             cache->intrinsic_measurement_valid_mask |= intrinsic_basis_mask;
             element->set_has_cached_intrinsic_widths(true);

@@ -979,3 +979,44 @@ char* file_cache_path(const char* key, const char* cache_dir, const char* ext) {
     snprintf(buf, dir_len + 1 + 8 + ext_len + 1, "%s/%08lx%s", cache_dir, hash, ext);
     return buf;
 }
+
+char* file_cache_key_path(const char* cache_path) {
+    if (!cache_path) return NULL;
+
+    const char suffix[] = ".url";
+    size_t path_len = strlen(cache_path);
+    char* key_path = (char*)mem_alloc(path_len + sizeof(suffix), MEM_CAT_TEMP);
+    if (!key_path) return NULL;
+    memcpy(key_path, cache_path, path_len);
+    memcpy(key_path + path_len, suffix, sizeof(suffix));
+    return key_path;
+}
+
+bool file_cache_write_url_entry(const char* cache_path, const char* url,
+                                const char* data, size_t size) {
+    if (!cache_path || !url || !data) return false;
+    if (write_binary_file(cache_path, data, size) != 0) return false;
+
+    char* key_path = file_cache_key_path(cache_path);
+    if (!key_path) return false;
+    bool wrote_key = write_binary_file(key_path, url, strlen(url)) == 0;
+    mem_free(key_path);
+    return wrote_key;
+}
+
+bool file_cache_url_entry_matches(const char* cache_path, const char* url) {
+    if (!cache_path || !url) return false;
+
+    char* key_path = file_cache_key_path(cache_path);
+    if (!key_path) return false;
+    size_t stored_length = 0;
+    char* stored_url = read_binary_file(key_path, &stored_length);
+    mem_free(key_path);
+    if (!stored_url) return false;
+
+    size_t url_length = strlen(url);
+    bool matches = stored_length == url_length &&
+        memcmp(stored_url, url, url_length) == 0;
+    mem_free(stored_url);
+    return matches;
+}

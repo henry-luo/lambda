@@ -1191,19 +1191,28 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             (doc->url->scheme == URL_SCHEME_HTTP || doc->url->scheme == URL_SCHEME_HTTPS);
         if (doc->html_root && doc_url_is_http) {
             network_downloader_init_shared();
-            file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
-            if (radiant_init_network_support(doc, NULL, file_cache) == 0) {
+            if (!doc->resource_manager) {
+                file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+                radiant_init_network_support(doc, NULL, file_cache);
+                if (doc->resource_manager) {
+                    // Keep the lifecycle marker when this late fallback owns setup.
+                    log_notice("view: network support initialized for HTTP document");
+                }
+            }
+            if (doc->resource_manager) {
                 resource_manager_set_ui_context(doc->resource_manager, &ui_context);
                 if (!headless && doc->resource_manager) {
                     resource_manager_set_wake_callback(doc->resource_manager,
                                                        network_wake_glfw, NULL);
                 }
-                log_notice("view: network support initialized for HTTP document");
+                log_notice("view: shared network support ready for HTTP document");
             }
         }
 
         // Create browsing session for navigation history and session state
-        ui_context.browsing_session = session_create(thread_pool, file_cache);
+        EnhancedFileCache* session_cache = doc->resource_manager
+            ? resource_manager_get_file_cache(doc->resource_manager) : file_cache;
+        ui_context.browsing_session = session_create(thread_pool, session_cache);
         if (ui_context.browsing_session) {
             log_info("view: browsing session created");
         }
