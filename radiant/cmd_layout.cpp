@@ -2469,63 +2469,20 @@ static DomDocument* load_lambda_html_doc_with_host_config(
                                          js_host_config);
 }
 
-static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts_expr) {
-    char* escaped_pdf = mem_escape_lambda_literal(pdf_file, MEM_CAT_LAYOUT);
-    if (!escaped_pdf) {
-        log_error("[load_html_doc] PDF package: failed to escape input path");
+static DomDocument* load_lambda_document_transform_doc(Url* document_url,
+    const LambdaDocumentTransformConfig* transform, int viewport_width,
+    int viewport_height, Pool* pool);
+
+static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
+                                            int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("pdf");
+    if (!transform) {
+        log_error("document-transform: PDF runtime configuration is missing");
         return nullptr;
     }
-
-    const char* opts = opts_expr ? opts_expr : "null";
-    int needed = snprintf(nullptr, 0,
-        "import pdf: lambda.pdf.pdf\n"
-        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-        "pdf.pdf_to_html(doc, %s)\n",
-        escaped_pdf, opts);
-    if (needed <= 0) {
-        mem_free(escaped_pdf);
-        log_error("[load_html_doc] PDF package: failed to size bridge script");
-        return nullptr;
-    }
-
-    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_LAYOUT);
-    if (!script_buf) {
-        mem_free(escaped_pdf);
-        log_error("[load_html_doc] PDF package: failed to allocate bridge script");
-        return nullptr;
-    }
-
-    snprintf(script_buf, (size_t)needed + 1,
-        "import pdf: lambda.pdf.pdf\n"
-        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-        "pdf.pdf_to_html(doc, %s)\n",
-        escaped_pdf, opts);
-    mem_free(escaped_pdf);
-    return script_buf;
-}
-
-static DomDocument* load_pdf_bridge_doc(Url* pdf_url, int viewport_width,
-                                        int viewport_height, Pool* pool) {
-    if (!pdf_url) return nullptr;
-    char* pdf_path = url_to_local_path(pdf_url);
-    const char* pdf_source = pdf_path ? pdf_path : url_get_href(pdf_url);
-    if (!pdf_source || !pdf_source[0]) {
-        log_error("[load_html_doc] PDF package: failed to resolve input path");
-        if (pdf_path) mem_free(pdf_path);
-        return nullptr;
-    }
-
-    char* bridge_source = build_pdf_view_bridge_script(pdf_source, "{max_pages: 48}");
-    if (!bridge_source) {
-        if (pdf_path) mem_free(pdf_path);
-        return nullptr;
-    }
-
-    DomDocument* doc = load_lambda_script_source_doc(pdf_url, bridge_source,
-                                                     viewport_width, viewport_height, pool);
-    mem_free(bridge_source);
-    if (pdf_path) mem_free(pdf_path);
-    return doc;
+    return load_lambda_document_transform_doc(pdf_url, transform,
+                                              viewport_width, viewport_height, pool);
 }
 
 static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
@@ -2610,7 +2567,7 @@ static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool
 
 static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               int width, int height, Pool* pool,
-                                              bool bridge_pdf, bool include_text,
+                                              bool include_text,
                                               bool* handled) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
@@ -2624,7 +2581,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
     if (!ext) return nullptr;
     if (strcmp(ext, ".pdf") == 0) {
         if (handled) *handled = true;
-        return bridge_pdf ? load_pdf_bridge_doc(url, width, height, pool) : nullptr;
+        return load_pdf_transform_doc(url, width, height, pool);
     }
 
     const LayoutFormatRoute* route = layout_find_format_route(ext);
@@ -2661,7 +2618,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     } else {
     bool handled = false;
     doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
-                                   pool, true, true, &handled);
+                                   pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
                                                     viewport_height, pool, js_host_config);
@@ -3721,9 +3678,11 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
     return doc;
 }
 
-// evaluate a Lambda document and run it through the CSS/layout pipeline.
-DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
-                                           int viewport_width, int viewport_height, Pool* pool) {
+// Evaluate either a Lambda source document or a configured native transform,
+// then run its result through the shared CSS/layout pipeline.
+static DomDocument* load_lambda_document_doc(Url* script_url,
+        const char* script_source, const LambdaDocumentTransformConfig* transform,
+        int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = time_now_ns();
 
     if (!script_url || !pool) {
@@ -3743,7 +3702,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         log_error("load_lambda_script_doc: failed to resolve Lambda script URL");
         return nullptr;
     }
-    log_info("[Lambda Script] Loading Lambda script: %s", script_filepath);
+    log_info("[Lambda Script] Loading Lambda document: %s", script_filepath);
 
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = time_now_ns();
@@ -3771,7 +3730,10 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     render_map_init();
     render_map_set_path_recorder(&render_map_record_path);
 
-    Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
+    const char* document_target = url_get_href(script_url);
+    Input* script_output = transform
+        ? run_lambda_document_transform(runtime, document_target, transform)
+        : run_script_mir(runtime, script_source, script_filepath, false);
 
     if (runtime_heap(runtime)) {
         layout_context->heap = runtime_heap(runtime);
@@ -3994,8 +3956,21 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
         time_elapsed_ms_f(total_start, total_end));
 
-    log_notice("[Lambda Script] Script document loaded and styled");
+    log_notice("[Lambda Script] Document loaded and styled");
     return dom_doc;
+}
+
+DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
+        int viewport_width, int viewport_height, Pool* pool) {
+    return load_lambda_document_doc(script_url, script_source, nullptr,
+        viewport_width, viewport_height, pool);
+}
+
+static DomDocument* load_lambda_document_transform_doc(Url* document_url,
+        const LambdaDocumentTransformConfig* transform, int viewport_width,
+        int viewport_height, Pool* pool) {
+    return load_lambda_document_doc(document_url, nullptr, transform,
+        viewport_width, viewport_height, pool);
 }
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
@@ -5006,7 +4981,7 @@ static bool layout_single_file(
     bool special_handled = false;
     const char* route_path = effective_ext ? effective_ext : input_file;
     doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                   pool, false, false, &special_handled);
+                                   pool, false, &special_handled);
     if (!special_handled) {
         const int max_redirects = 8;
         for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {

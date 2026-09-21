@@ -1265,40 +1265,6 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     return 0;  // success
 }
 
-static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* opts_expr,
-                                             const char* log_prefix) {
-    char* escaped_pdf = mem_escape_lambda_literal(pdf_file, MEM_CAT_TEMP);
-    if (!escaped_pdf) {
-        log_error("[%s] PDF package: failed to escape input path", log_prefix);
-        return nullptr;
-    }
-
-    const char* opts = opts_expr ? opts_expr : "null";
-    int needed = snprintf(nullptr, 0,
-        "import pdf: lambda.pdf.pdf\n"
-        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-        "pdf.pdf_to_html(doc, %s)\n",
-        escaped_pdf, opts);
-    if (needed <= 0) {
-        mem_free(escaped_pdf);
-        log_error("[%s] PDF package: failed to size bridge script", log_prefix);
-        return nullptr;
-    }
-    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
-    if (!script_buf) {
-        mem_free(escaped_pdf);
-        log_error("[%s] PDF package: failed to allocate bridge script", log_prefix);
-        return nullptr;
-    }
-    snprintf(script_buf, (size_t)needed + 1,
-        "import pdf: lambda.pdf.pdf\n"
-        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-        "pdf.pdf_to_html(doc, %s)\n",
-        escaped_pdf, opts);
-    mem_free(escaped_pdf);
-    return script_buf;
-}
-
 static char* build_latex_to_html_bridge_script(const char* latex_file,
                                                bool full_document,
                                                const char* font_option,
@@ -1342,15 +1308,6 @@ static char* build_latex_to_html_bridge_script(const char* latex_file,
     }
     mem_free(escaped_latex);
     return script_buf;
-}
-
-static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
-                                            const char* opts_expr, const char* log_prefix) {
-    char* script_buf = build_pdf_to_html_bridge_script(pdf_file, opts_expr, log_prefix);
-    if (!script_buf) return false;
-    write_text_file(tmp_script_path, script_buf);
-    mem_free(script_buf);
-    return true;
 }
 
 void run_assertions() {
@@ -3600,19 +3557,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
                 return lambda_main_finish(copy_status == 0 ? 0 : 1);
             }
-            log_info("[render] PDF detected — using Lambda PDF package in-memory element pipeline");
-            char* render_pdf_bridge = file_temp_path("render_pdf_bridge", ".ls");
-            if (!render_pdf_bridge) {
-                printf("Error: Failed to allocate PDF render bridge path\n");
-                return lambda_main_finish(1);
-            }
-            if (!write_pdf_to_html_bridge_script(html_file, render_pdf_bridge, "null", "render")) {
-                printf("Error: Failed to prepare PDF render bridge for '%s'\n", html_file);
-                mem_free(render_pdf_bridge);
-                return lambda_main_finish(1);
-            }
-            render_package_temp_input = render_pdf_bridge;
-            html_file = render_package_temp_input;
+            log_info("[render] PDF detected — using native Lambda PDF transform");
         }
 
         // Determine output format based on file extension
@@ -3928,44 +3873,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 filename, graph_bridge_source, event_file, headless,
                 font_dirs, font_dir_count, event_log, state_dump);
             mem_free(graph_bridge_source);
-
-            lambda_view_log_completion(exit_code);
-            return lambda_main_finish(exit_code);
-        }
-
-        // ============================================================
-        // PDF → Lambda element-tree view via the Lambda PDF package
-        // ============================================================
-        // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed.
-        // We hand a tiny Lambda bridge script to the normal in-memory .ls view loader;
-        // the script returns an <html> document containing one <svg> per page.
-        // Radiant then builds the DOM directly from that element tree.
-        char* pdf_bridge_source = nullptr;
-        if (ext && strcmp(ext, ".pdf") == 0) {
-            log_info("[view] PDF detected — using Lambda PDF package in-memory element pipeline");
-
-            pdf_bridge_source = build_pdf_to_html_bridge_script(filename, "{max_pages: 48}", "view");
-            if (!pdf_bridge_source) {
-                printf("Error: Failed to prepare PDF view bridge for '%s'\n", filename);
-                if (temp_file_path) {
-                    if (temp_file_path_is_local) file_delete(temp_file_path);
-                    mem_free(temp_file_path);
-                }
-                return lambda_main_finish(1);
-            }
-
-            // The script returns the constructed <html>/<svg> element tree, so
-            // Radiant builds the DOM directly without XML/HTML serialization or
-            // bridge-file I/O.
-            exit_code = view_lambda_script_source_in_window_with_events(
-                filename, pdf_bridge_source, event_file, headless,
-                font_dirs, font_dir_count, event_log, state_dump);
-
-            mem_free(pdf_bridge_source);
-            if (temp_file_path) {
-                if (temp_file_path_is_local) file_delete(temp_file_path);
-                mem_free(temp_file_path);
-            }
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);

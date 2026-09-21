@@ -42550,7 +42550,9 @@ static bool interp_script_needs_large_stack(const Script* script) {
 }
 #endif
 
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
+        bool run_main, Script** out_script) {
+    if (out_script) *out_script = NULL;
     log_notice("Running script with MIR JIT compilation (direct)");
 
     // Initialize runner
@@ -42585,6 +42587,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         output->root = ItemError;
         return output;
     }
+    if (out_script) *out_script = runner.script;
 
     // T0: a planned script has no `main` by construction — module init is the
     // interpreter's job. Imports still fall back to JIT in P0/P1, so a planned
@@ -42791,5 +42794,67 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     // Execute (no imports — use standard path)
     Input* output = execute_script_and_create_output(&runner, run_main);
 
+    return output;
+}
+
+// Document loaders select this fixed native contract instead of generated code.
+static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
+    {"pdf", "lambda.pdf.pdf", "pdf_to_html"},
+};
+
+const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
+        const char* input_type) {
+    if (!input_type) return NULL;
+    for (size_t index = 0;
+            index < sizeof(lambda_document_transforms) / sizeof(lambda_document_transforms[0]);
+            index++) {
+        const LambdaDocumentTransformConfig* transform =
+            &lambda_document_transforms[index];
+        if (strcmp(transform->input_type, input_type) == 0) return transform;
+    }
+    return NULL;
+}
+
+Input* run_lambda_document_transform(Runtime* runtime, const char* input_target,
+        const LambdaDocumentTransformConfig* transform) {
+    if (!runtime || !input_target || !transform || !transform->input_type ||
+            !transform->package_module || !transform->function_name) {
+        log_error("document-transform: incomplete transform configuration");
+        return NULL;
+    }
+    char* package_path = lambda_resolve_import_module_path("./",
+        strview_from_cstr(transform->package_module));
+    if (!package_path) {
+        log_error("document-transform: could not resolve package '%s'",
+            transform->package_module);
+        return NULL;
+    }
+    Script* package = NULL;
+    Input* output = run_script_mir(runtime, NULL, package_path, false, &package);
+    mem_free(package_path);
+    if (!output || !package) return output;
+
+    EvalContext* eval_context = runtime_get_eval_context(runtime);
+    if (!eval_context) {
+        log_error("document-transform: package '%s' did not create an evaluation context",
+            transform->package_module);
+        output->root = ItemError;
+        return output;
+    }
+    RuntimeExecutionScope execution_scope(eval_context);
+    RootFrame roots(4);
+    Rooted<Item> target(roots, (Item){.item = s2it(heap_strcpy(input_target,
+        (int64_t)strlen(input_target)))});
+    Rooted<Item> type(roots, (Item){.item = s2it(heap_strcpy(transform->input_type,
+        (int64_t)strlen(transform->input_type)))});
+    Rooted<Item> document(roots, fn_input2(target.get(), type.get()));
+    if (item_is_error(document.get())) {
+        output->root = document.get();
+        return output;
+    }
+    Item args[2] = {document.get(), ItemNull};
+    Rooted<Item> result(roots, interp_call_module_export(runtime, package,
+        transform->function_name, args, 2));
+    output->root = result.get();
     return output;
 }
