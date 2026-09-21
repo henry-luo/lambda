@@ -34,8 +34,6 @@ typedef struct CacheMetadata {
     size_t content_size;     // Size in bytes
     time_t last_accessed;    // Last access time (for LRU)
     time_t created_at;       // Creation timestamp
-    bool legacy_cache_entry; // true when cache_path owns a verified DJB2 payload
-    
 } CacheMetadata;
 
 // Enhanced file cache manager

@@ -15,7 +15,7 @@ Extend the existing file I/O modules (`lib/file.c` and `lib/file_utils.c`) into 
 - Streaming: `file_read_lines`
 - Temp files: `file_temp_path`, `file_temp_create`, `dir_temp_create`
 - Path utils: `file_path_join`, `file_path_dirname`, `file_path_basename`, `file_path_ext`
-- Extras: `file_ensure_dir`, `file_cache_path`, `create_dir`
+- Extras: `file_ensure_dir`, `create_dir`
 
 **`lib/file_utils.c`** provides:
 - `create_dir_recursive` — `mkdir -p` equivalent
@@ -382,7 +382,7 @@ Python `os`, `os.path`, `shutil` → file module:
 ### Phase 6: Path Utilities & Temp Files — ✅ Complete
 - `file_path_join`, `file_path_dirname`, `file_path_basename`, `file_path_ext`
 - `file_temp_path`, `file_temp_create`, `dir_temp_create`
-- Bonus: `file_ensure_dir`, `file_cache_path`
+- Bonus: `file_ensure_dir`
 - Unit tests: join edge cases (trailing slashes, empty segments), temp uniqueness
 
 ### Phase 7: Codebase Migration — ✅ Complete
