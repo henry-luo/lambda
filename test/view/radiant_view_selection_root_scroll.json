@@ -1,0 +1,15 @@
+{
+  "name": "Radiant selection overlay follows root scroll",
+  "html": "test/html/selection_overlay_root_scroll.html",
+  "viewport": { "width": 400, "height": 160 },
+  "events": [
+    { "type": "scroll_to", "x": 0, "y": 260 },
+    { "type": "mouse_down", "x": 8, "y": 142, "button": "left" },
+    { "type": "mouse_move", "x": 180, "y": 142 },
+    { "type": "assert_selection", "is_collapsed": false, "check_dom": true },
+    { "type": "assert_pixel", "x": 80, "y": 142,
+      "min_r": 90, "max_r": 130, "min_g": 145, "max_g": 190,
+      "min_b": 200, "max_b": 240 },
+    { "type": "mouse_up", "x": 180, "y": 142, "button": "left" }
+  ]
+}
