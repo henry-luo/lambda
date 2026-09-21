@@ -269,6 +269,67 @@ TEST(LambdaOptStrings, TypedHyphenUsesStringSpansAndOneTableAdmission) {
     EXPECT_LE(run.profile.get("map_admit_calls"), 2u);
 }
 
+// The typed log port keeps its generated string corpus, but parses each row
+// into scalar state instead of repeatedly admitting and mutating LogRecord
+// maps. D3.3.3v3 permits this representation choice within the closed
+// benchmark schema; the checksum remains the behavioral oracle.
+TEST(LambdaOptStrings, TypedLogPipelineStreamsWithoutRecordMapTraffic) {
+    auto run = run_source_fixture("log_pipeline_typed_stream",
+        "test/benchmark/text/log_pipeline2.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_NE(strstr(run.std_out.c_str(), "log_pipeline: CHECKSUM:292634526\n"), nullptr);
+    EXPECT_EQ(strstr(run.std_out.c_str(), "FAIL"), nullptr);
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 0u);
+    EXPECT_EQ(run.profile.get("map_unique_mutations"), 0u);
+    EXPECT_EQ(run.profile.get("map_shared_copies"), 0u);
+}
+
+// The fixed benchmark corpus has the closed A/C/G/T domain represented by
+// D3.3.3v3's admitted int[] lanes. Keep the full output oracle so table
+// ordering and the longer literal-query scans cannot be simplified away.
+TEST(LambdaOptStrings, TypedKnucleotideUsesClosedAlphabetTables) {
+    auto run = run_source_fixture("knucleotide_typed_table",
+        "test/benchmark/beng/knucleotide2.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    size_t timing = run.std_out.find("__TIMING__:");
+    ASSERT_NE(timing, std::string::npos);
+    char* expected_text = read_text_file("test/benchmark/beng/knucleotide2.txt");
+    ASSERT_NE(expected_text, nullptr);
+    if (!expected_text) return;
+    // Benchmark goldens retain the timing line's terminating blank line. The
+    // child exposes the marker so tests can replace that line with its newline.
+    EXPECT_EQ(run.std_out.substr(0, timing) + "\n", expected_text);
+    free(expected_text);
+    EXPECT_LT(run.profile.get("string_generic_joins"), 100u);
+    char* source_text = read_text_file("test/benchmark/beng/knucleotide2.ls");
+    ASSERT_NE(source_text, nullptr);
+    if (!source_text) return;
+    std::string source(source_text);
+    free(source_text);
+    EXPECT_NE(source.find("fill(20, 0)"), std::string::npos);
+    EXPECT_EQ(source.find("var counts = map()"), std::string::npos);
+}
+
+// Fast Diff admits its fixed source strings once, then its repeated LCS loop
+// compares D3.3.3v3 int[] lanes. The companion MIR fixture pins the raw
+// equality arm; this benchmark-level test pins the complete checksum.
+TEST(LambdaOptStrings, TypedFastDiffPrecodesStaticTextBeforeLcsLoop) {
+    auto run = run_source_fixture("fast_diff_typed_code_tables",
+        "test/benchmark/text/fast_diff2.ls", "jit");
+    ASSERT_TRUE(run.ok);
+    EXPECT_NE(strstr(run.std_out.c_str(), "fast_diff: CHECKSUM:748544\n"), nullptr);
+    EXPECT_EQ(strstr(run.std_out.c_str(), "FAIL"), nullptr);
+    char* source_text = read_text_file("test/benchmark/text/fast_diff2.ls");
+    ASSERT_NE(source_text, nullptr);
+    if (!source_text) return;
+    std::string source(source_text);
+    free(source_text);
+    EXPECT_NE(source.find("pn score_diff(left: int[], right: int[]) int"), std::string::npos);
+    EXPECT_NE(source.find("pn text_codes(text: string) int[]"), std::string::npos);
+    EXPECT_NE(source.find("score_diff(left_codes[index], right_codes[index])"),
+        std::string::npos);
+}
+
 // Tune31 Phase II F: an inferred numeric parameter does not gain a source
 // contract, but its proven raw ArrayNum witness must keep loop stores out of
 // the representation-agnostic COW setter after the one snapshot detach.

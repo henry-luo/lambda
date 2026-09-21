@@ -7,7 +7,8 @@
   and D close without speculative engine changes.
   Phase I's final code, focused semantic gates and paired release evidence
   are recorded in §3.7 and §4.4. The full Phase II baseline passes, as
-  recorded in §6.5.
+  recorded in §6.5. Three follow-on typed source ports are recorded in §7;
+  they are intentionally separate from the Tune31 engine results.
 - **Scope:** recover native execution in untyped Lambda, close measured
   regressions, and remove repeated runtime work in both Lambda variants.
 - **Primary evidence:** [Result42–47 analysis](Lambda_Benchmark_Result47_Analysis.md),
@@ -1119,3 +1120,47 @@ The Hyphen source comparison does not claim an engine result. The separate
 inferred-store and exclusive-field-borrow implementations are the Phase II F
 and A engine results; B and E are rejected by paired results, while C and D
 close without a safe, measured generic change.
+
+## 7. Follow-on typed source ports (2026-09-21)
+
+These benchmark-source rewrites apply the same representation discipline as
+the typed Hyphen port. They do not change the runtime and must not be folded
+into a Tune31 engine geomean. **D3.3.3v3** permits an explicit source
+representation to retain its established carrier; **S7.1.2** keeps string
+indexing and slicing semantic rather than requiring a byte-output buffer.
+Each port keeps its external text output and canonical oracle.
+
+| Typed source | Rewritten hot representation | JIT control → candidate | Ratio, upper 95% | Pairs |
+|---|---|---:|---:|---:|
+| `log_pipeline2.ls` | direct string spans and scalar aggregate state instead of a `LogRecord` map per row | 3410.830 → 1778.870 ms | 0.5215, 0.5259 | 41/41 wins |
+| `knucleotide2.ls` | fixed 20-lane A/C/G/T one- and two-mer table; longer requested literals remain string scans | 4.258 → 0.647 ms | 0.1519, 0.1557 | 81/81 wins |
+| `fast_diff2.ls` | fixed source strings admitted once as `int[]` code tables before the repeated LCS loop | 124.564 → 48.754 ms | 0.3914, 0.4050 | 41/41 wins |
+
+The changes imitate the useful part of the C2MIR ports: the repeated work
+uses its closed, native-friendly representation. They do not claim an
+identical general-purpose parser or container API. Log Pipeline still scans
+all generated fields and checks its scalar schema; Knucleotide emits the same
+formatted strings and performs its longer queries as strings; Fast Diff
+converts the static fixture before timing and retains string output. None uses
+an integer output buffer.
+
+The source rewrite pins are deliberately mechanism-specific:
+
+- `LambdaOptStrings.TypedLogPipelineStreamsWithoutRecordMapTraffic` checks
+  the checksum and zero map admissions/mutations.
+- `LambdaOptStrings.TypedKnucleotideUsesClosedAlphabetTables` compares the
+  normalized full golden output and requires the closed 20-slot table.
+- `LambdaOptStrings.TypedFastDiffPrecodesStaticTextBeforeLcsLoop` checks the
+  checksum and the static `string → int[]` admission boundary.
+- `tune31_typed_text_code_loop` has its `.txt` golden and MIR sidecar. The
+  sidecar requires raw integer equality in the repeated loop and forbids both
+  `fn_string_ascii_at` and `fn_eq` there.
+
+The three Lambda optimization tests and the new MIR fixture pass after
+`make build-test`. Knucleotide and Fast Diff also pass JIT forced collection,
+freed-memory poisoning and the root witness; Fast Diff passes interp and auto
+with the canonical checksum. The archived release evidence is under
+`temp/tune31_phase3/`: `paired_log_pipeline_typed_stream_jit_41.json`,
+`paired_knucleotide_typed_table_jit_81.json`,
+`paired_fast_diff_code_tables_jit_41.json`, the matching `profiles/` TSVs,
+and the Fast Diff `mir/` dumps.

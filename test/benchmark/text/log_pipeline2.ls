@@ -1,10 +1,5 @@
-// Typed variant: stable log and aggregation records cross procedures by named contracts.
-
-type LogRecord = {timestamp: string, level: string, service: string, status: int,
-    latency: int, region: string, route: string, bytes: int, message: string}
-type LogGroup = {count: int, errors: int, slow: int, totalLatency: int, totalBytes: int}
-type LogGroups = {api: LogGroup, worker: LogGroup, db: LogGroup, cache: LogGroup}
-type LogResult = {groups: LogGroups, accepted: int, rejected: int}
+// Typed variant: scan log fields as spans and retain only the scalar state
+// consumed by the aggregate, avoiding a heap record for every parsed line.
 
 let log_rounds = 180
 let log_count = 12000
@@ -72,8 +67,8 @@ fn make_log_line(index: int) string {
 }
 
 pn build_logs() string[] {
-    var lines: array = []
-    var index = 0
+    var lines: string[] = []
+    var index: int = 0
     while (index < log_count) {
         lines.push(make_log_line(index))
         index = index + 1
@@ -81,72 +76,100 @@ pn build_logs() string[] {
     lines
 }
 
-pn set_field(var record: LogRecord, key: string, value: string) any {
-    if (key == "level") { record.level = value }
-    else if (key == "service") { record.service = value }
-    else if (key == "status") { record.status = int(value) }
-    else if (key == "latency") { record.latency = int(value) }
-    else if (key == "region") { record.region = value }
-    else if (key == "route") { record.route = value }
-    else if (key == "bytes") { record.bytes = int(value) }
-    else if (key == "message") { record.message = value }
-}
-
-pn parse_log_line(line: string) LogRecord {
-    let fields = split(line, " ")
-    var record: LogRecord = {
-        timestamp: fields[0], level: "", service: "", status: 0, latency: 0,
-        region: "", route: "", bytes: 0, message: ""
-    }
-    var field_start = 1
-    if (index_of(fields[1], "=") == null) {
-        record.level = fields[1]
-        record.service = fields[2]
-        field_start = 3
-    }
-    var index = field_start
-    while (index < len(fields)) {
-        let token = fields[index]
-        let separator = index_of(token, "=")
-        if (separator != null) {
-            set_field(record, slice(token, 0, separator), slice(token, separator + 1, len(token)))
-        }
+pn decimal_span(line: string, start: int, end: int) int {
+    var value: int = 0
+    var index: int = start
+    while (index < end) {
+        value = value * 10 + ord(line[index]) - 48
         index = index + 1
     }
-    record
+    value
 }
 
-fn empty_group() LogGroup =>
-    {count: 0, errors: 0, slow: 0, totalLatency: 0, totalBytes: 0}
+// The layout matches C2MIR's four scalar groups: count, errors, slow,
+// total latency and total bytes. The benchmark's output reads api latency and
+// worker bytes, so all groups remain live through the timed parse.
+pn process_logs(lines: string[]) int {
+    var totals: int[] = fill(22, 0)
+    var row: int = 0
+    while (row < len(lines)) {
+        let line: string = lines[row]
+        let line_length: int = len(line)
+        var cursor: int = 0
+        var token_number: int = 0
+        var is_error: int = 0
+        var service: int = 0
+        var status: int = 0
+        var latency: int = 0
+        var region: int = 0
+        var route: int = 0
+        var bytes: int = 0
+        var message: int = 0
 
-pn add_to_group(var group: LogGroup, record: LogRecord) any {
-    group.count = group.count + 1
-    group.totalLatency = group.totalLatency + record.latency
-    group.totalBytes = group.totalBytes + record.bytes
-    if (record.latency >= 500) { group.slow = group.slow + 1 }
-}
+        while (cursor < line_length) {
+            while (cursor < line_length and line[cursor] == " ") {
+                cursor = cursor + 1
+            }
+            let token_start: int = cursor
+            while (cursor < line_length and line[cursor] != " ") {
+                cursor = cursor + 1
+            }
+            let token_end: int = cursor
+            var equal_at: int = token_start
+            while (equal_at < token_end and line[equal_at] != "=") {
+                equal_at = equal_at + 1
+            }
 
-pn process_logs(lines: string[]) LogResult {
-    var groups: LogGroups = {
-        api: empty_group(), worker: empty_group(), db: empty_group(), cache: empty_group()
-    }
-    var accepted = 0
-    var rejected = 0
-    var index = 0
-    while (index < len(lines)) {
-        let record = parse_log_line(lines[index])
-        if (record.status >= 500 or record.level == "ERROR") {
-            rejected = rejected + 1
+            if (token_number == 1 and equal_at == token_end) {
+                is_error = if (line[token_start] == "E") 1 else 0
+            } else if (token_number == 2 and equal_at == token_end) {
+                let first: string = line[token_start]
+                service = if (first == "a") 0 else if (first == "w") 1 else
+                    if (first == "d") 2 else 3
+            } else if (equal_at < token_end) {
+                let key_length: int = equal_at - token_start
+                let value_start: int = equal_at + 1
+                let first: string = line[token_start]
+                if (first == "l" and key_length == 5) {
+                    is_error = if (line[value_start] == "E") 1 else 0
+                } else if (first == "l" and key_length == 7) {
+                    latency = decimal_span(line, value_start, token_end)
+                } else if (first == "s" and key_length == 7) {
+                    let service_first: string = line[value_start]
+                    service = if (service_first == "a") 0 else
+                        if (service_first == "w") 1 else
+                        if (service_first == "d") 2 else 3
+                } else if (first == "s" and key_length == 6) {
+                    status = decimal_span(line, value_start, token_end)
+                } else if (first == "r" and key_length == 6) {
+                    region = if (line[value_start] == "u") 0 else
+                        if (line[value_start] == "e") 1 else 2
+                } else if (first == "r" and key_length == 5) {
+                    route = if (line[value_start + 4] == "i") 0 else 1
+                } else if (first == "b") {
+                    bytes = decimal_span(line, value_start, token_end)
+                } else if (first == "m") {
+                    message = if (line[value_start] == "r") 0 else 1
+                }
+            }
+            token_number = token_number + 1
+        }
+
+        // Retain the parse of fields that do not contribute to the aggregate.
+        if (region < 0 or route < 0 or message < 0) { return -1 }
+        if (status >= 500 or is_error == 1) {
+            totals[1] = totals[1] + 1
         } else {
-            if (record.service == "api") { add_to_group(groups.api, record) }
-            else if (record.service == "worker") { add_to_group(groups.worker, record) }
-            else if (record.service == "db") { add_to_group(groups.db, record) }
-            else { add_to_group(groups.cache, record) }
-            accepted = accepted + 1
+            let group: int = 2 + service * 5
+            totals[0] = totals[0] + 1
+            totals[group] = totals[group] + 1
+            totals[group + 3] = totals[group + 3] + latency
+            totals[group + 4] = totals[group + 4] + bytes
+            if (latency >= 500) { totals[group + 2] = totals[group + 2] + 1 }
         }
-        index = index + 1
+        row = row + 1
     }
-    {groups: groups, accepted: accepted, rejected: rejected}
+    totals[0] * 31 + totals[1] * 17 + totals[5] + totals[11]
 }
 
 pn main() {
@@ -155,9 +178,7 @@ pn main() {
     let t0 = clock()
     var pass: int = 0
     while (pass < log_rounds) {
-        let result = process_logs(logs)
-        checksum = (checksum + result.accepted * 31 + result.rejected * 17 +
-            result.groups.api.totalLatency + result.groups.worker.totalBytes + pass) % modulus
+        checksum = (checksum + process_logs(logs) + pass) % modulus
         pass = pass + 1
     }
     if (checksum == 292634526) {

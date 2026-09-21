@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Tune31 follow-on / D3.3.3v3: after source text is admitted as int[] code lanes, the repeated comparison loop emits raw lane equality and must not call string indexing or generic equality.",
+  "checks": [
+    {
+      "in_func": "_count_equal_codes_#",
+      "expect": [
+        "\teq\t"
+      ],
+      "forbid": [
+        "call\tfn_string_ascii_at_p, fn_string_ascii_at",
+        "call\tfn_eq_p, fn_eq"
+      ]
+    }
+  ]
+}
