@@ -7582,6 +7582,29 @@ extern "C" Item js_object_get_own_property_descriptors(Item obj) {
     return result;
 }
 
+static bool js_create_data_property_initialize_reserved_literal_slot(Item object,
+        String* name, Item value) {
+    if (!name || get_type_id(object) != LMD_TYPE_MAP || !object.map ||
+            !js_object_uses_ordinary_shape(object) ||
+            (name->len >= 2 && name->chars[0] == '_' && name->chars[1] == '_')) {
+        return false;
+    }
+    Map* map = object.map;
+    TypeMap* shape = (TypeMap*)map->type;
+    ShapeEntry* entry = js_find_shape_entry(object, name->chars, (int)name->len);
+    if (!shape || !shape->is_transition_shared_shape || !entry ||
+            entry->flags != 0 || entry->accessor ||
+            shape_entry_storage_size(entry) != (int)sizeof(void*) ||
+            !map_ctor_offset_is_reserved(map, entry->byte_offset)) {
+        return false;
+    }
+    // A literal's source-order CreateDataProperty publishes its pre-reserved
+    // ordinary data slot. Going through DefineOwnProperty would detach the
+    // shared recipe before that slot is observable, defeating its MIR guard.
+    Item stored = fn_map_set(object, (Item){.item = s2it(name)}, value);
+    return !item_is_error(stored);
+}
+
 extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
     RootFrame roots(10);
     Rooted<Item> obj_root(roots, obj);
@@ -7628,6 +7651,10 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
                 // swallow a class's own computed static method.
                 js_define_own_key_storage(obj_root.get(), name_root.get(), value_root.get());
             }
+            return obj_root.get();
+        }
+        if (js_create_data_property_initialize_reserved_literal_slot(
+                obj_root.get(), identity_name, value_root.get())) {
             return obj_root.get();
         }
     }

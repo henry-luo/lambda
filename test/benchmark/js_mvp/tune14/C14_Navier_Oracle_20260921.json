@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "manifest": {
+    "path": "/Users/henryluo/Projects/Lambda-opus/test/benchmark/js_tune14_manifest_v1.json",
+    "sha256": "5e0e7e718d762bcf1cb933ecce78386ffb2aa262283fb14f0dbf87e7f119de1a"
+  },
+  "source": {
+    "path": "test/benchmark/jetstream/navier-stokes.js",
+    "sha256": "24ff01d4efb18f994786659b04bdf79d74821461c99e9d8c29c2ea0081ff161c"
+  },
+  "lambda": {
+    "path": "temp/tune14/lambda_t14_c14_release.exe",
+    "sha256": "4b140f0c150d631033f896290c051e3536dbfa429d6341b26ed6f941def5d127"
+  },
+  "expected_density_marker": "__NAVIER_DENSITY_DIGEST__:-257786486",
+  "node": {
+    "command": [
+      "node",
+      "temp/_node_bench_navier_stokes.js"
+    ],
+    "status": "ok",
+    "returncode": 0,
+    "timing_marker_count": 1,
+    "density_marker_present": true,
+    "stdout_sha256": "209897840613df4f96232a73d38fb9dd260a276109a81f80e082f795cd293991",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "lambdajs": {
+    "command": [
+      "temp/tune14/lambda_t14_c14_release.exe",
+      "js",
+      "temp/_ljs_jetstream_navier_stokes.js"
+    ],
+    "status": "ok",
+    "returncode": 0,
+    "timing_marker_count": 1,
+    "density_marker_present": true,
+    "stdout_sha256": "7e713306303ceb78531ff388a46553c523d990ec798190e661680df6fbfe9e61",
+    "stderr_sha256": "d5cac2bc3289f10c7b993819ccd8ae88ad19e93485bfacf1283a7752dad89f4c"
+  },
+  "quickjs": {
+    "command": [
+      "qjs",
+      "--stack-size",
+      "4194304",
+      "--std",
+      "-m",
+      "temp/_qjs_jetstream_navier_stokes.js"
+    ],
+    "status": "ok",
+    "returncode": 0,
+    "timing_marker_count": 1,
+    "density_marker_present": true,
+    "stdout_sha256": "431bda49710a06dd7271c9a1ba6f1f866ac3190ad1c1e916dd380e26dc9a6045",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

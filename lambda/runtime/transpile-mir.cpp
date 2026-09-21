@@ -8405,6 +8405,35 @@ static bool mir_cow_path_has_fixed_borrow_descriptor(MirTranspiler* mt,
     return true;
 }
 
+// Tune31 Phase III A1: a one-segment typed record place has a stable packed
+// field descriptor. The runtime helper rechecks the carrier identity and
+// falls back to the fixed generic descriptor on a mismatch (D3.3.3v3).
+static MIR_reg_t mir_emit_cow_typed_map_field_borrow(MirTranspiler* mt,
+        MirVarEntry* root, const AstCowPath* path) {
+    if (!root || !root->full_type || !path || path->count != 1 ||
+            !path->is_member[0]) return 0;
+    AstNode* segment = ast_unwrap_primary(path->segment[0]);
+    if (!segment || segment->node_type != AST_NODE_IDENT) return 0;
+    Type* contract = lambda_type_nonnull_map_contract(root->full_type);
+    if (!contract || contract->type_id != LMD_TYPE_MAP) return 0;
+    TypeMap* shape = (TypeMap*)contract;
+    if (!shape->is_trusted_contract || !has_fixed_shape(shape)) return 0;
+    AstIdentNode* name = (AstIdentNode*)segment;
+    ShapeEntry* field = find_shape_field_by_name(shape, name->name->chars,
+        name->name->len);
+    TypeId storage = shape_entry_storage_type_id(field);
+    if (!field || (storage != LMD_TYPE_ARRAY && storage != LMD_TYPE_ARRAY_NUM &&
+            storage != LMD_TYPE_MAP && storage != LMD_TYPE_ELEMENT)) return 0;
+
+    MIR_reg_t key = mir_emit_cow_path_key(mt, path->segment[0], true);
+    MIR_reg_t owner = load_gc_root_slot(mt, root->root_slot, "typed_borrow_owner");
+    return emit_call_4(mt, "cow_path_borrow_typed_map_field", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape),
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)field),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+}
+
 // `value_leaf` borrows a builtin mutator's place: a link holding no container
 // comes back as that value (cow_place_leaf*) for the mutator to reject, so no
 // borrow error returns from the enclosing function.
@@ -8418,6 +8447,13 @@ static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
     // root preparation (S9.1.2, S9.2.2, D4.4.4v4).
     if (!root->is_var_param || root->cow_marked) {
         (void)mir_prepare_cow_root(mt, root);
+    }
+    if (!value_leaf) {
+        MIR_reg_t typed_leaf = mir_emit_cow_typed_map_field_borrow(mt, root, path);
+        if (typed_leaf) {
+            emit_return_if_item_error(mt, typed_leaf);
+            return typed_leaf;
+        }
     }
     if (mir_cow_path_has_fixed_borrow_descriptor(mt, path)) {
         MIR_reg_t keys[3];
@@ -11340,6 +11376,35 @@ static MIR_reg_t mir_replay_string_concat(MirTranspiler* mt, AstNode* node,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
 }
 
+static MIR_reg_t mir_emit_owned_string_concat_fixed(MirTranspiler* mt,
+        int count, MIR_op_t* args) {
+    // The owner proves that the first piece is an exclusive builder. Fixed
+    // entries share string_buffer_join with the variadic fallback, but avoid
+    // its ABI packing and variable-count dispatch (D5.3.1–D5.3.4).
+    switch (count) {
+    case 2:
+        return emit_call_2(mt, "fn_strcat", MIR_T_P,
+            MIR_T_P, args[0], MIR_T_P, args[1]);
+    case 3:
+        return emit_call_3(mt, "fn_strcat3", MIR_T_P,
+            MIR_T_P, args[0], MIR_T_P, args[1], MIR_T_P, args[2]);
+    case 4:
+        return emit_call_4(mt, "fn_strcat4", MIR_T_P,
+            MIR_T_P, args[0], MIR_T_P, args[1], MIR_T_P, args[2],
+            MIR_T_P, args[3]);
+    case 5:
+        return emit_call_5(mt, "fn_strcat5", MIR_T_P,
+            MIR_T_P, args[0], MIR_T_P, args[1], MIR_T_P, args[2],
+            MIR_T_P, args[3], MIR_T_P, args[4]);
+    case 6:
+        return emit_call_6(mt, "fn_strcat6", MIR_T_P,
+            MIR_T_P, args[0], MIR_T_P, args[1], MIR_T_P, args[2],
+            MIR_T_P, args[3], MIR_T_P, args[4], MIR_T_P, args[5]);
+    default:
+        return 0;
+    }
+}
+
 static MIR_reg_t mir_emit_string_concat_tree(MirTranspiler* mt, AstNode* node,
         MirVarEntry* owner) {
     if (mir_record_drained_string(mt, node)) return emit_box_string(mt, mir_empty_string_pointer(mt));
@@ -11397,10 +11462,11 @@ static MIR_reg_t mir_emit_string_concat_tree(MirTranspiler* mt, AstNode* node,
     }
     MIR_var_t mandatory[] = {{MIR_T_I64, "owned", 0}, {MIR_T_I64, "count", 0}};
     MIR_op_t values[] = {MIR_new_int_op(mt->ctx, owner != NULL), MIR_new_int_op(mt->ctx, count)};
-    MIR_reg_t ptr = owner && count == 2
-        ? emit_call_2(mt, "fn_strcat", MIR_T_P, MIR_T_P, args[0], MIR_T_P, args[1])
-        : emit_vararg_call_common(mt, "fn_strcat_many", MIR_T_P, 1,
+    MIR_reg_t ptr = owner ? mir_emit_owned_string_concat_fixed(mt, count, args) : 0;
+    if (!ptr) {
+        ptr = emit_vararg_call_common(mt, "fn_strcat_many", MIR_T_P, 1,
             2, mandatory, values, count, args);
+    }
     MIR_reg_t boxed = emit_box_string(mt, ptr);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_reg_op(mt->ctx, boxed)));
@@ -12688,6 +12754,16 @@ static AstFieldNode* mir_ascii_char_index_expr(MirTranspiler* mt,
         ? index : NULL;
 }
 
+// The two-character fusion is a typed-boundary optimization. Keep inferred
+// string lanes on their established per-index lowering until a separate
+// source-identical regression gate proves that broader match safe (D3.3.3v3).
+static AstFieldNode* mir_declared_ascii_char_index_expr(MirTranspiler* mt,
+        AstNode* subject) {
+    AstFieldNode* index = mir_ascii_char_index_expr(mt, subject);
+    MirVarEntry* root = index ? mir_direct_root_binding(mt, index->object) : NULL;
+    return root && root->binding && root->binding->declared_type ? index : NULL;
+}
+
 static MIR_reg_t emit_ascii_char_literal_compare(MirTranspiler* mt,
         AstFieldNode* index, uint8_t expected, Operator op) {
     bool native_index = mir_index_expr_is_native_int(mt, index->field);
@@ -12700,6 +12776,32 @@ static MIR_reg_t emit_ascii_char_literal_compare(MirTranspiler* mt,
         MIR_T_I64, MIR_new_int_op(mt->ctx, expected)));
     if (op == OPERATOR_NE) {
         MIR_reg_t not_equal = new_reg(mt, "char_ne", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+            MIR_new_reg_op(mt->ctx, not_equal), MIR_new_reg_op(mt->ctx, equal),
+            MIR_new_int_op(mt->ctx, 0)));
+        return not_equal;
+    }
+    return equal;
+}
+
+// Both operands produce one Lambda character. The shared runtime leaf
+// compares ASCII bytes or exact UTF-8 spans without allocating either result
+// (S7.1.1v3); it owns the two-absent-character equality case too.
+static MIR_reg_t emit_string_char_pair_compare(MirTranspiler* mt,
+        AstFieldNode* left, AstFieldNode* right, Operator op) {
+    bool native_left = mir_index_expr_is_native_int(mt, left->field);
+    MIR_reg_t left_index = emit_index_value(mt, left->field, native_left);
+    MIR_reg_t left_text = transpile_box_item(mt, left->object);
+    bool native_right = mir_index_expr_is_native_int(mt, right->field);
+    MIR_reg_t right_index = emit_index_value(mt, right->field, native_right);
+    MIR_reg_t right_text = transpile_box_item(mt, right->object);
+    MIR_reg_t equal = emit_uext8(mt, emit_call_4(mt, "fn_string_char_eq",
+        MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, left_text),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, left_index),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_text),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_index)));
+    if (op == OPERATOR_NE) {
+        MIR_reg_t not_equal = new_reg(mt, "char_pair_ne", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
             MIR_new_reg_op(mt->ctx, not_equal), MIR_new_reg_op(mt->ctx, equal),
             MIR_new_int_op(mt->ctx, 0)));
@@ -14113,6 +14215,13 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
     {
         TypeString* literal = (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE)
             ? mir_string_literal_type(bi->right) : NULL;
+        AstFieldNode* left_char = mir_declared_ascii_char_index_expr(mt, bi->left);
+        AstFieldNode* right_char = mir_declared_ascii_char_index_expr(mt, bi->right);
+        if (left_char && right_char &&
+                (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE)) {
+            return publish(emit_string_char_pair_compare(mt, left_char, right_char,
+                bi->op), VALUE_REP_I64);
+        }
         AstFieldNode* char_index = literal && literal->string->len == 1 &&
             (unsigned char)literal->string->chars[0] < 0x80
             ? mir_ascii_char_index_expr(mt, bi->left) : NULL;

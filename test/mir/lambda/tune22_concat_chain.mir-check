@@ -4,7 +4,7 @@
   "checks": [
     {
       "in_func": "_concat_chain_tune22_#",
-      "expect": ["fn_strcat_many"],
+      "expect": ["fn_strcat4"],
       "forbid": ["call\tfn_join_p, fn_join", "call\tfn_string_p, fn_string"]
     },
     {

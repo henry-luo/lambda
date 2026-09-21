@@ -96,6 +96,15 @@ static bool event_view_pointer_events_none(View* view) {
     return false;
 }
 
+static bool event_view_is_inside_svg(View* view) {
+    for (DomNode* node = static_cast<DomNode*>(view); node; node = node->parent) {
+        if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_SVG) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool event_view_is_float(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
@@ -1339,21 +1348,25 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         DomDocument* doc = root_node && root_node->is_element()
             ? root_node->as_element()->doc : nullptr;
         MousePositionEvent* mouse = &evcon->event.mouse_position;
-        DomElement* svg_hit = doc ? (DomElement*)dom_document_svg_element_from_point(
-            doc, (float)mouse->x, (float)mouse->y) : nullptr;
-        if (svg_hit && evcon->target) {
-            bool target_contains_svg = false;
-            for (DomNode* node = (DomNode*)svg_hit; node; node = node->parent) {
-                if (node == static_cast<DomNode*>(evcon->target)) {
-                    target_contains_svg = true;
-                    break;
+        if (evcon->target && event_view_is_inside_svg(evcon->target)) {
+            // Only SVG targets need paint-geometry refinement. PDF text layers
+            // already own their pointer input through normal CSS box hit-testing.
+            DomElement* svg_hit = doc ? (DomElement*)dom_document_svg_element_from_point(
+                doc, (float)mouse->x, (float)mouse->y) : nullptr;
+            if (svg_hit) {
+                bool target_contains_svg = false;
+                for (DomNode* node = (DomNode*)svg_hit; node; node = node->parent) {
+                    if (node == static_cast<DomNode*>(evcon->target)) {
+                        target_contains_svg = true;
+                        break;
+                    }
                 }
-            }
-            if (target_contains_svg) {
-                // SVG paint geometry has no per-shape CSS boxes. Preserve the
-                // normal page-layer winner, then refine only inside that winner
-                // with the SVG CTM/bounds hit result used by elementFromPoint().
-                evcon->target = static_cast<View*>(svg_hit);
+                if (target_contains_svg) {
+                    // SVG paint geometry has no per-shape CSS boxes. Preserve the
+                    // normal page-layer winner, then refine only inside that winner
+                    // with the SVG CTM/bounds hit result used by elementFromPoint().
+                    evcon->target = static_cast<View*>(svg_hit);
+                }
             }
         }
         evcon->font = pa_font;

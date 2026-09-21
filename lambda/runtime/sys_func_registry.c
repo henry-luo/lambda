@@ -1757,6 +1757,14 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"fn_string_char_eq", FPTR(fn_string_char_eq),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"it2l", FPTR(it2l),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
@@ -1899,6 +1907,10 @@ JitImport jit_runtime_imports[] = {
     // String operations (non-sys-func entries)
     // ========================================================================
     {"fn_strcat", FPTR(fn_strcat)},
+    {"fn_strcat3", FPTR(fn_strcat3)},
+    {"fn_strcat4", FPTR(fn_strcat4)},
+    {"fn_strcat5", FPTR(fn_strcat5)},
+    {"fn_strcat6", FPTR(fn_strcat6)},
     {"fn_strcat_many", FPTR(fn_strcat_many)},
     {"fn_string_freeze", FPTR(fn_string_freeze)},
     {"fn_normalize", FPTR(fn_normalize)},
@@ -2044,6 +2056,7 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_set", FPTR(cow_path_set)},
     {"cow_path_borrow", FPTR(cow_path_borrow)},
     {"cow_path_borrow_fixed", FPTR(cow_path_borrow_fixed)},
+    {"cow_path_borrow_typed_map_field", FPTR(cow_path_borrow_typed_map_field)},
     {"cow_place_leaf", FPTR(cow_place_leaf)},
     {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
@@ -3666,7 +3679,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
         // Exact String-character equality reads only the already-rooted Item.
-        "fn_string_char_eq_ascii",
+        "fn_string_char_eq_ascii", "fn_string_char_eq",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",

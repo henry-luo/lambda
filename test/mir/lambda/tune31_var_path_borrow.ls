@@ -1,5 +1,5 @@
-// Tune31 Phase II A: a `var` record root is exclusive on entry. Re-borrowing
-// its typed array field keeps child COW while avoiding a root no-op per call.
+// Tune31 Phase III A1: a typed `var` record field borrows through its packed
+// descriptor, while the detached child keeps the ordinary COW semantics.
 
 type Counter = {values: int[]}
 

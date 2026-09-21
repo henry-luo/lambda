@@ -2,7 +2,10 @@
 #include "../lambda-data.hpp"
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
 
 #include <stdio.h>
@@ -23,6 +26,44 @@ static JsOptTraceCounter g_js_opt_trace_events[JS_OPT_EVENT_COUNT] = {};
 static uint64_t g_js_opt_trace_reason_counts[JS_OPT_REASON_COUNT] = {};
 static int g_js_opt_trace_mode = -1;
 static bool g_js_opt_trace_registered = false;
+static bool g_js_opt_trace_dumped = false;
+
+struct JsOptNamedFastNoEntryCounter {
+    char* name;
+    uint32_t length;
+    uint64_t count;
+};
+
+static HashMap* g_js_opt_named_fast_no_entry = NULL;
+
+static uint64_t js_opt_named_fast_no_entry_hash(const void* item,
+        uint64_t seed0, uint64_t seed1) {
+    const JsOptNamedFastNoEntryCounter* entry =
+        (const JsOptNamedFastNoEntryCounter*)item;
+    return entry && entry->name
+        ? hashmap_hash_bytes(entry->name, entry->length, seed0, seed1) : 0;
+}
+
+static int js_opt_named_fast_no_entry_compare(const void* left,
+        const void* right, void*) {
+    const JsOptNamedFastNoEntryCounter* a =
+        (const JsOptNamedFastNoEntryCounter*)left;
+    const JsOptNamedFastNoEntryCounter* b =
+        (const JsOptNamedFastNoEntryCounter*)right;
+    if (!a || !b || !a->name || !b->name || a->length != b->length) return 1;
+    return a->length == 0 || memcmp(a->name, b->name, a->length) == 0 ? 0 : 1;
+}
+
+static void js_opt_named_fast_no_entry_free(void* item) {
+    JsOptNamedFastNoEntryCounter* entry =
+        (JsOptNamedFastNoEntryCounter*)item;
+    if (entry) mem_free(entry->name);
+}
+
+static void js_opt_trace_cleanup(void) {
+    hashmap_free(g_js_opt_named_fast_no_entry);
+    g_js_opt_named_fast_no_entry = NULL;
+}
 
 static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "scope_lookup_cache_hit", "scope_lookup_cache_miss",
@@ -52,6 +93,7 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "named_fast_no_receiver_other",
     "named_fast_function_data",
     "runtime_number_head_hit", "runtime_number_head_fallback",
+    "runtime_number_compare_head",
     "runtime_string_concat_head",
     "mir_number_admitted", "mir_number_fallback",
     "mir_native_index_admitted", "mir_native_index_fallback",
@@ -59,6 +101,8 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "mir_loop_stable_name_id",
     "mir_light_call",
     "mir_light_direct_activation",
+    "mir_this_call",
+    "mir_this_direct_activation",
     "bound_call_forward_args",
     "mir_deferred_function_finalize",
     "mir_lazy_function_metadata",
@@ -134,8 +178,79 @@ void js_opt_trace_record(JsOptEvent event, JsOptReason reason,
     }
 }
 
+void js_opt_trace_named_fast_no_entry(const char* name, uint32_t length) {
+    if (!js_opt_trace_is_enabled() || !name || length == 0) return;
+    if (!g_js_opt_named_fast_no_entry) {
+        g_js_opt_named_fast_no_entry = hashmap_new(
+            sizeof(JsOptNamedFastNoEntryCounter), 16, 0, 0,
+            js_opt_named_fast_no_entry_hash, js_opt_named_fast_no_entry_compare,
+            js_opt_named_fast_no_entry_free, NULL);
+        if (!g_js_opt_named_fast_no_entry) return;
+    }
+    JsOptNamedFastNoEntryCounter probe = {const_cast<char*>(name), length, 0};
+    JsOptNamedFastNoEntryCounter* found =
+        (JsOptNamedFastNoEntryCounter*)hashmap_get(g_js_opt_named_fast_no_entry,
+            &probe);
+    if (found) {
+        if (found->count != UINT64_MAX) found->count++;
+        return;
+    }
+    char* copied_name = mem_dup_n(name, length, MEM_CAT_JS_RUNTIME);
+    if (!copied_name) return;
+    JsOptNamedFastNoEntryCounter entry = {copied_name, length, 1};
+    (void)hashmap_set(g_js_opt_named_fast_no_entry, &entry);
+    if (hashmap_oom(g_js_opt_named_fast_no_entry)) mem_free(copied_name);
+}
+
+static void js_opt_trace_append_escaped_name(StrBuf* buf, const char* name,
+        uint32_t length) {
+    static const char* hex = "0123456789ABCDEF";
+    if (!buf || !name) return;
+    for (uint32_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)name[i];
+        if (ch >= 0x20 && ch <= 0x7e && ch != '%' && ch != ',' &&
+                ch != '=') {
+            strbuf_append_char(buf, (char)ch);
+            continue;
+        }
+        strbuf_append_char(buf, '%');
+        strbuf_append_char(buf, hex[(ch >> 4) & 0x0f]);
+        strbuf_append_char(buf, hex[ch & 0x0f]);
+    }
+}
+
+static void js_opt_trace_append_named_fast_no_entry_details(StrBuf* buf) {
+    if (!buf || !g_js_opt_named_fast_no_entry) return;
+    enum { JS_OPT_TRACE_TOP_NAMED_FAST_NO_ENTRY = 16 };
+    JsOptNamedFastNoEntryCounter* top[JS_OPT_TRACE_TOP_NAMED_FAST_NO_ENTRY] = {};
+    size_t cursor = 0;
+    void* raw = NULL;
+    while (hashmap_iter(g_js_opt_named_fast_no_entry, &cursor, &raw)) {
+        JsOptNamedFastNoEntryCounter* entry =
+            (JsOptNamedFastNoEntryCounter*)raw;
+        if (!entry || !entry->name || entry->count == 0) continue;
+        for (int i = 0; i < JS_OPT_TRACE_TOP_NAMED_FAST_NO_ENTRY; i++) {
+            if (top[i] && top[i]->count >= entry->count) continue;
+            for (int j = JS_OPT_TRACE_TOP_NAMED_FAST_NO_ENTRY - 1; j > i; j--) {
+                top[j] = top[j - 1];
+            }
+            top[i] = entry;
+            break;
+        }
+    }
+    strbuf_append_format(buf, "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=%llu top=",
+        (unsigned long long)hashmap_count(g_js_opt_named_fast_no_entry));
+    for (int i = 0; i < JS_OPT_TRACE_TOP_NAMED_FAST_NO_ENTRY && top[i]; i++) {
+        if (i != 0) strbuf_append_char(buf, ',');
+        strbuf_append_uint64(buf, top[i]->count);
+        strbuf_append_char(buf, ':');
+        js_opt_trace_append_escaped_name(buf, top[i]->name, top[i]->length);
+    }
+    strbuf_append_char(buf, '\n');
+}
+
 void js_opt_trace_dump(void) {
-    if (!js_opt_trace_is_enabled()) return;
+    if (!js_opt_trace_is_enabled() || g_js_opt_trace_dumped) return;
     create_dir_recursive("temp");
     char default_path[128];
     snprintf(default_path, sizeof(default_path), "temp/js_opt_trace_%ld.tsv",
@@ -144,7 +259,14 @@ void js_opt_trace_dump(void) {
     if (!out_path || !out_path[0]) out_path = default_path;
 
     StrBuf* buf = strbuf_new();
-    if (!buf) return;
+    if (!buf) {
+        js_opt_trace_cleanup();
+        g_js_opt_trace_dumped = true;
+        return;
+    }
+    // Keep the strict schema record last: legacy readers tokenize every line
+    // after its `reasons=` field, while companion diagnostics are optional.
+    js_opt_trace_append_named_fast_no_entry_details(buf);
     strbuf_append_str(buf, "JS_OPT_TRACE schema=1 events=");
     for (int i = 0; i < JS_OPT_EVENT_COUNT; i++) {
         if (i != 0) strbuf_append_char(buf, ',');
@@ -167,6 +289,11 @@ void js_opt_trace_dump(void) {
         log_error("js-opt-trace: failed to write '%s'", out_path);
     }
     strbuf_free(buf);
+    // The normal runner dumps before memtrack_shutdown().  Release copied
+    // source spellings here so the diagnostic does not outlive that boundary;
+    // the atexit hook is then an idempotent no-op.
+    js_opt_trace_cleanup();
+    g_js_opt_trace_dumped = true;
 }
 
 #endif // LAMBDA_JS_EXEC_PROFILE

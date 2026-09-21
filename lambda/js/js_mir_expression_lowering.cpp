@@ -737,12 +737,7 @@ MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, in
     MIR_reg_t fn_item = jm_call_2(mt, "js_new_method_function_mir", MIR_T_I64,
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
         MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
-    if (JM_JS_FACT(fc, is_strict)) {
-        jm_callr_void_1(mt, "js_mark_strict_func", fn_item);
-    }
-    if (JM_JS_FACT(fc, is_derived_constructor)) {
-        jm_callr_void_1(mt, "js_mark_derived_constructor_func", fn_item);
-    }
+    jm_emit_apply_function_analysis_flags(mt, fn_item, fc);
     return fn_item;
 }
 
@@ -2987,11 +2982,14 @@ static JsObjectNode* jm_direct_literal_argument_for_parameter(
 struct JsMirLiteralShapePlan {
     JsObjectNode* object;
     TypeMap* shape;
+    // All object-literal return arms of one recursive producer share this
+    // identity. A runtime guard still proves every individual receiver.
+    JsFunctionNode* return_function;
 };
 
 static bool jm_literal_field_type_supported(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT ||
-        type_id == LMD_TYPE_STRING;
+        type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_MAP;
 }
 
 struct JsMirStaticShapeField {
@@ -3185,6 +3183,278 @@ static TypeMap* jm_literal_shape_for_object(JsMirTranspiler* mt,
     return arraylist_append(mt->literal_shape_plans, plan) ? shape : NULL;
 }
 
+static bool jm_literal_shape_field_name_matches(const JsMirStaticShapeField* fields,
+        int field_count, String* name) {
+    if (!fields || !name) return false;
+    for (int index = 0; index < field_count; index++) {
+        String* field_name = fields[index].name;
+        if (field_name && field_name->len == name->len &&
+                memcmp(field_name->chars, name->chars, name->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool jm_recursive_literal_property_field(JsMirTranspiler* mt,
+        JsFunctionNode* function, JsPropertyNode* property, String** out_name,
+        TypeId* out_type, bool* out_recursive_call) {
+    if (out_name) *out_name = NULL;
+    if (out_type) *out_type = LMD_TYPE_ANY;
+    if (out_recursive_call) *out_recursive_call = false;
+    String* name = jm_literal_property_name(property);
+    JsAstNode* value = property && property->value
+        ? (JsAstNode*)ast_unwrap_primary((AstNode*)property->value) : NULL;
+    if (!name || !value || (name->len == 9 &&
+            memcmp(name->chars, "__proto__", 9) == 0)) {
+        return false;
+    }
+    if (value->node_type == AST_NODE_LITERAL &&
+            ((JsLiteralNode*)value)->literal_type == AST_LITERAL_NULL) {
+        if (out_name) *out_name = name;
+        if (out_type) *out_type = LMD_TYPE_MAP;
+        return true;
+    }
+    if (value->node_type == AST_NODE_CALL_EXPR &&
+            jm_resolve_direct_call_function(mt, (JsCallNode*)value, true) == function) {
+        if (out_name) *out_name = name;
+        if (out_type) *out_type = LMD_TYPE_MAP;
+        if (out_recursive_call) *out_recursive_call = true;
+        return true;
+    }
+    return jm_literal_shape_property_supported(mt, property, out_name, out_type);
+}
+
+static bool jm_recursive_literal_object_fields(JsMirTranspiler* mt,
+        JsFunctionNode* function, JsObjectNode* object,
+        JsMirStaticShapeField* fields, int* in_out_count,
+        bool* out_has_recursive_call) {
+    if (!mt || !function || !object || !fields || !in_out_count ||
+            !out_has_recursive_call) {
+        return false;
+    }
+    int expected_count = *in_out_count;
+    int field_count = 0;
+    bool has_recursive_call = false;
+    for (JsAstNode* node = object->properties; node; node = node->next) {
+        if (node->node_type != AST_NODE_PROPERTY || field_count == 16) return false;
+        String* name = NULL;
+        TypeId type_id = LMD_TYPE_ANY;
+        bool recursive_call = false;
+        if (!jm_recursive_literal_property_field(mt, function,
+                (JsPropertyNode*)node, &name, &type_id, &recursive_call) ||
+                !jm_literal_field_type_supported(type_id)) {
+            return false;
+        }
+        for (int prior = 0; prior < field_count; prior++) {
+            if (fields[prior].name && fields[prior].name->len == name->len &&
+                    memcmp(fields[prior].name->chars, name->chars,
+                        name->len) == 0) {
+                return false;
+            }
+        }
+        if (expected_count == 0) {
+            fields[field_count] = {name, type_id};
+        } else if (field_count >= expected_count ||
+                fields[field_count].type_id != type_id ||
+                fields[field_count].name->len != name->len ||
+                memcmp(fields[field_count].name->chars, name->chars,
+                    name->len) != 0) {
+            return false;
+        }
+        has_recursive_call = has_recursive_call || recursive_call;
+        field_count++;
+    }
+    if (field_count == 0 || (expected_count != 0 && field_count != expected_count)) {
+        return false;
+    }
+    *in_out_count = field_count;
+    *out_has_recursive_call = has_recursive_call;
+    return true;
+}
+
+static bool jm_recursive_literal_member_targets_function(JsMirTranspiler* mt,
+        JsMemberNode* member, JsFunctionNode* target) {
+    if (!mt || !member || !member->object || !target) return false;
+    JsAstNode* receiver = (JsAstNode*)ast_unwrap_primary((AstNode*)member->object);
+    if (receiver && receiver->node_type == AST_NODE_CALL_EXPR) {
+        return jm_resolve_direct_call_function(mt, (JsCallNode*)receiver,
+            true) == target;
+    }
+    if (!receiver || receiver->node_type != AST_NODE_IDENT) return false;
+    NameEntry* binding = ((JsIdentifierNode*)receiver)->entry;
+    if (!binding || !binding->node) return false;
+    int parameter_index = -1;
+    JsFunctionNode* consumer = jm_function_for_parameter(mt, (AstNode*)
+        binding->node, &parameter_index);
+    if (!consumer || parameter_index < 0) return false;
+
+    AstIndex* index = &mt->tp->ast_index;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+        if (!node || node->node_type != AST_NODE_CALL_EXPR ||
+                jm_resolve_direct_call_function(mt, (JsCallNode*)node,
+                    true) != consumer) {
+            continue;
+        }
+        JsAstNode* argument = jm_call_argument_at((JsCallNode*)node,
+            parameter_index);
+        argument = argument ? (JsAstNode*)ast_unwrap_primary((AstNode*)argument) : NULL;
+        if (argument && argument->node_type == AST_NODE_CALL_EXPR &&
+                jm_resolve_direct_call_function(mt, (JsCallNode*)argument,
+                    true) == target) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int jm_recursive_literal_static_field_uses(JsMirTranspiler* mt,
+        JsFunctionNode* function, const JsMirStaticShapeField* fields,
+        int field_count) {
+    if (!mt || !mt->tp || !function || !fields || field_count <= 0) return 0;
+    AstIndex* index = &mt->tp->ast_index;
+    int uses = 0;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+        if (!node || node->node_type != AST_NODE_MEMBER_EXPR) continue;
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (member->computed || !member->property ||
+                member->property->node_type != AST_NODE_IDENT ||
+                !jm_recursive_literal_member_targets_function(mt, member,
+                    function)) {
+            continue;
+        }
+        String* name = ((JsIdentifierNode*)member->property)->name;
+        if (jm_literal_shape_field_name_matches(fields, field_count, name)) uses++;
+    }
+    return uses;
+}
+
+static bool jm_append_recursive_literal_shape_plan(JsMirTranspiler* mt,
+        JsObjectNode* object, JsFunctionNode* function, TypeMap* shape) {
+    if (!mt || !mt->literal_shape_plans || !object || !function || !shape) {
+        return false;
+    }
+    JsMirLiteralShapePlan* plan = (JsMirLiteralShapePlan*)pool_calloc(
+        mt->tp->pool, sizeof(JsMirLiteralShapePlan));
+    if (!plan) return false;
+    plan->object = object;
+    plan->shape = shape;
+    plan->return_function = function;
+    return arraylist_append(mt->literal_shape_plans, plan);
+}
+
+void jm_plan_literal_field_shapes(JsMirTranspiler* mt) {
+    if (!mt || !mt->tp || !mt->literal_shape_plans ||
+            !jm_static_literal_storage_is_current_realm()) {
+        return;
+    }
+    AstIndex* index = &mt->tp->ast_index;
+    for (int function_index = 0; function_index < mt->func_count; function_index++) {
+        JsFunctionNode* function = mt->func_entries[function_index].node;
+        if (!function || function->is_async || function->is_generator ||
+                !function->body || function->body->node_type != AST_NODE_BLOCK) {
+            continue;
+        }
+        AstNodeId function_id = ast_index_find(index, (AstNode*)function);
+        if (function_id == AST_NODE_ID_INVALID) continue;
+        AstFunctionId owner = index->owner_functions[function_id];
+        JsMirStaticShapeField fields[16] = {};
+        JsObjectNode* returns[16] = {};
+        int field_count = 0;
+        int return_count = 0;
+        bool has_recursive_call = false;
+        bool supported = true;
+        for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+            if (index->owner_functions[node_id] != owner ||
+                    index->nodes[node_id]->node_type != AST_NODE_RETURN_STAM) {
+                continue;
+            }
+            JsReturnNode* result = (JsReturnNode*)index->nodes[node_id];
+            JsAstNode* expression = result->argument
+                ? (JsAstNode*)ast_unwrap_primary((AstNode*)result->argument) : NULL;
+            if (!expression || expression->node_type != AST_NODE_MAP ||
+                    return_count == 16) {
+                supported = false;
+                break;
+            }
+            bool return_has_recursive_call = false;
+            if (!jm_recursive_literal_object_fields(mt, function,
+                    (JsObjectNode*)expression, fields, &field_count,
+                    &return_has_recursive_call)) {
+                supported = false;
+                break;
+            }
+            returns[return_count++] = (JsObjectNode*)expression;
+            has_recursive_call = has_recursive_call || return_has_recursive_call;
+        }
+        if (!supported || return_count < 2 || !has_recursive_call ||
+                jm_recursive_literal_static_field_uses(mt, function, fields,
+                    field_count) < 2) {
+            continue;
+        }
+        TypeMap* shape = jm_build_static_shape(mt, fields, field_count);
+        if (!shape) continue;
+        bool appended = true;
+        for (int return_index = 0; return_index < return_count; return_index++) {
+            if (!jm_append_recursive_literal_shape_plan(mt, returns[return_index],
+                    function, shape)) {
+                appended = false;
+                break;
+            }
+        }
+        if (!appended) {
+            log_error("js-mir: recursive literal shape plan append failed");
+        }
+    }
+}
+
+static TypeMap* jm_literal_shape_for_direct_call_return(JsMirTranspiler* mt,
+        JsCallNode* call) {
+    if (!mt || !call || !mt->literal_shape_plans) return NULL;
+    JsFunctionNode* function = jm_resolve_direct_call_function(mt, call, true);
+    if (!function) return NULL;
+    for (int index = 0; index < mt->literal_shape_plans->length; index++) {
+        JsMirLiteralShapePlan* plan = (JsMirLiteralShapePlan*)arraylist_get(
+            mt->literal_shape_plans, index);
+        if (plan && plan->return_function == function) return plan->shape;
+    }
+    JsObjectNode* literal = jm_direct_call_literal_return(mt, call);
+    return literal ? jm_literal_shape_for_object(mt, literal) : NULL;
+}
+
+static TypeMap* jm_literal_shape_for_parameter_candidate(JsMirTranspiler* mt,
+        AstNode* definition) {
+    int parameter_index = -1;
+    JsFunctionNode* function = jm_function_for_parameter(mt, definition,
+        &parameter_index);
+    if (!mt || !mt->tp || !function || parameter_index < 0) return NULL;
+    AstIndex* index = &mt->tp->ast_index;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+        if (!node || node->node_type != AST_NODE_CALL_EXPR ||
+                jm_resolve_direct_call_function(mt, (JsCallNode*)node,
+                    true) != function) {
+            continue;
+        }
+        JsAstNode* argument = jm_call_argument_at((JsCallNode*)node,
+            parameter_index);
+        argument = argument ? (JsAstNode*)ast_unwrap_primary((AstNode*)argument) : NULL;
+        if (!argument) continue;
+        if (argument->node_type == AST_NODE_MAP) {
+            TypeMap* shape = jm_literal_shape_for_object(mt,
+                (JsObjectNode*)argument);
+            if (shape) return shape;
+        } else if (argument->node_type == AST_NODE_CALL_EXPR) {
+            TypeMap* shape = jm_literal_shape_for_direct_call_return(mt,
+                (JsCallNode*)argument);
+            if (shape) return shape;
+        }
+    }
+    return NULL;
+}
+
 static bool jm_member_uses_this(JsMemberNode* member) {
     if (!member || !member->object ||
             member->object->node_type != AST_NODE_IDENT) return false;
@@ -3263,6 +3533,52 @@ static int jm_class_shape_static_field_use_count(JsMirTranspiler* mt,
     return static_field_uses;
 }
 
+typedef struct JmClassConstructorShapeRhsScan {
+    bool observes_receiver;
+    bool has_direct_eval;
+} JmClassConstructorShapeRhsScan;
+
+static void jm_scan_class_constructor_shape_rhs(JsAstNode* node,
+        JmClassConstructorShapeRhsScan* scan);
+
+static void jm_scan_class_constructor_shape_rhs_child(JsAstNode* child,
+        void* opaque) {
+    jm_scan_class_constructor_shape_rhs(child,
+        (JmClassConstructorShapeRhsScan*)opaque);
+}
+
+static void jm_scan_class_constructor_shape_rhs(JsAstNode* node,
+        JmClassConstructorShapeRhsScan* scan) {
+    if (!node || !scan || (scan->observes_receiver && scan->has_direct_eval)) {
+        return;
+    }
+    if (js_ast_identifier_named(node, "this", 4)) scan->observes_receiver = true;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        JsCallNode* call = (JsCallNode*)node;
+        if (!call->optional && js_ast_identifier_named(call->callee, "eval", 4)) {
+            scan->has_direct_eval = true;
+        }
+    }
+    js_ast_visit_children(node, jm_scan_class_constructor_shape_rhs_child, scan);
+}
+
+static bool jm_class_constructor_shape_field_type(JsMirTranspiler* mt,
+        JsAstNode* value, TypeId* out_type) {
+    if (!mt || !value || !out_type) return false;
+    JmClassConstructorShapeRhsScan scan = {};
+    jm_scan_class_constructor_shape_rhs(value, &scan);
+    // A reserved shape may not make the receiver observable before the source
+    // write. Direct eval inherits `this`, so both forms retain generic setup.
+    if (scan.observes_receiver || scan.has_direct_eval) return false;
+    *out_type = LMD_TYPE_NULL;
+    if (value->node_type != AST_NODE_LITERAL) return true;
+    TypeId type_id = jm_get_effective_type(mt, value);
+    // A literal keeps the proven load lane. Every other RHS starts as the
+    // shared Map kernel's null placeholder and transitions on its source write.
+    *out_type = jm_literal_field_type_supported(type_id) ? type_id : LMD_TYPE_NULL;
+    return true;
+}
+
 static bool jm_class_append_constructor_shape_fields(JsMirTranspiler* mt,
         JsClassEntry* entry, JsMirStaticShapeField* fields, int* field_count) {
     if (!mt || !entry || !fields || !field_count || !entry->constructor ||
@@ -3288,16 +3604,18 @@ static bool jm_class_append_constructor_shape_fields(JsMirTranspiler* mt,
             ? (JsMemberNode*)assignment->left : NULL;
         if (assignment->op != OPERATOR_ASSIGN || !member || member->computed ||
                 !jm_member_uses_this(member) || !member->property ||
-                member->property->node_type != AST_NODE_IDENT ||
-                !assignment->right || assignment->right->node_type != AST_NODE_LITERAL) {
+                member->property->node_type != AST_NODE_IDENT || !assignment->right) {
             return false;
         }
         String* name = ((JsIdentifierNode*)member->property)->name;
-        TypeId type_id = jm_get_effective_type(mt, assignment->right);
+        TypeId type_id = LMD_TYPE_NULL;
+        if (!jm_class_constructor_shape_field_type(mt, assignment->right,
+                &type_id)) {
+            return false;
+        }
         if (!name || jm_is_private_name(name) ||
                 (name->len == (uint32_t)JS_INTERNAL_PROTO_KEY_LEN &&
                  memcmp(name->chars, JS_INTERNAL_PROTO_KEY, name->len) == 0) ||
-                !jm_literal_field_type_supported(type_id) ||
                 *field_count == 16 ||
                 jm_class_shape_field_name_matches(fields, *field_count, name)) {
             return false;
@@ -3347,9 +3665,10 @@ static TypeMap* jm_class_instance_shape_for_class(JsMirTranspiler* mt,
         }
         fields[field_count++] = {field->name, type_id};
     }
-    // The receiver is unobservable while constructor slots are reserved. A
-    // narrow literal-only constructor prefix can therefore share the existing
-    // class recipe; unsupported bodies retain normal property construction.
+    // The shared Map kernel keeps reserved slots absent until each source
+    // write. An effect-bounded straight-line constructor can reuse its
+    // transition shape without publishing future fields early; control-flow
+    // and receiver-escaping bodies retain normal construction.
     if (!jm_class_append_constructor_shape_fields(mt, entry, fields,
             &field_count)) {
         return NULL;
@@ -3383,15 +3702,12 @@ static void* jm_literal_shape_candidate_direct(void* owner, AstNode* node) {
 static void* jm_literal_shape_candidate_binding(void* owner,
         AstNode* definition) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
-    JsObjectNode* literal = jm_direct_literal_argument_for_parameter(mt,
-        definition);
-    return literal ? jm_literal_shape_for_object(mt, literal) : NULL;
+    return jm_literal_shape_for_parameter_candidate(mt, definition);
 }
 
 static void* jm_literal_shape_candidate_call(void* owner, AstCallNode* call) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
-    JsObjectNode* literal = jm_direct_call_literal_return(mt, (JsCallNode*)call);
-    return literal ? jm_literal_shape_for_object(mt, literal) : NULL;
+    return jm_literal_shape_for_direct_call_return(mt, (JsCallNode*)call);
 }
 
 static bool jm_plan_predicted_literal_field(JsMirTranspiler* mt,

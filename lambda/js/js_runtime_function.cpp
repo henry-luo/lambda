@@ -282,6 +282,24 @@ static bool js_function_has_mir_light_contract(const JsFunction* fn) {
          get_type_id(home_class) == LMD_TYPE_UNDEFINED);
 }
 
+static bool js_function_has_mir_this_contract(const JsFunction* fn) {
+    if (!fn || !js_fn_is_js_layout(fn) || !js_fn_func_ptr(fn) ||
+            js_fn_body_kind(fn) != JS_FUNCTION_BODY_CODE ||
+            js_fn_eval_initializer_context(fn) || js_fn_param_count(fn) < 0) {
+        return false;
+    }
+    uint32_t required = JS_FUNC_FLAG_ANALYSIS_KNOWN |
+        JS_FUNC_FLAG_MIR_CONTEXT_ABI | JS_FUNC_FLAG_STRICT |
+        JS_FUNC_FLAG_READS_THIS;
+    uint32_t excluded = JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN |
+        JS_FUNC_FLAG_ASYNC | JS_FUNC_FLAG_DERIVED_CTOR | JS_FUNC_FLAG_USES_WITH |
+        JS_FUNC_FLAG_HAS_BOUND_THIS | JS_FUNC_FLAG_TYPED_ARRAY_METHOD |
+        JS_FUNC_FLAG_CLASS_CONSTRUCTOR | JS_FUNC_FLAG_ARROW |
+        JS_FUNC_FLAG_READS_NEW_TARGET | JS_FUNC_FLAG_USES_ARGUMENTS |
+        JS_FUNC_FLAG_DIRECT_EVAL;
+    return (fn->flags & required) == required && (fn->flags & excluded) == 0;
+}
+
 void js_function_finalize_capabilities(JsFunction* fn) {
     if (!fn) return;
     js_function_register_pool_pointer_roots(fn);
@@ -290,8 +308,10 @@ void js_function_finalize_capabilities(JsFunction* fn) {
     // metadata mutation must re-finalize before the value is republished.
     fn->invoke = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
         ? js_call_entry_bound
-        : (js_function_has_mir_light_contract(fn)
-            ? js_call_entry_mir_light : js_call_entry_generic);
+        : (js_function_has_mir_this_contract(fn)
+            ? js_call_entry_mir_this
+            : (js_function_has_mir_light_contract(fn)
+                ? js_call_entry_mir_light : js_call_entry_generic));
     fn->body = js_function_select_body_entry(fn);
     fn->construct = NULL;
     bool syntax_forbids_construct = (fn->flags & (JS_FUNC_FLAG_ARROW |
@@ -1568,11 +1588,17 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
         if (get_type_id(name_item) == LMD_TYPE_STRING) fn->name = it2s(name_item);
     }
     if (source_chars) {
-        Item source_item = js_make_string_len(source_chars, (int)source_length);
-        fn = (JsFunction*)function_root.get().function;
-        if (get_type_id(source_item) == LMD_TYPE_STRING) {
-            JsCallableCode* code = js_fn_code_ensure(fn);
-            if (code) code->source_text = it2s(source_item);
+        JsCallableCode* code = js_fn_code_ensure(fn);
+        // All MIR closures of one definition share this code record. Preserve
+        // their immutable Function#toString source instead of allocating it
+        // again at every closure evaluation.
+        if (code && !code->source_text) {
+            Item source_item = js_make_string_len(source_chars, (int)source_length);
+            fn = (JsFunction*)function_root.get().function;
+            if (get_type_id(source_item) == LMD_TYPE_STRING) {
+                code = js_fn_code_ensure(fn);
+                if (code && !code->source_text) code->source_text = it2s(source_item);
+            }
         }
     }
     if (formal_length >= 0) {

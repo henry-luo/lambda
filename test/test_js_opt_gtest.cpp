@@ -82,6 +82,7 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "named_fast_function_data",
     "runtime_number_head_hit",
     "runtime_number_head_fallback",
+    "runtime_number_compare_head",
     "runtime_string_concat_head",
     "mir_number_admitted",
     "mir_number_fallback",
@@ -92,6 +93,8 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "mir_loop_stable_name_id",
     "mir_light_call",
     "mir_light_direct_activation",
+    "mir_this_call",
+    "mir_this_direct_activation",
     "bound_call_forward_args",
     "mir_deferred_function_finalize",
     "mir_lazy_function_metadata",
@@ -671,9 +674,9 @@ TEST(JsOpt, TraceParserFailsClosed) {
 
     char* unknown_schema = copy_text(valid);
     ASSERT_NE(unknown_schema, nullptr);
-    char* schema = strstr(unknown_schema, "schema=1");
+    char* schema = strstr(unknown_schema, "JS_OPT_TRACE schema=1");
     ASSERT_NE(schema, nullptr);
-    schema[strlen("schema=")] = '2';
+    schema[strlen("JS_OPT_TRACE schema=")] = '2';
     EXPECT_FALSE(parse_trace(unknown_schema, &trace));
     free(unknown_schema);
 
@@ -804,23 +807,55 @@ TEST(JsOpt, RuntimeNumberHeadKeepsCoercingCasesOnSlowPath) {
         "  if (op === 0) return a + b;\n"
         "  if (op === 1) return a - b;\n"
         "  if (op === 2) return a * b;\n"
-        "  return a / b;\n"
+        "  if (op === 3) return a / b;\n"
+        "  if (op === 4) return a & b;\n"
+        "  if (op === 5) return a | b;\n"
+        "  if (op === 6) return a ^ b;\n"
+        "  if (op === 7) return a << b;\n"
+        "  if (op === 8) return a >> b;\n"
+        "  return a >>> b;\n"
         "}\n"
         "var calls = 0;\n"
         "var coercing = { valueOf: function() { calls++; return 4; } };\n"
         "if (operate(1.5, 2.5, 0) !== 4 || operate(9, 2, 1) !== 7 ||\n"
         "    operate(3, 4, 2) !== 12 || operate(9, 2, 3) !== 4.5 ||\n"
+        "    operate(5, 3, 4) !== 1 || operate(5, 3, 5) !== 7 ||\n"
+        "    operate(5, 3, 6) !== 6 || operate(5, 3, 7) !== 40 ||\n"
+        "    operate(-16, 2, 8) !== -4 || operate(-1, 1, 9) !== 2147483647 ||\n"
         "    operate('x', 2, 0) !== 'x2' || operate(coercing, 1, 0) !== 5 ||\n"
-        "    calls !== 1) throw new Error('runtime number head changed semantics');\n"
+        "    operate(coercing, 1, 4) !== 0 || calls !== 2)\n"
+        "  throw new Error('runtime number head changed semantics');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
     ASSERT_TRUE(run_fixture_mode_backend("runtime_number_head", source, true,
         "ast", &trace, output, sizeof(output)));
     expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_HIT][1], 3u);
-    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK][2], 1u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_HIT][1], 9u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_HEAD_FALLBACK][2], 2u);
     expect_trace_off_same("runtime_number_head", source, output, "ast");
+}
+
+TEST(JsOpt, RuntimeNumberCompareHeadKeepsRelationalCoercion) {
+    const char* source =
+        "function relation(left, right) {\n"
+        "  return [left < right, left > right, left <= right, left >= right].join(',');\n"
+        "}\n"
+        "var coercions = 0;\n"
+        "var coercing = { valueOf: function() { coercions++; return 4; } };\n"
+        "if (relation(2, 3) !== 'true,false,true,false' ||\n"
+        "    relation(NaN, 3) !== 'false,false,false,false' ||\n"
+        "    relation(coercing, 3) !== 'false,true,false,true' || coercions !== 4)\n"
+        "  throw new Error('runtime number comparison changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture_mode_backend("runtime_number_compare_head", source,
+        true, "ast", &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_COMPARE_HEAD][1], 7u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_BOXED_COMPARE_CALL][1], 3u);
+    expect_trace_off_same("runtime_number_compare_head", source, output, "ast");
 }
 
 TEST(JsOpt, RuntimeOwnDenseElementHeadsPreserveFallbackSemantics) {
@@ -1241,6 +1276,35 @@ TEST(JsOpt, MirLiteralFieldPlanUsesExactShape) {
     expect_trace_off_same("mir_literal_field", source, output);
 }
 
+TEST(JsOpt, RecursiveLiteralReturnShapeUsesGuardedMapSlots) {
+    const char* source =
+        "function makeNode(depth) {\n"
+        "  if (depth === 0) return { left: null, right: null };\n"
+        "  return { left: makeNode(depth - 1), right: makeNode(depth - 1) };\n"
+        "}\n"
+        "function checkNode(node) {\n"
+        "  if (node.left === null) return 1;\n"
+        "  return 1 + checkNode(node.left) + checkNode(node.right);\n"
+        "}\n"
+        "if (checkNode(makeNode(2)) !== 7 ||\n"
+        "    checkNode({ left: null, right: null }) !== 1)\n"
+        "  throw new Error('recursive literal plan changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("recursive_literal_field", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("recursive_literal_field");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_new_literal_object_with_typemap"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("recursive_literal_field", source, output);
+}
+
 TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     const char* source =
         "var ascii = 'ab,cd'; var unicode = 'A😀,B';\n"
@@ -1503,6 +1567,74 @@ TEST(JsOpt, ConstructorAssignedFieldsUseGuardedLayout) {
     expect_trace_off_same("constructor_assigned_fields", source, output);
 }
 
+TEST(JsOpt, DynamicConstructorFieldsReuseReservedShapeTransitions) {
+    const char* source =
+        "class DynamicConstructorPlan {\n"
+        "  constructor(value, size) {\n"
+        "    this.value = value;\n"
+        "    this.storage = size === 0 ? null : new Array(size);\n"
+        "    this.index = 11;\n"
+        "  }\n"
+        "  read() { return this.value; }\n"
+        "}\n"
+        "var source = { marker: 7 };\n"
+        "var first = new DynamicConstructorPlan(source, 0);\n"
+        "var second = new DynamicConstructorPlan(9, 3);\n"
+        "var firstDescriptor = Object.getOwnPropertyDescriptor(first, 'value');\n"
+        "if (first === second || first.read() !== source || second.read() !== 9 ||\n"
+        "    first.storage !== null || second.storage.length !== 3 ||\n"
+        "    Object.keys(first).join(',') !== 'value,storage,index' ||\n"
+        "    Object.keys(second).join(',') !== 'value,storage,index' ||\n"
+        "    !firstDescriptor || !firstDescriptor.writable || !firstDescriptor.enumerable || !firstDescriptor.configurable)\n"
+        "  throw new Error('dynamic constructor fields changed transition semantics');\n"
+        "var setterCalls = 0;\n"
+        "Object.defineProperty(DynamicConstructorPlan.prototype, 'value', { set: function(value) { setterCalls++; }, configurable: true });\n"
+        "var intercepted = new DynamicConstructorPlan(4, 0);\n"
+        "if (setterCalls !== 1 || Object.hasOwn(intercepted, 'value') ||\n"
+        "    Object.keys(intercepted).join(',') !== 'storage,index')\n"
+        "  throw new Error('dynamic constructor reservation hid inherited setter');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("dynamic_constructor_fields", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("dynamic_constructor_fields");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_set_class_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("dynamic_constructor_fields", source, output);
+}
+
+TEST(JsOpt, ConstructorShapeDeclinesReceiverEscapingRhs) {
+    const char* source =
+        "function publish(receiver) {\n"
+        "  Object.defineProperty(receiver, 'later', { value: 'published', writable: true, enumerable: true, configurable: true });\n"
+        "  return { payload: 7 };\n"
+        "}\n"
+        "class ConstructorEscapePlan {\n"
+        "  constructor() { this.first = publish(this); this.later = 11; }\n"
+        "  read() { return this.first.payload + this.later; }\n"
+        "}\n"
+        "var value = new ConstructorEscapePlan();\n"
+        "if (value.read() !== 18 || Object.keys(value).join(',') !== 'later,first')\n"
+        "  throw new Error('receiver escape fallback changed constructor order');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("constructor_escape_refusal", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("constructor_escape_refusal");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "js_set_class_instance_shape"), nullptr);
+    free(mir);
+    expect_trace_off_same("constructor_escape_refusal", source, output);
+}
+
 TEST(JsOpt, LoopStableModuleNameIdSurvivesNestedEval) {
     const char* source =
         "function nameIdLoop(receiver) {\n"
@@ -1561,6 +1693,28 @@ TEST(JsOpt, MirLightCallKeepsDynamicFunctionSemantics) {
     EXPECT_NE(strstr(mir, "js_call"), nullptr);
     free(mir);
     expect_trace_off_same("mir_light_call", source, output);
+}
+
+TEST(JsOpt, MirThisCallPreservesReceiverAndMethodHome) {
+    const char* source =
+        "class Vault {\n"
+        "  #bonus;\n"
+        "  constructor(value, bonus) { this.value = value; this.#bonus = bonus; }\n"
+        "  read() { return this.value + this.#bonus; }\n"
+        "}\n"
+        "var value = new Vault(12, 5);\n"
+        "var invoke = value.read;\n"
+        "if (invoke.call(value) !== 17)\n"
+        "  throw new Error('this entry lost receiver or method home');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_this_call", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_THIS_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_THIS_DIRECT_ACTIVATION][1], 0u);
+    expect_trace_off_same("mir_this_call", source, output);
 }
 
 TEST(JsOpt, ReceiverOnlyBoundCallForwardsRootedArguments) {
@@ -1833,6 +1987,31 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
     expect_trace_off_same("named_fast_path", source, output);
 }
 
+TEST(JsOpt, NamedFastNoEntryProfileAttributesPropertyName) {
+    const char* source =
+        "var base = { profileProbe: 17 };\n"
+        "var object = Object.create(base);\n"
+        "object.profileProbe = 23;\n"
+        "if (object.profileProbe !== 23) throw new Error('prototype read changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("named_fast_no_entry_profile", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.reasons[JS_OPT_REASON_NAMED_FAST_NO_ENTRY], 0u);
+    char trace_path[512];
+    snprintf(trace_path, sizeof(trace_path), "%s/%s.trace", kOptDir,
+        "named_fast_no_entry_profile");
+    char* trace_text = read_text(trace_path);
+    ASSERT_NE(trace_text, nullptr);
+    EXPECT_NE(strstr(trace_text,
+        "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct="), nullptr);
+    EXPECT_NE(strstr(trace_text, ":profileProbe"), nullptr);
+    free(trace_text);
+    expect_trace_off_same("named_fast_no_entry_profile", source, output);
+}
+
 TEST(JsOpt, HostDynamicReadsRemainGlobalOnly) {
     const char* source =
         "globalThis.event = 17;\n"
@@ -1994,9 +2173,12 @@ TEST(JsOpt, DeferredMirFunctionPublicationKeepsFinalMetadata) {
         "var first = make('a');\n"
         "var second = make('b');\n"
         "var desc = Object.getOwnPropertyDescriptor(first, 'length');\n"
+        "var firstSource = first.toString(); var secondSource = second.toString();\n"
         "if (first('1', '2') !== 'a12' || second('3', '4') !== 'b34' ||\n"
         "    first.length !== 2 || !desc || desc.value !== 2 ||\n"
-        "    desc.writable || desc.enumerable || !desc.configurable)\n"
+        "    desc.writable || desc.enumerable || !desc.configurable ||\n"
+        "    firstSource !== secondSource ||\n"
+        "    firstSource.indexOf('return prefix + first + second') < 0)\n"
         "  throw new Error('deferred function metadata changed');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
