@@ -34,7 +34,6 @@ typedef struct CacheMetadata {
     size_t content_size;     // Size in bytes
     time_t last_accessed;    // Last access time (for LRU)
     time_t created_at;       // Creation timestamp
-    
 } CacheMetadata;
 
 // Enhanced file cache manager

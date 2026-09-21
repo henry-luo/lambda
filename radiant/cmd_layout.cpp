@@ -55,6 +55,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/interp.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_runtime.h"
@@ -62,6 +63,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
 #include "network_integration.h"
+#include "resource_loaders.h"
 #include "radiant.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/io/mark_builder.hpp"
@@ -93,7 +95,9 @@ Element* get_html_root_element(Input* input);
 extern void fontface_cleanup(UiContext* uicon);
 CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root,
                                         CssEngine* engine, const char* base_path, Pool* pool,
-                                        int* stylesheet_count, int* linked_count_out = nullptr);
+                                        int* stylesheet_count, int* linked_count_out = nullptr,
+                                        int* script_prefetch_count_out = nullptr,
+                                        uint64_t* script_prefetch_start_ns_out = nullptr);
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                      Element* html_root, HtmlVersion version,
                                      Url* url, Runtime* runtime);
@@ -175,13 +179,22 @@ struct CssSourceBuffer {
     size_t length;
 };
 
+// CSS parsing runs on the document thread, but its immutable HTTP bytes are
+// supplied by the page's shared network scheduler.
+static thread_local NetworkResourceManager* g_css_resource_manager = nullptr;
+
 static bool css_load_source(const char* path, bool is_http, bool binary,
                             CssSourceBuffer* source) {
     if (!path || !*path || !source) return false;
     source->data = nullptr;
     source->length = 0;
     if (is_http) {
-        source->data = download_http_content_cached(path, &source->length, "./temp/cache");
+        if (g_css_resource_manager) {
+            source->data = resource_manager_copy_resource_content(
+                g_css_resource_manager, path, PRIORITY_HIGH, &source->length);
+        } else {
+            source->data = download_http_content_cached(path, &source->length, "./temp/cache");
+        }
     } else if (binary) {
         source->data = read_binary_file(path, &source->length);
     } else {
@@ -198,8 +211,6 @@ void log_root_item(Item item, const char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
-                                           int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float device_scale = 1.0f);
@@ -787,6 +798,13 @@ static CssStylesheet* parse_and_collect_stylesheet(
     const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
     int* count, int* capacity, int import_depth);
 
+static bool resolve_css_import_path(const char* import_url, const char* stylesheet_path,
+                                    char* import_path, size_t import_path_size) {
+    return import_url && import_url[0] &&
+        css_resolve_reference_path(import_url, stylesheet_path, false,
+                                   import_path, import_path_size, nullptr);
+}
+
 static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* stylesheet_path,
                                         CssEngine* engine, Pool* pool,
                                         CssStylesheet*** stylesheets, int* count,
@@ -797,18 +815,31 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         return;
     }
 
+    // Request direct imports together before parsing them in source order.
+    // Their bytes may overlap while CSS application remains sequential.
+    if (g_css_resource_manager) {
+        for (size_t i = 0; i < stylesheet->rule_count; i++) {
+            CssRule* rule = stylesheet->rules[i];
+            const char* import_url = rule && rule->type == CSS_RULE_IMPORT
+                ? rule->data.import_rule.url : nullptr;
+            char import_path[1024];
+            if (resolve_css_import_path(import_url, stylesheet_path,
+                                        import_path, sizeof(import_path)) &&
+                css_path_is_http(import_path)) {
+                resource_manager_prefetch(g_css_resource_manager, import_path, PRIORITY_HIGH);
+            }
+        }
+    }
+
     for (size_t i = 0; i < stylesheet->rule_count; i++) {
         CssRule* rule = stylesheet->rules[i];
         if (!rule || rule->type != CSS_RULE_IMPORT) continue;
 
         const char* import_url = rule->data.import_rule.url;
-        if (!import_url || import_url[0] == '\0') continue;
-
-
         // Resolve import path relative to the stylesheet or document URL.
         char import_path[1024];
-        if (!css_resolve_reference_path(import_url, stylesheet_path, false,
-                                        import_path, sizeof(import_path), nullptr)) {
+        if (!resolve_css_import_path(import_url, stylesheet_path,
+                                     import_path, sizeof(import_path))) {
             continue;
         }
 
@@ -842,6 +873,9 @@ static CssStylesheet* parse_and_collect_stylesheet(
     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
     annotate_css_stylesheet_source_file(stylesheet, source_path);
     if (!stylesheet) return nullptr;
+    // Keep CSS declaration URLs in document-global form before loader-stage
+    // prefetching and later paint-time resource lookup.
+    radiant_resolve_stylesheet_resource_urls(stylesheet);
 
     if (!lam::pool_grow_array(pool, stylesheets, capacity, *count + 1, 4)) {
         // stylesheet arrays are dereferenced immediately after append; skip this sheet if the pool cannot grow.
@@ -1056,6 +1090,12 @@ static char* resolve_http_href(const char* href, const char* base_path) {
 static void append_external_resource_url(char* url, char*** out_urls,
                                          int* out_count, int* out_capacity) {
     if (!url || !out_urls || !out_count || !out_capacity) return;
+    for (int i = 0; i < *out_count; i++) {
+        if (strcmp((*out_urls)[i], url) == 0) {
+            mem_free(url);
+            return;
+        }
+    }
     if (*out_count >= *out_capacity) {
         if (!lam::mem_grow_array(out_urls, out_capacity, *out_count + 1, 16,
                                  MEM_CAT_TEMP)) {
@@ -1068,22 +1108,28 @@ static void append_external_resource_url(char* url, char*** out_urls,
     (*out_urls)[(*out_count)++] = url;
 }
 
-// collect external CSS and script URLs for prefetch.
+typedef enum {
+    EXTERNAL_PREFETCH_STYLESHEET,
+    EXTERNAL_PREFETCH_SCRIPT,
+} ExternalPrefetchKind;
+
+// Collect one resource class per pass so stylesheet requests cannot wait on
+// unrelated script transfers before CSS parsing starts.
 static void collect_external_resource_urls(Element* elem, const char* base_path,
                                             char*** out_urls, int* out_count, int* out_capacity,
-                                            int depth) {
+                                            ExternalPrefetchKind kind, int depth) {
     if (!elem || depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type || !type->name.str) goto recurse;
 
-    if (str_ieq_cstr(type->name.str, "link")) {
+    if (kind == EXTERNAL_PREFETCH_STYLESHEET && str_ieq_cstr(type->name.str, "link")) {
         const char* rel = extract_element_attribute(elem, "rel", nullptr);
         const char* href = extract_element_attribute(elem, "href", nullptr);
         if (rel && href && str_ieq_cstr(rel, "stylesheet")) {
             char* abs = resolve_http_href(href, base_path);
             append_external_resource_url(abs, out_urls, out_count, out_capacity);
         }
-    } else if (str_ieq_cstr(type->name.str, "script")) {
+    } else if (kind == EXTERNAL_PREFETCH_SCRIPT && str_ieq_cstr(type->name.str, "script")) {
         const char* src = extract_element_attribute(elem, "src", nullptr);
         if (src) {
             char* abs = resolve_http_href(src, base_path);
@@ -1096,31 +1142,66 @@ recurse:
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
             collect_external_resource_urls(child_item.element, base_path,
-                                            out_urls, out_count, out_capacity, depth + 1);
+                                            out_urls, out_count, out_capacity, kind, depth + 1);
         }
     }
 }
 
-// prefetch external CSS and script resources for remote documents.
-static void prefetch_document_subresources(Element* html_root, const char* base_path) {
-    if (!html_root || !base_path) return;
-    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return;
+// Queue render-blocking stylesheets first, then overlap script transfer with
+// CSS parsing. The resource manager owns every request through document teardown.
+static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
+                                          const char* base_path,
+                                          uint64_t* script_prefetch_start_ns_out) {
+    if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = 0;
+    if (!doc || !doc->resource_manager || !html_root || !base_path) return 0;
+    if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return 0;
 
-    char** urls = nullptr;
-    int count = 0;
-    int capacity = 0;
-    collect_external_resource_urls(html_root, base_path, &urls, &count, &capacity, 0);
+    char** stylesheet_urls = nullptr;
+    int stylesheet_count = 0;
+    int stylesheet_capacity = 0;
+    char** script_urls = nullptr;
+    int script_count = 0;
+    int script_capacity = 0;
+    collect_external_resource_urls(html_root, base_path, &stylesheet_urls, &stylesheet_count,
+                                   &stylesheet_capacity, EXTERNAL_PREFETCH_STYLESHEET, 0);
+    collect_external_resource_urls(html_root, base_path, &script_urls, &script_count,
+                                   &script_capacity, EXTERNAL_PREFETCH_SCRIPT, 0);
 
-    if (count > 0) {
-        log_info("[PREFETCH] downloading %d sub-resources in parallel", count);
-        double t0 = (double)clock() / CLOCKS_PER_SEC;
-        http_prefetch_urls_parallel((const char* const*)urls, count, "./temp/cache", 8);
-        double elapsed = (double)clock() / CLOCKS_PER_SEC - t0;
-        log_info("[PREFETCH] completed in %.3fs (cpu)", elapsed);
+    if (stylesheet_count > 0) {
+        uint64_t stylesheet_start = time_now_ns();
+        int loaded = 0;
+        log_info("[PREFETCH] queuing %d render-blocking stylesheets", stylesheet_count);
+        for (int i = 0; i < stylesheet_count; i++) {
+            resource_manager_prefetch(doc->resource_manager, stylesheet_urls[i], PRIORITY_HIGH);
+        }
+        for (int i = 0; i < stylesheet_count; i++) {
+            NetworkResource* res = resource_manager_prefetch(
+                doc->resource_manager, stylesheet_urls[i], PRIORITY_HIGH);
+            if (resource_manager_wait_for_resource(doc->resource_manager, res)) loaded++;
+        }
+        log_info("[PREFETCH] stylesheet requests %d/%d ready in %.1fms wall",
+                 loaded, stylesheet_count,
+                 time_elapsed_ms_f(stylesheet_start, time_now_ns()));
+        (void)loaded; // retained for the debug scheduler completion diagnostic.
     }
 
-    for (int i = 0; i < count; i++) mem_free(urls[i]);
-    if (urls) mem_free(urls);
+    if (script_count > 0) {
+        if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = time_now_ns();
+        int queued = 0;
+        for (int i = 0; i < script_count; i++) {
+            if (resource_manager_prefetch(doc->resource_manager, script_urls[i], PRIORITY_NORMAL)) {
+                queued++;
+            }
+        }
+        log_info("[PREFETCH] started %d script requests alongside CSS parsing", queued);
+        (void)queued; // retained for the debug scheduler admission diagnostic.
+    }
+
+    for (int i = 0; i < stylesheet_count; i++) mem_free(stylesheet_urls[i]);
+    for (int i = 0; i < script_count; i++) mem_free(script_urls[i]);
+    mem_free(stylesheet_urls);
+    mem_free(script_urls);
+    return script_count;
 }
 
 // load one linked stylesheet; document traversal owns source ordering.
@@ -1407,17 +1488,27 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
 // collect linked and inline document stylesheets in source order.
 CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root,
                                         CssEngine* engine, const char* base_path, Pool* pool,
-                                        int* stylesheet_count, int* linked_count_out) {
+                                        int* stylesheet_count, int* linked_count_out,
+                                        int* script_prefetch_count_out,
+                                        uint64_t* script_prefetch_start_ns_out) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
+    if (script_prefetch_count_out) *script_prefetch_count_out = 0;
+    if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = 0;
 
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
     int stylesheet_capacity = 0;
 
-    // Step 0: Pre-fetch external HTTP sub-resources (CSS, scripts) in parallel
-    // so subsequent serial loaders find them already cached on disk.
-    prefetch_document_subresources(html_root, base_path);
+    DomDocument* document = dom_root ? dom_root->doc : nullptr;
+    NetworkResourceManager* previous_manager = g_css_resource_manager;
+    g_css_resource_manager = document ? document->resource_manager : nullptr;
+
+    // Start script transfer only after stylesheet bytes are ready. This lets
+    // CSS parsing overlap script I/O without delaying the first cascade.
+    int script_prefetch_count = prefetch_document_subresources(
+        document, html_root, base_path, script_prefetch_start_ns_out);
+    if (script_prefetch_count_out) *script_prefetch_count_out = script_prefetch_count;
 
     // CSS Cascade §6.4: stylesheet source order follows document order across
     // both <link rel=stylesheet> and <style>. A later external sheet must win
@@ -1426,6 +1517,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
     collect_stylesheets_in_document_order(html_root, dom_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
                                           &stylesheet_capacity, &linked_count, 0);
+    g_css_resource_manager = previous_manager;
     if (linked_count_out) *linked_count_out = linked_count;
 
     return stylesheets;
@@ -2152,6 +2244,17 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     dom_doc->services.cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
+    // Create the page-owned scheduler before dependency discovery so CSS,
+    // script, and later DOM consumers share request identities and cache data.
+    if (radiant_url_is_http(url_get_href(html_url)) &&
+        radiant_init_network_support(dom_doc, NULL, NULL) == 0) {
+        resource_manager_set_css_engine(dom_doc->resource_manager, css_engine);
+        // The manager is now ready before CSS discovery; retain the view
+        // lifecycle marker at this earlier ownership boundary.
+        log_notice("view: network support initialized for HTTP document");
+        log_info("[PREFETCH] document resource manager ready before CSS discovery");
+    }
+
     // Load external CSS if provided
     CssStylesheet* external_stylesheet = nullptr;
     if (css_filename) {
@@ -2161,11 +2264,13 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Extract and parse <link rel="stylesheet"> and <style> elements
     int inline_stylesheet_count = 0;
+    int script_prefetch_count = 0;
+    uint64_t script_prefetch_start_ns = 0;
     const char* css_base_path = url_get_href(html_url);
     g_css_document_charset = dom_doc->document_charset; // set fallback encoding for CSS files
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, dom_root, css_engine, css_base_path, pool,
-        &inline_stylesheet_count);
+        &inline_stylesheet_count, nullptr, &script_prefetch_count, &script_prefetch_start_ns);
     g_css_document_charset = nullptr; // reset after CSS collection
 
     auto t_css_parse = time_now_ns();
@@ -2199,6 +2304,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                                    external_stylesheet ? 1 : 0,
                                    inline_stylesheets, inline_stylesheet_count, pool);
     }
+    // Font bytes may transfer during cascade; registration waits for UiContext.
+    radiant_prefetch_document_font_resources(dom_doc);
+    radiant_prefetch_document_stylesheet_resources(dom_doc);
     auto t_stylesheet_setup = timing ? time_now_ns() : t_css_parse;
 
     // Step 2c: Apply inline style="" attributes BEFORE scripts
@@ -2228,6 +2336,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         // P17: scripts run after the initial cascade so load-time CSSOM reads see
         // resolved styles; if scripts mutate DOM/classes/stylesheets we recascade
         // below while preserving JS inline style writes.
+        if (script_prefetch_count > 0) {
+            log_info("[PREFETCH] %d script requests overlapped CSS parsing for %.1fms wall",
+                     script_prefetch_count,
+                     time_elapsed_ms_f(script_prefetch_start_ns, time_now_ns()));
+        }
         log_mem_stage("load_html: before_scripts");
         execute_document_scripts_profiled(html_root, dom_doc, pool, html_url, script_timing);
         log_mem_stage("load_html: after_scripts");
@@ -2355,88 +2468,33 @@ static DomDocument* load_lambda_html_doc_with_host_config(
                                          js_host_config);
 }
 
-static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts_expr) {
-    char* escaped_pdf = mem_escape_lambda_literal(pdf_file, MEM_CAT_LAYOUT);
-    if (!escaped_pdf) {
-        log_error("[load_html_doc] PDF package: failed to escape input path");
+DomDocument* load_lambda_document_transform_doc(Url* document_url,
+    const LambdaDocumentTransformConfig* transform,
+    const LambdaDocumentTransformOption* options, int option_count,
+    int viewport_width, int viewport_height, Pool* pool);
+
+static DomDocument* load_pdf_transform_doc(Url* pdf_url, int viewport_width,
+                                            int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("pdf");
+    if (!transform) {
+        log_error("document-transform: PDF runtime configuration is missing");
         return nullptr;
     }
-
-    const char* opts = opts_expr ? opts_expr : "null";
-    int needed = snprintf(nullptr, 0,
-        "import pdf: lambda.pdf.pdf\n"
-        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-        "pdf.pdf_to_html(doc, %s)\n",
-        escaped_pdf, opts);
-    if (needed <= 0) {
-        mem_free(escaped_pdf);
-        log_error("[load_html_doc] PDF package: failed to size bridge script");
-        return nullptr;
-    }
-
-    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_LAYOUT);
-    if (!script_buf) {
-        mem_free(escaped_pdf);
-        log_error("[load_html_doc] PDF package: failed to allocate bridge script");
-        return nullptr;
-    }
-
-    snprintf(script_buf, (size_t)needed + 1,
-        "import pdf: lambda.pdf.pdf\n"
-        "let doc = input(\"%s\", 'pdf') ^ { null }\n"
-        "pdf.pdf_to_html(doc, %s)\n",
-        escaped_pdf, opts);
-    mem_free(escaped_pdf);
-    return script_buf;
+    return load_lambda_document_transform_doc(pdf_url, transform, nullptr, 0,
+                                              viewport_width, viewport_height, pool);
 }
 
-static DomDocument* load_pdf_bridge_doc(Url* pdf_url, int viewport_width,
-                                        int viewport_height, Pool* pool) {
-    if (!pdf_url) return nullptr;
-    char* pdf_path = url_to_local_path(pdf_url);
-    const char* pdf_source = pdf_path ? pdf_path : url_get_href(pdf_url);
-    if (!pdf_source || !pdf_source[0]) {
-        log_error("[load_html_doc] PDF package: failed to resolve input path");
-        if (pdf_path) mem_free(pdf_path);
+static DomDocument* load_graph_transform_doc(Url* graph_url, int viewport_width,
+                                              int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("graph");
+    if (!transform) {
+        log_error("document-transform: graph runtime configuration is missing");
         return nullptr;
     }
-
-    char* bridge_source = build_pdf_view_bridge_script(pdf_source, "{max_pages: 48}");
-    if (!bridge_source) {
-        if (pdf_path) mem_free(pdf_path);
-        return nullptr;
-    }
-
-    DomDocument* doc = load_lambda_script_source_doc(pdf_url, bridge_source,
-                                                     viewport_width, viewport_height, pool);
-    mem_free(bridge_source);
-    if (pdf_path) mem_free(pdf_path);
-    return doc;
-}
-
-static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
-                                          int viewport_height, Pool* pool) {
-    if (!graph_url) return nullptr;
-    char* graph_path = url_to_local_path(graph_url);
-    const char* graph_source = graph_path ? graph_path : url_get_href(graph_url);
-    if (!graph_source || !graph_source[0]) {
-        log_error("[load_html_doc] GRAPH_BRIDGE_PATH: failed to resolve input path");
-        if (graph_path) mem_free(graph_path);
-        return nullptr;
-    }
-
-    char* bridge_source = build_graph_to_html_bridge_script(
-        graph_source, nullptr, nullptr, "load_html_doc");
-    if (!bridge_source) {
-        if (graph_path) mem_free(graph_path);
-        return nullptr;
-    }
-
-    DomDocument* doc = load_lambda_script_source_doc(graph_url, bridge_source,
-                                                     viewport_width, viewport_height, pool);
-    mem_free(bridge_source);
-    if (graph_path) mem_free(graph_path);
-    return doc;
+    return load_lambda_document_transform_doc(graph_url, transform, nullptr, 0,
+                                              viewport_width, viewport_height, pool);
 }
 
 typedef DomDocument* (*LayoutFormatLoader)(Url*, int, int, Pool*);
@@ -2480,7 +2538,7 @@ static const LayoutFormatRoute* layout_find_format_route(const char* extension) 
 
 static bool layout_path_has_known_extension(const char* path) {
     if (!path) return false;
-    if (graph_bridge_path_is_graph(path)) return true;
+    if (graph_path_is_graph(path)) return true;
     const char* extension = file_path_ext(path);
     return extension && (strcmp(extension, ".pdf") == 0 ||
                          layout_find_format_route(extension));
@@ -2496,21 +2554,21 @@ static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool
 
 static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               int width, int height, Pool* pool,
-                                              bool bridge_pdf, bool include_text,
+                                              bool include_text,
                                               bool* handled) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
 
-    if (graph_bridge_path_is_graph(path)) {
+    if (graph_path_is_graph(path)) {
         if (handled) *handled = true;
-        return load_graph_bridge_doc(url, width, height, pool);
+        return load_graph_transform_doc(url, width, height, pool);
     }
 
     const char* ext = file_path_ext(path);
     if (!ext) return nullptr;
     if (strcmp(ext, ".pdf") == 0) {
         if (handled) *handled = true;
-        return bridge_pdf ? load_pdf_bridge_doc(url, width, height, pool) : nullptr;
+        return load_pdf_transform_doc(url, width, height, pool);
     }
 
     const LayoutFormatRoute* route = layout_find_format_route(ext);
@@ -2547,7 +2605,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     } else {
     bool handled = false;
     doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
-                                   pool, true, true, &handled);
+                                   pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
                                                     viewport_height, pool, js_host_config);
@@ -3145,41 +3203,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             log_info("[Lambda Markdown] Found %d math elements, rendering via math package",
                      math_list->length);
 
-            // Build a Lambda script that renders all math at once
-            // Use parse() instead of input() to parse raw strings (not files)
-            StrBuf* script = strbuf_new_cap(4096);
-            strbuf_append_str(script, "import math: lambda.doc.math.math\n[\n");
-
-            for (int i = 0; i < math_list->length; i++) {
-                MathInfo* mi = (MathInfo*)math_list->data[i];
-
-                // Escape the LaTeX source for use in a Lambda string literal
-                strbuf_append_str(script, "  ");
-                if (mi->is_display) {
-                    strbuf_append_str(script, "<div class: \"math-display-container\"; math.render_display(parse(\"");
-                } else {
-                    strbuf_append_str(script, "math.render_inline(parse(\"");
-                }
-
-                escape_append_lambda_quoted_drop_cr(script, mi->source,
-                                                     mi->source_len, '"');
-
-                strbuf_append_str(script, "\", {type: \"math\"}))");
-                if (mi->is_display) {
-                    strbuf_append_str(script, ">");
-                }
-                strbuf_append_all(script, 2, i < math_list->length - 1 ? "," : "", "\n");
-            }
-
-            strbuf_append_str(script, "]\n");
-
-            // Run the script in-memory (no temp file needed). Generated math
-            // nodes are allocated directly in the markdown document arena and
-            // the runtime is retained if any of those nodes are spliced in.
+            // Invoke the math package directly so math source never becomes a Lambda script.
             Runtime* math_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
             if (!math_runtime) {
                 log_error("[Lambda Markdown] Failed to allocate math runtime");
-                strbuf_free(script);
                 for (int i = 0; i < math_list->length; i++) {
                     mem_free(math_list->data[i]);
                 }
@@ -3187,37 +3214,64 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 return nullptr;
             }
             runtime_init(math_runtime);
-            math_runtime->current_dir = const_cast<char*>("./");
-            math_runtime->import_base_dir = "./";
             math_runtime->ui_mode = true;
             math_runtime->result_arena = input->arena;
-
-            Input* math_result = run_script_mir(math_runtime, script->str, (char*)"<math_render>", false);
-            input_context = nullptr;
-
-            if (math_result && get_type_id(math_result->root) == LMD_TYPE_ARRAY) {
-                Array* rendered_arr = math_result->root.array;
-                int replace_count = 0;
-                for (int i = 0; i < math_list->length && i < (int)rendered_arr->length; i++) {
-                    Item rendered_item = rendered_arr->items[i];
-                    if (get_type_id(rendered_item) == LMD_TYPE_ELEMENT) {
-                        MathInfo* mi = (MathInfo*)math_list->data[i];
-                        mi->parent->items[mi->index] = rendered_item;
-                        replace_count++;
+            const LambdaDocumentTransformConfig* transform =
+                lambda_document_transform_for_input_type("math");
+            Script* math_package = nullptr;
+            Input* package_result = transform
+                ? run_lambda_package_module(math_runtime, transform->package_module, &math_package)
+                : nullptr;
+            EvalContext* math_context = runtime_get_eval_context(math_runtime);
+            int replace_count = 0;
+            if (package_result && math_package && math_context) {
+                RuntimeExecutionScope execution_scope(math_context);
+                RootFrame roots(6);
+                Rooted<Item> source(roots, ItemNull);
+                Rooted<Item> type(roots, (Item){.item = s2it(heap_strcpy("math", 4))});
+                Rooted<Item> parsed(roots, ItemNull);
+                Rooted<Item> options(roots, ItemNull);
+                Rooted<Item> option_name(roots, (Item){.item = s2it(heap_strcpy("display", 7))});
+                Rooted<Item> rendered(roots, ItemNull);
+                for (int i = 0; i < math_list->length; i++) {
+                    MathInfo* mi = (MathInfo*)math_list->data[i];
+                    source.set((Item){.item = s2it(heap_strcpy(mi->source,
+                        (int64_t)mi->source_len))});
+                    parsed.set(fn_parse2(source.get(), type.get()));
+                    if (item_is_error(parsed.get())) continue;
+                    options.set(vmap_new());
+                    if (get_type_id(options.get()) != LMD_TYPE_VMAP ||
+                            item_is_error(vmap_set(options.get(), option_name.get(),
+                                (Item){.item = b2it(mi->is_display ? 1 : 0)}))) {
+                        log_error("[Lambda Markdown] Failed to construct math render options");
+                        break;
                     }
-                }
-                if (replace_count > 0) {
-                    markdown_math_runtime = math_runtime;
-                    math_runtime = nullptr;
+                    Item args[2] = {parsed.get(), options.get()};
+                    rendered.set(interp_call_module_export(math_runtime, math_package,
+                        transform->function_name, args, 2));
+                    if (get_type_id(rendered.get()) != LMD_TYPE_ELEMENT) continue;
+                    Item rendered_item = rendered.get();
+                    if (mi->is_display) {
+                        MarkBuilder builder(input);
+                        ElementBuilder display = builder.element("div");
+                        display.attr("class", "math-display-container");
+                        display.child(rendered_item);
+                        rendered_item = display.final();
+                    }
+                    mi->parent->items[mi->index] = rendered_item;
+                    replace_count++;
                 }
                 log_info("[Lambda Markdown] Replaced %d/%d math elements with rendered HTML",
-                         replace_count, math_list->length);
+                    replace_count, math_list->length);
             } else {
-                log_error("[Lambda Markdown] Math rendering script failed or returned unexpected type");
+                log_error("[Lambda Markdown] Math package initialization failed");
             }
-
+            input_context = nullptr;
+            if (replace_count > 0) {
+                markdown_math_runtime = math_runtime;
+                math_runtime = nullptr;
+            }
             release_layout_runtime(math_runtime);
-            strbuf_free(script);
         }
 
         // Free math_list entries
@@ -3299,134 +3353,15 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         "wiki", "Lambda Wiki", "input/wiki.css", "wiki stylesheet");
 }
 
-// convert LaTeX through the Lambda package, then style the generated DOM.
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
-    if (!latex_url || !pool) {
-        log_error("load_latex_doc: invalid parameters");
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("latex");
+    if (!transform) {
+        log_error("document-transform: LaTeX runtime configuration is missing");
         return nullptr;
     }
-
-    LayoutTempPathGuard latex_path_guard = { url_to_local_path(latex_url) };
-    char* latex_filepath = latex_path_guard.path;
-    if (!latex_filepath) {
-        log_error("load_latex_doc: failed to resolve LaTeX file URL");
-        return nullptr;
-    }
-    log_info("[Lambda LaTeX] Loading LaTeX document via Lambda package pipeline: %s", latex_filepath);
-
-    // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
-    // Build a Lambda script that imports the LaTeX package and renders to HTML
-    char safe_path[1024];
-    snprintf(safe_path, sizeof(safe_path), "%s", latex_filepath);
-    for (char* p = safe_path; *p; p++) {
-        if (*p == '\\') *p = '/';
-    }
-
-    char script_buf[4096];
-    snprintf(script_buf, sizeof(script_buf),
-        "import latex: lambda.latex.latex\n"
-        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
-        "latex.render(ast, {standalone: true})\n",
-        safe_path);
-
-    Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
-    if (!result_pool) {
-        log_error("[Lambda LaTeX] Failed to create result pool");
-        return nullptr;
-    }
-
-    Input* result_input = Input::create(result_pool, latex_url);
-    if (!result_input) {
-        log_error("[Lambda LaTeX] Failed to create result input");
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-    result_input->ui_mode = true;
-
-    Runtime* latex_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
-    if (!latex_runtime) {
-        log_error("[Lambda LaTeX] Failed to allocate runtime");
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-    runtime_init(latex_runtime);
-    latex_runtime->current_dir = const_cast<char*>("./");
-    latex_runtime->import_base_dir = "./";  // resolve imports from project root
-    latex_runtime->ui_mode = true;
-    latex_runtime->result_arena = result_input->arena;
-    Input* script_result = run_script_mir(latex_runtime, script_buf, (char*)"<latex_render>", false);
-
-    if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL
-        || get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-        log_error("[Lambda LaTeX] Lambda LaTeX package - HTML rendering failed for: %s", latex_filepath);
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-    Element* html_root = nullptr;
-    TypeId result_type = get_type_id(script_result->root);
-    if (result_type == LMD_TYPE_ELEMENT) {
-        result_input->root = script_result->root;
-        html_root = script_result->root.element;
-    } else {
-        log_error("[Lambda LaTeX] Lambda package returned non-element type: %d", result_type);
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-    input_context = nullptr;
-
-    if (!html_root) {
-        log_error("[Lambda LaTeX] Failed to get HTML root element from LaTeX conversion");
-        release_layout_runtime(latex_runtime);
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-
-    DomElement* dom_root = nullptr;
-    CssEngine* css_engine = nullptr;
-    DomDocument* dom_doc = create_layout_css_document(
-        result_input, html_root, "LaTeX", DOM_PAGE_KIND_GENERATED, latex_runtime,
-        viewport_width, viewport_height, pool, &dom_root, &css_engine);
-    if (!dom_doc) {
-        pool_destroy(result_pool);
-        return nullptr;
-    }
-
-    CssStylesheet* latex_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/latex/css/article.css", "Lambda LaTeX", "LaTeX stylesheet", false);
-    // The compact article sheet does not follow base.css's @import, so load the
-    // combined faces directly before TeX metrics participate in layout.
-    CssStylesheet* cmu_font_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/latex/fonts/cmu-combined.css", "Lambda LaTeX", "CMU font stylesheet", false);
-    CssStylesheet* katex_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/latex/css/katex.css", "Lambda LaTeX", "KaTeX font stylesheet", false);
-
-    int inline_stylesheet_count = 0;
-    CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, dom_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
-
-    CssStylesheet* latex_stylesheets[3] = {latex_stylesheet, cmu_font_stylesheet, katex_stylesheet};
-    int latex_sheet_count = 0;
-    CssStylesheet** all_latex_stylesheets = layout_merge_css_sources(
-        pool, latex_stylesheets, 3, inline_stylesheets, inline_stylesheet_count,
-        &latex_sheet_count);
-    layout_apply_css_stylesheets(dom_doc, dom_root, all_latex_stylesheets,
-                                 latex_sheet_count, pool, css_engine);
-
-    apply_inline_styles_to_tree(dom_root, pool);
-
-
-    store_document_stylesheets(dom_doc, latex_stylesheets, 3,
-                               inline_stylesheets, inline_stylesheet_count, pool);
-
-    populate_layout_document(dom_doc, dom_root, html_root, HTML5,
-                             latex_url, latex_runtime);
-
-    return dom_doc;
+    return load_lambda_document_transform_doc(latex_url, transform, nullptr, 0,
+                                              viewport_width, viewport_height, pool);
 }
 
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool) {
@@ -3607,9 +3542,12 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
     return doc;
 }
 
-// evaluate a Lambda document and run it through the CSS/layout pipeline.
-DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
-                                           int viewport_width, int viewport_height, Pool* pool) {
+// Evaluate a Lambda document or configured native transform, then run its
+// result through the shared CSS/layout pipeline.
+static DomDocument* load_lambda_document_doc(Url* script_url,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = time_now_ns();
 
     if (!script_url || !pool) {
@@ -3629,7 +3567,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         log_error("load_lambda_script_doc: failed to resolve Lambda script URL");
         return nullptr;
     }
-    log_info("[Lambda Script] Loading Lambda script: %s", script_filepath);
+    log_info("[Lambda Script] Loading Lambda document: %s", script_filepath);
 
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = time_now_ns();
@@ -3657,7 +3595,11 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     render_map_init();
     render_map_set_path_recorder(&render_map_record_path);
 
-    Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
+    const char* document_target = url_get_href(script_url);
+    Input* script_output = transform
+        ? run_lambda_document_transform_with_options(runtime, document_target, transform,
+            options, option_count)
+        : run_script_mir(runtime, nullptr, script_filepath, false);
 
     if (runtime_heap(runtime)) {
         layout_context->heap = runtime_heap(runtime);
@@ -3880,12 +3822,21 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
         time_elapsed_ms_f(total_start, total_end));
 
-    log_notice("[Lambda Script] Script document loaded and styled");
+    log_notice("[Lambda Script] Document loaded and styled");
     return dom_doc;
 }
 
+DomDocument* load_lambda_document_transform_doc(Url* document_url,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        int viewport_width, int viewport_height, Pool* pool) {
+    return load_lambda_document_doc(document_url, transform, options, option_count,
+        viewport_width, viewport_height, pool);
+}
+
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
-    return load_lambda_script_source_doc(script_url, nullptr, viewport_width, viewport_height, pool);
+    return load_lambda_document_doc(script_url, nullptr, nullptr, 0,
+        viewport_width, viewport_height, pool);
 }
 
 static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {
@@ -4892,7 +4843,7 @@ static bool layout_single_file(
     bool special_handled = false;
     const char* route_path = effective_ext ? effective_ext : input_file;
     doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                   pool, false, false, &special_handled);
+                                   pool, false, &special_handled);
     if (!special_handled) {
         const int max_redirects = 8;
         for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
@@ -5243,47 +5194,8 @@ static int layout_resource_wait_timeout_ms() {
     return 1000;
 }
 
-static bool layout_doc_has_remote_font_face(DomDocument* doc) {
-    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
-
-    for (int s = 0; s < doc->stylesheet_count; s++) {
-        CssStylesheet* sheet = doc->stylesheets[s];
-        if (!sheet || !sheet->rules) continue;
-        for (size_t r = 0; r < sheet->rule_count; r++) {
-            CssRule* rule = sheet->rules[r];
-            if (!rule || rule->type != CSS_RULE_FONT_FACE) continue;
-            const char* content = rule->data.generic_rule.content;
-            if (content && (strstr(content, "http://") || strstr(content, "https://"))) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
-                                                           DomDocument* doc) {
-    if (!ui_context || !doc) return nullptr;
-    if (!layout_doc_has_remote_font_face(doc)) return nullptr;
-
-    // The resource manager changes image/media loading to async mode, so the
-    // layout CLI only enables it for documents that need remote webfont metrics.
-    network_downloader_init_shared();
-    EnhancedFileCache* file_cache = enhanced_cache_create("./temp/cache",
-        100 * 1024 * 1024, 10000);
-    if (!file_cache) {
-        log_warn("[Layout] Network cache unavailable; proceeding without async resources");
-        return nullptr;
-    }
-
-    if (radiant_init_network_support(doc, NULL, file_cache) != 0) {
-        log_warn("[Layout] Network support unavailable; proceeding without async resources");
-        enhanced_cache_destroy(file_cache);
-        return nullptr;
-    }
-
-    resource_manager_set_ui_context(doc->resource_manager, ui_context);
-    radiant_discover_document_font_resources(doc);
+static void layout_wait_for_network_resources(DomDocument* doc) {
+    if (!doc || !doc->resource_manager) return;
 
     int waited_ms = 0;
     const int poll_ms = 10;
@@ -5305,6 +5217,60 @@ static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context
                                &completed_resources, &failed_resources);
     log_info("[Layout] Network resources total=%d completed=%d failed=%d waited=%dms",
              total_resources, completed_resources, failed_resources, waited_ms);
+}
+
+static bool layout_doc_has_remote_font_face(DomDocument* doc) {
+    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) return false;
+
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet || !sheet->rules) continue;
+        for (size_t r = 0; r < sheet->rule_count; r++) {
+            CssRule* rule = sheet->rules[r];
+            if (!rule || rule->type != CSS_RULE_FONT_FACE) continue;
+            const char* content = rule->data.generic_rule.content;
+            if (content && (strstr(content, "http://") || strstr(content, "https://"))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
+                                                           DomDocument* doc) {
+    if (!ui_context || !doc) return nullptr;
+
+    // Remote HTML now creates its manager during loader-stage dependency
+    // discovery; do not replace that request/cache identity before layout.
+    if (doc->resource_manager) {
+        resource_manager_set_ui_context(doc->resource_manager, ui_context);
+        radiant_discover_document_font_resources(doc);
+        layout_wait_for_network_resources(doc);
+        return nullptr;
+    }
+    if (!layout_doc_has_remote_font_face(doc)) return nullptr;
+
+    // The resource manager changes image/media loading to async mode, so the
+    // layout CLI only enables it for documents that need remote webfont metrics.
+    network_downloader_init_shared();
+    EnhancedFileCache* file_cache = enhanced_cache_create("./temp/cache",
+        100 * 1024 * 1024, 10000);
+    if (!file_cache) {
+        log_warn("[Layout] Network cache unavailable; proceeding without async resources");
+        return nullptr;
+    }
+
+    if (radiant_init_network_support(doc, NULL, file_cache) != 0) {
+        log_warn("[Layout] Network support unavailable; proceeding without async resources");
+        enhanced_cache_destroy(file_cache);
+        return nullptr;
+    }
+
+    resource_manager_set_ui_context(doc->resource_manager, ui_context);
+    radiant_discover_document_font_resources(doc);
+
+    layout_wait_for_network_resources(doc);
     return file_cache;
 }
 

@@ -14,6 +14,7 @@
 #include "../../lib/time_util.h"
 #include "../../lib/hashmap_typed.hpp"
 #include "../../lib/arraylist.h"
+#include "../../lib/file.h"
 #include "../../lib/mem.h"
 #include <string.h>
 #include <time.h>
@@ -131,6 +132,7 @@ static void cancel_resource_locked(NetworkResourceManager* mgr,
         if (queue_for_main) {
             queue_failed_resource_locked(mgr, res);
         }
+        pthread_cond_broadcast(&mgr->resource_state_cond);
     }
 }
 
@@ -223,6 +225,9 @@ static void process_ready_resource_on_main(NetworkResourceManager* mgr, NetworkR
             case RESOURCE_SCRIPT:
                 if (processor->process_script) processor->process_script(res, doc);
                 break;
+            case RESOURCE_PREFETCH:
+                // The page loader consumes immutable bytes explicitly.
+                break;
         }
     }
 
@@ -234,7 +239,7 @@ static bool resource_failure_is_optional(NetworkResource* res) {
     if (!res) return false;
     return res->type == RESOURCE_CSS || res->type == RESOURCE_IMAGE ||
            res->type == RESOURCE_FONT || res->type == RESOURCE_SVG ||
-           res->type == RESOURCE_SCRIPT;
+           res->type == RESOURCE_SCRIPT || res->type == RESOURCE_PREFETCH;
 }
 
 static void configure_resource_timeout_and_retry(NetworkResourceManager* mgr, NetworkResource* res) {
@@ -297,6 +302,7 @@ static void download_completion_fn(void* task_data, bool success) {
                 res->state = STATE_COMPLETED;
                 res->end_time = get_time_seconds();
                 queue_ready_resource_locked(res->manager, res);
+                pthread_cond_broadcast(&res->manager->resource_state_cond);
                 queued_for_main = true;
                 log_debug("network: download complete: %s (%.3fs), queued for main thread",
                           res->url, res->end_time - res->start_time);
@@ -328,6 +334,7 @@ static void download_completion_fn(void* task_data, bool success) {
                     res->state = STATE_FAILED;
                     res->end_time = get_time_seconds();
                     queue_failed_resource_locked(res->manager, res);
+                    pthread_cond_broadcast(&res->manager->resource_state_cond);
                     queued_for_main = true;
                     if (resource_failure_is_optional(res)) {
                         // Missing linked subresources should degrade rendering,
@@ -365,10 +372,17 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     
     NetworkResourceManager* mgr = (NetworkResourceManager*)mem_calloc(1, sizeof(NetworkResourceManager), MEM_CAT_NETWORK);
     if (!mgr) return NULL;
-    
+
+    bool owns_file_cache = false;
+    if (!cache) {
+        cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+        owns_file_cache = cache != NULL;
+    }
+
     mgr->document = doc;
     mgr->thread_pool = pool;
     mgr->file_cache = cache;
+    mgr->owns_file_cache = owns_file_cache;
     mgr->document_id = __sync_fetch_and_add(&g_next_document_id, 1);
     mgr->navigation_id = mgr->document_id;
 
@@ -379,6 +393,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     scheduler_config.use_curl_multi_backend = true;
     mgr->scheduler = network_scheduler_create(pool, &scheduler_config);
     if (!mgr->scheduler) {
+        if (mgr->owns_file_cache) enhanced_cache_destroy(mgr->file_cache);
         mem_free(mgr);
         return NULL;
     }
@@ -392,6 +407,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     
     if (!mgr->resources) {
         network_scheduler_destroy(mgr->scheduler);
+        if (mgr->owns_file_cache) enhanced_cache_destroy(mgr->file_cache);
         mem_free(mgr);
         return NULL;
     }
@@ -411,6 +427,19 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
         if (mgr->pending_reflows) arraylist_free((ArrayList*)mgr->pending_reflows);
         if (mgr->pending_repaints) arraylist_free((ArrayList*)mgr->pending_repaints);
         network_scheduler_destroy(mgr->scheduler);
+        if (mgr->owns_file_cache) enhanced_cache_destroy(mgr->file_cache);
+        mem_free(mgr);
+        return NULL;
+    }
+    if (pthread_cond_init(&mgr->resource_state_cond, NULL) != 0) {
+        ResourceMap::destroy((struct hashmap*)mgr->resources);
+        arraylist_free((ArrayList*)mgr->pending_ready);
+        arraylist_free((ArrayList*)mgr->pending_failed);
+        arraylist_free((ArrayList*)mgr->pending_reflows);
+        arraylist_free((ArrayList*)mgr->pending_repaints);
+        pthread_mutex_destroy(&mgr->mutex);
+        network_scheduler_destroy(mgr->scheduler);
+        if (mgr->owns_file_cache) enhanced_cache_destroy(mgr->file_cache);
         mem_free(mgr);
         return NULL;
     }
@@ -477,7 +506,9 @@ void resource_manager_destroy(NetworkResourceManager* mgr) {
         network_scheduler_destroy(mgr->scheduler);
     }
     
+    pthread_cond_destroy(&mgr->resource_state_cond);
     pthread_mutex_destroy(&mgr->mutex);
+    if (mgr->owns_file_cache) enhanced_cache_destroy(mgr->file_cache);
     mem_free(mgr);
 }
 
@@ -636,10 +667,74 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     
     pthread_mutex_unlock(&mgr->mutex);
     if (submit_failed) {
+        pthread_mutex_lock(&mgr->mutex);
+        pthread_cond_broadcast(&mgr->resource_state_cond);
+        pthread_mutex_unlock(&mgr->mutex);
         notify_wake_callback(mgr);
     }
     
     return res;
+}
+
+NetworkResource* resource_manager_prefetch(NetworkResourceManager* mgr,
+                                           const char* url,
+                                           ResourcePriority priority) {
+    return resource_manager_load(mgr, url, RESOURCE_PREFETCH, priority, NULL);
+}
+
+bool resource_manager_wait_for_resource(NetworkResourceManager* mgr,
+                                        NetworkResource* res) {
+    if (!mgr || !res) return false;
+
+    pthread_mutex_lock(&mgr->mutex);
+    while (res->state == STATE_PENDING || res->state == STATE_DOWNLOADING) {
+        pthread_cond_wait(&mgr->resource_state_cond, &mgr->mutex);
+    }
+    bool ready = res->state == STATE_COMPLETED || res->state == STATE_CACHED;
+    pthread_mutex_unlock(&mgr->mutex);
+    return ready;
+}
+
+char* resource_manager_copy_resource_content(NetworkResourceManager* mgr,
+                                             const char* url,
+                                             ResourcePriority priority,
+                                             size_t* out_size) {
+    if (out_size) *out_size = 0;
+    NetworkResource* res = resource_manager_prefetch(mgr, url, priority);
+    if (!res || !resource_manager_wait_for_resource(mgr, res) || !res->local_path) return NULL;
+
+    char* content = read_binary_file(res->local_path, out_size);
+    if (!content) {
+        log_error("network: failed to read completed resource %s", res->url);
+    }
+    return content;
+}
+
+char* resource_manager_copy_ready_resource_content(NetworkResourceManager* mgr,
+                                                   const char* url,
+                                                   size_t* out_size) {
+    if (out_size) *out_size = 0;
+    if (!mgr || !url) return NULL;
+
+    char* local_path = NULL;
+    pthread_mutex_lock(&mgr->mutex);
+    ResourceEntry key = { .url = (char*)url, .res = NULL };
+    const ResourceEntry* entry = ResourceMap::get((struct hashmap*)mgr->resources, key);
+    NetworkResource* res = entry ? entry->res : NULL;
+    if (res && (res->state == STATE_COMPLETED || res->state == STATE_CACHED) &&
+        res->local_path) {
+        local_path = mem_strdup(res->local_path, MEM_CAT_NETWORK);
+    }
+    pthread_mutex_unlock(&mgr->mutex);
+    if (!local_path) return NULL;
+
+    char* content = read_binary_file(local_path, out_size);
+    mem_free(local_path);
+    return content;
+}
+
+EnhancedFileCache* resource_manager_get_file_cache(const NetworkResourceManager* mgr) {
+    return mgr ? mgr->file_cache : NULL;
 }
 
 // schedule reflow

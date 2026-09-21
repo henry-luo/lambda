@@ -207,11 +207,12 @@ not a small additive change.
 
 See §1.7 — 9 stock comparators added; `input-latex-tables.cpp` migrated.
 
-### 3.4 Content-addressed cache key in `lib/cache_key.h` — ⛔ deferred (low ROI)
+### 3.4 Content-addressed cache key in `lib/cache_key.h` — not needed
 
-After migration, only `enhanced_file_cache.cpp` uses the SHA-256 + hex pipeline
-(input_http already uses `file_cache_path` with DJB2). One caller is below the
-dedup threshold; pulling mbedtls into lib for it would be net negative.
+`enhanced_file_cache.cpp` owns the SHA-256 cache path, and `input_http` uses
+that cache directly.  In line with D1.3v3's shared-host-substrate rule, a
+second generic cache-key API would duplicate the native HTTP cache identity
+and could reintroduce a compatibility path.
 
 ### 3.5 Hex encode/decode in `lib/hex.h` — ✅ done
 
@@ -299,7 +300,6 @@ None currently tracked.
 - §1.8 (`lib/priority_queue.h` — zero callers; delete or extend)
 - §2.1 ArrayList accessor migration (70 files, cosmetic)
 - §2.4 (`lib/num_stack.h` — zero callers)
-- §3.4 (`lib/cache_key.h` — only 1 caller after `file_cache_path`)
 - §3.10 (bitset helpers — too scattered)
 - Composite-key hashmap macros (too varied; see `Lib_Enhance2.md` for a
   scoped future proposal)

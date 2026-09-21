@@ -176,7 +176,7 @@ static bool curl_resource_failure_is_optional(NetworkResource* res) {
     if (!res) return false;
     return res->type == RESOURCE_CSS || res->type == RESOURCE_IMAGE ||
            res->type == RESOURCE_FONT || res->type == RESOURCE_SVG ||
-           res->type == RESOURCE_SCRIPT;
+           res->type == RESOURCE_SCRIPT || res->type == RESOURCE_PREFETCH;
 }
 
 static bool persist_response(CurlMultiTransfer* transfer) {

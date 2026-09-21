@@ -144,7 +144,8 @@ pub fn pdf_to_svg(pdf, page_index, opts) {
 // Optional `opts` map: { title: string, css: string, background: string,
 //                        show_label: bool }
 fn _render_page_count(total, opts) {
-    let max_pages = if (opts and opts.max_pages and opts.max_pages > 0) int(opts.max_pages) else total
+    // Native document transforms use a bounded default; callers may override it.
+    let max_pages = if (opts and opts.max_pages and opts.max_pages > 0) int(opts.max_pages) else 48
     if (max_pages < total) max_pages else total
 }
 

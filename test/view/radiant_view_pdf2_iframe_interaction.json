@@ -22,6 +22,10 @@
       "to_target": { "text": "Smallpdf" }, "button": 0 },
     { "type": "assert_selection", "is_collapsed": false, "check_dom": true },
     { "type": "key_combo", "key": "c", "mods_str": "ctrl" },
-    { "type": "assert_clipboard", "contains": "Welcome" }
+    { "type": "assert_clipboard", "contains": "Welcome" },
+    { "type": "scroll", "x": 360, "y": 360, "dx": 0, "dy": -3 },
+    { "type": "mouse_drag", "from_x": 195, "from_y": 345,
+      "to_x": 340, "to_y": 345, "button": 0 },
+    { "type": "assert_selection", "is_collapsed": false, "check_dom": true }
   ]
 }

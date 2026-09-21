@@ -28,6 +28,33 @@ static char* sha256_to_hex(const unsigned char* hash) {
     return hex;
 }
 
+// Return the deterministic SHA-256 cache path without creating its directory.
+static char* enhanced_cache_path_for_url(const EnhancedFileCache* cache,
+                                         const char* url) {
+    if (!cache || !cache->cache_dir || !url) return NULL;
+
+    unsigned char hash[32];
+    compute_sha256(url, hash);
+    char* hex = sha256_to_hex(hash);
+    if (!hex) return NULL;
+
+    size_t path_cap = strlen(cache->cache_dir) + 80;
+    char* path = (char*)mem_alloc(path_cap, MEM_CAT_NETWORK);
+    if (path) {
+        str_fmt(path, path_cap, "%s/%c%c/%s.cache", cache->cache_dir,
+                hex[0], hex[1], hex);
+    }
+    mem_free(hex);
+    return path;
+}
+
+static void cache_metadata_free(CacheMetadata* meta) {
+    if (!meta) return;
+    mem_free(meta->cache_path);
+    mem_free(meta->etag);
+    mem_free(meta);
+}
+
 static void cache_entry_evict(const char* url, void* value, size_t bytes, void* udata) {
     (void)bytes;
     CacheMetadata* meta = (CacheMetadata*)value;
@@ -37,15 +64,30 @@ static void cache_entry_evict(const char* url, void* value, size_t bytes, void* 
     if ((!cache || cache->remove_files_on_evict) && meta->cache_path) {
         file_delete(meta->cache_path);
     }
-    mem_free(meta->cache_path);
-    mem_free(meta->etag);
-    mem_free(meta);
+    cache_metadata_free(meta);
 }
 
 static bool enhanced_cache_evict_lru_locked(EnhancedFileCache* cache) {
     if (!cache || lru_cache_count(cache->entries) == 0) return false;
     lru_cache_evict_one(cache->entries);
     return true;
+}
+
+static void enhanced_cache_make_space_locked(EnhancedFileCache* cache,
+                                             CacheMetadata* replacement,
+                                             size_t size) {
+    size_t retained_bytes = lru_cache_bytes(cache->entries) -
+        (replacement ? replacement->content_size : 0);
+    while ((!replacement && cache->max_entries > 0 &&
+            lru_cache_count(cache->entries) >= (size_t)cache->max_entries) ||
+           (cache->max_size_bytes > 0 &&
+            (retained_bytes > cache->max_size_bytes ||
+             size > cache->max_size_bytes - retained_bytes) &&
+            lru_cache_count(cache->entries) > (replacement ? 1u : 0u))) {
+        if (!enhanced_cache_evict_lru_locked(cache)) break;
+        retained_bytes = lru_cache_bytes(cache->entries) -
+            (replacement ? replacement->content_size : 0);
+    }
 }
 
 static bool cache_metadata_expired(const CacheMetadata* meta, time_t now) {
@@ -66,6 +108,48 @@ static void cache_metadata_apply_headers(CacheMetadata* meta,
     meta->etag = headers->etag ? mem_strdup(headers->etag, MEM_CAT_NETWORK) : NULL;
     meta->expires = headers->expires > 0 ? headers->expires :
         (headers->max_age > 0 ? time(NULL) + headers->max_age : 0);
+}
+
+static CacheMetadata* cache_metadata_create(char* cache_path, size_t content_size,
+                                            const HttpCacheHeaders* headers) {
+    if (!cache_path) return NULL;
+    CacheMetadata* meta = (CacheMetadata*)mem_calloc(
+        1, sizeof(CacheMetadata), MEM_CAT_NETWORK);
+    if (!meta) {
+        mem_free(cache_path);
+        return NULL;
+    }
+    meta->cache_path = cache_path;
+    meta->content_size = content_size;
+    meta->created_at = time(NULL);
+    meta->last_accessed = meta->created_at;
+    cache_metadata_apply_headers(meta, headers);
+    return meta;
+}
+
+// Reopen native cache data across cache-manager lifetimes. This is the only
+// durable cache format; no compatibility files are consulted.
+static CacheMetadata* enhanced_cache_restore_persisted_entry_locked(
+    EnhancedFileCache* cache, const char* url) {
+    char* cache_path = enhanced_cache_path_for_url(cache, url);
+    if (!cache_path) return NULL;
+
+    int64_t content_size = file_size(cache_path);
+    if (content_size < 0) {
+        mem_free(cache_path);
+        return NULL;
+    }
+
+    enhanced_cache_make_space_locked(cache, NULL, (size_t)content_size);
+    CacheMetadata* meta = cache_metadata_create(cache_path, (size_t)content_size, NULL);
+    if (!meta) return NULL;
+    if (!lru_cache_put(cache->entries, url, meta, meta->content_size)) {
+        cache_metadata_free(meta);
+        return NULL;
+    }
+
+    log_debug("cache: restored persisted entry for %s", url);
+    return meta;
 }
 
 static bool cache_acquire_write_slot(EnhancedFileCache* cache, bool wait_for_slot) {
@@ -151,6 +235,7 @@ char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url) {
 
     pthread_rwlock_wrlock(&cache->rwlock);
     CacheMetadata* meta = (CacheMetadata*)lru_cache_get(cache->entries, url);
+    if (!meta) meta = enhanced_cache_restore_persisted_entry_locked(cache, url);
     bool valid = meta && meta->cache_path && file_exists(meta->cache_path) &&
         !cache_metadata_expired(meta, time(NULL));
     char* result = valid ? mem_strdup(meta->cache_path, MEM_CAT_NETWORK) : NULL;
@@ -178,48 +263,28 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     // Touch a replacement before eviction so its metadata stays live while
     // capacity pressure removes older entries.
     CacheMetadata* meta = (CacheMetadata*)lru_cache_get(cache->entries, url);
-    size_t retained_bytes = lru_cache_bytes(cache->entries) -
-        (meta ? meta->content_size : 0);
-    while ((!meta && cache->max_entries > 0 &&
-            lru_cache_count(cache->entries) >= (size_t)cache->max_entries) ||
-           (cache->max_size_bytes > 0 &&
-            (retained_bytes > cache->max_size_bytes ||
-             size > cache->max_size_bytes - retained_bytes) &&
-            lru_cache_count(cache->entries) > (meta ? 1u : 0u))) {
-        if (!enhanced_cache_evict_lru_locked(cache)) break;
-        retained_bytes = lru_cache_bytes(cache->entries) -
-            (meta ? meta->content_size : 0);
-    }
+    enhanced_cache_make_space_locked(cache, meta, size);
 
-    // compute hash for filename
-    unsigned char hash[32];
-    compute_sha256(url, hash);
-    char* hex = sha256_to_hex(hash);
-    if (!hex) {
-        pthread_rwlock_unlock(&cache->rwlock);
-        return NULL;
-    }
-
-    // create path: cache_dir/AB/ABCDEF...cache
-    size_t path_cap = strlen(cache->cache_dir) + 80;
-    char* path = (char*)mem_alloc(path_cap, MEM_CAT_NETWORK);
+    char* path = enhanced_cache_path_for_url(cache, url);
     if (!path) {
-        mem_free(hex);
         pthread_rwlock_unlock(&cache->rwlock);
         return NULL;
     }
-    str_fmt(path, path_cap, "%s/%c%c/%s.cache", cache->cache_dir, hex[0], hex[1], hex);
 
-    // create subdirectory
-    char dir_path[512];
-    snprintf(dir_path, sizeof(dir_path), "%s/%c%c", cache->cache_dir, hex[0], hex[1]);
-    create_dir_recursive(dir_path);
+    char* cache_subdir = file_path_dirname(path);
+    if (!cache_subdir || create_dir_recursive(cache_subdir) != 0) {
+        log_error("cache: failed to create cache directory for %s", path);
+        mem_free(cache_subdir);
+        mem_free(path);
+        pthread_rwlock_unlock(&cache->rwlock);
+        return NULL;
+    }
+    mem_free(cache_subdir);
 
     // write file
     FILE* f = fopen(path, "wb");
     if (!f) {
         log_error("cache: failed to write %s: %s", path, strerror(errno));
-        mem_free(hex);
         mem_free(path);
         pthread_rwlock_unlock(&cache->rwlock);
         return NULL;
@@ -231,7 +296,6 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
     if (meta) {
         char* replacement_path = mem_strdup(path, MEM_CAT_NETWORK);
         if (!replacement_path) {
-            mem_free(hex);
             mem_free(path);
             pthread_rwlock_unlock(&cache->rwlock);
             return NULL;
@@ -242,28 +306,21 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
         meta->last_accessed = time(NULL);
         cache_metadata_apply_headers(meta, headers);
         if (!meta->cache_path || !lru_cache_put(cache->entries, url, meta, size)) {
-            mem_free(hex);
             mem_free(path);
             pthread_rwlock_unlock(&cache->rwlock);
             return NULL;
         }
         log_debug("cache: updated %s (%zu bytes) -> %s", url, size, path);
     } else {
-        meta = (CacheMetadata*)mem_calloc(1, sizeof(CacheMetadata), MEM_CAT_NETWORK);
+        char* metadata_path = mem_strdup(path, MEM_CAT_NETWORK);
+        meta = cache_metadata_create(metadata_path, size, headers);
         if (!meta) {
-            mem_free(hex);
             mem_free(path);
             pthread_rwlock_unlock(&cache->rwlock);
             return NULL;
         }
-        meta->cache_path = mem_strdup(path, MEM_CAT_NETWORK);
-        meta->content_size = size;
-        meta->created_at = time(NULL);
-        meta->last_accessed = time(NULL);
-        cache_metadata_apply_headers(meta, headers);
-        if (!meta->cache_path || !lru_cache_put(cache->entries, url, meta, size)) {
+        if (!lru_cache_put(cache->entries, url, meta, size)) {
             cache_entry_evict(url, meta, size, NULL);
-            mem_free(hex);
             mem_free(path);
             pthread_rwlock_unlock(&cache->rwlock);
             return NULL;
@@ -271,7 +328,6 @@ static char* enhanced_cache_store_impl(EnhancedFileCache* cache, const char* url
         log_debug("cache: stored %s (%zu bytes) -> %s", url, size, path);
     }
 
-    mem_free(hex);
     pthread_rwlock_unlock(&cache->rwlock);
 
     return path;

@@ -830,16 +830,6 @@ char* mem_join3(const char* first, size_t first_len,
     return mem_join3_loc(first, first_len, second, second_len, third, third_len, category, 0);
 }
 
-char* mem_escape_lambda_literal_loc(const char* value, MemCategory category, int line) {
-    if (!value) return NULL;
-    MemJoinContext context = {category, line};
-    return str_escape_alloc(value, strlen(value), STR_ESC_LAMBDA, mem_join_alloc, &context);
-}
-
-char* mem_escape_lambda_literal(const char* value, MemCategory category) {
-    return mem_escape_lambda_literal_loc(value, category, 0);
-}
-
 char* mem_strdup_loc(const char* str, MemCategory category, int line) {
     if (!str) return NULL;
     return mem_dup_n_loc(str, strlen(str), category, line);

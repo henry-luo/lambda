@@ -1,6 +1,6 @@
 # JS Tune14 — Shared native regions and cheaper ordinary operations
 
-**Version:** 1.4.28
+**Version:** 1.4.29
 
 **Date:** 2026-09-21
 
@@ -29,7 +29,9 @@ while refusing receiver-observing RHS values and direct `eval`. C14 now has a fr
 same-session 63-row control and three-engine Navier oracle; the C14 LambdaJS /
 QuickJS geomean is 1.120086, while MVP is intentionally unavailable to release
 measurement. T14-7 now reuses immutable definition source across MIR closures
-with an accepted Havlak replay. The remaining T14-0 through T14-8 outcomes
+with an accepted Havlak replay. Its strict-receiver call entry reaches Havlak
+but has only an inconclusive paired result, so it remains an open residual.
+The remaining T14-0 through T14-8 outcomes
 remain open; this is not a performance acceptance record.
 
 **Source audit:** `c5052085ce91026edd94c50cf89c4fd0e539c2ec`.
@@ -1791,6 +1793,40 @@ Do not add overlapping inclusive samples into a promised speedup. Do not label
 a generic helper `NO_GC` because its frequent branch is nonallocating. A shared
 leaf and full semantic miss must retain truthful effect contracts, completion
 handling and precise liveness (**D5.3**, **D6.2.2v2**, **D8.4.3v2**).
+
+#### Implementation update — 2026-09-21: strict MIR receiver entry remains open
+
+Class-method wrappers were created with the MIR `Context` ABI but did not
+receive the finalized compiler facts used by call capability selection. The
+shared method/closure factory now publishes those immutable facts, preserving
+the prior derived-constructor marker, and a narrow `mir_this` call entry skips
+the generic arguments/new-target/eval activation only for strict compiled
+bodies that read `this` and exclude generators, arrows, `arguments`, direct
+`eval`, `with`, bound receivers and constructors. It roots the receiver and
+lexical method home across the body, so private names retain their declaring
+class. All other shapes resume through the generic entry (**S1.11**, **D5.3**,
+**D6.2.2v2**, **D8.4.3v2**).
+
+`JsOpt.MirThisCallPreservesReceiverAndMethodHome` exercises an extracted
+private-field method receiver and records both entry events. The final
+optimizer contract passed 69/69 in 95.376 seconds. A diagnostic Havlak run
+recorded 24,159,104 `mir_this_call` / `mir_this_direct_activation` takes in
+[`temp/js_opt_trace_45826.tsv`](../../temp/js_opt_trace_45826.tsv), and the
+final release candidate
+`temp/tune14/lambda_t14_mir_this_release.exe`
+(`1a27c21c64dc0d86ff599bcdbb5ef93b2f90f0b7e0aba11090f2f1ef375cd778`)
+produced `Havlak: PASS`.
+
+The output-validating 11-pair replay in
+[`havlak_mir_this_paired.json`](../../temp/tune14/havlak_mir_this_paired.json)
+compared it with frozen pre-change release
+`b707cbe3d6624a8242864354953a7459e43d41577f47b7659a67ef31fddedd14`.
+All 11 pairs were `ok` with equal stdout; medians were 49,128.529 ms control
+and 49,716.951 ms candidate (ratio 1.011977, 7/11 candidate wins), but the
+one-sided paired-bootstrap upper bound was 1.062753. This is insufficient to
+confirm either a gain or a greater-than-3% regression. Retain the code and
+artifact for a longer isolated replay; do not count it as a T14-7 performance
+acceptance.
 
 **Exit:** each family has either an attributed implementation with paired
 evidence, or a measured no-change/deferred disposition that names the remaining

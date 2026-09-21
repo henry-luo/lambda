@@ -1443,30 +1443,22 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
     return true;
 }
 
-// Main function to layout HTML and render to SVG
-// scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
-int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width, int viewport_height, float scale) {
-
-    RenderExportSession session;
-    if (!render_export_session_begin(
-            &session, html_file, viewport_width, viewport_height, 1200, 800, scale)) {
-        return 1;
-    }
-    UiContext* ui_context = session.ui_context;
-    DomDocument* doc = session.document;
+static int render_export_session_to_svg(RenderExportSession* session, const char* svg_file) {
+    if (!session) return 1;
+    UiContext* ui_context = session->ui_context;
+    DomDocument* doc = session->document;
 
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
-        int svg_width = (int)(session.content_width * session.output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
-        int svg_height = (int)(session.content_height * session.output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        int svg_width = (int)(session->content_width * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        int svg_height = (int)(session->content_height * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
         char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
                                                    svg_width, svg_height, doc->state);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);
                 mem_free(svg_content);
-                render_export_session_end(&session);
                 return 0;
             } else {
                 mem_free(svg_content);
@@ -1476,7 +1468,34 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     } else {
     }
 
-    // Cleanup
-    render_export_session_end(&session);
     return 1;
+}
+
+// Main function to layout HTML and render to SVG.
+// scale: User-specified scale factor (default 1.0, use 2.0 for high-DPI output)
+int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width,
+        int viewport_height, float scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin(
+            &session, html_file, viewport_width, viewport_height, 1200, 800, scale)) {
+        return 1;
+    }
+    int result = render_export_session_to_svg(&session, svg_file);
+    render_export_session_end(&session);
+    return result;
+}
+
+int render_document_transform_to_svg(const char* document_file,
+        const LambdaDocumentTransformConfig* transform,
+        const LambdaDocumentTransformOption* options, int option_count,
+        const char* svg_file, int viewport_width, int viewport_height, float scale) {
+    RenderExportSession session;
+    if (!render_export_session_begin_document_transform(&session, document_file, transform,
+            options, option_count, viewport_width, viewport_height, 1200, 800, scale,
+            1.0f, false)) {
+        return 1;
+    }
+    int result = render_export_session_to_svg(&session, svg_file);
+    render_export_session_end(&session);
+    return result;
 }

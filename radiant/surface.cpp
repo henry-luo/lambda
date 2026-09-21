@@ -588,38 +588,51 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
     if (is_http) {
         // Network-managed documents cannot let layout/render perform blocking
-        // HTTP fetches; failed or late-discovered images fall back to a missing
-        // image instead of stalling shutdown for per-image timeouts.
+        // HTTP fetches. Loader-stage CSS prefetches may already have completed;
+        // consume those bytes without admitting a new synchronous transfer.
         if (uicon->document->resource_manager) {
-            log_debug("[image] Skipping sync HTTP image fetch (resource manager active): %s",
-                      url_get_href(abs_url));
-            url_destroy(abs_url);
-            return NULL;
+            const char* url_str = url_get_href(abs_url);
+            downloaded_data = (unsigned char*)resource_manager_copy_ready_resource_content(
+                uicon->document->resource_manager, url_str, &downloaded_size);
+            if (!downloaded_data || downloaded_size == 0) {
+                log_debug("[image] Network image not ready without blocking: %s", url_str);
+                if (downloaded_data) mem_free(downloaded_data);
+                url_destroy(abs_url);
+                return NULL;
+            }
+            file_path = mem_strdup(url_str, MEM_CAT_RENDER);
+            if (!file_path) {
+                mem_free(downloaded_data);
+                url_destroy(abs_url);
+                return NULL;
+            }
+            log_debug("[image] Consumed ready network image bytes: %s", url_str);
+        } else {
+            // Download the image from HTTP URL
+            const char* url_str = url_get_href(abs_url);
+            file_path = mem_strdup(url_str, MEM_CAT_RENDER);
+            if (!file_path) {
+                url_destroy(abs_url);
+                return NULL;
+            }
+            ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
+            ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
+            if (entry) {
+                log_debug(entry->unavailable ? "Image unavailable from cache: %s"
+                                             : "Image loaded from cache: %s", file_path);
+                mem_free(file_path);
+                url_destroy(abs_url);
+                return entry->image;
+            }
+            log_debug("[image] Downloading image from URL: %s", url_str);
+            downloaded_data = (unsigned char*)download_http_content(url_str, &downloaded_size, nullptr);
+            if (!downloaded_data || downloaded_size == 0) {
+                log_error("[image] Failed to download image: %s", url_str);
+                load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
+                return NULL;
+            }
+            log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
         }
-        // Download the image from HTTP URL
-        const char* url_str = url_get_href(abs_url);
-        file_path = mem_strdup(url_str, MEM_CAT_RENDER);
-        if (!file_path) {
-            url_destroy(abs_url);
-            return NULL;
-        }
-        ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
-        ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
-        if (entry) {
-            log_debug(entry->unavailable ? "Image unavailable from cache: %s"
-                                         : "Image loaded from cache: %s", file_path);
-            mem_free(file_path);
-            url_destroy(abs_url);
-            return entry->image;
-        }
-        log_debug("[image] Downloading image from URL: %s", url_str);
-        downloaded_data = (unsigned char*)download_http_content(url_str, &downloaded_size, nullptr);
-        if (!downloaded_data || downloaded_size == 0) {
-            log_error("[image] Failed to download image: %s", url_str);
-            load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
-            return NULL;
-        }
-        log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
     } else {
         file_path = url_to_local_path(abs_url);
         if (!file_path) {

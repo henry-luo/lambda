@@ -91,32 +91,53 @@ static void test_radiant_view_ensure_temp_dir() {
 #endif
 }
 
-static bool test_radiant_view_file_contains(const char* path, const char* needle) {
+static char* test_radiant_view_read_file(const char* path) {
     FILE* file = fopen(path, "rb");
-    if (!file) return false;
+    if (!file) return nullptr;
     if (fseek(file, 0, SEEK_END) != 0) {
         fclose(file);
-        return false;
+        return nullptr;
     }
     long size = ftell(file);
     if (size < 0) {
         fclose(file);
-        return false;
+        return nullptr;
     }
     if (fseek(file, 0, SEEK_SET) != 0) {
         fclose(file);
-        return false;
+        return nullptr;
     }
     char* buffer = (char*)malloc((size_t)size + 1);
     if (!buffer) {
         fclose(file);
-        return false;
+        return nullptr;
     }
     size_t read_size = fread(buffer, 1, (size_t)size, file);
     buffer[read_size] = '\0';
+    fclose(file);
+    return buffer;
+}
+
+static bool test_radiant_view_file_contains(const char* path, const char* needle) {
+    char* buffer = test_radiant_view_read_file(path);
+    if (!buffer) return false;
     bool found = strstr(buffer, needle) != NULL;
     free(buffer);
-    fclose(file);
+    return found;
+}
+
+static bool test_radiant_view_profile_has_intrinsic_measurement(const char* path) {
+    char* buffer = test_radiant_view_read_file(path);
+    if (!buffer) return false;
+    const char* profile = strstr(buffer, "[LAYOUT_PROFILE] intrinsic:");
+    const char* requests = profile ? strstr(profile, "requests=") : nullptr;
+    bool found = false;
+    if (requests) {
+        char* end = nullptr;
+        const char* value = requests + strlen("requests=");
+        found = strtoul(value, &end, 10) > 0 && end != value;
+    }
+    free(buffer);
     return found;
 }
 
@@ -317,6 +338,26 @@ TEST(RadiantViewTest, PreservesDocumentUrlAcrossScriptFormSubmit) {
 
 TEST(RadiantViewTest, LaysOutDenseCollapsedTable) {
     test_radiant_view_expect_case(17);
+}
+
+TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
+    const char* page = "test/layout/data/baseline/flex_019_nested_flex.html";
+    const char* view_log = "./temp/test_radiant_view_intrinsic_cache_log.txt";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    const ShellEnvEntry env[] = {
+        {"LAYOUT_PROFILE", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    EXPECT_TRUE(test_radiant_view_profile_has_intrinsic_measurement(view_log));
 }
 
 TEST(RadiantViewTest, PreservesMarkerPropsDuringRetainedTableReflow) {

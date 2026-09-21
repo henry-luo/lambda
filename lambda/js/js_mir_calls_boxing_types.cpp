@@ -765,26 +765,10 @@ void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFuncti
     jm_callr_void_2(mt, "js_set_function_source_known_code", fn_reg, src_reg);
 }
 
-void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
-        JsFuncCollected* fc, JsFunctionNode* fn_node) {
-    if (!mt || !fn_reg || !fc || !fn_node) return;
-    char display_buffer[256];
-    const char* source_name = fn_node->name ? fn_node->name->chars : NULL;
-    const char* display_name = jm_function_display_name(source_name,
-        display_buffer, sizeof(display_buffer));
-    const char* source_text = NULL;
-    uint32_t source_len = 0;
-    if (!jm_function_source_span(mt, fn_node, &source_text, &source_len)) {
-        source_text = NULL;
-        source_len = 0;
-    }
-    uint32_t name_len = display_name ? (uint32_t)strlen(display_name) : 0;
-    MIR_reg_t name_chars = display_name
-        ? jm_string_literal_chars(mt, display_name, (int)name_len) : 0;
-    MIR_reg_t source_chars = source_text
-        ? jm_string_literal_chars(mt, source_text, (int)source_len) : 0;
-    uint64_t span_lengths = (uint64_t)name_len | ((uint64_t)source_len << 32);
-    int flags = 0;
+static int64_t jm_function_init_flags(JsFuncCollected* fc,
+        JsFunctionNode* fn_node) {
+    if (!fc || !fn_node) return 0;
+    int64_t flags = 0;
     if (fn_node->is_generator && fn_node->is_async) {
         flags |= JS_FUNC_INIT_ASYNC_GENERATOR;
     } else if (fn_node->is_generator) {
@@ -807,6 +791,47 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     // through its companion slot; native callbacks keep their explicit result
     // homes because those are ownership transfers, not generated ABI lanes.
     flags |= JS_FUNC_INIT_MIR_CONTEXT_ABI;
+    return flags;
+}
+
+void jm_emit_apply_function_analysis_flags(JsMirTranspiler* mt,
+        MIR_reg_t fn_reg, JsFuncCollected* fc) {
+    if (!mt || !fn_reg || !fc || !fc->node) return;
+    // Method factories set their ABI before source-order metadata is known.
+    // Publish the same immutable compiler facts without rematerializing a
+    // name, source string, or formal-length descriptor.
+    jm_call_void_6(mt, "js_finalize_function",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+        MIR_T_P, MIR_new_int_op(mt->ctx, 0),
+        MIR_T_P, MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, -1),
+        MIR_T_I64, MIR_new_int_op(mt->ctx,
+            jm_function_init_flags(fc, fc->node)));
+    if (JM_JS_FACT(fc, is_derived_constructor)) {
+        jm_callr_void_1(mt, "js_mark_derived_constructor_func", fn_reg);
+    }
+}
+
+void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
+        JsFuncCollected* fc, JsFunctionNode* fn_node) {
+    if (!mt || !fn_reg || !fc || !fn_node) return;
+    char display_buffer[256];
+    const char* source_name = fn_node->name ? fn_node->name->chars : NULL;
+    const char* display_name = jm_function_display_name(source_name,
+        display_buffer, sizeof(display_buffer));
+    const char* source_text = NULL;
+    uint32_t source_len = 0;
+    if (!jm_function_source_span(mt, fn_node, &source_text, &source_len)) {
+        source_text = NULL;
+        source_len = 0;
+    }
+    uint32_t name_len = display_name ? (uint32_t)strlen(display_name) : 0;
+    MIR_reg_t name_chars = display_name
+        ? jm_string_literal_chars(mt, display_name, (int)name_len) : 0;
+    MIR_reg_t source_chars = source_text
+        ? jm_string_literal_chars(mt, source_text, (int)source_len) : 0;
+    uint64_t span_lengths = (uint64_t)name_len | ((uint64_t)source_len << 32);
     // D5.4.3: no allocating operation separates callable creation from this
     // GC-aware transaction. The runtime roots the fresh callable before it
     // materializes either string or publishes metadata and capabilities.
@@ -818,7 +843,8 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
                               : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)span_lengths),
         MIR_T_I64, MIR_new_int_op(mt->ctx, JM_JS_FACT(fc, formal_length)),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
+        MIR_T_I64, MIR_new_int_op(mt->ctx,
+            jm_function_init_flags(fc, fn_node)));
 }
 
 // Publish a class's source in the callable carrier so Function.prototype

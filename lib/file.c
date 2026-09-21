@@ -42,7 +42,6 @@
 extern char *strdup(const char *s);
 #include <stdbool.h>
 #include "file.h"
-#include "hash.h"
 #include "log.h"
 #include "str.h"
 
@@ -963,19 +962,4 @@ int file_ensure_dir(const char* dir_path) {
         return -1;
     }
     return 0;
-}
-
-char* file_cache_path(const char* key, const char* cache_dir, const char* ext) {
-    if (!key || !cache_dir) return NULL;
-    if (!ext) ext = ".cache";
-
-    unsigned long hash = (unsigned long)hash_djb2_add_extend_cstr(5381, key);
-
-    size_t dir_len = strlen(cache_dir);
-    size_t ext_len = strlen(ext);
-    // "<dir>/<8hex><ext>\0"
-    char* buf = (char*)mem_alloc(dir_len + 1 + 8 + ext_len + 1, MEM_CAT_TEMP);
-    if (!buf) return NULL;
-    snprintf(buf, dir_len + 1 + 8 + ext_len + 1, "%s/%08lx%s", cache_dir, hash, ext);
-    return buf;
 }

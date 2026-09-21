@@ -179,10 +179,6 @@ bool file_path_has_ext_ci(const char* path, const char* ext);
 // a directory or creation fails.
 int file_ensure_dir(const char* dir_path);
 
-// Generate a cache file path from `key` using a DJB2 hash.
-// Result is "<cache_dir>/<hex_hash>.<ext>".  Caller must free().
-char* file_cache_path(const char* key, const char* cache_dir, const char* ext);
-
 #ifdef __cplusplus
 }
 #endif

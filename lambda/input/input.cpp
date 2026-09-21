@@ -1069,6 +1069,19 @@ const char* input_detect_structurizr_flavor(const char* pathname,
         ? "structurizr" : NULL;
 }
 
+const char* input_detect_graph_flavor(const char* pathname,
+                                      const char* source,
+                                      size_t source_len) {
+    if (!pathname) return NULL;
+    size_t path_len = strlen(pathname);
+    if (str_iends_with_const(pathname, path_len, ".mmd")) return "mermaid";
+    if (str_iends_with_const(pathname, path_len, ".d2")) return "d2";
+    if (str_iends_with_const(pathname, path_len, ".dot") ||
+            str_iends_with_const(pathname, path_len, ".gv")) return "dot";
+    if (str_iends_with_const(pathname, path_len, ".structurizr")) return "structurizr";
+    return input_detect_structurizr_flavor(pathname, source, source_len);
+}
+
 static bool markup_flavor_to_format(const char* flavor, MarkupFormat* format) {
     for (size_t i = 0; i < sizeof(MARKUP_FLAVOR_MAPPINGS) / sizeof(MARKUP_FLAVOR_MAPPINGS[0]); i++) {
         if (strcmp(flavor, MARKUP_FLAVOR_MAPPINGS[i].flavor) == 0) {
@@ -1137,7 +1150,7 @@ static Input* input_from_source_n_with_name_parent(const char* source,
     // Explicit `graph` inputs still need extension/content flavor detection;
     // limiting detection to `auto` silently sent flavorless .dsl files to DOT.
     const char* detected_graph_flavor = flavor ? NULL
-        : input_detect_structurizr_flavor(pathname, source, source_len);
+        : input_detect_graph_flavor(pathname, source, source_len);
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.

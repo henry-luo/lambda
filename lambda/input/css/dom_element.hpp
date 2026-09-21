@@ -765,9 +765,18 @@ struct DomElement : DomNode {
     }
 
     bool needs_style_recompute() const { return flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE); }
-    void set_needs_style_recompute(bool value) { set_flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE, value); }
+    void set_needs_style_recompute(bool value) {
+        set_flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE, value);
+        // A style mutation may change intrinsic contributions before the next
+        // retained layout generation; do not reuse its provisional measurement.
+        if (value) set_has_cached_intrinsic_widths(false);
+    }
     bool styles_resolved() const { return flag(ELMT_FLAG_STYLES_RESOLVED); }
-    void set_styles_resolved(bool value) { set_flag(ELMT_FLAG_STYLES_RESOLVED, value); }
+    void set_styles_resolved(bool value) {
+        set_flag(ELMT_FLAG_STYLES_RESOLVED, value);
+        // A reset discards the cascade that produced any cached contribution.
+        if (!value) set_has_cached_intrinsic_widths(false);
+    }
     bool float_prelaid() const { return flag(ELMT_FLAG_FLOAT_PRELAID); }
     void set_float_prelaid(bool value) { set_flag(ELMT_FLAG_FLOAT_PRELAID, value); }
     bool has_cached_intrinsic_widths() const { return flag(ELMT_FLAG_HAS_CACHED_INTRINSIC_WIDTHS); }

@@ -59,6 +59,11 @@ pub fn render(ast, options) {
     }
 }
 
+// Native document-loader entry point keeps standalone output as the view default.
+pub fn render_document(ast, options) {
+    render(ast, if (options == null) {standalone: true} else options)
+}
+
 fn is_standalone(options) {
     if (options == null) { false }
     else if (options.standalone == true) { true }

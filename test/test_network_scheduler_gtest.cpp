@@ -8,6 +8,8 @@
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_scheduler.h"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lib/file.h"
 #include "../lib/mem.h"
 
 #include <pthread.h>
@@ -21,41 +23,6 @@
 // windows mkdir accepts only the path; map the POSIX mode-bearing test call.
 #define mkdir(path, mode) _mkdir(path)
 #endif
-
-extern "C" {
-
-bool network_download_resource(NetworkResource* res) {
-    (void)res;
-    return false;
-}
-
-char* enhanced_cache_try_store(EnhancedFileCache* cache,
-                               const char* url,
-                               const char* content,
-                               size_t size,
-                               const HttpCacheHeaders* headers) {
-    (void)cache;
-    (void)url;
-    (void)content;
-    (void)size;
-    (void)headers;
-    return NULL;
-}
-
-char* cookie_jar_build_request_header(CookieJar* jar, const char* url, bool is_secure) {
-    (void)jar;
-    (void)url;
-    (void)is_secure;
-    return NULL;
-}
-
-void cookie_jar_store(CookieJar* jar, const char* request_url, const char* set_cookie_header) {
-    (void)jar;
-    (void)request_url;
-    (void)set_cookie_header;
-}
-
-}
 
 typedef struct CompletionState {
     pthread_mutex_t mutex;
@@ -109,6 +76,71 @@ static bool read_text_file(const char* path, char* buffer, size_t buffer_size) {
     fclose(f);
     buffer[read_size] = '\0';
     return true;
+}
+
+TEST(NetworkResourceCache, ReopensPersistedNativeEntry) {
+    const char* cache_dir = "./temp/test_cache_native_reopen";
+    const char* url = "https://example.com/assets/site.css";
+    const char* content = "body { color: rebeccapurple; }";
+
+    ASSERT_TRUE(create_dir(cache_dir));
+    EnhancedFileCache* writer = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(writer, nullptr);
+    char* stored_path = enhanced_cache_store(writer, url, content, strlen(content), NULL);
+    ASSERT_NE(stored_path, nullptr);
+    mem_free(stored_path);
+    enhanced_cache_destroy(writer);
+
+    EnhancedFileCache* reader = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(reader, nullptr);
+    char* restored_path = enhanced_cache_lookup(reader, url);
+    ASSERT_NE(restored_path, nullptr);
+    size_t restored_size = 0;
+    char* restored_content = read_binary_file(restored_path, &restored_size);
+    ASSERT_NE(restored_content, nullptr);
+    EXPECT_EQ(restored_size, strlen(content));
+    EXPECT_STREQ(restored_content, content);
+
+    mem_free(restored_content);
+    mem_free(restored_path);
+    enhanced_cache_clear(reader);
+    enhanced_cache_destroy(reader);
+}
+
+TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
+    const char* cache_dir = "./temp/test_cache_manager_prefetch";
+    const char* url = "https://example.com/assets/app.js";
+    const char* content = "window.parallelLoader = true;";
+
+    ASSERT_TRUE(create_dir(cache_dir));
+    EnhancedFileCache* cache = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(cache, nullptr);
+    char* stored_path = enhanced_cache_store(cache, url, content, strlen(content), NULL);
+    ASSERT_NE(stored_path, nullptr);
+    mem_free(stored_path);
+
+    DomDocument document;
+    NetworkResourceManager* manager = resource_manager_create(&document, NULL, cache);
+    ASSERT_NE(manager, nullptr);
+
+    NetworkResource* prefetched = resource_manager_prefetch(manager, url, PRIORITY_HIGH);
+    ASSERT_NE(prefetched, nullptr);
+    NetworkResource* script_consumer = resource_manager_load(
+        manager, url, RESOURCE_SCRIPT, PRIORITY_NORMAL, NULL);
+    EXPECT_EQ(script_consumer, prefetched);
+    EXPECT_EQ(prefetched->type, RESOURCE_PREFETCH);
+    EXPECT_TRUE(resource_manager_wait_for_resource(manager, prefetched));
+
+    size_t copied_size = 0;
+    char* copied = resource_manager_copy_resource_content(
+        manager, url, PRIORITY_HIGH, &copied_size);
+    ASSERT_NE(copied, nullptr);
+    EXPECT_EQ(copied_size, strlen(content));
+    EXPECT_STREQ(copied, content);
+    mem_free(copied);
+
+    resource_manager_destroy(manager);
+    enhanced_cache_destroy(cache);
 }
 
 TEST(NetworkSchedulerCurlMulti, FileUrlCompletesAndWritesLocalResource) {
