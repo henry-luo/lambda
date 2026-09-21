@@ -88,6 +88,7 @@ static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
     heap_register_gc_root(&desc->specifier_item.item);
     heap_register_gc_root(&desc->awaited_target.item);
     heap_register_gc_root(&desc->evaluation_error.item);
+    heap_register_gc_root(&desc->deferred_async_frame.item);
     desc->roots_epoch = epoch;
 }
 
@@ -148,8 +149,10 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
                 heap_unregister_gc_root(&entry->desc->specifier_item.item);
                 heap_unregister_gc_root(&entry->desc->awaited_target.item);
                 heap_unregister_gc_root(&entry->desc->evaluation_error.item);
+                heap_unregister_gc_root(&entry->desc->deferred_async_frame.item);
             }
             mem_free(entry->desc->async_parents);
+            mem_free(entry->desc->static_dependencies);
             mem_free((void*)entry->desc->path);
             mem_free(entry->desc);
         }

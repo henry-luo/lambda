@@ -35,11 +35,19 @@ static inline bool js_execution_auto_requested(void) {
 JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
                                    size_t source_length, const char* filename,
                                    bool strict = false);
+// Retain an ES module template with its module-specific scope graph.
+JsScript* js_interp_prepare_es_module_script(Runtime* runtime, const char* source,
+                                             size_t source_length,
+                                             const char* filename);
 Item js_interp_execute_script(Runtime* runtime, JsScript* script,
                               uint64_t* result_home);
 Item js_interp_execute_source(Runtime* runtime, const char* source,
                               size_t source_length, const char* filename,
                               uint64_t* result_home);
+// Execute a Test262 classic source with its realm-local native helper object.
+Item js_interp_execute_test262_source(Runtime* runtime, const char* source,
+                                      size_t source_length, const char* filename,
+                                      bool native_harness, uint64_t* result_home);
 // Execute indirect eval code in the AST tier with EvalDeclarationInstantiation
 // global binding semantics.
 Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
@@ -57,6 +65,9 @@ Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,
                                         uint64_t* result_home);
 Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
                                         uint64_t* result_home);
+// Return the module's recorded evaluation error in the JS throw lane after a
+// host turn has drained its top-level-await carrier.
+Item js_interp_es_module_evaluation_error(Runtime* runtime, JsScript* script);
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                              uint64_t* result_home);
 Item js_interp_start_async_function(JsFunction* function, Item* args,
@@ -76,4 +87,6 @@ void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state,
         struct gc_heap* gc);
 extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
                                         Item input);
+extern "C" Item js_interp_resume_module_async(JsAsyncContextStateRecord* state,
+                                               Item input);
 bool js_interp_script_is_supported(JsScript* script);

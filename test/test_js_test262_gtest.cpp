@@ -1241,10 +1241,12 @@ static void partition_batch_indices(
             continue;
         }
 
+        // Module and async jobs need their own outer execution wrappers even
+        // when AST mode is selected for every job.
         std::string key = prepared[idx].is_slow_test ? "slow:" :
-            prepared[idx].ast_backend ? "ast:" :
             prepared[idx].is_module ? "module:" :
-            (prepared[idx].is_async ? "async:" : "sync:");
+            prepared[idx].is_async ? "async:" :
+            prepared[idx].ast_backend ? "ast:" : "sync:";
         if (use_native_harness) key = "native-" + key;
         key += special_preamble_key(prepared[idx].special_preamble_includes);
         if (prepared[idx].ast_backend && !use_native_harness) {
@@ -1538,6 +1540,7 @@ static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
 static bool g_persistent_workers = false; // --persistent-workers: one lambda worker handles many manifests
 static bool g_mir_interp = false;
+static bool g_ast_only = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
 static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
 static bool g_verbose = false;       // --verbose: dump per-batch-timing + memory-growth detail (else summary-only)
@@ -1572,6 +1575,7 @@ static long slow_threshold_for_test(const std::string& test_name) {
 }
 
 static bool test262_should_use_ast_backend(const Test262Prepared& prepared) {
+    if (g_ast_only) return true;
     // Raw, async, and module jobs retain the established MIR path; exact test
     // names and metadata feature tags can also force a synchronous test to MIR.
     if (prepared.is_async || prepared.is_module || prepared.is_raw) return false;
@@ -1767,6 +1771,26 @@ static bool load_test_name_allowlist(const std::string& path, std::unordered_set
 
 static bool async_test_is_enabled(const std::string& test_name) {
     return g_run_async && g_async_allowlist.find(test_name) != g_async_allowlist.end();
+}
+
+// AST-only validation must execute every supported runner mode. The hybrid
+// runner retains its curated admissions while the interpreter is completed.
+static const char* test262_execution_mode_skip_message(const std::string& test_name,
+                                                        const std::string& test_path,
+                                                        const Test262Metadata& meta) {
+    if (g_ast_only) return NULL;
+    if (meta.is_module && !(g_run_async && is_es2021_module_test(test_path, meta))) {
+        return "module flag";
+    }
+    if (meta.is_raw && !is_es2021_raw_test(test_path, meta)) return "raw flag";
+    if (meta.is_async && !(async_test_is_enabled(test_name) ||
+            (g_run_async && is_js51_es2022_async_admission_test(test_name)) ||
+            (g_run_async && is_js53_waitasync_admission_test(test_name)) ||
+            (g_run_async && (is_dynamic_import_script_test(test_path, meta) ||
+                is_es2021_module_test(test_path, meta))))) {
+        return "async flag";
+    }
+    return NULL;
 }
 
 static std::vector<std::string> split_diagnose_expected_paths(const std::string& field) {
@@ -2478,23 +2502,11 @@ static void prepare_all_tests(
                 p.skip_message = unsupported_feature_skip_message(meta);
                 continue;
             }
-            if (meta.is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
+            const char* mode_skip = test262_execution_mode_skip_message(
+                p.test_name, p.test_path, meta);
+            if (mode_skip) {
                 p.skip_result = T262_SKIP;
-                p.skip_message = "module flag";
-                continue;
-            }
-            if (meta.is_raw && !is_es2021_raw_test(p.test_path, meta)) {
-                p.skip_result = T262_SKIP;
-                p.skip_message = "raw flag";
-                continue;
-            }
-            if (meta.is_async && !(async_test_is_enabled(p.test_name) ||
-                    (g_run_async && is_js51_es2022_async_admission_test(p.test_name)) ||
-                    (g_run_async && is_js53_waitasync_admission_test(p.test_name)) ||
-                    (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
-                        is_es2021_module_test(p.test_path, meta))))) {
-                p.skip_result = T262_SKIP;
-                p.skip_message = "async flag";
+                p.skip_message = mode_skip;
                 continue;
             }
 
@@ -4668,6 +4680,7 @@ static void print_test262_help(const char* program) {
     printf("  --persistent-workers      Reuse one Lambda worker process for all manifests\n");
     printf("                            assigned to each test262 worker (POC timing mode).\n");
     printf("  --mir-interp              Run Lambda through MIR interpreter mode.\n");
+    printf("  --ast-only                Run every selected job through the AST interpreter.\n");
     printf("  --no-stripped             Use canonical test files instead of stripped files.\n");
     printf("  --help, -h                Print this help and exit without running tests.\n");
     printf("\n");
@@ -4765,6 +4778,11 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--mir-interp") == 0) {
             g_mir_interp = true;
+        }
+        if (strcmp(argv[i], "--ast-only") == 0) {
+            // The normal runner deliberately routes unsupported AST job types
+            // to MIR. Parity runs must retain those jobs and expose defects.
+            g_ast_only = true;
         }
         if (strcmp(argv[i], "--no-stripped") == 0) {
             g_no_stripped = true;  // explicit disable
@@ -4896,9 +4914,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[test262] Error: cannot open MIR allowlist: %s\n", MIR_LIST_FILE);
         return 1;
     }
-    g_hybrid_backend_routing = true;
-    fprintf(stderr, "[test262] Loaded MIR allowlist: %zu tests from %s; sync remainder uses AST batches of %zu\n",
-            g_mir_allowlist.size(), MIR_LIST_FILE, T262_AST_BATCH_CHUNK_SIZE);
+    g_hybrid_backend_routing = !g_ast_only;
+    if (g_ast_only) {
+        fprintf(stderr, "[test262] AST-only mode: all selected jobs use AST batches of %zu\n",
+                T262_AST_BATCH_CHUNK_SIZE);
+    } else {
+        fprintf(stderr, "[test262] Loaded MIR allowlist: %zu tests from %s; sync remainder uses AST batches of %zu\n",
+                g_mir_allowlist.size(), MIR_LIST_FILE, T262_AST_BATCH_CHUNK_SIZE);
+    }
 
     if (load_special_preamble_list(SPECIAL_PREAMBLE_FILE)) {
         fprintf(stderr, "[test262] Loaded special preamble map: %zu exact + %zu prefix entries from %s\n",
@@ -5102,19 +5125,10 @@ int main(int argc, char** argv) {
                 if (has_unsupported_feature_for_test(meta, p.test_name)) {
                     p.skip_result = T262_SKIP;
                     p.skip_message = unsupported_feature_skip_message(meta);
-                } else if (is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
+                } else if (const char* mode_skip = test262_execution_mode_skip_message(
+                               p.test_name, p.test_path, meta)) {
                     p.skip_result = T262_SKIP;
-                    p.skip_message = "module flag";
-                } else if (is_raw && !is_es2021_raw_test(p.test_path, meta)) {
-                    p.skip_result = T262_SKIP;
-                    p.skip_message = "raw flag";
-                } else if (p.is_async && !(async_test_is_enabled(p.test_name) ||
-                        (g_run_async && is_js51_es2022_async_admission_test(p.test_name)) ||
-                        (g_run_async && is_js53_waitasync_admission_test(p.test_name)) ||
-                        (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
-                            is_es2021_module_test(p.test_path, meta))))) {
-                    p.skip_result = T262_SKIP;
-                    p.skip_message = "async flag";
+                    p.skip_message = mode_skip;
                 }
             }
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);

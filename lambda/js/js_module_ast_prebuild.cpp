@@ -86,8 +86,8 @@ static bool js_ast_prebuild_build_module(void* opaque, const char* path) {
     size_t source_length = 0;
     char* source = js_load_script_source_from_cache(path,
         "js-ast-prebuild", "ast-template", true, &source_length);
-    JsScript* script = source ? js_interp_prepare_script(&worker, source,
-        source_length, path, true) : NULL;
+    JsScript* script = source ? js_interp_prepare_es_module_script(&worker, source,
+        source_length, path) : NULL;
     // The cache admission predicate is the AST executor's compatibility
     // predicate. A prebuilt closure is usable by AUTO only when every worker
     // published (or reused) such an image.

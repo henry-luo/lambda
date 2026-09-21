@@ -23,6 +23,9 @@
 
 extern __thread EvalContext* context;
 extern int js_dynamic_import_suppress_module_drain;
+// Static imports execute nested module sources synchronously. Their queued
+// jobs belong to the importing module's host turn, not to the nested load.
+static __thread int js_interp_static_import_depth = 0;
 extern Item js_make_number(double value);
 extern "C" Item bigint_from_string(const char* value, int length);
 void jm_resolve_module_path(const char* base_file, const char* specifier,
@@ -86,6 +89,9 @@ struct JsInterpFrame {
     JsInterpContinuation** async_loop_continuations;
     JsInterpContinuation** async_try_continuations;
     JsGeneratorStateRecord* generator_state;
+    // A suspended generator or async function owns replayable expression
+    // values. Ordinary frames leave this null.
+    JsSuspendedActivation* suspended_activation;
     // The cache itself is realm-owned; frames only retain the native row for
     // their immutable parser image.
     JsAstLiteralCacheEntry* literal_cache;
@@ -150,6 +156,9 @@ enum JsInterpLoopResumePhase : uint8_t {
     JS_LOOP_RESUME_FOR_AWAIT_STEP,
     JS_LOOP_RESUME_FOR_AWAIT_VALUE,
     JS_LOOP_RESUME_FOR_AWAIT_CLOSE,
+    // A yield/await in a destructuring iteration head must resume the
+    // assignment against its already-observed iteration value.
+    JS_LOOP_RESUME_FOR_AWAIT_ASSIGNMENT,
 };
 
 enum JsInterpContinuationKind : uint8_t {
@@ -185,9 +194,13 @@ struct JsInterpContinuation {
             const char* close_completion_label;
             int close_completion_label_len;
             int64_t body_start_ledger;
+            int64_t async_await_ledger;
             uint8_t close_completion_kind;
             uint8_t resume_phase;
             bool is_for_of;
+            // Async generators carry independent yield and await replay
+            // ledgers; this cursor records the ledger that suspended it.
+            bool await_ledger;
         } loop;
         struct {
             JsAstNode* node;
@@ -223,6 +236,98 @@ struct JsInterpContinuation {
         } array_binding;
     } payload;
 };
+
+// The AST itself is retained by JsScript. Only the completed value needs GC
+// tracing while an activation is suspended; the node pointer identifies the
+// exact evaluation that must be skipped on replay.
+struct JsInterpExpressionReplay {
+    JsAstNode* node;
+    Item value;
+    JsInterpExpressionReplay* next;
+};
+
+static void js_interp_expression_replay_clear_list(
+        JsInterpExpressionReplay** head) {
+    if (!head) return;
+    while (*head) {
+        JsInterpExpressionReplay* removed = *head;
+        *head = removed->next;
+        mem_free(removed);
+    }
+}
+
+void js_interp_activation_replay_clear(JsSuspendedActivation* activation) {
+    if (!activation) return;
+    js_interp_expression_replay_clear_list(&activation->ast_expression_replay);
+    js_interp_expression_replay_clear_list(&activation->ast_expression_recorded);
+}
+
+void js_interp_activation_replay_trace(JsSuspendedActivation* activation,
+        gc_heap_t* gc) {
+    if (!activation || !gc) return;
+    for (JsInterpExpressionReplay* entry = activation->ast_expression_replay;
+            entry; entry = entry->next) {
+        gc_mark_item(gc, entry->value.item);
+    }
+    for (JsInterpExpressionReplay* entry = activation->ast_expression_recorded;
+            entry; entry = entry->next) {
+        gc_mark_item(gc, entry->value.item);
+    }
+}
+
+static void js_interp_expression_replay_begin(JsSuspendedActivation* activation) {
+    if (!activation) return;
+    js_interp_expression_replay_clear_list(&activation->ast_expression_replay);
+    activation->ast_expression_replay = activation->ast_expression_recorded;
+    activation->ast_expression_recorded = NULL;
+}
+
+static void js_interp_expression_replay_discard_pending(
+        JsSuspendedActivation* activation) {
+    if (!activation) return;
+    js_interp_expression_replay_clear_list(&activation->ast_expression_replay);
+}
+
+static void js_interp_expression_replay_discard_recorded(
+        JsSuspendedActivation* activation) {
+    if (!activation) return;
+    js_interp_expression_replay_clear_list(&activation->ast_expression_recorded);
+}
+
+static void js_interp_expression_replay_finish_phase(JsInterpFrame* frame) {
+    if (!frame || !frame->suspended_activation) return;
+    // A resumed loop phase has completed, so a later iteration must evaluate
+    // its test/update/body again instead of consuming this phase's old values.
+    js_interp_expression_replay_discard_pending(frame->suspended_activation);
+    js_interp_expression_replay_discard_recorded(frame->suspended_activation);
+}
+
+static bool js_interp_expression_replay_take(JsInterpFrame* frame,
+        JsAstNode* node, Item* value) {
+    JsSuspendedActivation* activation = frame ? frame->suspended_activation : NULL;
+    if (!activation || !activation->ast_expression_replay || !node || !value) return false;
+    JsInterpExpressionReplay* entry = activation->ast_expression_replay;
+    if (entry->node != node) return false;
+    activation->ast_expression_replay = entry->next;
+    *value = entry->value;
+    mem_free(entry);
+    return true;
+}
+
+static bool js_interp_expression_replay_record(JsInterpFrame* frame,
+        JsAstNode* node, Item value) {
+    JsSuspendedActivation* activation = frame ? frame->suspended_activation : NULL;
+    if (!activation || !node) return true;
+    JsInterpExpressionReplay* entry = (JsInterpExpressionReplay*)mem_calloc(1,
+        sizeof(*entry), MEM_CAT_JS_RUNTIME);
+    if (!entry) return false;
+    entry->node = node;
+    entry->value = value;
+    JsInterpExpressionReplay** link = &activation->ast_expression_recorded;
+    while (*link) link = &(*link)->next;
+    *link = entry;
+    return true;
+}
 
 // The suspension records live on the generator or the async context, whichever
 // owns this activation. Both walkers reach them through these two accessors so
@@ -345,6 +450,7 @@ static void js_interp_continuation_trace(JsInterpContinuation* list,
 
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state) {
     if (!state) return;
+    js_interp_activation_replay_clear(state);
     js_interp_continuation_clear(&state->ast_loop_continuations);
     js_interp_continuation_clear(&state->ast_list_continuation);
     js_interp_continuation_clear(&state->ast_try_continuations);
@@ -507,7 +613,8 @@ static void js_interp_generator_remove_loop(JsInterpFrame* frame,
 static bool js_interp_generator_suspend_loop(JsInterpFrame* frame,
         JsAstNode* loop, JsInterpEnv* env, Item iterator, Item for_in_object,
         Item iteration_result, bool is_for_of, uint8_t resume_phase,
-        int64_t body_start_ledger) {
+        int64_t body_start_ledger, int64_t async_await_ledger,
+        bool await_ledger) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
     if (!state) return true;
     JsInterpContinuation* existing = js_interp_generator_find_loop(frame,
@@ -523,7 +630,9 @@ static bool js_interp_generator_suspend_loop(JsInterpFrame* frame,
     continuation->payload.loop.iteration_result = iteration_result;
     continuation->payload.loop.is_for_of = is_for_of;
     continuation->payload.loop.body_start_ledger = body_start_ledger;
+    continuation->payload.loop.async_await_ledger = async_await_ledger;
     continuation->payload.loop.resume_phase = resume_phase;
+    continuation->payload.loop.await_ledger = await_ledger;
     continuation->next = state->ast_loop_continuations;
     state->ast_loop_continuations = continuation;
     return true;
@@ -532,7 +641,8 @@ static bool js_interp_generator_suspend_loop(JsInterpFrame* frame,
 static bool js_interp_async_suspend_loop(JsInterpFrame* frame,
         JsAstNode* loop, JsInterpEnv* env, Item iterator, Item for_in_object,
         Item iteration_result, bool is_for_of, uint8_t resume_phase,
-        int64_t body_start_ledger) {
+        int64_t body_start_ledger, int64_t async_await_ledger,
+        bool await_ledger) {
     if (!frame || !frame->async_loop_continuations) return false;
     if (js_interp_generator_find_loop(frame, loop)) return true;
     JsInterpContinuation* continuation = js_interp_continuation_new(
@@ -545,7 +655,9 @@ static bool js_interp_async_suspend_loop(JsInterpFrame* frame,
     continuation->payload.loop.iteration_result = iteration_result;
     continuation->payload.loop.is_for_of = is_for_of;
     continuation->payload.loop.body_start_ledger = body_start_ledger;
+    continuation->payload.loop.async_await_ledger = async_await_ledger;
     continuation->payload.loop.resume_phase = resume_phase;
+    continuation->payload.loop.await_ledger = await_ledger;
     // The owning JsAsyncContextStateRecord traces every continuation edge in
     // js_interp_async_trace_continuations. Do not add a second direct-root
     // protocol for these same values.
@@ -591,16 +703,25 @@ static bool js_interp_suspend_loop(JsInterpFrame* frame,
         uint8_t resume_phase,
         int64_t body_start_ledger) {
     if (!frame) return true;
+    bool await_ledger = completion.kind == JS_INTERP_AWAIT &&
+        frame->async_await_seen != NULL;
+    int64_t async_await_ledger = frame->async_await_seen
+        ? *frame->async_await_seen : 0;
+    if (await_ledger && *frame->async_await_seen > 0) {
+        // Await increments its own cursor before returning the suspension.
+        body_start_ledger = *frame->async_await_seen - 1;
+    }
     if (completion.kind == JS_INTERP_YIELD) {
         return js_interp_generator_suspend_loop(frame, loop, env, iterator,
             for_in_object, iteration_result, is_for_of, resume_phase,
-            body_start_ledger);
+            body_start_ledger, async_await_ledger, false);
     }
     if (completion.kind != JS_INTERP_AWAIT || !frame->async_loop_continuations) {
         return true;
     }
     return js_interp_async_suspend_loop(frame, loop, env, iterator, for_in_object,
-        iteration_result, is_for_of, resume_phase, body_start_ledger);
+        iteration_result, is_for_of, resume_phase, body_start_ledger,
+        async_await_ledger, await_ledger);
 }
 
 // JSCU10: an async frame is precisely traced through its GC carrier, so its
@@ -616,6 +737,7 @@ void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state,
 
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state) {
     if (!state) return;
+    js_interp_activation_replay_clear(state);
     js_interp_continuation_clear(&state->ast_loop_continuations);
     js_interp_continuation_clear(&state->ast_list_continuation);
     js_interp_continuation_clear(&state->ast_try_continuations);
@@ -629,6 +751,8 @@ static JsInterpCompletion js_interp_throw(Item value) {
     return {JS_INTERP_THROW, value, NULL, 0};
 }
 
+static JsInterpCompletion js_interp_resume_completion(Item input);
+
 // Async AST replay consumes an already-observed await without re-evaluating
 // its operand. Implicit awaits (such as for-await iterator steps) share the
 // same ledger so their resume input stays aligned with explicit `await`.
@@ -637,18 +761,14 @@ static JsInterpCompletion js_interp_await_value(JsInterpFrame* frame, Item value
             *frame->async_await_seen < frame->async_await_skip) {
         int64_t resume_index = *frame->async_await_seen;
         (*frame->async_await_seen)++;
-        if (*frame->async_await_seen == frame->async_await_skip) {
-            Item resumed = frame->async_resume_input;
-            return item_is_error(resumed) ? js_interp_throw(resumed)
-                : js_interp_normal(resumed);
-        }
         Item prior = get_type_id(frame->async_await_values) == LMD_TYPE_ARRAY
             ? js_elements_get_int(frame->async_await_values, resume_index)
             : make_js_undefined();
-        return item_is_error(prior) ? js_interp_throw(prior) : js_interp_normal(prior);
+        return item_is_error(prior) ? js_interp_throw(prior)
+            : js_interp_resume_completion(prior);
     }
 
-    RootFrame roots(1);
+    RootFrame roots(3);
     Rooted<Item> target_root(roots, value);
     if (frame && frame->async_await_seen) {
         target_root.set(js_promise_resolve(target_root.get()));
@@ -900,6 +1020,54 @@ static Item js_interp_publish_export_value(JsInterpFrame* frame,
     js_interp_propagate_reexports(context ? context->runtime : NULL,
         frame && frame->script ? frame->script->reference : NULL, export_name, value, 0);
     return stored;
+}
+
+static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name);
+static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
+        String* unresolved_name);
+
+// Export declarations can bind through a destructuring pattern. Every bound
+// name is an exported local binding and must be published after initialization.
+static Item js_interp_publish_pattern_exports(JsInterpFrame* frame,
+        Item namespace_obj, JsAstNode* pattern) {
+    if (!pattern) return make_js_undefined();
+    if (pattern->node_type == AST_NODE_IDENT) {
+        String* name = ((JsIdentifierNode*)pattern)->name;
+        NameEntry* entry = js_interp_find_binding(frame, name);
+        RootFrame roots(1);
+        Rooted<Item> value_root(roots, js_interp_read_binding(frame, entry, name));
+        if (item_is_error(value_root.get())) return value_root.get();
+        return js_interp_publish_export_value(frame, namespace_obj, name, value_root.get());
+    }
+    if (pattern->node_type == AST_NODE_ASSIGN_PATTERN) {
+        return js_interp_publish_pattern_exports(frame, namespace_obj,
+            (JsAstNode*)((JsAssignmentPatternNode*)pattern)->left);
+    }
+    if (pattern->node_type == AST_NODE_REST_ELEMENT ||
+            pattern->node_type == AST_NODE_REST_PROPERTY ||
+            pattern->node_type == AST_NODE_SPREAD) {
+        return js_interp_publish_pattern_exports(frame, namespace_obj,
+            (JsAstNode*)((JsSpreadElementNode*)pattern)->argument);
+    }
+    if (pattern->node_type == AST_NODE_ARRAY_PATTERN) {
+        for (JsAstNode* element = (JsAstNode*)((JsArrayPatternNode*)pattern)->elements;
+                element; element = (JsAstNode*)element->next) {
+            Item published = js_interp_publish_pattern_exports(frame, namespace_obj, element);
+            if (item_is_error(published)) return published;
+        }
+        return make_js_undefined();
+    }
+    if (pattern->node_type == AST_NODE_MAP_PATTERN) {
+        for (JsAstNode* property = (JsAstNode*)((JsObjectPatternNode*)pattern)->properties;
+                property; property = (JsAstNode*)property->next) {
+            JsAstNode* value = property->node_type == AST_NODE_PROPERTY
+                ? (JsAstNode*)((JsPropertyNode*)property)->value
+                : (JsAstNode*)((JsSpreadElementNode*)property)->argument;
+            Item published = js_interp_publish_pattern_exports(frame, namespace_obj, value);
+            if (item_is_error(published)) return published;
+        }
+    }
+    return make_js_undefined();
 }
 
 static bool js_interp_private_source_name(Item key) {
@@ -2849,19 +3017,11 @@ static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
         if (item_is_error(value_root.get())) {
             JS_INTERP_CALL_RETURN(js_interp_throw(value_root.get()));
         }
-        Item string_value = js_to_string(value_root.get());
-        if (item_is_error(string_value)) JS_INTERP_CALL_RETURN(js_interp_throw(string_value));
-        String* requested = it2s(string_value);
-        char resolved[512];
-        jm_resolve_module_path(frame->script && frame->script->reference
-            ? frame->script->reference : ".", requested->chars,
-            (int)requested->len, resolved, (int)sizeof(resolved));
-        value_root.set(js_interp_load_es_module(context ? context->runtime : NULL,
-            resolved));
-        Item result = item_is_error(value_root.get()) ? js_promise_reject(value_root.get())
-            : js_promise_resolve(value_root.get());
-        JS_INTERP_CALL_RETURN(item_is_error(result) ? js_interp_throw(result)
-            : js_interp_normal(result));
+        // Dynamic import performs ToString inside its Promise capability. In
+        // particular, a coercion error rejects the returned promise instead
+        // of escaping the import expression synchronously.
+        value_root.set(js_dynamic_import(value_root.get()));
+        JS_INTERP_CALL_RETURN(js_interp_normal(value_root.get()));
     }
     if (super_call) {
         // SuperCall invokes the parent's [[Construct]] with the active
@@ -2964,7 +3124,7 @@ static JsInterpCompletion js_interp_eval_tagged_template(JsInterpFrame* frame,
     int count = 0;
     for (JsAstNode* quasi = tagged->quasi->quasis; quasi;
             quasi = (JsAstNode*)quasi->next) count++;
-    RootFrame roots(5);
+    RootFrame roots(6);
     Rooted<Item> tag_root(roots, ItemNull);
     Rooted<Item> this_root(roots, make_js_undefined());
     Rooted<Item> key_root(roots, ItemNull);
@@ -3485,7 +3645,50 @@ static JsInterpMemberResult js_interp_eval_member_chain(JsInterpFrame* frame,
     return {item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result), false};
 }
 
+static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* node);
+
+static bool js_interp_expression_may_suspend(JsAstNode* node) {
+    if (!node) return false;
+    if (node->node_type == AST_NODE_YIELD || node->node_type == AST_NODE_AWAIT) {
+        return true;
+    }
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_ARROW_FUNC) {
+        // Creating a nested callable does not execute its body.
+        return false;
+    }
+    struct JsInterpSuspendSearch {
+        bool found;
+    } search = {false};
+    js_ast_visit_children(node, [](JsAstNode* child, void* opaque) {
+        JsInterpSuspendSearch* search = (JsInterpSuspendSearch*)opaque;
+        if (search && !search->found) {
+            search->found = js_interp_expression_may_suspend(child);
+        }
+    }, &search);
+    return search.found;
+}
+
 static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) {
+    if (!node) return js_interp_normal(make_js_undefined());
+    Item replay_value = ItemNull;
+    if (js_interp_expression_replay_take(frame, node, &replay_value)) {
+        // A later suspension in this same statement must replay this child
+        // again, so carry the consumed value into the next replay segment.
+        if (!js_interp_expression_replay_record(frame, node, replay_value)) {
+            return js_interp_throw(ItemError);
+        }
+        return js_interp_normal(replay_value);
+    }
+    JsInterpCompletion result = js_interp_eval_raw(frame, node);
+    if (result.kind == JS_INTERP_NORMAL && !js_interp_expression_may_suspend(node) &&
+            !js_interp_expression_replay_record(frame, node, result.value)) {
+        return js_interp_throw(ItemError);
+    }
+    return result;
+}
+
+static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* node) {
     if (!node) return js_interp_normal(make_js_undefined());
     switch (node->node_type) {
     case AST_NODE_LITERAL: {
@@ -3842,12 +4045,18 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                     if (argument.kind != JS_INTERP_NORMAL) return argument;
                     argument_root.set(argument.value);
                 }
-                iterator_root.set(js_get_iterator(argument_root.get()));
+                // AsyncGenerator yield* obtains @@asyncIterator before it
+                // falls back to the synchronous iterator protocol.
+                iterator_root.set(frame->generator_state && frame->generator_state->is_async
+                    ? js_get_async_iterator(argument_root.get())
+                    : js_get_iterator(argument_root.get()));
                 if (item_is_error(iterator_root.get())) {
                     return js_interp_throw(iterator_root.get());
                 }
             } else {
-                iterator_root.set(js_get_iterator(make_js_undefined()));
+                iterator_root.set(frame->generator_state && frame->generator_state->is_async
+                    ? js_get_async_iterator(make_js_undefined())
+                    : js_get_iterator(make_js_undefined()));
                 if (item_is_error(iterator_root.get())) {
                     return js_interp_throw(iterator_root.get());
                 }
@@ -4191,8 +4400,13 @@ static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* n
         bool replay_abrupt = receives_resume_input &&
             resume->payload.list.replay_current_statement &&
             (js_gen_is_throw_signal(input) || js_gen_is_return_signal(input));
+        bool skipped_suspended_statement =
+            !resume->payload.list.replay_current_statement;
         js_interp_advance_ledger(frame, resume->payload.list.yield_count_before_next_statement);
         js_interp_continuation_pop(head);
+        if (skipped_suspended_statement) {
+            js_interp_expression_replay_finish_phase(frame);
+        }
         if (receives_resume_input && !replay_abrupt) {
             JsInterpCompletion resumed = js_interp_resume_completion(input);
             if (resumed.kind != JS_INTERP_NORMAL) return resumed;
@@ -4203,8 +4417,7 @@ static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* n
         result = js_interp_exec(frame, current);
         bool suspended = (result.kind == JS_INTERP_YIELD && frame &&
                 frame->generator_state) ||
-            (result.kind == JS_INTERP_AWAIT && frame && !frame->generator_state &&
-                head);
+            (result.kind == JS_INTERP_AWAIT && frame && head);
         if (suspended && !js_interp_list_find(*head, node)) {
             JsInterpContinuation* continuation = js_interp_continuation_new(
                 JS_INTERP_CONTINUATION_LIST);
@@ -4219,11 +4432,15 @@ static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* n
             continuation->payload.list.yield_count_before_next_statement =
                 continuation->payload.list.replay_current_statement ? count_before_current
                 : (seen ? *seen : 0);
-            continuation->payload.list.receives_resume_input = *head == NULL;
+            continuation->payload.list.receives_resume_input =
+                result.kind == JS_INTERP_YIELD && *head == NULL;
             continuation->next = *head;
             *head = continuation;
         }
         if (result.kind != JS_INTERP_NORMAL) return result;
+        // A completed statement will not be re-entered after a later
+        // suspension. Drop its transient expression results immediately.
+        js_interp_expression_replay_finish_phase(frame);
     }
     return result;
 }
@@ -4454,7 +4671,22 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
     Rooted<Item> close_completion_root(roots, ItemNull);
     JsInterpContinuation* resume = js_interp_generator_find_loop(frame,
         (JsAstNode*)loop);
-    if (resume) js_interp_advance_ledger(frame, resume->payload.loop.body_start_ledger);
+    if (resume) {
+        if (resume->payload.loop.await_ledger && frame &&
+                frame->async_await_seen &&
+                *frame->async_await_seen < resume->payload.loop.body_start_ledger) {
+            *frame->async_await_seen = resume->payload.loop.body_start_ledger;
+        } else if (!resume->payload.loop.await_ledger) {
+            js_interp_advance_ledger(frame, resume->payload.loop.body_start_ledger);
+        }
+        if (!resume->payload.loop.await_ledger && frame &&
+                frame->async_await_seen &&
+                *frame->async_await_seen < resume->payload.loop.async_await_ledger) {
+            // A yield inside an async loop resumes after the implicit awaits
+            // that produced its iteration value.
+            *frame->async_await_seen = resume->payload.loop.async_await_ledger;
+        }
+    }
     JsInterpEnv* env = resume ? resume->payload.loop.env : NULL;
     if (!resume) {
         if (loop->init) {
@@ -4509,6 +4741,8 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
         resume->payload.loop.resume_phase == JS_LOOP_RESUME_FOR_AWAIT_VALUE;
     bool resume_for_await_close = resume &&
         resume->payload.loop.resume_phase == JS_LOOP_RESUME_FOR_AWAIT_CLOSE;
+    bool resume_for_await_assignment = resume &&
+        resume->payload.loop.resume_phase == JS_LOOP_RESUME_FOR_AWAIT_ASSIGNMENT;
     if (resume_for_await_close) {
         JsInterpCompletion carried = {
             (JsInterpCompletionKind)resume->payload.loop.close_completion_kind,
@@ -4523,7 +4757,7 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
     for (;;) {
         JsInterpEnv* iteration_env = env_root.env;
         bool create_iteration_env = false;
-        if (!resume_body) {
+        if (!resume_body && !resume_for_await_assignment) {
             if (is_for_await) {
                 if (!resume_for_await_value) {
                     int64_t step_ledger = js_interp_ledger_position(frame);
@@ -4595,6 +4829,12 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
                 ? js_interp_env_clone(env_root.env) : env_root.env;
             create_iteration_env = has_per_iteration_lexical;
         }
+        if (resume_for_await_assignment) {
+            // The continuation's iteration_result slot holds the resolved
+            // value once the head itself has suspended.
+            value_root.set(iteration_result_root.get());
+            resume_for_await_assignment = false;
+        }
         JsInterpEnvRoot iteration_root(create_iteration_env ? iteration_env : NULL);
         if (create_iteration_env && (!iteration_env || !iteration_root.registered)) {
             return js_interp_throw(ItemError);
@@ -4602,9 +4842,23 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
         JsInterpFrame iteration_frame = *frame;
         iteration_frame.env = iteration_env;
         if (!resume_body) {
+            int64_t assignment_ledger = js_interp_ledger_position(frame);
             JsInterpCompletion assigned = js_interp_assign_iteration_head(&iteration_frame,
                 (JsAstNode*)loop->left, value_root.get(), loop->declares_binding);
             if (assigned.kind != JS_INTERP_NORMAL) {
+                if (js_interp_completion_suspends(assigned)) {
+                    // A generator suspension in the iteration head is not an
+                    // abrupt loop exit. Keep the iterator and its resolved
+                    // value so replay finishes this one assignment.
+                    if (!js_interp_suspend_loop(frame, assigned, (JsAstNode*)loop,
+                            iteration_env, iterator_root.get(),
+                            for_in_object_root.get(), value_root.get(), true,
+                            JS_LOOP_RESUME_FOR_AWAIT_ASSIGNMENT,
+                            assignment_ledger)) {
+                        return js_interp_throw(ItemError);
+                    }
+                    return assigned;
+                }
                 js_interp_generator_remove_loop(frame, (JsAstNode*)loop);
                 if (is_for_await) {
                     return js_interp_start_for_await_close(frame, (JsAstNode*)loop,
@@ -4632,6 +4886,9 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
         if (completion.kind == JS_INTERP_NORMAL ||
                 (completion.kind == JS_INTERP_CONTINUE &&
                  js_interp_completion_targets_active_label(&completion, &iteration_frame))) {
+            if (resume_body) {
+                js_interp_expression_replay_finish_phase(frame);
+            }
             js_interp_generator_remove_loop(frame, (JsAstNode*)loop);
             resume_body = false;
             continue;
@@ -4741,13 +4998,8 @@ static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
                     declarator; declarator = (JsAstNode*)declarator->next) {
                 JsVariableDeclaratorNode* variable =
                     (JsVariableDeclaratorNode*)declarator;
-                if (!variable->id || variable->id->node_type != AST_NODE_IDENT) continue;
-                String* name = ((JsIdentifierNode*)variable->id)->name;
-                NameEntry* entry = js_interp_find_binding(frame, name);
-                value_root.set(js_interp_read_binding(frame, entry, name));
-                if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
-                Item stored = js_interp_publish_export_value(frame, namespace_root.get(), name,
-                    value_root.get());
+                Item stored = js_interp_publish_pattern_exports(frame,
+                    namespace_root.get(), (JsAstNode*)variable->id);
                 if (item_is_error(stored)) return js_interp_throw(stored);
             }
         }
@@ -4794,13 +5046,15 @@ static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
     }
     if (!exported->is_default) return completion;
     if (exported->declaration &&
-            (exported->declaration->node_type == AST_NODE_FUNC ||
-             exported->declaration->node_type == AST_NODE_CLASS ||
+            (exported->declaration->node_type == AST_NODE_CLASS ||
              exported->declaration->node_type == AST_NODE_CLASS_EXPR)) {
-        String* name = exported->declaration->node_type ==
-                AST_NODE_FUNC
-            ? ((JsFunctionNode*)exported->declaration)->name
-            : ((JsClassNode*)exported->declaration)->name;
+        // ClassDefinitionEvaluation returns the class itself. This also
+        // avoids looking up the synthetic "default" name assigned to an
+        // anonymous default class solely for its inferred function name.
+        value_root.set(completion.value);
+    } else if (exported->declaration &&
+            exported->declaration->node_type == AST_NODE_FUNC) {
+        String* name = ((JsFunctionNode*)exported->declaration)->name;
         if (name) {
             NameEntry* entry = js_interp_find_binding(frame, name);
             value_root.set(js_interp_read_binding(frame, entry, name));
@@ -4952,8 +5206,12 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                     }
                     js_interp_generator_remove_loop(frame, (JsAstNode*)loop);
                     if (test.kind != JS_INTERP_NORMAL) return test;
+                    if (resume && resume_phase == JS_LOOP_RESUME_TEST) {
+                        js_interp_expression_replay_finish_phase(frame);
+                    }
                     if (!js_is_truthy(test.value)) return js_interp_normal(make_js_undefined());
                 }
+                bool completing_resumed_body = resume_body;
                 resume_body = false;
                 JsInterpFrame body_frame = *frame;
                 body_frame.active_label = NULL;
@@ -4978,12 +5236,17 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 if (body.kind == JS_INTERP_RETURN || body.kind == JS_INTERP_THROW) return body;
                 if (body.kind == JS_INTERP_CONTINUE &&
                         !js_interp_completion_targets_active_label(&body, frame)) return body;
+                if (completing_resumed_body) {
+                    js_interp_expression_replay_finish_phase(frame);
+                }
             }
         }
         if (loop->form == LOOP_FORM_DO_WHILE) {
             bool resume_test = resume && resume_phase == JS_LOOP_RESUME_TEST;
             for (;;) {
                 if (!resume_test) {
+                    bool completing_resumed_body = resume &&
+                        resume_phase == JS_LOOP_RESUME_BODY;
                     JsInterpFrame body_frame = *frame;
                     body_frame.active_label = NULL;
                     body_frame.active_label_len = 0;
@@ -5008,6 +5271,9 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                     if (body.kind == JS_INTERP_RETURN || body.kind == JS_INTERP_THROW) return body;
                     if (body.kind == JS_INTERP_CONTINUE &&
                             !js_interp_completion_targets_active_label(&body, frame)) return body;
+                    if (completing_resumed_body) {
+                        js_interp_expression_replay_finish_phase(frame);
+                    }
                 }
                 resume_test = false;
                 int64_t test_ledger = js_interp_ledger_position(frame);
@@ -5022,6 +5288,9 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 }
                 js_interp_generator_remove_loop(frame, (JsAstNode*)loop);
                 if (test.kind != JS_INTERP_NORMAL) return test;
+                if (resume && resume_phase == JS_LOOP_RESUME_TEST) {
+                    js_interp_expression_replay_finish_phase(frame);
+                }
                 if (!js_is_truthy(test.value)) return js_interp_normal(make_js_undefined());
             }
         }
@@ -5058,6 +5327,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         }
         bool resume_body = resume && resume_phase == JS_LOOP_RESUME_BODY;
         bool resume_update = resume && resume_phase == JS_LOOP_RESUME_UPDATE;
+        bool resume_test = resume && resume_phase == JS_LOOP_RESUME_TEST;
         for (;;) {
             JsInterpFrame loop_frame = *frame;
             loop_frame.env = env_root.env;
@@ -5076,6 +5346,10 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                     }
                     js_interp_generator_remove_loop(frame, (JsAstNode*)loop);
                     if (test.kind != JS_INTERP_NORMAL) return test;
+                    if (resume_test) {
+                        js_interp_expression_replay_finish_phase(frame);
+                        resume_test = false;
+                    }
                     if (!js_is_truthy(test.value)) {
                         return js_interp_normal(make_js_undefined());
                     }
@@ -5110,6 +5384,9 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                         !js_interp_completion_targets_active_label(&body, &loop_frame)) {
                     return body;
                 }
+                if (resume_body) {
+                    js_interp_expression_replay_finish_phase(frame);
+                }
             }
             // ECMAScript gives each `for (let/const ...)` iteration a fresh
             // binding environment. Clone before the update so body closures
@@ -5117,6 +5394,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
             // iteration through the new record. A resumed update already has
             // its clone; repeating it would lose the update's own writes.
             bool iteration_record_ready = resume_update;
+            bool completing_resumed_update = resume_update;
             resume_update = false;
             resume_body = false;
             if (has_per_iteration_lexical && !iteration_record_ready) {
@@ -5141,6 +5419,9 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 }
                 js_interp_generator_remove_loop(frame, (JsAstNode*)loop);
                 if (update.kind != JS_INTERP_NORMAL) return update;
+                if (completing_resumed_update) {
+                    js_interp_expression_replay_finish_phase(frame);
+                }
             }
         }
         }
@@ -5478,6 +5759,9 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         uint64_t* result_home) {
     if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !js_fn_ast_function(function) || !js_fn_ast_script(function)) return ItemError;
+    // D7.2.3/D8.5.1: queued callbacks execute with their defining script's
+    // origin, so relative dynamic imports retain the enclosing module path.
+    RuntimeCurrentFileScope current_file(context, js_fn_ast_script(function)->reference);
     // JC20: this activation borrows the call activation a kernel instance
     // pushed for `function` (generic body entry or the AST direct instance).
     // That activation roots the callee and holds `this` and `new.target`; the
@@ -5789,7 +6073,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
 extern "C" Item js_interp_resume_generator(Item generator,
         JsGeneratorStateRecord* state, Item input) {
     if (!state || get_type_id(state->ast_function) != LMD_TYPE_FUNC) return ItemError;
-    RootFrame roots(8);
+    RootFrame roots(9);
     Rooted<Item> generator_root(roots, generator);
     Rooted<Item> function_root(roots, state->ast_function);
     Rooted<Item> arguments_root(roots, state->ast_arguments);
@@ -5798,6 +6082,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
     Rooted<Item> pending_root(roots, state->ast_pending_resume_input);
     Rooted<Item> home_class_root(roots, ItemNull);
     Rooted<Item> yield_values_root(roots, state->ast_replay_values);
+    Rooted<Item> await_values_root(roots, state->ast_await_replay_values);
     if (get_type_id(function_root.get()) != LMD_TYPE_FUNC) return ItemError;
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast_function(function) ||
@@ -5808,7 +6093,25 @@ extern "C" Item js_interp_resume_generator(Item generator,
         ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
     if (!body) return js_throw_type_error("interpreted generator requires a block body");
 
-    if (state->ast_replay_skip > 0) {
+    if (state->ast_waiting_for_await) {
+        if (get_type_id(await_values_root.get()) != LMD_TYPE_ARRAY) {
+            await_values_root.set(js_array_new(0));
+            if (item_is_error(await_values_root.get())) return await_values_root.get();
+            state->ast_await_replay_values = await_values_root.get();
+        }
+        int64_t resume_index = state->ast_await_replay_skip - 1;
+        while (js_array_length(await_values_root.get()) < resume_index) {
+            Item padded = js_array_push(await_values_root.get(), make_js_undefined());
+            if (item_is_error(padded)) return padded;
+        }
+        Item stored = js_array_length(await_values_root.get()) == resume_index
+            ? js_array_push(await_values_root.get(), input_root.get())
+            : js_elements_set_int_direct(await_values_root.get(), resume_index,
+                input_root.get());
+        if (item_is_error(stored)) return stored;
+        state->ast_waiting_for_await = false;
+        js_interp_expression_replay_begin(state);
+    } else if (state->ast_replay_skip > 0) {
         if (get_type_id(yield_values_root.get()) != LMD_TYPE_ARRAY) {
             yield_values_root.set(js_array_new(0));
             if (item_is_error(yield_values_root.get())) return yield_values_root.get();
@@ -5824,6 +6127,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
             : js_elements_set_int_direct(yield_values_root.get(), resume_index,
                 input_root.get());
         if (item_is_error(stored)) return stored;
+        js_interp_expression_replay_begin(state);
     }
 
     if (!state->ast_initialized) {
@@ -5869,6 +6173,11 @@ extern "C" Item js_interp_resume_generator(Item generator,
         // replaying through it would repeat that clause's finished statements.
         js_interp_generator_clear_nested_list_continuations(state);
     }
+    if (resuming_list && !replaying_suspended_statement) {
+        // A terminal yield advances directly to the next statement, so no
+        // cached child expression belongs to the resumed execution path.
+        js_interp_expression_replay_discard_pending(state);
+    }
     if (!resuming_list && state->ast_replay_skip > 0 &&
             (js_gen_is_throw_signal(input_root.get()) ||
              js_gen_is_return_signal(input_root.get()))) {
@@ -5881,6 +6190,7 @@ extern "C" Item js_interp_resume_generator(Item generator,
     }
 
     int64_t yielded = resumed_yield_count;
+    int64_t awaited = 0;
     JsInterpFrame frame = {};
     frame.script = js_fn_ast_script(function);
     frame.env = state->ast_body_env;
@@ -5898,6 +6208,16 @@ extern "C" Item js_interp_resume_generator(Item generator,
     frame.generator_abrupt_resume_yield = state->ast_pending_resume_yield;
     frame.generator_abrupt_resume_input = pending_root.get();
     frame.generator_state = state;
+    frame.suspended_activation = state;
+    if (state->is_async) {
+        frame.async_await_seen = &awaited;
+        frame.async_await_skip = state->ast_await_replay_skip;
+        frame.async_resume_input = input_root.get();
+        frame.async_await_values = await_values_root.get();
+        frame.async_list_continuations = &state->ast_list_continuation;
+        frame.async_loop_continuations = &state->ast_loop_continuations;
+        frame.async_try_continuations = &state->ast_try_continuations;
+    }
     JsInterpEvalLocalFrame eval_local(state->ast_body_env ? state->ast_body_env
         : state->ast_function_env,
         js_fn_ast_has_direct_eval(function));
@@ -5912,6 +6232,11 @@ extern "C" Item js_interp_resume_generator(Item generator,
         }
         state->ast_replay_skip++;
         return js_make_iter_result(result.value, false);
+    }
+    if (result.kind == JS_INTERP_AWAIT && state->is_async) {
+        state->ast_await_replay_skip++;
+        state->ast_waiting_for_await = true;
+        return js_gen_await_result(result.value, state->ast_await_replay_skip);
     }
     state->done = true;
     state->state = -1;
@@ -5954,6 +6279,10 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     JsFunction* function = (JsFunction*)function_root.get().function;
     if (!function || !js_fn_ast_function(function) ||
             get_type_id(arguments_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    // Promise reactions resume outside the original call frame. Restore the
+    // function's source origin so a later relative import() uses the same
+    // base URL as the invocation that suspended (D8.5.1).
+    RuntimeCurrentFileScope current_file(context, js_fn_ast_script(function)->reference);
     JsBlockNode* body = js_fn_ast_function(function)->body &&
             js_fn_ast_function(function)->body->node_type == AST_NODE_BLOCK
         ? (JsBlockNode*)js_fn_ast_function(function)->body : NULL;
@@ -5975,6 +6304,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
             : js_elements_set_int_direct(await_values_root.get(), resume_index,
                 input_root.get());
         if (item_is_error(stored)) return js_interp_async_state_result(stored, -2);
+        js_interp_expression_replay_begin(state);
     }
     if (!state->ast_initialized) {
         Item prepared = js_interp_prepare_suspended_activation(function,
@@ -5998,6 +6328,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     frame.async_list_continuations = &state->ast_list_continuation;
     frame.async_loop_continuations = &state->ast_loop_continuations;
     frame.async_try_continuations = &state->ast_try_continuations;
+    frame.suspended_activation = state;
     JsInterpEvalLocalFrame eval_local(state->ast_body_env ? state->ast_body_env
         : state->ast_function_env,
         js_fn_ast_has_direct_eval(function));
@@ -6008,9 +6339,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
         state->ast_replay_skip++;
         return js_interp_async_state_result(result.value, state->ast_replay_skip);
     }
-    js_interp_continuation_clear(&state->ast_loop_continuations);
-    js_interp_continuation_clear(&state->ast_list_continuation);
-    js_interp_continuation_clear(&state->ast_try_continuations);
+    js_interp_async_clear_continuations(state);
     if (result.kind == JS_INTERP_RETURN) return js_interp_async_state_result(result.value, -1);
     if (result.kind == JS_INTERP_NORMAL) {
         // A concise body is an expression, not a statement list: its normal
@@ -6019,6 +6348,74 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     }
     Item reason = item_is_error(result.value)
         ? js_error_lane_payload(result.value) : result.value;
+    return js_interp_async_state_result(reason, -2);
+}
+
+extern "C" Item js_interp_resume_module_async(JsAsyncContextStateRecord* state,
+        Item input) {
+    if (!state || !state->ast_module_script) return js_interp_async_state_result(ItemError, -2);
+    JsScript* script = state->ast_module_script;
+    RootFrame roots(5);
+    Rooted<Item> input_root(roots, input);
+    Rooted<Item> replay_root(roots, state->ast_replay_values);
+    Rooted<Item> this_root(roots, make_js_undefined());
+    Rooted<Item> new_target_root(roots, js_get_new_target());
+    Rooted<Item> home_class_root(roots, ItemNull);
+    Rooted<Item> namespace_root(roots, js_module_get(state->ast_module_specifier));
+    if (get_type_id(namespace_root.get()) == LMD_TYPE_NULL) {
+        return js_interp_async_state_result(ItemError, -2);
+    }
+    if (state->ast_replay_skip > 0) {
+        if (get_type_id(replay_root.get()) != LMD_TYPE_ARRAY) {
+            replay_root.set(js_array_new(0));
+            if (item_is_error(replay_root.get())) return js_interp_async_state_result(replay_root.get(), -2);
+            state->ast_replay_values = replay_root.get();
+        }
+        int64_t resume_index = state->ast_replay_skip - 1;
+        Item stored = js_array_length(replay_root.get()) == resume_index
+            ? js_array_push(replay_root.get(), input_root.get())
+            : js_elements_set_int_direct(replay_root.get(), resume_index, input_root.get());
+        if (item_is_error(stored)) return js_interp_async_state_result(stored, -2);
+        js_interp_expression_replay_begin(state);
+    }
+    int64_t awaited = 0;
+    JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
+        home_class_root.home(), true, NULL, 0, NULL, false};
+    frame.async_await_seen = &awaited;
+    frame.async_await_skip = state->ast_replay_skip;
+    frame.async_resume_input = input_root.get();
+    frame.async_await_values = replay_root.get();
+    frame.async_list_continuations = &state->ast_list_continuation;
+    frame.async_loop_continuations = &state->ast_loop_continuations;
+    frame.async_try_continuations = &state->ast_try_continuations;
+    frame.suspended_activation = state;
+    RuntimeCurrentFileScope current_file(context, script->reference);
+    JsModuleNamespaceScope module_namespace(namespace_root.get(), true);
+    JsInterpCompletion result = js_interp_exec(&frame, (JsAstNode*)script->ast_root);
+    ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
+        script->reference);
+    if (result.kind == JS_INTERP_AWAIT) {
+        // The module's carrier is the same completion edge MIR records for a
+        // top-level await, including its ordering among async import parents.
+        js_module_mark_has_tla(state->ast_module_specifier);
+        js_module_mark_post_await_pending(state->ast_module_specifier);
+        js_module_assign_async_eval_order(state->ast_module_specifier);
+        state->ast_replay_skip++;
+        return js_interp_async_state_result(result.value, state->ast_replay_skip);
+    }
+    js_interp_async_clear_continuations(state);
+    if (result.kind == JS_INTERP_NORMAL) {
+        if (module) { module->initialized = true; module->loading = false; }
+        js_module_complete_tla_body(state->ast_module_specifier);
+        return js_interp_async_state_result(make_js_undefined(), -1);
+    }
+    Item reason = item_is_error(result.value) ? js_error_lane_payload(result.value) : result.value;
+    if (module) module->loading = false;
+    // js_async_drive settles this carrier after we return. Register parent
+    // propagation on that rejection so a dependency's dynamic import reacts
+    // before its importers' rejections are published.
+    js_module_record_async_evaluation_error(state->ast_module_specifier, reason,
+        state->promise);
     return js_interp_async_state_result(reason, -2);
 }
 
@@ -6095,21 +6492,27 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     return runtime_publish_result(context, result.value);
 }
 
-JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
-        size_t source_length, const char* filename, bool strict) {
+static JsScript* js_interp_prepare_script_mode(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool strict, JsParseMode parse_mode,
+        bool cacheable) {
     if (!runtime || !source) return NULL;
     // Parse templates are independent from eval/module execution state. The
     // returned adapter has a fresh overlay for lexical bridges, module cells,
     // and lazy function/class facts (D8.5.1v2).
-    JsScript* cached = js_common_ast_cache_lookup(runtime, source, source_length,
-        filename ? filename : "<inline-js>", strict, false);
-    if (cached) return cached;
+    JsScript* cached = NULL;
     InputScriptBuildScope cache_build = {};
-    InputScriptBuildClaim claim = js_common_ast_cache_begin_build(&cache_build,
-        source, source_length, filename ? filename : "<inline-js>", strict, false);
-    if (claim == INPUT_SCRIPT_BUILD_READY) {
+    InputScriptBuildClaim claim = INPUT_SCRIPT_BUILD_BYPASS;
+    bool module_parse = (parse_mode & JS_PARSE_MODULE) != 0;
+    if (cacheable) {
         cached = js_common_ast_cache_lookup(runtime, source, source_length,
-            filename ? filename : "<inline-js>", strict, false);
+            filename ? filename : "<inline-js>", strict, false, module_parse);
+        if (cached) return cached;
+        claim = js_common_ast_cache_begin_build(&cache_build, source, source_length,
+            filename ? filename : "<inline-js>", strict, false, module_parse);
+    }
+    if (cacheable && claim == INPUT_SCRIPT_BUILD_READY) {
+        cached = js_common_ast_cache_lookup(runtime, source, source_length,
+            filename ? filename : "<inline-js>", strict, false, module_parse);
         if (cached) return cached;
     }
     JsTranspiler* transpiler = js_transpiler_create(runtime);
@@ -6118,29 +6521,41 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
     }
     if (transpiler) transpiler->ast_cache_requested_strict = strict;
     if (!transpiler || !js_transpiler_parse_c(transpiler, source, source_length,
-            JS_PARSE_AUTO)) {
+            parse_mode)) {
         js_transpiler_destroy(transpiler);
-        js_common_ast_cache_complete_build(&cache_build, false, false);
+        if (cacheable) js_common_ast_cache_complete_build(&cache_build, false, false);
         return NULL;
     }
     JsAstNode* ast = (JsAstNode*)transpiler->ast_root;
     if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
-        js_common_ast_cache_complete_build(&cache_build, false, false);
+        if (cacheable) js_common_ast_cache_complete_build(&cache_build, false, false);
         return NULL;
     }
     JsScript* script = js_script_adopt_transpiler(transpiler, runtime,
         filename ? filename : "<inline-js>");
-    bool published = script && claim != INPUT_SCRIPT_BUILD_POISONED &&
+    bool published = cacheable && script && claim != INPUT_SCRIPT_BUILD_POISONED &&
         js_common_ast_cache_admit(runtime, script, source, source_length,
-            filename ? filename : "<inline-js>", strict, false);
-    js_common_ast_cache_complete_build(&cache_build, published, false);
+            filename ? filename : "<inline-js>", strict, false, module_parse);
+    if (cacheable) js_common_ast_cache_complete_build(&cache_build, published, false);
     return script;
+}
+
+JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool strict) {
+    return js_interp_prepare_script_mode(runtime, source, source_length, filename, strict,
+        JS_PARSE_AUTO, true);
+}
+
+JsScript* js_interp_prepare_es_module_script(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename) {
+    return js_interp_prepare_script_mode(runtime, source, source_length, filename, true,
+        (JsParseMode)(JS_PARSE_SCRIPT | JS_PARSE_MODULE), true);
 }
 
 static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool is_module, bool strict,
-        bool is_eval_script, uint64_t* result_home) {
+        bool is_eval_script, bool test262_native_harness, uint64_t* result_home) {
     JsScript* script = js_interp_prepare_script(runtime, source, source_length,
         filename, strict);
     if (!script) {
@@ -6152,7 +6567,7 @@ static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
     script->is_es_module = false;
     if (strict) script->strict_mode = true;
     script->is_eval_script = is_eval_script;
-    script->test262_native_harness = false;
+    script->test262_native_harness = test262_native_harness;
     script->test262_native_build_string = false;
     return js_interp_execute_script(runtime, script, result_home);
 }
@@ -6160,20 +6575,27 @@ static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
 Item js_interp_execute_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, uint64_t* result_home) {
     return js_interp_execute_source_mode(runtime, source, source_length, filename,
-        false, false, false, result_home);
+        false, false, false, false, result_home);
+}
+
+Item js_interp_execute_test262_source(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool native_harness,
+        uint64_t* result_home) {
+    return js_interp_execute_source_mode(runtime, source, source_length, filename,
+        false, false, false, native_harness, result_home);
 }
 
 Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, uint64_t* result_home) {
     return js_interp_execute_source_mode(runtime, source, source_length, filename,
-        false, false, true, result_home);
+        false, false, true, false, result_home);
 }
 
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool strict,
         uint64_t* result_home) {
     return js_interp_execute_source_mode(runtime, source, source_length, filename,
-        true, strict, false, result_home);
+        true, strict, false, false, result_home);
 }
 
 static bool js_interp_is_lambda_module_path(const char* filename) {
@@ -6248,10 +6670,26 @@ static Item js_interp_load_static_imports(Runtime* runtime, JsScript* script) {
         char resolved[512];
         jm_resolve_module_path(script->reference, source->chars,
             (int)source->len, resolved, (int)sizeof(resolved));
+        js_interp_static_import_depth++;
         Item namespace_obj = js_interp_load_es_module(runtime, resolved);
+        js_interp_static_import_depth--;
         if (item_is_error(namespace_obj) || get_type_id(namespace_obj) == LMD_TYPE_NULL) {
             return item_is_error(namespace_obj) ? namespace_obj :
                 js_throw_reference_error(js_make_string("imported module is unavailable"));
+        }
+        // D8: AST and MIR modules share the registry's async-dependency graph.
+        // A static parent inherits the child's completion promise so a later
+        // dynamic import cannot expose the parent before its TLA dependency.
+        RootFrame roots(2);
+        Rooted<Item> current_specifier(roots, js_make_string(script->reference));
+        Rooted<Item> dependency_specifier(roots, js_make_string(resolved));
+        js_module_register_static_dependency(current_specifier.get(),
+            dependency_specifier.get());
+        js_module_inherit_awaited_target(current_specifier.get(),
+            dependency_specifier.get());
+        if (js_module_needs_async_settle(dependency_specifier.get())) {
+            js_module_register_async_parent(dependency_specifier.get(),
+                current_specifier.get());
         }
     }
     return make_js_undefined();
@@ -6351,6 +6789,16 @@ static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) 
     return make_js_undefined();
 }
 
+Item js_interp_es_module_evaluation_error(Runtime* runtime, JsScript* script) {
+    ModuleDescriptor* module = runtime && script
+        ? module_get_for_runtime(runtime, script->reference) : NULL;
+    if (!module || get_type_id(module->evaluation_error) == LMD_TYPE_NULL) {
+        return ItemNull;
+    }
+    return item_is_error(module->evaluation_error)
+        ? module->evaluation_error : js_throw_value(module->evaluation_error);
+}
+
 Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         uint64_t* result_home) {
     if (!runtime || !script) return ItemError;
@@ -6385,13 +6833,16 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         return js_throw_syntax_error(js_make_string("unsupported AST interpreter module"));
     }
     ModuleDescriptor* module = module_get_for_runtime(runtime, script->reference);
-    if (module && (module->initialized || module->loading)) return module->namespace_obj;
+    if (module && (module->initialized || module->loading)) {
+        Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
+        return item_is_error(evaluation_error) ? evaluation_error : module->namespace_obj;
+    }
     module = module_register_loading_with_namespace_ops_for_runtime(runtime,
         script->reference, "js", NULL);
     if (!module) return ItemError;
     module->specifier_item = js_make_string(script->reference);
 
-    RootFrame roots(1);
+    RootFrame roots(3);
     Rooted<Item> namespace_root(roots, module->namespace_obj);
     Item instantiated = js_interp_instantiate_es_module(runtime, script);
     if (item_is_error(instantiated)) {
@@ -6412,22 +6863,57 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
         module->loading = false;
         return star_validation;
     }
-    Item evaluated = js_interp_execute_script(runtime, script, NULL);
-    if (item_is_error(evaluated)) {
-        module->evaluation_error = evaluated;
+    Rooted<Item> frame_root(roots, js_async_context_create_module(script,
+        script->module_state_id, module->specifier_item));
+    if (item_is_error(frame_root.get())) {
+        module->evaluation_error = frame_root.get();
         module->loading = false;
-        return evaluated;
+        return frame_root.get();
     }
+    Rooted<Item> completion_root(roots, js_async_get_promise(frame_root.get()));
+    // A static import may be suspended before this module's first statement.
+    // Keep the AST carrier in the canonical module record until its async
+    // dependencies notify the shared scheduler (D8.5.1).
+    if (js_module_pending_async_deps(module->specifier_item) > 0) {
+        js_module_set_deferred_async_frame(module->specifier_item, frame_root.get());
+    } else {
+        js_async_start(frame_root.get());
+    }
+    // Ordinary modules finish during the initial drive. Leaving their carrier
+    // promise in the TLA slot changes dynamic import's resolved namespace into
+    // an extra promise turn; retain it only for a suspended module body.
+    if (!module->initialized) module->awaited_target = completion_root.get();
+    Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
+    if (item_is_error(evaluation_error)) return evaluation_error;
     module->namespace_obj = namespace_root.get();
-    module->initialized = true;
-    module->loading = false;
     return runtime_publish_result(context, namespace_root.get());
 }
 
 Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, uint64_t* result_home) {
-    JsScript* script = js_interp_prepare_script(runtime, source, source_length,
-        filename, true);
+    // Module callers already know the parse goal. Do not infer it from the
+    // first top-level tokens: Test262 prepends assertion helpers before the
+    // module body, and a script-mode scope graph cannot be reclassified later.
+    JsScript* script = js_interp_prepare_es_module_script(runtime, source, source_length,
+        filename);
     if (!script) return ItemError;
-    return js_interp_execute_es_module_script(runtime, script, result_home);
+    // A static import inherits the importing module's host turn. Runtime
+    // execution-depth also includes embedding scopes, so it cannot identify
+    // that boundary reliably.
+    bool outermost_entry = js_interp_static_import_depth == 0 &&
+        js_dynamic_import_suppress_module_drain <= 0;
+    // The async module carrier resumes from a microtask scheduled by its first
+    // top-level await. Keep the owner scope active through that host-turn
+    // drain so the callback re-enters the same Runtime rather than being
+    // discarded after the nested module executor has returned.
+    RuntimeExecutionScope source_execution_scope;
+    Item result = js_interp_execute_es_module_script(runtime, script, result_home);
+    if (outermost_entry) {
+        js_microtask_flush();
+        js_event_loop_drain_script_turn(runtime && runtime->dom_doc != NULL,
+            js_dynamic_import_suppress_module_drain <= 0);
+        Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
+        if (item_is_error(evaluation_error)) return evaluation_error;
+    }
+    return result;
 }

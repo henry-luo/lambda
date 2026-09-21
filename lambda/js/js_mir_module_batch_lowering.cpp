@@ -4154,7 +4154,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     size_t source_length = strlen(js_source);
     if (ast_executor_forced || runtime->js_ast_backend || ast_closure_ready) {
         JsScript* cached_ast = js_common_ast_cache_lookup(runtime, js_source,
-            source_length, filename, true, false);
+            source_length, filename, true, false, true);
         if (cached_ast) {
             // The parallel prebuild has only published this immutable AST.
             // Instantiate and evaluate it in this Runtime, never on a worker.
@@ -4595,6 +4595,7 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                         String* cur_str_c = heap_create_name(filename, strlen(filename));
                         Item cur_item_c = (Item){.item = s2it(cur_str_c)};
                         jm_propagate_import_evaluation_error(cur_item_c, spec_item);
+                        js_module_register_static_dependency(cur_item_c, spec_item);
                         js_module_inherit_awaited_target(cur_item_c, spec_item);
                         // Js57 P7d-B: cached dep — if it still hasn't finished
                         // its TLA evaluation, register the importer as a parent
@@ -4678,6 +4679,7 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                     String* cur_str = heap_create_name(filename, strlen(filename));
                     Item cur_item = (Item){.item = s2it(cur_str)};
                     jm_propagate_import_evaluation_error(cur_item, spec_item);
+                    js_module_register_static_dependency(cur_item, spec_item);
                     js_module_inherit_awaited_target(cur_item, spec_item);
                     // Js57 P7d-B: freshly-loaded dep — if it has TLA or
                     // transitively depends on a TLA module, register the
