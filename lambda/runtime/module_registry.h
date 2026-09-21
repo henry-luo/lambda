@@ -53,7 +53,17 @@ typedef struct ModuleDescriptor {
     int async_parent_count;
     int async_parent_capacity;
     struct ModuleDescriptor** async_parents;
+    // Static edges identify strongly connected module components. Async
+    // importers of a member wait for that component's evaluation root.
+    int static_dependency_count;
+    int static_dependency_capacity;
+    struct ModuleDescriptor** static_dependencies;
+    struct ModuleDescriptor* async_cycle_root;
+    uint64_t static_visit_epoch;
     void* deferred_main_ptr;
+    // An AST-interpreter module can wait before its first body step while its
+    // static async dependencies settle. The descriptor owns this GC edge.
+    Item deferred_async_frame;
     int body_executed;
     int post_await_pending;
     int body_state;

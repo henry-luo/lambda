@@ -22,6 +22,8 @@ struct JsCallableCode;
 struct JsRuntimeState;
 struct JsInterpEnv;
 struct JsInterpContinuation;
+struct JsInterpExpressionReplay;
+struct JsScript;
 struct AstNode;
 struct DomDocument;
 struct DomElement;
@@ -757,6 +759,11 @@ struct JsSuspendedActivation : DurableActivation {
     // Generator yields and async awaits replay through the same Item ledger.
     Item ast_replay_values = {};
     int64_t ast_replay_skip = 0;
+    // A suspended expression resumes from its last completed child. These
+    // records retain those child values so replay never repeats user-visible
+    // work before a yield or await.
+    JsInterpExpressionReplay* ast_expression_replay = NULL;
+    JsInterpExpressionReplay* ast_expression_recorded = NULL;
     JsInterpContinuation* ast_loop_continuations = NULL;
     bool ast_initialized = false;
     // JSCU44: `with` scopes open at the suspension point. They outlive the
@@ -776,6 +783,11 @@ struct JsGeneratorStateRecord : JsSuspendedActivation {
     int64_t delegate_resume = -1;
     int delegate_idx = 0;
     Item ast_this = {};
+    // Async generators retain await completions separately from next() input:
+    // a single body can suspend at both await and yield sites.
+    Item ast_await_replay_values = {};
+    int64_t ast_await_replay_skip = 0;
+    bool ast_waiting_for_await = false;
     // Terminal-yield loop continuations keep AST generators resumable without
     // replaying completed iterations on every next().
     JsInterpContinuation* ast_list_continuation = NULL;
@@ -795,6 +807,10 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     // resumed MIR property names must use the module image that compiled the body.
     uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
+    // A module program uses the same durable carrier as an async function,
+    // but resumes its Script body in the module's existing lexical slab.
+    JsScript* ast_module_script = NULL;
+    Item ast_module_specifier = {};
     // Statement cursors for every list on the suspension path, so a resume
     // re-enters the awaiting statement instead of replaying the completed
     // statements of each enclosing block/loop body. This replaces the single

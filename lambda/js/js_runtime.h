@@ -1222,6 +1222,8 @@ Item js_async_get_resolved(void);                // get prepared await promise
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
                                  Item this_val);
 Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
+Item js_async_context_create_module(struct JsScript* script, uint32_t module_state_id,
+                                    Item specifier);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1364,6 +1366,10 @@ Item js_module_get_awaited_target(Item specifier);
 void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
 Item js_p5_module_await(Item specifier, Item value);
 void js_module_record_evaluation_error(Item specifier, Item error);
+// An async module must reject its own evaluation promise before notifying
+// async importers, preserving leaf-to-root rejection reaction order.
+void js_module_record_async_evaluation_error(Item specifier, Item error,
+                                             Item completion_promise);
 Item js_module_get_evaluation_error(Item specifier);
 
 /* Js57 P7d: per-module TLA evaluation tracking. */
@@ -1371,8 +1377,10 @@ void js_module_mark_has_tla(Item specifier);
 int  js_module_get_has_tla(Item specifier);
 int  js_module_needs_async_settle(Item specifier);
 void js_tla_drain_pending_modules(void);
+void js_module_register_static_dependency(Item parent_specifier, Item dep_specifier);
 void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
 void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr);
+void js_module_set_deferred_async_frame(Item specifier, Item frame);
 int  js_module_pending_async_deps(Item specifier);
 void js_module_mark_post_await_pending(Item specifier);
 int  js_module_get_body_state(Item specifier);
