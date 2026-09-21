@@ -1,0 +1,27 @@
+{
+  "name": "Radiant view PDF2 iframe remains interactive",
+  "html": "test/html/index.html",
+  "assertions": [
+    {"output_contains": "Assertions:"},
+    {"output_not_contains": "[LAYOUT_PROF]"},
+    {"output_not_contains": "[RENDER_PROF]"},
+    {"output_not_contains": "[PEAK_FOOTPRINT]"}
+  ],
+  "viewport": { "width": 900, "height": 720 },
+  "default_timeout": 1000,
+  "events": [
+    { "type": "click", "target": { "selector": "a[href=\"../pdf/Get_Started_With_Smallpdf.pdf\"]" } },
+    { "type": "wait", "ms": 100 },
+    { "type": "mouse_move", "x": 120, "y": 140 },
+    { "type": "mouse_move", "x": 260, "y": 220 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "switch_frame", "selector": "iframe[name=\"main_frame\"]" },
+    { "type": "assert_count", "target": { "selector": ".pdf-page" }, "min": 1 },
+    { "type": "mouse_move", "target": { "text": "Welcome" } },
+    { "type": "mouse_drag", "target": { "text": "Welcome" },
+      "to_target": { "text": "Smallpdf" }, "button": 0 },
+    { "type": "assert_selection", "is_collapsed": false, "check_dom": true },
+    { "type": "key_combo", "key": "c", "mods_str": "ctrl" },
+    { "type": "assert_clipboard", "contains": "Welcome" }
+  ]
+}
