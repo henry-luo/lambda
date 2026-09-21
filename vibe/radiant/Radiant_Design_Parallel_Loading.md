@@ -41,11 +41,10 @@ top-level HTML response remains synchronous because the `DomDocument` does
 not exist until that response is parsed; its dependencies join the manager as
 soon as the document is constructed.
 
-The target implementation is the existing curl-multi scheduler and enhanced
-cache.  The compatibility bridge introduced in the first implementation phase
-imports a legacy-prefetched file into the enhanced cache index without copying
-the response.  It removes duplicate download work while callers migrate; it is
-not a second permanent cache design.
+The target implementation is the curl-multi scheduler and its enhanced cache.
+Every persistent HTTP entry uses the enhanced cache's SHA-256 path.  There is
+no compatibility cache identity or sidecar adoption path, so a loader cannot
+fall back to a second cache design.
 
 ### 2.2 Critical-path priority
 
@@ -100,7 +99,7 @@ while removing scripts from CSS's network wait.
 
 ## 4. Phased implementation
 
-### Phase P1 — CSS-first overlap and cache bridge
+### Phase P1 — CSS-first overlap and native cache
 
 - Separate early linked-stylesheet and script URL sets.
 - Complete stylesheet prefetch before the synchronous stylesheet reader runs.
@@ -108,16 +107,17 @@ while removing scripts from CSS's network wait.
   script runner needs source bytes.
 - Use monotonic wall-clock timing for each prefetch phase, never process CPU
   time.
-- Let enhanced-cache lookup adopt an existing legacy cache file for the same
-  URL.  The resource manager then sees the file as a cache hit instead of
-  re-downloading it.
+- Persist synchronous HTTP responses in the enhanced cache's native SHA-256
+  layout, so every later consumer resolves the same URL to the same cache
+  identity.
 
 ### Phase P2 — unify the loader on the resource manager
 
 Create the resource manager as soon as a remote `DomDocument` exists.  The
 HTML speculative scanner, CSS loader, script source resolver, and late DOM
 discovery submit requests to that one manager and await URL identities rather
-than files.  Remove the legacy prefetch API after all consumers have moved.
+than files.  The obsolete prefetch API and its cache format are removed after
+all consumers have moved.
 
 ### Phase P3 — dependency-aware CSS and script scheduling
 
@@ -140,9 +140,9 @@ P1 and P2 are implemented by creating a `NetworkResourceManager` immediately
 after remote HTML becomes a `DomDocument`.  It owns the enhanced cache when
 the caller has not supplied one, exposes byte-copy consumers for CSS and
 scripts, and retains a condition variable for those consumers to await a
-single transfer.  The legacy `HttpPrefetchBatch` interface was removed.  The
-enhanced cache can still adopt an older verified sidecar entry while generic
-callers migrate, but no loader-stage request uses that path.
+single transfer.  The obsolete `HttpPrefetchBatch` interface, its DJB2 cache
+naming, and its URL sidecar files are removed.  Synchronous HTTP callers also
+use the native enhanced cache, so no bridge remains outside the loader.
 
 The manager is registered in the document-resource lifetime list when it is
 created.  Thus every `DomDocument` destruction path, including redirect or

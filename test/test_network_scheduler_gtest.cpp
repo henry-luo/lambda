@@ -78,67 +78,33 @@ static bool read_text_file(const char* path, char* buffer, size_t buffer_size) {
     return true;
 }
 
-TEST(NetworkResourceCache, AdoptsVerifiedLegacyPrefetchEntry) {
-    const char* cache_dir = "./temp/test_cache_legacy_prefetch";
+TEST(NetworkResourceCache, ReopensPersistedNativeEntry) {
+    const char* cache_dir = "./temp/test_cache_native_reopen";
     const char* url = "https://example.com/assets/site.css";
     const char* content = "body { color: rebeccapurple; }";
 
     ASSERT_TRUE(create_dir(cache_dir));
-    char* legacy_path = file_cache_path(url, cache_dir, ".cache");
-    ASSERT_NE(legacy_path, nullptr);
-    ASSERT_TRUE(file_cache_write_url_entry(legacy_path, url, content, strlen(content)));
+    EnhancedFileCache* writer = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(writer, nullptr);
+    char* stored_path = enhanced_cache_store(writer, url, content, strlen(content), NULL);
+    ASSERT_NE(stored_path, nullptr);
+    mem_free(stored_path);
+    enhanced_cache_destroy(writer);
 
-    EnhancedFileCache* cache = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
-    ASSERT_NE(cache, nullptr);
-    char* adopted_path = enhanced_cache_lookup(cache, url);
-    ASSERT_NE(adopted_path, nullptr);
-    EXPECT_STREQ(adopted_path, legacy_path);
-    EXPECT_EQ(enhanced_cache_get_entry_count(cache), 1);
+    EnhancedFileCache* reader = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(reader, nullptr);
+    char* restored_path = enhanced_cache_lookup(reader, url);
+    ASSERT_NE(restored_path, nullptr);
+    size_t restored_size = 0;
+    char* restored_content = read_binary_file(restored_path, &restored_size);
+    ASSERT_NE(restored_content, nullptr);
+    EXPECT_EQ(restored_size, strlen(content));
+    EXPECT_STREQ(restored_content, content);
 
-    size_t adopted_size = 0;
-    char* adopted_content = read_binary_file(adopted_path, &adopted_size);
-    ASSERT_NE(adopted_content, nullptr);
-    EXPECT_EQ(adopted_size, strlen(content));
-    EXPECT_STREQ(adopted_content, content);
-
-    mem_free(adopted_content);
-    mem_free(adopted_path);
-    char* key_path = file_cache_key_path(legacy_path);
-    ASSERT_NE(key_path, nullptr);
-    enhanced_cache_evict_lru(cache);
-    EXPECT_FALSE(file_exists(legacy_path));
-    EXPECT_FALSE(file_exists(key_path));
-    enhanced_cache_destroy(cache);
-
-    if (file_exists(legacy_path)) file_delete(legacy_path);
-    if (file_exists(key_path)) file_delete(key_path);
-    mem_free(key_path);
-    mem_free(legacy_path);
-}
-
-TEST(NetworkResourceCache, RejectsMismatchedLegacyPrefetchEntry) {
-    const char* cache_dir = "./temp/test_cache_legacy_mismatch";
-    const char* requested_url = "https://example.com/assets/requested.css";
-    const char* stored_url = "https://example.com/assets/colliding.css";
-    const char* content = "body { display: none; }";
-
-    ASSERT_TRUE(create_dir(cache_dir));
-    char* legacy_path = file_cache_path(requested_url, cache_dir, ".cache");
-    ASSERT_NE(legacy_path, nullptr);
-    ASSERT_TRUE(file_cache_write_url_entry(legacy_path, stored_url, content, strlen(content)));
-
-    EnhancedFileCache* cache = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
-    ASSERT_NE(cache, nullptr);
-    EXPECT_EQ(enhanced_cache_lookup(cache, requested_url), nullptr);
-    EXPECT_EQ(enhanced_cache_get_entry_count(cache), 0);
-    enhanced_cache_destroy(cache);
-
-    char* key_path = file_cache_key_path(legacy_path);
-    ASSERT_NE(key_path, nullptr);
-    file_delete(legacy_path);
-    file_delete(key_path);
-    mem_free(key_path);
-    mem_free(legacy_path);
+    mem_free(restored_content);
+    mem_free(restored_path);
+    enhanced_cache_clear(reader);
+    enhanced_cache_destroy(reader);
 }
 
 TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {

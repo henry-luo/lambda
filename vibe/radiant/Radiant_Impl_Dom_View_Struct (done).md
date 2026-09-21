@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-18
 **Baseline commit:** `019f47214`
-**Parent design:** `vibe/radiant/Radiant_Design_Dom_View_Struct.md` — decisions DV1–DV16, findings F1–F8, target sketch (§4). This doc turns those into execution-grade tasks.
+**Parent design:** `vibe/radiant/Radiant_Design_View_Struct.md` — decisions DV1–DV16, findings F1–F8, target sketch (§4). This doc turns those into execution-grade tasks.
 **Related:** `vibe/radiant/Radiant_Imp_Code_Dedup.md` (header consolidation), `vibe/radiant/Radiant_Design_Robustness.md` (T7 stale-View), `vibe/Lambda_Jube_DOM3.md` (property-table dispatch), `doc/dev/C_Plus_Convention.md`.
 
 **Campaign status:** P0–P6 complete. All implementation phases and refactor-specific acceptance gates are complete; repository-wide baseline defects encountered by the aggregate gate are isolated and recorded in §16. **P7 (DV16 constructor retirement, added 2026-07-18) is a follow-up phase — not started.**

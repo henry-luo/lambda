@@ -66,7 +66,10 @@ These are quality improvements to the **synchronous** layer; they do not change 
 
 8. **Glob: replace fragile inline matcher on Windows.** `file_find` has a hand-rolled wildcard matcher in the Windows branch that does not handle `?`/`[]` correctly. Either use `PathMatchSpecA` (shlwapi) or vendor a small portable `fnmatch` and use it on both platforms for consistency.
 
-9. **Hash upgrade in `file_cache_path`.** DJB2 + 8 hex digits = 32-bit hash → ~50% collision risk at 77k entries. Use xxHash3 64-bit (already linked elsewhere via `lib/`) and 16 hex digits.
+9. **Keep one native HTTP cache identity.** The enhanced cache already uses a
+   SHA-256 path for both scheduler and synchronous HTTP callers, consistent
+   with D1.3v3's shared-host-substrate rule. Do not add a generic short-hash
+   file-cache helper or a compatibility sidecar format.
 
 10. **Streaming reads for large files.** Add `read_text_file_streaming(filename, chunk_cb, user_data)` for files that don't fit comfortably in arena memory (e.g., large PDFs, datasets). Avoids the implicit "whole-file in `MEM_CAT_TEMP`" assumption.
 
@@ -626,15 +629,11 @@ Use `PathMatchSpecA` from `shlwapi.dll`:
 
 Handles `*`, `?`, and `[abc]` correctly on both platforms.
 
-### A.9 `file_cache_path` collision rate
+### A.9 Native HTTP cache identity
 
-```c
-#include "xxhash.h"
-uint64_t hash = XXH3_64bits(key, strlen(key));
-snprintf(buf, need, "%s/%016llx%s", cache_dir, (unsigned long long)hash, ext);
-```
-
-At 1 M cache entries, DJB2-32 collision probability ≈ 11%; XXH3-64 ≈ 3 × 10⁻⁸. The cost difference is unmeasurable.
+The enhanced file cache owns the content-addressed SHA-256 path. Both the
+network scheduler and synchronous HTTP consumers use it, so no generic
+short-hash helper or URL-sidecar compatibility format is present.
 
 ### A.10 Streaming reader
 
