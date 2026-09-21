@@ -10329,6 +10329,7 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
 extern Item js_interp_create_generator(JsFunction*, Item*, int);
 extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
 extern Item js_interp_start_async_function(JsFunction*, Item*, int);
+extern bool js_interp_promote_function_if_hot(JsFunction*);
 
 // JC14 body entries. Each adapter owns only the ABI conversion its body shape
 // needs; js_function_select_body_entry chooses one per callee at finalization.
@@ -14437,6 +14438,27 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
             js_fn_body_kind(fn) != JS_FUNCTION_BODY_AST))) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
+    }
+
+    // A definition record is shared by closures. If a sibling predates its
+    // P2 publication, refresh only this call boundary to the already-retained
+    // satellite; no AST activation is resumed or transferred.
+    if (construct_new_target.item == 0 && fn && fn->code &&
+            fn->code->p2_promotion.state == FN_PROMOTION_COMPILED &&
+            (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) == 0 &&
+            !js_function_promote_ast_body(fn,
+                fn->code->p2_promotion.boxed_entry)) {
+        log_error("js-p2: failed to refresh promoted definition");
+        return ItemError;
+    }
+
+    // JSI18/D8.1.3: only an ordinary entry may replace the boxed AST body.
+    // The kernel already roots the callee and actual span, so compilation may
+    // allocate without exposing unrooted call operands to the collector.
+    if (construct_new_target.item == 0 &&
+            js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST &&
+            js_interp_promote_function_if_hot(fn)) {
+        ast_direct = false;
     }
 
     bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;

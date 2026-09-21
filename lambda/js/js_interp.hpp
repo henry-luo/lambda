@@ -70,6 +70,8 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
 Item js_interp_es_module_evaluation_error(Runtime* runtime, JsScript* script);
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                              uint64_t* result_home);
+// P2 promotion is attempted only at an ordinary call-entry boundary.
+bool js_interp_promote_function_if_hot(JsFunction* function);
 Item js_interp_start_async_function(JsFunction* function, Item* args,
                                     int arg_count);
 Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count);

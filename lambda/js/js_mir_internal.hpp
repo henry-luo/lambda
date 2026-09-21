@@ -198,6 +198,8 @@ JsMirTranspiler* js_mir_open_compile_unit(
 typedef Item (*JsMirMainFunc)(Context*);
 JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
         void (*gen_interface)(MIR_context_t, MIR_item_t));
+void* js_mir_link_function(MIR_context_t ctx, const char* function_name,
+        void (*gen_interface)(MIR_context_t, MIR_item_t));
 Item js_mir_execute_compiled_entry(void* entry_func);
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 Item js_mir_compile_unit_fail(MIR_context_t ctx, JsMirTranspiler* mt,
@@ -785,6 +787,8 @@ void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* o
 void jm_cleanup_active_mir(void);
 void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
+bool jm_retain_p2_mir_context(MIR_context_t ctx);
+void jm_destroy_p2_mir_contexts(JsRuntimeState* runtime_state);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
 // Resolve an inline document script through the page URL rather than its
@@ -806,6 +810,8 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);
 void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool transpile_js_mir_ast(JsMirTranspiler* mt);
+bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
+    AstFunctionId function_id, void** out_entry);
 bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);

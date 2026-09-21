@@ -5757,6 +5757,196 @@ bool js_interp_script_is_supported(JsScript* script) {
     return supported;
 }
 
+struct JsP2AdmissionScan {
+    JsScript* script;
+    AstFunctionId function_id;
+    const char* reject_reason;
+};
+
+static void js_interp_p2_reject(JsP2AdmissionScan* scan,
+        const char* reason) {
+    if (scan && !scan->reject_reason) scan->reject_reason = reason;
+}
+
+static void js_interp_p2_scan_node(JsAstNode* node,
+        JsP2AdmissionScan* scan);
+
+static void js_interp_p2_scan_child(JsAstNode* child, void* opaque) {
+    js_interp_p2_scan_node(child, (JsP2AdmissionScan*)opaque);
+}
+
+// The initial P2 bridge deliberately accepts only bodies whose generated code
+// depends on its own locals. This avoids treating the incompatible T0 closure
+// environment and module-cell ABIs as if they were interchangeable.
+static void js_interp_p2_scan_node(JsAstNode* node,
+        JsP2AdmissionScan* scan) {
+    if (!node || !scan || scan->reject_reason) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        JsIdentifierNode* identifier = (JsIdentifierNode*)node;
+        NameEntry* entry = identifier->entry;
+        if (!entry) {
+            if (!js_ast_identifier_named(node, "undefined", 9)) {
+                js_interp_p2_reject(scan, "unresolved global name");
+            }
+            break;
+        }
+        AstNodeId binding_id = entry->node
+            ? ast_index_find(&scan->script->ast_index, entry->node)
+            : AST_NODE_ID_INVALID;
+        if (binding_id == AST_NODE_ID_INVALID ||
+                binding_id >= scan->script->ast_index.count ||
+                scan->script->ast_index.owner_functions[binding_id] !=
+                    scan->function_id) {
+            js_interp_p2_reject(scan, "captured or module binding");
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR:
+    case AST_NODE_NEW_EXPR:
+        js_interp_p2_reject(scan, "call boundary");
+        break;
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_MAP:
+    case AST_NODE_PROPERTY:
+        js_interp_p2_reject(scan, "property access");
+        break;
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+    case AST_NODE_METHOD:
+        js_interp_p2_reject(scan, "nested callable");
+        break;
+    case AST_NODE_CLASS:
+    case AST_NODE_CLASS_EXPR:
+    case AST_NODE_FIELD:
+        js_interp_p2_reject(scan, "class boundary");
+        break;
+    case AST_NODE_ARRAY:
+    case AST_NODE_ARRAY_PATTERN:
+    case AST_NODE_MAP_PATTERN:
+    case AST_NODE_ASSIGN_PATTERN:
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
+    case AST_NODE_SPREAD:
+        js_interp_p2_reject(scan, "compound value or pattern");
+        break;
+    case AST_NODE_BLOCK:
+    case AST_NODE_EXPR_STMT:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_VARIABLE_DECLARATOR:
+    case AST_NODE_PARAM:
+    case AST_NODE_LITERAL:
+    case AST_NODE_NULL:
+    case AST_NODE_UNARY:
+    case AST_NODE_BINARY:
+    case AST_NODE_ASSIGN:
+    case AST_NODE_CONDITIONAL_EXPR:
+    case AST_NODE_SEQ:
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_LOOP:
+    case AST_NODE_RETURN_STAM:
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+    case AST_NODE_TRY_STAM:
+    case AST_NODE_CATCH_CLAUSE:
+        break;
+    default:
+        js_interp_p2_reject(scan, "unplanned syntax");
+        break;
+    }
+    if (!scan->reject_reason) {
+        js_ast_visit_children(node, js_interp_p2_scan_child, scan);
+    }
+}
+
+static int js_interp_p2_threshold(void) {
+    const char* text = getenv("JS_JIT_THRESHOLD");
+    if (!text || !text[0]) return 5;
+    char* end = NULL;
+    long threshold = strtol(text, &end, 10);
+    return end && !*end && threshold > 0 && threshold <= INT_MAX
+        ? (int)threshold : 5;
+}
+
+static const char* js_interp_p2_admission_reason(JsFunction* function,
+        AstFunctionId* out_function_id) {
+    if (out_function_id) *out_function_id = AST_FUNCTION_ID_INVALID;
+    JsScript* script = js_fn_ast_script(function);
+    AstFuncNode* definition = js_fn_ast_function(function);
+    if (!script || !definition || !script->source || script->is_module ||
+            script->is_eval_script || definition->node_type != AST_NODE_FUNC ||
+            definition->is_async || definition->is_generator ||
+            !definition->entry || definition->entry->scope != script->global_scope) {
+        return "definition shape";
+    }
+    AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
+    AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
+        ? script->ast_index.owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
+    if (function_id == AST_FUNCTION_ID_INVALID ||
+            ast_index_function_parent(&script->ast_index, function_id) !=
+                AST_FUNCTION_ID_INVALID ||
+            ast_function_capture_count(definition) != 0) {
+        return "closure capture";
+    }
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(
+        (JsAstNode*)definition->params, (JsAstNode*)definition->body);
+    if (facts.observations || facts.has_direct_eval || facts.has_with ||
+            facts.has_direct_super_call || facts.has_lexical_super_call) {
+        return "activation-sensitive function";
+    }
+    JsP2AdmissionScan scan = {script, function_id, NULL};
+    for (JsAstNode* parameter = (JsAstNode*)definition->params; parameter &&
+            !scan.reject_reason; parameter = (JsAstNode*)parameter->next) {
+        js_interp_p2_scan_node(parameter, &scan);
+    }
+    js_interp_p2_scan_node((JsAstNode*)definition->body, &scan);
+    if (scan.reject_reason) return scan.reject_reason;
+    if (out_function_id) *out_function_id = function_id;
+    return NULL;
+}
+
+bool js_interp_promote_function_if_hot(JsFunction* function) {
+    if (!function || !js_execution_auto_requested() ||
+            js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
+            !function->code) {
+        return false;
+    }
+    JsCallableCode* code = function->code;
+    FnPromotionCell* promotion = &code->p2_promotion;
+    if (promotion->state == FN_PROMOTION_COMPILED ||
+            promotion->state == FN_PROMOTION_PINNED_INTERP ||
+            promotion->state == FN_PROMOTION_COMPILING) {
+        return false;
+    }
+    if (promotion->call_count != UINT32_MAX) promotion->call_count++;
+    if (promotion->call_count < (uint32_t)js_interp_p2_threshold()) return false;
+
+    AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
+    const char* reason = js_interp_p2_admission_reason(function, &function_id);
+    if (reason) {
+        promotion->state = FN_PROMOTION_PINNED_INTERP;
+        log_debug("js-p2: pinned definition reason=%s", reason);
+        return false;
+    }
+    promotion->state = FN_PROMOTION_COMPILING;
+    void* entry = NULL;
+    JsScript* script = js_fn_ast_script(function);
+    if (!js_mir_compile_function_satellite(context ? context->runtime : NULL,
+            script, function_id, &entry) ||
+            !js_function_promote_ast_body(function, entry)) {
+        promotion->state = FN_PROMOTION_PINNED_INTERP;
+        log_error("js-p2: satellite compilation failed");
+        return false;
+    }
+    promotion->boxed_entry = entry;
+    promotion->state = FN_PROMOTION_COMPILED;
+    log_info("js-p2: promoted definition calls=%u", promotion->call_count);
+    return true;
+}
+
 static Item js_interp_configure_function_metadata(Item function_item) {
     if (get_type_id(function_item) != LMD_TYPE_FUNC) return function_item;
     JsFunction* function = (JsFunction*)function_item.function;

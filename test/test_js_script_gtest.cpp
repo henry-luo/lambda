@@ -558,6 +558,40 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function squareSum(limit) { "
+        "  var total = 0; "
+        "  for (var index = 0; index < limit; index = index + 1) { "
+        "    total = total + index * index; "
+        "  } "
+        "  return total; "
+        "} "
+        "squareSum(3); squareSum(4); squareSum;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-satellite.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    ASSERT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+    ASSERT_NE(js_function_get_ptr(function_item), nullptr);
+
+    Item limit = flt2it(5.0);
+    Item result = js_call_function(function_item, make_js_undefined(), &limit, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);

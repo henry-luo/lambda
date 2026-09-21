@@ -853,6 +853,30 @@ void jm_defer_mir_cleanup(MIR_context_t ctx) {
     }
 }
 
+bool jm_retain_p2_mir_context(MIR_context_t ctx) {
+    if (!ctx || !js_active_runtime_state) return false;
+    // A promoted definition may escape through a callback or global binding;
+    // use a context-owned lane that ordinary source-turn cleanup never drains.
+    jit_release_generated_ir(ctx);
+    if (!js_code_store_push(&js_active_runtime_state->p2_code_store, ctx)) {
+        log_error("js-p2: cannot retain satellite MIR context");
+        return false;
+    }
+    return true;
+}
+
+void jm_destroy_p2_mir_contexts(JsRuntimeState* runtime_state) {
+    if (!runtime_state) return;
+    JsCodeStore* store = &runtime_state->p2_code_store;
+    for (int i = 0; i < js_code_store_count(store); i++) {
+        JsCompiledArtifact* artifact = js_code_store_artifact_at(store, i);
+        if (!artifact) continue;
+        jit_cleanup_mode((MIR_context_t)artifact->mir_context, 1);
+        if (artifact->source_owner) mem_free(artifact->source_owner);
+    }
+    js_code_store_clear_rows(store);
+}
+
 void jm_cleanup_deferred_mir() {
     // Deferred MIR storage is inside the active JS capsule.  Once its owner
     // has been released there is no remaining per-context entry to finish.
@@ -3822,6 +3846,92 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt) {
         MIR_finish_module(mt->ctx);
     }
     return completed;
+}
+
+// P2 emits only the selected boxed entry. The clone supplies the existing JS
+// parser/binder/lowering facts, while the admission gate guarantees the body
+// does not need module slots, captures, or another source function body.
+static bool js_mir_lower_function_satellite(JsMirTranspiler* mt,
+        AstFunctionId function_id, const char** out_name) {
+    if (!mt || !out_name || !js_mir_analyze_and_plan(mt)) return false;
+    JsFuncCollected* function = jm_collected_func_by_id(mt, function_id);
+    if (!function || !function->node || JM_CAPTURE_COUNT(function) != 0) {
+        log_error("js-p2: selected definition lacks a closed MIR plan");
+        return false;
+    }
+    jm_define_function(mt, function);
+    MIR_finish_module(mt->ctx);
+    MIR_load_module(mt->ctx, mt->module);
+    if (!js_prelink_compiled_name_table(mt)) {
+        log_error("js-p2: failed to prelink satellite names");
+        return false;
+    }
+    *out_name = function->name;
+    return *out_name != NULL;
+}
+
+bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
+        AstFunctionId function_id, void** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!runtime || !script || !script->source || !script->source_length ||
+            !out_entry || !context || context->runtime != runtime) {
+        return false;
+    }
+
+    JsTranspiler* tp = js_transpiler_create(runtime);
+    MIR_context_t ctx = NULL;
+    JsMirTranspiler* mt = NULL;
+    bool retained = false;
+    void* entry = NULL;
+    const char* function_name = NULL;
+    if (!tp) return false;
+    jm_track_active_js_transpile(tp, NULL, NULL);
+    tp->strict_mode = script->strict_mode;
+    tp->strict_js = script->strict_js;
+    if (!js_transpiler_parse_c(tp, script->source, script->source_length,
+            JS_PARSE_AUTO)) {
+        log_error("js-p2: satellite source parse failed");
+        goto cleanup;
+    }
+    if (function_id >= tp->ast_index.function_count) {
+        log_error("js-p2: selected function identity is absent from clone");
+        goto cleanup;
+    }
+    mt = js_mir_open_compile_unit(tp,
+        script->reference ? script->reference : "<js-p2>", "js_p2_satellite",
+        false, 0, g_js_mir_optimize_level, true, "js-p2", false, &ctx);
+    if (!mt) goto cleanup;
+    g_active_mir_ctx = ctx;
+    if (!js_mir_lower_function_satellite(mt, function_id, &function_name) ||
+            !jm_validate_mir_labels(ctx)) {
+        goto cleanup;
+    }
+    entry = js_mir_link_function(ctx, function_name, MIR_set_gen_interface);
+    if (!entry) {
+        log_error("js-p2: failed to link satellite entry");
+        goto cleanup;
+    }
+    jm_clear_active_js_transpile(NULL, mt, NULL);
+    jm_destroy_mir_transpiler(mt);
+    mt = NULL;
+    g_active_mir_ctx = NULL;
+    retained = jm_retain_p2_mir_context(ctx);
+    if (!retained) {
+        log_error("js-p2: satellite context retention failed");
+        goto cleanup;
+    }
+    *out_entry = entry;
+
+cleanup:
+    if (mt) {
+        jm_clear_active_js_transpile(NULL, mt, NULL);
+        jm_destroy_mir_transpiler(mt);
+    }
+    if (ctx && !retained) jit_cleanup_mode(ctx, 1);
+    g_active_mir_ctx = NULL;
+    jm_clear_active_js_transpile(tp, NULL, NULL);
+    js_transpiler_destroy(tp);
+    return retained;
 }
 
 bool js_mir_link_runtime_state(JsMirTranspiler* mt) {

@@ -24,6 +24,7 @@ extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
+extern void jm_destroy_p2_mir_contexts(JsRuntimeState* state);
 struct JsGeneratorStateRecord;
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 extern "C" void js_reset_buffer_module(void);
@@ -777,6 +778,9 @@ void js_runtime_state_destroy_context(void) {
     root_vector_destroy(&state->regexp_last_match.values);
     root_vector_destroy(&state->promises.domain_stack);
     js_eval_state_vectors_destroy(&state->eval);
+    // P2 entries remain callable past a source turn, so their native code is
+    // released only at the owning EvalContext's final lifetime boundary.
+    jm_destroy_p2_mir_contexts(state);
     js_code_store_destroy(&state->code_store);
     js_runtime_state_free_records(state);
     mem_free(state);
