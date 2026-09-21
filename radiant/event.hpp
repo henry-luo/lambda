@@ -2802,6 +2802,11 @@ DocState* radiant_document_ensure_state(DomDocument* document, const char* owner
  */
 void radiant_document_destroy_state(DomDocument* document);
 
+// Apply the event-time mutation-subtree CSS recascade before first layout.
+// Returns false when selector or stylesheet dependencies require a full tree.
+bool radiant_apply_load_mutation_cascade(DomDocument* document,
+                                         const char** fallback_reason);
+
 /**
  * Move a document through its high-level lifecycle.
  */

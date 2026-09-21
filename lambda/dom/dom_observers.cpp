@@ -681,6 +681,7 @@ extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
                  kind == DOM_JS_MUTATION_TREE_REPLACE;
     bool attribute = kind == DOM_JS_MUTATION_ATTRIBUTE ||
                      kind == DOM_JS_MUTATION_STYLE ||
+                     kind == DOM_JS_MUTATION_INLINE_STYLE ||
                      kind == DOM_JS_MUTATION_STYLE_REPAINT;
     bool character = kind == DOM_JS_MUTATION_TEXT;
     // Live control values affect rendering without mutating the observed DOM tree.

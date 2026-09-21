@@ -335,7 +335,7 @@ static inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id)
         case CSS_PROPERTY_VISIBILITY:
             return DOM_JS_MUTATION_STYLE_REPAINT;
         default:
-            return DOM_JS_MUTATION_STYLE;
+            return DOM_JS_MUTATION_INLINE_STYLE;
     }
 }
 
@@ -10523,7 +10523,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* style_text = dom_to_attr_cstr(value);
         elem->set_attribute("style", style_text);
         elem->set_styles_resolved(false);
-        dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
         log_debug("dom_set_property: set style='%.50s' on <%s>",
                   style_text, elem->tag_name ? elem->tag_name : "?");
         return value;
@@ -11145,7 +11145,7 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
     // handle cssText special case: replace entire inline style
     if (strcmp(css_prop, "cssText") == 0) {
         elem->set_attribute("style", val_str);
-        dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
         log_debug("dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
         return value;

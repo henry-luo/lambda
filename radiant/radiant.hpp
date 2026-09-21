@@ -150,6 +150,9 @@ bool radiant_resolve_layout_relative_resource_path(const char* source_path,
 
 typedef struct DocumentScriptPhaseTiming {
     uint64_t collect_us;
+    uint64_t source_prefetch_us;
+    uint64_t source_wait_us;
+    uint64_t source_read_us;
     uint64_t runtime_setup_us;
     uint64_t postdom_total_us;
     uint64_t preamble_us;
@@ -165,6 +168,8 @@ typedef struct DocumentScriptPhaseTiming {
     uint64_t event_loop_us;
     uint64_t runtime_cleanup_us;
     uint64_t source_cleanup_us;
+    uint64_t source_prefetch_tasks;
+    uint64_t source_loaded_tasks;
     uint64_t cache_lookups;
     uint64_t cache_hits;
     uint64_t cache_misses;

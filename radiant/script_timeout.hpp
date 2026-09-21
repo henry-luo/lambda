@@ -4,7 +4,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#define RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS 5
+// The watchdog starts after trusted browser-preamble preparation. Give small
+// page-owned scripts a bounded CPU window before source-size scaling applies.
+#define RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS 10
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS 120
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
 
