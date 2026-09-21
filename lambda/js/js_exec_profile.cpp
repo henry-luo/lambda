@@ -74,7 +74,20 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "string_slice_ascii", "string_slice_unicode",
     "string_char_access_ascii", "string_char_access_unicode",
     "string_concat_ascii", "string_concat_unicode",
-    "ascii_substring_cache_hit", "ascii_substring_cache_miss"
+    "ascii_substring_cache_hit", "ascii_substring_cache_miss",
+    "runtime_to_numeric_call",
+    "runtime_increment_call",
+    "runtime_decrement_call",
+    "runtime_boxed_compare_call",
+    "runtime_number_index_get_call",
+    "runtime_number_index_numeric_array",
+    "runtime_number_index_tagged_array",
+    "runtime_number_index_tagged_packed_plain",
+    "runtime_number_index_tagged_holey_plain",
+    "runtime_number_index_tagged_with_props",
+    "runtime_number_index_tagged_other",
+    "runtime_number_index_typed_array",
+    "runtime_number_index_other"
 };
 
 static const char* g_js_opt_reason_names[JS_OPT_REASON_COUNT] = {

@@ -3712,9 +3712,10 @@ static MIR_reg_t jm_emit_packed_array_read_impl(JsMirTranspiler* mt,
         return 0;
     }
 
-    // The direct plan is deliberately monomorphic: an ordinary packed tagged
-    // array with no companion properties and no scalar tail. Every other
-    // receiver/key state keeps its existing JS semantic fallback (D1.3).
+    // The direct plan inlines a plain packed tagged array. A companion-bearing
+    // array can still prove one present own dense element through the existing
+    // no-GC runtime leaf; every hole or descriptor state keeps the JS fallback
+    // (D1.3, D8.2.3).
     MIR_reg_t result = jm_new_reg(mt, native_number ? "dense_read_f64" :
         "dense_read", native_number ? MIR_T_D : MIR_T_I64);
     MIR_label_t miss = external_miss ? external_miss : jm_new_label(mt);
@@ -3761,11 +3762,22 @@ static MIR_reg_t jm_emit_packed_array_read_impl(JsMirTranspiler* mt,
     jm_emit_jmp(mt, miss);
 
     jm_emit_label(mt, tagged);
+    MIR_label_t tagged_with_props = jm_new_label(mt);
+    MIR_label_t tagged_value = jm_new_label(mt);
+    // MIR has no phi register at this control-flow join. Both physical arms
+    // therefore copy their value into this common carrier before decoding it.
+    MIR_reg_t loaded = jm_new_reg(mt, "dense_loaded", MIR_T_I64);
     MIR_reg_t content = em_load_at(emitter, array, LAMBDA_GC_OFF_CONTAINER_FLAGS,
         MIR_T_U8, "dense_content");
     jm_emit_reg_binary_op(mt, MIR_AND, content, content,
         MIR_new_int_op(mt->ctx, 1));
     jm_emit_branch(mt, MIR_BT, miss, content);
+    MIR_reg_t attr_type = em_load_at(emitter, array, LAMBDA_GC_OFF_MAP_TYPE,
+        MIR_T_I64, "dense_attr_type");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+        MIR_new_label_op(mt->ctx, tagged_with_props),
+        MIR_new_reg_op(mt->ctx, attr_type),
+        MIR_new_int_op(mt->ctx, 0)));
     MIR_reg_t elements = em_load_at(emitter, array,
         LAMBDA_GC_OFF_CONTAINER_ARRAY_FLAGS, MIR_T_U8, "dense_elements");
     jm_emit_reg_binary_op(mt, MIR_AND, elements, elements,
@@ -3773,11 +3785,6 @@ static MIR_reg_t jm_emit_packed_array_read_impl(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
         MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, elements),
         MIR_new_int_op(mt->ctx, JS_ELEMENTS_PACKED_TAGGED)));
-    MIR_reg_t attr_type = em_load_at(emitter, array, LAMBDA_GC_OFF_MAP_TYPE,
-        MIR_T_I64, "dense_attr_type");
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, attr_type),
-        MIR_new_int_op(mt->ctx, 0)));
     MIR_reg_t scalar_tail = em_load_at(emitter, array,
         LAMBDA_GC_OFF_LIST_EXTRA,
         MIR_T_I64, "dense_scalar_tail");
@@ -3803,7 +3810,21 @@ static MIR_reg_t jm_emit_packed_array_read_impl(JsMirTranspiler* mt,
         MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, items),
         MIR_new_int_op(mt->ctx, 0)));
     MIR_reg_t address = em_element_address(emitter, items, index, (int)sizeof(Item));
-    MIR_reg_t loaded = em_load_at(emitter, address, 0, MIR_T_I64, "dense_loaded");
+    MIR_reg_t plain_loaded = em_load_at(emitter, address, 0, MIR_T_I64,
+        "dense_plain_loaded");
+    jm_emit_mov(mt, loaded, plain_loaded);
+    jm_emit_jmp(mt, tagged_value);
+
+    jm_emit_label(mt, tagged_with_props);
+    MIR_reg_t companion_loaded = jm_callr_2(mt,
+        "js_array_get_existing_own_dense_with_props_or_missing", MIR_T_I64,
+        receiver, index);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, companion_loaded),
+        MIR_new_int_op(mt->ctx, (int64_t)JS_DELETED_SENTINEL_VAL)));
+    jm_emit_mov(mt, loaded, companion_loaded);
+
+    jm_emit_label(mt, tagged_value);
     if (!native_number) {
         jm_emit_mov(mt, result, loaded);
     } else {
@@ -3993,60 +4014,87 @@ static TypeId jm_numeric_binary_operand_type(JsMirTranspiler* mt,
     return LMD_TYPE_ANY;
 }
 
-static bool jm_try_emit_right_typed_array_number_binary(JsMirTranspiler* mt,
+static MIR_reg_t jm_emit_typed_array_number_binary_slow(
+        JsMirTranspiler* mt, const char* fallback_fn, bool member_is_left,
+        const JsMirReference* ref, JsAstNode* peer, MIR_reg_t peer_native) {
+    MIR_reg_t member_value = jm_emit_get_value(mt, ref);
+    jm_emit_error_lane_propagate_check(mt);
+    if (!member_is_left) {
+        return jm_callr_2(mt, fallback_fn, MIR_T_I64,
+            jm_box_native(mt, peer_native, LMD_TYPE_FLOAT), member_value);
+    }
+
+    // The right expression follows the completed left Get. Preserve an Item
+    // left value across a potentially suspending native peer before boxing it.
+    int member_spill = jm_preserve_before_expression(mt, member_value, peer);
+    peer_native = jm_transpile_as_native(mt, peer, LMD_TYPE_FLOAT);
+    if (member_spill >= 0) jm_gen_spill_load(mt, member_value, member_spill);
+    return jm_callr_2(mt, fallback_fn, MIR_T_I64, member_value,
+        jm_box_native(mt, peer_native, LMD_TYPE_FLOAT));
+}
+
+static bool jm_try_emit_typed_array_number_binary(JsMirTranspiler* mt,
         JsBinaryNode* bin, MIR_reg_t* out_result) {
-    if (!mt || !bin || !out_result || !bin->right ||
-            bin->right->node_type != AST_NODE_MEMBER_EXPR) return false;
+    if (!mt || !bin || !out_result) return false;
+    bool member_is_left = bin->left &&
+        bin->left->node_type == AST_NODE_MEMBER_EXPR;
+    JsAstNode* member_node = member_is_left ? bin->left : bin->right;
+    JsAstNode* peer = member_is_left ? bin->right : bin->left;
+    if (!member_node || member_node->node_type != AST_NODE_MEMBER_EXPR ||
+            !peer) return false;
     const char* fallback_fn = jm_numeric_binary_fallback_fn(bin->op);
     MirNumericOpPlan plan;
     if (!fallback_fn || !em_numeric_op_plan(bin->op, &plan) ||
             plan.is_comparison) return false;
-    JsMemberNode* member = (JsMemberNode*)bin->right;
-    TypeId left_type = jm_numeric_binary_operand_type(mt, bin->left);
+    JsMemberNode* member = (JsMemberNode*)member_node;
+    TypeId peer_type = jm_numeric_binary_operand_type(mt, peer);
     // Keep this proof aligned with jm_emit_reference().  A binding fact can
     // prove an operand Number, but only the reference's effective type admits
     // a native key register before either operand has been evaluated.
     TypeId key_type = member->computed
         ? jm_get_effective_type(mt, member->property) : LMD_TYPE_ANY;
-    if ((left_type != LMD_TYPE_INT && left_type != LMD_TYPE_FLOAT) ||
+    if ((peer_type != LMD_TYPE_INT && peer_type != LMD_TYPE_FLOAT) ||
             (key_type != LMD_TYPE_INT && key_type != LMD_TYPE_FLOAT) ||
             jm_fixed_typed_array_receiver_kind(mt, member) < 0) {
         return false;
     }
 
-    // Evaluate the left operand before the member Reference. On a brand/key
-    // miss the original Get and generic Number operator execute from that
-    // exact point; the fast arm never observes a user-defined conversion.
-    MIR_reg_t left = jm_transpile_as_native(mt, bin->left, LMD_TYPE_FLOAT);
-    JsMirReference ref = jm_emit_reference(mt, (JsAstNode*)member);
+    // Preserve JavaScript's left-to-right Get order. The native peer is pure
+    // with respect to ToNumeric; the guarded member arm alone supplies the
+    // fast Number witness and its generic miss resumes from that Reference.
+    MIR_reg_t peer_native = 0;
+    if (!member_is_left) {
+        peer_native = jm_transpile_as_native(mt, peer, LMD_TYPE_FLOAT);
+    }
+    JsMirReference ref = jm_emit_reference(mt, member_node);
     jm_emit_error_lane_propagate_check(mt);
     if (ref.native_key_reg == 0) {
-        // Preserve the already-evaluated operands when a reference cannot
-        // materialize its key natively; returning false here would lower the
-        // binary expression a second time.
-        MIR_reg_t slow_right = jm_emit_get_value(mt, &ref);
-        jm_emit_error_lane_propagate_check(mt);
-        MIR_reg_t slow_left = jm_box_native(mt, left, LMD_TYPE_FLOAT);
-        *out_result = jm_callr_2(mt, fallback_fn, MIR_T_I64,
-            slow_left, slow_right);
+        *out_result = jm_emit_typed_array_number_binary_slow(mt, fallback_fn,
+            member_is_left, &ref, peer, peer_native);
         jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
             JS_OPT_OUTCOME_TAKEN);
         return true;
     }
-    MIR_reg_t numeric_key = ref.native_key_reg;
-    if (ref.native_key_type == LMD_TYPE_INT) {
-        numeric_key = jm_new_reg(mt, "typed_binary_index", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-            MIR_new_reg_op(mt->ctx, numeric_key),
-            MIR_new_reg_op(mt->ctx, ref.native_key_reg)));
-    }
+    MIR_reg_t numeric_key = jm_emit_native_key_as_number(mt,
+        ref.native_key_reg, ref.native_key_type, "typed_binary_index");
 
     MIR_reg_t result = jm_new_reg(mt, "typed_binary", MIR_T_I64);
     MIR_label_t miss = jm_new_label(mt);
     MIR_label_t done = jm_new_label(mt);
-    MIR_reg_t right = jm_emit_fixed_typed_array_load_number(mt, member,
+    MIR_reg_t member_number = jm_emit_fixed_typed_array_load_number(mt, member,
         ref.base_reg, numeric_key, miss);
-    if (!right) return false;
+    if (!member_number) {
+        *out_result = jm_emit_typed_array_number_binary_slow(mt, fallback_fn,
+            member_is_left, &ref, peer, peer_native);
+        jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
+            JS_OPT_OUTCOME_TAKEN);
+        return true;
+    }
+    if (member_is_left) {
+        peer_native = jm_transpile_as_native(mt, peer, LMD_TYPE_FLOAT);
+    }
+    MIR_reg_t left = member_is_left ? member_number : peer_native;
+    MIR_reg_t right = member_is_left ? peer_native : member_number;
     MIR_reg_t numeric_result;
     if (plan.helper_name) {
         numeric_result = jm_call_2(mt, plan.helper_name, MIR_T_D,
@@ -4060,11 +4108,8 @@ static bool jm_try_emit_right_typed_array_number_binary(JsMirTranspiler* mt,
     jm_emit_jmp(mt, done);
 
     jm_emit_label(mt, miss);
-    MIR_reg_t slow_right = jm_emit_get_value(mt, &ref);
-    jm_emit_error_lane_propagate_check(mt);
-    MIR_reg_t slow_left = jm_box_native(mt, left, LMD_TYPE_FLOAT);
-    jm_emit_mov(mt, result, jm_callr_2(mt, fallback_fn, MIR_T_I64,
-        slow_left, slow_right));
+    jm_emit_mov(mt, result, jm_emit_typed_array_number_binary_slow(mt,
+        fallback_fn, member_is_left, &ref, peer, peer_native));
     jm_emit_label(mt, done);
     jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
@@ -4230,7 +4275,7 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     bool right_numeric = right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT;
 
     MIR_reg_t typed_binary = 0;
-    if (jm_try_emit_right_typed_array_number_binary(mt, bin, &typed_binary)) {
+    if (jm_try_emit_typed_array_number_binary(mt, bin, &typed_binary)) {
         return publish(typed_binary, VALUE_REP_ITEM);
     }
 
@@ -4658,8 +4703,11 @@ static bool jm_try_emit_native_number_update(JsMirTranspiler* mt,
 static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         bool decrement) {
     const char* update_function = decrement ? "js_decrement" : "js_increment";
+    const char* numeric_update_function = decrement ? "js_decrement_numeric" :
+        "js_increment_numeric";
     const char* reference_old_name = decrement ? "dec_old_ref" : "inc_old_ref";
     const char* boxed_old_name = decrement ? "dec_old_box" : "inc_old_box";
+    bool result_discarded = mt->discarded_expression == (JsAstNode*)un;
     TypeId result_type = jm_get_effective_type(mt, (JsAstNode*)un);
     auto publish = [mt, un, result_type](MIR_reg_t reg, ValueRep rep) {
         return jm_expression_value(mt, (JsAstNode*)un, reg, result_type, rep);
@@ -4686,15 +4734,25 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
         jm_capture_write_reference(mt, &ref);
         jm_emit_canonicalize_computed_key_for_get_put(mt, &ref);
         MIR_reg_t operand = jm_emit_get_value(mt, &ref);
-        MIR_reg_t num_operand = jm_callr_1(mt, "js_to_numeric", MIR_T_I64, operand);
-        MIR_reg_t old_value = num_operand;
-        if (!un->prefix) {
-            old_value = jm_new_reg(mt, reference_old_name, MIR_T_I64);
-            jm_emit_mov(mt, old_value, num_operand);
+        MIR_reg_t old_value = 0;
+        MIR_reg_t result = 0;
+        if (result_discarded) {
+            // A discarded update never observes postfix's prior numeric value.
+            result = jm_callr_1(mt, update_function, MIR_T_I64, operand);
+        } else {
+            MIR_reg_t num_operand = jm_callr_1(mt, "js_to_numeric", MIR_T_I64,
+                operand);
+            old_value = num_operand;
+            if (!un->prefix) {
+                old_value = jm_new_reg(mt, reference_old_name, MIR_T_I64);
+                jm_emit_mov(mt, old_value, num_operand);
+            }
+            result = jm_callr_1(mt, numeric_update_function, MIR_T_I64,
+                num_operand);
         }
-        MIR_reg_t result = jm_callr_1(mt, update_function, MIR_T_I64, num_operand);
         jm_emit_put_value(mt, &ref, result);
-        return publish(un->prefix ? result : old_value, VALUE_REP_ITEM);
+        return publish(un->prefix || result_discarded ? result : old_value,
+            VALUE_REP_ITEM);
     }
 
     MirValue native_update = {};
@@ -4704,13 +4762,20 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
 
     MIR_reg_t with_key = 0;
     MIR_reg_t operand = jm_transpile_unary_numeric_operand(mt, un->operand, &with_key);
-    MIR_reg_t num_operand = jm_callr_1(mt, "js_to_numeric", MIR_T_I64, operand);
-    if (!un->prefix) {
-        MIR_reg_t saved = jm_new_reg(mt, boxed_old_name, MIR_T_I64);
-        jm_emit_mov(mt, saved, num_operand);
-        num_operand = saved;
+    MIR_reg_t num_operand = 0;
+    MIR_reg_t result = 0;
+    if (result_discarded) {
+        // The full entry owns ToNumeric when no postfix completion is needed.
+        result = jm_callr_1(mt, update_function, MIR_T_I64, operand);
+    } else {
+        num_operand = jm_callr_1(mt, "js_to_numeric", MIR_T_I64, operand);
+        if (!un->prefix) {
+            MIR_reg_t saved = jm_new_reg(mt, boxed_old_name, MIR_T_I64);
+            jm_emit_mov(mt, saved, num_operand);
+            num_operand = saved;
+        }
+        result = jm_callr_1(mt, numeric_update_function, MIR_T_I64, num_operand);
     }
-    MIR_reg_t result = jm_callr_1(mt, update_function, MIR_T_I64, num_operand);
     if (un->operand && un->operand->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
         MIR_label_t with_done_label = 0;
@@ -4718,7 +4783,8 @@ static MirValue jm_transpile_update_unary(JsMirTranspiler* mt, JsUnaryNode* un,
             return publish(jm_emit_undefined(mt), VALUE_REP_ITEM);
         }
     }
-    return publish(un->prefix ? result : num_operand, VALUE_REP_ITEM);
+    return publish(un->prefix || result_discarded ? result : num_operand,
+        VALUE_REP_ITEM);
 }
 
 static MirValue jm_emit_unary_expression(JsMirTranspiler* mt,

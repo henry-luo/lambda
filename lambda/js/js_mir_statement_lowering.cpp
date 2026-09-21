@@ -1605,6 +1605,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         JsClosureCheckpoint saved_last_closure;
         jm_closure_checkpoint_save(mt, &saved_last_closure);
         jm_closure_tracker_clear(mt);
+        JsAstNode* saved_discarded = mt->discarded_expression;
+        mt->discarded_expression = for_node->update;
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
         if (jm_is_native_type(upd_type)) {
             (void)em_apply_value_demand(&mt->func_em->em,
@@ -1613,6 +1615,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         } else {
             jm_transpile_box_item(mt, for_node->update);
         }
+        mt->discarded_expression = saved_discarded;
         // Route the update immediately. Deferring this to the next test would
         // inspect an update register that does not exist on a zero-iteration exit.
         jm_emit_error_lane_propagate_check(mt);

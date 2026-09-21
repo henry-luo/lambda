@@ -30,7 +30,9 @@ if PROJECT_ROOT not in sys.path:
 os.chdir(PROJECT_ROOT)
 
 from run_benchmarks import (  # noqa: E402
+    NAVIER_STOKES_DENSITY_ORACLE_V1,
     build_benchmark_list,
+    jetstream_post_timing_oracle_marker,
     make_jetstream_ljs_wrapper,
     mir_script_variants,
     parse_timing,
@@ -40,6 +42,10 @@ from run_benchmarks import (  # noqa: E402
 TIMING_LINE = "__TIMING__:"
 DEFAULT_BOOTSTRAP_RESAMPLES = 10000
 DEFAULT_BOOTSTRAP_SEED = 260026
+
+
+def oracle_expected_stdout(oracle_id):
+    return jetstream_post_timing_oracle_marker(oracle_id)
 
 
 def sha256_file(path):
@@ -358,6 +364,9 @@ def main():
                         help="Lambda execution tier for Lambda sources (default: jit)")
     parser.add_argument("--manifest", default=None,
                         help="JSON file containing explicit same-source or source-pair rows")
+    parser.add_argument("--jetstream-post-timing-oracle",
+                        choices=[NAVIER_STOKES_DENSITY_ORACLE_V1], default=None,
+                        help="run the selected JetStream semantic oracle after its timer")
     parser.add_argument("--source-pair", nargs=2, action="append",
                         metavar=("CONTROL_SCRIPT", "CANDIDATE_SCRIPT"),
                         help="compare two explicit source files; may be given more than once")
@@ -385,6 +394,8 @@ def main():
             parser.error(f"{label} binary is not executable: {path}")
     if args.manifest and args.source_pair:
         parser.error("--manifest and --source-pair cannot be combined")
+    if args.jetstream_post_timing_oracle and args.language != "js":
+        parser.error("--jetstream-post-timing-oracle requires --language js")
 
     suite_filters = parse_filters(args.suite)
     bench_filters = parse_filters(args.bench)
@@ -422,6 +433,10 @@ def main():
         benchmarks = build_benchmark_list(suite_filters, bench_filters)
         if not benchmarks:
             parser.error("no benchmarks matched the supplied filters")
+        if args.jetstream_post_timing_oracle:
+            if (len(benchmarks) != 1 or not benchmarks[0]["is_jetstream"] or
+                    benchmarks[0]["name"] != "navier_stokes"):
+                parser.error("the Navier post-timing oracle requires only jetstream/navier_stokes")
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output = args.output or os.path.join("temp", f"paired_benchmarks_{timestamp}.json")
@@ -453,6 +468,7 @@ def main():
             "seed": args.bootstrap_seed,
         },
         "timeout_s": args.timeout,
+        "jetstream_post_timing_oracle": args.jetstream_post_timing_oracle,
         "command": " ".join(sys.argv),
     }
     if args.manifest:
@@ -524,10 +540,13 @@ def main():
     for benchmark in benchmarks:
         untyped, typed = mir_script_variants(benchmark)
         scripts = {"untyped": untyped, "typed": typed}
+        expected_stdout_text = None
         if args.language == "js":
             script = benchmark["js_path"]
             if benchmark["is_jetstream"] and benchmark["ref_js"]:
-                script = make_jetstream_ljs_wrapper(benchmark["name"], benchmark["ref_js"])
+                script = make_jetstream_ljs_wrapper(
+                    benchmark["name"], benchmark["ref_js"], args.jetstream_post_timing_oracle)
+                expected_stdout_text = oracle_expected_stdout(args.jetstream_post_timing_oracle)
             elif benchmark["suite"] == "awfy" and script:
                 bundle = script.replace("2.js", "2_bundle.js")
                 if os.path.exists(bundle):
@@ -550,9 +569,11 @@ def main():
             row["control_source"] = source_provenance(script)
             row["candidate_source"] = source_provenance(script)
             row.update(compare_row(control, candidate, script, script, args.pairs,
-                                   args.timeout, args.language, args.tier, None,
+                                   args.timeout, args.language, args.tier, expected_stdout_text,
                                    args.bootstrap_resamples, args.bootstrap_seed))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
+            if row["expected_stdout_matches_all"] is False:
+                row["status"] = "wrong_output"
             artifact["rows"].append(row)
             ratio = row["candidate_over_control_median_ratio"]
             ratio_text = "n/a" if ratio is None else f"{ratio:.4f}"

@@ -2644,16 +2644,8 @@ static DomDocument* js_document_proxy_doc_from_item(Item item) {
         if (host_type == (const void*)&js_foreign_doc_vmap_marker) {
             return (DomDocument*)host_data;
         }
-        // ESO102: a wrapper around the document *node* is the same Document as
-        // the proxy. Readers accept either shape before either writer changes,
-        // so the identity can be unified without a flag day -- ESO101's attempt
-        // segfaulted precisely because the writers moved while the readers still
-        // keyed on the proxy's host type.
-        DomNode* node = (DomNode*)dom_unwrap_element(item);
-        if (node && node->is_element()) {
-            DomElement* e = node->as_element();
-            if (e->doc && e->doc->js.doc_node == (void*)e) return e->doc;
-        }
+        // non-document virtual projections must not re-enter dom_unwrap_element:
+        // it delegates here after rejecting their host type (D7.4.5v2).
         return nullptr;
     }
     return nullptr;

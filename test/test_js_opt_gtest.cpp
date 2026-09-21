@@ -113,7 +113,20 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "string_concat_ascii",
     "string_concat_unicode",
     "ascii_substring_cache_hit",
-    "ascii_substring_cache_miss"
+    "ascii_substring_cache_miss",
+    "runtime_to_numeric_call",
+    "runtime_increment_call",
+    "runtime_decrement_call",
+    "runtime_boxed_compare_call",
+    "runtime_number_index_get_call",
+    "runtime_number_index_numeric_array",
+    "runtime_number_index_tagged_array",
+    "runtime_number_index_tagged_packed_plain",
+    "runtime_number_index_tagged_holey_plain",
+    "runtime_number_index_tagged_with_props",
+    "runtime_number_index_tagged_other",
+    "runtime_number_index_typed_array",
+    "runtime_number_index_other"
 };
 
 static const char* kReasonNames[JS_OPT_REASON_COUNT] = {
@@ -497,7 +510,7 @@ static char* read_fixture_mir(const char* name) {
 }
 
 static const char* find_mir_function(const char* mir, const char* marker,
-        const char** end_out) {
+        const char** end_out, const char* required_line_text = NULL) {
     if (end_out) *end_out = NULL;
     if (!mir || !marker) return NULL;
     const char* candidate = mir;
@@ -506,7 +519,10 @@ static const char* find_mir_function(const char* mir, const char* marker,
         while (line > mir && line[-1] != '\n') line--;
         const char* line_end = strchr(line, '\n');
         const char* function = strstr(line, ":\tfunc\t");
-        if (function && (!line_end || function < line_end)) {
+        const char* required = required_line_text
+            ? strstr(line, required_line_text) : line;
+        if (function && (!line_end || function < line_end) &&
+                required && (!line_end || required < line_end)) {
             const char* end = strstr(function, "\n\tendfunc");
             if (!end) return NULL;
             if (end_out) *end_out = end;
@@ -993,6 +1009,115 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
     EXPECT_TRUE(overwritten_compare && overwritten_compare < overwritten_end);
     free(mir);
     expect_trace_off_same("native_alias_compound", source, output);
+}
+
+TEST(JsOpt, RuntimeHelperCensusKeepsGenericCoercionAndIndexSemantics) {
+    const char* source =
+        "function bump(value) { return value++; }\n"
+        "function lower(value) { return --value; }\n"
+        "function ordered(left, right) { return left < right; }\n"
+        "function integralIndex(value) { const index = 1.0; return value[index]; }\n"
+        "function indexed(value) { const index = 1.5; return value[index]; }\n"
+        "let coercions = 0;\n"
+        "let two = { valueOf() { coercions++; return 2; } };\n"
+        "let five = { valueOf() { coercions++; return 5; } };\n"
+        "let values = [7, 9]; values[1.5] = 'fractional';\n"
+        "if (bump(two) !== 2 || lower(five) !== 4 || !ordered(two, five) ||\n"
+        "    integralIndex(values) !== 9 || indexed(values) !== 'fractional' ||\n"
+        "    coercions !== 4) {\n"
+        "  throw new Error('runtime helper census changed generic semantics');\n"
+        "}\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("runtime_helper_census", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_TO_NUMERIC_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_INCREMENT_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_DECREMENT_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_BOXED_COMPARE_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL][1], 0u);
+    uint64_t classified_number_reads =
+        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_NUMERIC_ARRAY][1] +
+        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_ARRAY][1] +
+        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_TYPED_ARRAY][1] +
+        trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_OTHER][1];
+    EXPECT_GT(classified_number_reads, 0u);
+    expect_trace_off_same("runtime_helper_census", source, output);
+}
+
+TEST(JsOpt, DiscardedGenericUpdateFusesToNumericAndUpdate) {
+    const char* source =
+        "function genericLoop(value) {\n"
+        "  for (let index = 0; index < 4; index++) value++;\n"
+        "  return value;\n"
+        "}\n"
+        "let coercions = 0;\n"
+        "let value = { valueOf() { coercions++; return 2; } };\n"
+        "if (genericLoop('2') !== 6 || genericLoop(value) !== 6 || coercions !== 1)\n"
+        "  throw new Error('discarded update changed coercion or result');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("discarded_generic_update", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_TO_NUMERIC_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_INCREMENT_CALL][1], 0u);
+
+    char* mir = read_fixture_mir("discarded_generic_update");
+    ASSERT_NE(mir, nullptr);
+    const char* generic_end = NULL;
+    const char* generic = find_mir_function(mir, "_js_genericLoop_", &generic_end,
+        "_body:\tfunc");
+    ASSERT_NE(generic, nullptr);
+    ASSERT_NE(generic_end, nullptr);
+    const char* update = strstr(generic, "\n\tcall\tjs_increment");
+    EXPECT_TRUE(update && update < generic_end);
+    const char* numeric_update = strstr(generic, "\n\tcall\tjs_increment_numeric");
+    EXPECT_FALSE(numeric_update && numeric_update < generic_end);
+    const char* numeric = strstr(generic, "\n\tcall\tjs_to_numeric");
+    EXPECT_FALSE(numeric && numeric < generic_end);
+    free(mir);
+    expect_trace_off_same("discarded_generic_update", source, output);
+}
+
+TEST(JsOpt, CompanionDenseReadPreservesHoles) {
+    const char* source =
+        "function middle(values) {\n"
+        "  let result = undefined;\n"
+        "  for (let index = 0; index < 3; index++) {\n"
+        "    if (index === 1) result = values[index];\n"
+        "  }\n"
+        "  return result;\n"
+        "}\n"
+        "let dense = [1, 2, 3]; dense.note = 'companion';\n"
+        "let hole = new Array(3); hole[0] = 1; hole[2] = 3; hole.note = 'companion';\n"
+        "if (middle(dense) !== 2 || middle(hole) !== undefined)\n"
+        "  throw new Error('companion dense read changed own-element behavior');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("companion_dense_read", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1], 0u);
+
+    char* mir = read_fixture_mir("companion_dense_read");
+    ASSERT_NE(mir, nullptr);
+    const char* middle_end = NULL;
+    const char* middle = find_mir_function(mir, "_js_middle_", &middle_end,
+        "_body:\tfunc");
+    ASSERT_NE(middle, nullptr);
+    ASSERT_NE(middle_end, nullptr);
+    const char* companion = strstr(middle,
+        "js_array_get_existing_own_dense_with_props_or_missing");
+    EXPECT_TRUE(companion && companion < middle_end);
+    const char* fallback = strstr(middle, "js_elements_get_number");
+    EXPECT_TRUE(fallback && fallback < middle_end);
+    free(mir);
+    expect_trace_off_same("companion_dense_read", source, output);
 }
 
 TEST(JsOpt, MirNativeNumberIndexKeepsKeyUnboxed) {
@@ -1708,6 +1833,24 @@ TEST(JsOpt, NamedLoadStoreUsesTierBPath) {
     expect_trace_off_same("named_fast_path", source, output);
 }
 
+TEST(JsOpt, HostDynamicReadsRemainGlobalOnly) {
+    const char* source =
+        "globalThis.event = 17;\n"
+        "var ordinary = { event: 23, innerWidth: 29, length: 31 };\n"
+        "function read(object) { return object.event + ':' + object.innerWidth + ':' + object.length; }\n"
+        "if (globalThis.event !== 17 || read(ordinary) !== '23:29:31')\n"
+        "  throw new Error('host dynamic receiver changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("host_dynamic_global_only", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.reasons[JS_OPT_REASON_NAMED_FAST_HOST_DYNAMIC], 0u);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
+    expect_trace_off_same("host_dynamic_global_only", source, output);
+}
+
 TEST(JsOpt, NamedDataDescriptorReadSkipsOnlyIrrelevantAttributes) {
     const char* source =
         "function read(object) { return object.hidden + object.fixed; }\n"
@@ -2095,6 +2238,43 @@ TEST(JsOpt, NestedTypedArrayArithmeticRetainsNumberResultAfterGenericMiss) {
     EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
     free(mir);
     expect_trace_off_same("nested_typed_array_number_result", source, output);
+}
+
+TEST(JsOpt, LeftTypedArrayArithmeticRetainsNumberResultAfterGenericMiss) {
+    const char* source =
+        "function transform(data) {\n"
+        "  let scale = 5;\n"
+        "  let product = data[0] * scale - data[1] * scale;\n"
+        "  data[2] = data[0] - product;\n"
+        "  return product + ':' + data[2];\n"
+        "}\n"
+        "let typed = new Float64Array(3); typed[0] = 2; typed[1] = 3;\n"
+        "console.log('typed:' + transform(typed));\n"
+        "let indirect = transform;\n"
+        "console.log('array:' + indirect([2, 3, 0]));\n"
+        "let coercions = 0;\n"
+        "let objects = [{ valueOf() { coercions++; return 2; } },\n"
+        "               { valueOf() { coercions++; return 3; } }, 0];\n"
+        "console.log('object:' + indirect(objects) + ':' + coercions);\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("left_typed_array_number_result", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_NE(strstr(output, "typed:-5:7"), nullptr) << output;
+    EXPECT_NE(strstr(output, "array:-5:7"), nullptr) << output;
+    EXPECT_NE(strstr(output, "object:-5:7:3"), nullptr) << output;
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_TYPED_NUMBER_READ][2], 0u);
+
+    char* mir = read_fixture_mir("left_typed_array_number_result");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "dmul"), nullptr);
+    EXPECT_NE(strstr(mir, "dsub"), nullptr);
+    EXPECT_NE(strstr(mir, "js_typed_array_set_number_if_kind"), nullptr);
+    free(mir);
+    expect_trace_off_same("left_typed_array_number_result", source, output);
 }
 
 TEST(JsOpt, TypedArrayKindFollowsStableDirectParameterForwarding) {

@@ -333,6 +333,8 @@ extern "C" Item js_to_number(Item value) {
 // ES spec §7.1.3 ToNumeric(value) — like ToNumber but preserves BigInt
 // Used by increment/decrement (++/--) which must work on BigInt values.
 extern "C" Item js_to_numeric(Item value) {
+    js_opt_trace_record(JS_OPT_RUNTIME_TO_NUMERIC_CALL, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_DECIMAL) {
         Decimal* _dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFF);
@@ -944,6 +946,8 @@ extern "C" int64_t js_typeof_is(Item value, NameId type_name_id) {
 // op codes:  0=LT (a<b)  1=GT (a>b)  2=LE (a<=b)  3=GE (a>=b)
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
 static Item js_compare_boxed(int64_t op, Item left, Item right) {
+    js_opt_trace_record(JS_OPT_RUNTIME_BOXED_COMPARE_CALL, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
     if (op < 0 || op > 3) return (Item){.item = b2it(false)};
     bool reverse = op == 1 || op == 2;
     bool invert = op >= 2;
@@ -1184,20 +1188,35 @@ Item js_make_number(double d) {
 // Arithmetic Operators
 // =============================================================================
 
-// Increment: handles both Number and BigInt (for ++ operator)
-extern "C" Item js_increment(Item value) {
-    JS_ASSIGN_OR_RETURN_INTO(value, js_numeric_operand(value));
-    if (js_is_bigint(value)) return bigint_inc(value);
-    double d = js_get_number(value);
-    return js_make_number(d + 1.0);
+// Both update entries share the result kernel. The numeric entry accepts only
+// a completed ToNumeric result; the public entry owns the coercion itself.
+static Item js_numeric_update(Item numeric, bool decrement) {
+    js_opt_trace_record(decrement ? JS_OPT_RUNTIME_DECREMENT_CALL :
+        JS_OPT_RUNTIME_INCREMENT_CALL, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+    if (item_is_error(numeric)) return numeric;
+    if (js_is_bigint(numeric)) return decrement ? bigint_dec(numeric) : bigint_inc(numeric);
+    double value = js_get_number(numeric);
+    return js_make_number(value + (decrement ? -1.0 : 1.0));
 }
 
-// Decrement: handles both Number and BigInt (for -- operator)
+extern "C" Item js_increment_numeric(Item numeric) {
+    return js_numeric_update(numeric, false);
+}
+
+extern "C" Item js_decrement_numeric(Item numeric) {
+    return js_numeric_update(numeric, true);
+}
+
+// Increment and decrement implement the complete ECMAScript ToNumeric step.
+// MIR uses the numeric entries only when it must retain the postfix value.
+extern "C" Item js_increment(Item value) {
+    JS_ASSIGN_OR_RETURN(numeric, js_to_numeric(value));
+    return js_increment_numeric(numeric);
+}
+
 extern "C" Item js_decrement(Item value) {
-    JS_ASSIGN_OR_RETURN_INTO(value, js_numeric_operand(value));
-    if (js_is_bigint(value)) return bigint_dec(value);
-    double d = js_get_number(value);
-    return js_make_number(d - 1.0);
+    JS_ASSIGN_OR_RETURN(numeric, js_to_numeric(value));
+    return js_decrement_numeric(numeric);
 }
 
 // Number() function call: ES2020 §21.1.1.1 — calls ToNumeric, then converts BigInt to Number

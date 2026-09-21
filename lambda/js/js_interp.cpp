@@ -3586,7 +3586,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             Rooted<Item> old_root(roots, js_interp_reference_read(frame, &reference));
             Rooted<Item> numeric_root(roots, js_to_numeric(old_root.get()));
             Rooted<Item> next_root(roots, unary->op == OPERATOR_JS_INCREMENT
-                ? js_increment(numeric_root.get()) : js_decrement(numeric_root.get()));
+                ? js_increment_numeric(numeric_root.get()) : js_decrement_numeric(numeric_root.get()));
             if (item_is_error(old_root.get()) || item_is_error(numeric_root.get()) ||
                     item_is_error(next_root.get())) {
                 return js_interp_throw(item_is_error(old_root.get()) ? old_root.get()

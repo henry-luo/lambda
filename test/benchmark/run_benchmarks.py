@@ -640,7 +640,54 @@ def make_qjs_wrapper(js_path):
     return wrapper
 
 
-def make_jetstream_node_wrapper(bench_name, js_path):
+NAVIER_STOKES_DENSITY_ORACLE_V1 = "navier_stokes_density_v1"
+NAVIER_STOKES_DENSITY_DIGEST_V1 = -257786486
+
+
+def jetstream_post_timing_oracle_marker(oracle_id):
+    if oracle_id is None:
+        return None
+    if oracle_id == NAVIER_STOKES_DENSITY_ORACLE_V1:
+        return "__NAVIER_DENSITY_DIGEST__:" + str(NAVIER_STOKES_DENSITY_DIGEST_V1)
+    raise ValueError("unknown JetStream post-timing oracle: " + oracle_id)
+
+
+def jetstream_post_timing_oracle(oracle_id):
+    """Return a deterministic semantic check that runs after a JetStream timer."""
+    if oracle_id is None:
+        return ""
+    jetstream_post_timing_oracle_marker(oracle_id)
+    # Frame 15 retains the benchmark's native checksum. The exposed density vector
+    # adds a whole-result oracle without changing the single-frame timed work.
+    return (
+        "\nfor (var __navier_frame = 1; __navier_frame < 15; __navier_frame++) {\n"
+        "    runNavierStokes();\n"
+        "}\n"
+        "var __navier_dens = solver.getDens();\n"
+        "var __navier_digest = 2166136261;\n"
+        "for (var __navier_index = 0; __navier_index < __navier_dens.length; __navier_index++) {\n"
+        "    var __navier_quantized = Math.floor(__navier_dens[__navier_index] * 1000);\n"
+        "    __navier_digest = (__navier_digest ^ __navier_quantized) | 0;\n"
+        "    __navier_digest = (((__navier_digest << 5) - __navier_digest) + (__navier_digest >>> 7)) | 0;\n"
+        "}\n"
+        "console.log(\"__NAVIER_DENSITY_DIGEST__:\" + __navier_digest);\n"
+    )
+
+
+def jetstream_timing_trailer(run_expr, run_count, post_timing_oracle=None):
+    """Build the shared one-runIteration timing boundary and optional after-check."""
+    return (
+        "\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
+        "// with the file's OWN loop count so every engine runs the same work\n"
+        "var _t0 = performance.now();\n"
+        f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n"
+        "var _t1 = performance.now();\n"
+        "console.log(\"__TIMING__:\" + (_t1 - _t0).toFixed(3));\n" +
+        jetstream_post_timing_oracle(post_timing_oracle)
+    )
+
+
+def make_jetstream_node_wrapper(bench_name, js_path, post_timing_oracle=None):
     """Create Node.js wrapper timing one runIteration() of a JetStream benchmark."""
     detected = _detect_jetstream_run_function(js_path)
     if detected is None:
@@ -652,12 +699,7 @@ def make_jetstream_node_wrapper(bench_name, js_path):
         code = f.read()
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
-                "// with the file's OWN loop count so every engine runs the same work\n")
-        f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
-        f.write("var _t1 = performance.now();\n")
-        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+        f.write(jetstream_timing_trailer(run_expr, run_count, post_timing_oracle))
     return wrapper
 
 
@@ -705,7 +747,7 @@ def _detect_jetstream_run_function(js_path):
     return None
 
 
-def make_jetstream_ljs_wrapper(bench_name, js_path):
+def make_jetstream_ljs_wrapper(bench_name, js_path, post_timing_oracle=None):
     """Create LambdaJS wrapper timing one runIteration() of a JetStream benchmark."""
     detected = _detect_jetstream_run_function(js_path)
     if detected is None:
@@ -719,16 +761,11 @@ def make_jetstream_ljs_wrapper(bench_name, js_path):
     code = code.replace('"use strict";', "")
     with open(wrapper, "w") as f:
         f.write(code)
-        f.write("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
-                "// with the file's OWN loop count so every engine runs the same work\n")
-        f.write("var _t0 = performance.now();\n")
-        f.write(f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n")
-        f.write("var _t1 = performance.now();\n")
-        f.write('console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+        f.write(jetstream_timing_trailer(run_expr, run_count, post_timing_oracle))
     return wrapper
 
 
-def make_jetstream_qjs_wrapper(bench_name, js_path):
+def make_jetstream_qjs_wrapper(bench_name, js_path, post_timing_oracle=None):
     """Create QuickJS wrapper timing one runIteration() of a JetStream benchmark."""
     detected = _detect_jetstream_run_function(js_path)
     if detected is None:
@@ -738,12 +775,7 @@ def make_jetstream_qjs_wrapper(bench_name, js_path):
     wrapper = os.path.join("temp", f"_qjs_jetstream_{bench_name}.js")
     with open(js_path) as f:
         code = f.read()
-    trailer = ("\n// Timing wrapper: one runIteration() of this benchmark, repeated\n"
-               "// with the file's OWN loop count so every engine runs the same work\n"
-               "var _t0 = performance.now();\n"
-               f"for (var _i = 0; _i < {run_count}; _i++) {{ {run_expr}; }}\n"
-               "var _t1 = performance.now();\n"
-               'console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));\n')
+    trailer = jetstream_timing_trailer(run_expr, run_count, post_timing_oracle)
     write_qjs_script_wrapper(wrapper, code, trailer)
     return wrapper
 
