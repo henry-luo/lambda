@@ -1658,9 +1658,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 // Build a closure for a class method that has captures
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count) {
     MIR_reg_t closure_reg = jm_create_func_or_closure(mt, fc);
-    if (JM_JS_FACT(fc, is_derived_constructor)) {
-        jm_callr_void_1(mt, "js_mark_derived_constructor_func", closure_reg);
-    }
+    jm_emit_apply_function_analysis_flags(mt, closure_reg, fc);
     return closure_reg;
 }
 

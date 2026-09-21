@@ -737,12 +737,7 @@ MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, in
     MIR_reg_t fn_item = jm_call_2(mt, "js_new_method_function_mir", MIR_T_I64,
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
         MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
-    if (JM_JS_FACT(fc, is_strict)) {
-        jm_callr_void_1(mt, "js_mark_strict_func", fn_item);
-    }
-    if (JM_JS_FACT(fc, is_derived_constructor)) {
-        jm_callr_void_1(mt, "js_mark_derived_constructor_func", fn_item);
-    }
+    jm_emit_apply_function_analysis_flags(mt, fn_item, fc);
     return fn_item;
 }
 

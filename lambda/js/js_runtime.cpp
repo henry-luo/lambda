@@ -14579,6 +14579,25 @@ static bool js_call_mir_light_is_active(Item func_item) {
         home_global.item == js_get_global_this().item;
 }
 
+static bool js_call_mir_this_is_active(Item func_item) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC || !func_item.function ||
+            !js_active_runtime_state) return false;
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_mir_this ||
+            !fn->body || js_runtime_state.with_head ||
+            js_function_has_vm_stack_source(fn) ||
+            js_fn_runtime_context(fn) != (Context*)context ||
+            js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
+        return false;
+    }
+    uint32_t module_state_id = js_fn_module_state_id(fn);
+    if (module_state_id != UINT32_MAX &&
+            module_state_id != lambda_active_module_state_id()) return false;
+    Item home_global = fn->home_global;
+    return home_global.item == 0 || get_type_id(home_global) != LMD_TYPE_MAP ||
+        home_global.item == js_get_global_this().item;
+}
+
 // The finalizer admits this entry only for code bodies that cannot observe an
 // activation-local fact. Keep the callee and borrowed argument span rooted,
 // but leave the caller activation installed: D6.2.2v2 requires exact roots,
@@ -14616,6 +14635,55 @@ Item js_call_entry_mir_light(Item func_item, Item this_val, Item* args,
     js_opt_trace_record(JS_OPT_MIR_LIGHT_DIRECT_ACTIVATION,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     return js_call_mir_light_direct(func_item, this_val, args, arg_count,
+        result_home, args_prerooted);
+}
+
+// A strict compiled body that reads `this` still needs its receiver and method
+// home, but does not need the generic call kernel's arguments/new.target/eval
+// activation. The finalized flags and runtime state guard make that reduced
+// activation explicit; every unsupported or stale shape resumes generically.
+static Item js_call_mir_this_direct(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
+    if (lambda_stack_pointer() < context->stack_limit) {
+        return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
+    }
+    RootFrame call_roots(4);
+    Rooted<Item> callee_root(call_roots, func_item);
+    Rooted<Item> this_root(call_roots, this_val);
+    Rooted<Item> previous_this_root(call_roots, js_current_this);
+    Rooted<Item> previous_home_root(call_roots, js_current_private_home_class);
+    RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
+        ? (size_t)arg_count : 0);
+    if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
+            call_arg_roots, "js-call-mir-this")) return ItemError;
+    JsFunction* fn = (JsFunction*)callee_root.get().function;
+    js_current_this = this_root.get();
+    Item method_home = js_fn_home_class(fn);
+    if (method_home.item != ItemNull.item && method_home.item != 0 &&
+            get_type_id(method_home) != LMD_TYPE_UNDEFINED) {
+        js_current_private_home_class = method_home;
+    }
+    Item result = lambda_item_resolve_pending_slot(fn->body(callee_root.get(),
+        this_root.get(), args, arg_count, result_home));
+    js_current_this = previous_this_root.get();
+    js_current_private_home_class = previous_home_root.get();
+    if (result_home && lambda_item_uses_scalar_home(result)) {
+        result = lambda_item_adopt_scalar_home(result, result_home);
+    }
+    return result;
+}
+
+Item js_call_entry_mir_this(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home, bool args_prerooted) {
+    if (!js_call_mir_this_is_active(func_item)) {
+        return js_call_entry_generic(func_item, this_val, args, arg_count,
+            result_home, args_prerooted);
+    }
+    js_opt_trace_record(JS_OPT_MIR_THIS_CALL, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+    js_opt_trace_record(JS_OPT_MIR_THIS_DIRECT_ACTIVATION, JS_OPT_REASON_NONE,
+        JS_OPT_OUTCOME_TAKEN);
+    return js_call_mir_this_direct(func_item, this_val, args, arg_count,
         result_home, args_prerooted);
 }
 

@@ -101,6 +101,8 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "mir_loop_stable_name_id",
     "mir_light_call",
     "mir_light_direct_activation",
+    "mir_this_call",
+    "mir_this_direct_activation",
     "bound_call_forward_args",
     "mir_deferred_function_finalize",
     "mir_lazy_function_metadata",

@@ -93,6 +93,8 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "mir_loop_stable_name_id",
     "mir_light_call",
     "mir_light_direct_activation",
+    "mir_this_call",
+    "mir_this_direct_activation",
     "bound_call_forward_args",
     "mir_deferred_function_finalize",
     "mir_lazy_function_metadata",
@@ -672,9 +674,9 @@ TEST(JsOpt, TraceParserFailsClosed) {
 
     char* unknown_schema = copy_text(valid);
     ASSERT_NE(unknown_schema, nullptr);
-    char* schema = strstr(unknown_schema, "schema=1");
+    char* schema = strstr(unknown_schema, "JS_OPT_TRACE schema=1");
     ASSERT_NE(schema, nullptr);
-    schema[strlen("schema=")] = '2';
+    schema[strlen("JS_OPT_TRACE schema=")] = '2';
     EXPECT_FALSE(parse_trace(unknown_schema, &trace));
     free(unknown_schema);
 
@@ -1691,6 +1693,28 @@ TEST(JsOpt, MirLightCallKeepsDynamicFunctionSemantics) {
     EXPECT_NE(strstr(mir, "js_call"), nullptr);
     free(mir);
     expect_trace_off_same("mir_light_call", source, output);
+}
+
+TEST(JsOpt, MirThisCallPreservesReceiverAndMethodHome) {
+    const char* source =
+        "class Vault {\n"
+        "  #bonus;\n"
+        "  constructor(value, bonus) { this.value = value; this.#bonus = bonus; }\n"
+        "  read() { return this.value + this.#bonus; }\n"
+        "}\n"
+        "var value = new Vault(12, 5);\n"
+        "var invoke = value.read;\n"
+        "if (invoke.call(value) !== 17)\n"
+        "  throw new Error('this entry lost receiver or method home');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_this_call", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_THIS_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_THIS_DIRECT_ACTIVATION][1], 0u);
+    expect_trace_off_same("mir_this_call", source, output);
 }
 
 TEST(JsOpt, ReceiverOnlyBoundCallForwardsRootedArguments) {
