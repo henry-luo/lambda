@@ -294,26 +294,32 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     float ua_font_size = 13.3333f;
 
     float content_w = 0;
-    if (font && font->font_size > 0 && lycon->ui_context) {
+    bool uses_ua_default_width = size == FormDefaults::TEXT_SIZE_CHARS &&
+        !form_control_has_specified_font(block);
+    if (uses_ua_default_width) {
+        // The browser's native 20-column control retains this calibrated width.
+        content_w = default_content_w;
+    } else if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
         setup_font(lycon->ui_context, &temp_font, font);
         if (font_box_handle(&temp_font)) {
-            float average_metric = font_get_text_control_avg_char_width(
-                font_box_handle(&temp_font));
-            // The size algorithm uses the face's fractional average advance;
-            // rounding it widens a default 20-column control by almost one glyph.
-            float average_char_w = average_metric;
-            if (average_char_w <= 0.0f) {
+            if (form->appearance_none) {
+                // Removing native appearance resolves the size through `ch`.
                 GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
-                average_char_w = zero_glyph.advance_x;
-            }
-            float max_char_w = font_get_max_char_width(font->font_handle);
-            if (max_char_w > 0.0f && average_char_w > 0.0f) {
-                // Keep the maximum-width term separate from the average width:
-                // it preserves room for the widest character without treating
-                // the size attribute as a CSS `ch` length.
-                content_w = ceilf(average_char_w * size) +
-                    max_char_w - average_char_w;
+                if (zero_glyph.advance_x > 0.0f) content_w = zero_glyph.advance_x * size;
+            } else {
+                float average_metric = font_get_text_control_avg_char_width(
+                    font_box_handle(&temp_font));
+                float average_char_w = average_metric;
+                if (average_char_w <= 0.0f) {
+                    GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
+                    average_char_w = zero_glyph.advance_x;
+                }
+                float max_char_w = font_get_max_char_width(font->font_handle);
+                if (max_char_w > 0.0f && average_char_w > 0.0f) {
+                    content_w = ceilf(average_char_w * size) +
+                        max_char_w - average_char_w;
+                }
             }
         }
     }
