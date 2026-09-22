@@ -1567,6 +1567,160 @@ TEST(JsOpt, ConstructorAssignedFieldsUseGuardedLayout) {
     expect_trace_off_same("constructor_assigned_fields", source, output);
 }
 
+TEST(JsOpt, PlainFunctionEntryFieldsUseGuardedLayout) {
+    const char* source =
+        "function EntryPlan(value) {\n"
+        "  this.weight = 6.5; this.label = 'entry'; this.value = value;\n"
+        "}\n"
+        "EntryPlan.prototype = {\n"
+        "  read: function() { return this.weight + ':' + this.label + ':' + this.value; },\n"
+        "  replace: function() { this.weight = 8.5; return this.weight; }\n"
+        "};\n"
+        "var entry = new EntryPlan('payload');\n"
+        "if (Object.keys(entry).join(',') !== 'weight,label,value' ||\n"
+        "    entry.read() !== '6.5:entry:payload' || entry.replace() !== 8.5)\n"
+        "  throw new Error('plain entry shape changed source-order properties');\n"
+        "Object.defineProperty(EntryPlan.prototype, 'weight', {\n"
+        "  get: function() { return 3.5; },\n"
+        "  set: function(value) {}, configurable: true\n"
+        "});\n"
+        "var intercepted = new EntryPlan('value');\n"
+        "if (Object.hasOwn(intercepted, 'weight') ||\n"
+        "    intercepted.read() !== '3.5:entry:value')\n"
+        "  throw new Error('plain entry shape skipped inherited setter fallback');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("plain_function_entry_fields", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("plain_function_entry_fields");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("plain_function_entry_fields", source, output);
+}
+
+TEST(JsOpt, PlainFunctionHashMapPrefixUsesGuardedLayout) {
+    const char* source =
+        "function HashMapPlan(capacity) {\n"
+        "  if (capacity == null) capacity = 4;\n"
+        "  if (capacity < 0) throw new Error('bad capacity');\n"
+        "  this._capacity = capacity; this._elementCount = 0;\n"
+        "  this._elementData = new Array(this._capacity);\n"
+        "  this._loadFactor = 0.75; this._modCount = 0; this._computeThreshold();\n"
+        "}\n"
+        "HashMapPlan.prototype = {\n"
+        "  _computeThreshold: function() { this._threshold = this._elementData.length * this._loadFactor; },\n"
+        "  size: function() { return this._elementCount; },\n"
+        "  capacity: function() { return this._capacity; },\n"
+        "  total: function() { return this._capacity + this._elementCount; }\n"
+        "};\n"
+        "var map = new HashMapPlan(5);\n"
+        "if (Object.keys(map).join(',') !== '_capacity,_elementCount,_elementData,_loadFactor,_modCount,_threshold' ||\n"
+        "    map._elementData.length !== 5 || map.size() !== 0 || map.capacity() !== 5 ||\n"
+        "    map.total() !== 5 || map._threshold !== 3.75)\n"
+        "  throw new Error('plain hashmap prefix changed own-field semantics');\n"
+        "var setterCalls = 0;\n"
+        "Object.defineProperty(HashMapPlan.prototype, '_capacity', {\n"
+        "  get: function() { return 3; },\n"
+        "  set: function(value) { setterCalls++; }, configurable: true\n"
+        "});\n"
+        "var intercepted = new HashMapPlan(7);\n"
+        "if (setterCalls !== 1 || Object.hasOwn(intercepted, '_capacity') ||\n"
+        "    intercepted._elementData.length !== 3 || intercepted.capacity() !== 3 ||\n"
+        "    intercepted.total() !== 3)\n"
+        "  throw new Error('plain hashmap prefix hid inherited setter state');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("plain_function_hashmap_prefix", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("plain_function_hashmap_prefix");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
+    free(mir);
+    expect_trace_off_same("plain_function_hashmap_prefix", source, output);
+}
+
+TEST(JsOpt, PlainFunctionFieldsFollowLocalAliases) {
+    const char* source =
+        "function AliasEntry(value) {\n"
+        "  this.rank = 6.5; this.label = 'alias'; this.value = value;\n"
+        "}\n"
+        "const ConstructorAlias = AliasEntry;\n"
+        "var entry = new ConstructorAlias('payload');\n"
+        "var alias = entry;\n"
+        "var alias2 = alias;\n"
+        "if (alias2.rank + ':' + alias2.label + ':' + alias2.value !== '6.5:alias:payload')\n"
+        "  throw new Error('plain alias fields changed semantics');\n"
+        "Object.defineProperty(AliasEntry.prototype, 'rank', {\n"
+        "  get: function() { return 3.5; }, set: function(value) {}, configurable: true\n"
+        "});\n"
+        "var intercepted = new AliasEntry('value');\n"
+        "if (Object.hasOwn(intercepted, 'rank') || intercepted.rank !== 3.5)\n"
+        "  throw new Error('plain alias fields skipped inherited setter fallback');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("plain_function_local_alias_fields", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("plain_function_local_alias_fields");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    free(mir);
+    expect_trace_off_same("plain_function_local_alias_fields", source, output);
+}
+
+TEST(JsOpt, PlainFunctionFieldsUseSeparatelyAssignedPrototypeMethods) {
+    const char* source =
+        "function SeparateEntry(value) {\n"
+        "  this.rank = 6.5; this.label = 'separate'; this.value = value;\n"
+        "}\n"
+        "SeparateEntry.prototype.read = function() {\n"
+        "  return this.rank + ':' + this.label + ':' + this.value;\n"
+        "};\n"
+        "SeparateEntry.prototype.replace = function() { this.rank = 8.5; return this.rank; };\n"
+        "var entry = new SeparateEntry('payload');\n"
+        "if (entry.read() !== '6.5:separate:payload' || entry.replace() !== 8.5)\n"
+        "  throw new Error('separate prototype methods changed semantics');\n"
+        "Object.defineProperty(SeparateEntry.prototype, 'rank', {\n"
+        "  get: function() { return 3.5; }, set: function(value) {}, configurable: true\n"
+        "});\n"
+        "var intercepted = new SeparateEntry('value');\n"
+        "if (Object.hasOwn(intercepted, 'rank') ||\n"
+        "    intercepted.read() !== '3.5:separate:value')\n"
+        "  throw new Error('separate prototype methods skipped inherited setter fallback');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("plain_function_separate_prototype_fields", source,
+        &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_LITERAL_FIELD_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("plain_function_separate_prototype_fields");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
+    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    free(mir);
+    expect_trace_off_same("plain_function_separate_prototype_fields", source,
+        output);
+}
+
 TEST(JsOpt, DynamicConstructorFieldsReuseReservedShapeTransitions) {
     const char* source =
         "class DynamicConstructorPlan {\n"

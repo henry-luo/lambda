@@ -601,6 +601,7 @@ struct JsTestParam {
 
 static const char* JS_MIR_LIST_FILE = "test/js/mir_list.txt";
 static bool js_mixed_mode = false;
+static bool js_full_ast_mode = false;
 static bool js_mir_list_loaded = false;
 static bool js_mir_list_available = false;
 static char* js_mir_list_contents = NULL;
@@ -668,6 +669,7 @@ static bool js_test_is_in_mir_list(const char* test_name) {
 }
 
 static JsExecutionBackend js_backend_for_test(const JsTestParam& test) {
+    if (js_full_ast_mode) return JS_BACKEND_AST;
     if (!js_mixed_mode) return JS_BACKEND_INHERIT;
     return js_test_is_in_mir_list(test.test_name.c_str())
         ? JS_BACKEND_MIR : JS_BACKEND_AST;
@@ -1309,7 +1311,8 @@ TEST(JavaScriptRegression, Js55P0ArraySliceGcRootsAndDenseAppend) {
 static void parse_js_gtest_options(int* argc, char** argv) {
     if (!argc || !argv) return;
     const char* mode = getenv("JS_GTEST_MODE");
-    js_mixed_mode = !mode || strcmp(mode, "mir") != 0;
+    js_full_ast_mode = mode && strcmp(mode, "ast") == 0;
+    js_mixed_mode = !js_full_ast_mode && (!mode || strcmp(mode, "mir") != 0);
 
     int write_index = 1;
     for (int read_index = 1; read_index < *argc; read_index++) {
@@ -1321,11 +1324,18 @@ static void parse_js_gtest_options(int* argc, char** argv) {
             js_mixed_mode = false;
             continue;
         }
+        if (strcmp(argv[read_index], "--full-ast") == 0) {
+            // Force every fixture through the interpreter, including the
+            // historical MIR allowlist, so this mode measures real parity.
+            js_full_ast_mode = true;
+            js_mixed_mode = false;
+            continue;
+        }
         argv[write_index++] = argv[read_index];
     }
     *argc = write_index;
     argv[write_index] = NULL;
-    if (js_mixed_mode) {
+    if (js_mixed_mode || js_full_ast_mode) {
         // make every unlisted direct or shell-launched JS check AST by default;
         // listed parameterized cases override this in their child environment.
         shell_setenv("JS_EXECUTION_BACKEND", "ast");

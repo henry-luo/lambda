@@ -832,6 +832,12 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     fn->code = code;
     ast->env = environment;
     fn->flags = flags;
+    // A later closure of a promoted definition enters the already-published
+    // satellite with the same ordinary call ABI.
+    if (code->body_kind == JS_FUNCTION_BODY_CODE && code->func_ptr &&
+            code->runtime_context == (Context*)context) {
+        fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+    }
     fn->home_global = js_get_global_this();
     ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW) ? js_get_this() : ItemNull;
     ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
@@ -843,6 +849,27 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     js_function_capture_with_env(fn);
     js_function_finalize_capabilities(fn);
     return function_root.get();
+}
+
+bool js_function_promote_ast_body(JsFunction* fn, void* entry) {
+    if (!fn || !entry || !fn->code || !js_fn_ast_definition(fn)) {
+        return false;
+    }
+    // The definition code record is the single body authority for every
+    // closure of this AST site. A sibling created before publication refreshes
+    // its entry from that record; the caller retains the MIR context first.
+    if (js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST) {
+        fn->code->func_ptr = entry;
+        fn->code->runtime_context = (Context*)context;
+        fn->code->body_kind = JS_FUNCTION_BODY_CODE;
+    } else if (js_fn_body_kind(fn) != JS_FUNCTION_BODY_CODE ||
+            fn->code->func_ptr != entry ||
+            fn->code->runtime_context != (Context*)context) {
+        return false;
+    }
+    fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+    js_function_finalize_capabilities(fn);
+    return fn->body == (JsBodyEntry)entry;
 }
 
 static void js_function_source_skip_trivia(const char** text, uint32_t* length) {

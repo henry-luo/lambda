@@ -1,0 +1,8 @@
+{
+  "name": "CommonJS-aware UMD export reaches a following classic script",
+  "html": "test/ui/js_load_commonjs_umd_global.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-before", "equals": "undefined:undefined:undefined"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-result", "equals": "object:yes"}
+  ]
+}

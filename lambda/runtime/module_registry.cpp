@@ -88,6 +88,7 @@ static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
     heap_register_gc_root(&desc->specifier_item.item);
     heap_register_gc_root(&desc->awaited_target.item);
     heap_register_gc_root(&desc->evaluation_error.item);
+    heap_register_gc_root(&desc->deferred_async_frame.item);
     desc->roots_epoch = epoch;
 }
 
@@ -143,13 +144,19 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
         if (entry->desc) {
             // Descriptors are native allocations, so unregister their exact
             // namespace roots before the owning heap is retired.
-            if (entry->desc->roots_epoch == js_get_heap_epoch()) {
+            // AST-prebuild workers may create descriptors before any document
+            // heap exists, so no root epoch was ever assigned to them.
+            if (entry->desc->roots_epoch != 0 && context && context->heap &&
+                    context->heap->gc &&
+                    entry->desc->roots_epoch == js_get_heap_epoch()) {
                 heap_unregister_gc_root(&entry->desc->namespace_obj.item);
                 heap_unregister_gc_root(&entry->desc->specifier_item.item);
                 heap_unregister_gc_root(&entry->desc->awaited_target.item);
                 heap_unregister_gc_root(&entry->desc->evaluation_error.item);
+                heap_unregister_gc_root(&entry->desc->deferred_async_frame.item);
             }
             mem_free(entry->desc->async_parents);
+            mem_free(entry->desc->static_dependencies);
             mem_free((void*)entry->desc->path);
             mem_free(entry->desc);
         }

@@ -230,6 +230,10 @@ void enhanced_cache_destroy(EnhancedFileCache* cache) {
     log_debug("cache: destroyed");
 }
 
+const char* enhanced_cache_get_directory(const EnhancedFileCache* cache) {
+    return cache ? cache->cache_dir : NULL;
+}
+
 char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url) {
     if (!cache || !url) return NULL;
 

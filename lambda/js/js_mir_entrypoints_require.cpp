@@ -118,6 +118,13 @@ JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
     return (JsMirMainFunc)find_func(ctx, (char*)"js_main");
 }
 
+void* js_mir_link_function(MIR_context_t ctx, const char* function_name,
+        void (*gen_interface)(MIR_context_t, MIR_item_t)) {
+    if (!ctx || !function_name) return NULL;
+    MIR_link(ctx, gen_interface, import_resolver);
+    return find_func(ctx, (char*)function_name);
+}
+
 static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
     // D5.4.1: callbacks remain part of the active evaluator turn; marking this
     // boundary prevents synchronous layout from handing TLS to another realm.
@@ -160,9 +167,30 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
         js_test262_source_has_build_string_helper(js_source, js_source_len, filename);
     jm_clear_active_js_transpile(NULL, NULL, owned_source);
     mem_free(owned_source);
-    Item result = js_ast_is_es_module((JsAstNode*)script->ast_root)
+    bool es_module = js_ast_is_es_module((JsAstNode*)script->ast_root);
+    // D8.5.1: an AST module's host turn owns its queued continuations. Keep
+    // the runtime owner active through the first microtask drain so a nested
+    // dynamic import can resume the module carrier after the executor returns.
+    RuntimeExecutionScope module_execution_scope;
+    if (module_execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop->callback_running &&
+            js_dynamic_import_suppress_module_drain <= 0) {
+        // This retained-AST entry owns the outer script turn. Initializing the
+        // loop only in js_interp_execute_script misses it because that call
+        // executes under this scope, leaving timer APIs without a uv loop.
+        js_event_loop_init();
+    }
+    Item result = es_module
         ? js_interp_execute_es_module_script(runtime, script, result_home)
         : js_interp_execute_script(runtime, script, result_home);
+    // This is the outer retained-AST module entry. Static imports use their
+    // parent's turn, but the completed module must process its queued TLA
+    // continuation before a Test262 batch returns to its async harness.
+    if (es_module) {
+        js_microtask_flush();
+        Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
+        if (item_is_error(evaluation_error)) result = evaluation_error;
+    }
     js_mir_finish_script_turn(runtime, result);
     // D8.5.1v2: a document realm owns every module artifact until its Runtime
     // teardown. Browser-global sync can take the AST path between two module
@@ -185,7 +213,7 @@ static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
     bool published = script && (!cache_build ||
         cache_build->state != INPUT_SCRIPT_BUILD_POISONED) &&
         js_common_ast_cache_admit(runtime, script, js_source, js_source_len,
-            filename, strict, typescript_profile);
+            filename, strict, typescript_profile, false);
     js_common_ast_cache_complete_build(cache_build, published, false);
     return js_mir_execute_retained_ast_script(runtime, script, owned_source,
         js_source, js_source_len, filename, result_home, test262_native_harness);
@@ -759,7 +787,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     if (ast_executor_forced || runtime->js_ast_backend || ast_closure_ready) {
         JsScript* cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
-            filename, typescript_profile, typescript_profile);
+            filename, typescript_profile, typescript_profile, false);
         if (cached) {
             if (js_execution_auto_requested() && ast_closure_ready) {
                 runtime->js_ast_backend = true;
@@ -777,10 +805,10 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         }
         InputScriptBuildClaim claim = js_common_ast_cache_begin_build(
             &ast_cache_build, js_source, js_source_len, filename,
-            typescript_profile, typescript_profile);
+            typescript_profile, typescript_profile, false);
         if (claim == INPUT_SCRIPT_BUILD_READY) {
             cached = js_common_ast_cache_lookup(runtime, js_source, js_source_len,
-                filename, typescript_profile, typescript_profile);
+                filename, typescript_profile, typescript_profile, false);
             if (cached) {
                 if (js_execution_auto_requested() && ast_closure_ready) {
                     runtime->js_ast_backend = true;
@@ -2229,13 +2257,28 @@ static Item js_dynamic_import_reject_type_error(const char* message) {
     return js_promise_reject(js_new_error_with_name(error_name, error_message));
 }
 
+static Item js_execute_dynamic_import_module(Runtime* runtime,
+        const char* source, const char* filename) {
+    if (js_ast_interpreter_requested()) {
+        return js_interp_execute_es_module_source(runtime, source, strlen(source),
+            filename, NULL);
+    }
+    return transpile_js_module_to_mir(runtime, source, filename);
+}
+
 // dynamic import() — synchronous load, wrapped in a resolved Promise
 extern "C" Item js_dynamic_import(Item specifier) {
     RootFrame roots(5);
     Rooted<Item> specifier_string_root(roots, js_to_string(specifier));
     if (item_is_error(specifier_string_root.get()) ||
             get_type_id(specifier_string_root.get()) != LMD_TYPE_STRING) {
-        return js_promise_reject(specifier_string_root.get());
+        // Promise rejections carry the JavaScript exception value, never the
+        // runtime's internal ERROR lane. This matters for `import(import.meta)`:
+        // ToString throws TypeError and a catch handler must observe that object.
+        Item reason = item_is_error(specifier_string_root.get())
+            ? js_error_lane_payload(specifier_string_root.get())
+            : specifier_string_root.get();
+        return js_promise_reject(reason);
     }
     String* spec = it2s(specifier_string_root.get());
     if (!spec || spec->len == 0) {
@@ -2247,6 +2290,10 @@ extern "C" Item js_dynamic_import(Item specifier) {
     if (base_file && base_file[0] && base_file[0] != '<') {
         jm_resolve_module_path(base_file, spec->chars, (int)spec->len,
                                resolved_path, (int)sizeof(resolved_path));
+    } else if (jm_resolve_document_module_path(context ? context->runtime : NULL,
+            base_file, spec->chars, (int)spec->len, resolved_path,
+            (int)sizeof(resolved_path))) {
+        // The shared resolver selected the active document URL.
     } else {
         snprintf(resolved_path, sizeof(resolved_path), "%.*s",
                  (int)spec->len, spec->chars);
@@ -2284,7 +2331,7 @@ extern "C" Item js_dynamic_import(Item specifier) {
             js_dynamic_import_suppress_module_drain--;
             return js_dynamic_import_reject_type_error("import(): no runtime available");
         }
-        ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        ns = js_execute_dynamic_import_module(runtime, source, path_buf);
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
     }
@@ -2294,7 +2341,7 @@ extern "C" Item js_dynamic_import(Item specifier) {
         js_tla_flush_for_dynamic_import();
     }
     if (item_is_error(ns)) {
-        return js_promise_reject(ns);
+        return js_promise_reject(js_error_lane_payload(ns));
     }
     if (get_type_id(ns) == LMD_TYPE_NULL) {
         char msg[256];

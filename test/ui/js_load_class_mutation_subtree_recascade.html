@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Load-time class mutation</title>
+<style>
+  #box { width: 41px; height: 20px; color: rgb(255, 0, 0); }
+  #box.accent { width: 123px; color: rgb(0, 128, 0); }
+</style>
+</head>
+<body>
+  <div id="box">class mutation</div>
+  <script>document.getElementById('box').setAttribute('class', 'accent');</script>
+</body>
+</html>

@@ -48,6 +48,8 @@ extern "C" {
 
 struct NetworkThreadPool;
 struct EnhancedFileCache;
+struct CookieJar;
+struct RadiantStateStore;
 
 #define BROWSE_HISTORY_MAX 100
 
@@ -65,6 +67,9 @@ typedef struct BrowsingSession {
 
     struct NetworkThreadPool* thread_pool;
     struct EnhancedFileCache* file_cache;
+    struct RadiantStateStore* state_store;
+    struct CookieJar* cookie_jar;
+    const char* browsing_context_id;  // borrowed from state_store
 #ifdef __cplusplus
     void init(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache);
     void destroy();
@@ -82,6 +87,10 @@ typedef struct BrowsingSession {
 } BrowsingSession;
 
 BrowsingSession* session_create(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache);
+// Agents may choose an isolated durable profile while sharing the cache file.
+BrowsingSession* session_create_for_profile(struct NetworkThreadPool* pool,
+                                            struct EnhancedFileCache* cache,
+                                            const char* profile_name);
 void session_destroy(BrowsingSession* session);
 DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
                               const char* url, int vw, int vh);
@@ -97,6 +106,11 @@ void session_save_scroll_position(BrowsingSession* session, float scroll_y);
 float session_get_scroll_position(const BrowsingSession* session);
 const char* session_extract_title(DomDocument* doc);
 void session_set_current_title(BrowsingSession* session, const char* title);
+void session_seed_document(BrowsingSession* session, DomDocument* document);
+void session_attach_document(BrowsingSession* session, DomDocument* document);
+struct CookieJar* session_cookie_jar(const BrowsingSession* session);
+struct RadiantStateStore* session_state_store(const BrowsingSession* session);
+const char* session_browsing_context_id(const BrowsingSession* session);
 
 // ===== frame clock =====
 
@@ -150,6 +164,9 @@ bool radiant_resolve_layout_relative_resource_path(const char* source_path,
 
 typedef struct DocumentScriptPhaseTiming {
     uint64_t collect_us;
+    uint64_t source_prefetch_us;
+    uint64_t source_wait_us;
+    uint64_t source_read_us;
     uint64_t runtime_setup_us;
     uint64_t postdom_total_us;
     uint64_t preamble_us;
@@ -165,6 +182,8 @@ typedef struct DocumentScriptPhaseTiming {
     uint64_t event_loop_us;
     uint64_t runtime_cleanup_us;
     uint64_t source_cleanup_us;
+    uint64_t source_prefetch_tasks;
+    uint64_t source_loaded_tasks;
     uint64_t cache_lookups;
     uint64_t cache_hits;
     uint64_t cache_misses;

@@ -137,6 +137,9 @@ struct JsCallableCode {
     Context* runtime_context;
     // a weak realm table is detached before its owner is destroyed.
     HashMap* intern_table;
+    // Compiler-pool recipe for an ordinary function's own constructor fields.
+    // It belongs to the source definition shared by every closure instance.
+    TypeMap* instance_shape;
 
     // 4-byte group
     int param_count;
@@ -163,6 +166,10 @@ struct JsCallableCode {
     bool definition_owned;
     // A compiled JS entry is valid only in the realm that compiled it.
     bool interned;
+    // Reuse Lambda's definition-site cell on the durable JS code record:
+    // JS MIR analysis is currently session-owned, while this record survives
+    // every AST closure created from the same definition.
+    FnPromotionCell p2_promotion;
 };
 
 static inline void js_callable_code_init_definition(JsCallableCode* code,
@@ -277,6 +284,10 @@ static inline uint8_t js_fn_body_kind(const JsFunction* fn) {
     return fn && fn->code ? fn->code->body_kind :
         JS_FUNCTION_BODY_CODE;
 }
+
+// Publish a native satellite without changing the function object's identity.
+// The caller must retain the satellite context before making this visible.
+bool js_function_promote_ast_body(JsFunction* fn, void* entry);
 
 static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, native);

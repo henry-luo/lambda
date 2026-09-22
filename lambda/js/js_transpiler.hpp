@@ -187,15 +187,16 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
 // are admitted; execution state remains local to the receiving Runtime.
 JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
                                      size_t source_length, const char* reference,
-                                     bool strict, bool typescript_profile);
+                                     bool strict, bool typescript_profile,
+                                     bool module_parse);
 InputScriptBuildClaim js_common_ast_cache_begin_build(InputScriptBuildScope* build,
     const char* source, size_t source_length, const char* reference,
-    bool strict, bool typescript_profile);
+    bool strict, bool typescript_profile, bool module_parse);
 void js_common_ast_cache_complete_build(InputScriptBuildScope* build,
     bool published, bool poison);
 bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
                                size_t source_length, const char* reference,
-                               bool strict, bool typescript_profile);
+                               bool strict, bool typescript_profile, bool module_parse);
 static inline JsScript* js_script_from_script(Script* script) {
     return script && script->profile == &js_profile ? (JsScript*)script : NULL;
 }

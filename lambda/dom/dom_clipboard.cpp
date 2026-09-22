@@ -1512,6 +1512,14 @@ extern "C" Item js_permissions_query(Item desc) {
     return dom_realm_promise_resolve(status);
 }
 
+// Headless Radiant does not persist service-worker registrations, but the
+// Navigator API remains observable and feature probes expect a promise.
+static Item js_service_worker_get_registrations() {
+    RootFrame roots(1);
+    Rooted<Item> registrations_root(roots, js_array_new(0));
+    return dom_realm_promise_resolve(registrations_root.get());
+}
+
 // =============================================================================
 // Bridge: synchronous read/write of multi-MIME records to the C ClipboardStore.
 //
@@ -1799,10 +1807,11 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     // resolve without prototype-chain lookup (matches what test code
     // typically does and the shim's previous direct-assignment behaviour).
     {
-        RootFrame roots(3);
+        RootFrame roots(4);
         Rooted<Item> clipboard_root(roots,
             dom_realm_new_object_of_class(JS_CLASS_CLIPBOARD));
         Rooted<Item> permissions_root(roots, ItemNull);
+        Rooted<Item> service_worker_root(roots, ItemNull);
         Rooted<Item> navigator_root(roots, ItemNull);
         dom_realm_set_cstr(clipboard_root.get(), "writeText", dom_realm_get_cstr(clipboard_proto_root.get(), "writeText"));
         dom_realm_set_cstr(clipboard_root.get(), "readText", dom_realm_get_cstr(clipboard_proto_root.get(), "readText"));
@@ -1812,9 +1821,14 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         permissions_root.set(js_new_object());
         js_clipboard_set_method(permissions_root.get(), "query", js_permissions_query);
 
+        service_worker_root.set(js_new_object());
+        js_clipboard_set_method(service_worker_root.get(), "getRegistrations",
+            js_service_worker_get_registrations);
+
         navigator_root.set(js_new_object());
         dom_realm_set_cstr(navigator_root.get(), "clipboard", clipboard_root.get());
         dom_realm_set_cstr(navigator_root.get(), "permissions", permissions_root.get());
+        dom_realm_set_cstr(navigator_root.get(), "serviceWorker", service_worker_root.get());
         dom_realm_set_cstr(navigator_root.get(), "platform", make_str("MacIntel"));
         dom_realm_set_cstr(navigator_root.get(), "userAgent", make_str("Lambda/Headless (Macintosh)"));
         // Browser capability probes call appName before inspecting SVG support;

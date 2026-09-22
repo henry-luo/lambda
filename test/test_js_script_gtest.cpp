@@ -558,6 +558,220 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function squareSum(limit) { "
+        "  var total = 0; "
+        "  for (var index = 0; index < limit; index = index + 1) { "
+        "    total = total + index * index; "
+        "  } "
+        "  return total; "
+        "} "
+        "squareSum(3); squareSum(4); squareSum;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-satellite.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    ASSERT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+    ASSERT_NE(js_function_get_ptr(function_item), nullptr);
+
+    Item limit = flt2it(5.0);
+    Item result = js_call_function(function_item, make_js_undefined(), &limit, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function advance(delta) { \"use strict\"; "
+        "this.count = this.count + delta; return this.count; } "
+        "var receiver = { count: 1, advance: advance }; "
+        "receiver.advance(2); receiver.advance(3); advance;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-this-property.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item receiver = js_get_key_default(js_get_global_this(),
+        js_make_string("receiver"));
+    ASSERT_EQ(get_type_id(receiver), LMD_TYPE_MAP);
+    EXPECT_EQ(js_get_key_default(receiver, js_make_string("count")).item,
+        flt2it(6.0).item);
+
+    Item delta = flt2it(4.0);
+    Item result = js_call_function(function_item, receiver, &delta, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(10.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "var multiply = function(value) { "
+        "var result = value * 3; return result; }; "
+        "multiply(2); multiply(3); multiply;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-function-expression.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item value = flt2it(7.0);
+    Item result = js_call_function(function_item, make_js_undefined(), &value, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(21.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function grow(seed, delta) { "
+        "var state = { nested: { count: seed } }; "
+        "state.nested.count = state.nested.count + delta; "
+        "return state.nested.count; } "
+        "grow(1, 2); grow(3, 4); grow;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-local-object-property-chain.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {flt2it(8.0), flt2it(6.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(14.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function pair(left, right) { return [left, right]; } "
+        "pair(1, 2); pair(3, 4); pair;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-array-literal.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {flt2it(8.0), flt2it(6.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, flt2it(8.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 1).item, flt2it(6.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function read(object, key) { return object[key]; } "
+        "var values = { count: 9 }; "
+        "read(values, 'count'); read(values, 'count'); read;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-computed-property-pinned.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item values = js_get_key_default(js_get_global_this(),
+        js_make_string("values"));
+    Item args[] = {values, js_make_string("count")};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(9.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function materialize(key, value) { "
+        "return { [key = key + value]: value = value + 1 }; } "
+        "materialize('count', 1); materialize('count', 2); materialize;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-computed-object-literal.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {js_make_string("count"), flt2it(5.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_get_key_default(result, js_make_string("count5")).item,
+        flt2it(6.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);
@@ -652,6 +866,20 @@ TEST(JsInterpreter, AutoPrebuildsStaticImportClosureAsAst) {
     EXPECT_EQ(after.mir_builds, before.mir_builds);
 }
 
+TEST(RuntimePrebuild, CleansWorkerModuleRegistry) {
+    Runtime worker = {};
+    runtime_init(&worker);
+    module_register_for_runtime(&worker, "temp/prebuild-worker-cleanup.ls",
+        "lambda", ItemNull, NULL);
+    ASSERT_NE(module_registry_first_for_runtime(&worker), nullptr);
+
+    runtime_cleanup_ast_prebuild_worker(&worker);
+
+    EXPECT_EQ(module_registry_first_for_runtime(&worker), nullptr);
+    EXPECT_EQ(worker.scripts, nullptr);
+    EXPECT_EQ(worker.loaded_script_index, nullptr);
+}
+
 TEST(JsJubeRuntime, DropsPrototypeRootsAcrossFreshRuntimes) {
     const char source[] = "hostobjDemo.create(40).bump(2);";
 
@@ -680,7 +908,7 @@ struct JsCommonAstBuildWaiter {
 static void* js_common_ast_build_waiter_main(void* opaque) {
     JsCommonAstBuildWaiter* waiter = (JsCommonAstBuildWaiter*)opaque;
     (void)js_common_ast_cache_begin_build(&waiter->build, waiter->source,
-        waiter->source_length, waiter->reference, false, false);
+        waiter->source_length, waiter->reference, false, false, false);
     return NULL;
 }
 
@@ -698,7 +926,7 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
 
     InputScriptBuildScope owner = {};
     ASSERT_EQ(js_common_ast_cache_begin_build(&owner, source,
-        sizeof(source) - 1, reference, false, false), INPUT_SCRIPT_BUILD_OWNER);
+        sizeof(source) - 1, reference, false, false, false), INPUT_SCRIPT_BUILD_OWNER);
     EXPECT_EQ(owner.kind, INPUT_SCRIPT_BUILD_AST);
 
     JsCommonAstBuildWaiter waiter = {source, sizeof(source) - 1, reference, {}};
@@ -730,7 +958,7 @@ TEST(JsInterpreter, SingleFlightsCommonAstTemplateBuild) {
         JsScript* script = js_script_adopt_transpiler(transpiler, &runtime,
             reference);
         published = script && js_common_ast_cache_admit(&runtime, script, source,
-            sizeof(source) - 1, reference, false, false);
+            sizeof(source) - 1, reference, false, false, false);
         if (!published && script) {
             runtime_free_script(&runtime, (Script*)script, true);
         }
@@ -1350,6 +1578,91 @@ TEST(JsInterpreter, LazyGlobalsPreserveOwnDescriptorsAndReplacements) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, PublishesWebStreamConstructorsToGlobalThis) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "var readable = new ReadableStream({}); "
+        "var writable = new WritableStream({}); "
+        "var transform = new TransformStream({}); "
+        "var encoder = new TextEncoderStream(); "
+        "var decoder = new TextDecoderStream(); "
+        "var piped = readable.pipeThrough(new TextEncoderStream()); "
+        "typeof ReadableStream === 'function' && "
+        "typeof WritableStream === 'function' && "
+        "typeof TransformStream === 'function' && "
+        "typeof TextEncoderStream === 'function' && "
+        "typeof TextDecoderStream === 'function' && "
+        "typeof readable.getReader === 'function' && "
+        "typeof readable.pipeTo === 'function' && "
+        "typeof readable.pipeThrough === 'function' && "
+        "typeof piped.getReader === 'function' && "
+        "typeof writable.getWriter === 'function' && "
+        "typeof transform.readable.getReader === 'function' && "
+        "typeof transform.writable.getWriter === 'function' && "
+        "typeof encoder.writable.getWriter === 'function' && "
+        "typeof decoder.readable.getReader === 'function';";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "web-stream-globals.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RetainsExternalClassicCallbackArgumentsAcrossUnits) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_ast_backend = true;
+
+    const char preamble_source[] = "var window = globalThis;";
+    JsPreambleState preamble = {};
+    uint64_t result_home = 0;
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir_preamble_len(&runtime,
+        preamble_source, sizeof(preamble_source) - 1,
+        "classic-preamble.js", &preamble, &result_home)));
+    uint32_t preamble_state_id = preamble.module_state_id;
+    ASSERT_TRUE(lambda_module_state_reserve_and_activate(
+        (uint32_t)preamble.module_var_count));
+    ASSERT_TRUE(lambda_module_state_copy_var_prefix(preamble_state_id,
+        lambda_active_module_state_id(), (uint32_t)preamble.module_var_count));
+
+    const char loader_source[] =
+        "var modules = { gitbook: 41 }; "
+        "window.require = function(items, callback) { "
+        "items = items.map(function(name) { "
+        "name = name.toLowerCase(); "
+        "if (!modules[name]) { throw new Error('unknown module'); } "
+        "return modules[name]; "
+        "}); "
+        "callback.apply(null, items); "
+        "};";
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+        loader_source, sizeof(loader_source) - 1,
+        "classic-loader.js", &preamble, &result_home)));
+
+    const char sync_source[] =
+        "if (typeof window !== 'undefined') { "
+        "var globalSyncTick = 1; "
+        "}";
+    ASSERT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+        sync_source, sizeof(sync_source) - 1,
+        "classic-global-sync.js", &preamble, &result_home)));
+
+    const char consumer_source[] =
+        "require(['gitbook'], function(value) { "
+        "globalThis.__cachedClassicResult = value + 1; "
+        "}); "
+        "if (globalThis.__cachedClassicResult !== 42) { "
+        "throw new Error('cached classic callback lost its argument'); "
+        "}";
+    EXPECT_FALSE(item_is_error(transpile_js_to_mir_with_preamble_len(&runtime,
+        consumer_source, sizeof(consumer_source) - 1,
+        "classic-consumer.js", &preamble, &result_home)));
+
+    preamble_state_destroy(&preamble);
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, RetainedTypedArrayAndPropertyHelpersKeepStrictnessAndIsolation) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1383,6 +1696,19 @@ TEST(JsInterpreter, RetainedTypedArrayAndPropertyHelpersKeepStrictnessAndIsolati
         runtime_reset_heap(&runtime);
         runtime_release_script_generation(&runtime, checkpoint, module_checkpoint);
     }
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, NativeHarnessSourceEntryInstallsTest262Helpers) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char source[] =
+        "assert.sameValue(typeof assert, 'function'); "
+        "assert.sameValue(typeof verifyProperty, 'function'); true;";
+    Item result = js_interp_execute_test262_source(&runtime, source,
+        sizeof(source) - 1, "native-harness.js", true, NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, ITEM_TRUE);
     runtime_cleanup(&runtime);
 }
 
@@ -1543,7 +1869,7 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
+TEST(JsInterpreter, SupportsModuleMetadataAndInlineDynamicImports) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
@@ -1559,14 +1885,258 @@ TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
         "globalThis.__interp_dynamic_counter = 0; "
         "import('./dep.mjs').then(function(ns) { "
         "globalThis.__interp_dynamic_counter = ns.counter; });";
+    runtime.js_document_base_url = "test/js/interp_esm/document.html";
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
     Item result = transpile_js_to_mir(&runtime, source,
-        "test/js/interp_esm/dynamic.js", NULL);
+        "<inline-script-0>", NULL);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(result));
     Item dynamic_value = js_get_key_default(js_get_global_this(),
         js_make_string("__interp_dynamic_counter"));
+    EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
+        nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, OrdersDynamicImportsThroughTopLevelAwaitDependencies) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { gate, aStarted, bStarted } from './tla-order-setup.mjs'; "
+        "globalThis.__interp_tla_order = ''; "
+        "const imports = Promise.all(["
+        "bStarted.promise.then(() => import('./tla-order-a.mjs').finally(() => "
+        "globalThis.__interp_tla_order += 'A')).catch(() => {}), "
+        "import('./tla-order-b.mjs').finally(() => "
+        "globalThis.__interp_tla_order += 'B').catch(() => {})]); "
+        "Promise.all([aStarted.promise, bStarted.promise]).then(gate.resolve); "
+        "imports.then(() => globalThis.__interp_tla_order += '!');";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item result = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/tla-order-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item order = js_get_key_default(js_get_global_this(),
+        js_make_string("__interp_tla_order"));
+    EXPECT_EQ(js_strict_equal(order, js_make_string("BA!")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, OrdersDynamicImportRejectionsThroughTopLevelAwaitDependencies) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { gate, aStarted, bStarted } from './tla-order-setup.mjs'; "
+        "globalThis.__interp_tla_rejection_order = ''; "
+        "const imports = Promise.all(["
+        "bStarted.promise.then(() => import('./tla-order-a.mjs').finally(() => "
+        "globalThis.__interp_tla_rejection_order += 'A')).catch(() => {}), "
+        "import('./tla-order-b.mjs').finally(() => "
+        "globalThis.__interp_tla_rejection_order += 'B').catch(() => {})]); "
+        "Promise.all([aStarted.promise, bStarted.promise]).then(() => "
+        "gate.reject('expected rejection')); "
+        "imports.then(() => globalThis.__interp_tla_rejection_order += '!');";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item result = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/tla-rejection-order-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item order = js_get_key_default(js_get_global_this(),
+        js_make_string("__interp_tla_rejection_order"));
+    EXPECT_EQ(js_strict_equal(order, js_make_string("BA!")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, SupportsTopLevelAwaitInModules) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "await 1;";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/top-level-await.mjs", NULL);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PublishesDestructuredModuleExports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "export const { check } = { check: false };";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/destructured-export.mjs", NULL);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("check")), (Item){.item = b2it(false)}).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PublishesAnonymousDefaultClassesAfterTopLevelAwait) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "function base() { return class {}; } "
+        "export default class extends base(await 1) {};";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/default-class-await.mjs", NULL);
+
+    char diagnostic[256] = {};
+    js_error_lane_format(namespace_obj, diagnostic, sizeof(diagnostic));
+    ASSERT_FALSE(item_is_error(namespace_obj)) << diagnostic;
+    EXPECT_EQ(get_type_id(js_get_key_default(namespace_obj,
+        js_make_string("default"))), LMD_TYPE_FUNC);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PublishesDefaultExpressionAfterTopLevelAwait) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "export default await 42;";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/default-expression-await.mjs", NULL);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("default")), flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResumesMultipleTopLevelAwaitsBeforePublishingExports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "export const first = await 1; "
+        "export default await Promise.resolve(42); "
+        "export const third = await 'done';";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/multiple-awaits.mjs", NULL);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj, js_make_string("first")),
+        flt2it(1.0)).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj, js_make_string("default")),
+        flt2it(42.0)).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj, js_make_string("third")),
+        js_make_string("done")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AwaitsDynamicImportOfSuspendedModule) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "const dependency = await import('./dynamic-tla-dependency.mjs'); "
+        "export default [dependency.first, dependency.default, dependency.third];";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/dynamic-tla-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item values = js_get_key_default(namespace_obj, js_make_string("default"));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(values, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(values, 1), flt2it(42.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(values, 2), js_make_string("done")).item,
+        b2it(true));
+    Item dependency = js_module_get(js_make_string(
+        "test/js/interp_esm/dynamic-tla-dependency.mjs"));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(dependency, js_make_string("default")),
+        flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RetainedAstModuleAwaitsDynamicImportOfSuspendedModule) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "const dependency = await import('./dynamic-tla-dependency.mjs'); "
+        "export default [dependency.first, dependency.default, dependency.third];";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/dynamic-tla-retained-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item values = js_get_key_default(namespace_obj, js_make_string("default"));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(values, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(values, 1), flt2it(42.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(values, 2), js_make_string("done")).item,
+        b2it(true));
+    Item dependency = js_module_get(js_make_string(
+        "test/js/interp_esm/dynamic-tla-dependency.mjs"));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(dependency, js_make_string("default")),
+        flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RejectsDynamicImportCoercionWithTheThrownValue) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+        "dynamic-import-bootstrap.js", NULL)));
+
+    Item rejected = js_dynamic_import(js_get_import_meta());
+    Item completion = js_await_sync(rejected);
+
+    ASSERT_TRUE(item_is_error(completion));
+    Item name = js_get_key_default(js_error_lane_payload(completion),
+        js_make_string("name"));
+    EXPECT_EQ(js_strict_equal(name, js_make_string("TypeError")).item, b2it(true));
+
+    const char module_source[] =
+        "import(import.meta).catch(function(error) { "
+        "globalThis.__interp_dynamic_error_name = error.name; });";
+    Item namespace_obj = js_interp_execute_es_module_source(&runtime, module_source,
+        sizeof(module_source) - 1, "dynamic-import-import-meta.mjs", NULL);
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item observed_name = js_get_key_default(js_get_global_this(),
+        js_make_string("__interp_dynamic_error_name"));
+    EXPECT_EQ(js_strict_equal(observed_name, js_make_string("TypeError")).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ModuleDynamicImportsResolveFromDocumentReference) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
+        "module-dynamic-import-setup.js", NULL)));
+
+    const char source[] =
+        "import('./dep.mjs').then(function(ns) { "
+        "globalThis.__module_dynamic_counter = ns.counter; });";
+    Item namespace_obj = transpile_js_module_to_mir(&runtime, source,
+        "test/js/interp_esm/document.html");
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item dynamic_value = js_get_key_default(js_get_global_this(),
+        js_make_string("__module_dynamic_counter"));
     EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
         nullptr);
@@ -3476,6 +4046,49 @@ TEST(JsInterpreter, ExecutesSupportedAsyncGeneratorForm) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, SuspendsAsyncGeneratorAwaitsBeforeYielding) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let order = []; async function* values() { order.push('start'); "
+        "let value = await Promise.resolve(1); order.push('after'); yield value; } "
+        "async function run() { let iterator = values(); let pending = iterator.next(); "
+        "order.push('sync'); let result = await pending; order.push('done'); "
+        "return [result.value, order.join(',')]; } run();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "async-generator-await-order.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1),
+        js_make_string("start,sync,after,done")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RejectsAsyncGeneratorYieldedPromises) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "async function* values() { yield Promise.reject('rejected value'); } "
+        "async function run() { try { await values().next(); return 'resolved'; } "
+        "catch (value) { return value; } } run();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "async-generator-yield-rejection.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, js_make_string("rejected value")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, IteratesAsyncGeneratorsWithForAwait) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -3493,6 +4106,68 @@ TEST(JsInterpreter, IteratesAsyncGeneratorsWithForAwait) {
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResumesAsyncGeneratorForAwaitHeadYield) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let target = {}; let count = 0; "
+        "async function* values() { "
+        "for await ([target[yield]] of [[33]]) { count += 1; } } "
+        "values();";
+    Item generator = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "async-generator-for-await-head-yield.js", NULL);
+
+    ASSERT_FALSE(item_is_error(generator));
+    Item first = js_await_sync_incremental(js_generator_next(generator,
+        make_js_undefined()));
+    ASSERT_FALSE(item_is_error(first));
+    EXPECT_EQ(js_iterator_result_value(first).item, ITEM_JS_UNDEFINED);
+    EXPECT_EQ(js_iterator_result_done(first).item, b2it(false));
+    JsGeneratorStateRecord* state = js_generator_get_ast_state(generator);
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->ast_replay_skip, 1);
+    Item second = js_await_sync_incremental(js_generator_next(generator,
+        js_make_string("key")));
+    ASSERT_FALSE(item_is_error(second));
+    EXPECT_EQ(js_iterator_result_value(second).item, ITEM_JS_UNDEFINED);
+    EXPECT_EQ(js_iterator_result_done(second).item, b2it(true));
+    EXPECT_EQ(state->ast_replay_skip, 1);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResumesSuspendedExpressionsWithoutRepeatingEffects) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let generatorCount = 0; function* generator() { return ++generatorCount + (yield 10); } "
+        "let iterator = generator(); let first = iterator.next(); let second = iterator.next(5); "
+        "let asyncCount = 0; async function asyncValue() { "
+        "return (++asyncCount === 1) ? await Promise.resolve(5) : 99; } "
+        "[first.value, second.value, second.done, generatorCount, asyncValue(), asyncCount];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "suspended-expression-replay.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(10.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(6.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 2).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 3), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 5), flt2it(1.0)).item,
+        b2it(true));
+
+    Item awaited = js_await_sync_incremental(js_elements_get_int(result, 4));
+    ASSERT_FALSE(item_is_error(awaited));
+    EXPECT_EQ(js_strict_equal(awaited, flt2it(5.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -4160,6 +4835,23 @@ TEST(JsInterpreter, RetainsPrivateClassIdentityForEscapedClosuresAcrossGc) {
     Item result = js_call_function(reader, make_js_undefined(), NULL, 0);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(7.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PublishesNavigatorServiceWorkerRegistrations) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var worker = navigator.serviceWorker; "
+        "typeof worker.getRegistrations === 'function' && "
+        "worker.getRegistrations() instanceof Promise;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "navigator-service-worker.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
 
     runtime_cleanup(&runtime);
 }

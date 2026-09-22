@@ -9,6 +9,7 @@
 #include "../../lib/byte_builder.h"
 #include "input.hpp"
 #include "../network/http_client.h"
+#include "../network/cookie_jar.h"
 #include "../network/enhanced_file_cache.h"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
@@ -19,6 +20,9 @@
 // Structure to hold response data
 typedef struct {
     ByteBuilder body;
+    CookieJar* cookie_jar;
+    CURL* curl;
+    const char* request_url;
 } HttpResponse;
 
 // HttpConfig is now defined in input.h
@@ -29,7 +33,8 @@ static HttpConfig default_http_config = {
     .max_redirects = 5,
     .user_agent = RADIANT_HTTP_CLIENT_USER_AGENT,
     .verify_ssl = true,
-    .enable_compression = true
+    .enable_compression = true,
+    .cookie_jar = NULL
 };
 
 // helper: configure the optional request body for methods that carry one
@@ -54,6 +59,24 @@ static size_t write_response_callback(void* contents, size_t size, size_t nmemb,
         return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
     }
     return total_size;
+}
+
+static size_t write_cookie_header_callback(char* buffer, size_t size, size_t nmemb,
+                                           HttpResponse* response) {
+    size_t header_size = size * nmemb;
+    if (!response || !response->cookie_jar || !response->request_url ||
+        !str_istarts_with_const(buffer, header_size, "set-cookie:")) {
+        return header_size;
+    }
+    const char* effective_url = response->request_url;
+    char* curl_url = NULL;
+    if (response->curl) curl_easy_getinfo(response->curl, CURLINFO_EFFECTIVE_URL, &curl_url);
+    if (curl_url && curl_url[0]) effective_url = curl_url;
+    char* header = mem_dup_n(buffer, header_size, MEM_CAT_NETWORK);
+    if (!header) return 0;
+    cookie_jar_store(response->cookie_jar, effective_url, header);
+    mem_free(header);
+    return header_size;
 }
 
 // Initialize libcurl (call once at startup)
@@ -98,12 +121,22 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
         curl_easy_cleanup(curl);
         return NULL;
     }
+    response.cookie_jar = config ? config->cookie_jar : NULL;
+    response.curl = curl;
+    response.request_url = url;
     CURLcode res;
 
     // Configure curl options
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    if (response.cookie_jar) {
+        // Feed the jar into curl's cookie engine so redirect hops are matched
+        // against each hop's URL instead of forwarding one raw Cookie header.
+        cookie_jar_import_curl(response.cookie_jar, curl);
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_cookie_header_callback);
+        curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response);
+    }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, config ? config->timeout_seconds : default_http_config.timeout_seconds);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, config ? config->max_redirects : default_http_config.max_redirects);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -158,6 +191,9 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
                 log_error("HTTP: Download failed for %s: %s", url, curl_easy_strerror(res));
                 break;
         }
+        if (response.cookie_jar && !cookie_jar_flush(response.cookie_jar)) {
+            log_error("HTTP: failed to persist response cookies");
+        }
         byte_builder_destroy(&response.body);
         curl_easy_cleanup(curl);
         return NULL;
@@ -169,6 +205,9 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     if (response_code >= 400) {
         log_error("HTTP: Server returned error %ld for %s", response_code, url);
+        if (response.cookie_jar && !cookie_jar_flush(response.cookie_jar)) {
+            log_error("HTTP: failed to persist response cookies");
+        }
         byte_builder_destroy(&response.body);
         curl_easy_cleanup(curl);
         return NULL;
@@ -193,6 +232,9 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
         *content_size = response.body.length;
     }
 
+    if (response.cookie_jar && !cookie_jar_flush(response.cookie_jar)) {
+        log_error("HTTP: failed to persist response cookies");
+    }
     curl_easy_cleanup(curl);
     return (char*)byte_builder_take(&response.body, NULL);
 }
@@ -249,6 +291,16 @@ static char* download_http_content_with_enhanced_cache(const char* url,
     if (out_cache_path) *out_cache_path = cache_path;
     else mem_free(cache_path);
     return content;
+}
+
+char* download_http_content_with_cookie_jar(const char* url, size_t* content_size,
+                                            CookieJar* cookie_jar,
+                                            char** effective_url) {
+    if (!cookie_jar) return download_http_content(url, content_size, NULL, effective_url);
+
+    HttpConfig config = default_http_config;
+    config.cookie_jar = cookie_jar;
+    return download_http_content(url, content_size, &config, effective_url);
 }
 
 // Download HTTP/HTTPS resource to the native cache and optionally return its path.
@@ -322,9 +374,31 @@ Input* input_from_http(const char* url, const char* type, const char* flavor,
 // Extended HTTP configuration for fetch operations
 // Note: FetchConfig and FetchResponse are defined in input.h
 
-// Callback to collect response headers
-static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchResponse* response) {
+typedef struct HttpFetchHeaderContext {
+    FetchResponse* response;
+    CookieJar* cookie_jar;
+    CURL* curl;
+    const char* request_url;
+} HttpFetchHeaderContext;
+
+// Callback to collect response headers and queue profile-cookie updates.
+static size_t header_callback(char* buffer, size_t size, size_t nitems, void* user_data) {
     size_t header_size = size * nitems;
+    HttpFetchHeaderContext* context = (HttpFetchHeaderContext*)user_data;
+    FetchResponse* response = context ? context->response : NULL;
+    if (!response) return 0;
+
+    if (context->cookie_jar && context->request_url &&
+        str_istarts_with_const(buffer, header_size, "set-cookie:")) {
+        const char* effective_url = context->request_url;
+        char* curl_url = NULL;
+        if (context->curl) curl_easy_getinfo(context->curl, CURLINFO_EFFECTIVE_URL, &curl_url);
+        if (curl_url && curl_url[0]) effective_url = curl_url;
+        char* cookie_header = mem_dup_n(buffer, header_size, MEM_CAT_NETWORK);
+        if (!cookie_header) return 0;
+        cookie_jar_store(context->cookie_jar, effective_url, cookie_header);
+        mem_free(cookie_header);
+    }
 
     // Skip status line and empty lines
     if (header_size < 3 || buffer[0] == '\r' || buffer[0] == '\n') {
@@ -410,6 +484,9 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         curl_easy_cleanup(curl);
         return NULL;
     }
+    HttpFetchHeaderContext header_context = {
+        response, config ? config->cookie_jar : NULL, curl, url
+    };
 
     CURLcode res;
 
@@ -418,7 +495,8 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
-    curl_easy_setopt(curl, CURLOPT_HEADERDATA, response);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_context);
+    if (header_context.cookie_jar) cookie_jar_import_curl(header_context.cookie_jar, curl);
 
     // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
@@ -477,6 +555,9 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     // Perform the request
     log_debug("HTTP: Fetching %s\n", url);
     res = curl_easy_perform(curl);
+    if (header_context.cookie_jar && !cookie_jar_flush(header_context.cookie_jar)) {
+        log_error("HTTP: failed to persist Fetch/XHR response cookies");
+    }
 
     if (res != CURLE_OK) {
         log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));

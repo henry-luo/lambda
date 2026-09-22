@@ -1,0 +1,7 @@
+{
+  "name": "external classic scripts publish UMD globals to later scripts",
+  "html": "test/ui/js_load_external_global_binding.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-result", "equals": "ready"}
+  ]
+}

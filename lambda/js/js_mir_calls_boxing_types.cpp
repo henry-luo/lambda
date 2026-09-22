@@ -845,6 +845,14 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_I64, MIR_new_int_op(mt->ctx, JM_JS_FACT(fc, formal_length)),
         MIR_T_I64, MIR_new_int_op(mt->ctx,
             jm_function_init_flags(fc, fn_node)));
+    TypeMap* instance_shape = jm_plain_function_instance_shape_for_function(mt,
+        fn_node);
+    if (instance_shape) {
+        jm_call_void_2(mt, "js_set_function_instance_shape",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx,
+                (int64_t)(uintptr_t)instance_shape));
+    }
 }
 
 // Publish a class's source in the callable carrier so Function.prototype

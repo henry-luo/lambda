@@ -161,6 +161,16 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
     return shell_exec("./lambda.exe", args, &options);
 }
 
+static ShellResult test_radiant_view_run_layout_timing(const char* page,
+                                                        const char* timing_path) {
+    const char* args[] = {
+        "./lambda.exe", "layout", page, "--timing-output", timing_path, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    return shell_exec("./lambda.exe", args, &options);
+}
+
 static void test_radiant_view_run_case(size_t index) {
     RadiantViewCaseResult* result = &g_radiant_view_results[index];
     const RadiantViewCase* view_case = &g_radiant_view_cases[index];
@@ -360,6 +370,36 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
     EXPECT_TRUE(test_radiant_view_profile_has_intrinsic_measurement(view_log));
 }
 
+TEST(RadiantViewTest, SkipsGlobalCascadeForLoadTimeInlineStyleWrites) {
+    const char* page = "test/ui/js_load_inline_style_no_recascade.html";
+    const char* timing_path = "./temp/test_radiant_view_inline_style_timing.jsonl";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    ShellResult shell_result = test_radiant_view_run_layout_timing(page, timing_path);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_full_recascade\":false"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_incremental_recascade\":false"));
+}
+
+TEST(RadiantViewTest, ReCascadesOnlyMutatedSubtreeForLoadTimeClassWrite) {
+    const char* page = "test/ui/js_load_class_mutation_subtree_recascade.html";
+    const char* timing_path = "./temp/test_radiant_view_class_mutation_timing.jsonl";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    ShellResult shell_result = test_radiant_view_run_layout_timing(page, timing_path);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_incremental_recascade\":true"));
+}
+
 TEST(RadiantViewTest, PreservesMarkerPropsDuringRetainedTableReflow) {
     test_radiant_view_expect_case(18);
 }
@@ -461,26 +501,57 @@ TEST(RadiantViewTest, DefersPrecommitGeometryReadInHostDrivenView) {
     shell_result_free(&shell_result);
 }
 
-TEST(RadiantViewTest, DefersCrossOriginIframeNavigationOutsideLayout) {
-    const char* page = "test/html/iframe_cross_origin_deferred.html";
-    const char* view_log = "./temp/test_radiant_view_cross_origin_iframe_log.txt";
+TEST(RadiantViewTest, RecoversTimedOutLoadScriptWithoutUnsafeBatchReset) {
+    const char* page = "test/ui/js_load_watchdog_recovery.html";
     ASSERT_TRUE(test_radiant_view_file_readable(page));
-    test_radiant_view_ensure_temp_dir();
 
     const ShellEnvEntry env[] = {
-        {"LAMBDA_LOG_FILE", view_log},
-        {"LAMBDA_LOG_LEVEL", "DEBUG"},
+        {"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "1"},
         {NULL, NULL},
     };
     ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_NE(nullptr, shell_result.stdout_buf);
+    EXPECT_NE(nullptr, strstr(shell_result.stdout_buf,
+                              "execute_document_scripts: JS execution timed out"));
+    EXPECT_NE(nullptr, strstr(shell_result.stdout_buf,
+                              "view command completed with result: 0"));
+    shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, ExecutesUmdBrowserGlobalWithoutImplicitAmdLoader) {
+    const char* page = "test/ui/js_load_commonjs_umd_global.html";
+    const char* events = "test/ui/js_load_commonjs_umd_global.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, nullptr);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, DefersCrossOriginIframeNavigationOutsideLayout) {
+    const char* page = "test/html/iframe_cross_origin_deferred.html";
+    const char* output = "./temp/test_radiant_view_cross_origin_iframe.svg";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    test_radiant_view_ensure_temp_dir();
+
+    const char* args[] = {
+        "./lambda.exe", "render", page, "-o", output, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
     ASSERT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
     shell_result_free(&shell_result);
 
+    // A remote frame must not prevent the parent document's first render.
     EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "iframe: deferring cross-origin navigation"));
-    EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "view command completed with result: 0"));
+        output, "The parent document must render before a remote frame navigates."));
 }
 
 TEST(RadiantViewTest, KeepsModuleCodeAliveAcrossBrowserTaskSync) {
@@ -552,6 +623,26 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
         timing_path, "\"script_cache_lookups\":0"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         timing_path, "\"script_cache_compiles\":0"));
+    // Local sources do not enter the network batch, but every timing record
+    // must expose the transport split used by remote documents.
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"script_source_prefetch_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"script_source_wait_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"script_source_read_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_recascade_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_handler_install_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_mutation_kind_mask\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"first_render_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"cleanup_ms\":"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"document_context_live_bytes\":"));
 }
 
 TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {

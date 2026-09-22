@@ -35,7 +35,7 @@ LangProfile js_profile = { "js", js_ast_publish_extension_facts,
 
 static InputScriptRequest js_common_ast_cache_request(const char* source,
         size_t source_length, const char* reference, bool strict,
-        bool typescript_profile) {
+        bool typescript_profile, bool module_parse) {
     const char* identity = reference ? reference : "<inline-js>";
     InputScriptRequest request = {};
     request.identity = identity;
@@ -51,6 +51,9 @@ static InputScriptRequest js_common_ast_cache_request(const char* source,
     request.backend = "ast";
     request.execution_mode = "ast-template";
     request.ast_abi = 1;
+    // A module grammar creates a different global scope graph even when the
+    // source text contains no import or export declaration.
+    request.module_mode = module_parse;
     return request;
 }
 
@@ -137,12 +140,12 @@ NamePool* js_script_execution_name_pool(JsScript* script) {
 
 JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
         size_t source_length, const char* reference, bool strict,
-        bool typescript_profile) {
+        bool typescript_profile, bool module_parse) {
     InputScriptCache* cache = input_manager_global_script_cache();
     if (!runtime || !source || !input_script_cache_ast_enabled(cache)) return NULL;
     InputCacheScope* scope = input_script_cache_open_scope(cache);
     InputScriptRequest request = js_common_ast_cache_request(source, source_length,
-        reference, strict, typescript_profile);
+        reference, strict, typescript_profile, module_parse);
     InputScriptLease* lease = input_script_cache_acquire(scope, &request);
     void* value = NULL;
     if (!lease || !input_script_cache_get_ast(lease, &value)) {
@@ -163,14 +166,14 @@ JsScript* js_common_ast_cache_lookup(Runtime* runtime, const char* source,
 
 InputScriptBuildClaim js_common_ast_cache_begin_build(InputScriptBuildScope* build,
         const char* source, size_t source_length, const char* reference,
-        bool strict, bool typescript_profile) {
+        bool strict, bool typescript_profile, bool module_parse) {
     InputScriptCache* cache = input_manager_global_script_cache();
     if (!source || !input_script_cache_ast_enabled(cache)) {
         input_script_build_scope_reset(build);
         return build ? build->state : INPUT_SCRIPT_BUILD_BYPASS;
     }
     InputScriptRequest request = js_common_ast_cache_request(source,
-        source_length, reference, strict, typescript_profile);
+        source_length, reference, strict, typescript_profile, module_parse);
     return input_script_build_scope_begin(build, cache, &request,
         INPUT_SCRIPT_BUILD_AST);
 }
@@ -182,13 +185,13 @@ void js_common_ast_cache_complete_build(InputScriptBuildScope* build,
 
 bool js_common_ast_cache_admit(Runtime* runtime, JsScript* script, const char* source,
         size_t source_length, const char* reference, bool strict,
-        bool typescript_profile) {
+        bool typescript_profile, bool module_parse) {
     InputScriptCache* cache = input_manager_global_script_cache();
     if (!runtime || !source || !input_script_cache_ast_enabled(cache) ||
             !js_common_ast_cache_eligible(script, typescript_profile)) return false;
     InputCacheScope* scope = input_script_cache_open_scope(cache);
     InputScriptRequest request = js_common_ast_cache_request(source, source_length,
-        reference, strict, typescript_profile);
+        reference, strict, typescript_profile, module_parse);
     InputScriptLease* lease = input_script_cache_acquire(scope, &request);
     void* existing = NULL;
     if (!lease || input_script_cache_get_ast(lease, &existing)) {

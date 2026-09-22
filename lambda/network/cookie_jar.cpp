@@ -3,17 +3,17 @@
 // Thread-safe storage, domain/path matching, persistence, public suffix checking.
 
 #include "cookie_jar.h"
+#include "radiant_state_store.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
 #include "../../lib/str.h"
 #include "../../lib/url.h"
 
+#include <curl/curl.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <ctype.h>
-#include <errno.h>
 #include <time.h>
 #ifdef _WIN32
 // strptime/timegm are POSIX functions not available on Windows — provide implementations
@@ -61,6 +61,37 @@ static void cookie_entry_free(CookieEntry* e) {
     mem_free(e->domain);
     mem_free(e->path);
     mem_free(e);
+}
+
+static RadiantStateCookie cookie_state_entry(const CookieEntry* entry) {
+    RadiantStateCookie state_entry = {};
+    if (!entry) return state_entry;
+    state_entry.name = entry->name;
+    state_entry.value = entry->value;
+    state_entry.domain = entry->domain;
+    state_entry.path = entry->path;
+    state_entry.expires = entry->expires;
+    state_entry.secure = entry->secure;
+    state_entry.http_only = entry->http_only;
+    state_entry.same_site = (int)entry->same_site;
+    state_entry.creation_time = entry->creation_time;
+    return state_entry;
+}
+
+static void cookie_state_queue_upsert(CookieJar* jar, const CookieEntry* entry) {
+    if (!jar || !jar->state_store || !entry) return;
+    RadiantStateCookie state_entry = cookie_state_entry(entry);
+    if (!radiant_state_store_queue_cookie_upsert(jar->state_store, &state_entry)) {
+        log_error("cookie_jar: failed to queue persistent cookie update");
+    }
+}
+
+static void cookie_state_queue_delete(CookieJar* jar, const CookieEntry* entry) {
+    if (!jar || !jar->state_store || !entry) return;
+    if (!radiant_state_store_queue_cookie_delete(jar->state_store, entry->name,
+                                                  entry->domain, entry->path)) {
+        log_error("cookie_jar: failed to queue persistent cookie deletion");
+    }
 }
 
 // Case-insensitive domain comparison
@@ -328,7 +359,35 @@ static CookieEntry* parse_set_cookie(const char* header, const char* request_url
 // Public API
 // ============================================================================
 
-CookieJar* cookie_jar_create(const char* storage_path) {
+static bool cookie_jar_load_state_entry(const RadiantStateCookie* state_entry,
+                                        void* user_data) {
+    CookieJar* jar = (CookieJar*)user_data;
+    if (!jar || !state_entry) return false;
+    CookieEntry* entry = (CookieEntry*)mem_calloc(1, sizeof(CookieEntry), MEM_CAT_NETWORK);
+    if (!entry) return false;
+    entry->name = mem_strdup(state_entry->name, MEM_CAT_NETWORK);
+    entry->value = mem_strdup(state_entry->value, MEM_CAT_NETWORK);
+    entry->domain = mem_strdup(state_entry->domain, MEM_CAT_NETWORK);
+    entry->path = mem_strdup(state_entry->path, MEM_CAT_NETWORK);
+    entry->expires = state_entry->expires;
+    entry->secure = state_entry->secure;
+    entry->http_only = state_entry->http_only;
+    entry->same_site = (SameSitePolicy)state_entry->same_site;
+    entry->creation_time = state_entry->creation_time;
+    if (!entry->name || !entry->value || !entry->domain || !entry->path) {
+        cookie_entry_free(entry);
+        return false;
+    }
+    jar_ensure_capacity(jar);
+    if (jar->count >= jar->capacity) {
+        cookie_entry_free(entry);
+        return false;
+    }
+    jar->entries[jar->count++] = entry;
+    return true;
+}
+
+CookieJar* cookie_jar_create(struct RadiantStateStore* state_store) {
     CookieJar* jar = (CookieJar*)mem_calloc(1, sizeof(CookieJar), MEM_CAT_NETWORK);
     if (!jar) return NULL;
 
@@ -336,25 +395,21 @@ CookieJar* cookie_jar_create(const char* storage_path) {
     jar->count = 0;
     jar->capacity = 0;
     pthread_mutex_init(&jar->lock, NULL);
-    jar->storage_path = storage_path ? mem_strdup(storage_path, MEM_CAT_NETWORK) : NULL;
+    jar->state_store = state_store;
 
-    // load persistent cookies from file if available
-    if (jar->storage_path) {
-        cookie_jar_load(jar);
+    if (jar->state_store && !radiant_state_store_load_cookies(jar->state_store,
+                                                               cookie_jar_load_state_entry, jar)) {
+        log_error("cookie_jar: failed to load profile cookies");
+        cookie_jar_destroy(jar);
+        return NULL;
     }
 
-    log_info("cookie_jar: created (storage: %s, loaded: %d cookies)",
-             jar->storage_path ? jar->storage_path : "none", jar->count);
+    log_info("cookie_jar: created from profile state (%d cookies)", jar->count);
     return jar;
 }
 
 void cookie_jar_destroy(CookieJar* jar) {
     if (!jar) return;
-
-    // save persistent cookies before destroying
-    if (jar->storage_path) {
-        cookie_jar_save(jar);
-    }
 
     pthread_mutex_lock(&jar->lock);
     for (int i = 0; i < jar->count; i++) {
@@ -366,8 +421,35 @@ void cookie_jar_destroy(CookieJar* jar) {
     pthread_mutex_unlock(&jar->lock);
 
     pthread_mutex_destroy(&jar->lock);
-    mem_free(jar->storage_path);
     mem_free(jar);
+}
+
+bool cookie_jar_flush(CookieJar* jar) {
+    return !jar || !jar->state_store || radiant_state_store_flush(jar->state_store);
+}
+
+void cookie_jar_import_curl(CookieJar* jar, void* curl_handle) {
+    CURL* curl = (CURL*)curl_handle;
+    if (!jar || !curl) return;
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
+    pthread_mutex_lock(&jar->lock);
+    time_t now = time(NULL);
+    for (int i = 0; i < jar->count; i++) {
+        CookieEntry* entry = jar->entries[i];
+        if (!entry || !entry->name || !entry->value || !entry->domain || !entry->path ||
+            (entry->expires > 0 && entry->expires <= now)) continue;
+        size_t line_size = strlen(entry->domain) + strlen(entry->path) +
+            strlen(entry->name) + strlen(entry->value) + 48;
+        char* line = (char*)mem_alloc(line_size, MEM_CAT_NETWORK);
+        if (!line) continue;
+        str_fmt(line, line_size, "%s\t%s\t%s\t%s\t%lld\t%s\t%s",
+            entry->domain, entry->domain[0] == '.' ? "TRUE" : "FALSE", entry->path,
+            entry->secure ? "TRUE" : "FALSE", (long long)entry->expires,
+            entry->name, entry->value);
+        curl_easy_setopt(curl, CURLOPT_COOKIELIST, line);
+        mem_free(line);
+    }
+    pthread_mutex_unlock(&jar->lock);
 }
 
 void cookie_jar_store(CookieJar* jar, const char* request_url,
@@ -419,6 +501,7 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
             if (strcmp(e->name, entry->name) == 0 &&
                 domain_eq(e->domain, entry->domain) &&
                 strcmp(e->path ? e->path : "/", entry->path ? entry->path : "/") == 0) {
+                cookie_state_queue_delete(jar, e);
                 cookie_entry_free(e);
                 jar->entries[i] = jar->entries[--jar->count];
                 break;
@@ -441,6 +524,7 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
             entry->creation_time = e->creation_time;  // preserve original creation time
             cookie_entry_free(e);
             jar->entries[i] = entry;
+            cookie_state_queue_upsert(jar, entry);
             pthread_mutex_unlock(&jar->lock);
             log_debug("cookie_jar: updated cookie '%s' for domain '%s'",
                       entry->name, entry->domain ? entry->domain : "?");
@@ -452,6 +536,7 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
     jar_ensure_capacity(jar);
     if (jar->count < jar->capacity) {
         jar->entries[jar->count++] = entry;
+        cookie_state_queue_upsert(jar, entry);
         log_debug("cookie_jar: stored cookie '%s' for domain '%s' (total: %d)",
                   entry->name, entry->domain ? entry->domain : "?", jar->count);
     } else {
@@ -461,10 +546,10 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
     pthread_mutex_unlock(&jar->lock);
 }
 
-char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
-                                       bool is_secure) {
+static char* cookie_jar_build_document_header(CookieJar* jar, const char* request_url) {
     if (!jar || !request_url) return NULL;
 
+    bool is_secure = str_istarts_with(request_url, strlen(request_url), "https:", 6);
     char* req_host = host_from_url(request_url);
     char* req_path = path_from_url(request_url);
     if (!req_host) {
@@ -488,6 +573,7 @@ char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
         if (e->expires > 0 && e->expires <= now) continue;
         // secure check
         if (e->secure && !is_secure) continue;
+        if (e->http_only) continue;
         // domain match
         if (!cookie_domain_matches(req_host, e->domain)) continue;
         // path match
@@ -513,6 +599,7 @@ char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
         CookieEntry* e = jar->entries[i];
         if (e->expires > 0 && e->expires <= now) continue;
         if (e->secure && !is_secure) continue;
+        if (e->http_only) continue;
         if (!cookie_domain_matches(req_host, e->domain)) continue;
         if (!path_matches(req_path, e->path)) continue;
 
@@ -538,6 +625,10 @@ char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
     return header;
 }
 
+char* cookie_jar_build_document_cookie(CookieJar* jar, const char* request_url) {
+    return cookie_jar_build_document_header(jar, request_url);
+}
+
 void cookie_jar_clear_expired(CookieJar* jar) {
     if (!jar) return;
     time_t now = time(NULL);
@@ -546,6 +637,7 @@ void cookie_jar_clear_expired(CookieJar* jar) {
     int removed = 0;
     for (int i = jar->count - 1; i >= 0; i--) {
         if (jar->entries[i]->expires > 0 && jar->entries[i]->expires <= now) {
+            cookie_state_queue_delete(jar, jar->entries[i]);
             cookie_entry_free(jar->entries[i]);
             jar->entries[i] = jar->entries[--jar->count];
             removed++;
@@ -565,6 +657,7 @@ void cookie_jar_clear_session(CookieJar* jar) {
     int removed = 0;
     for (int i = jar->count - 1; i >= 0; i--) {
         if (jar->entries[i]->expires == 0) {  // session cookie
+            cookie_state_queue_delete(jar, jar->entries[i]);
             cookie_entry_free(jar->entries[i]);
             jar->entries[i] = jar->entries[--jar->count];
             removed++;
@@ -582,6 +675,7 @@ void cookie_jar_clear_all(CookieJar* jar) {
 
     pthread_mutex_lock(&jar->lock);
     for (int i = 0; i < jar->count; i++) {
+        cookie_state_queue_delete(jar, jar->entries[i]);
         cookie_entry_free(jar->entries[i]);
     }
     jar->count = 0;
@@ -596,125 +690,4 @@ int cookie_jar_count(CookieJar* jar) {
     int c = jar->count;
     pthread_mutex_unlock(&jar->lock);
     return c;
-}
-
-// ============================================================================
-// Persistence — simple text format
-// Format: one cookie per line, tab-separated fields:
-//   domain\tpath\tsecure\texpires\tname\tvalue\thttponly\tsamesite
-// Lines starting with '#' are comments. Session cookies (expires=0) are not saved.
-// ============================================================================
-
-void cookie_jar_save(CookieJar* jar) {
-    if (!jar || !jar->storage_path) return;
-
-    pthread_mutex_lock(&jar->lock);
-
-    FILE* f = fopen(jar->storage_path, "w");
-    if (!f) {
-        log_error("cookie_jar: failed to save to %s: %s", jar->storage_path, strerror(errno));
-        pthread_mutex_unlock(&jar->lock);
-        return;
-    }
-
-    fprintf(f, "# Lambda Cookie Jar — RFC 6265\n");
-    fprintf(f, "# domain\tpath\tsecure\texpires\tname\tvalue\thttponly\tsamesite\n");
-
-    time_t now = time(NULL);
-#ifndef NDEBUG
-    int saved = 0;
-#endif
-    for (int i = 0; i < jar->count; i++) {
-        CookieEntry* e = jar->entries[i];
-        // skip session cookies and expired
-        if (e->expires == 0) continue;
-        if (e->expires <= now) continue;
-
-        fprintf(f, "%s\t%s\t%d\t%ld\t%s\t%s\t%d\t%d\n",
-                e->domain ? e->domain : "",
-                e->path ? e->path : "/",
-                e->secure ? 1 : 0,
-                (long)e->expires,
-                e->name ? e->name : "",
-                e->value ? e->value : "",
-                e->http_only ? 1 : 0,
-                (int)e->same_site);
-#ifndef NDEBUG
-        saved++;
-#endif
-    }
-
-    fclose(f);
-    pthread_mutex_unlock(&jar->lock);
-
-#ifndef NDEBUG
-    log_debug("cookie_jar: saved %d persistent cookies to %s", saved, jar->storage_path);
-#endif
-}
-
-void cookie_jar_load(CookieJar* jar) {
-    if (!jar || !jar->storage_path) return;
-
-    FILE* f = fopen(jar->storage_path, "r");
-    if (!f) return;  // no file yet — that's fine
-
-    char line[4096];
-    time_t now = time(NULL);
-    int loaded = 0;
-
-    while (fgets(line, sizeof(line), f)) {
-        // skip comments and empty lines
-        if (line[0] == '#' || line[0] == '\n' || line[0] == '\0') continue;
-
-        // strip trailing newline
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') line[--len] = '\0';
-        if (len > 0 && line[len - 1] == '\r') line[--len] = '\0';
-
-        // parse tab-separated: domain path secure expires name value httponly samesite
-        char* fields[8];
-        int field_count = 0;
-        char* tok = line;
-        for (int i = 0; i < 8 && tok; i++) {
-            fields[i] = tok;
-            char* tab = strchr(tok, '\t');
-            if (tab) {
-                *tab = '\0';
-                tok = tab + 1;
-            } else {
-                tok = NULL;
-            }
-            field_count++;
-        }
-
-        if (field_count < 6) continue;  // need at least domain/path/secure/expires/name/value
-
-        time_t expires = (time_t)strtol(fields[3], NULL, 10);
-        // skip expired
-        if (expires > 0 && expires <= now) continue;
-
-        CookieEntry* e = (CookieEntry*)mem_calloc(1, sizeof(CookieEntry), MEM_CAT_NETWORK);
-        e->domain = mem_strdup(fields[0], MEM_CAT_NETWORK);
-        e->path = mem_strdup(fields[1], MEM_CAT_NETWORK);
-        e->secure = (fields[2][0] == '1');
-        e->expires = expires;
-        e->name = mem_strdup(fields[4], MEM_CAT_NETWORK);
-        e->value = mem_strdup(fields[5], MEM_CAT_NETWORK);
-        e->http_only = (field_count > 6 && fields[6][0] == '1');
-        e->same_site = (field_count > 7) ? (SameSitePolicy)atoi(fields[7]) : SAME_SITE_LAX;
-        e->creation_time = now;
-
-        jar_ensure_capacity(jar);
-        if (jar->count < jar->capacity) {
-            jar->entries[jar->count++] = e;
-            loaded++;
-        } else {
-            cookie_entry_free(e);
-        }
-    }
-
-    fclose(f);
-    if (loaded > 0) {
-        log_info("cookie_jar: loaded %d persistent cookies from %s", loaded, jar->storage_path);
-    }
 }

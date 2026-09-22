@@ -2205,6 +2205,12 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
+    {"js_constructor_shape_field_is_initialized",
+     FPTR(js_constructor_shape_field_is_initialized),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_opt_trace_record", FPTR(js_opt_trace_record),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
@@ -2559,6 +2565,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_class_constructor", FPTR(js_set_class_constructor), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_prototype", FPTR(js_set_class_instance_prototype), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_instance_shape", FPTR(js_set_class_instance_shape), JIT_IMPORT_VOID_PRESERVES},
+    {"js_set_function_instance_shape", FPTR(js_set_function_instance_shape), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_class_superclass", FPTR(js_set_class_superclass), JIT_IMPORT_VOID_PRESERVES},
     {"js_get_class_superclass", FPTR(js_get_class_superclass)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property), JIT_IMPORT_VOID_PRESERVES},
@@ -3701,6 +3708,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // This existing-slot write excludes growth, holes, scalar homes, and
         // descriptor overlays before mutating direct packed storage.
         "js_array_set_existing_number_no_gc",
+        // Reads one reservation-mask bit on an already-rooted Map. It cannot
+        // allocate, dispatch guest code, or re-enter generated code.
+        "js_constructor_shape_field_is_initialized",
         // This read admits only a direct present own dense element through an
         // existing companion map; it rejects scalar homes, holes and numeric
         // descriptor overlays.

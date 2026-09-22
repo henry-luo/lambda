@@ -1,0 +1,8 @@
+{
+  "name": "Bootstrap UMD export reaches a following classic script",
+  "html": "test/ui/js_load_bootstrap_global_binding.html",
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-popper", "equals": "object"},
+    {"type": "assert_attribute", "target": {"selector": "#result"}, "attribute": "data-result", "equals": "object:object"}
+  ]
+}

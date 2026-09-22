@@ -110,6 +110,7 @@ static int download_progress_callback(void* clientp,
 // Context for header callback (captures Set-Cookie headers for cookie jar)
 typedef struct {
     CookieJar* jar;
+    CURL* curl;
     const char* request_url;
 } HeaderCallbackCtx;
 
@@ -127,7 +128,11 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, void* us
             len--;
         char* header_str = mem_dup_n(buffer, len, MEM_CAT_NETWORK);
 
-        cookie_jar_store(ctx->jar, ctx->request_url, header_str);
+        const char* effective_url = ctx->request_url;
+        char* curl_url = NULL;
+        if (ctx->curl) curl_easy_getinfo(ctx->curl, CURLINFO_EFFECTIVE_URL, &curl_url);
+        if (curl_url && curl_url[0]) effective_url = curl_url;
+        cookie_jar_store(ctx->jar, effective_url, header_str);
         mem_free(header_str);
     }
     return total;
@@ -230,27 +235,15 @@ bool network_download_resource(NetworkResource* res) {
     }
     
     // Phase 4: Cookie integration
-    struct curl_slist* custom_headers = NULL;
-    HeaderCallbackCtx header_ctx = {NULL, NULL};
+    HeaderCallbackCtx header_ctx = {NULL, NULL, NULL};
     CookieJar* jar = (res->manager) ? res->manager->cookie_jar : NULL;
     
     if (jar) {
-        // inject Cookie header from jar
-        bool is_secure = str_istarts_with_cstr(res->url, "https://");
-        char* cookie_value = cookie_jar_build_request_header(jar, res->url, is_secure);
-        if (cookie_value) {
-            // build "Cookie: name=val; name2=val2" header
-            size_t hdr_len = strlen(cookie_value) + 9;  // "Cookie: " + val + nul
-            char* cookie_hdr = (char*)mem_alloc(hdr_len, MEM_CAT_NETWORK);
-            snprintf(cookie_hdr, hdr_len, "Cookie: %s", cookie_value);
-            custom_headers = curl_slist_append(custom_headers, cookie_hdr);
-            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, custom_headers);
-            mem_free(cookie_hdr);
-            mem_free(cookie_value);
-        }
-
-        // set up header callback to capture Set-Cookie responses
+        // Use curl's cookie engine so each redirect re-evaluates the jar for
+        // its own URL instead of forwarding an origin's raw Cookie header.
+        cookie_jar_import_curl(jar, curl);
         header_ctx.jar = jar;
+        header_ctx.curl = curl;
         header_ctx.request_url = res->url;
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_ctx);
@@ -305,7 +298,6 @@ bool network_download_resource(NetworkResource* res) {
         res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
         byte_builder_destroy(&response.body);
-        if (custom_headers) curl_slist_free_all(custom_headers);
         curl_easy_cleanup(curl);
         return false;
     }
@@ -331,7 +323,6 @@ bool network_download_resource(NetworkResource* res) {
         res->error_message = mem_strdup(error_msg, MEM_CAT_NETWORK);
         
         byte_builder_destroy(&response.body);
-        if (custom_headers) curl_slist_free_all(custom_headers);
         curl_easy_cleanup(curl);
         return false;
     }
@@ -376,7 +367,6 @@ bool network_download_resource(NetworkResource* res) {
     }
     
     byte_builder_destroy(&response.body);
-    if (custom_headers) curl_slist_free_all(custom_headers);
     curl_easy_cleanup(curl);
     
     return true;

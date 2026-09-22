@@ -249,6 +249,8 @@ struct TypeMap;
 Item js_new_object(void);
 Item js_new_object_with_typemap(struct TypeMap* tm);
 Item js_new_literal_object_with_typemap(struct TypeMap* tm);
+int64_t js_constructor_shape_field_is_initialized(Item object,
+                                                   int64_t byte_offset);
 // A compiler-owned primitive object-literal recipe.  The recipe outlives the
 // MIR code that references it; every invocation still creates fresh strings
 // and a fresh ordinary object.
@@ -303,6 +305,7 @@ Item js_new_class_function(void);
 void js_set_class_constructor(Item class_function, Item constructor_body);
 void js_set_class_instance_prototype(Item class_function, Item prototype);
 void js_set_class_instance_shape(Item class_function, struct TypeMap* shape);
+void js_set_function_instance_shape(Item function, struct TypeMap* shape);
 void js_set_class_superclass(Item class_function, Item superclass);
 Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);
@@ -1084,6 +1087,9 @@ Item js_url_construct(Item input);
 Item js_url_construct_with_base(Item input, Item base);
 Item js_readable_stream_new(Item underlying_source);
 Item js_writable_stream_new(Item underlying_sink);
+Item js_transform_stream_new(Item transformer);
+Item js_text_encoder_stream_new(void);
+Item js_text_decoder_stream_new(Item encoding, Item options);
 
 // Symbol API
 // JS Symbols use the core pointer-backed LMD_TYPE_SYMBOL representation.
@@ -1201,6 +1207,8 @@ Item js_async_get_resolved(void);                // get prepared await promise
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
                                  Item this_val);
 Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
+Item js_async_context_create_module(struct JsScript* script, uint32_t module_state_id,
+                                    Item specifier);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1343,6 +1351,10 @@ Item js_module_get_awaited_target(Item specifier);
 void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
 Item js_p5_module_await(Item specifier, Item value);
 void js_module_record_evaluation_error(Item specifier, Item error);
+// An async module must reject its own evaluation promise before notifying
+// async importers, preserving leaf-to-root rejection reaction order.
+void js_module_record_async_evaluation_error(Item specifier, Item error,
+                                             Item completion_promise);
 Item js_module_get_evaluation_error(Item specifier);
 
 /* Js57 P7d: per-module TLA evaluation tracking. */
@@ -1350,8 +1362,10 @@ void js_module_mark_has_tla(Item specifier);
 int  js_module_get_has_tla(Item specifier);
 int  js_module_needs_async_settle(Item specifier);
 void js_tla_drain_pending_modules(void);
+void js_module_register_static_dependency(Item parent_specifier, Item dep_specifier);
 void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
 void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr);
+void js_module_set_deferred_async_frame(Item specifier, Item frame);
 int  js_module_pending_async_deps(Item specifier);
 void js_module_mark_post_await_pending(Item specifier);
 int  js_module_get_body_state(Item specifier);

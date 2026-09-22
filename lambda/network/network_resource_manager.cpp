@@ -453,8 +453,9 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     mgr->default_timeout_ms = 30000;  // 30 seconds per resource
     mgr->page_load_timeout_ms = 60000;  // 60 seconds total page load
     
-    // Phase 4: cookie jar for session management
-    mgr->cookie_jar = cookie_jar_create("./temp/cookies.dat");
+    // Cookie lifetime is profile-owned by BrowsingSession. A manager starts
+    // without a jar until its host attaches the borrowed session jar.
+    mgr->cookie_jar = NULL;
     
     log_debug("network: created resource manager (doc=%llu, nav=%llu, timeouts: per-resource=%dms, page=%dms)",
               (unsigned long long)mgr->document_id,
@@ -477,11 +478,7 @@ void resource_manager_destroy(NetworkResourceManager* mgr) {
         network_scheduler_wait_all(mgr->scheduler);
     }
     
-    // Phase 4: destroy cookie jar (saves persistent cookies to disk)
-    if (mgr->cookie_jar) {
-        cookie_jar_destroy(mgr->cookie_jar);
-        mgr->cookie_jar = NULL;
-    }
+    mgr->cookie_jar = NULL;
     
     // free all resources in hashmap
     if (mgr->resources) {
@@ -790,6 +787,12 @@ void resource_manager_schedule_repaint(NetworkResourceManager* mgr, struct DomEl
 // flush pending layout updates (called on main thread from render loop)
 void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
     if (!mgr) return;
+
+    // Curl workers only enqueue persistence commands. The document's main
+    // loop owns the SQLite connection and commits them at this hand-off.
+    if (mgr->cookie_jar && !cookie_jar_flush(mgr->cookie_jar)) {
+        log_error("network: failed to flush profile cookie state");
+    }
     
     pthread_mutex_lock(&mgr->mutex);
     
@@ -868,6 +871,12 @@ void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
     if (processor && processor->request_layout_update) {
         processor->request_layout_update(mgr, needs_reflow, needs_repaint);
     }
+}
+
+void resource_manager_set_cookie_jar(NetworkResourceManager* mgr,
+                                     CookieJar* cookie_jar) {
+    if (!mgr) return;
+    mgr->cookie_jar = cookie_jar;
 }
 
 // check if all resources loaded

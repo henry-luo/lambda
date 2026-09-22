@@ -43,9 +43,14 @@ struct gc_heap;
 void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
                                              struct gc_heap* gc);
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
+void js_interp_activation_replay_clear(JsSuspendedActivation* activation);
+void js_interp_activation_replay_trace(JsSuspendedActivation* activation,
+                                       gc_heap_t* gc);
 struct JsAsyncContextStateRecord;
 void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
 void js_interp_async_trace_continuations(JsAsyncContextStateRecord* state, gc_heap_t* gc);
+extern "C" Item js_interp_resume_module_async(JsAsyncContextStateRecord* state,
+                                               Item input);
 
 // Shared formatting buffer for the throw-with-format helpers. JS error
 // messages are bounded by construction; truncation is preferable to a heap
@@ -267,7 +272,7 @@ extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 static void js_set_prototype_fresh(Item object, Item prototype);
-static bool js_class_instance_shape_is_admissible(TypeMap* shape);
+static bool js_constructor_instance_shape_is_admissible(TypeMap* shape);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
 extern "C" bool js_promise_vmap_is(Item value);
@@ -2214,7 +2219,15 @@ extern "C" Item js_constructor_create_object(Item callee, Item new_target) {
     Rooted<Item> aux_one_root(roots, ItemNull);
     Rooted<Item> aux_two_root(roots, ItemNull);
     if (!roots.valid()) return ItemNull;
-    object_root.set(js_new_object());
+    JsFunction* constructor_fn = get_type_id(callee_root.get()) == LMD_TYPE_FUNC
+        ? (JsFunction*)callee_root.get().function : NULL;
+    // Only an unredirected ordinary source constructor owns this recipe. A
+    // bound wrapper or a distinct newTarget must retain generic allocation.
+    TypeMap* instance_shape = constructor_fn &&
+            target_root.get().item == callee_root.get().item
+        ? js_fn_code(constructor_fn)->instance_shape : NULL;
+    object_root.set(js_constructor_instance_shape_is_admissible(instance_shape)
+        ? js_new_literal_object_with_typemap(instance_shape) : js_new_object());
     TypeId callee_type = get_type_id(callee_root.get());
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee_root.get())) {
         // Bound construction substitutes the ultimate target only when the
@@ -3541,7 +3554,7 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
         }
         TypeMap* instance_shape = class_fn
             ? js_fn_class(class_fn)->instance_shape : NULL;
-        object_root.set(js_class_instance_shape_is_admissible(instance_shape)
+        object_root.set(js_constructor_instance_shape_is_admissible(instance_shape)
             ? js_new_literal_object_with_typemap(instance_shape) : js_new_object());
         // Subclass builtin detection: walk the prototype chain of instance_proto
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
@@ -3646,13 +3659,23 @@ extern "C" void js_set_class_constructor(Item class_function, Item constructor_b
 extern "C" void js_set_class_instance_shape(Item class_function,
         TypeMap* shape) {
     if (get_type_id(class_function) != LMD_TYPE_FUNC ||
-            !js_class_instance_shape_is_admissible(shape)) return;
+            !js_constructor_instance_shape_is_admissible(shape)) return;
     JsFunction* fn = (JsFunction*)class_function.function;
     if (!fn) return;
     JsClassData* klass = js_fn_class_ensure(fn);
     if (!klass) return;
     // The recipe belongs to the retained compiler Input, never to this class.
     klass->instance_shape = shape;
+}
+
+extern "C" void js_set_function_instance_shape(Item function, TypeMap* shape) {
+    if (get_type_id(function) != LMD_TYPE_FUNC ||
+            !js_constructor_instance_shape_is_admissible(shape)) return;
+    JsFunction* fn = (JsFunction*)function.function;
+    // Pending MIR functions already own their definition record. Do not make
+    // this post-finalization publication allocate across an unrooted boundary.
+    if (!fn || !fn->code) return;
+    fn->code->instance_shape = shape;
 }
 
 #define JS_SET_CLASS_ITEM(name, field) \
@@ -3919,7 +3942,7 @@ extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm) {
     return object;
 }
 
-static bool js_class_instance_shape_is_admissible(TypeMap* shape) {
+static bool js_constructor_instance_shape_is_admissible(TypeMap* shape) {
     if (!shape || !typemap_ptr_is_plausible(shape) ||
             !shape->is_transition_shared_shape || shape->js_meta ||
             shape->length <= 0 || shape->length > 16) {
@@ -3937,6 +3960,12 @@ static bool js_class_instance_shape_is_admissible(TypeMap* shape) {
         count++;
     }
     return count == shape->length && offset == shape->byte_size;
+}
+
+extern "C" int64_t js_constructor_shape_field_is_initialized(Item object,
+        int64_t byte_offset) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return 0;
+    return map_ctor_offset_is_reserved(object.map, byte_offset) ? 0 : 1;
 }
 
 // Forward declaration for prototype chain support
@@ -10225,6 +10254,7 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
 extern Item js_interp_create_generator(JsFunction*, Item*, int);
 extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
 extern Item js_interp_start_async_function(JsFunction*, Item*, int);
+extern bool js_interp_promote_function_if_hot(JsFunction*);
 
 // JC14 body entries. Each adapter owns only the ABI conversion its body shape
 // needs; js_function_select_body_entry chooses one per callee at finalization.
@@ -14333,6 +14363,27 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
             js_fn_body_kind(fn) != JS_FUNCTION_BODY_AST))) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
+    }
+
+    // A definition record is shared by closures. If a sibling predates its
+    // P2 publication, refresh only this call boundary to the already-retained
+    // satellite; no AST activation is resumed or transferred.
+    if (construct_new_target.item == 0 && fn && fn->code &&
+            fn->code->p2_promotion.state == FN_PROMOTION_COMPILED &&
+            (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) == 0 &&
+            !js_function_promote_ast_body(fn,
+                fn->code->p2_promotion.boxed_entry)) {
+        log_error("js-p2: failed to refresh promoted definition");
+        return ItemError;
+    }
+
+    // JSI18/D8.1.3: only an ordinary entry may replace the boxed AST body.
+    // The kernel already roots the callee and actual span, so compilation may
+    // allocate without exposing unrooted call operands to the collector.
+    if (construct_new_target.item == 0 &&
+            js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST &&
+            js_interp_promote_function_if_hot(fn)) {
+        ast_direct = false;
     }
 
     bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
@@ -28024,6 +28075,7 @@ static void js_suspended_activation_gc_trace(
     gc_mark_item(gc, activation->ast_function.item);
     gc_mark_item(gc, activation->ast_arguments.item);
     gc_mark_item(gc, activation->ast_replay_values.item);
+    js_interp_activation_replay_trace((JsSuspendedActivation*)activation, gc);
     if (activation->ast_function_env) {
         gc_mark_object_ptr(gc, activation->ast_function_env);
     }
@@ -28041,6 +28093,7 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     gc_mark_item(gc, gen->private_home_class.item);
     gc_mark_item(gc, gen->delegate.item);
     gc_mark_item(gc, gen->ast_this.item);
+    gc_mark_item(gc, gen->ast_await_replay_values.item);
     gc_mark_item(gc, gen->ast_pending_resume_input.item);
     js_interp_generator_trace_continuations(gen, gc);
 }
@@ -28294,6 +28347,11 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
     if (item_is_error(gen->ast_replay_values)) return gen->ast_replay_values;
+    gen->ast_await_replay_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+        ? js_array_new(0) : ItemNull;
+    if (item_is_error(gen->ast_await_replay_values)) return gen->ast_await_replay_values;
+    gen->ast_await_replay_skip = 0;
+    gen->ast_waiting_for_await = false;
     gen->ast_loop_continuations = NULL;
     gen->ast_list_continuation = NULL;
     gen->ast_array_binding_continuations = NULL;
@@ -28550,6 +28608,108 @@ static Item js_generator_resume_after_delegate_error(Item generator, JsGenerator
     return js_generator_next(generator, js_gen_throw_signal(caught_value));
 }
 
+static Item js_generator_resume_return_signal(JsGenerator* gen, bool is_async,
+        Item value);
+
+static Item js_async_generator_delegate_abrupt_fulfilled(Item generator,
+        Item is_return_item, Item delegate_result) {
+    JsGenerator* gen = js_get_generator(generator);
+    if (!gen || !gen->is_async) {
+        Item error_lane = js_throw_type_error("invalid async generator");
+        return js_promise_reject(js_error_lane_payload(error_lane));
+    }
+    Item done_item = js_iter_result_is_done(delegate_result);
+    if (item_is_error(done_item)) {
+        return js_generator_resume_after_delegate_error(generator, gen, done_item);
+    }
+    Item value = js_iter_result_value(delegate_result);
+    if (item_is_error(value)) {
+        return js_generator_resume_after_delegate_error(generator, gen, value);
+    }
+    if (!js_is_truthy(done_item)) {
+        return js_async_generator_yield_result(value);
+    }
+
+    gen->delegate = ItemNull;
+    gen->state = gen->delegate_resume;
+    gen->delegate_resume = -1;
+    gen->delegate_idx = 0;
+    if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+        // The completed delegate occupies the parked AST yield* expression.
+        gen->ast_replay_skip++;
+    }
+    if (js_is_truthy(is_return_item)) {
+        if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+            return js_generator_next(generator, js_gen_return_signal(value));
+        }
+        return js_generator_resume_return_signal(gen, true, value);
+    }
+    return js_generator_next(generator, value);
+}
+
+static Item js_async_generator_delegate_step_fulfilled(Item generator,
+        Item delegate_result) {
+    return js_async_generator_delegate_abrupt_fulfilled(generator,
+        make_js_undefined(), delegate_result);
+}
+
+static Item js_async_generator_delegate_step_rejected(Item generator, Item reason) {
+    JsGenerator* gen = js_get_generator(generator);
+    if (!gen || !gen->is_async) return js_promise_reject(reason);
+    return js_generator_resume_after_delegate_error(generator, gen,
+        js_throw_value(reason));
+}
+
+static Item js_async_generator_await_delegate_step(Item generator,
+        JsGenerator* gen, Item delegate_result, bool is_return = false) {
+    if (!gen) return ItemError;
+    JS_ROOTS(roots, generator_root, generator, result_root, delegate_result,
+        promise_root, ItemNull, fulfilled_root, ItemNull, rejected_root, ItemNull);
+    gen->executing = false;
+    promise_root.set(js_promise_resolve(result_root.get()));
+    if (item_is_error(promise_root.get())) return promise_root.get();
+    if (is_return) {
+        Item bound_args[2] = {generator_root.get(), (Item){.item = ITEM_TRUE}};
+        fulfilled_root.set(js_bind_function(js_new_native_function(
+            js_async_generator_delegate_abrupt_fulfilled), make_js_undefined(),
+            bound_args, 2));
+    } else {
+        fulfilled_root.set(js_bind_function(js_new_native_function(
+            js_async_generator_delegate_step_fulfilled), make_js_undefined(),
+            &generator, 1));
+    }
+    rejected_root.set(js_bind_function(js_new_native_function(
+        js_async_generator_delegate_step_rejected), make_js_undefined(),
+        &generator, 1));
+    if (item_is_error(fulfilled_root.get()) || item_is_error(rejected_root.get())) {
+        return item_is_error(fulfilled_root.get()) ? fulfilled_root.get()
+            : rejected_root.get();
+    }
+    return js_promise_then(promise_root.get(), fulfilled_root.get(),
+        rejected_root.get());
+}
+
+static Item js_async_generator_continue_after_await(Item generator,
+        JsGenerator* gen, Item value, int64_t next_state) {
+    if (!gen) return ItemError;
+    JS_ROOTS(roots, generator_root, generator, value_root, value, promise_root,
+        ItemNull, fulfilled_root, ItemNull, rejected_root, ItemNull);
+    gen->state = next_state;
+    gen->executing = false;
+    promise_root.set(js_promise_resolve(value_root.get()));
+    if (item_is_error(promise_root.get())) return promise_root.get();
+    fulfilled_root.set(js_bind_function(js_new_native_function(js_generator_next),
+        make_js_undefined(), &generator, 1));
+    rejected_root.set(js_bind_function(js_new_native_function(js_generator_throw),
+        make_js_undefined(), &generator, 1));
+    if (item_is_error(fulfilled_root.get()) || item_is_error(rejected_root.get())) {
+        return item_is_error(fulfilled_root.get()) ? fulfilled_root.get()
+            : rejected_root.get();
+    }
+    return js_promise_then(promise_root.get(), fulfilled_root.get(),
+        rejected_root.get());
+}
+
 extern "C" Item js_generator_next(Item generator, Item input) {
     JsGenerator* gen = js_get_generator(generator);
     if (!gen) {
@@ -28593,6 +28753,12 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             return js_generator_resume_after_delegate_error(
                 generator_root.get(), gen, del_result);
         }
+        if (is_async) {
+            // AsyncGenerator yield* awaits each delegated next() result before
+            // it observes done or value, including async-iterator promises.
+            return js_async_generator_await_delegate_step(generator_root.get(), gen,
+                del_result);
+        }
         Item del_done_item = js_iter_result_is_done(del_result);
         if (item_is_error(del_done_item)) {
             gen->executing = false;
@@ -28632,21 +28798,41 @@ extern "C" Item js_generator_next(Item generator, Item input) {
 
     if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
         extern Item js_interp_resume_generator(Item, JsGeneratorStateRecord*, Item);
-        Item result = js_interp_resume_generator(generator_root.get(), gen,
-            input_root.get());
+        result_root.set(js_interp_resume_generator(generator_root.get(), gen,
+            input_root.get()));
         gen->executing = false;
-        if (item_is_error(result)) {
+        if (item_is_error(result_root.get())) {
             gen->done = true;
             gen->state = -1;
             js_interp_generator_clear_continuations(gen);
-            return is_async ? js_promise_reject(js_error_lane_payload(result)) : result;
+            return is_async ? js_promise_reject(js_error_lane_payload(result_root.get()))
+                : result_root.get();
         }
         if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
             // `yield*` installed a delegate without exposing an iterator
             // result. Re-enter the shared protocol with its initial next().
             return js_generator_next(generator_root.get(), make_js_undefined());
         }
-        return is_async ? js_promise_resolve(result) : result;
+        if (is_async && get_type_id(result_root.get()) == LMD_TYPE_ARRAY &&
+                result_root.get().array->length > 2 &&
+                get_type_id(result_root.get().array->items[2]) == LMD_TYPE_INT &&
+                it2i(result_root.get().array->items[2]) == 2) {
+            int64_t next_state = result_root.get().array->length > 1 &&
+                    get_type_id(result_root.get().array->items[1]) == LMD_TYPE_INT
+                ? it2i(result_root.get().array->items[1]) : 0;
+            return js_async_generator_continue_after_await(generator_root.get(), gen,
+                result_root.get().array->items[0], next_state);
+        }
+        if (!is_async) return result_root.get();
+        Item done = js_iter_result_is_done(result_root.get());
+        if (item_is_error(done)) return js_promise_reject(js_error_lane_payload(done));
+        if (!js_is_truthy(done)) {
+            value_root.set(js_iter_result_value(result_root.get()));
+            return item_is_error(value_root.get())
+                ? js_promise_reject(js_error_lane_payload(value_root.get()))
+                : js_async_generator_yield_result(value_root.get());
+        }
+        return js_promise_resolve(result_root.get());
     }
 
     // Call the state machine: fn(env, input, state) -> [value, next_state]
@@ -28690,7 +28876,8 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         // Check for yield* delegation marker (3-element array with flag)
         if (arr->length > 2 && get_type_id(arr->items[2]) == LMD_TYPE_INT && it2i(arr->items[2]) == 1) {
             // value is the iterable to delegate to, next_state is the resume state
-            Item iterator = js_get_iterator(value);
+            Item iterator = is_async ? js_get_async_iterator(value)
+                : js_get_iterator(value);
             if (item_is_error(iterator)) {
                 gen->delegate = ItemNull;
                 gen->state = next_state;
@@ -28710,17 +28897,9 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         }
 
         if (arr->length > 2 && get_type_id(arr->items[2]) == LMD_TYPE_INT && it2i(arr->items[2]) == 2) {
-            gen->state = next_state;
-            gen->executing = false;
             if (!is_async) return js_generator_next(generator, value);
-            Item promise = js_promise_resolve(value);
-            Item on_fulfilled = js_bind_function(
-                js_new_native_function(js_generator_next),
-                make_js_undefined(), &generator, 1);
-            Item on_rejected = js_bind_function(
-                js_new_native_function(js_generator_throw),
-                make_js_undefined(), &generator, 1);
-            return js_promise_then(promise, on_fulfilled, on_rejected);
+            return js_async_generator_continue_after_await(generator_root.get(), gen,
+                value, next_state);
         }
 
         if (next_state < 0) {
@@ -28795,6 +28974,10 @@ static Item js_generator_delegate_abrupt_call(Item generator, JsGenerator* gen,
     Item inner = js_call_function(delegate_fn, gen->delegate, args, 1);
     if (item_is_error(inner)) {
         return js_generator_resume_after_delegate_error(generator, gen, inner);
+    }
+    if (is_async) {
+        return js_async_generator_await_delegate_step(generator, gen, inner,
+            is_return);
     }
     TypeId itid = get_type_id(inner);
     if (itid != LMD_TYPE_MAP && itid != LMD_TYPE_ELEMENT && itid != LMD_TYPE_ARRAY) {
@@ -31493,6 +31676,7 @@ extern "C" void js_async_frame_map_gc_trace(Map* map, gc_heap_t* gc) {
     js_suspended_activation_gc_trace(ctx, gc);
     gc_mark_item(gc, ctx->this_val.item);
     gc_mark_item(gc, ctx->promise.item);
+    gc_mark_item(gc, ctx->ast_module_specifier.item);
     js_interp_async_trace_continuations(ctx, gc);
 }
 
@@ -31558,7 +31742,9 @@ static void js_async_drive(Item frame_item, Item input, int64_t state) {
     // allocation is unnecessary because the carrier itself never moves.
     Item prev_this = js_current_this;
     js_current_this = ctx->this_val;
-    if (get_type_id(ctx->ast_function) == LMD_TYPE_FUNC) {
+    if (ctx->ast_module_script) {
+        result_root.set(js_interp_resume_module_async(ctx, input_root.get()));
+    } else if (get_type_id(ctx->ast_function) == LMD_TYPE_FUNC) {
         result_root.set(js_interp_resume_async(ctx, input_root.get()));
     } else {
         result_root.set(js_invoke_mir_state(
@@ -31705,6 +31891,23 @@ extern "C" Item js_async_context_create_ast(Item function, Item arguments,
         Item this_val) {
     return js_async_context_create_current(NULL, NULL, 0, this_val, function,
         arguments);
+}
+
+extern "C" Item js_async_context_create_module(JsScript* script, uint32_t module_state_id,
+        Item specifier) {
+    Item frame = js_async_context_create_current(NULL, NULL, 0,
+        make_js_undefined(), ItemNull, ItemNull);
+    JS_ROOTS(roots, frame_root, frame);
+    JsAsyncContext* ctx = js_async_frame_from_item(frame_root.get());
+    if (!ctx) return frame_root.get();
+    ctx->ast_module_script = script;
+    ctx->ast_module_specifier = specifier;
+    // Module instantiation sealed this script's lexical slab. A nested import
+    // may be created while another module is active, so capture the target
+    // slab rather than the caller's current module state.
+    ctx->module_state_id = module_state_id;
+    ctx->ast_replay_values = js_array_new(0);
+    return item_is_error(ctx->ast_replay_values) ? ctx->ast_replay_values : frame_root.get();
 }
 
 // Start execution of an async state machine (initial call at state 0)
@@ -32186,8 +32389,9 @@ extern "C" void js_tla_enter_module(void) {
 // Forward declarations for module-vars/namespace state accessors defined in
 // js_runtime_state.cpp. Avoids including js_mir_internal.hpp here.
 
-static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
+static bool js_tla_flush_pending_modules(bool skip_pending_awaits) {
     typedef Item (*js_main_fn)(Context*);
+    bool fired = false;
     while (1) {
         ModuleDescriptor* best = NULL;
         int best_aeo = -1;
@@ -32211,6 +32415,7 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
             }
         }
         if (!best) break;
+        fired = true;
         ModuleDescriptor* m = best;
         log_debug("P7d: depth-0 drain firing post-await for '%s' (AEO=%d)",
             m->path ? m->path : "<module>", m->async_eval_order);
@@ -32247,6 +32452,69 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
             js_module_complete_tla_body(spec);
         }
     }
+    return fired;
+}
+
+// AST modules have a durable interpreter frame instead of MIR's deferred
+// function pointer. Start each frame only after every static async dependency
+// has completed; otherwise a live imported binding is observed in its TDZ.
+static bool js_tla_start_ready_ast_modules(void) {
+    bool started = false;
+    while (1) {
+        ModuleDescriptor* best = NULL;
+        Runtime* runtime = context ? context->runtime : NULL;
+        for (ModuleDescriptor* m = module_registry_first_for_runtime(runtime);
+                m; m = module_registry_next(m)) {
+            if (get_type_id(m->deferred_async_frame) == LMD_TYPE_NULL) continue;
+            if (m->body_executed || m->pending_async_deps > 0) continue;
+            if (get_type_id(m->evaluation_error) != LMD_TYPE_NULL) continue;
+            best = m;
+            break;
+        }
+        if (!best) break;
+        RootFrame roots(1);
+        Rooted<Item> frame_root(roots, best->deferred_async_frame);
+        best->deferred_async_frame = ItemNull;
+        started = true;
+        log_debug("P7d: starting deferred AST module '%s'",
+            best->path ? best->path : "<module>");
+        js_async_start(frame_root.get());
+    }
+    return started;
+}
+
+// A native continuation can complete an AST parent and vice versa. Iterate the
+// two durable representations until neither scheduler has newly-ready work.
+static void js_tla_drain_ready_modules(bool skip_pending_awaits) {
+    while (1) {
+        bool started_ast = js_tla_start_ready_ast_modules();
+        bool ran_mir = js_tla_flush_pending_modules(skip_pending_awaits);
+        if (!started_ast && !ran_mir) break;
+    }
+}
+
+static __thread bool js_tla_ready_drain_scheduled = false;
+
+static Item js_tla_ready_drain_microtask(void) {
+    js_tla_ready_drain_scheduled = false;
+    if (g_tla_draining_depth > 0) return make_js_undefined();
+    g_tla_draining_depth++;
+    js_tla_drain_ready_modules(false);
+    g_tla_draining_depth--;
+    return make_js_undefined();
+}
+
+// The completing async frame settles its carrier after it notifies parents.
+// Queue parent execution behind that settlement so dynamic-import reactions
+// preserve the dependency's observable fulfillment order.
+static void js_tla_schedule_ready_drain(void) {
+    if (js_tla_ready_drain_scheduled) return;
+    RootFrame roots(1);
+    Rooted<Item> callback_root(roots,
+        js_new_native_function(js_tla_ready_drain_microtask));
+    if (item_is_error(callback_root.get())) return;
+    js_tla_ready_drain_scheduled = true;
+    js_microtask_enqueue(callback_root.get());
 }
 
 extern "C" void js_tla_flush_for_dynamic_import(void) {
@@ -32255,7 +32523,7 @@ extern "C" void js_tla_flush_for_dynamic_import(void) {
     // module's deferred TLA body before resolving its namespace, otherwise an
     // already-settled `await` still exposes an empty export object (D7.2.2).
     g_tla_draining_depth++;
-    js_tla_flush_pending_modules(true);
+    js_tla_drain_ready_modules(true);
     g_tla_draining_depth--;
 }
 
@@ -32266,7 +32534,7 @@ static void js_tla_drain_post_await_modules(void) {
     js_opt_trace_record(JS_OPT_TLA_DRAIN, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     // Js57 P7d: module bodies are drained in async-evaluation order only after
     // their pending dependencies have completed.
-    js_tla_flush_pending_modules(false);
+    js_tla_drain_ready_modules(false);
 }
 
 extern "C" void js_tla_drain_pending_modules(void) {
@@ -32352,27 +32620,92 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     module->loading = false;
 }
 
-extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
-    ModuleDescriptor* m = js_module_find(specifier);
-    if (!m || get_type_id(error) == LMD_TYPE_NULL) return;
-    if (get_type_id(m->evaluation_error) != LMD_TYPE_NULL) return;
+static bool js_module_record_evaluation_error_local(ModuleDescriptor* module,
+        Item error) {
+    if (!module || get_type_id(error) == LMD_TYPE_NULL) return false;
+    if (get_type_id(module->evaluation_error) != LMD_TYPE_NULL) return false;
     Item observed = item_is_error(error) ? js_error_lane_payload(error) : error;
     // Module evaluation errors are cached with the module record so an
     // importer cannot continue after a failed dependency body.
-    m->evaluation_error = observed;
-    m->body_executed = 1;
-    m->post_await_pending = 0;
-    m->deferred_main_ptr = NULL;
+    module->evaluation_error = observed;
+    module->body_executed = 1;
+    module->post_await_pending = 0;
+    module->deferred_main_ptr = NULL;
+    module->loading = false;
+    if (get_type_id(module->deferred_async_frame) != LMD_TYPE_NULL) {
+        RootFrame roots(2);
+        Rooted<Item> frame_root(roots, module->deferred_async_frame);
+        Rooted<Item> promise_root(roots, js_async_get_promise(frame_root.get()));
+        module->deferred_async_frame = ItemNull;
+        js_promise_reject_existing(promise_root.get(), observed);
+    }
+    return true;
+}
+
+static void js_module_propagate_evaluation_error(ModuleDescriptor* module,
+        Item error) {
+    if (!module) return;
 
     // A rejected async dependency settles every importer with the same
     // completion; dropping this propagation lets the importer run as if the
     // dependency fulfilled, which is observable as a missing module throw.
-    for (int i = 0; i < m->async_parent_count; i++) {
-        ModuleDescriptor* parent = m->async_parents[i];
+    for (int i = 0; i < module->async_parent_count; i++) {
+        ModuleDescriptor* parent = module->async_parents[i];
         if (!parent) continue;
         if (parent->body_executed) continue;
         if (parent->pending_async_deps > 0) parent->pending_async_deps--;
-        js_module_record_evaluation_error(parent->specifier_item, observed);
+        js_module_record_evaluation_error(parent->specifier_item, error);
+    }
+}
+
+extern "C" void js_module_record_evaluation_error(Item specifier, Item error) {
+    RootFrame roots(2);
+    Rooted<Item> specifier_root(roots, specifier);
+    Rooted<Item> error_root(roots, error);
+    ModuleDescriptor* module = js_module_find(specifier_root.get());
+    if (!js_module_record_evaluation_error_local(module, error_root.get())) return;
+    Item observed = item_is_error(error_root.get())
+        ? js_error_lane_payload(error_root.get()) : error_root.get();
+    js_module_propagate_evaluation_error(module, observed);
+}
+
+static Item js_module_propagate_carrier_rejection(Item env_item, Item reason) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+    ModuleDescriptor* module = js_module_find(env[0]);
+    js_module_propagate_evaluation_error(module, reason);
+    return make_js_undefined();
+}
+
+extern "C" void js_module_record_async_evaluation_error(Item specifier,
+        Item error, Item completion_promise) {
+    RootFrame roots(4);
+    Rooted<Item> specifier_root(roots, specifier);
+    Rooted<Item> error_root(roots, error);
+    Rooted<Item> completion_root(roots, completion_promise);
+    ModuleDescriptor* module = js_module_find(specifier_root.get());
+    if (!js_module_record_evaluation_error_local(module, error_root.get())) return;
+
+    Item* env = js_alloc_env(1);
+    if (!env) {
+        js_module_propagate_evaluation_error(module, error_root.get());
+        return;
+    }
+    env[0] = specifier_root.get();
+    Rooted<Item> handler_root(roots,
+        js_new_native_closure(js_module_propagate_carrier_rejection, 1, env, 1));
+    if (item_is_error(handler_root.get())) {
+        js_module_propagate_evaluation_error(module, error_root.get());
+        return;
+    }
+    // The module carrier remains pending until js_async_drive consumes the
+    // returned rejection state. Its existing dynamic-import reactions are
+    // queued first; this observer then rejects async parents in leaf-to-root
+    // order (ECMA-262 AsyncModuleExecutionRejected).
+    Item attached = js_promise_then(completion_root.get(), ItemNull,
+        handler_root.get());
+    if (item_is_error(attached)) {
+        js_module_propagate_evaluation_error(module, error_root.get());
     }
 }
 
@@ -32458,6 +32791,96 @@ extern "C" void js_module_save_context(Item specifier, uint32_t module_state_id)
     m->saved_module_state_id = module_state_id;
 }
 
+static int js_module_append_descriptor(ModuleDescriptor*** entries, int* count,
+        int* capacity, ModuleDescriptor* entry, const char* edge_name) {
+    if (!entries || !count || !capacity || !entry) return -1;
+    for (int index = 0; index < *count; index++) {
+        if ((*entries)[index] == entry) return 0;
+    }
+    if (*count >= *capacity) {
+        int old_capacity = *capacity;
+        if (!lam::mem_grow_array(entries, capacity, *count + 1, 4,
+                MEM_CAT_JS_RUNTIME)) {
+            log_error("P7d: failed to grow %s edge list", edge_name);
+            return -1;
+        }
+        memset(*entries + old_capacity, 0,
+            (size_t)(*capacity - old_capacity) * sizeof(ModuleDescriptor*));
+    }
+    (*entries)[(*count)++] = entry;
+    return 1;
+}
+
+static __thread uint64_t js_module_static_visit_epoch = 1;
+
+static uint64_t js_module_next_static_visit_epoch(void) {
+    js_module_static_visit_epoch++;
+    if (js_module_static_visit_epoch != 0) return js_module_static_visit_epoch;
+    Runtime* runtime = context ? context->runtime : NULL;
+    for (ModuleDescriptor* module = module_registry_first_for_runtime(runtime);
+            module; module = module_registry_next(module)) {
+        module->static_visit_epoch = 0;
+    }
+    js_module_static_visit_epoch = 1;
+    return js_module_static_visit_epoch;
+}
+
+static bool js_module_static_reaches(ModuleDescriptor* source,
+        ModuleDescriptor* target, uint64_t epoch) {
+    if (!source) return false;
+    if (source == target) return true;
+    if (source->static_visit_epoch == epoch) return false;
+    source->static_visit_epoch = epoch;
+    for (int index = 0; index < source->static_dependency_count; index++) {
+        if (js_module_static_reaches(source->static_dependencies[index], target, epoch)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool js_module_same_static_component(ModuleDescriptor* first,
+        ModuleDescriptor* second) {
+    if (!first || !second) return false;
+    if (!js_module_static_reaches(first, second, js_module_next_static_visit_epoch())) {
+        return false;
+    }
+    return js_module_static_reaches(second, first, js_module_next_static_visit_epoch());
+}
+
+// The registry insertion order is the depth-first module-load order for a
+// component. Its first member is the evaluation root used by async parents.
+static ModuleDescriptor* js_module_mark_async_cycle(ModuleDescriptor* member) {
+    if (!member) return NULL;
+    Runtime* runtime = context ? context->runtime : NULL;
+    ModuleDescriptor* root = NULL;
+    for (ModuleDescriptor* candidate = module_registry_first_for_runtime(runtime);
+            candidate; candidate = module_registry_next(candidate)) {
+        if (js_module_same_static_component(member, candidate)) {
+            root = candidate;
+            break;
+        }
+    }
+    if (!root) return NULL;
+    for (ModuleDescriptor* candidate = module_registry_first_for_runtime(runtime);
+            candidate; candidate = module_registry_next(candidate)) {
+        if (js_module_same_static_component(member, candidate)) {
+            candidate->async_cycle_root = root;
+        }
+    }
+    return root;
+}
+
+extern "C" void js_module_register_static_dependency(Item parent_specifier,
+        Item dep_specifier) {
+    ModuleDescriptor* parent = js_module_find(parent_specifier);
+    ModuleDescriptor* dependency = js_module_find(dep_specifier);
+    if (!parent || !dependency || parent == dependency) return;
+    (void)js_module_append_descriptor(&parent->static_dependencies,
+        &parent->static_dependency_count, &parent->static_dependency_capacity,
+        dependency, "static dependency");
+}
+
 // Returns 1 if the module needs deferral — either it has TLA itself OR its
 // pending_async_deps counter is still positive (a TLA-transitive dep hasn't
 // settled yet). Used by jm_load_imports to decide whether an importer should
@@ -32469,6 +32892,10 @@ extern "C" int js_module_needs_async_settle(Item specifier) {
     if (m->has_tla && !m->body_executed) return 1;
     if (m->post_await_pending) return 1;
     if (m->pending_async_deps > 0) return 1;
+    // The first AST body step has not run yet, so it has not had a chance to
+    // mark HasTLA. Its carrier is nevertheless a pending evaluation edge.
+    if (m->loading && !m->initialized &&
+            get_type_id(m->awaited_target) != LMD_TYPE_NULL) return 1;
     return 0;
 }
 
@@ -32479,24 +32906,17 @@ extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_
     ModuleDescriptor* dep = js_module_find(dep_specifier);
     ModuleDescriptor* par = js_module_find(parent_specifier);
     if (!dep || !par || dep == par) return;  // ignore missing/self edges
+    if (js_module_same_static_component(dep, par)) {
+        (void)js_module_mark_async_cycle(dep);
+    } else if (dep->async_cycle_root && !dep->async_cycle_root->body_executed) {
+        // InnerModuleEvaluation waits on the cycle root for an importer outside
+        // the strongly connected component, not on the first leaf to settle.
+        dep = dep->async_cycle_root;
+    }
     // Avoid duplicate parent entries — the spec counts each requested dep at
     // most once per importer.
-    for (int i = 0; i < dep->async_parent_count; i++) {
-        if (dep->async_parents[i] == par) return;
-    }
-    if (dep->async_parent_count >= dep->async_parent_capacity) {
-        int old_capacity = dep->async_parent_capacity;
-        if (!lam::mem_grow_array(&dep->async_parents,
-                &dep->async_parent_capacity, dep->async_parent_count + 1, 4,
-                MEM_CAT_JS_RUNTIME)) {
-            log_error("P7d: failed to grow async parent list");
-            return;
-        }
-        memset(dep->async_parents + old_capacity, 0,
-               (size_t)(dep->async_parent_capacity - old_capacity) *
-                   sizeof(ModuleDescriptor*));
-    }
-    dep->async_parents[dep->async_parent_count++] = par;
+    if (js_module_append_descriptor(&dep->async_parents, &dep->async_parent_count,
+            &dep->async_parent_capacity, par, "async parent") != 1) return;
     par->pending_async_deps++;
     log_debug("P7d: module '%s' registered as async parent of '%s' (par pending=%d)",
         js_module_path(par), js_module_path(dep), par->pending_async_deps);
@@ -32512,6 +32932,14 @@ extern "C" void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr) 
     m->deferred_main_ptr = main_ptr;
     log_debug("P7d: module '%s' deferred_main_ptr=%p (pending=%d)",
         js_module_path(m), main_ptr, m->pending_async_deps);
+}
+
+extern "C" void js_module_set_deferred_async_frame(Item specifier, Item frame) {
+    ModuleDescriptor* m = js_module_find(specifier);
+    if (!m) return;
+    m->deferred_async_frame = frame;
+    log_debug("P7d: module '%s' deferred AST frame (pending=%d)",
+        js_module_path(m), m->pending_async_deps);
 }
 
 extern "C" int js_module_pending_async_deps(Item specifier) {
@@ -32574,7 +33002,7 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
     }
     m->body_executed = 1;
     m->post_await_pending = 0;
-    log_debug("P7d: module '%.*s' body_executed=1, notifying %d parents",
+    log_debug("P7d: module '%s' body_executed=1, notifying %d parents",
         js_module_path(m), m->async_parent_count);
 
     // First pass: just decrement parent dependency counts. Do not execute
@@ -32588,23 +33016,24 @@ extern "C" void js_module_complete_tla_body(Item specifier) {
         }
     }
 
-    // Drain the same AEO-ordered module scan used at module-exit. Nested calls
-    // only update dependency counters; the outer scan observes them.
+    // The async carrier resolves after this callback returns. A microtask puts
+    // ready importers behind that resolution, while nested scheduler calls
+    // already observe their own updated dependency counters.
     if (g_tla_draining_depth > 0) {
         mem_free(parents);
         return;
     }
-    g_tla_draining_depth++;
-    js_tla_flush_pending_modules(false);
-    g_tla_draining_depth--;
+    js_tla_schedule_ready_drain();
     mem_free(parents);
 }
 
 // P5's old 64-slot thunk bank made namespace capture a global mutable table.
 // A native closure owns the captured Item directly, so concurrent dynamic
 // imports no longer alias slots or require a fixed root range.
-JS_FORWARD_STATIC_EXPRESSION(Item, js_p5_dynamic_import_handler,
-    (Item namespace_obj), namespace_obj)
+static Item js_p5_dynamic_import_handler(Item env_item) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    return env ? env[0] : ItemError;
+}
 
 extern "C" Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj) {
     Item* env = js_alloc_env(1);
