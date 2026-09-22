@@ -40,7 +40,9 @@ Both surfaces ultimately read/write the **same OS pasteboard**, so they must sha
 ### Non-Goals (Phase 1)
 - Cross-origin Permissions Policy enforcement (no iframe in current `js --document` runner).
 - Native rich HTML / image clipboard interop on **Linux X11** (kept as plain-text fallback; macOS + Windows get full `text/html` and `image/png`).
-- Drag-and-drop — uses a related but distinct `DataTransfer` lifecycle; tracked separately in [Radiant_Design_Selection2.md](Radiant_Design_Selection2.md).
+- Drag-and-drop — uses a related but distinct `DataTransfer` lifecycle; its
+  selection and synthetic-input boundary is described in
+  [Radiant_Design_Selection.md](Radiant_Design_Selection.md).
 - Custom format unsanitized read/write where the OS pasteboard format is not addressable (the `*.tentative.https.html` tests are accepted as **expected-fail** in Phase 1).
 
 ---

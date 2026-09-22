@@ -6,32 +6,54 @@
 #include "../../lib/shell.h"
 #include "../../lib/thread_pool.h"
 
-#include <stdint.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct ModuleAstPrebuildNode {
+// Static import discovery must stay parser-accurate, but compiling a parent
+// before its children would make worker threads wait in load_script(). Keep
+// the dependencies as continuations instead: a completed child releases only
+// its own parents into the closure-wide pool.
+
+typedef struct ModuleAstPrebuildGraph ModuleAstPrebuildGraph;
+typedef struct ModuleAstPrebuildNode ModuleAstPrebuildNode;
+
+typedef enum ModuleAstPrebuildJobKind {
+    MODULE_AST_PREBUILD_DISCOVER,
+    MODULE_AST_PREBUILD_BUILD,
+} ModuleAstPrebuildJobKind;
+
+typedef struct ModuleAstPrebuildJob {
+    ModuleAstPrebuildGraph* graph;
+    ModuleAstPrebuildNode* node;
+    ModuleAstPrebuildJobKind kind;
+} ModuleAstPrebuildJob;
+
+struct ModuleAstPrebuildNode {
     const ModuleAstPrebuildProfile* profile;
     char* path;
     char* source;
-    ArrayList* dependencies;  // intptr_t(index + 1)
-    int depth;
-    bool discovering;
-    bool discovered;
-    bool depth_visiting;
-} ModuleAstPrebuildNode;
+    ArrayList* dependencies;  // ModuleAstPrebuildNode*
+    ArrayList* dependents;    // ModuleAstPrebuildNode*
+    uint32_t pending_dependencies;
+    bool is_root;
+    bool discovery_queued;
+    bool discovery_complete;
+    bool build_queued;
+    bool complete;
+    bool failed;
+    bool dependency_failed;
+};
 
-typedef struct ModuleAstPrebuildGraph {
+struct ModuleAstPrebuildGraph {
     const ModuleAstPrebuildProfiles* profiles;
     ArrayList* nodes;
+    ThreadPool* pool;
+    pthread_mutex_t mutex;
+    bool mutex_initialized;
+    int pool_workers;
     ModuleAstPrebuildStats stats;
-} ModuleAstPrebuildGraph;
-
-typedef struct ModuleAstPrebuildJob {
-    const ModuleAstPrebuildProfile* profile;
-    const char* path;
-    bool success;
-} ModuleAstPrebuildJob;
+};
 
 static bool module_ast_prebuild_enabled(void) {
     const char* value = shell_getenv("LAMBDA_MODULE_AST_PREBUILD");
@@ -39,12 +61,11 @@ static bool module_ast_prebuild_enabled(void) {
         strcmp(value, "false") != 0);
 }
 
-static int module_ast_prebuild_max_workers(void) {
+static int module_ast_prebuild_pool_workers(void) {
     const char* value = shell_getenv("LAMBDA_MODULE_AST_THREADS");
     int requested = value ? atoi(value) : 0;
-    if (requested < 0) return 0;
-    if (requested > 8) return 8;
-    return requested;
+    if (requested <= 0) return 8;
+    return requested > 8 ? 8 : requested;
 }
 
 static void module_ast_prebuild_free_specs(ArrayList* specs) {
@@ -60,59 +81,28 @@ static void module_ast_prebuild_free_node(ModuleAstPrebuildNode* node) {
     mem_free(node->path);
     mem_free(node->source);
     arraylist_free(node->dependencies);
+    arraylist_free(node->dependents);
     mem_free(node);
 }
 
 static void module_ast_prebuild_free_graph(ModuleAstPrebuildGraph* graph) {
-    if (!graph || !graph->nodes) return;
-    for (int index = 0; index < graph->nodes->length; index++) {
-        module_ast_prebuild_free_node((ModuleAstPrebuildNode*)graph->nodes->data[index]);
+    if (!graph) return;
+    if (graph->pool) {
+        tp_destroy(graph->pool);
+        graph->pool = NULL;
     }
-    arraylist_free(graph->nodes);
-    graph->nodes = NULL;
-}
-
-static ModuleAstPrebuildNode* module_ast_prebuild_node_at(
-        const ModuleAstPrebuildGraph* graph, int index) {
-    return graph && graph->nodes && index >= 0 && index < graph->nodes->length
-        ? (ModuleAstPrebuildNode*)graph->nodes->data[index] : NULL;
-}
-
-static int module_ast_prebuild_find_node(const ModuleAstPrebuildGraph* graph,
-        const ModuleAstPrebuildProfile* profile, const char* path) {
-    if (!graph || !graph->nodes || !profile || !path) return -1;
-    for (int index = 0; index < graph->nodes->length; index++) {
-        ModuleAstPrebuildNode* node = module_ast_prebuild_node_at(graph, index);
-        if (node && node->profile == profile && node->path &&
-                strcmp(node->path, path) == 0) return index;
+    if (graph->nodes) {
+        for (int index = 0; index < graph->nodes->length; index++) {
+            module_ast_prebuild_free_node(
+                (ModuleAstPrebuildNode*)graph->nodes->data[index]);
+        }
+        arraylist_free(graph->nodes);
+        graph->nodes = NULL;
     }
-    return -1;
-}
-
-static int module_ast_prebuild_add_node(ModuleAstPrebuildGraph* graph,
-        const ModuleAstPrebuildProfile* profile, char* path, char* source) {
-    if (!graph || !profile || !path || !source) {
-        mem_free(path);
-        mem_free(source);
-        return -1;
+    if (graph->mutex_initialized) {
+        pthread_mutex_destroy(&graph->mutex);
+        graph->mutex_initialized = false;
     }
-    ModuleAstPrebuildNode* node = (ModuleAstPrebuildNode*)mem_calloc(1,
-        sizeof(ModuleAstPrebuildNode), MEM_CAT_SYSTEM);
-    if (!node) {
-        mem_free(path);
-        mem_free(source);
-        return -1;
-    }
-    node->profile = profile;
-    node->path = path;
-    node->source = source;
-    node->depth = -1;
-    if (!arraylist_append(graph->nodes, node)) {
-        module_ast_prebuild_free_node(node);
-        return -1;
-    }
-    graph->stats.discovered_modules++;
-    return graph->nodes->length - 1;
 }
 
 static char* module_ast_prebuild_canonical_path(char* path) {
@@ -123,26 +113,246 @@ static char* module_ast_prebuild_canonical_path(char* path) {
     return canonical;
 }
 
-static bool module_ast_prebuild_append_dependency(ModuleAstPrebuildNode* parent,
-        int dependency_index) {
-    if (!parent || dependency_index < 0) return false;
-    if (!parent->dependencies) parent->dependencies = arraylist_new(4);
-    return parent->dependencies && arraylist_append(parent->dependencies,
-        (void*)(intptr_t)(dependency_index + 1));
+// graph->mutex must be held.
+static ModuleAstPrebuildNode* module_ast_prebuild_find_node_locked(
+        const ModuleAstPrebuildGraph* graph,
+        const ModuleAstPrebuildProfile* profile, const char* path) {
+    if (!graph || !graph->nodes || !profile || !path) return NULL;
+    for (int index = 0; index < graph->nodes->length; index++) {
+        ModuleAstPrebuildNode* node =
+            (ModuleAstPrebuildNode*)graph->nodes->data[index];
+        if (node && node->profile == profile && node->path &&
+                strcmp(node->path, path) == 0) return node;
+    }
+    return NULL;
 }
 
-static bool module_ast_prebuild_discover_node(ModuleAstPrebuildGraph* graph,
-        int node_index) {
-    ModuleAstPrebuildNode* node = module_ast_prebuild_node_at(graph, node_index);
-    if (!node || !node->profile || !node->source) return false;
-    if (node->discovered || node->discovering) return true;
-    node->discovering = true;
+// graph->mutex must be held. Takes ownership of path and source.
+static ModuleAstPrebuildNode* module_ast_prebuild_add_node_locked(
+        ModuleAstPrebuildGraph* graph, const ModuleAstPrebuildProfile* profile,
+        char* path, char* source, bool is_root) {
+    if (!graph || !profile || !path) {
+        mem_free(path);
+        mem_free(source);
+        return NULL;
+    }
+    ModuleAstPrebuildNode* node = (ModuleAstPrebuildNode*)mem_calloc(1,
+        sizeof(ModuleAstPrebuildNode), MEM_CAT_SYSTEM);
+    if (!node) {
+        mem_free(path);
+        mem_free(source);
+        return NULL;
+    }
+    node->profile = profile;
+    node->path = path;
+    node->source = source;
+    node->is_root = is_root;
+    if (!arraylist_append(graph->nodes, node)) {
+        module_ast_prebuild_free_node(node);
+        return NULL;
+    }
+    graph->stats.discovered_modules++;
+    return node;
+}
+
+static void module_ast_prebuild_notify_dependents(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node, bool success);
+static void module_ast_prebuild_activate_node(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node);
+
+static void module_ast_prebuild_finish_node(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node, bool success) {
+    if (!graph || !node) return;
+    bool notify = false;
+    pthread_mutex_lock(&graph->mutex);
+    if (!node->complete) {
+        node->complete = true;
+        node->failed = !success;
+        if (!node->is_root) {
+            if (success) graph->stats.built_modules++;
+            else graph->stats.failed_modules++;
+        }
+        notify = true;
+    }
+    pthread_mutex_unlock(&graph->mutex);
+    if (notify) module_ast_prebuild_notify_dependents(graph, node, success);
+}
+
+static void module_ast_prebuild_run_job(void* opaque);
+
+static void module_ast_prebuild_queue_job(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node, ModuleAstPrebuildJobKind kind) {
+    ModuleAstPrebuildJob* job = (ModuleAstPrebuildJob*)mem_calloc(1,
+        sizeof(ModuleAstPrebuildJob), MEM_CAT_SYSTEM);
+    if (!job) {
+        log_error("module-ast-prebuild: could not queue %s for %s",
+            kind == MODULE_AST_PREBUILD_DISCOVER ? "discovery" : "build",
+            node && node->path ? node->path : "<unknown>");
+        module_ast_prebuild_finish_node(graph, node, false);
+        return;
+    }
+    job->graph = graph;
+    job->node = node;
+    job->kind = kind;
+    if (!graph->pool || !tp_submit(graph->pool, module_ast_prebuild_run_job, job)) {
+        // A queue-allocation failure must not strand dependents. Running the
+        // isolated job here preserves the ordinary-loader fallback contract.
+        module_ast_prebuild_run_job(job);
+    }
+}
+
+static void module_ast_prebuild_queue_discovery(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node) {
+    bool queue = false;
+    pthread_mutex_lock(&graph->mutex);
+    if (!node->complete && !node->discovery_queued) {
+        node->discovery_queued = true;
+        queue = true;
+    }
+    pthread_mutex_unlock(&graph->mutex);
+    if (queue) module_ast_prebuild_queue_job(graph, node,
+        MODULE_AST_PREBUILD_DISCOVER);
+}
+
+static void module_ast_prebuild_queue_build(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node) {
+    module_ast_prebuild_queue_job(graph, node, MODULE_AST_PREBUILD_BUILD);
+}
+
+// Called after discovery or after a dependency notifies this node.
+static void module_ast_prebuild_activate_node(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node) {
+    bool queue_build = false;
+    bool fail = false;
+    pthread_mutex_lock(&graph->mutex);
+    if (!node->complete && node->discovery_complete &&
+            node->pending_dependencies == 0) {
+        if (node->dependency_failed) {
+            node->complete = true;
+            node->failed = true;
+            if (!node->is_root) graph->stats.failed_modules++;
+            fail = true;
+        } else if (!node->is_root && !node->build_queued) {
+            node->build_queued = true;
+            queue_build = true;
+        }
+    }
+    pthread_mutex_unlock(&graph->mutex);
+    if (fail) module_ast_prebuild_notify_dependents(graph, node, false);
+    if (queue_build) module_ast_prebuild_queue_build(graph, node);
+}
+
+static void module_ast_prebuild_dependency_finished(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* parent, bool success) {
+    if (!graph || !parent) return;
+    pthread_mutex_lock(&graph->mutex);
+    if (!parent->complete && parent->pending_dependencies > 0) {
+        parent->pending_dependencies--;
+        if (!success) parent->dependency_failed = true;
+    }
+    pthread_mutex_unlock(&graph->mutex);
+    module_ast_prebuild_activate_node(graph, parent);
+}
+
+static void module_ast_prebuild_notify_dependents(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node, bool success) {
+    if (!graph || !node) return;
+    ModuleAstPrebuildNode** dependents = NULL;
+    int count = 0;
+    pthread_mutex_lock(&graph->mutex);
+    count = node->dependents ? node->dependents->length : 0;
+    if (count > 0) {
+        dependents = (ModuleAstPrebuildNode**)mem_calloc((size_t)count,
+            sizeof(ModuleAstPrebuildNode*), MEM_CAT_SYSTEM);
+        if (dependents) {
+            for (int index = 0; index < count; index++) {
+                dependents[index] =
+                    (ModuleAstPrebuildNode*)node->dependents->data[index];
+            }
+        }
+    }
+    pthread_mutex_unlock(&graph->mutex);
+    if (count > 0 && !dependents) {
+        log_error("module-ast-prebuild: could not notify dependents of %s",
+            node->path ? node->path : "<unknown>");
+        return;
+    }
+    for (int index = 0; index < count; index++) {
+        module_ast_prebuild_dependency_finished(graph, dependents[index], success);
+    }
+    mem_free(dependents);
+}
+
+static ModuleAstPrebuildNode* module_ast_prebuild_request_node(
+        ModuleAstPrebuildGraph* graph, const ModuleAstPrebuildProfile* profile,
+        char* path) {
+    if (!graph || !profile || !path) {
+        mem_free(path);
+        return NULL;
+    }
+    path = module_ast_prebuild_canonical_path(path);
+    pthread_mutex_lock(&graph->mutex);
+    ModuleAstPrebuildNode* node = module_ast_prebuild_find_node_locked(graph,
+        profile, path);
+    if (!node) node = module_ast_prebuild_add_node_locked(graph, profile, path,
+        NULL, false);
+    else mem_free(path);
+    pthread_mutex_unlock(&graph->mutex);
+    if (node) module_ast_prebuild_queue_discovery(graph, node);
+    return node;
+}
+
+static bool module_ast_prebuild_add_dependency(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* parent, ModuleAstPrebuildNode* child) {
+    if (!graph || !parent || !child) return false;
+    bool child_complete = false;
+    bool child_success = false;
+    bool appended = false;
+    pthread_mutex_lock(&graph->mutex);
+    if (!parent->complete) {
+        if (!parent->dependencies) parent->dependencies = arraylist_new(4);
+        if (!child->dependents) child->dependents = arraylist_new(4);
+        appended = parent->dependencies && child->dependents &&
+            arraylist_append(parent->dependencies, child) &&
+            arraylist_append(child->dependents, parent);
+        if (appended) {
+            child_complete = child->complete;
+            child_success = !child->failed;
+            if (!child_complete) parent->pending_dependencies++;
+            else if (!child_success) parent->dependency_failed = true;
+        } else {
+            parent->dependency_failed = true;
+        }
+    }
+    pthread_mutex_unlock(&graph->mutex);
+    if (!appended) {
+        log_error("module-ast-prebuild: could not record dependency %s -> %s",
+            parent->path ? parent->path : "<unknown>",
+            child->path ? child->path : "<unknown>");
+        return false;
+    }
+    if (child_complete) module_ast_prebuild_activate_node(graph, parent);
+    return true;
+}
+
+static void module_ast_prebuild_discover_node(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node) {
+    if (!graph || !node || !node->profile) {
+        module_ast_prebuild_finish_node(graph, node, false);
+        return;
+    }
+    if (!node->source) node->source = read_text_file(node->path);
+    if (!node->source) {
+        log_error("module-ast-prebuild: could not read %s",
+            node->path ? node->path : "<unknown>");
+        module_ast_prebuild_finish_node(graph, node, false);
+        return;
+    }
     ArrayList* specifiers = node->profile->discover_imports
         ? node->profile->discover_imports(node->profile->context, node->source,
             strlen(node->source)) : NULL;
-    for (int spec_index = 0; specifiers && spec_index < specifiers->length;
-            spec_index++) {
-        const char* specifier = (const char*)specifiers->data[spec_index];
+    for (int index = 0; specifiers && index < specifiers->length; index++) {
+        const char* specifier = (const char*)specifiers->data[index];
         ModuleAstResolvedImport resolved = {};
         if (!specifier || !node->profile->resolve_import ||
                 !node->profile->resolve_import(node->profile->context, node->path,
@@ -157,108 +367,53 @@ static bool module_ast_prebuild_discover_node(ModuleAstPrebuildGraph* graph,
             mem_free(resolved.path);
             continue;
         }
-        resolved.path = module_ast_prebuild_canonical_path(resolved.path);
-        int dependency_index = module_ast_prebuild_find_node(graph,
+        ModuleAstPrebuildNode* child = module_ast_prebuild_request_node(graph,
             dependency_profile, resolved.path);
-        if (dependency_index < 0) {
-            char* source = read_text_file(resolved.path);
-            dependency_index = module_ast_prebuild_add_node(graph,
-                dependency_profile, resolved.path, source);
-            resolved.path = NULL;
-            if (dependency_index < 0) continue;
-        }
-        mem_free(resolved.path);
-        if (!module_ast_prebuild_append_dependency(node, dependency_index)) {
-            module_ast_prebuild_free_specs(specifiers);
-            node->discovering = false;
-            return false;
-        }
-        if (!module_ast_prebuild_discover_node(graph, dependency_index)) {
-            module_ast_prebuild_free_specs(specifiers);
-            node->discovering = false;
-            return false;
+        if (!child || !module_ast_prebuild_add_dependency(graph, node, child)) {
+            pthread_mutex_lock(&graph->mutex);
+            node->dependency_failed = true;
+            pthread_mutex_unlock(&graph->mutex);
         }
     }
     module_ast_prebuild_free_specs(specifiers);
-    node->discovering = false;
-    node->discovered = true;
-    return true;
+    pthread_mutex_lock(&graph->mutex);
+    if (!node->complete) node->discovery_complete = true;
+    pthread_mutex_unlock(&graph->mutex);
+    module_ast_prebuild_activate_node(graph, node);
 }
 
-static int module_ast_prebuild_depth(ModuleAstPrebuildGraph* graph, int node_index) {
-    ModuleAstPrebuildNode* node = module_ast_prebuild_node_at(graph, node_index);
-    if (!node) return 0;
-    if (node->depth >= 0) return node->depth;
-    if (node->depth_visiting) return 0;
-    node->depth_visiting = true;
-    int depth = 0;
-    for (int index = 0; node->dependencies && index < node->dependencies->length;
-            index++) {
-        int dependency_index = (int)(intptr_t)node->dependencies->data[index] - 1;
-        int dependency_depth = module_ast_prebuild_depth(graph, dependency_index);
-        if (dependency_depth + 1 > depth) depth = dependency_depth + 1;
-    }
-    node->depth_visiting = false;
-    node->depth = depth;
-    return depth;
+static void module_ast_prebuild_build_node(ModuleAstPrebuildGraph* graph,
+        ModuleAstPrebuildNode* node) {
+    bool success = node && node->profile && node->profile->build_ast && node->path &&
+        node->profile->build_ast(node->profile->context, node->path);
+    module_ast_prebuild_finish_node(graph, node, success);
 }
 
-static void module_ast_prebuild_job(void* opaque) {
+static void module_ast_prebuild_run_job(void* opaque) {
     ModuleAstPrebuildJob* job = (ModuleAstPrebuildJob*)opaque;
-    if (!job || !job->profile || !job->profile->build_ast || !job->path) return;
-    job->success = job->profile->build_ast(job->profile->context, job->path);
+    if (!job) return;
+    if (job->kind == MODULE_AST_PREBUILD_DISCOVER) {
+        module_ast_prebuild_discover_node(job->graph, job->node);
+    } else {
+        module_ast_prebuild_build_node(job->graph, job->node);
+    }
+    mem_free(job);
 }
 
-static void module_ast_prebuild_run_level(ModuleAstPrebuildGraph* graph,
-        int depth) {
-    int count = 0;
-    for (int index = 1; index < graph->nodes->length; index++) {
-        ModuleAstPrebuildNode* node = module_ast_prebuild_node_at(graph, index);
-        if (node && node->depth == depth) count++;
+static uint32_t module_ast_prebuild_mark_unresolved(ModuleAstPrebuildGraph* graph) {
+    uint32_t unresolved = 0;
+    pthread_mutex_lock(&graph->mutex);
+    for (int index = 0; graph->nodes && index < graph->nodes->length; index++) {
+        ModuleAstPrebuildNode* node =
+            (ModuleAstPrebuildNode*)graph->nodes->data[index];
+        if (!node || node->is_root || node->complete) continue;
+        node->complete = true;
+        node->failed = true;
+        graph->stats.failed_modules++;
+        unresolved++;
     }
-    if (count == 0) return;
-    ModuleAstPrebuildJob* jobs = (ModuleAstPrebuildJob*)mem_calloc((size_t)count,
-        sizeof(ModuleAstPrebuildJob), MEM_CAT_SYSTEM);
-    if (!jobs) {
-        graph->stats.failed_modules += (uint32_t)count;
-        return;
-    }
-    int next = 0;
-    for (int index = 1; index < graph->nodes->length; index++) {
-        ModuleAstPrebuildNode* node = module_ast_prebuild_node_at(graph, index);
-        if (!node || node->depth != depth) continue;
-        jobs[next].profile = node->profile;
-        jobs[next].path = node->path;
-        next++;
-    }
-    int workers = module_ast_prebuild_max_workers();
-    if (workers == 0 || workers > count) workers = count;
-    if (workers > 1) {
-        ThreadPool* pool = tp_create_with_stack(workers, 8 * 1024 * 1024);
-        if (pool) {
-            for (int index = 0; index < count; index++) {
-                if (!tp_submit(pool, module_ast_prebuild_job, &jobs[index])) {
-                    module_ast_prebuild_job(&jobs[index]);
-                }
-            }
-            tp_wait_all(pool);
-            tp_destroy(pool);
-            graph->stats.worker_batches++;
-        } else {
-            for (int index = 0; index < count; index++) {
-                module_ast_prebuild_job(&jobs[index]);
-            }
-        }
-    } else {
-        for (int index = 0; index < count; index++) {
-            module_ast_prebuild_job(&jobs[index]);
-        }
-    }
-    for (int index = 0; index < count; index++) {
-        if (jobs[index].success) graph->stats.built_modules++;
-        else graph->stats.failed_modules++;
-    }
-    mem_free(jobs);
+    pthread_mutex_unlock(&graph->mutex);
+    return unresolved;
 }
 
 bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
@@ -269,44 +424,50 @@ bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
     if (!module_ast_prebuild_enabled() || !profiles ||
             root_language >= MODULE_AST_LANGUAGE_COUNT || !root_path ||
             !profiles->profiles[root_language]) return false;
-    char* root_path_copy = mem_strdup(root_path, MEM_CAT_SYSTEM);
-    char* root_source_copy = root_source
-        ? mem_dup_n(root_source, root_source_length, MEM_CAT_SYSTEM)
-        : read_text_file(root_path);
-    if (!root_path_copy || !root_source_copy) {
-        mem_free(root_path_copy);
-        mem_free(root_source_copy);
-        return false;
-    }
+
     ModuleAstPrebuildGraph graph = {};
     graph.profiles = profiles;
     graph.nodes = arraylist_new(16);
-    if (!graph.nodes) {
-        mem_free(root_path_copy);
-        mem_free(root_source_copy);
-        return false;
-    }
-    root_path_copy = module_ast_prebuild_canonical_path(root_path_copy);
-    int root_index = module_ast_prebuild_add_node(&graph,
-        profiles->profiles[root_language], root_path_copy, root_source_copy);
-    if (root_index < 0 || !module_ast_prebuild_discover_node(&graph, root_index)) {
+    graph.pool_workers = module_ast_prebuild_pool_workers();
+    if (!graph.nodes || pthread_mutex_init(&graph.mutex, NULL) != 0) {
         module_ast_prebuild_free_graph(&graph);
         return false;
     }
-    int maximum_depth = 0;
-    for (int index = 1; index < graph.nodes->length; index++) {
-        int depth = module_ast_prebuild_depth(&graph, index);
-        if (depth > maximum_depth) maximum_depth = depth;
+    graph.mutex_initialized = true;
+    graph.pool = tp_create_with_stack(graph.pool_workers, 8 * 1024 * 1024);
+    if (graph.pool) graph.stats.worker_pool_runs++;
+    else log_warn("module-ast-prebuild: pool creation failed; loading serially");
+
+    char* root_path_copy = module_ast_prebuild_canonical_path(
+        mem_strdup(root_path, MEM_CAT_SYSTEM));
+    char* root_source_copy = root_source
+        ? mem_dup_n(root_source, root_source_length, MEM_CAT_SYSTEM) : NULL;
+    pthread_mutex_lock(&graph.mutex);
+    ModuleAstPrebuildNode* root = module_ast_prebuild_add_node_locked(&graph,
+        profiles->profiles[root_language], root_path_copy, root_source_copy, true);
+    pthread_mutex_unlock(&graph.mutex);
+    if (!root) {
+        module_ast_prebuild_free_graph(&graph);
+        return false;
     }
-    for (int depth = 0; depth <= maximum_depth; depth++) {
-        module_ast_prebuild_run_level(&graph, depth);
+
+    module_ast_prebuild_queue_discovery(&graph, root);
+    if (graph.pool) tp_wait_all(graph.pool);
+    uint32_t unresolved = module_ast_prebuild_mark_unresolved(&graph);
+    if (unresolved > 0) {
+        log_warn("module-ast-prebuild: root=%s skipped=%u unresolved dependency task(s)",
+            root_path, unresolved);
     }
+
     if (out_stats) *out_stats = graph.stats;
     if (graph.stats.discovered_modules > 1) {
-        log_info("module-ast-prebuild: root=%s discovered=%u built=%u failed=%u batches=%u",
+        log_info("module-ast-prebuild: root=%s discovered=%u built=%u failed=%u "
+            "pool_runs=%u workers=%d",
             root_path, graph.stats.discovered_modules - 1, graph.stats.built_modules,
-            graph.stats.failed_modules, graph.stats.worker_batches);
+            graph.stats.failed_modules, graph.stats.worker_pool_runs,
+            graph.pool ? tp_thread_count(graph.pool) : 0);
     }
+    bool root_ok = !root->failed;
     module_ast_prebuild_free_graph(&graph);
-    return true;
+    return root_ok;
 }

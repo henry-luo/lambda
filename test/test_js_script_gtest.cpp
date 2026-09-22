@@ -4230,6 +4230,31 @@ TEST(JsInterpreter, ResumesSuspendedExpressionsWithoutRepeatingEffects) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, DoesNotReplayCommaSequenceBeforeAwait) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class Editor { constructor(config) { this.starts = 0; this.afterStart = 0; let resolve; this.isReady = "
+        "new Promise((ready) => { resolve = ready; }); Promise.resolve().then(async () => { "
+        "this.config = config, this.init(), await this.start(), this.afterStart += 1, "
+        "await this.render(), resolve(this.starts + this.afterStart + this.config.value); }); } "
+        "init() { this.starts += 1; } "
+        "async start() { await [1, 2, 3].reduce((chain) => chain.then(async () => { "
+        "await Promise.resolve(); }), Promise.resolve()); } "
+        "render() { return Promise.resolve(); } } "
+        "let editor = new Editor({ value: 10 }); editor.isReady;";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "async-promise-callback-replay.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(12.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ClosesForAwaitIteratorAfterValueAwaitRejection) {
     Runtime runtime = {};
     runtime_init(&runtime);

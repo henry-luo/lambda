@@ -24,8 +24,7 @@ than discarded. The durable cross-cutting decisions from Editing.md that Editing
 adopts are listed in §4.2–§4.3, §8.4, §9, and §10.3.
 **Related docs:**
 [Radiant_Design_State.md](Radiant_Design_State.md),
-[Radiant_Design_Selection.md](Radiant_Design_Selection.md),
-[Radiant_Design_Selection2.md](Radiant_Design_Selection2.md).
+[Radiant_Design_Selection.md](../radiant/Radiant_Design_Selection.md).
 
 ---
 

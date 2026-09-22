@@ -4532,6 +4532,9 @@
           {
             "source": "test_input_script_cache_gtest.cpp",
             "name": "Input Script Cache Tests",
+            "additional_sources": [
+              "lambda/runtime/module_ast_prebuild.cpp"
+            ],
             "dependencies": [
               "lambda-data"
             ],
