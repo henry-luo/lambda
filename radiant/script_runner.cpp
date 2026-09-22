@@ -222,6 +222,7 @@ typedef enum JsScriptCompilePolicy {
 typedef enum JsScriptTaskStatus {
     JS_SCRIPT_TASK_READY,
     JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE,
+    JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE,
     JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED,
     JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED,
     JS_SCRIPT_TASK_SKIPPED_NOMODULE,
@@ -506,6 +507,13 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
     return resolved;
 }
 
+static bool script_source_is_html_document(const char* source) {
+    if (!source) return false;
+    while (*source && str_char_is_ascii_space(*source)) source++;
+    return strncasecmp(source, "<!doctype html", 14) == 0 ||
+           strncasecmp(source, "<html", 5) == 0;
+}
+
 /**
  * Load external script content from a resolved path or URL.
  *
@@ -684,6 +692,7 @@ static const char* script_task_status_name(JsScriptTaskStatus status) {
     switch (status) {
         case JS_SCRIPT_TASK_READY: return "ready";
         case JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE: return "skipped-unsupported-type";
+        case JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE: return "skipped-non-script-response";
         case JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED: return "skipped-external-disabled";
         case JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED: return "skipped-module-unsupported";
         case JS_SCRIPT_TASK_SKIPPED_NOMODULE: return "skipped-nomodule";
@@ -705,8 +714,10 @@ static bool script_task_timing_enabled() {
 }
 #endif
 
-static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 16u * 1024u * 1024u;
-static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 128u * 1024u * 1024u;
+// LambdaJS expands production bundles substantially while building their AST
+// and browser realm. Keep headless rendering below the memory envelope.
+static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 512u * 1024u;
+static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 1024u * 1024u;
 // Deferred and async scripts are not render-blocking in a browser. Bound their
 // pre-layout work so a large application bundle cannot delay the first window.
 static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
@@ -730,15 +741,15 @@ static size_t script_prelayout_defer_limit_bytes() {
 }
 
 static size_t script_external_compile_limit_bytes() {
-    // browsers do not enforce small source-byte caps; this guard only protects
-    // Radiant from pathological fixture input while allowing real libraries.
+    // This is a renderer admission budget, not a browser language restriction.
+    // Users may raise it explicitly when investigating a particular library.
     return script_byte_limit_from_env(
         "RADIANT_JS_EXTERNAL_SCRIPT_BYTES", JS_EXTERNAL_SCRIPT_BUDGET_BYTES);
 }
 
 static size_t script_total_compile_limit_bytes() {
-    // page script graphs can include many files, so total budget must be much
-    // larger than the per-file guard to stay browser-compatible.
+    // Several individually acceptable bundles can exhaust the same document
+    // realm, so bound their aggregate before runtime initialization.
     return script_byte_limit_from_env(
         "RADIANT_JS_TOTAL_SCRIPT_BYTES", JS_TOTAL_SCRIPT_BUDGET_BYTES);
 }
@@ -1467,6 +1478,16 @@ static void load_external_script_sources(JsScriptTaskCollection* collection,
             task->resolved_url, is_http, task->kind == JS_SCRIPT_TASK_MODULE,
             resource_manager, task->network_resource, timing);
         if (content) {
+            if (script_source_is_html_document(content)) {
+                // A changed or redirected script endpoint can return an HTML
+                // document with a successful status; never feed it to LambdaJS.
+                log_info("script_runner: skipping HTML response for external script: %s",
+                         task->resolved_url);
+                mem_free(content);
+                task->status = JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE;
+                collection->skipped_scripts++;
+                continue;
+            }
             task->source = content;
             task->source_len = strlen(content);
             collection->external_source_bytes += task->source_len;

@@ -46,6 +46,17 @@ static void direct_link_interp_import_binding(JsTranspiler* tp,
     }
 }
 
+static void direct_link_interp_export_bindings(JsTranspiler* tp) {
+    if (!tp) return;
+    for (JsInterpModuleBinding* binding = tp->interp_exports; binding;
+            binding = binding->next) {
+        if (binding->source || !binding->local_name) continue;
+        // An export follows its declared cell, never a nested same-spelled
+        // binding that happens to be written while the module is evaluating.
+        binding->entry = js_scope_lookup(tp, binding->local_name);
+    }
+}
+
 static void direct_define_import_bindings(JsTranspiler* tp,
         JsImportNode* import_node) {
     if (!tp || !import_node) return;
@@ -887,6 +898,7 @@ bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast) {
     tp->current_scope = global;
     ((JsProgramNode*)ast)->global_vars = global;
     direct_walk_node(tp, ast);
+    direct_link_interp_export_bindings(tp);
     direct_plan_scope_slots(tp, global);
     tp->current_scope = global;
     return !tp->has_errors;

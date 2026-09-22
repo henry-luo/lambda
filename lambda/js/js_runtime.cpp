@@ -8023,8 +8023,7 @@ extern "C" Item js_get_reference(Item object, Item key) {
         }
         return js_throw_type_error(msg);
     }
-    Item result = js_get_key_default(object, key);
-    return result;
+    return js_get_key_default(object, key);
 }
 JS_FORWARD_STATIC_RETURN(bool, js_is_class_object_item, (Item obj), js_is_class_constructor, (obj))
 

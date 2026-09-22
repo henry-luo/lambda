@@ -863,7 +863,12 @@ static JsInterpModuleBinding* js_interp_import_binding(JsScript* script,
         NameEntry* entry, String* local_name) {
     for (JsInterpModuleBinding* binding = script ? script->interp_imports : NULL;
             binding; binding = binding->next) {
-        if (entry && binding->entry == entry) return binding;
+        if (entry) {
+            if (binding->entry == entry) return binding;
+            continue;
+        }
+        // Parser recovery can leave an unbound identifier. Only that case can
+        // resolve an import by spelling; a local shadow must keep its binding.
         if (js_interp_name_matches(binding->local_name, local_name)) return binding;
     }
     return NULL;
@@ -1002,15 +1007,15 @@ static Item js_interp_read_import_binding(JsScript* script,
 }
 
 static void js_interp_publish_export_bindings(JsInterpFrame* frame,
-        String* local_name, Item value) {
-    if (!frame || !frame->script || !frame->script->is_es_module || !local_name) return;
+        NameEntry* entry, Item value) {
+    if (!frame || !frame->script || !frame->script->is_es_module || !entry) return;
     ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
         frame->script->reference);
     if (!module) return;
     Item namespace_obj = module->namespace_obj;
     for (JsInterpModuleBinding* binding = frame->script->interp_exports;
             binding; binding = binding->next) {
-        if (!binding->source && js_interp_name_matches(binding->local_name, local_name)) {
+        if (!binding->source && binding->entry == entry) {
             js_set_key_default(namespace_obj, js_interp_name_key(binding->export_name), value);
             js_interp_propagate_reexports(context ? context->runtime : NULL,
                 frame->script->reference, binding->export_name, value, 0);
@@ -1598,7 +1603,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         Item stored = js_interp_env_set_eval_binding(eval_env, key, value);
         if (item_is_error(stored)) return stored;
         if (js_eval_local_has_var_binding(key)) js_eval_local_export_var(key, value);
-        js_interp_publish_export_bindings(frame, name, value);
+        js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
     // `var`/parameter bindings may have been supplied by a previous direct
@@ -1607,7 +1612,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     if (!initialize && allow_eval_bindings && (!entry || !entry->is_const) &&
             js_eval_local_has_var_binding(key)) {
         js_eval_local_export_var(key, value);
-        js_interp_publish_export_bindings(frame, name, value);
+        js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
     if (!entry) {
@@ -1669,7 +1674,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
                 if (item_is_error(set_result)) return set_result;
             }
         }
-        js_interp_publish_export_bindings(frame, entry->name, value);
+        js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
     JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
@@ -1692,7 +1697,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     js_interp_env_slot_store(env, entry->slot, value);
     Item written = js_interp_write_arguments_param(frame, entry, value);
     if (item_is_error(written)) return written;
-    js_interp_publish_export_bindings(frame, entry->name, value);
+    js_interp_publish_export_bindings(frame, entry, value);
     return value;
 }
 

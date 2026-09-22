@@ -1513,11 +1513,21 @@ extern "C" Item js_permissions_query(Item desc) {
 }
 
 // Headless Radiant does not persist service-worker registrations, but the
-// Navigator API remains observable and feature probes expect a promise.
+// Navigator API remains observable and feature probes expect promises.
 static Item js_service_worker_get_registrations() {
     RootFrame roots(1);
     Rooted<Item> registrations_root(roots, js_array_new(0));
     return dom_realm_promise_resolve(registrations_root.get());
+}
+
+static Item js_service_worker_register(Item script_url, Item options) {
+    (void)script_url;
+    (void)options;
+    RootFrame roots(1);
+    // Keep registration side effects disabled in headless mode while giving
+    // browser feature-detection scripts the specified asynchronous result.
+    Rooted<Item> registration_root(roots, js_new_object());
+    return dom_realm_promise_resolve(registration_root.get());
 }
 
 // =============================================================================
@@ -1824,6 +1834,8 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         service_worker_root.set(js_new_object());
         js_clipboard_set_method(service_worker_root.get(), "getRegistrations",
             js_service_worker_get_registrations);
+        js_clipboard_set_method(service_worker_root.get(), "register",
+            js_service_worker_register);
 
         navigator_root.set(js_new_object());
         dom_realm_set_cstr(navigator_root.get(), "clipboard", clipboard_root.get());

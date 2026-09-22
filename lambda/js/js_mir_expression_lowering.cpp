@@ -57,6 +57,19 @@ static bool jm_capture_is_current_loop_lexical(JsMirTranspiler* mt,
 static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt,
         JsMirVarEntry* var, int slot);
 
+static void jm_resolve_static_script_specifier(JsMirTranspiler* mt,
+        String* specifier, char* out, int out_size) {
+    Runtime* runtime = js_current_runtime();
+    if (!runtime && mt && mt->tp) runtime = mt->tp->runtime;
+    // Inline scripts use synthetic labels, so their relative module targets
+    // must resolve from the containing document rather than the label.
+    if (!jm_resolve_document_module_path(runtime, mt ? mt->filename : NULL,
+            specifier->chars, (int)specifier->len, out, out_size)) {
+        jm_resolve_module_path(mt && mt->filename ? mt->filename : ".",
+            specifier->chars, (int)specifier->len, out, out_size);
+    }
+}
+
 static int jm_preserve_before_expression(JsMirTranspiler* mt, MIR_reg_t value,
         JsAstNode* following) {
     // The next expression may collect or resume in a new native activation.
@@ -7623,9 +7636,8 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                     if (lit->literal_type == AST_LITERAL_STRING && lit->value.string_value) {
                         // resolve the module path at transpile time
                         char resolved[512];
-                        jm_resolve_module_path(mt->filename ? mt->filename : ".",
-                            lit->value.string_value->chars, (int)lit->value.string_value->len,
-                            resolved, sizeof(resolved));
+                        jm_resolve_static_script_specifier(mt, lit->value.string_value,
+                            resolved, (int)sizeof(resolved));
                         MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
                         return jm_emit_call_item_value(mt, call,
                             jm_callr_1(mt, "js_require", MIR_T_I64, spec));
@@ -7651,11 +7663,9 @@ static MirValue jm_emit_call_expression(JsMirTranspiler* mt,
                 if (arg && arg->node_type == AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)arg;
                     if (lit->literal_type == AST_LITERAL_STRING && lit->value.string_value) {
-                        // static string — resolve module path at transpile time
                         char resolved[512];
-                        jm_resolve_module_path(mt->filename ? mt->filename : ".",
-                            lit->value.string_value->chars, (int)lit->value.string_value->len,
-                            resolved, sizeof(resolved));
+                        jm_resolve_static_script_specifier(mt, lit->value.string_value,
+                            resolved, (int)sizeof(resolved));
                         MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
                         return jm_emit_call_item_value(mt, call,
                             jm_callr_1(mt, "js_dynamic_import", MIR_T_I64, spec));

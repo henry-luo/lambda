@@ -171,6 +171,21 @@ static ShellResult test_radiant_view_run_layout_timing(const char* page,
     return shell_exec("./lambda.exe", args, &options);
 }
 
+static bool test_radiant_view_write_script_bytes(FILE* file, size_t bytes) {
+    const char statement[] = "var scriptBudgetPadding = 0;\n";
+    if (!file) return false;
+    size_t written = 0;
+    while (written < bytes) {
+        size_t remaining = bytes - written;
+        size_t chunk = remaining < sizeof(statement) - 1 ? remaining : sizeof(statement) - 1;
+        if (fwrite(statement, 1, chunk, file) != chunk) {
+            return false;
+        }
+        written += chunk;
+    }
+    return true;
+}
+
 static void test_radiant_view_run_case(size_t index) {
     RadiantViewCaseResult* result = &g_radiant_view_results[index];
     const RadiantViewCase* view_case = &g_radiant_view_cases[index];
@@ -518,6 +533,86 @@ TEST(RadiantViewTest, RecoversTimedOutLoadScriptWithoutUnsafeBatchReset) {
     EXPECT_NE(nullptr, strstr(shell_result.stdout_buf,
                               "view command completed with result: 0"));
     shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, SkipsDefaultCumulativeBrowserScriptBudget) {
+    const char* page = "./temp/test_radiant_view_script_budget.html";
+    const char* view_log = "./temp/test_radiant_view_script_budget.log";
+    const size_t script_bytes = 32u * 1024u;
+    const int script_count = 32;
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    bool page_written = fputs("<!doctype html><html><head></head><body>", page_file) >= 0;
+    for (int i = 0; i < script_count && page_written; i++) {
+        page_written = fputs("<script>", page_file) >= 0 &&
+            test_radiant_view_write_script_bytes(page_file, script_bytes) &&
+            fputs("</script>", page_file) >= 0;
+    }
+    page_written = page_written && fputs("script budget</body></html>", page_file) >= 0;
+    ASSERT_EQ(0, fclose(page_file));
+    ASSERT_TRUE(page_written);
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "skipping document JS after browser source budget"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "view command completed with result: 0"));
+    shell_result_free(&shell_result);
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, SkipsExternalScriptResponseThatIsHtml) {
+    const char* page = "./temp/test_radiant_view_html_script_response.html";
+    const char* script = "./temp/test_radiant_view_html_script_response.js";
+    const char* events = "./temp/test_radiant_view_html_script_response_events.json";
+    const char* view_log = "./temp/test_radiant_view_html_script_response.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* script_file = fopen(script, "wb");
+    ASSERT_NE(nullptr, script_file);
+    ASSERT_GE(fputs("<!doctype html><html><body>redirected response</body></html>",
+                    script_file), 0);
+    ASSERT_EQ(0, fclose(script_file));
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    ASSERT_GE(fputs("<!doctype html><html><head><script src=\"test_radiant_view_html_script_response.js\"></script></head><body>script response</body></html>",
+                    page_file), 0);
+    ASSERT_EQ(0, fclose(page_file));
+
+    FILE* events_file = fopen(events, "wb");
+    ASSERT_NE(nullptr, events_file);
+    ASSERT_GE(fputs("{\"events\":[]}", events_file), 0);
+    ASSERT_EQ(0, fclose(events_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, events, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "skipping HTML response for external script"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log, "js-mir: parse failed"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "view command completed with result: 0"));
+    shell_result_free(&shell_result);
+    remove(page);
+    remove(script);
+    remove(events);
+    remove(view_log);
 }
 
 TEST(RadiantViewTest, ExecutesUmdBrowserGlobalWithoutImplicitAmdLoader) {
