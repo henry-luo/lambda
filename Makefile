@@ -2691,6 +2691,10 @@ test-graph-mermaid: build-graph-mermaid-test
 	@./test/test_graph_mermaid_gtest.exe
 	@echo "Running Mermaid graph package integration fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*mermaid*'
+	@echo "Running retained Mermaid layout bridge..."
+	@./lambda.exe render test/input/test_graph.mmd -o temp/mermaid_layout_bridge.svg --no-log
+	@test "$$(grep -c 'data-graph-role=\"edge\"' temp/mermaid_layout_bridge.svg)" -eq 5
+	@rm -f temp/mermaid_layout_bridge.svg
 
 build-graph-graphviz-test:
 	@echo "Building Graphviz graph semantic runner..."

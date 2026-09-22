@@ -341,6 +341,9 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
 // The callback's defining module owns both its slab and interpreter state.
 Item interp_call_runtime_function(Runtime* runtime, Function* function,
                                   const Item* args, int argc);
+// True while this thread is executing inside a T0 interpreter activation.
+// Reentrant native callbacks must reuse that state instead of opening a retained call.
+bool interp_has_active_state(void);
 // Runs a retained callback on the interpreter's bounded large-stack worker.
 // The caller must keep callback arguments rooted until this synchronous call returns.
 typedef void (*InterpLargeStackThreadHook)(void* opaque);

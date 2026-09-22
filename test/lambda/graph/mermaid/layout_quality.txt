@@ -2,7 +2,7 @@
   grouped: ["inside-a", "inside-b", "outside"],
   cluster_separated: true,
   obstacle_detour: true,
-  label_positions: [[55, 0], [55, 64]],
+  label_positions: [[65, 4], [65, 42]],
   labels_separated: true,
   labels_contained: true
 }

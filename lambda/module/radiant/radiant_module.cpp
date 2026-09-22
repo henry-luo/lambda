@@ -2,6 +2,7 @@
 #include "../../input/css/dom_element.hpp"
 #include "../../io/input-allocation-context.h"
 #include "../../runtime/lambda-error.h"
+#include "../../runtime/interp.hpp"
 #include "../../runtime/transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
@@ -1120,10 +1121,21 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
         Rooted<Item> rooted_result(roots, ItemNull);
-        LAMBDA_SCALAR_HOME(callback_result_home);
-        rooted_result.set(radiant_lambda_fn_call3_into(rooted_fn.get().function,
-            rooted_parent.get(), rooted_children.get(), rooted_layout_context.get(),
-            &callback_result_home));
+        if (runtime && !interp_has_active_state()) {
+            Item callback_args[] = {
+                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
+            // Document transforms finish before their retained layout pass. Route
+            // callbacks through the retained-call bridge so interpreted functions
+            // recreate their dispatch state after that top-level activation ends.
+            rooted_result.set(interp_call_runtime_function(runtime, rooted_fn.get().function,
+                callback_args, 3));
+        } else {
+            // render_svg() invokes layout during its caller's active interpreter pass.
+            LAMBDA_SCALAR_HOME(callback_result_home);
+            rooted_result.set(radiant_lambda_fn_call3_into(rooted_fn.get().function,
+                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get(),
+                &callback_result_home));
+        }
         if (get_type_id(rooted_result.get()) == LMD_TYPE_ERROR) {
             log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         } else {

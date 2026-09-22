@@ -6250,6 +6250,7 @@ extern "C" Item interp_call_borrowed(Function* fn, const Item* args, int argc) {
 
 static __thread InterpState* g_interp_state = NULL;
 static InterpState* interp_current_state(void) { return g_interp_state; }
+bool interp_has_active_state(void) { return interp_current_state() != NULL; }
 static uint32_t interp_depth_budget(void);
 
 // Retained DOM events execute after the script runner has unwound its T0
