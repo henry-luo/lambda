@@ -402,47 +402,31 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
     for (JsAstNode* member = body->statements; member; member = member->next) {
         if (member->node_type == AST_NODE_FIELD) {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)member;
-            if (field->is_static && field->key) {
-                if (entry->member_count >= entry->member_capacity) return false;
-                JsClassMember* class_member = &entry->members[entry->member_count++];
-                class_member->kind = JS_CLASS_MEMBER_STATIC_FIELD;
-                JsClassMember* static_field =
-                    class_member;
-                static_field->computed = field->computed;
-                static_field->key_expr = field->key;
-                // D6.2.2v2: retain literal member spellings for initialization.
-                static_field->name = !field->computed
-                    ? jm_class_member_source_name(mt, entry, field->key) : NULL;
-                static_field->initializer = field->value;
-                static_field->module_var_index = -1;
-                static_field->key_module_var_index = -1;
-                log_debug("js-mir: class '%.*s' static field %s'%.*s'",
-                    class_node->name ? (int)class_node->name->len : 5,
-                    class_node->name ? class_node->name->chars : "anon?",
-                    field->computed ? "[computed] " : "",
-                    static_field->name ? (int)static_field->name->len : 0,
-                    static_field->name ? static_field->name->chars : "");
-            } else if (!field->is_static && field->key) {
-                if (entry->member_count >= entry->member_capacity) return false;
-                JsClassMember* class_member = &entry->members[entry->member_count++];
-                class_member->kind = JS_CLASS_MEMBER_INSTANCE_FIELD;
-                JsClassMember* instance_field =
-                    class_member;
-                instance_field->computed = field->computed;
-                instance_field->key_expr = field->key;
-                instance_field->name = !field->computed
-                    ? jm_class_member_source_name(mt, entry, field->key) : NULL;
-                instance_field->initializer = field->value;
-                instance_field->initializer_fc = jm_collect_class_field_initializer(mt, field);
-                instance_field->key_module_var_index = -1;
+            if (!field->key) continue;
+            if (entry->member_count >= entry->member_capacity) return false;
+            JsClassMember* field_member = &entry->members[entry->member_count++];
+            field_member->kind = field->is_static ? JS_CLASS_MEMBER_STATIC_FIELD
+                : JS_CLASS_MEMBER_INSTANCE_FIELD;
+            field_member->computed = field->computed;
+            field_member->key_expr = field->key;
+            // D6.2.2v2: retain literal member spellings for initialization.
+            field_member->name = !field->computed
+                ? jm_class_member_source_name(mt, entry, field->key) : NULL;
+            field_member->initializer = field->value;
+            field_member->key_module_var_index = -1;
+            if (field->is_static) {
+                field_member->module_var_index = -1;
+            } else {
+                field_member->initializer_fc = jm_collect_class_field_initializer(mt, field);
                 if (mt->collection_failed) return false;
-                log_debug("js-mir: class '%.*s' instance field %s'%.*s'",
-                    class_node->name ? (int)class_node->name->len : 5,
-                    class_node->name ? class_node->name->chars : "anon?",
-                    field->computed ? "[computed] " : "",
-                    instance_field->name ? (int)instance_field->name->len : 0,
-                    instance_field->name ? instance_field->name->chars : "");
             }
+            log_debug("js-mir: class '%.*s' %s field %s'%.*s'",
+                class_node->name ? (int)class_node->name->len : 5,
+                class_node->name ? class_node->name->chars : "anon?",
+                field->is_static ? "static" : "instance",
+                field->computed ? "[computed] " : "",
+                field_member->name ? (int)field_member->name->len : 0,
+                field_member->name ? field_member->name->chars : "");
             continue;
         }
         if (member->node_type == JS_AST_NODE_STATIC_BLOCK) {
@@ -1062,6 +1046,21 @@ static void jm_infer_indexed(JsMirTranspiler* mt, JsFunctionNode* fn,
 }
 
 // Infer parameter types for a collected function from body usage patterns.
+// Used only by debug traces, which release builds compile out.
+[[maybe_unused]] static const char* jm_param_type_label(JsFuncCollected* fc, int index) {
+    TypeId type = jm_param_type(fc, index);
+    return type == LMD_TYPE_INT ? "INT" : type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY";
+}
+
+// Debug trace of the first three inferred formal types.
+static void jm_log_param_types(const char* phase, const char* name,
+        JsFuncCollected* fc, int pc) {
+    log_debug("js-mir %s param types for %s: [%s%s%s%s%s%s]", phase, name,
+        pc > 0 ? jm_param_type_label(fc, 0) : "", pc > 1 ? "," : "",
+        pc > 1 ? jm_param_type_label(fc, 1) : "", pc > 2 ? "," : "",
+        pc > 2 ? jm_param_type_label(fc, 2) : "", pc > 3 ? ",..." : "");
+}
+
 void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int pc = ast_linked_node_count(fn->params);
@@ -1131,12 +1130,8 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     jm_set_param_type(fc, i, LMD_TYPE_ANY);
                 }
             }
-            log_debug("js-mir P3.4: annotation-based param types for %s: [%s%s%s%s]",
-                fn->name ? fn->name->chars : "(anon)",
-                pc > 0 ? (jm_param_type(fc, 0) == LMD_TYPE_INT ? "INT" : jm_param_type(fc, 0) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
-                pc > 1 ? (jm_param_type(fc, 1) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 1) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
-                pc > 2 ? (jm_param_type(fc, 2) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 2) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
-                pc > 3 ? ",..." : "");
+            jm_log_param_types("P3.4: annotation-based",
+                fn->name ? fn->name->chars : "(anon)", fc, pc);
         }
     }
 
@@ -1218,12 +1213,7 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
     }
 
-    log_debug("js-mir P4: inferred param types for %s: [%s%s%s%s]",
-        fc->name,
-        pc > 0 ? (jm_param_type(fc, 0) == LMD_TYPE_INT ? "INT" : jm_param_type(fc, 0) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
-        pc > 1 ? (jm_param_type(fc, 1) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 1) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
-        pc > 2 ? (jm_param_type(fc, 2) == LMD_TYPE_INT ? ",INT" : jm_param_type(fc, 2) == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
-        pc > 3 ? ",..." : "");
+    jm_log_param_types("P4: inferred", fc->name, fc, pc);
     mem_free(inference_bindings);
     mem_free(evidence);
 }

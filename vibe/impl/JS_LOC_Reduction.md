@@ -839,6 +839,9 @@ line-span counts, not NLOC, for that file.
 
 | 3 | JLS-1 extern hygiene; util → node-core | ~95 | ~30 | **−65** | **300** (util) | **134,283** | test262 40,261/40,261; `test_js_gtest` 465/466 (waived cookie); 63/63 official rows; sweep identical to batch 2 bar timing lines; `test-lambda-baseline` 5,770/5,771 (waived cookie), no leaks; other Tier A/D packages re-measured and dropped (§B.3) |
 
+| — | upstream merge `1cfba2714` (not this work) | — | — | — | — | 134,309 | batches 2–3 committed as `2dde16651`/`178154a35`; upstream changes |
+| 4 | JLS-5/JLS-6 JS-side dedupe (§B.4) | 140 | 93 | **−47** | 0 | **134,262** | finalized MIR byte-identical on 552 scripts; `test_js_mir_emission_gtest` 32/32; `test_js_gtest` 465/466 (waived cookie); `test-lambda-baseline` 5,774/5,775 (waived cookie), no leaks; test262 40,260/40,261 — one batch kill, reproduced identically on pristine `1cfba2714` (§B.4) |
+
 ### B.1 Batch 1 record (JLS-15)
 
 **Method.** Source scanning proved unreliable for this job: token-pasted
@@ -1007,3 +1010,74 @@ two-client extractions inside T14-2/T14-3, and JLS-9 (one global/`with`
 reference resolver), which follows T14-5. Each is a semantic refactor of hot
 compiler or runtime paths rather than a clean-up, and needs the Tune14
 ownership decision in §10.
+
+
+### B.4 Batch 4 record (JLS-5, JLS-6) — USER: "do them here"
+
+Both packages were re-measured against the code before any cross-language
+extraction, and the shared-mechanics premise from rev 1 does not hold:
+
+- **JLS-6 capture facts.** Lambda's `collect_captures_from_node`
+  (`build_ast.cpp`, about 240 lines) is a hand-written per-kind walker whose
+  `default` case skips unlisted kinds; JS's `jm_analyze_captures` already
+  collects references from the shared `AstIndex` by owning function. The
+  environment-layout phases 1.5–1.7d that rev 1 targeted use
+  `scope_env_slot` / `grandparent_slot` / `parent_env_link_slot_override`,
+  which Lambda only initializes and never reads: they are JS-only, with no
+  Lambda twin. Sharing the collection step would simplify Lambda (moving it
+  onto the index or the core child catalog) but cannot shrink `lambda/js`.
+- **JLS-5 numeric facts.** Lambda's `infer_param_types_batched`
+  (`transpile-mir.cpp`) finds aliases and evidence by walking Lambda node
+  shapes with call-site joins; JS's `jm_infer_*` reads the `AstIndex`. They
+  share no walker or worklist, so a common engine means rewriting Lambda's
+  inference onto the index — a large, performance-sensitive Lambda change
+  that does not reduce `lambda/js`.
+
+**What landed instead (JS-side duplication inside the same passes).**
+
+| change | net |
+|---|---|
+| `jm_add_capture` returns the new record and is shared; the main capture loop in `jm_analyze_captures` and transitive propagation in `js_mir_analyze_and_plan` stop building `FnCapture` field by field | −19 |
+| `JM_FOR_EACH_CHILD_FUNC` replaces 12 three-line "collected functions with this parent" loop headers in the capture-planning phases | −18 |
+| class-field collection merges its static and instance branches; the two parameter-type debug traces share `jm_log_param_types` | −11 |
+| `[[maybe_unused]]` note on the debug-only label helper (release compiles traces out) | +1 |
+| **total** | **−47** |
+
+**Gate.** Finalized MIR for all 552 dumpable scripts in `test/js` plus the
+benchmark corpus is byte-identical to the pre-change tree (after normalising
+per-run absolute addresses and pointer-derived template-cache keys; three slow
+library scripts were dumped serially because they exceed 60 s under parallel
+debug load). `test_js_mir_emission_gtest` 32/32; `test_js_gtest` 465/466
+(waived cookie); `test-lambda-baseline` 5,774/5,775 (waived cookie), no
+leaks. test262 is 40,260/40,261 in two consecutive runs: `language_expressions_class_elements_same_line_method_rs_static_async_generator_method_privatename_identifier_js`
+is killed inside its batch and passes on the isolated retry. The identical
+result on pristine `1cfba2714` (this batch's files stashed) and a clean
+isolated rerun of its 100-test batch show it is a load-dependent instability
+that arrived with the upstream merge, not from this change; batch 3's test262
+run, before that merge, was 40,261/40,261. It is reported to the user rather
+than waived here.
+
+**Lambda-side JLS-6 — done (USER, 2026-09-22).** Lambda's capture walker
+(`collect_captures_from_node`, a 240-line per-kind switch whose `default`
+skipped 49 kinds the shared catalogs know) is replaced by `capture_visit`, a
+policy-only visitor over `walk_lambda_ast`, the Lambda-layout traversal the
+bind pass already uses. (The core `ast_visit_core_children` catalog was
+rejected: it reads `ASSIGN_STAM` as the generic assign layout, which is wrong
+for Lambda's `AstAssignStamNode`.) Explicit cases remain only for identifiers,
+the three assignment forms that mark a capture mutable, nested functions
+(copy up their outer captures, do not descend) and `for` join keys (the one
+edge `walk_lambda_ast` omits); `analyze_captures` now also walks the
+function's parameters, so defaults can capture. `build_ast.cpp` −159 net
+(+60/−219), in `lambda/runtime`, not the JS metric.
+Fixed: a binding used only in a named argument or parameter default was never
+captured (probe: expected 90, interpreter printed 0 and JIT printed 100). On
+the forced JIT tier `test_latex_pkg`, `test_math_atom_color`,
+`test_math_atom_style` and `test_math_html_output` stopped failing with
+`undeclared reg` and now match their goldens on both tiers. New regression
+test `test/lambda/closure_capture_sites.ls` (+ `.txt`). Main-module MIR is
+byte-identical for all 1,052 dumpable Lambda test scripts (imported package
+modules are compiled separately and are not in that dump);
+`test-lambda-baseline` 5,775/5,776 (waived cookie), no leaks.
+Still open (pre-existing, separate): the JIT's public wrapper evaluates an
+omitted default without the closure environment and logs
+`undefined variable`; the direct call path supplies the right value.

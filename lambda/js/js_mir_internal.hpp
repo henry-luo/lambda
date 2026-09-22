@@ -24,6 +24,14 @@ static inline bool js_path_is_http_url(const char* path) {
 }
 
 bool jm_float_const_is_inline(double value);
+// Iterate the collected functions whose lexical parent is `parent_id`;
+// `continue` and `break` behave as in a plain loop over func_entries.
+#define JM_FOR_EACH_CHILD_FUNC(mt, idx, child, parent_id) \
+    for (int idx = 0; idx < (mt)->func_count; idx++) \
+        if (JsFuncCollected* child = &(mt)->func_entries[idx]; \
+                jm_parent_function_id((mt), child) != (parent_id)) {} else
+FnCapture* jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* entry,
+    bool is_nfe_binding, bool force_env_capture);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 
 extern JsModuleConstEntry* g_eval_preamble_entries;
