@@ -26,6 +26,7 @@ typedef struct CurlMultiRequest {
 
 typedef struct HeaderCallbackCtx {
     CookieJar* jar;
+    CURL* easy;
     const char* request_url;
 } HeaderCallbackCtx;
 
@@ -33,7 +34,6 @@ typedef struct CurlMultiTransfer {
     struct NetworkResource* resource;
     void* request_data;
     CURL* easy;
-    struct curl_slist* custom_headers;
     HeaderCallbackCtx* header_ctx;
     ByteBuilder body;
 } CurlMultiTransfer;
@@ -118,7 +118,11 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, void* us
         }
         char* header_str = mem_dup_n(buffer, len, MEM_CAT_NETWORK);
         if (!header_str) return total;
-        cookie_jar_store(ctx->jar, ctx->request_url, header_str);
+        const char* effective_url = ctx->request_url;
+        char* curl_url = NULL;
+        if (ctx->easy) curl_easy_getinfo(ctx->easy, CURLINFO_EFFECTIVE_URL, &curl_url);
+        if (curl_url && curl_url[0]) effective_url = curl_url;
+        cookie_jar_store(ctx->jar, effective_url, header_str);
         mem_free(header_str);
     }
     return total;
@@ -249,7 +253,6 @@ static bool finish_transfer(CurlMultiTransfer* transfer, CURLcode result) {
 
 static void transfer_free(CurlMultiTransfer* transfer) {
     if (!transfer) return;
-    if (transfer->custom_headers) curl_slist_free_all(transfer->custom_headers);
     if (transfer->header_ctx) mem_free(transfer->header_ctx);
     if (transfer->easy) curl_easy_cleanup(transfer->easy);
     byte_builder_destroy(&transfer->body);
@@ -287,24 +290,13 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
 
     CookieJar* jar = (res->manager) ? res->manager->cookie_jar : NULL;
     if (jar) {
-        bool is_secure = str_istarts_with_cstr(res->url, "https://");
-        char* cookie_value = cookie_jar_build_request_header(jar, res->url, is_secure);
-        if (cookie_value) {
-            size_t hdr_len = strlen(cookie_value) + 9;
-            char* cookie_hdr = (char*)mem_alloc(hdr_len, MEM_CAT_NETWORK);
-            if (cookie_hdr) {
-                snprintf(cookie_hdr, hdr_len, "Cookie: %s", cookie_value);
-                transfer->custom_headers = curl_slist_append(transfer->custom_headers, cookie_hdr);
-                curl_easy_setopt(easy, CURLOPT_HTTPHEADER, transfer->custom_headers);
-                mem_free(cookie_hdr);
-            }
-            mem_free(cookie_value);
-        }
-
+        // Curl's cookie engine computes a fresh domain/path match per redirect.
+        cookie_jar_import_curl(jar, easy);
         transfer->header_ctx =
             (HeaderCallbackCtx*)mem_calloc(1, sizeof(HeaderCallbackCtx), MEM_CAT_NETWORK);
         if (transfer->header_ctx) {
             transfer->header_ctx->jar = jar;
+            transfer->header_ctx->easy = easy;
             transfer->header_ctx->request_url = res->url;
             curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, header_callback);
             curl_easy_setopt(easy, CURLOPT_HEADERDATA, transfer->header_ctx);

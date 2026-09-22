@@ -9,6 +9,8 @@ extern "C" {
 Item dom_storage_local_object(void);
 Item dom_storage_session_object(void);
 void dom_storage_reset(void);
+// Rebinds the realm-local storage cache to the current document/session.
+void dom_storage_bind_document(void);
 
 Item dom_match_media(Item query_item);
 void dom_match_media_notify_resize(void);

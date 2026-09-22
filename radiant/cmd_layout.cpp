@@ -219,7 +219,7 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Aren
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
     int viewport_width, int viewport_height,
-    const DocumentJsHostConfig* js_host_config);
+    const DocumentJsHostConfig* js_host_config, CookieJar* top_level_cookie_jar);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -2083,7 +2083,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     bool css_at_head_end,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
-    DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config) {
+    DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config,
+    CookieJar* top_level_cookie_jar) {
     auto t_start = time_now_ns();
 
     log_mem_stage("load_html: enter");
@@ -2108,7 +2109,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         const char* url_str = url_get_href(html_url);
         size_t content_size = 0;
         char* eff_url = nullptr;
-        html_content = download_http_content(url_str, &content_size, nullptr, &eff_url);
+        html_content = download_http_content_with_cookie_jar(url_str, &content_size,
+            top_level_cookie_jar, &eff_url);
         // Update document URL if redirected (e.g. google.com → www.google.com)
         if (eff_url) {
             Url* redirected_url = url_parse(eff_url);
@@ -2304,6 +2306,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (radiant_url_is_http(url_get_href(html_url)) &&
         radiant_init_network_support(dom_doc, NULL, NULL) == 0) {
         resource_manager_set_css_engine(dom_doc->resource_manager, css_engine);
+        // Dependency discovery starts immediately below, so attach the
+        // profile jar before CSS, scripts, and fonts schedule their requests.
+        resource_manager_set_cookie_jar(dom_doc->resource_manager, top_level_cookie_jar);
         // The manager is now ready before CSS discovery; retain the view
         // lifecycle marker at this earlier ownership boundary.
         log_notice("view: network support initialized for HTTP document");
@@ -2551,16 +2556,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr, nullptr);
+                                         nullptr, nullptr, nullptr, nullptr);
 }
 
 static DomDocument* load_lambda_html_doc_with_host_config(
     Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
-    Pool* pool, const DocumentJsHostConfig* js_host_config) {
+    Pool* pool, const DocumentJsHostConfig* js_host_config,
+    CookieJar* top_level_cookie_jar) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, nullptr, false, true, nullptr, nullptr,
-                                         js_host_config);
+                                         js_host_config, top_level_cookie_jar);
 }
 
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
@@ -2679,7 +2685,8 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
 
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
                                               int viewport_height,
-                                              const DocumentJsHostConfig* js_host_config) {
+                                              const DocumentJsHostConfig* js_host_config,
+                                              CookieJar* top_level_cookie_jar) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -2696,14 +2703,14 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-                                                    viewport_height, pool, js_host_config);
+            viewport_height, pool, js_host_config, top_level_cookie_jar);
     } else {
     bool handled = false;
     doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
                                    pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-                                                    viewport_height, pool, js_host_config);
+            viewport_height, pool, js_host_config, top_level_cookie_jar);
     }
     }
 
@@ -2720,7 +2727,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
 }
 
 DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height,
-                           const DocumentJsHostConfig* js_host_config) {
+                           const DocumentJsHostConfig* js_host_config,
+                           CookieJar* top_level_cookie_jar) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -2728,7 +2736,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
-            viewport_width, viewport_height, js_host_config);
+            viewport_width, viewport_height, js_host_config, top_level_cookie_jar);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;
@@ -5018,7 +5026,7 @@ static bool layout_single_file(
                                                 track_source_lines, true,
                                                 timing_file ? &html_load_timing : nullptr,
                                                 timing_file ? &document_script_timing : nullptr,
-                                                &js_host_config);
+                                                &js_host_config, nullptr);
             if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
                 break;
             }

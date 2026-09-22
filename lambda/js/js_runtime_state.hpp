@@ -414,7 +414,6 @@ struct JsDomState : RootVector {
     Item default_view = {};
     Item title = {};
     Item fonts = {};
-    Item cookie = {};
     bool design_mode = false;
     DomElement* active_element = NULL;
     DomDocument* current_document = NULL;
@@ -444,6 +443,8 @@ struct JsDomMediaQueryState {
 struct JsDomPlatformState {
     JsDomStorageState local_storage = {};
     JsDomStorageState session_storage = {};
+    char* storage_origin = NULL;  // current document origin for the two realm caches
+    void* storage_document = NULL;  // preserves opaque-origin storage across host-loop rebinds
     ArrayList* media_queries = NULL;
     RootVector media_query_objects = {};
     bool media_query_roots_initialized = false;

@@ -2043,6 +2043,19 @@
             "icon": "\ud83d\udd0d"
           },
           {
+            "source": "test_radiant_agent_state_gtest.cpp",
+            "name": "Radiant Agent State Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_radiant_agent_state_gtest.exe",
+            "icon": "\ud83e\udde0"
+          },
+          {
             "source": "lib/test_str_gtest.cpp",
             "name": "Str Library Tests",
             "dependencies": [

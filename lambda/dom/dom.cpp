@@ -63,9 +63,11 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../network/cookie_jar.h"
+#include "../network/network_resource_manager.h"
 #include "../network/public_suffix.h"
 #include "../io/input-allocation-context.h"
 #include "../../radiant/view.hpp"
+#include "../../radiant/radiant.hpp"
 #include "../../radiant/event.hpp"
 #include "../../radiant/layout.hpp"
 #include "../../radiant/render.hpp"
@@ -231,7 +233,6 @@ struct JsWebAnimationHost {
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
-#define js_document_cookie_value (js_runtime_state.dom.cookie)
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.dom)))
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
@@ -1116,7 +1117,6 @@ extern "C" void dom_batch_reset() {
     js_document_design_mode = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
-    js_document_cookie_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     dom_events_reset();
     js_xhr_reset();
@@ -1756,6 +1756,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_install_option_constructor();
         dom_install_dom_parser_global();
         dom_install_xml_serializer_global();
+        dom_storage_bind_document();
         js_history_install_globals();
         dom_install_testdriver_globals();
     }
@@ -1781,6 +1782,7 @@ extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
     radiant_set_cssom_used_value_sync(ui_context ? dom_ensure_geometry_snapshot : nullptr);
+    dom_storage_bind_document();
 }
 
 JS_FORWARD_EXPRESSION(void*, dom_get_ui_context, (void),
@@ -2710,6 +2712,26 @@ static Item dom_document_set_domain(DomDocument* document, Item value) {
     return value;
 }
 
+static CookieJar* dom_document_cookie_jar(DomDocument* document) {
+    if (_js_current_ui_context && _js_current_ui_context->browsing_session) {
+        CookieJar* jar = session_cookie_jar(_js_current_ui_context->browsing_session);
+        if (jar) return jar;
+    }
+    return document && document->resource_manager
+        ? document->resource_manager->cookie_jar : nullptr;
+}
+
+static Item dom_document_cookie_value(DomDocument* document) {
+    CookieJar* jar = dom_document_cookie_jar(document);
+    const char* href = document && document->url ? url_get_href(document->url) : nullptr;
+    if (!jar || !href) return js_name_item("");
+    char* value = cookie_jar_build_document_cookie(jar, href);
+    if (!value) return js_name_item("");
+    Item result = js_name_item(value);
+    mem_free(value);
+    return result;
+}
+
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of dom_realm_set to avoid
 // infinite recursion (dom_realm_set dispatches back here for DOM resources).
@@ -2741,7 +2763,15 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
         if (strcmp(prop, "cookie") == 0) {
             Item cookie_value = js_to_string(value);
             if (item_is_error(cookie_value)) return cookie_value;
-            js_document_cookie_value = cookie_value;
+            DomDocument* document = _js_current_document
+                ? _js_current_document : _js_main_document;
+            CookieJar* jar = dom_document_cookie_jar(document);
+            const char* href = document && document->url ? url_get_href(document->url) : nullptr;
+            if (!jar || !href) {
+                return js_throw_named_error_text("SecurityError",
+                    "document.cookie requires an active browsing session");
+            }
+            cookie_jar_store(jar, href, fn_to_cstr(cookie_value));
             return value;
         }
         if (strcmp(prop, "domain") == 0) {
@@ -6601,8 +6631,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
 
     // Document.cookie is scoped to this browsing context's session state.
     if (strcmp(prop, "cookie") == 0) {
-        return get_type_id(js_document_cookie_value) == LMD_TYPE_STRING
-            ? js_document_cookie_value : js_name_item("");
+        return dom_document_cookie_value(doc);
     }
 
     if (strcmp(prop, "domain") == 0) {

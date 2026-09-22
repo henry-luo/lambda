@@ -138,12 +138,15 @@ Item input_mdx(Input* input, const char* mdx_string);
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 
 // HTTP/HTTPS functions (from input_http.cpp)
+struct CookieJar;
+
 typedef struct {
     long timeout_seconds;
     long max_redirects;
     const char* user_agent;
     bool verify_ssl;
     bool enable_compression;
+    struct CookieJar* cookie_jar;  // optional profile jar for top-level navigation
 } HttpConfig;
 
 // Extended fetch configuration and response structures
@@ -158,6 +161,7 @@ typedef struct {
     const char* user_agent;
     bool verify_ssl;
     bool enable_compression;
+    struct CookieJar* cookie_jar;  // optional profile jar for browser Fetch/XHR
 } FetchConfig;
 
 typedef struct FetchResponse {
@@ -171,6 +175,10 @@ typedef struct FetchResponse {
 } FetchResponse;
 
 char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config, char** effective_url = nullptr);
+// Use the profile jar for a synchronous top-level browser navigation.
+char* download_http_content_with_cookie_jar(const char* url, size_t* content_size,
+                                            struct CookieJar* cookie_jar,
+                                            char** effective_url = nullptr);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 
 // Cache-aware synchronous download. Checks disk cache first; downloads on miss.

@@ -9,6 +9,10 @@
 #include "../lib/url.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "network_integration.h"
+#include "../lambda/network/cookie_jar.h"
+#include "../lambda/network/enhanced_file_cache.h"
+#include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/radiant_state_store.h"
 #include <assert.h>
 #include <string.h>
 
@@ -31,12 +35,79 @@ static void history_entry_free(HistoryEntry* entry) {
 }
 
 // Ensure history array has room for one more entry
-static void history_ensure_capacity(BrowsingSession* session) {
-    if (session->history_count < session->history_capacity) return;
+static bool history_ensure_capacity(BrowsingSession* session) {
+    if (!session) return false;
+    if (session->history_count < session->history_capacity) return true;
     int target = session->history_count + 1;
     if (target > BROWSE_HISTORY_MAX) target = BROWSE_HISTORY_MAX;
-    (void)lam::mem_grow_array(&session->history, &session->history_capacity,
-                              target, 8, MEM_CAT_TEMP);
+    return lam::mem_grow_array(&session->history, &session->history_capacity,
+                               target, 8, MEM_CAT_TEMP);
+}
+
+static bool history_append_loaded(BrowsingSession* session, Url* url, const char* title,
+                                  float scroll_y, const char* transition) {
+    if (!session || !url) return false;
+
+    // Reserve all memory before committing SQLite so a reported successful
+    // navigation cannot leave the durable and in-memory stacks different.
+    if (!history_ensure_capacity(session)) return false;
+    char* title_copy = title ? mem_strdup(title, MEM_CAT_TEMP) : nullptr;
+    if (title && !title_copy) return false;
+    if (session->state_store && session->browsing_context_id && url->href &&
+        !radiant_state_store_history_append(session->state_store,
+            session->browsing_context_id, url->href->chars, title,
+            0.0f, scroll_y, transition, nullptr)) {
+        log_error("browse_session: failed to persist navigation history");
+        mem_free(title_copy);
+        return false;
+    }
+
+    for (int i = session->history_index + 1; i < session->history_count; i++) {
+        history_entry_free(&session->history[i]);
+    }
+    session->history_count = session->history_index + 1;
+
+    if (session->history_count >= BROWSE_HISTORY_MAX) {
+        history_entry_free(&session->history[0]);
+        memmove(&session->history[0], &session->history[1],
+                (size_t)(session->history_count - 1) * sizeof(HistoryEntry));
+        session->history_count--;
+        session->history_index--;
+    }
+
+    if (session->history_count >= session->history_capacity) {
+        mem_free(title_copy);
+        return false;
+    }
+
+    HistoryEntry* entry = &session->history[session->history_count];
+    entry->url = url;
+    entry->title = title_copy;
+    entry->scroll_y = scroll_y;
+    session->history_count++;
+    session->history_index = session->history_count - 1;
+    return true;
+}
+
+static bool history_load_from_state(const char* url, const char* title,
+                                    float scroll_x, float scroll_y, void* user_data) {
+    (void)scroll_x;
+    BrowsingSession* session = (BrowsingSession*)user_data;
+    Url* parsed = url_parse(url);
+    if (!parsed) return true;  // skip an unusable historical URL and keep the store readable
+    if (!history_ensure_capacity(session)) {
+        url_destroy(parsed);
+        return false;
+    }
+    if (session->history_count >= session->history_capacity) {
+        url_destroy(parsed);
+        return false;
+    }
+    HistoryEntry* entry = &session->history[session->history_count++];
+    entry->url = parsed;
+    entry->title = title ? mem_strdup(title, MEM_CAT_TEMP) : nullptr;
+    entry->scroll_y = scroll_y;
+    return true;
 }
 
 // Walk DOM to find <title> element text content
@@ -69,25 +140,80 @@ static const char* find_title_text(DomElement* root) {
 // Public API
 // ============================================================================
 
-BrowsingSession* session_create(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache) {
+static void session_init_with_profile(BrowsingSession* session,
+                                      struct NetworkThreadPool* pool,
+                                      struct EnhancedFileCache* cache,
+                                      const char* profile_name) {
+    if (!session) return;
+    session->history = nullptr;
+    session->history_count = 0;
+    session->history_index = -1;
+    session->history_capacity = 0;
+    session->thread_pool = pool;
+    session->file_cache = cache;
+    session->state_store = nullptr;
+    session->cookie_jar = nullptr;
+    session->browsing_context_id = nullptr;
+
+    const char* cache_dir = enhanced_cache_get_directory(cache);
+    if (cache_dir) {
+        session->state_store = radiant_state_store_open(cache_dir, profile_name);
+        if (session->state_store) {
+            session->browsing_context_id = radiant_state_store_open_browsing_context(
+                session->state_store, &session->history_index);
+            if (session->browsing_context_id) {
+                if (!radiant_state_store_history_load(session->state_store,
+                                                      session->browsing_context_id,
+                                                      history_load_from_state, session)) {
+                    log_error("browse_session: failed to restore navigation history");
+                    for (int i = 0; i < session->history_count; i++) {
+                        history_entry_free(&session->history[i]);
+                    }
+                    session->history_count = 0;
+                    session->history_index = -1;
+                }
+                if (session->history_index >= session->history_count) {
+                    session->history_index = session->history_count - 1;
+                }
+            }
+        }
+    }
+    session->cookie_jar = cookie_jar_create(session->state_store);
+    if (!session->cookie_jar) log_error("browse_session: failed to create cookie jar");
+}
+
+BrowsingSession* session_create_for_profile(struct NetworkThreadPool* pool,
+                                            struct EnhancedFileCache* cache,
+                                            const char* profile_name) {
     BrowsingSession* session = (BrowsingSession*)mem_calloc(1, sizeof(BrowsingSession), MEM_CAT_TEMP);
     if (!session) return nullptr;
 
-    session->init(pool, cache);
+    session_init_with_profile(session, pool, cache, profile_name);
     log_info("browse_session: created");
     return session;
 }
 
+BrowsingSession* session_create(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache) {
+    return session_create_for_profile(pool, cache, "default");
+}
+
 void BrowsingSession::init(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache) {
-    history = nullptr;
-    history_count = 0;
-    history_index = -1;
-    history_capacity = 0;
-    thread_pool = pool;
-    file_cache = cache;
+    session_init_with_profile(this, pool, cache, "default");
 }
 
 void BrowsingSession::destroy() {
+    if (cookie_jar) {
+        cookie_jar_clear_session(cookie_jar);
+        (void)cookie_jar_flush(cookie_jar);
+        cookie_jar_destroy(cookie_jar);
+        cookie_jar = nullptr;
+    }
+    if (state_store) {
+        radiant_state_store_close(state_store);
+        state_store = nullptr;
+    }
+    browsing_context_id = nullptr;
+
     // free all history entries
     for (int i = 0; i < history_count; i++) {
         history_entry_free(&history[i]);
@@ -125,35 +251,6 @@ DomDocument* BrowsingSession::navigate(struct UiContext* uicon, const char* url,
     const char* resolved_href = resolved->href->chars;
     log_info("browse_session: navigating to %s", resolved_href);
 
-    // truncate forward history (discard entries after current index)
-    for (int i = history_index + 1; i < history_count; i++) {
-        history_entry_free(&history[i]);
-    }
-    history_count = history_index + 1;
-
-    // evict oldest entry if at max capacity
-    if (history_count >= BROWSE_HISTORY_MAX) {
-        history_entry_free(&history[0]);
-        memmove(&history[0], &history[1],
-                (size_t)(history_count - 1) * sizeof(HistoryEntry));
-        history_count--;
-        history_index--;
-    }
-
-    // add new history entry
-    history_ensure_capacity(this);
-    if (history_count >= history_capacity) {
-        url_destroy(resolved);
-        return nullptr;  // allocation failed
-    }
-
-    HistoryEntry* entry = &history[history_count];
-    entry->url = resolved;
-    entry->title = nullptr;
-    entry->scroll_y = 0.0f;
-    history_count++;
-    history_index = history_count - 1;
-
     // session navigation owns replacing the presented document, so keep the old document alive until the new load succeeds.
     DomDocument* old_doc = uicon->document;
 
@@ -167,6 +264,7 @@ DomDocument* BrowsingSession::navigate(struct UiContext* uicon, const char* url,
     if (!new_doc) {
         log_error("browse_session: failed to load %s", resolved_href);
         mem_free(href_copy);
+        url_destroy(resolved);
         return nullptr;
     }
 
@@ -176,16 +274,19 @@ DomDocument* BrowsingSession::navigate(struct UiContext* uicon, const char* url,
         free_document(old_doc);
     }
 
-    // extract and store page title
+    // Commit history only after the replacement document successfully loaded.
     const char* title_text = session_extract_title(new_doc);
-    if (title_text) {
-        entry->title = mem_strdup(title_text, MEM_CAT_TEMP);
+    if (!history_append_loaded(this, resolved, title_text, 0.0f, "link")) {
+        log_error("browse_session: failed to append navigation history");
+        url_destroy(resolved);
+    } else {
+        HistoryEntry* entry = &history[history_index];
+        log_info("browse_session: loaded %s (title: %s, history: %d/%d)",
+                 resolved_href,
+                 entry->title ? entry->title : "(none)",
+                 history_index + 1, history_count);
     }
-
-    log_info("browse_session: loaded %s (title: %s, history: %d/%d)",
-             resolved_href,
-             entry->title ? entry->title : "(none)",
-             history_index + 1, history_count);
+    session_attach_document(this, new_doc);
 
     mem_free(href_copy);
     return new_doc;
@@ -239,11 +340,18 @@ static DomDocument* session_go_history(BrowsingSession* session, struct UiContex
         free_document(old_doc);
     }
 
+    session_attach_document(session, new_doc);
+
     // update title if it changed
     const char* title_text = session_extract_title(new_doc);
     if (title_text && (!entry->title || strcmp(entry->title, title_text) != 0)) {
         if (entry->title) mem_free(entry->title);
         entry->title = mem_strdup(title_text, MEM_CAT_TEMP);
+    }
+    if (session->state_store && session->browsing_context_id) {
+        (void)radiant_state_store_history_select(session->state_store,
+                                                 session->browsing_context_id,
+                                                 session->history_index);
     }
 
     return new_doc;
@@ -306,6 +414,10 @@ const char* session_current_title(const BrowsingSession* session) {
 void BrowsingSession::save_scroll_position(float scroll_y) {
     if (history_index < 0) return;
     history[history_index].scroll_y = scroll_y;
+    if (state_store && browsing_context_id) {
+        (void)radiant_state_store_history_update_current(state_store, browsing_context_id,
+            history[history_index].title, 0.0f, scroll_y);
+    }
 }
 
 void session_save_scroll_position(BrowsingSession* session, float scroll_y) {
@@ -331,8 +443,40 @@ void BrowsingSession::set_current_title(const char* title) {
     HistoryEntry* entry = &history[history_index];
     if (entry->title) mem_free(entry->title);
     entry->title = title ? mem_strdup(title, MEM_CAT_TEMP) : nullptr;
+    if (state_store && browsing_context_id) {
+        (void)radiant_state_store_history_update_current(state_store, browsing_context_id,
+            entry->title, 0.0f, entry->scroll_y);
+    }
 }
 
 void session_set_current_title(BrowsingSession* session, const char* title) {
     if (session) session->set_current_title(title);
+}
+
+void session_seed_document(BrowsingSession* session, DomDocument* document) {
+    if (!session || !document || !document->url || !document->url->href) return;
+    // A caller-provided initial URL supersedes automatic restore and becomes
+    // a fresh branch from any persisted back/forward stack.
+    Url* url = url_parse(document->url->href->chars);
+    if (!url) return;
+    if (!history_append_loaded(session, url, session_extract_title(document), 0.0f, "typed")) {
+        url_destroy(url);
+    }
+}
+
+void session_attach_document(BrowsingSession* session, DomDocument* document) {
+    if (!session || !document || !document->resource_manager) return;
+    resource_manager_set_cookie_jar(document->resource_manager, session->cookie_jar);
+}
+
+CookieJar* session_cookie_jar(const BrowsingSession* session) {
+    return session ? session->cookie_jar : nullptr;
+}
+
+RadiantStateStore* session_state_store(const BrowsingSession* session) {
+    return session ? session->state_store : nullptr;
+}
+
+const char* session_browsing_context_id(const BrowsingSession* session) {
+    return session ? session->browsing_context_id : nullptr;
 }
