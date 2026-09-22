@@ -9631,7 +9631,9 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->last = added;
     new_type->length = old_count + 1;
     new_type->byte_size = new_size;
-    new_type->type_index = ((ArrayList*)context->type_list)->length;
+    // execution-owned shapes are reached through their container, never the
+    // cached compiler type list or its concurrent satellite readers (D8.5.1v7).
+    new_type->type_index = -1;
     // the copied chain above carries old_type's entries verbatim, spread slots included
     new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
@@ -9646,7 +9648,6 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->struct_name = old_type->struct_name;
     new_type->is_private_clone = true;
     typemap_hash_build(new_type, context->pool);
-    arraylist_append((ArrayList*)context->type_list, new_type);
 
     // The candidate is private. Publishing the new shape/data pair together
     // makes the additional open field immediately match its physical slot.
@@ -11000,8 +11001,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_e = new_e->next;
     }
 
-    // create new TypeMap or TypeElmt (never mutate shared types)
-    ArrayList* tl = (ArrayList*)context->type_list;
+    // rebuilt shapes belong to this execution pool, not the retained module's
+    // compiler registry; the container owns their direct reference (D8.5.1v7).
 
     if (container_type_id == LMD_TYPE_ELEMENT) {
         TypeElmt* old_et = (TypeElmt*)old_map_type;
@@ -11020,12 +11021,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // stop being an instance of its type and lose its methods (LR03-8).
         new_et->nominal = old_map_type->nominal;
         new_et->is_nominal = old_map_type->is_nominal;
-        new_et->type_index = tl->length;
+        new_et->type_index = -1;
 
         // Populate/grow hash table for O(1) property lookup.
         typemap_hash_build((TypeMap*)new_et, context->pool);
 
-        arraylist_append(tl, new_et);
         *type_slot = new_et;
     } else {
         TypeMap* new_mt = (TypeMap*)alloc_type(context->pool,
@@ -11036,7 +11036,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->byte_size = new_byte_size;
         new_mt->nominal = old_map_type->nominal;   // S2.1.4/OB16, see above
         new_mt->is_nominal = old_map_type->is_nominal;
-        new_mt->type_index = tl->length;
+        new_mt->type_index = -1;
         new_mt->has_named_shape = old_map_type->has_named_shape;
         new_mt->is_trusted_contract = false;
         new_mt->struct_name = old_map_type->struct_name;
@@ -11064,7 +11064,6 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             }
         }
 
-        arraylist_append(tl, new_mt);
         *type_slot = new_mt;
     }
 

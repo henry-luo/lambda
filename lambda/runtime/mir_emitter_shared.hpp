@@ -432,6 +432,9 @@ struct MirFrameState {
     MIR_reg_t root_end;
     MIR_reg_t number_base;
     MIR_label_t anchor;
+    // A Lambda entry routes the native-stack probe through the same cold
+    // recovery exit as a side-stack reservation failure (S7.11.1v2, S7.11.4).
+    MIR_label_t native_stack_overflow;
     MIR_label_t return_label;
     MIR_reg_t return_reg;
     // rv6 tail forwarding keeps the pair returned by a same-shape callee in
@@ -2210,7 +2213,8 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         size_t number_commit_limit_offset) {
     MirFrameState* frame = &em->frame;
     bool needs_reserve = frame->root_slot_count > 0 || frame->fixed_number_slots > 0;
-    MIR_label_t overflow_label = em_new_label(em);
+    MIR_label_t overflow_label = frame->native_stack_overflow
+        ? frame->native_stack_overflow : em_new_label(em);
     // grow/retry are only reachable when the frame has stack reservations;
     // unattached MIR labels otherwise survive context teardown.
     MIR_label_t grow_label = needs_reserve ? em_new_label(em) : NULL;

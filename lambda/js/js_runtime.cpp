@@ -15406,20 +15406,12 @@ static void js_regexp_transfer_payload(Item destination, Item source) {
 }
 
 extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
-    if (!map) return;
-    Item obj = (Item){.map = map};
+    // RegExp owns native state only through its dedicated carrier.  Probing a
+    // regular Lambda Map through JS class metadata during heap teardown can
+    // outlive the script-owned shape that describes it.
+    if (!map || map->map_kind != MAP_KIND_REGEXP) return;
     JsRegexData* rd = js_regex_data_from_map(map);
-    if (!rd) {
-        if (js_class_id(obj) != JS_CLASS_REGEXP) return;
-        bool found = false;
-        Item rd_item = js_map_shape_lookup_ext(map, "__rd", 4, &found);
-        if (!found) return;
-        TypeId tid = get_type_id(rd_item);
-        if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return;
-        int64_t ptr_val = it2i(rd_item);
-        if (ptr_val == 0) return;
-        rd = (JsRegexData*)(uintptr_t)ptr_val;
-    }
+    if (!rd) return;
     // Content-keyed literal reuse lets several GC maps point at one compiled
     // JsRegexData.  The compile cache owns that native payload until its realm
     // reset; finalizing the first dead literal here would leave later literals
@@ -28446,9 +28438,7 @@ static void js_suspended_activation_gc_trace(
 }
 
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
-    if (!map || !gc) return;
-    Item generator_item = (Item){.map = map};
-    if (!js_object_has_class(generator_item, JS_CLASS_GENERATOR)) return;
+    if (!map || !gc || map->map_kind != MAP_KIND_GENERATOR) return;
     JsGeneratorStateRecord* gen = &((JsGeneratorMapCarrier*)map)->state;
     js_suspended_activation_gc_trace(gen, gc);
     gc_mark_item(gc, gen->private_home_class.item);
@@ -28463,8 +28453,7 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
 // this for every dying Map (lambda-mem.cpp), so a generator that is never run
 // to completion still releases its interpreter continuations.
 extern "C" void js_generator_map_heap_destroy(Map* map) {
-    if (!map) return;
-    if (!js_object_has_class((Item){.map = map}, JS_CLASS_GENERATOR)) return;
+    if (!map || map->map_kind != MAP_KIND_GENERATOR) return;
     js_interp_generator_clear_continuations(&((JsGeneratorMapCarrier*)map)->state);
 }
 
@@ -28672,7 +28661,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
         sizeof(JsGeneratorMapCarrier), LMD_TYPE_MAP);
     if (!generator_type || !carrier) return ItemError;
     carrier->base.type_id = LMD_TYPE_MAP;
-    carrier->base.map_kind = MAP_KIND_PLAIN;
+    carrier->base.map_kind = MAP_KIND_GENERATOR;
     carrier->base.type = generator_type;
     carrier->base.data = NULL;
     carrier->base.data_cap = 0;

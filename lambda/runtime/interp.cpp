@@ -173,33 +173,29 @@ static void interp_satellite_compile_job(void* opaque) {
     pthread_mutex_lock(&queue->mutex);
     bool retired_before_compile = queue->retiring ||
         job->generation != queue->generation;
-    if (retired_before_compile) {
-        if (queue->pending > 0) queue->pending--;
-        if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
-    }
     pthread_mutex_unlock(&queue->mutex);
-    if (retired_before_compile) {
-        interp_satellite_job_destroy(job);
-        return;
-    }
 
     InterpSatelliteImage* image = NULL;
-    bool compiled = job->runtime && compile_ast_function_satellite_snapshot(
+    bool compiled = !retired_before_compile && job->runtime && compile_ast_function_satellite_snapshot(
         job->runtime, job->script, job->def, job->sequence,
         interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
     bool retired = queue->retiring || job->generation != queue->generation;
-    if (queue->pending > 0) queue->pending--;
     if (!retired && queue->ready && arraylist_append(queue->ready, job)) {
         job->image = compiled ? image : NULL;
         job = NULL;  // the evaluator now owns this completed request
     }
-    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
-    pthread_mutex_unlock(&queue->mutex);
     if (job) {
+        // teardown must keep Script/parent pools alive until the rejected
+        // image has released all compiler-owned references (D8.5.1v7).
+        pthread_mutex_unlock(&queue->mutex);
         interp_satellite_image_destroy(image);
         interp_satellite_job_destroy(job);
+        pthread_mutex_lock(&queue->mutex);
     }
+    if (queue->pending > 0) queue->pending--;
+    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
+    pthread_mutex_unlock(&queue->mutex);
 }
 
 static bool interp_satellite_enqueue(Runtime* runtime, Script* script,

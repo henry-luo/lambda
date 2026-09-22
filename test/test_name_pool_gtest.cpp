@@ -15,6 +15,21 @@
 #include "../lib/test_utils.h"
 #include <cstring>
 #include <cstdio>
+#include <pthread.h>
+
+struct NamePoolReferenceWork {
+    NamePool* names;
+    bool release;
+};
+
+static void* name_pool_reference_worker(void* opaque) {
+    NamePoolReferenceWork* work = (NamePoolReferenceWork*)opaque;
+    for (int index = 0; index < 100000; index++) {
+        if (work->release) name_pool_release(work->names);
+        else name_pool_retain(work->names);
+    }
+    return nullptr;
+}
 
 // Test fixture for NamePool tests
 class NamePoolTest : public ::testing::Test {
@@ -24,6 +39,38 @@ protected:
     void SetUp() override    { pool = tu_setup_pool(); }
     void TearDown() override { tu_teardown_pool(pool); }
 };
+
+TEST_F(NamePoolTest, ConcurrentImmutableParentReferencesAreCountedExactly) {
+    NamePool* names = name_pool_create(pool, nullptr);
+    ASSERT_NE(names, nullptr);
+    String* sentinel = name_pool_create_name(names, "concurrent_parent_name");
+    ASSERT_NE(sentinel, nullptr);
+    pthread_t threads[4];
+    NamePoolReferenceWork work = {names, false};
+    int started = 0;
+    for (; started < 4; started++) {
+        if (pthread_create(&threads[started], nullptr, name_pool_reference_worker, &work) != 0) break;
+    }
+    for (int index = 0; index < started; index++) pthread_join(threads[index], nullptr);
+    EXPECT_EQ(started, 4);
+    uint32_t retained = names->ref_count;
+    EXPECT_EQ(retained, 1u + (uint32_t)started * 100000u);
+    if (retained == 1u + (uint32_t)started * 100000u) {
+        work.release = true;
+        int releasing = 0;
+        for (; releasing < started; releasing++) {
+            if (pthread_create(&threads[releasing], nullptr, name_pool_reference_worker, &work) != 0) break;
+        }
+        for (int index = 0; index < releasing; index++) pthread_join(threads[index], nullptr);
+        EXPECT_EQ(releasing, started);
+        EXPECT_EQ(names->ref_count, 1u);
+    }
+    EXPECT_EQ(name_pool_lookup(names, "concurrent_parent_name"), sentinel);
+    // keep failed-counter cleanup bounded by the observed references, so an
+    // assertion failure cannot become a separate underflow in the test.
+    retained = names->ref_count;
+    for (uint32_t index = 0; index < retained; index++) name_pool_release(names);
+}
 
 // Test basic name creation and interning
 TEST_F(NamePoolTest, BasicNameCreation) {

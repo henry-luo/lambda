@@ -983,6 +983,7 @@ enum MapKind {
     MAP_KIND_ERROR       = 15, // resting-state LambdaError presented as a JS object
     MAP_KIND_REGEXP      = 16, // RegExp carrier with typed trailing native payload
     MAP_KIND_ASYNC_FRAME = 17, // JSCU10: suspended async activation (internal, no property face)
+    MAP_KIND_GENERATOR   = 18, // JSCU9: generator carrier with suspended native state
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)

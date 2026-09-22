@@ -2175,6 +2175,10 @@ static void emit_jit_root_frame_enter(MirTranspiler* mt) {
     mt->em.frame.root_end = new_reg(mt, "root_frame_end", MIR_T_I64);
     mt->em.frame.anchor = new_label(mt);
     emit_label(mt, mt->em.frame.anchor);
+    // native promotion bypasses T0's call-depth budget; every native entry
+    // must retain the recovery-backed stack guard (S7.11.1v2, S7.11.4).
+    mt->em.frame.native_stack_overflow = new_label(mt);
+    em_branch_if_stack_exhausted(&mt->em, mt->em.frame.native_stack_overflow);
 }
 
 static void emit_binder_env_enter(MirTranspiler* mt, uint16_t binder_count) {
@@ -3627,16 +3631,30 @@ static bool mir_find_string_builder_assignment(AstNode* node, void* data) {
 
 // Binding publication happens while a declaration/parameter is being built;
 // the spelling is used only to address the newly inserted scope-map entry.
+static void mir_rebind_var_entry(MirTranspiler* mt, MirVarEntry* var,
+        NameEntry* binding) {
+    if (!var) return;
+    var->binding = binding;
+    if (!mt || !binding || !mt->vars_by_binding) return;
+    for (int scope = mt->scope_depth; scope >= 0; scope--) {
+        if (!mt->var_scopes[scope]) continue;
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
+            VarScopeEntry* entry = (VarScopeEntry*)item;
+            if (&entry->var != var) continue;
+            MirBindingVarLocator locator = {binding, scope, entry->name};
+            hashmap_set(mt->vars_by_binding, &locator);
+            return;
+        }
+    }
+}
+
 static void publish_var_binding(MirTranspiler* mt, const char* name,
         NameEntry* binding) {
     MirVarEntry* var = find_var(mt, name);
     if (var) {
-        var->binding = binding;
-        if (binding && mt->vars_by_binding) {
-            MirBindingVarLocator locator = {binding, mt->scope_depth,
-                mir_semantic_name_cstr(mt, name).str};
-            hashmap_set(mt->vars_by_binding, &locator);
-        }
+        mir_rebind_var_entry(mt, var, binding);
         if (var->type_id == LMD_TYPE_STRING && binding) {
             // This is a may-own fact for the whole body, including loop backedges.
             MirStringBindingScan scan = {binding, false};
@@ -26927,7 +26945,9 @@ static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
             // `var` parameter's store lands on the caller's own entry, which
             // is the write-through the call itself performs (S9.2.2).
             array_bindings[index] = arrays[index]->binding;
-            arrays[index]->binding = param->entry;
+            // The borrowed caller slot now denotes the callee parameter.
+            // Re-index it so callee identifiers resolve by their AST binding.
+            mir_rebind_var_entry(mt, arrays[index], param->entry);
             continue;
         }
         const char* pname = param->name->chars;
@@ -26987,7 +27007,7 @@ static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
     emit_label(mt, frame.exit);
     pop_scope(mt);
     for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-        if (arrays[i]) arrays[i]->binding = array_bindings[i];
+        if (arrays[i]) mir_rebind_var_entry(mt, arrays[i], array_bindings[i]);
     }
     return frame.result;
 }
@@ -31823,6 +31843,24 @@ static void emit_array_num_store_fallback(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, result)));
 }
 
+static void emit_compound_array_store_fallback(MirTranspiler* mt,
+        MIR_reg_t obj, TypeId obj_tid, MIR_reg_t arr_ptr, MIR_reg_t index,
+        MIR_reg_t boxed_value, MirVarEntry* root, bool cow_guard,
+        MIR_reg_t result_reg) {
+    if (cow_guard) {
+        // A marked root's checked store must preserve its detach protocol.
+        emit_array_num_store_fallback(mt, obj, obj_tid, arr_ptr, index,
+            boxed_value, root, false, result_reg);
+        return;
+    }
+    MIR_reg_t result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result_reg), MIR_new_reg_op(mt->ctx, result)));
+}
+
 typedef enum MirArrayNumStoreLane {
     MIR_ARRAY_NUM_STORE_INT,
     MIR_ARRAY_NUM_STORE_FLOAT,
@@ -34283,41 +34321,50 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
                  assign_obj_elem == LMD_TYPE_FLOAT &&
                  is_integer_type_id(idx_tid) &&
                  value_native_proven) {
-            MIR_reg_t val_native = em_require_rep(&mt->em,
-                transpile_expr_value(mt, ca->value), VALUE_REP_F64).reg;
-            emit_array_num_direct_store(mt, MIR_ARRAY_NUM_STORE_FLOAT,
-                value_nullable_float_lane, ca->value,
-                val_native, obj, obj_tid, arr_ptr, idx_int, assign_obj_var,
-                assign_elem_guarded, assign_obj_cow_guard, assign_result,
-                mir_index_proof(mt, ca->object, ca->key));
+            MirValue value = transpile_expr_value(mt, ca->value);
+            if (value.rep == VALUE_REP_F64) {
+                MIR_reg_t val_native = em_require_rep(&mt->em, value,
+                    VALUE_REP_F64).reg;
+                emit_array_num_direct_store(mt, MIR_ARRAY_NUM_STORE_FLOAT,
+                    value_nullable_float_lane, ca->value,
+                    val_native, obj, obj_tid, arr_ptr, idx_int, assign_obj_var,
+                    assign_elem_guarded, assign_obj_cow_guard, assign_result,
+                    mir_index_proof(mt, ca->object, ca->key));
+            } else {
+                // A planning proof admits the fast path, but a satellite may
+                // lower its direct callee through the public Item ABI. Store
+                // only an observed float lane (D2.4.1–D2.4.3, D8.2.6).
+                emit_compound_array_store_fallback(mt, obj, obj_tid, arr_ptr,
+                    idx_int, em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg,
+                    assign_obj_var, assign_obj_cow_guard, assign_result);
+            }
         }
         else if (obj_tid == LMD_TYPE_ARRAY_NUM &&
                  assign_obj_elem == LMD_TYPE_BOOL &&
                  is_integer_type_id(idx_tid) && value_native_proven) {
-            MIR_reg_t val_native = em_require_rep(&mt->em,
-                transpile_expr_value(mt, ca->value), VALUE_REP_I64).reg;
-            emit_array_num_direct_store(mt, MIR_ARRAY_NUM_STORE_BOOL, false, ca->value,
-                val_native, obj, obj_tid, arr_ptr, idx_int, assign_obj_var,
-                assign_elem_guarded, assign_obj_cow_guard, assign_result,
-                mir_index_proof(mt, ca->object, ca->key));
+            MirValue value = transpile_expr_value(mt, ca->value);
+            if (value.rep == VALUE_REP_I64) {
+                MIR_reg_t val_native = em_require_rep(&mt->em, value,
+                    VALUE_REP_I64).reg;
+                emit_array_num_direct_store(mt, MIR_ARRAY_NUM_STORE_BOOL, false, ca->value,
+                    val_native, obj, obj_tid, arr_ptr, idx_int, assign_obj_var,
+                    assign_elem_guarded, assign_obj_cow_guard, assign_result,
+                    mir_index_proof(mt, ca->object, ca->key));
+            } else {
+                // Match the float path: ABI joins cannot be written as packed
+                // bytes until the producer confirms its physical carrier.
+                emit_compound_array_store_fallback(mt, obj, obj_tid, arr_ptr,
+                    idx_int, em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg,
+                    assign_obj_var, assign_obj_cow_guard, assign_result);
+            }
         }
         // ==================================================================
         // DEFAULT: box value, call fn_array_set
         // ==================================================================
         else {
             MIR_reg_t val = transpile_box_item(mt, ca->value);
-            if (assign_obj_cow_guard) {
-                // CW32v2: a marked root's boxed store also consults the bit
-                emit_array_num_store_fallback(mt, obj, obj_tid, arr_ptr, idx_int,
-                    val, assign_obj_var, false, assign_result);
-            } else {
-                MIR_reg_t call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
-                    MIR_new_reg_op(mt->ctx, call_result)));
-            }
+            emit_compound_array_store_fallback(mt, obj, obj_tid, arr_ptr,
+                idx_int, val, assign_obj_var, assign_obj_cow_guard, assign_result);
         }
 
         // Return helper status so OOB write failures participate in T^ propagation.
@@ -35737,50 +35784,6 @@ static bool mir_find_defect_origin(AstNode* node, void* data) {
     return !scan->found;
 }
 
-static bool mir_cached_return_type_get(FnAnalysis* analysis, uint32_t epoch,
-        TypeId* type_id) {
-    if (__atomic_load_n(&analysis->mir_cached_return_type_epoch,
-            __ATOMIC_ACQUIRE) != epoch) return false;
-    TypeId cached = __atomic_load_n(&analysis->mir_cached_return_type,
-        __ATOMIC_RELAXED);
-    if (__atomic_load_n(&analysis->mir_cached_return_type_epoch,
-            __ATOMIC_ACQUIRE) != epoch) return false;
-    *type_id = cached;
-    return true;
-}
-
-static void mir_cached_return_type_set(FnAnalysis* analysis, uint32_t epoch,
-        TypeId type_id) {
-    __atomic_store_n(&analysis->mir_cached_return_type_epoch, 0,
-        __ATOMIC_RELEASE);
-    __atomic_store_n(&analysis->mir_cached_return_type, type_id,
-        __ATOMIC_RELAXED);
-    __atomic_store_n(&analysis->mir_cached_return_type_epoch, epoch,
-        __ATOMIC_RELEASE);
-}
-
-static bool mir_cached_return_defer_get(FnAnalysis* analysis, uint32_t epoch,
-        bool* may_defer) {
-    if (__atomic_load_n(&analysis->mir_cached_return_defer_epoch,
-            __ATOMIC_ACQUIRE) != epoch) return false;
-    bool cached = __atomic_load_n(&analysis->mir_cached_return_defer,
-        __ATOMIC_RELAXED);
-    if (__atomic_load_n(&analysis->mir_cached_return_defer_epoch,
-            __ATOMIC_ACQUIRE) != epoch) return false;
-    *may_defer = cached;
-    return true;
-}
-
-static void mir_cached_return_defer_set(FnAnalysis* analysis, uint32_t epoch,
-        bool may_defer) {
-    __atomic_store_n(&analysis->mir_cached_return_defer_epoch, 0,
-        __ATOMIC_RELEASE);
-    __atomic_store_n(&analysis->mir_cached_return_defer, may_defer,
-        __ATOMIC_RELAXED);
-    __atomic_store_n(&analysis->mir_cached_return_defer_epoch, epoch,
-        __ATOMIC_RELEASE);
-}
-
 static bool mir_cached_defect_origin_get(FnAnalysis* analysis, uint32_t epoch,
         bool* found) {
     if (__atomic_load_n(&analysis->mir_cached_defect_origin_epoch,
@@ -36428,12 +36431,6 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
 }
 
 static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
-    FnAnalysis* analysis = fn_node ? fn_node->analysis : NULL;
-    bool cached = false;
-    if (analysis && mir_cached_return_defer_get(analysis,
-            mt->inference_cache_epoch, &cached)) {
-        return cached;
-    }
     bool may_defer = false;
     AstNode* body = NULL;
     AstNode* fn_as = NULL;
@@ -36536,20 +36533,10 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     may_defer = !mir_expr_proves_native_return_lane(mt, body, return_tid);
 
 done:
-    if (analysis) {
-        mir_cached_return_defer_set(analysis, mt->inference_cache_epoch,
-            may_defer);
-    }
     return may_defer;
 }
 
 static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
-    FnAnalysis* analysis = fn_node ? fn_node->analysis : NULL;
-    TypeId cached = LMD_TYPE_ANY;
-    if (analysis && mir_cached_return_type_get(analysis,
-            mt->inference_cache_epoch, &cached)) {
-        return cached;
-    }
     AstNode* fn_as_node = (AstNode*)fn_node;
     bool is_proc = (fn_as_node->node_type == AST_NODE_PROC);
 
@@ -36559,10 +36546,6 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
     // publish such a body through a raw scalar return ABI.
     if (function_return_may_defer(mt, fn_node)) {
         log_debug("mir: infer_return_type - body may defer (proc=%d)", is_proc);
-        if (analysis) {
-            mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
-                LMD_TYPE_ANY);
-        }
         return LMD_TYPE_ANY;
     }
 
@@ -36593,15 +36576,7 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
                     (has_native_contract &&
                      mir_direct_pointer_lane_abi_type(ret_tid))) {
                 log_debug("mir: infer_return_type - declared type_id=%d (proc=%d)", ret_tid, is_proc);
-                if (analysis) {
-                    mir_cached_return_type_set(analysis,
-                        mt->inference_cache_epoch, ret_tid);
-                }
                 return ret_tid;
-            }
-            if (analysis) {
-                mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
-                    LMD_TYPE_ANY);
             }
             return LMD_TYPE_ANY;
         }
@@ -36611,10 +36586,6 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
         TypeId proc_return = infer_proc_native_return_lane(mt, fn_node);
         log_debug("mir: infer_return_type - proc return lane=%d", proc_return);
         if (proc_return != LMD_TYPE_ANY) {
-            if (analysis) {
-                mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
-                    proc_return);
-            }
             return proc_return;
         }
     }
@@ -36629,18 +36600,10 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
         // Only accept simple native scalar types
         if (mir_is_native_scalar_value_type(body_tid)) {
             log_debug("mir: infer_return_type - body type_id=%d", body_tid);
-            if (analysis) {
-                mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
-                    body_tid);
-            }
             return body_tid;
         }
     }
 
-    if (analysis) {
-        mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
-            LMD_TYPE_ANY);
-    }
     return LMD_TYPE_ANY;
 }
 
@@ -42134,6 +42097,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     if (!image) goto fail;
     image->context = satellite_context;
     image->mir_gen_initialized = !satellite_interp;
+    image->module_layout = layout;
     image->compiler_pool = snapshot_pool;
     image->compiler_name_pool = snapshot_name_pool;
     image->compiler_const_list = snapshot_const_list;
@@ -42188,6 +42152,26 @@ bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
         true, cancel_probe, cancel_context, out_image);
 }
 
+bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image) {
+    if (!script || !image || !image->context || !image->module_layout) return false;
+    if (image->module_state_prepared) return true;
+    LambdaModuleLayout* layout = image->module_layout;
+    uint32_t key_base = lambda_module_state_property_key_count(script->module_state_id);
+    if (key_base > LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK ||
+            layout->property_key_count > LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK - key_base) {
+        return false;
+    }
+    // distinct in-flight images may finish in any order. Assign their disjoint
+    // key suffixes on the owning evaluator, never from worker TLS (D8.5.1v7).
+    layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS | key_base;
+    image->module_state_prepared = lambda_module_state_bind_static(script->module_state_id,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list) && prepare_context_module_state(image->context,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list);
+    return image->module_state_prepared;
+}
+
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
         const AstFuncNode* fn, void** out_boxed_entry) {
     if (out_boxed_entry) *out_boxed_entry = NULL;
@@ -42208,11 +42192,7 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     // A satellite resolves literals through the current module-state image.
     // Bind and seal it only on the evaluator thread, where its TLS owner is
     // valid and the Function entries can be updated atomically as one step.
-    bool prepared = lambda_module_state_bind_static(script->module_state_id,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list) && prepare_context_module_state(image->context,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list);
+    bool prepared = interp_satellite_image_prepare(script, image);
     if (!prepared) {
         log_error("interp-tier: synchronous satellite module-state publish failed");
         if (installed_context) {
