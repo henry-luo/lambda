@@ -25,8 +25,8 @@ allocator has a named context owner), D7.1.2 (I/O versus derived-artifact
 layering), D7.2.2–D7.2.3 (transactional module initialization and in-process
 import caching), D8.1.3v10 (retained LambdaJS AST and explicit AST tier),
 D8.4.1v2 (immutable generated code), D7.1.2v2 (I/O and opaque-artifact
-layering), D8.5.1v5 (the persistent executable-script cache and static
-module-prebuild scheduler), and D8.1.1v12/D8.5.1v6 (parallel satellite
+layering), D8.5.1v7 (the persistent executable-script cache and global
+static-module future registry), and D8.1.1v12/D8.5.1v6 (parallel satellite
 publication).
 This proposal records the 2026-09-13 policy decisions in §15; formal rulings
 are kept synchronized as implementation lands.
@@ -500,24 +500,44 @@ being evicted while an execution instance references it. If scope recovery
 releases an owner without `complete_build()`, the common service poisons that
 key, broadcasts every waiter, and requires source invalidation before retry.
 
-#### Static module-prebuild task graph (implemented 2026-09-22)
+#### Process-global static-module future registry (implemented 2026-09-22)
 
-Static import prebuild uses one bounded pool for the entire file-backed import
-closure, rather than one pool and wait barrier for each dependency depth. A
-parse-accurate discovery task immediately sends every resolved static import
-to that pool. Its request key is the canonical path plus language/profile, so
-the task graph has one node per module even when several importers name it.
+Static import prebuild is a process-global service, not a stack-local closure
+graph. It owns one bounded `LAMBDA_MODULE_AST_THREADS` pool for the process and
+a keyed task registry. A task key is the canonical module path plus the
+language/profile that supplies discovery, resolution, and AST admission. The
+`InputScriptCache` remains the authority for exact source bytes, source
+generation, parser ABI, and artifact reuse; a registry task is only a
+best-effort scheduling future and cannot make a stale artifact admissible.
 
-For example, discovery of `A -> B -> C` and `A -> D -> C` first queues `B` and
-`D`; their discovery tasks both request the one deduplicated `C` node. `C` is
-built once, and its completion notifies both direct dependents, releasing `B`
-and `D` independently. A module's AST build is queued only after its direct
-imports complete. Workers publish dependency completion; they never block on a
-child task, so a fixed pool cannot deadlock behind nested imports. The ordinary
-loader remains responsible for module instantiation, execution, MIR, and
-diagnostics. Cache build claims still provide single-flight sharing when another
-closure requests the same artifact. [D8.1.1v11,
-D8.5.1v5]
+The root loader submits discovery and returns immediately: it has no
+`wait_all()` ownership boundary. Every discovery task immediately requests all
+resolved static children from the global registry. If a request finds an
+existing pending or completed task it receives that task's future instead of
+creating a second job. A task keeps direct dependency and dependent lists; a
+child completion continues only its direct parents. An importer task queues its
+AST build only after every direct child future completed successfully. Pool
+workers therefore publish work and continuations but never block waiting on a
+nested import.
+
+```text
+root A discovery: request B, D; return to ordinary A load
+B discovery: request C              D discovery: request C
+                       \            /
+                        one C future
+                       /            \
+                 notify B          notify D
+                 build B           build D
+```
+
+The ordinary Lambda and JS import consumers wait only for the future of the
+module they are about to load. They never wait for an unrelated root closure;
+the prebuild worker path never performs this consumer wait. Thus `A -> B -> C`
+and `A -> D -> C` use one `C` build without either a depth batch barrier or a
+whole-closure wait. Cycle detection completes the affected prebuild future as
+failed; the established ordinary loader retains its own cycle handling and
+diagnostics. Module initialization, execution state, and MIR remain with the
+receiving runtime. [D8.1.1v13, D8.5.1v7]
 
 #### Parallel P2 satellite compilation (initial implementation landed)
 

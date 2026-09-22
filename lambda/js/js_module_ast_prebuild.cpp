@@ -84,6 +84,7 @@ static bool js_ast_prebuild_build_module(void* opaque, const char* path) {
     (void)opaque;
     Runtime worker = {};
     runtime_init(&worker);
+    worker.ast_prebuild_only = true;
     size_t source_length = 0;
     char* source = js_load_script_source_from_cache(path,
         "js-ast-prebuild", "ast-template", true, &source_length);
@@ -100,20 +101,29 @@ static bool js_ast_prebuild_build_module(void* opaque, const char* path) {
     return built;
 }
 
-bool js_module_ast_prebuild_imports(const char* filename, const char* source,
-        size_t source_length) {
-    if (!filename || !source || !input_script_cache_ast_enabled(
-            input_manager_global_script_cache())) return false;
-    ModuleAstPrebuildProfile profile = {
+static const ModuleAstPrebuildProfile* js_ast_prebuild_profile(void) {
+    static const ModuleAstPrebuildProfile profile = {
         "javascript", MODULE_AST_LANGUAGE_JAVASCRIPT,
         js_ast_prebuild_discover_imports, js_ast_prebuild_resolve_import,
         js_ast_prebuild_build_module, NULL,
     };
+    return &profile;
+}
+
+bool js_module_ast_prebuild_imports(const char* filename, const char* source,
+        size_t source_length) {
+    if (!filename || !source || !input_script_cache_ast_enabled(
+            input_manager_global_script_cache())) return false;
     ModuleAstPrebuildProfiles profiles = {};
-    profiles.profiles[MODULE_AST_LANGUAGE_JAVASCRIPT] = &profile;
+    profiles.profiles[MODULE_AST_LANGUAGE_JAVASCRIPT] = js_ast_prebuild_profile();
     ModuleAstPrebuildStats stats = {};
-    bool scheduled = module_ast_prebuild_imports(&profiles,
+    return module_ast_prebuild_imports(&profiles,
         MODULE_AST_LANGUAGE_JAVASCRIPT, filename, source, source_length,
         &stats);
-    return scheduled && stats.failed_modules == 0;
+}
+
+bool js_module_ast_prebuild_await_import(const char* path) {
+    if (!path || !input_script_cache_ast_enabled(
+            input_manager_global_script_cache())) return false;
+    return module_ast_prebuild_await_import(js_ast_prebuild_profile(), path);
 }

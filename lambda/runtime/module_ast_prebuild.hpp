@@ -6,9 +6,9 @@
 
 #include "../../lib/arraylist.h"
 
-// The module prebuild graph is deliberately language-neutral. A profile owns
-// syntax discovery, resolution, and the isolated AST build; this scheduler
-// owns one bounded closure-wide queue plus dependency continuations.
+// The module prebuild registry is deliberately language-neutral. A profile
+// owns syntax discovery, resolution, and the isolated AST build; the registry
+// owns one process-wide bounded queue plus keyed dependency futures.
 typedef enum ModuleAstLanguage {
     MODULE_AST_LANGUAGE_LAMBDA = 0,
     MODULE_AST_LANGUAGE_JAVASCRIPT,
@@ -32,6 +32,8 @@ typedef bool (*ModuleAstResolveImportFn)(void* context,
 typedef bool (*ModuleAstBuildFn)(void* context, const char* path);
 
 typedef struct ModuleAstPrebuildProfile {
+    // The process-global registry borrows this descriptor while its tasks are
+    // pending; production adapters therefore expose a static descriptor.
     const char* name;
     ModuleAstLanguage language;
     ModuleAstDiscoverImportsFn discover_imports;
@@ -52,11 +54,17 @@ typedef struct ModuleAstPrebuildStats {
     uint32_t worker_pool_runs;
 } ModuleAstPrebuildStats;
 
-// Build a static import closure through one dependency-aware queue. Discovery
-// jobs publish nested requests immediately; a module build waits only on its
-// direct prerequisites, never on a depth batch. This is best-effort: a missing
-// or invalid module is left for the ordinary loader's established diagnostics.
+// Seed process-global static-import discovery. This is fire-and-forget: roots
+// never wait for a closure. Discovery jobs publish nested requests immediately;
+// a module build waits only on its direct prerequisites, never on a depth batch.
+// This is best-effort: a missing or invalid module is left for ordinary-loader
+// diagnostics.
 bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
     ModuleAstLanguage root_language, const char* root_path,
     const char* root_source, size_t root_source_length,
     ModuleAstPrebuildStats* out_stats);
+
+// Wait only for the future of one direct import. Prebuild workers must bypass
+// this entry so a bounded pool never blocks behind its own queued work.
+bool module_ast_prebuild_await_import(const ModuleAstPrebuildProfile* profile,
+    const char* path);

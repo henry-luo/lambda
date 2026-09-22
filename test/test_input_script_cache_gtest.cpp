@@ -58,6 +58,9 @@ static void cache_test_restore_env(const char* name, char* previous_value) {
 typedef struct CacheQueuePrebuildState {
     int generation;
     pthread_mutex_t mutex;
+    pthread_cond_t root_discovered_cond;
+    bool root_discovered;
+    int root_resolutions;
     bool slow_discovery_active;
     bool left_built_after_shared;
     bool right_built_after_shared;
@@ -110,7 +113,6 @@ static ArrayList* cache_queue_prebuild_discover(void* opaque,
 
 static bool cache_queue_prebuild_resolve(void* opaque, const char* importer_path,
         const char* specifier, ModuleAstResolvedImport* out) {
-    (void)importer_path;
     CacheQueuePrebuildState* state = (CacheQueuePrebuildState*)opaque;
     if (!state || !specifier || !out) return false;
     char path[160];
@@ -118,6 +120,14 @@ static bool cache_queue_prebuild_resolve(void* opaque, const char* importer_path
         state->generation, specifier);
     out->path = mem_strdup(path, MEM_CAT_SYSTEM);
     out->language = MODULE_AST_LANGUAGE_LAMBDA;
+    if (importer_path && strstr(importer_path, "_root.ls")) {
+        pthread_mutex_lock(&state->mutex);
+        state->root_discovered = ++state->root_resolutions == 3;
+        if (state->root_discovered) {
+            pthread_cond_broadcast(&state->root_discovered_cond);
+        }
+        pthread_mutex_unlock(&state->mutex);
+    }
     return out->path != NULL;
 }
 
@@ -231,6 +241,7 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     CacheQueuePrebuildState state = {};
     state.generation = (int)getpid();
     ASSERT_EQ(pthread_mutex_init(&state.mutex, nullptr), 0);
+    ASSERT_EQ(pthread_cond_init(&state.root_discovered_cond, nullptr), 0);
 
     char root_path[160];
     char slow_path[160];
@@ -268,6 +279,17 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     EXPECT_TRUE(module_ast_prebuild_imports(&profiles, MODULE_AST_LANGUAGE_LAMBDA,
         root_path, "root", 4, &stats));
 
+    // Root scheduling returns immediately. Wait only for the direct futures
+    // that make the test's temporary profile/context safe to release.
+    pthread_mutex_lock(&state.mutex);
+    while (!state.root_discovered) {
+        pthread_cond_wait(&state.root_discovered_cond, &state.mutex);
+    }
+    pthread_mutex_unlock(&state.mutex);
+    EXPECT_TRUE(module_ast_prebuild_await_import(&profile, left_path));
+    EXPECT_TRUE(module_ast_prebuild_await_import(&profile, right_path));
+    EXPECT_TRUE(module_ast_prebuild_await_import(&profile, slow_path));
+
     cache_test_restore_env("LAMBDA_MODULE_AST_THREADS", previous_threads);
     pthread_mutex_lock(&state.mutex);
     EXPECT_EQ(state.shared_builds, 1);
@@ -275,9 +297,6 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     EXPECT_TRUE(state.right_built_after_shared);
     EXPECT_TRUE(state.dependent_built_while_slow_discovery_active);
     pthread_mutex_unlock(&state.mutex);
-    EXPECT_EQ(stats.discovered_modules, 5u);
-    EXPECT_EQ(stats.built_modules, 4u);
-    EXPECT_EQ(stats.failed_modules, 0u);
     EXPECT_EQ(stats.worker_pool_runs, 1u);
 
     unlink(root_path);
@@ -285,6 +304,7 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     unlink(left_path);
     unlink(right_path);
     unlink(shared_path);
+    pthread_cond_destroy(&state.root_discovered_cond);
     pthread_mutex_destroy(&state.mutex);
 }
 

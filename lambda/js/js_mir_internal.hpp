@@ -836,6 +836,7 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
     bool record_cache_dependencies);
 bool js_module_ast_prebuild_imports(const char* filename, const char* source,
     size_t source_length);
+bool js_module_ast_prebuild_await_import(const char* path);
 extern "C" Item js_new_function_from_string(Item* args, int argc);
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_normalize_path_separators(char* path);

@@ -151,14 +151,18 @@ static bool lambda_ast_prebuild_build_module(void* opaque, const char* path) {
     return built;
 }
 
-static bool lambda_ast_prebuild_imports(const char* path) {
-    ModuleAstPrebuildProfile profile = {
+static const ModuleAstPrebuildProfile* lambda_ast_prebuild_profile(void) {
+    static const ModuleAstPrebuildProfile profile = {
         "lambda", MODULE_AST_LANGUAGE_LAMBDA,
         lambda_ast_prebuild_discover_imports, lambda_ast_prebuild_resolve_import,
         lambda_ast_prebuild_build_module, NULL,
     };
+    return &profile;
+}
+
+static bool lambda_ast_prebuild_imports(const char* path) {
     ModuleAstPrebuildProfiles profiles = {};
-    profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = &profile;
+    profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = lambda_ast_prebuild_profile();
     ModuleAstPrebuildStats stats = {};
     return module_ast_prebuild_imports(&profiles, MODULE_AST_LANGUAGE_LAMBDA,
         path, NULL, 0, &stats);
@@ -1478,11 +1482,19 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     // Build the static closure before the root enters its Runtime. Workers only
     // publish AST templates; import initialization and tier selection stay on
-    // this execution path (D8.1.1v11, D8.5.1v5).
+    // this execution path (D8.1.1v13, D8.5.1v7).
     if (runtime && !runtime->ast_prebuild_only && !is_import && !source &&
             lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_ast_enabled(input_manager_global_script_cache())) {
         (void)lambda_ast_prebuild_imports(script_path);
+    }
+    if (runtime && !runtime->ast_prebuild_only && is_import && !source &&
+            lambda_tier_selected() != LAMBDA_TIER_JIT &&
+            input_script_cache_ast_enabled(input_manager_global_script_cache())) {
+        // Only an ordinary consumer waits, and only for its own direct module.
+        // Prebuild workers bypass this path to keep the bounded pool runnable.
+        (void)module_ast_prebuild_await_import(lambda_ast_prebuild_profile(),
+            script_path);
     }
 
     // Normalize path to canonical absolute path for reliable deduplication

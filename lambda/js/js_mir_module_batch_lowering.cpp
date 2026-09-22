@@ -4234,7 +4234,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     bool ast_executor_requested = ast_executor_forced ||
         js_execution_auto_requested();
     bool ast_closure_ready = false;
-    if (ast_executor_requested &&
+    if (ast_executor_requested && !runtime->ast_prebuild_only &&
             !runtime->js_ast_backend && filename && filename[0] != '<') {
         ast_closure_ready = js_module_ast_prebuild_imports(filename, js_source,
             strlen(js_source));
@@ -4731,6 +4731,12 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
                     }
                 } else {
                     // Same-language import: read and compile JS module
+                    if (!runtime->ast_prebuild_only &&
+                            (runtime->js_ast_backend || js_execution_auto_requested())) {
+                        // The global registry waits only for this direct module;
+                        // a prebuild worker never takes the consumer wait path.
+                        (void)js_module_ast_prebuild_await_import(resolved);
+                    }
                     size_t mod_source_length = 0;
                     char* mod_source = js_load_script_source_from_cache(
                         resolved, "js-static-import", "module", true,
