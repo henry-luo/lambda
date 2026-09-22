@@ -1078,6 +1078,14 @@ test `test/lambda/closure_capture_sites.ls` (+ `.txt`). Main-module MIR is
 byte-identical for all 1,052 dumpable Lambda test scripts (imported package
 modules are compiled separately and are not in that dump);
 `test-lambda-baseline` 5,775/5,776 (waived cookie), no leaks.
-Still open (pre-existing, separate): the JIT's public wrapper evaluates an
-omitted default without the closure environment and logs
-`undefined variable`; the direct call path supplies the right value.
+Follow-up fixed (USER, 2026-09-22): the JIT's public wrapper resolved an
+omitted default before any capture was bound, so a closure called as a value
+(`let f = make(21); f()`) failed to compile with `undefined variable` and the
+script aborted. `transpile-mir.cpp` now binds the closure's captures in the
+wrapper (shared `emit_load_closure_captures`, also used by the body prologue)
+when a parameter has a default. Lambda MIR is identical for all 1,052 existing
+test scripts; the regression test gained two dynamic-call cases.
+
+The JLS-5/6 MIR check was redone without `git stash` (pre-change files
+written from `1cfba2714`, forced rebuild on each side, both versions confirmed
+in the build): 554/554 identical.

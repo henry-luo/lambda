@@ -7145,6 +7145,41 @@ static MIR_reg_t emit_optional_argument_value(MirTranspiler* mt, MIR_reg_t value
     return result;
 }
 
+// Binds each capture of `fn_node` from its flat Item environment into the
+// current scope. The body also records env offsets so mutations write back;
+// the public wrapper only reads captures while resolving omitted defaults.
+static void emit_load_closure_captures(MirTranspiler* mt, AstFuncNode* fn_node,
+        MIR_reg_t env_ptr_reg, bool track_write_back) {
+    int cap_count = 0;
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) cap_count++;
+    int cap_index = 0;
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next, cap_index++) {
+        char cap_name[128];
+        snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
+        MIR_reg_t cap_val = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, env_ptr_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        // Store as local variable (already boxed as Item)
+        set_var(mt, cap_name, cap_val, MIR_T_I64, LMD_TYPE_ANY);
+        publish_var_binding(mt, cap_name, cap->entry);
+        if (!track_write_back) continue;
+        MirVarEntry* cap_var = mir_var_for_binding(mt, cap->entry);
+        if (cap_var) cap_var->env_offset = cap_index * 8;
+        log_debug("mir: closure - loaded capture '%s' at env offset %d",
+            cap_name, cap_index * 8);
+    }
+}
+
+static bool fn_has_parameter_default(AstFuncNode* fn_node) {
+    for (AstNamedNode* param = fn_node->param; param; param = (AstNamedNode*)param->next) {
+        TypeParam* parameter = (TypeParam*)param->type;
+        if (parameter && parameter->default_value) return true;
+    }
+    return false;
+}
+
 static void async_store_var(MirTranspiler* mt, MirVarEntry* var) {
     if (!mt || !var || !mt->in_async_proc || !mt->async_frame_reg ||
             var->async_slot < 0) return;
@@ -37022,6 +37057,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         MIR_reg_t env = MIR_reg(mt->ctx, "_env_ptr", wrapper_func);
         call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, env);
         call_vars[call_arg_count++] = {MIR_T_P, "env", 0};
+        // An omitted default is resolved here, before the body's prologue, and
+        // may read a captured binding (`fn inner(x = n)`); bind the captures so
+        // it does not compile as an undefined variable.
+        if (fn_has_parameter_default(fn_node)) {
+            emit_load_closure_captures(mt, fn_node, env, false);
+        }
     } else if (is_method) {
         MIR_reg_t self = MIR_reg(mt->ctx, "_self", wrapper_func);
         call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, self);
@@ -37987,41 +38028,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // Get the _env_ptr parameter register
         MIR_reg_t env_ptr_reg = MIR_reg(mt->ctx, "_env_ptr", func);
         mt->env_reg = env_ptr_reg;
-
-        // Load captured variables from env into local scope
-        // env is a flat array of Items (8 bytes each)
-        int cap_count = 0;
-        for (FnCapture* count_cap = fn_node->captures; count_cap; count_cap = count_cap->next) {
-            cap_count++;
-        }
-        int cap_index = 0;
-        FnCapture* cap = fn_node->captures;
-        while (cap) {
-            char cap_name[128];
-            snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
-
-            MIR_reg_t cap_val = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, env_ptr_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-
-            // Store as local variable (already boxed as Item)
-            set_var(mt, cap_name, cap_val, MIR_T_I64, LMD_TYPE_ANY);
-            publish_var_binding(mt, cap_name, cap->entry);
-
-            // Mark as captured variable with env offset for write-back on mutation
-            MirVarEntry* cap_var = mir_var_for_binding(mt, cap->entry);
-            if (cap_var) {
-                cap_var->env_offset = cap_index * 8;
-            }
-
-            log_debug("mir: closure '%s' - loaded capture '%s' at env offset %d",
-                name_buf->str, cap_name, cap_index * 8);
-
-            cap_index++;
-            cap = cap->next;
-        }
+        emit_load_closure_captures(mt, fn_node, env_ptr_reg, true);
     }
 
     // Method body setup: load object fields from _self into local scope.
