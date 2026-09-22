@@ -10,7 +10,6 @@
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/side_stack.h"
 
-extern __thread EvalContext* context;
 
 // =============================================================================
 // Function object wrappers
@@ -703,7 +702,6 @@ extern "C" void js_func_cache_suppress_pop(void) {
     }
 }
 
-extern "C" Item* js_with_capture_stack(int* out_depth);
 
 static void js_function_capture_with_env(JsFunction* fn) {
     if (!fn || !js_with_depth_active()) return;
@@ -1648,7 +1646,6 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
     js_function_finalize_capabilities(fn);
 }
 
-extern "C" void js_set_class_name(Item cls_item, Item name_item);
 static Item js_private_display_name_item(Item name_item);
 
 // Set the name of a JsFunction (called from transpiler after js_new_function/js_new_closure)

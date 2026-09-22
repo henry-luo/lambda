@@ -4,7 +4,6 @@
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/str.h"
 
-extern __thread EvalContext* context;
 
 extern "C" void* jube_host_identity(Item item);
 JS_FORWARD_EXPRESSION(Item, js_undefined, (void), ((Item){.item = ITEM_JS_UNDEFINED}))
@@ -1271,7 +1270,6 @@ static inline Item js_op_to_primitive(Item value, int hint) {
     return js_to_primitive(value, h);
 }
 
-extern "C" uint64_t js_get_heap_epoch();
 
 // These are context-local TLS-backed fields so a tight concatenation loop
 // remains direct loads/stores while never retaining another runtime's strings.

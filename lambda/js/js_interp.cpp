@@ -21,13 +21,9 @@
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 
-extern __thread EvalContext* context;
-extern int js_dynamic_import_suppress_module_drain;
 // Static imports execute nested module sources synchronously. Their queued
 // jobs belong to the importing module's host turn, not to the nested load.
 static __thread int js_interp_static_import_depth = 0;
-extern Item js_make_number(double value);
-extern "C" Item bigint_from_string(const char* value, int length);
 bool js_activate_runtime_name_pool(void);
 
 enum JsInterpCompletionKind : uint8_t {

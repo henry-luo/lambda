@@ -740,9 +740,7 @@ static int jube_host_node_resolve_namespace(void* session, const char* specifier
                                             Item* out_namespace);
 static int jube_host_node_resolve_host_namespace(void* session, const char* specifier,
                                                  Item* out_namespace);
-extern "C" Item js_get_buffer_namespace(void);
 extern "C" Item js_get_node_module_namespace(void);
-extern "C" Item js_get_util_namespace(void);
 extern "C" int js_permission_has_net(void);
 extern "C" int js_permission_enabled(void);
 extern "C" Item js_process_permission_has(Item scope, Item resource);
@@ -3679,10 +3677,8 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
     // Runtime primitives stay host-owned while node-core's descriptors control
     // their public Node exposure.
     static const JubeHostNamespaceEntry entries[] = {
-        {"buffer", js_get_buffer_namespace},
         {"module", js_get_node_module_namespace},
         {"url", node_url_namespace},
-        {"util", js_get_util_namespace},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
         if (strcmp(specifier, entries[i].specifier) == 0) {

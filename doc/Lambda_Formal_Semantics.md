@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 28.0.0 (2026-09-21)
+**Spec version:** 29.0.0 (2026-09-22)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -181,12 +181,15 @@ harnesses.
 
 ### S2.1 Types
 
-- **S2.1.1v3** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
+- **S2.1.1v4** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
   sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
   `decimal`, `string`, `symbol` (with `path` as a special symbol), `binary`,
-  `datetime` (with `date`/`time` sub-kinds). Containers: `range`, `list`,
-  `array` (transparently unboxed numeric variants), `map`, `element` (a list of
-  children *and* a map of attributes). First-class: `function`, `type`,
+  `datetime` (with `date`/`time` sub-kinds); `string`, `symbol`, and
+  `binary` are the text scalars, placed as one value and walked as sequences
+  (S2.5.8). Containers: `array` (transparently unboxed numeric variants) with
+  its two specialized kinds `range` and `list` — `list <: array`,
+  `range <: array`, and `type()` names the specific kind (S2.5.1v2) —
+  `map`, `element` (a list of children *and* a map of attributes). First-class: `function`, `type`,
   `error`. **`object` is a nominal container, not a container kind**: a map,
   array, or element whose type is nominal (S2.1.4). `A is object` asks whether
   A carries a nominal type and is orthogonal to the structural test, so a
@@ -321,16 +324,19 @@ harnesses.
 
 ### S2.5 Lists and blocks
 
-- **S2.5.1*** **A list spreads; an array does not.** Both are ordered
-  sequences of one family (S5.3.1) and differ in one bit. A list auto-spreads:
-  wherever it lands as an item — in a list, an array literal, or content
-  (S2.6.3) — its items are spliced in place, recursively, so `[(1, 2), 3]`
-  has three items. An array is always one item, whatever it holds, and a
-  `range` is an array. *The spread bit is the whole difference.* A list does
-  **not** normalize its items: `(1, null, 2)` keeps three and `("a", "b")`
-  two; normalization happens only where a list lands in content (S2.6).
-- **S2.5.2*** **A for-expression produces a list**, so its results spread
-  where it lands: `[for (i in 1 to 2) (i, i)]` has four items.
+- **S2.5.1v2*** **A list spreads; an array does not.** A list is a
+  specialized array, as a range is: `list <: array`, `type((1, 2))` is
+  `list`, `(1, 2) is int[]` holds, and the three are one sequence family
+  (S5.3.1) that differs in one bit. A list auto-spreads: wherever it sits as
+  an item — in a list, an array literal, or content (S2.6.3) — its items are
+  spliced in place, recursively, so `[(1, 2), 3]` has three items and
+  `((1, 2), (3, 4))` is `(1, 2, 3, 4)`: **a list never nests**. An array or a
+  range is always one item, whatever it holds. A list does **not** normalize
+  its items: `(1, null, 2)` keeps three and `("a", "b")` two; normalization
+  happens only where a list lands in content (S2.6).
+- **S2.5.2v2*** **A for-expression produces a list, whatever its clauses**
+  — `where`, `order by`, `limit`/`offset`, `group by` included — so its
+  results spread where it lands: `[for (i in 1 to 2) (i, i)]` has four items.
 - **S2.5.3** **A block `{…}` produces a list** of its statements' results, in
   order — not merely its last expression: `{ 1; 2 }` is the list `(1, 2)`.
   A `pn` body is the exception: it follows the procedural convention and,
@@ -340,11 +346,55 @@ harnesses.
   nothing to the enclosing block, list, or content — as `let` does in a
   list: `(let x = 5, x + 1)` has the single item `x + 1`, and
   `{ let y = 1; y + 1 }` the single item `y + 1`.
-- **S2.5.5*** **One-item and empty lists collapse.** A list of one item *is*
-  that item and the empty list *is* `null`: `(x)` ≡ `x` and `()` ≡ `null`, so
-  `(((e)))` is always `e`. Blocks collapse alike — `{ let y = 1; y + 1 }` is
-  `2`, and a block of declarations only is `null`. Collapse counts items
-  after spreading and never drops one: `(1, null)` stays a two-item list.
+- **S2.5.5v2*** **A list has at least two items.** A one-item list *is* its
+  item and the empty list *is* `null`: `(x)` ≡ `x` and `()` ≡ `null`, so
+  `(((e)))` is always `e`; blocks collapse alike (`{ let y = 1; y + 1 }` is
+  `2`, a block of declarations only is `null`). Collapse counts items after
+  spreading and never drops one: `(1, null)` stays two items. **Void versus
+  null**: a list *expression* sitting in an item position splices whatever it
+  has, including nothing, while a list *value* — bound, passed, returned,
+  stored, compared — has collapsed, and a collapsed empty list is the `null`
+  value, placed as an item like any other: `[for (x in []) x, 1]` is `[1]`,
+  but `let e = for (x in []) x; [e, 1]` is `[null, 1]` and `push(a, e)`
+  pushes `null`. A non-text scalar has no content (S8.3.1v3), so a computed
+  one-item list is invisible to `for`, `len`, and indexing —
+  `len(take((10, 20, 30), 1))` is `len(10)` = 0. Wrap when a stable
+  collection is wanted: `[for …]`, `[take(…)]` always yield `[]` when empty.
+- **S2.5.6*** **A list is transient; where it lands decides.** The
+  persistent data model — maps, elements, objects, arrays, scalars: whatever
+  can be serialized — holds no lists. A list in a *sequence-item position* (a
+  list or array literal, content, an insertion by `push`/`splice`/`a[i] = v`)
+  splices (S2.5.1v2); a list in a *single-value slot of a persistent
+  container* (a map field, an attribute, an object field) is stored as the
+  array it is — `{f: (1, 2)}.f` is `[1, 2]`; everywhere else — binding,
+  argument, return, operand, subscript — it passes through unchanged, and an
+  annotation checks it without changing its kind (S11.1.6). A list prints and
+  formats as its array; the spread bit is never serialized; a top-level list
+  is content (S2.6.1).
+- **S2.5.7*** **Sequence operations preserve the input kind; mixing gives an
+  array.** A transform — select, reorder, map, filter, slice, mutate —
+  returns a list for a list input and an array for an array or range input:
+  `(1, 2) |> ~ * 2` is `(2, 4)`, `[1, 2] |> ~ * 2` is `[2, 4]`. An operation
+  over several sequences yields a list only when every sequence operand is a
+  list; any array or range operand makes it an array; scalars and `null` do
+  not affect the kind — `(1, 2) ++ 3` is `(1, 2, 3)`, `(1, 2) ++ [3]` is
+  `[1, 2, 3]`, `zip(list, list)` is a list of array pairs, `zip(list, array)`
+  an array. Constructors fix their own kind: `for` and blocks build lists;
+  literals, ranges, `range()`, `split`, `find`, `varg()`, rest parameters,
+  `content(e)`, and every function without a list input build arrays;
+  `fill(n, x)` follows its item (`fill(2, (1, 2))` is `(1, 2, 1, 2)`).
+  `keys`/`values`/`names` (S8.4.1v2), the mapping pipe and `that` (S10.1),
+  vectorized functions (S7.10.5v2), and `++` (S10.6.1) obey this rule.
+- **S2.5.8*** **Text is placed as one value and walked as a sequence** —
+  exactly like an array. Iteration, `len`, indexing, `in`, the pipe, `that`,
+  and every sequence operation see a string or symbol as its code points and
+  a binary as its bytes (S8.3.1v3, S8.1.1): `"a" in "cat"` is character
+  membership (substring search is `contains`), `reverse("abc")` is `"cba"`,
+  `"abc" that ~ != "b"` is `"ac"`. A sequence operation over a text value
+  yields that text kind when every result item is of that kind — concatenated:
+  `"abc" |> upper(~)` is `"ABC"`, `"abc" |> ~ ++ "-"` is `"a-b-c-"` — and an
+  array otherwise: `"abc" |> ord(~)` is `[97, 98, 99]`; an empty result is
+  `""`. For `++` and for placement a text value is one item (S10.6.1).
 
 ### S2.6 Content
 
@@ -357,13 +407,13 @@ harnesses.
   apart are carried inside a non-merging item — e.g. an array,
   `<cmd ["a", "b"]>` — never as adjacent content strings. Normalization
   belongs to content alone: collections never normalize, lists included
-  (S2.5.1), so `[1, null, "", 2]` keeps all four items. [C1; Design_Syntax §7.23, §7.27]
+  (S2.5.1v2), so `[1, null, "", 2]` keeps all four items. [C1; Design_Syntax §7.23, §7.27]
 - **S2.6.2*** **Absent and empty items are dropped.** A `null` contributes
   nothing, however it arose — written literally, read from a missing key
   (S7.1.1v3), or produced by an `else`-less `if` (S16.6.3) — and neither does
   an empty string `""` (S2.2.3). An empty binary cannot arise (S2.2.2).
-- **S2.6.3** **Lists spread into content; arrays do not (S2.5.1).** A list
-  item — a for-expression's or a block's result among them (S2.5.2, S2.5.3) —
+- **S2.6.3** **Lists spread into content; arrays do not (S2.5.1v2).** A list
+  item — a for-expression's or a block's result among them (S2.5.2v2, S2.5.3) —
   splices its items inline, recursively, each spliced item normalized as if
   written in place; an array or a range stays one item. So
   `<e for (i in 1 to 2) (i, i)>` has four items, while `<e [1, null]>` and
@@ -395,10 +445,14 @@ harnesses.
   invariant, not an accident. Any proposal to make a *value* of a truthy type
   falsy must clear this bar; `nan` stays truthy because poison carries no
   falsy tag. [C17]
-- **S3.3** Consequences to teach: truthy-0 keeps `or` a safe coalescing
-  operator (no `??` needed); `if (results)` does not mean "any results" —
-  write `len(results) > 0`; `a div b or 0` does not rescue a zero divisor
-  (poison is truthy) — guard the divisor or test `is nan`. [C2, C17]
+- **S3.3v2** Consequences to teach: truthy-0 keeps `or` a safe coalescing
+  operator (no `??` needed); `if (results)` does not mean "any results" for
+  an array — write `len(results) > 0`; for a list result the empty case is
+  `null`, so `results or default` works, but a one-item list is its item and
+  the item's own truthiness applies — a single `false`, `""`, `null`, or
+  error result reads as no result (S2.5.5v2); `a div b or 0` does not rescue
+  a zero divisor (poison is truthy) — guard the divisor or test `is nan`.
+  [C2, C17]
 
 ---
 
@@ -666,7 +720,7 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
   (no locale collation); sequences lexicographic; maps via canonically sorted
   keys; elements by tag, attributes, children; objects — nominal values of
   ANY structural kind, the object band being orthogonal to the structural
-  kinds (S2.1.1v3) — by type name, then attributes, then content.* [C11.4,
+  kinds (S2.1.1v4) — by type name, then attributes, then content.* [C11.4,
   OB4, OB13]
 - **S6.2.3** Sort is stable; `desc` is **full reversal** — one pure order, no
   pinning exceptions. [C11.4]
@@ -953,10 +1007,12 @@ question: **can the result be mistaken for a successful computation?** [§7.6 re
 *Take input broadly; keep results in domain. Preserve the successful result's
 cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
-- **S7.10.1** Result shape is fixed by the contract, never by cardinality:
-  zero-to-many → `[]`; zero-or-one → `null`; string-valued no-content →
-  `""`; non-admissive invalid input → `error`. The four are distinct and must
-  stay distinguishable.
+- **S7.10.1v2** Result shape is fixed by the contract, never by cardinality,
+  for array and text inputs: zero-to-many → `[]`; zero-or-one → `null`;
+  string-valued no-content → `""`; non-admissive invalid input → `error`. The
+  four are distinct and must stay distinguishable. A list input yields a list
+  result (S2.5.7), which obeys S2.5.5v2: empty is `null`, one item is the
+  item.
 - **S7.10.2** Admission is an explicit per-function contract: an **admissive**
   case has a meaningful no-answer reading and returns result-domain absence
   (`arr[-1]`, `argmin([])`); a **non-admissive** case returns a detailed
@@ -971,9 +1027,11 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   `is null`. Private `-1` adapters must normalize at the Lambda boundary.
 - **S7.10.4** Error operands are rejected at the call boundary (parameters
   are `any \ error`), keeping "error operand" distinct from "no match".
-- **S7.10.5*** Vectorized sys funcs are array-in/array-out: one lane does not
-  collapse to a scalar; zero lanes produce a typed empty; lane exceptions
-  produce lane values (`nan`/`inf`), never a shape change.
+- **S7.10.5v2*** Vectorized sys funcs are sequence-in, same-kind-out
+  (S2.5.7): array in → array out, one lane never collapsing to a scalar and
+  zero lanes a typed empty; list in → list out — a one-lane list cannot arise
+  (S2.5.5v2), and zero lanes is `null`, so `null ⊕ x` is `null`; lane
+  exceptions produce lane values (`nan`/`inf`), never a shape change.
 - **S7.10.6** A mutator family picks one public convention (updated owner, or
   unit) and holds it; `[]` never means "mutation succeeded"; invalid mutation
   is `error`, never the unchanged input. (Which convention — open, App. B.)
@@ -1070,8 +1128,12 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S8.3 `len`
 
-- **S8.3.1v2** The law: **`len(x)` is the number of iterations `for (i in x)`
-  performs.** Consequences, not separate rules: `len("str")` = 3;
+- **S8.3.1v3** The law: **`len(x)` is the number of iterations `for (i in x)`
+  performs.** Consequences, not separate rules: `len("str")` = 3 (text walks
+  by code point, S2.5.8); `len(5)` = **0** — a non-text scalar has no
+  content, so `for (i in 5)` iterates nothing, while the mapping pipe and
+  `that` treat a scalar as one member by their own rule (S10.1.2v2,
+  S10.1.5v2): a placement, not an iteration;
   `len([[1,2],[3]])` = **2** (shallow — the count indexing needs);
   `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
   sequence); `len(err)` = **error** (iterating an error yields an error, not
@@ -1092,9 +1154,11 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 
 ### S8.4 Projections
 
-- **S8.4.1** `keys(c)` ≡ `for (k, v in c) k`; `values(c)` ≡
-  `for (k, v in c) v`; `names(c)` ≡ `for (k at c) k`. Defined by the
-  comprehensions they abbreviate; deliberately not built in until a call
+- **S8.4.1v2** `keys(c)` ≡ `[for (k, v in c) k]`; `values(c)` ≡
+  `[for (k, v in c) v]`; `names(c)` ≡ `[for (k at c) k]` — arrays: a
+  projection of a persistent container is a constructor (S2.5.7), never a
+  collapsing list (`keys({a: 1})` is `['a']`, `keys({})` is `[]`). Defined by
+  the comprehensions they abbreviate; deliberately not built in until a call
   site pays for one. `len(names(c))` is the `at`-axis length. [§8.2 record]
 
 ---
@@ -1200,28 +1264,33 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 - **S10.1.1** `|` means union/alternative **everywhere**: type expressions,
   match or-patterns, string patterns, value expressions (types are
   first-class). `|>` is the pipe. [C6]
-- **S10.1.2** The pipe is dual-mode on a parse-time syntactic test: a body
+- **S10.1.2v2** The pipe is dual-mode on a parse-time syntactic test: a body
   with a **free `~`** is a mapping pipe (binds `~` per item; `~#` is the
   current key/index); with no free `~` it is whole-value application
   (`data |> sum` ≡ `sum(data)`; extra args append: `data |> take(3)` ≡
-  `take(data, 3)`). A `~`-free non-callable body is a type error. Scalars
-  pipe as a whole value. [C6]
+  `take(data, 3)`). A `~`-free non-callable body is a type error. The mapping
+  pipe walks what `for … in` walks — an array or list by item, a map by
+  value, an element by attribute values then children (S8.1.2v2), text by
+  code point (S2.5.8) — and its result keeps the source's kind (S2.5.7): a
+  list gives a list, text its own kind when possible, everything else an
+  array. A non-sequence scalar pipes as one value: `5 |> ~ + 1` is `6`. [C6]
 - **S10.1.3** `~` is lexically scoped to the RHS of its pipe; nested
   constructs shadow, **innermost-wins** — uniformly for pipes, `that`
   clauses, match arms, and `last` (S7.2.2); reach an outer item via a `let`.
 - **S10.1.4** File write/append syntax is deferred; `output(data, file)` is
   the interim. [C6a]
-- **S10.1.5** `that` is the **filter**: `c that p` keeps the members of `c`
+- **S10.1.5v2** `that` is the **filter**: `c that p` keeps the members of `c`
   for which `p` is truthy. It binds `~` per member and `~#` to the key/index
-  on the same discipline as the mapping pipe (S10.1.2), scoped by S10.1.3, and
-  it sits at the **pipe precedence tier**, left-associative, so filters and
-  pipes chain left to right (`c |> f that p`). Its result spreads into an
-  enclosing array literal exactly as a pipe or `for` does. A scalar filters as
-  a one-member collection; an empty result is absent (`null`) by the ordinary
-  collection rule, not an empty container. Filtering a map tests its **values**
-  and yields an array — the keys are dropped (SO38). The filter was spelled
-  `where` before it was renamed to remove the ambiguity with the `for`-header
-  clause; that spelling is retired (S10.3.1v2).
+  on the same discipline as the mapping pipe (S10.1.2v2), scoped by S10.1.3,
+  and it sits at the **pipe precedence tier**, left-associative, so filters
+  and pipes chain left to right (`c |> f that p`). Its result keeps the
+  source's kind (S2.5.7): a list filters to a list, which spreads where it
+  lands and is `null` when empty; an array, range, map, or element filters to
+  an array, `[]` when empty (a map's keys are dropped, SO38); text filters to
+  text, `""` when empty (S2.5.8). A non-sequence scalar filters as a
+  one-member collection: `5 that ~ > 3` is `5`, `5 that ~ > 9` is `null`. The
+  filter was spelled `where` before it was renamed to remove the ambiguity
+  with the `for`-header clause; that spelling is retired (S10.3.1v2).
   [Grammar_Reduce2 appendix]
 
 ### S10.2 Vectorization
@@ -1243,7 +1312,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 - **S10.3.1v2** `and or not is in to div that at eq ne lt le gt ge` — Lambda is
   a keyword-operator language; new operators prefer words over sigils. `where`
   is **not** among them: binary `where` was retired in favour of `that`
-  (S10.1.5), and `where` survives only as a `for`-header clause word. A `where`
+  (S10.1.5v2), and `where` survives only as a `for`-header clause word. A `where`
   in infix position is the retired spelling and is a compile error naming
   `that`, never a silent reinterpretation. [Grammar_Reduce2 appendix]
 
@@ -1257,9 +1326,9 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   [PTH3, PTH5, PTH9]
 - **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
   bound, selects the innermost current-value context, and counts as a free
-  `~` for the S10.1.2 mapping-pipe test. Thus `~~.~~.a` means
+  `~` for the S10.1.2v2 mapping-pipe test. Thus `~~.~~.a` means
   `~.~~.~~.a`; it never denotes a relative path, whose form starts with `\.`.
-  [S10.1.2,
+  [S10.1.2v2,
   S10.1.3, PTH6]
 - **S10.4.3v2*** Contextual parent navigation is occurrence-based and
   carries lineage in the evaluation context as a navigation path, cursor, or
@@ -1285,27 +1354,45 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   never adds root/parent pointers to Lambda values, and node identity
   (S5.1.4v2) is not lineage. [S1.4, S1.6, S9.1, S9.3, PTH29, OB10]
 
+### S10.6 Concatenation
+
+- **S10.6.1*** **`++` concatenates sequences and appends scalars.** Sequence
+  `++` sequence concatenates, the kind following S2.5.7: `(1, 2) ++ (3, 4)`
+  is a list; any array or range operand gives an array. Sequence `++` scalar
+  appends the scalar as one item and scalar `++` sequence prepends it:
+  `[1, 2] ++ 3` is `[1, 2, 3]`, `(1, 2) ++ 3` is `(1, 2, 3)`, `3 ++ [1, 2]`
+  is `[3, 1, 2]`; strings, symbols, and binaries are scalars here
+  (`[1] ++ "ab"` is `[1, "ab"]`). Scalar `++` scalar is text concatenation:
+  two values of one text kind keep it (`"a" ++ "b"` is `"ab"`, `'a' ++ 'b'`
+  is `'ab'`, binary `++` binary is a binary); otherwise both render as text
+  and the result is a string (`1 ++ 2` is `"12"`). `null` is `()` and so the
+  identity: `x ++ null` and `null ++ x` are `x`. Maps and elements are not
+  sequences — `m1 ++ m2` is an error; merge is `{*: m1, *: m2}` (S12.3.5v2).
+  Paths keep S2.4.2v4's `base ++ relative_suffix`. [Design_Syntax §7.27]
+
 ---
 
 ## S11 Types and Patterns
 
 ### S11.1 Types compose like values
 
-- **S11.1.1v2** A bracket type is a structural pattern whose positions mix
-  values and types freely: `[1, int, "str"]`; `[int]` is **exactly one int**
-  (TypeScript's reading — forced by compositionality at n = 1) and enforced
-  with a teaching message. `T[]` is the homogeneous-array contract: every
-  logical element satisfies `T`, and repeated postfixes preserve rank
-  (`T[][]` means an array of `T[]`, not a flattened leaf array). `T[n]` is an
-  occurrence/count pattern, never a spelling of `T[]`; a program must state
-  both obligations when it needs both. A lint applies to bare `[T]` in
-  annotation position only.* [C7]
-- **S11.1.2** String structural patterns are delimited islands: `\( ... )`
+- **S11.1.1v3*** A bracket type is a structural pattern whose positions mix
+  values, types, and occurrence runs freely: `[1, int, "str"]`,
+  `[1, int*, 2]`; `[int]` is **exactly one int** (TypeScript's reading —
+  forced by compositionality at n = 1) and enforced with a teaching message.
+  `T[]` is the homogeneous-array contract — every logical element satisfies
+  `T`, at any length, lists included since a list is an array (S2.5.1v2) —
+  and `T[n]` is `T[]` with a fixed length, so `(1, 2) is int[2]`; repeated
+  postfixes preserve rank (`T[][]` means an array of `T[]`, not a flattened
+  leaf array; `int[2][3]` is three arrays of two). Counts on a *run* are the
+  occurrence family (S11.1.6): a counted array is spelled `[T{n,m}]`, never
+  `T[n,m]`. A lint applies to bare `[T]` in annotation position only. [C7]
+- **S11.1.2v2** String structural patterns are delimited islands: `\( ... )`
   denotes a string-domain pattern and `\symbol( ... )` denotes a
   symbol-domain pattern. Inside an island, quoted literals are strings, `d`,
   `w`, `s`, `a`, `.`, and `...` are the reserved pattern atoms, whitespace is
-  concatenation, and the existing union, grouping, occurrence, negation, and
-  `to` rules apply. A pattern's tag is part of its type value: matching checks
+  concatenation, and the existing union, grouping, occurrence (`? + *
+  {n,m}`, S11.1.6), negation, and `to` rules apply. A pattern's tag is part of its type value: matching checks
   the value domain before content, so a string never satisfies a symbol
   pattern or vice versa. A literal-only island is representationally identical
   to the corresponding ordinary literal union; named structural patterns may
@@ -1339,6 +1426,30 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   (S11.4.8v2) selects a coloured type, and the join of `fn` with `pn` is
   `function`. The `<:` relation over function-type operands stays pending
   under S11.1.4v2. [C20-1, C20.2]
+- **S11.1.6*** **Two type families, split by concept: a run and an array.**
+  The *occurrence* family — `T?`, `T*`, `T+`, `T{n,m}` (`T{n}` exactly,
+  `T{n,}` at least; the regex spellings) — describes a run of `T`s, which is
+  what a list is; the *array* family — `T[]`, `T[n]`, `T[n][m]` — describes
+  an array. In a **sequence-pattern slot** (inside `[…]`, `(…)`, or a
+  `\(…)` island) an occurrence is a run of the sequence's items and zero
+  items is **void**: `[1, int*, 2]` matches `[1, 2]` and `[1, 5, 6, 2]`,
+  never `[1, null, 2]` and never `[1, [5, 6], 2]` — an array item is one
+  item, where a list would have spliced. As a **boundary type** (a binding,
+  parameter, return, field, `is`, or `match` arm) an occurrence admits
+  exactly the values a run *is* (S2.5.5v2): `null` for zero, a bare `T` for
+  one, and a sequence of two or more `T` — a list, or its stored array image
+  (S2.5.6) — for more. Hence `T?` ≡ `T | null`, the nullable type; `T*` ≡
+  `T{0,}` ≡ `null | T | (T, T, …) | [T, T, …]`; `T+` ≡ `T{1,}`; and
+  `{f: int*}` admits `{f: null}`, `{f: 5}`, `{f: [5, 6]}` but not `{f: [5]}`
+  or `{f: []}` — those are arrays, `int[]`. The families coincide at two or
+  more items and differ only where no list exists: `int{2}` and `int[2]`
+  admit the same values, `int{1}` is a bare `int` while `int[1]` is `[int]`,
+  `int{0}` is `null` while `int[0]` is `[]`; `T*` and `T[]` are incomparable.
+  A parenthesized type list `(P, Q)` is a list pattern and collapses like a
+  list (`(int)` ≡ `int`, `()` ≡ `null`); standalone it admits the list or its
+  array image. Neither family changes a value's kind at a boundary: a list
+  admitted by `int[]` or `int*` stays a list. The spellings `T[n+]` and
+  `T[n, m]` are retired. [Type_Pattern §1.3, Design_Syntax §7.28]
 
 ### S11.2 Match
 
@@ -1365,7 +1476,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   nominal `T` holds when A's nominal record is T's or derives from it, and
   `A is object` holds when A carries any nominal record. The two axes are
   independent — a nominal map satisfies both `is map` and `is object`
-  (S2.1.1v3). `is` is type-directional: `3.0 is int` is false even though a deferred `int`
+  (S2.1.1v4). `is` is type-directional: `3.0 is int` is false even though a deferred `int`
   boundary admits `3.0` (S11.4.5) — membership asks what a value *is*; the
   boundary asks what it may *satisfy*. [C7, TE-6, OB13]
 
@@ -1569,13 +1680,17 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   resolved colour: an `fn`-coloured `call` **returns** an error value, a
   `pn`-coloured `call` **raises**. `args` must be an array; any other type is
   an error.
-- **S12.3.5** **Spread splices into containers, never into an argument
+- **S12.3.5v2*** **Spread splices into containers, never into an argument
   list; the spelling follows the container's shape.** Positional containers
   take the bare operator — `[*a, 3]`, `(*a, 3)`. **Keyed** containers take it
   in key position — `{*: m, w: 5}` and `<div *: attrs, id: "x">` — since a key
-  slot needs a key, and `*` is S16.8.6's any-key of the unit family. In
-  argument position `*x` passes its operand as one value; the expansion was
-  considered and **rejected** — argument in
+  slot needs a key, and `*` is S16.8.6v2's any-key of the unit family. `*x`
+  splices the items of a sequence (list, array, range), splices nothing for
+  `null` (it is `()`), and places a non-sequence value as one item, so
+  `[*xs]` packages any value as an array — `null` → `[]`, `5` → `[5]`,
+  `(5, 6)` → `[5, 6]`, `[5, 6]` → `[5, 6]`; spreading never modifies its
+  operand. In argument position `*x` passes its operand as one value; the
+  expansion was considered and **rejected** — argument in
   [LR02-R10](../vibe/Lambda_Issue_Ledger.md), `call` covers forwarding
   generally.
 
@@ -2026,11 +2141,13 @@ below by its section.
 - **S16.8.5** **Unary `+` is kept** (identity, plus string→number
   coercion), and `+` stays banned at line start: the arithmetic family
   `- + * /` is banned as a class, not per token. [Design_Syntax §7.12]
-- **S16.8.6** **`*` is spread; `*` and `...` are two wildcard families,
+- **S16.8.6v2** **`*` is spread; `*` and `...` are two wildcard families,
   not one.** `*` is the unit wildcard (path segment, any-key, `T*`
-  repetition, spread); `...` is the elided run (pattern gap, rest
-  parameters), with the normative equivalence `...` ≡ `any*`. Paths keep
-  `*`/`**` — an ellipsis would collide with path dots. [Design_Syntax §7.10]
+  repetition, spread); `T{n,m}` is the counted repetition, spelled as in
+  regex (`T{n}`, `T{n,}`; S11.1.6), which retires `T[n+]` and `T[n, m]`;
+  `...` is the elided run (pattern gap, rest parameters), with the normative
+  equivalence `...` ≡ `any*`. Paths keep `*`/`**` — an ellipsis would
+  collide with path dots. [Design_Syntax §7.10, §7.28]
 - **S16.8.7** **A single-quoted literal is a symbol, not a string**, and
   comma decomposition (`let a, b = expr`) is by design; bracket destructuring
   patterns are rejected. [Design_Syntax §7.8]
@@ -2204,10 +2321,10 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
 | S5.5.1 | Function self-equality defect open; normalized-AST hash awaits `compile()` (S15.3). |
-| S8.3.1v2 (element arm) | **Conformant as of 2026-09-03 (USER ruling).** `fn_len`'s element arm and the JIT's `fn_len_e` both answer attribute count plus content-item count, so `len(<e a:1, b:2, "t">)` is 3 and equals what `for (x in e)` walks — attribute VALUES first, then content items. Structural and nominal elements no longer disagree, and `len_iter_law.ls` pins the law. The child axis it displaced is now spelled **`content(e)`** (2026-09-04, USER): a read-only ARRAY VIEW that shadow-copies the element's items pointer and length without copying the slots, so `len(content(e))` is the child count and `content(e)[i]` the child walk. See [LR09-9](../vibe/Lambda_Issue_Ledger.md) for the ruling, the rejected `e.content` / `size(e)` spellings, and the migration. Baseline 4090/4090, GC stress 93/93. |
+| S8.3.1v3 (element arm) | **Conformant as of 2026-09-03 (USER ruling).** `fn_len`'s element arm and the JIT's `fn_len_e` both answer attribute count plus content-item count, so `len(<e a:1, b:2, "t">)` is 3 and equals what `for (x in e)` walks — attribute VALUES first, then content items. Structural and nominal elements no longer disagree, and `len_iter_law.ls` pins the law. The child axis it displaced is now spelled **`content(e)`** (2026-09-04, USER): a read-only ARRAY VIEW that shadow-copies the element's items pointer and length without copying the slots, so `len(content(e))` is the child count and `content(e)[i]` the child walk. See [LR09-9](../vibe/Lambda_Issue_Ledger.md) for the ruling, the rejected `e.content` / `size(e)` spellings, and the migration. Baseline 4090/4090, GC stress 93/93. |
 | S8.2.3, S12.3.3v2 | **Conformant as of 2026-09-03**, with one deliberate substitution. `lambda_object_member` is the single resolver for both member lanes — the ANY lane (`fn_member`) and the static lane (`item_attr`), which previously diverged: a bare `obj.m` bound on one and read `null` on the other. It resolves the key domain, then the type's own methods, then the base chain; `lambda_object_find_method` is the one walk. A bare `fn` method now yields a receiver-captured closure on both tiers (T0 binds through the new `interp_bind_object_method` seam, since an un-JITted method has no `compiled_fn`), and `obj["m"]` resolves identically to `obj.m`. `len`, `in`, `at` and the projections were already key-domain-only and are unchanged. **Gap:** S12.3.3v2 rules a bare `pn` method reference a compile error; it is not rejected at all today. The rejection cannot live in the runtime member lane — MIR lowers a `pn` method *call* by lowering its callee through that same lane, so refusing there makes the call a silent no-op on the JIT tier. It needs an AST flag plus a validation point in build_ast, which alone can tell a bare reference from a sanctioned callee. Tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). Fixtures: `test/lambda/object_method_value.ls`, `object_method_receiver.ls`, `proc/object_method_write.ls`; baseline 4082/4082. |
-| S2.1.1v3, S2.1.3v2, S2.1.4, S2.1.5, S5.4.2v3, S6.2.2v3, S11.3.1v2 | **Conformant as of 2026-09-03.** Nominal-ness is a property of the type descriptor, carried by a `TypeNominal` record allocated once per declaration and cached by an `is_nominal` base flag (D2.6.6v2, D2.6.11). A nominal value wears its DECLARED structural kind, so an attribute-only type yields maps and a type with a content pattern yields elements, and `is object` / `is map` read as the independent axes S2.1.1v3 rules. Nominal sameness is record identity rather than name equality, so two modules' `Point`s stay distinct while every shape grown from one declaration still answers `is T` — which is also what makes S2.1.4 part 3 work: an undeclared field grows the shape and the grown shape points at the same record. The object TypeId is gone from the enum entirely; `object` survives as a TYPE matched by pointer identity. Fixtures `test/lambda/object_nominal.ls` and `proc/object_open_instance.ls`; baseline 4085/4085, exact tier parity, stable under forced GC. Still open: schema-driven input producing objects (S2.1.3v2), and the S12.3.3v2 bare-`pn` rejection tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). |
-| S2.1.1v2, S5.4.2v2, S6.2.2v2, S8.1.2v2, S8.2.1v4, S8.3.1v2 (object arm) | **Shipped state under the superseded v2 rulings (2026-09-03).** `entity` is retired from all three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, `is_type_keyword`) and the reference grammar is regenerated; `let entity = 1` is now legal, where it was `error[E201]`. Objects carry content (D2.6.6 — `Object` is an alias of `struct Element`) and conform across the whole surface: `len` is attributes + content, `in`/`at` walk attribute values then children, an IntKey subscript selects a child, equality is nominal type + unordered attributes + ordered content, ordering is type name then attributes then content, both clone paths copy content, and printing emits round-trippable `<T a: 1, "child">`. Three pre-existing defects were fixed on the way: `item_keys` had NO object arm, so `for (v in obj)` yielded nothing while `len(obj)` reported the field count; object equality compared attributes only, so two objects of DIFFERENT nominal types with matching fields compared equal; and ordering likewise ignored the type name. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity. |
+| S2.1.1v4, S2.1.3v2, S2.1.4, S2.1.5, S5.4.2v3, S6.2.2v3, S11.3.1v2 | **Conformant as of 2026-09-03.** Nominal-ness is a property of the type descriptor, carried by a `TypeNominal` record allocated once per declaration and cached by an `is_nominal` base flag (D2.6.6v2, D2.6.11). A nominal value wears its DECLARED structural kind, so an attribute-only type yields maps and a type with a content pattern yields elements, and `is object` / `is map` read as the independent axes S2.1.1v4 rules. Nominal sameness is record identity rather than name equality, so two modules' `Point`s stay distinct while every shape grown from one declaration still answers `is T` — which is also what makes S2.1.4 part 3 work: an undeclared field grows the shape and the grown shape points at the same record. The object TypeId is gone from the enum entirely; `object` survives as a TYPE matched by pointer identity. Fixtures `test/lambda/object_nominal.ls` and `proc/object_open_instance.ls`; baseline 4085/4085, exact tier parity, stable under forced GC. Still open: schema-driven input producing objects (S2.1.3v2), and the S12.3.3v2 bare-`pn` rejection tracked as [LR02-18](../vibe/Lambda_Issue_Ledger.md). |
+| S2.1.1v2, S5.4.2v2, S6.2.2v2, S8.1.2v2, S8.2.1v4, S8.3.1v3 (object arm) | **Shipped state under the superseded v2 rulings (2026-09-03).** `entity` is retired from all three keyword tables (C lexer `base_types`, `grammar.js` `_base_type_kw`, `is_type_keyword`) and the reference grammar is regenerated; `let entity = 1` is now legal, where it was `error[E201]`. Objects carry content (D2.6.6 — `Object` is an alias of `struct Element`) and conform across the whole surface: `len` is attributes + content, `in`/`at` walk attribute values then children, an IntKey subscript selects a child, equality is nominal type + unordered attributes + ordered content, ordering is type name then attributes then content, both clone paths copy content, and printing emits round-trippable `<T a: 1, "child">`. Three pre-existing defects were fixed on the way: `item_keys` had NO object arm, so `for (v in obj)` yielded nothing while `len(obj)` reported the field count; object equality compared attributes only, so two objects of DIFFERENT nominal types with matching fields compared equal; and ordering likewise ignored the type name. Fixture `test/lambda/object_content.ls`; baseline 4083/4083, exact tier parity. |
 | S2.1.3 (v1, shipped state; superseded by S2.1.3v2) | **Partially implemented 2026-09-03.** Content patterns, the `<T attrs, content>` literal on both tiers, content-pattern inheritance, and tag-name output (markup formats emit `<TypeName …>` via the shared element handler; JSON keeps its `"@"` type key and gains the element `"_"` content key) all work. **Not implemented:** schema-driven input — `input(doc, schema: …)` and a document declaring its own schema still yield structural elements, never objects — and object construction from a schema is unverifiable end-to-end today ([LR12-1](../vibe/Lambda_Issue_Ledger.md)). The **content-arity check is no longer missing**: `validate_against_element_type` enforces `content_length` (`validator/validate.cpp`, both the fast verdict and the reporting path), and since the flip a content-bearing nominal type wears `LMD_TYPE_ELEMENT` and so dispatches into it. Validator tests now load, parse type annotations, and register direct-parser type declarators; the `validate` CLI reaches real validation for the shipped `schema_comprehensive.ls` + `test_data_valid.json` pair instead of failing root lookup. That pair currently reports its independent `element`-versus-`map` mismatch. LR13-3's root-*selection* policy remains open, and these targets still sit in `test-lambda-full`, not `test-lambda-baseline`. |
 | S5.1.4v2, S9.1.5v2, S10.4.3v2, S10.5.3v2 | **Ruled 2026-09-03, not implemented.** No container carries a node identity and no `===` exists; the DOM package compares wrappers structurally (`test/lambda/dom_api_core.ls`). The carrier, the id-preserving operation set, and the universal addressing scheme are open (SO39, DO25). |
 | S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
@@ -2221,7 +2338,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.6.7 | Landed 2026-08-17: statement-position `pn_call() ^ { error_body }` uses explicit ordinary completions before and after suspension; durable native-fault targets cover the S7.11 carve-out without retaining a recovery frame or jump buffer across a yield. Value-producing handlers over possibly-suspending `pn` calls remain rejected. |
 | S7.7.1–S7.7.6 | TE-18 declaration-boundary skip pending (routing, case-7 tiers, edge sites). `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
-| S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
+| S7.10.5v2 (v1 residue) | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
 | S8.2.1v4, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains (the v4 object face is not built — see the S2.1.3v2 row), including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. VMap additionally admits its two canonical NameKey/IntKey classes and rejects fractional/poison keys. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
@@ -2232,7 +2349,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | Exclusivity (S9.2 / CW §11.3) | **Two of four faces effectively hold.** Face 1 (two `var` args naming one variable) rejects via `E211`. Face 3 (path-prefix) rejects at the *conservative whole-base* granularity the design sanctions as its Stage-2 v1 — so `f(var t, var t.a)` is caught, and `f(var t.a, var t.b)` is caught too though the ruling would permit it. **Face 2 (receiver vs `var` arg) is unreachable**: a `pn` method with a `var` parameter cannot be dispatched at all (`E229`, "dynamic dispatch of a function with `var` parameters is deferred"), so the check would be dead code until that lands. The ratified path that lifts `E229` is CW33 (COW doc §11.10, 2026-08-29) — the `var`-param address ABI, under which this check becomes a slot-address compare in the callee prologue. **Face 4 closed at whole-base granularity (CW31, 2026-08-29; worktree branch `nm-impl-work`, pending merge)**: a `subview` binding records its ultimate base (`NameEntry::view_base`, chased through view-of-view), and the call-site check conflicts two `var` args sharing an effective root — overlapping subviews and view-vs-base both reject via `E211`; views of distinct bases pass. Disjoint tiles of one base also reject: the same sanctioned false positive as face 3, with the splitter ladder unchanged. Fixture: `test/lambda/negative/semantic/var_view_overlap.ls`. |
 | S9.3.1 | **UNCONDITIONAL since 2026-08-29** — insertion capture is applied at the specified container insertion points on both tiers, and `LAMBDA_COW_CAPTURE` is no longer consulted. The implementation marks named values at capture sites; freshly produced containers are not marked because they have no second observer at that insertion point. Plain-parameter snapshots under **S9.1.3** are unconditional as well, with `var` remaining the sole write-through construct. Full implementation record: [LR12-R9](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-r9>). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
-| S11.1.1v2 | `T[]` and nested `T[][]` contracts are implemented at annotation and parameter boundaries, including scalar, sized-scalar, pointer, string, named-map, and nested lanes. General structural array-pattern composition and the `is [T]` inline parse crash remain open. |
+| S11.1.1v3 (v2 core) | `T[]` and nested `T[][]` contracts are implemented at annotation and parameter boundaries, including scalar, sized-scalar, pointer, string, named-map, and nested lanes. General structural array-pattern composition and the `is [T]` inline parse crash remain open. |
 | S11.1.5 | **Colour half conformant as of 2026-09-18.** `pn`/`pn (...)` parse in type position (C parser, type-pattern parser, Tree-sitter); `is fn`/`is pn`, `match` arms and parameter admission test the colour through one runtime rule, and the static boundary rejects a known wrong colour (E207) while deferring a `function`-typed source to the runtime check; system procedure references carry their signature on both tiers. Fixtures `test/lambda/proc/fn_pn_function_types.ls`, `negative/semantic/fn_pn_colour_mismatch.ls`, `negative/runtime/fn_pn_colour_mismatch.ls`. **Residue:** a binder over a function value still selects `function` (blocked on SO44); hosted (JS) function values read as `fn`. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
@@ -2257,8 +2374,11 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S17.2.1, S17.2.2 | **Conformant as of 2026-09-08.** `lambda.sys.*` resolves to the existing system-function registry, including the S12.3.7 shadow escape; `lambda.math`/`lambda.io` share the built-in module rows with their bare aliases; the shipped package tree uses the canonical `lambda.*` paths with math typesetting under `lambda.doc.math`; and `lambda` is rejected as a binding name by the direct lexer reservation check. Regression: `test/lambda/lambda_namespace.ls` plus `test/lambda/negative/semantic/lambda_namespace_root.ls`; focused probes passed on qualified built-ins and the document package. |
 | S16.10 | **Ruled 2026-08-27, largely not implemented.** Current divergences: element tags reject keywords (`<if a:1>` errors, legal under S16.10.2); `import edit:` parses and every use fails; `import 'edit':` parses and creates an unreachable binding (use is silently null); `let if = 1` parses and uses fail; `let type = 1` parses and `type` silently reads the base type — the silent misread is the priority defect. E201 exists for `last` and the reserved namespace root `lambda`; it must extend to the remaining table in the C parser and the reference grammar. Migration: ~55 keyword-named corpus bindings (breakdown in [Design_Syntax §7.24](../vibe/Lambda_Design_Syntax.md)). Tracked as [LR02-14](../vibe/Lambda_Issue_Ledger.md). |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). The prior `INT64_ERROR` collision is resolved in [LR03-R4](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-r4>). Residue: ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
-| S2.5.1, S2.5.2, S2.5.5 | **Ruled 2026-09-21; probed the same day (JIT and interpreter identical); corrected the same day** after a fuller survey (`temp/spec_survey/listarray/`). Conformant: `(…)` literals and functional blocks spread into lists, array literals, and content; arrays stay one item; `let`/`type`/`fn` declarations contribute no item; blocks collapse (`{ let k = 1; 7 }` is `7`, `{ let z = 3 }` is `null`); a `pn` body without `return` yields its last expression. Gaps: (1) **a for-expression result is not a spreading list once bound** — `let r = for (x in [1,2]) x; [r, 9]` is `[[1,2],9]` — because the runtime has two list flags (`is_content`, `is_spreadable`) and an array literal spreads a for-style list only when a sibling is written as a `for` or `*` (a syntactic decision); (2) for-expressions do not collapse: an empty one is not `null` and a one-item one is `[v]`, not `v`; (3) a list normalizes its items today (`("a", "b")` is `"ab"`, `(1, null, 2)` has two items); (4) the empty-list literal `()` is a parse error. |
-| S2.2.3, S2.6.1, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; probed the same day on the JIT and interpreter tiers (identical).** S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Gaps: (1) a lone `""` is kept as a child — `<e "">` has one item and prints `<e "">` (it vanishes only when merged into an adjacent string); (2) adjacent binaries are not merged (`<e b'\x01' b'\x02'>` has two items); (3) **content writes do not normalize** — `e[1] = "m"` on `<e "x" 1 "y">` leaves three items, `e[1] = null` stores a null child, `e[0] = ""` stores an empty string, `e[0] = (3, 4)` stores the list as one item, and `push` rejects an element outright; (4) LaTeX input keeps consecutive strings unmerged (MarkBuilder's verbatim append, D2.6.5v2) — a transitional workaround until the LaTeX parser carries such runs in non-merging items. D2.6.5v2's footnote that string merging needs an input context looks stale — `<e "a" "b">` merges at run time on both tiers. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
+| S2.5.1v2, S2.5.2v2, S2.5.5v2, S2.5.6, S2.5.7 | **Ruled 2026-09-21/22; probed both tiers (identical).** Conformant: `(…)` literals and functional blocks spread into lists, array literals, and content; arrays and ranges stay one item; declarations contribute no item; blocks collapse; a `pn` body yields its last expression; `let`/`var` bindings keep the kind. Not implemented — the survey under `temp/spec_survey/listarray/` (562 probes): the runtime carries **two** list flags (`is_content` for `(…)`/blocks, `is_spreadable` for `for`), an array literal spreads a for-style list only when a sibling is written as a `for` or `*` (syntactic, so `let r = for (x in [1,2]) x; [r, 9]` is `[[1,2],9]`), for-expressions do not collapse (empty is a hidden non-null empty container, one item is `[v]`), `order by` returns an array, a list normalizes its items, `()` is a parse error, an attribute or field stores a list rather than its array image (`<e a: (1,2)>` reads back spread), `fill(2, (1,2))` nests, and no sequence function preserves kind (`sort` of a list is an array, `reverse`/`take`/slicing of a plain array or range is a list, `zip` is always a list). Design: one flag, one result-kind helper, value-decided spreading. Tracked as [LR05-10](../vibe/Lambda_Issue_Ledger.md), [LR12-28](../vibe/Lambda_Issue_Ledger.md). |
+| S2.5.8, S7.10.1v2, S7.10.5v2, S8.4.1v2, S10.1.2v2, S10.1.5v2, S10.6.1 | **Ruled 2026-09-21/22.** Kind preservation for pipes, `that`, vectorized functions, and `++` is unimplemented (above). Text: `reverse`/`sort`/`unique` return a string unchanged, `in` on strings is a substring test, `that`/pipe over a string yield characters as a spreading list, `"s"[-1]` is `""`; `5 that ~ > 3` is `[5]`; `[1,2] that ~ > 9` is `null` where `[]` is ruled; `++` stringifies a container beside a text scalar (`"a" ++ [1]` is `"a[1]"`) and rejects `[1,2] ++ 3`; `null` is already the identity. `keys`/`values`/`names` are not built in. Tracked as [LR05-11](../vibe/Lambda_Issue_Ledger.md). |
+| S11.1.1v3, S11.1.2v2, S11.1.6, S16.8.6v2 | **Ruled 2026-09-22.** The parser still reads `T[n]`, `T[n+]`, `T[n, m]` as occurrence counts (`parse_type_pattern.cpp` `apply_occurrence`, `grammar.js` `occurrence_count`) and has no `T{n,m}`; islands spell `\(d[3])`. `null is int*` is false, `[] is int?` is true, `[1,2] is [int*]` trips the bare-`[T]` lint; `int*` annotations parse and admit. Migration: every `[n]`/`[n+]`/`[n, m]` occurrence in the tree and the user docs (`doc/Lambda_Type.md` §Type Occurrences). Tracked as [LR03-12](../vibe/Lambda_Issue_Ledger.md). |
+| S12.3.5v2 | **Ruled 2026-09-22.** `[*a, 3]` permanently turns `a` into a list (`item_spread` mutates its operand; on the JIT it rewrites a pooled literal, so a function returning `[1, "y"]` returns a list on later calls — tier divergence); `[*(1 to 3), 9]` does not spread the range; `[*null, 1]` keeps the null. Tracked as [LR05-12](../vibe/Lambda_Issue_Ledger.md). |
+| S2.2.3, S2.6.1, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; probed the same day on the JIT and interpreter tiers (identical).** S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Gaps: (1) a lone `""` is kept as a child — `<e "">` has one item and prints `<e "">` (it vanishes only when merged into an adjacent string); (2) adjacent binaries are not merged (`<e b'\x01' b'\x02'>` has two items); (3) **content writes do not normalize** — `e[1] = "m"` on `<e "x" 1 "y">` leaves three items, `e[1] = null` stores a null child, `e[0] = ""` stores an empty string, `e[0] = (3, 4)` stores the list as one item, and `push` rejects an element outright; (4) LaTeX input keeps consecutive strings unmerged (MarkBuilder's verbatim append, D2.6.5v3) — a transitional workaround until the LaTeX parser carries such runs in non-merging items. D2.6.5v3's footnote that string merging needs an input context looks stale — `<e "a" "b">` merges at run time on both tiers. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
 
 ## Appendix B — Open Design Issues
 
@@ -2280,7 +2400,6 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO8** Should `is` become value-aware? Deliberately undecided (S11.3.1v2 records the intentional asymmetry).
 - **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken — measured 2026-08-24, `&` and `!` evaluate correctly in `is`/`match` pattern position but are rejected in `let`/parameter annotation position; LR02-9 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md)); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
 - **SO10** A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) — real question, future design (S7.9.3).
-- **SO11** Whether a non-null scalar iterates once (`len(5)`): `for (i in 5)` yields nothing while `5 |> ~` yields one item; the S8.3.1 law requires them to agree before `len(5)` is settled.
 
 **Values, COW, resources**
 - **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
@@ -2340,10 +2459,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
 - **SO38** Whether `that` over a **map** should keep the surviving keys
   (yielding a map) rather than dropping them (yielding an array of values, the
-  current behaviour recorded in S10.1.5). The pipe has the same question, and
+  current behaviour recorded in S10.1.5v2). The pipe has the same question, and
   the two should answer it together: `~#` binds the key in both, so the key is
   observable to the predicate but absent from the result. An S10 container-
-  shape question. [S10.1.2, S10.1.5]
+  shape question. [S10.1.2v2, S10.1.5v2]
 - **SO36** Whether a `pn` call may appear nested inside an expression
   (`(pn_func(), 123)`, `if (exists(path)) …`), or only as a bare statement /
   the whole RHS of a binding — the A-normal-form effect-sequencing
@@ -2357,7 +2476,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27; PTH1v2, PTH2v3, PTH3–PTH29; OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29; OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
@@ -2365,8 +2484,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
-| S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
-| S11 types | C7, C8.5c, C20; TE-1–TE-18; OB13 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md` |
+| S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md` |
+| S11 types | C7, C8.5c, C20; TE-1–TE-18; OB13; Type_Pattern §1.3; Design_Syntax §7.28 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |

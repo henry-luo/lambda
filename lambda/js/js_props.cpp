@@ -14,10 +14,7 @@
 #include "../runtime/lambda-root-frame.hpp"
 #include <math.h>
 
-extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern String* heap_create_name(const char* name, size_t len);
-extern Item js_make_number(double d);
-extern __thread EvalContext* context;
 extern "C" NameId js_symbol_name_id(Item sym);
 
 // js_runtime.cpp internals we need. Public header counterparts:
@@ -148,7 +145,6 @@ extern "C" const char* js_property_index_chars(int64_t index, int* out_len) {
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
-extern Item fn_map_set(Item map_item, Item key, Item value);
 
 // Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG

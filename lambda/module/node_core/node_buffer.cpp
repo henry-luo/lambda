@@ -1,24 +1,25 @@
 /**
- * js_buffer.cpp — Node.js-style 'buffer' module for LambdaJS
+ * node_buffer.cpp — Node.js-style 'buffer' module for LambdaJS
  *
  * Provides Buffer class backed by Uint8Array (TypedArray infrastructure).
  * Buffer.alloc, Buffer.from, Buffer.concat, buf.toString, buf.write,
  * buf.copy, buf.slice, buf.fill, buf.compare, buf.equals, buf.indexOf,
  * buf.byteLength.
  */
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_typed_array.h"
-#include "js_error_codes.h"
-#include "../lambda-data.hpp"
-#include "../runtime/transpiler.hpp"
-#include "../jube/jube_registry.h"
-#include "../../lib/log.h"
-#include "../../lib/mem.h"
-#include "../../lib/hex.h"
-#include "../../lib/base64.h"
-#include "../../lib/str.h"
-#include "../../lib/utf.h"
+#include "node_buffer.hpp"
+#include "../../js/js_runtime.h"
+#include "../../js/js_runtime_state.hpp"
+#include "../../js/js_typed_array.h"
+#include "../../js/js_error_codes.h"
+#include "../../lambda-data.hpp"
+#include "../../runtime/transpiler.hpp"
+#include "../../jube/jube_registry.h"
+#include "../../../lib/log.h"
+#include "../../../lib/mem.h"
+#include "../../../lib/hex.h"
+#include "../../../lib/base64.h"
+#include "../../../lib/str.h"
+#include "../../../lib/utf.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -2341,7 +2342,7 @@ extern "C" Item js_get_buffer_prototype(void) {
 
 // ─── Namespace ───────────────────────────────────────────────────────────────
 
-extern "C" Item js_get_buffer_namespace(void) {
+Item node_buffer_namespace(void) {
     if (!buffer_ensure_realm_slots()) return ItemError;
     Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
         JS_REALM_SLOT_BUFFER_NAMESPACE);
@@ -2457,12 +2458,3 @@ extern "C" Item js_get_buffer_namespace(void) {
     return namespace_root.get();
 }
 
-extern "C" void js_reset_buffer_module(void) {
-    if (!js_active_runtime_state) return;
-    Item* namespace_slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_BUFFER_NAMESPACE);
-    Item* prototype_slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_BUFFER_PROTOTYPE);
-    if (namespace_slot) *namespace_slot = (Item){0};
-    if (prototype_slot) *prototype_slot = (Item){0};
-}
