@@ -592,6 +592,186 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function advance(delta) { \"use strict\"; "
+        "this.count = this.count + delta; return this.count; } "
+        "var receiver = { count: 1, advance: advance }; "
+        "receiver.advance(2); receiver.advance(3); advance;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-this-property.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item receiver = js_get_key_default(js_get_global_this(),
+        js_make_string("receiver"));
+    ASSERT_EQ(get_type_id(receiver), LMD_TYPE_MAP);
+    EXPECT_EQ(js_get_key_default(receiver, js_make_string("count")).item,
+        flt2it(6.0).item);
+
+    Item delta = flt2it(4.0);
+    Item result = js_call_function(function_item, receiver, &delta, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(10.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "var multiply = function(value) { "
+        "var result = value * 3; return result; }; "
+        "multiply(2); multiply(3); multiply;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-function-expression.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item value = flt2it(7.0);
+    Item result = js_call_function(function_item, make_js_undefined(), &value, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(21.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function grow(seed, delta) { "
+        "var state = { nested: { count: seed } }; "
+        "state.nested.count = state.nested.count + delta; "
+        "return state.nested.count; } "
+        "grow(1, 2); grow(3, 4); grow;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-local-object-property-chain.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {flt2it(8.0), flt2it(6.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(14.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function pair(left, right) { return [left, right]; } "
+        "pair(1, 2); pair(3, 4); pair;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-array-literal.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {flt2it(8.0), flt2it(6.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, flt2it(8.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 1).item, flt2it(6.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function read(object, key) { return object[key]; } "
+        "var values = { count: 9 }; "
+        "read(values, 'count'); read(values, 'count'); read;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-computed-property-pinned.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item values = js_get_key_default(js_get_global_this(),
+        js_make_string("values"));
+    Item args[] = {values, js_make_string("count")};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(9.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function materialize(key, value) { "
+        "return { [key = key + value]: value = value + 1 }; } "
+        "materialize('count', 1); materialize('count', 2); materialize;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-computed-object-literal.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {js_make_string("count"), flt2it(5.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_get_key_default(result, js_make_string("count5")).item,
+        flt2it(6.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);

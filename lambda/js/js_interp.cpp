@@ -5775,14 +5775,36 @@ static void js_interp_p2_scan_child(JsAstNode* child, void* opaque) {
     js_interp_p2_scan_node(child, (JsP2AdmissionScan*)opaque);
 }
 
-// The initial P2 bridge deliberately accepts only bodies whose generated code
-// depends on its own locals. This avoids treating the incompatible T0 closure
-// environment and module-cell ABIs as if they were interchangeable.
+static bool js_interp_p2_is_this_identifier(JsAstNode* node) {
+    return js_ast_identifier_named(node, "this", 4);
+}
+
+// A static member name is an immutable key, not a lexical reference. A
+// computed member instead evaluates its receiver then local key through the
+// shared Reference path, which owns ToPropertyKey and abrupt completion.
+static bool js_interp_p2_member_is_supported(JsMemberNode* member) {
+    return member && member->object && member->property &&
+        (member->computed || member->property->node_type == AST_NODE_IDENT);
+}
+
+// Object-literal data keys are static or independently local expressions.
+// Accessors, methods, and spreads can create callable dependencies and stay T0.
+static bool js_interp_p2_is_data_object_property(JsPropertyNode* property) {
+    return property && !property->method &&
+        !property->is_getter && !property->is_setter && property->key &&
+        property->value && (property->computed ||
+            property->key->node_type == AST_NODE_IDENT ||
+            property->key->node_type == AST_NODE_LITERAL);
+}
+
+// P2 has no shared closure or module-value ABI. Static member names are sealed
+// into the definition's module slab, while their receivers remain local values.
 static void js_interp_p2_scan_node(JsAstNode* node,
         JsP2AdmissionScan* scan) {
     if (!node || !scan || scan->reject_reason) return;
     switch (node->node_type) {
     case AST_NODE_IDENT: {
+        if (js_interp_p2_is_this_identifier(node)) break;
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
         NameEntry* entry = identifier->entry;
         if (!entry) {
@@ -5807,11 +5829,37 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         js_interp_p2_reject(scan, "call boundary");
         break;
     case AST_NODE_MEMBER_EXPR:
-    case AST_NODE_INDEX_EXPR:
-    case AST_NODE_MAP:
+    case AST_NODE_INDEX_EXPR: {
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (!js_interp_p2_member_is_supported(member)) {
+            js_interp_p2_reject(scan, "property access");
+            return;
+        }
+        js_interp_p2_scan_node(member->object, scan);
+        // A static key names a property; a computed key is executable source.
+        if (member->computed) js_interp_p2_scan_node(member->property, scan);
+        return;
+    }
     case AST_NODE_PROPERTY:
         js_interp_p2_reject(scan, "property access");
         break;
+    case AST_NODE_MAP: {
+        JsObjectNode* object = (JsObjectNode*)node;
+        for (JsAstNode* property = (JsAstNode*)object->properties; property &&
+                !scan->reject_reason; property = (JsAstNode*)property->next) {
+            if (property->node_type != AST_NODE_PROPERTY ||
+                    !js_interp_p2_is_data_object_property(
+                        (JsPropertyNode*)property)) {
+                js_interp_p2_reject(scan, "object literal feature");
+                break;
+            }
+            JsPropertyNode* pair = (JsPropertyNode*)property;
+            // Match object construction order: a computed key runs before value.
+            if (pair->computed) js_interp_p2_scan_node(pair->key, scan);
+            js_interp_p2_scan_node(pair->value, scan);
+        }
+        return;
+    }
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
     case AST_NODE_ARROW_FUNC:
@@ -5824,6 +5872,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         js_interp_p2_reject(scan, "class boundary");
         break;
     case AST_NODE_ARRAY:
+        break;
     case AST_NODE_ARRAY_PATTERN:
     case AST_NODE_MAP_PATTERN:
     case AST_NODE_ASSIGN_PATTERN:
@@ -5877,9 +5926,10 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     JsScript* script = js_fn_ast_script(function);
     AstFuncNode* definition = js_fn_ast_function(function);
     if (!script || !definition || !script->source || script->is_module ||
-            script->is_eval_script || definition->node_type != AST_NODE_FUNC ||
-            definition->is_async || definition->is_generator ||
-            !definition->entry || definition->entry->scope != script->global_scope) {
+            script->is_eval_script ||
+            (definition->node_type != AST_NODE_FUNC &&
+             definition->node_type != AST_NODE_FUNC_EXPR) ||
+            definition->is_async || definition->is_generator) {
         return "definition shape";
     }
     AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
@@ -5893,7 +5943,7 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
     }
     JsAstFunctionFacts facts = js_ast_collect_function_facts(
         (JsAstNode*)definition->params, (JsAstNode*)definition->body);
-    if (facts.observations || facts.has_direct_eval || facts.has_with ||
+    if ((facts.observations & ~JS_AST_OBSERVES_THIS) || facts.has_direct_eval || facts.has_with ||
             facts.has_direct_super_call || facts.has_lexical_super_call) {
         return "activation-sensitive function";
     }

@@ -3862,10 +3862,6 @@ static bool js_mir_lower_function_satellite(JsMirTranspiler* mt,
     jm_define_function(mt, function);
     MIR_finish_module(mt->ctx);
     MIR_load_module(mt->ctx, mt->module);
-    if (!js_prelink_compiled_name_table(mt)) {
-        log_error("js-p2: failed to prelink satellite names");
-        return false;
-    }
     *out_name = function->name;
     return *out_name != NULL;
 }
@@ -3884,6 +3880,8 @@ bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
     bool retained = false;
     void* entry = NULL;
     const char* function_name = NULL;
+    uint32_t module_name_base = 0;
+    RuntimeModuleStateScope owner_module_state(context);
     if (!tp) return false;
     jm_track_active_js_transpile(tp, NULL, NULL);
     tp->strict_mode = script->strict_mode;
@@ -3897,9 +3895,16 @@ bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
         log_error("js-p2: selected function identity is absent from clone");
         goto cleanup;
     }
+    if (script->module_state_id != UINT32_MAX &&
+            !owner_module_state.activate(script->module_state_id)) {
+        log_error("js-p2: definition module state is unavailable");
+        goto cleanup;
+    }
+    module_name_base = lambda_module_state_property_key_count(
+        lambda_active_module_state_id());
     mt = js_mir_open_compile_unit(tp,
         script->reference ? script->reference : "<js-p2>", "js_p2_satellite",
-        false, 0, g_js_mir_optimize_level, true, "js-p2", false, &ctx);
+        false, module_name_base, g_js_mir_optimize_level, true, "js-p2", false, &ctx);
     if (!mt) goto cleanup;
     g_active_mir_ctx = ctx;
     if (!js_mir_lower_function_satellite(mt, function_id, &function_name) ||
@@ -3909,6 +3914,13 @@ bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
     entry = js_mir_link_function(ctx, function_name, MIR_set_gen_interface);
     if (!entry) {
         log_error("js-p2: failed to link satellite entry");
+        goto cleanup;
+    }
+    // A P2 clone is temporary, but its named-property sites run in the
+    // definition's retained module slab. Append its immutable key image only
+    // after linking, at the base encoded into the ready-to-publish satellite.
+    if (!js_append_compiled_name_table(mt)) {
+        log_error("js-p2: failed to append satellite names");
         goto cleanup;
     }
     jm_clear_active_js_transpile(NULL, mt, NULL);
