@@ -352,7 +352,32 @@ static const char* get_element_tag_name(Element* elem) {
 // ============================================================================
 
 static const char* get_svg_attr(Element* elem, const char* name) {
-    return extract_element_attribute(elem, name, nullptr);
+    const char* value = extract_element_attribute(elem, name, nullptr);
+    if (value || !name) return value;
+
+    char lowercase_name[128];
+    size_t name_len = strlen(name);
+    if (name_len >= sizeof(lowercase_name)) return nullptr;
+    bool has_uppercase = false;
+    for (size_t i = 0; i < name_len; i++) {
+        unsigned char ch = (unsigned char)name[i];
+        lowercase_name[i] = (char)tolower(ch);
+        has_uppercase = has_uppercase || lowercase_name[i] != name[i];
+    }
+    lowercase_name[name_len] = '\0';
+
+    // Synthetic SVG elements pass through HTML DOM normalization, which lowercases names.
+    return has_uppercase ? extract_element_attribute(elem, lowercase_name, nullptr) : nullptr;
+}
+
+static float get_svg_number_attr(Element* elem, const char* name, float fallback) {
+    if (!elem || !name) return fallback;
+    ConstItem value = elem->get_attr(name);
+    Item item = {.item = value.item};
+    double number = 0.0;
+    if (item_try_to_double(item, &number)) return (float)number;
+    const char* text = get_svg_attr(elem, name);
+    return text ? parse_svg_length(text, fallback) : fallback;
 }
 
 static uint8_t svg_element_opacity_u8(Element* elem) {
@@ -2448,8 +2473,9 @@ static void render_svg_path_marker_end(SvgInlineRenderContext* ctx, Element* ele
     const char* units = get_svg_attr(marker_elem, "markerUnits");
     if (units && strcmp(units, "userSpaceOnUse") == 0) marker_scale = 1.0f;
 
-    float ref_x = parse_svg_length(get_svg_attr(marker_elem, "refX"), 0.0f);
-    float ref_y = parse_svg_length(get_svg_attr(marker_elem, "refY"), 0.0f);
+    // Generated graph layers retain numeric SVG attributes as Lambda scalars.
+    float ref_x = get_svg_number_attr(marker_elem, "refX", 0.0f);
+    float ref_y = get_svg_number_attr(marker_elem, "refY", 0.0f);
     float angle = atan2f(end.tangent_y, end.tangent_x);
     const char* orient = get_svg_attr(marker_elem, "orient");
     if (orient && strcmp(orient, "auto") != 0 && strcmp(orient, "auto-start-reverse") != 0) {
@@ -2469,8 +2495,8 @@ static void render_svg_path_marker_end(SvgInlineRenderContext* ctx, Element* ele
     float saved_vw = ctx->current_viewport_w;
     float saved_vh = ctx->current_viewport_h;
     ctx->transform = marker_transform;
-    ctx->current_viewport_w = parse_svg_length(get_svg_attr(marker_elem, "markerWidth"), 3.0f);
-    ctx->current_viewport_h = parse_svg_length(get_svg_attr(marker_elem, "markerHeight"), 3.0f);
+    ctx->current_viewport_w = get_svg_number_attr(marker_elem, "markerWidth", 3.0f);
+    ctx->current_viewport_h = get_svg_number_attr(marker_elem, "markerHeight", 3.0f);
 
     for (int64_t i = 0; i < marker_elem->length; i++) {
         Element* child = get_child_element_at(marker_elem, i);
