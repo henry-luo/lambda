@@ -26,15 +26,15 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/thread_pool.h"
 #include "../../lib/url.h"
 #include <stdlib.h>
-#ifndef _WIN32
 #include <pthread.h>
-#endif
 
 extern "C" Item lambda_module_var_read_slot(void* module_state, uint32_t slot);
 extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
                                               void* type_list);
+extern "C" void ensure_jit_imports_initialized(void);
 extern __thread Context* input_context;
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,79 @@ typedef struct AstPromotionOverlayEntry {
     const AstFuncNode* def;
     FnPromotionCell cell;
 } AstPromotionOverlayEntry;
+
+// The queue is per execution Script while the workers are process-wide. A
+// Script teardown increments `generation` and waits for `pending`, so queued
+// work can never read a released cached-AST shell (D8.5.1v6).
+struct InterpSatelliteQueue {
+    pthread_mutex_t mutex;
+    pthread_cond_t idle;
+    ArrayList* ready;  // InterpSatelliteJob*, consumed only at a safe point
+    uint64_t generation;
+    uint32_t next_sequence;
+    uint32_t pending;
+    bool retiring;
+};
+
+typedef struct InterpSatelliteJob {
+    Runtime* runtime;
+    Script* script;
+    const AstFuncNode* def;
+    InterpSatelliteQueue* queue;
+    uint64_t generation;
+    uint32_t sequence;
+    InterpSatelliteImage* image;
+} InterpSatelliteJob;
+
+static ThreadPool* g_interp_satellite_pool = NULL;
+static pthread_once_t g_interp_satellite_pool_once = PTHREAD_ONCE_INIT;
+
+static int interp_satellite_pool_workers(void) {
+    const char* value = getenv("LAMBDA_SATELLITE_THREADS");
+    long requested = value ? strtol(value, NULL, 10) : 4;
+    if (requested < 1 || requested > 32) return 4;
+    return (int)requested;
+}
+
+static void interp_satellite_pool_init_once(void) {
+    g_interp_satellite_pool = tp_create(interp_satellite_pool_workers());
+    if (!g_interp_satellite_pool) {
+        log_error("interp-tier: could not create the satellite compiler pool");
+    }
+}
+
+static void interp_satellite_job_destroy(InterpSatelliteJob* job) {
+    if (!job) return;
+    interp_satellite_image_destroy(job->image);
+    mem_free(job);
+}
+
+static InterpSatelliteQueue* interp_satellite_queue_get(Script* script) {
+    if (!script) return NULL;
+    if (script->interp_satellite_queue) return script->interp_satellite_queue;
+    InterpSatelliteQueue* queue = (InterpSatelliteQueue*)mem_calloc(1,
+        sizeof(InterpSatelliteQueue), MEM_CAT_SYSTEM);
+    if (!queue) return NULL;
+    if (pthread_mutex_init(&queue->mutex, NULL) != 0) {
+        mem_free(queue);
+        return NULL;
+    }
+    if (pthread_cond_init(&queue->idle, NULL) != 0) {
+        pthread_mutex_destroy(&queue->mutex);
+        mem_free(queue);
+        return NULL;
+    }
+    queue->ready = arraylist_new(4);
+    if (!queue->ready) {
+        pthread_cond_destroy(&queue->idle);
+        pthread_mutex_destroy(&queue->mutex);
+        mem_free(queue);
+        return NULL;
+    }
+    queue->generation = 1;
+    script->interp_satellite_queue = queue;
+    return queue;
+}
 
 FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* def) {
     if (!def || !def->analysis) return NULL;
@@ -80,6 +153,157 @@ FnPromotionCell* interp_promotion_cell(Script* script, const AstFuncNode* def) {
 
 LambdaTier lambda_tier_selected(void) { return g_lambda_tier; }
 void lambda_tier_set(LambdaTier tier) { g_lambda_tier = tier; }
+
+static void interp_satellite_compile_job(void* opaque) {
+    InterpSatelliteJob* job = (InterpSatelliteJob*)opaque;
+    if (!job || !job->queue || !job->script || !job->def) {
+        interp_satellite_job_destroy(job);
+        return;
+    }
+    InterpSatelliteQueue* queue = job->queue;
+    InterpSatelliteImage* image = NULL;
+    bool compiled = job->runtime && compile_ast_function_satellite_snapshot(
+        job->runtime, job->script, job->def, job->sequence, &image);
+    pthread_mutex_lock(&queue->mutex);
+    bool retired = queue->retiring || job->generation != queue->generation;
+    if (queue->pending > 0) queue->pending--;
+    if (!retired && queue->ready && arraylist_append(queue->ready, job)) {
+        job->image = compiled ? image : NULL;
+        job = NULL;  // the evaluator now owns this completed request
+    }
+    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
+    pthread_mutex_unlock(&queue->mutex);
+    if (job) {
+        interp_satellite_image_destroy(image);
+        interp_satellite_job_destroy(job);
+    }
+}
+
+static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
+        const AstFuncNode* def, FnPromotionCell* cell) {
+    if (!runtime || !script || !def || !cell) return false;
+    // Initialize the shared resolver before private MIR contexts read it.
+    ensure_jit_imports_initialized();
+    pthread_once(&g_interp_satellite_pool_once, interp_satellite_pool_init_once);
+    if (!g_interp_satellite_pool) return false;
+    InterpSatelliteQueue* queue = interp_satellite_queue_get(script);
+    if (!queue) return false;
+    InterpSatelliteJob* job = (InterpSatelliteJob*)mem_calloc(1,
+        sizeof(InterpSatelliteJob), MEM_CAT_SYSTEM);
+    if (!job) return false;
+    job->runtime = runtime;
+    job->script = script;
+    job->def = def;
+    job->queue = queue;
+
+    pthread_mutex_lock(&queue->mutex);
+    if (queue->retiring || cell->state != FN_PROMOTION_INTERP) {
+        pthread_mutex_unlock(&queue->mutex);
+        mem_free(job);
+        return false;
+    }
+    job->generation = queue->generation;
+    job->sequence = ++queue->next_sequence;
+    queue->pending++;
+    cell->state = FN_PROMOTION_QUEUED;
+    pthread_mutex_unlock(&queue->mutex);
+
+    if (!tp_submit_priority(g_interp_satellite_pool, interp_satellite_compile_job,
+            job, TP_PRIORITY_LOW)) {
+        pthread_mutex_lock(&queue->mutex);
+        if (queue->pending > 0) queue->pending--;
+        if (cell->state == FN_PROMOTION_QUEUED) cell->state = FN_PROMOTION_INTERP;
+        if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
+        pthread_mutex_unlock(&queue->mutex);
+        mem_free(job);
+        return false;
+    }
+    log_notice("interp-tier: queued satellite function='%s' image=%u pool_workers=%d",
+        def->name ? def->name->chars : "<anonymous>", (unsigned)job->sequence,
+        tp_thread_count(g_interp_satellite_pool));
+    return true;
+}
+
+static bool interp_satellite_publish_image(Script* script,
+        InterpSatelliteImage* image) {
+    if (!script || !image || !image->context || !image->target_entry) return false;
+    bool prepared = lambda_module_state_bind_static(script->module_state_id,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list) && prepare_context_module_state(image->context,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list);
+    if (!prepared) return false;
+    if (!script->interp_satellite_images) {
+        script->interp_satellite_images = arraylist_new(4);
+    }
+    if (!script->interp_satellite_images ||
+            !arraylist_append(script->interp_satellite_images, image)) {
+        return false;
+    }
+    bool target_published = false;
+    for (uint32_t index = 0; index < image->member_count; index++) {
+        if (!image->member_entries[index] || !image->members[index]) continue;
+        bool member_published = interp_publish_satellite_member(script,
+            (AstFuncNode*)image->members[index], image->member_entries[index]);
+        if (image->members[index] == image->target) target_published = member_published;
+    }
+    if (!target_published) {
+        (void)arraylist_pop(script->interp_satellite_images);
+        return false;
+    }
+    return true;
+}
+
+static void interp_satellite_publish_ready(Script* script) {
+    InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
+    if (!queue) return;
+    for (;;) {
+        pthread_mutex_lock(&queue->mutex);
+        InterpSatelliteJob* job = queue->ready && queue->ready->length > 0
+            ? (InterpSatelliteJob*)arraylist_pop_front(queue->ready) : NULL;
+        pthread_mutex_unlock(&queue->mutex);
+        if (!job) return;
+
+        FnPromotionCell* cell = interp_promotion_cell(script, job->def);
+        bool published = job->image && cell &&
+            cell->state == FN_PROMOTION_QUEUED &&
+            interp_satellite_publish_image(script, job->image);
+        if (published) {
+            job->image = NULL;  // Script now owns the private MIR context.
+            log_notice("interp-tier: published queued satellite function='%s' image=%u",
+                job->def->name ? job->def->name->chars : "<anonymous>",
+                (unsigned)job->sequence);
+        } else if (cell && cell->state == FN_PROMOTION_QUEUED) {
+            cell->state = FN_PROMOTION_PINNED_INTERP;
+            log_error("interp-tier: queued satellite failed function='%s'; pinned to T0",
+                job->def->name ? job->def->name->chars : "<anonymous>");
+        }
+        interp_satellite_job_destroy(job);
+    }
+}
+
+void interp_satellite_cancel_script(Script* script) {
+    InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
+    if (!queue) return;
+    pthread_mutex_lock(&queue->mutex);
+    queue->retiring = true;
+    queue->generation++;
+    while (queue->pending > 0) pthread_cond_wait(&queue->idle, &queue->mutex);
+    ArrayList* ready = queue->ready;
+    queue->ready = NULL;
+    pthread_mutex_unlock(&queue->mutex);
+
+    if (ready) {
+        for (int index = 0; index < ready->length; index++) {
+            interp_satellite_job_destroy((InterpSatelliteJob*)ready->data[index]);
+        }
+        arraylist_free(ready);
+    }
+    pthread_cond_destroy(&queue->idle);
+    pthread_mutex_destroy(&queue->mutex);
+    mem_free(queue);
+    script->interp_satellite_queue = NULL;
+}
 
 bool lambda_tier_parse(const char* text, LambdaTier* out) {
     if (!text || !out) return false;
@@ -5637,6 +5861,10 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     }
     const AstFuncNode* fn_node = (const AstFuncNode*)fn->def;
     Script* module = fn->def_module;
+    // Function entry is an execution safe point even when a direct AST call
+    // bypasses the promotion probe. The current frame stays interpreted; a
+    // later nested/dynamic call observes the newly published boxed entry.
+    interp_satellite_publish_ready(module);
     if (!fn_node || !module || !fn_node->analysis ||
             !fn_node->analysis->frame_plan.planned) {
         log_error("interp: interpreted function '%s' has no frame plan",
@@ -6825,6 +7053,9 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     Script* script = fn->def_module;
     if (!st || !st->runtime || !def || !script || !def->analysis) return false;
 
+    // A completed worker image is published only between interpreter calls;
+    // the current activation keeps its T0 frame and never performs OSR.
+    interp_satellite_publish_ready(script);
     FnPromotionCell* cell = interp_promotion_cell(script, def);
     if (!cell) return false;
     if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
@@ -6832,6 +7063,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         return true;
     }
     if (cell->state == FN_PROMOTION_PINNED_INTERP ||
+            cell->state == FN_PROMOTION_QUEUED ||
             cell->state == FN_PROMOTION_COMPILING) {
         return false;
     }
@@ -6873,20 +7105,14 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         return false;
     }
 
-    cell->state = FN_PROMOTION_COMPILING;
-    void* entry = NULL;
-    if (!compile_ast_function_satellite(st->runtime, script, def, &entry) || !entry) {
-        // Promotion failure is not user-visible execution failure: the source
-        // was already accepted by T0, so retain that semantic implementation.
+    if (!interp_satellite_enqueue(st->runtime, script, def, cell)) {
+        // Queue failure is not user-visible execution failure: the source was
+        // already accepted by T0, so retain that semantic implementation.
         cell->state = FN_PROMOTION_PINNED_INTERP;
-        log_error("interp-tier: satellite compile failed function='%s'; pinned to T0",
+        log_error("interp-tier: satellite queue failed function='%s'; pinned to T0",
             def->name ? def->name->chars : "<anonymous>");
-        return false;
     }
-    cell->boxed_entry = entry;
-    cell->state = FN_PROMOTION_COMPILED;
-    interp_upgrade_function_entry(fn, def, entry);
-    return true;
+    return false;
 }
 
 bool interp_promote_function_if_hot(Function* fn) {

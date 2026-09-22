@@ -287,6 +287,33 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
                                     const AstFuncNode* fn, void** out_boxed_entry);
 
+// A worker-built satellite is inert until the evaluator seals its module-state
+// layout and publishes its entries. The fixed member set keeps the image
+// self-contained and mirrors the bounded direct-callee cluster.
+enum { INTERP_SATELLITE_CLUSTER_CAP = 64 };
+typedef struct InterpSatelliteImage {
+    MIR_context_t context;
+    bool mir_gen_initialized;
+    // Snapshot-only compiler allocations outlive MIR's copied symbol table
+    // until the image is retired. Ordinary synchronous satellites leave these
+    // null because their Script owns the compiler storage.
+    Pool* compiler_pool;
+    NamePool* compiler_name_pool;
+    ArrayList* compiler_const_list;
+    const AstFuncNode* target;
+    void* target_entry;
+    uint32_t member_count;
+    const AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP];
+    void* member_entries[INTERP_SATELLITE_CLUSTER_CAP];
+} InterpSatelliteImage;
+
+// Builds a private MIR image without writing a Script, its const/type lists,
+// module state, or Function entries. `sequence` is allocated before enqueue
+// and is therefore stable regardless of worker completion order.
+bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
+        const AstFuncNode* fn, uint32_t sequence, InterpSatelliteImage** out_image);
+void interp_satellite_image_destroy(InterpSatelliteImage* image);
+
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
 // Shared by the MIR Direct handoff and the T0 plan-only load path.
 void script_adopt_transpiler(Script* script, Transpiler* tp);

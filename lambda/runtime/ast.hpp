@@ -962,6 +962,10 @@ struct Script : Input {
     bool ast_frontend_only;
     AstNodeType interp_reject_kind; // first unsupported kind, for the log line
     uint32_t interp_satellite_count; // unique MIR satellite image sequence
+    // Execution-local satellite queue/image ownership. Cached AST templates
+    // never retain worker results across their receiving runtime instances.
+    struct InterpSatelliteQueue* interp_satellite_queue;
+    ArrayList* interp_satellite_images;
     bool interp_whole_script_poc_attempted; // opt-in AUTO whole-module POC gate
     bool interp_whole_script_poc_active;    // whole-module image published
     bool interp_views_registered;   // T0 view entries published in this context

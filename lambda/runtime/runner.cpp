@@ -891,6 +891,9 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
     instance->interp_views_registered = false;
     instance->ast_overlay_strings = NULL;
     instance->ast_promotion_overlay = NULL;
+    // Satellite work and private code images belong exclusively to this run.
+    instance->interp_satellite_queue = NULL;
+    instance->interp_satellite_images = NULL;
     if (!instance->cache_mir_artifact) {
         // AST reuse borrows parser/analysis facts only. A MIR context
         // (including satellites promoted by an earlier execution) is
@@ -2519,6 +2522,18 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     runtime_module_unit_index_delete_script(runtime, script);
     if (remove_index && script->reference) {
         runtime_loaded_script_delete_instance(runtime, script);
+    }
+    // A queued satellite reads this Script's immutable AST. Retire it before
+    // releasing an execution shell, then release every private MIR context
+    // that was already published into its Function entries.
+    interp_satellite_cancel_script(script);
+    if (script->interp_satellite_images) {
+        for (int index = 0; index < script->interp_satellite_images->length; index++) {
+            interp_satellite_image_destroy((InterpSatelliteImage*)
+                script->interp_satellite_images->data[index]);
+        }
+        arraylist_free(script->interp_satellite_images);
+        script->interp_satellite_images = NULL;
     }
     if (script->cache_owned_template) {
         // D8.5.1v2: the cache entry retains its template lease until eviction.
