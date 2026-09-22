@@ -26,17 +26,11 @@
 #include "../../lib/mem.h"
 #include <cstdio>
 
-extern __thread EvalContext* context;
-extern Item js_make_number(double value);
-extern "C" Item js_async_hooks_get_current_resource(void);
-extern "C" Item js_async_hooks_enter_resource(Item resource);
-extern "C" void js_async_hooks_restore_resource(Item previous);
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
-extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_promise_flush_unhandled_checks(void);
 extern "C" bool js_process_exit_requested(void);
 extern "C" Item js_domain_get_current(void);

@@ -21,13 +21,9 @@
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 
-extern __thread EvalContext* context;
-extern int js_dynamic_import_suppress_module_drain;
 // Static imports execute nested module sources synchronously. Their queued
 // jobs belong to the importing module's host turn, not to the nested load.
 static __thread int js_interp_static_import_depth = 0;
-extern Item js_make_number(double value);
-extern "C" Item bigint_from_string(const char* value, int length);
 bool js_activate_runtime_name_pool(void);
 
 enum JsInterpCompletionKind : uint8_t {
@@ -286,6 +282,18 @@ static void js_interp_expression_replay_discard_pending(
     js_interp_expression_replay_clear_list(&activation->ast_expression_replay);
 }
 
+static void js_interp_expression_replay_discard_through(
+        JsSuspendedActivation* activation, JsAstNode* node) {
+    if (!activation || !node) return;
+    while (activation->ast_expression_replay) {
+        JsInterpExpressionReplay* discarded = activation->ast_expression_replay;
+        activation->ast_expression_replay = discarded->next;
+        bool found = discarded->node == node;
+        mem_free(discarded);
+        if (found) return;
+    }
+}
+
 static void js_interp_expression_replay_discard_recorded(
         JsSuspendedActivation* activation) {
     if (!activation) return;
@@ -305,7 +313,17 @@ static bool js_interp_expression_replay_take(JsInterpFrame* frame,
     JsSuspendedActivation* activation = frame ? frame->suspended_activation : NULL;
     if (!activation || !activation->ast_expression_replay || !node || !value) return false;
     JsInterpExpressionReplay* entry = activation->ast_expression_replay;
-    if (entry->node != node) return false;
+    while (entry && entry->node != node) entry = entry->next;
+    if (!entry) return false;
+    // nested evaluations record before their completed parent. A comma
+    // sequence resumes at that parent, so discard its already-accounted-for
+    // children and return the parent's saved completion without re-running
+    // its observable work.
+    while (activation->ast_expression_replay != entry) {
+        JsInterpExpressionReplay* discarded = activation->ast_expression_replay;
+        activation->ast_expression_replay = discarded->next;
+        mem_free(discarded);
+    }
     activation->ast_expression_replay = entry->next;
     *value = entry->value;
     mem_free(entry);
@@ -3721,7 +3739,8 @@ static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
 static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) {
     if (!node) return js_interp_normal(make_js_undefined());
     Item replay_value = ItemNull;
-    if (js_interp_expression_replay_take(frame, node, &replay_value)) {
+    if (node->node_type != AST_NODE_AWAIT &&
+            js_interp_expression_replay_take(frame, node, &replay_value)) {
         // A later suspension in this same statement must replay this child
         // again, so carry the consumed value into the next replay segment.
         if (!js_interp_expression_replay_record(frame, node, replay_value)) {
@@ -4029,9 +4048,21 @@ static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* no
                 *frame->async_await_seen < frame->async_await_skip &&
                 !js_interp_await_argument_can_suspend(
                     (JsAstNode*)awaited->argument)) {
-            // An inner await owns the earlier ledger value, so replay its
-            // operand before this outer await consumes a saved completion.
-            return js_interp_await_value(frame, make_js_undefined());
+            // A nested await owns the prior ledger entry and must replay first.
+            // the await's marker follows its operand's recorded children.
+            // remove exactly that completed operand before injecting the
+            // fulfilled value, retaining any later comma-sequence operands.
+            js_interp_expression_replay_discard_through(frame->suspended_activation,
+                node);
+            JsInterpCompletion resumed = js_interp_await_value(frame,
+                make_js_undefined());
+            // a later await can suspend after this one, requiring the next
+            // replay pass to reach this already-completed await again.
+            if (resumed.kind == JS_INTERP_NORMAL &&
+                    !js_interp_expression_replay_record(frame, node, ItemNull)) {
+                return js_interp_throw(ItemError);
+            }
+            return resumed;
         }
         RootFrame roots(1);
         Rooted<Item> target_root(roots, make_js_undefined());
@@ -4041,7 +4072,12 @@ static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* no
             if (target.kind != JS_INTERP_NORMAL) return target;
             target_root.set(target.value);
         }
-        return js_interp_await_value(frame, target_root.get());
+        JsInterpCompletion result = js_interp_await_value(frame, target_root.get());
+        if (result.kind == JS_INTERP_AWAIT &&
+                !js_interp_expression_replay_record(frame, node, ItemNull)) {
+            return js_interp_throw(ItemError);
+        }
+        return result;
     }
     case AST_NODE_YIELD: {
         JsYieldNode* yielded = (JsYieldNode*)node;

@@ -834,6 +834,14 @@ line-span counts, not NLOC, for that file.
 | — | baseline `7a06981f8` (mvp excluded) | — | — | — | — | 139,018 | test262 40,261/40,261; `test_js_gtest` 466/466 |
 | 1 | JLS-15 dead Node host code | 3,438 | 18 | **−3,420** | 0 | **135,598** | `test_js_gtest` 466/466; test262 40,261/40,261 fully passing; benchmark corpus 109/109 rows identical apart from timing lines (§B.1); Node dylib imports all resolve; `test-lambda-baseline` 5,727/5,740, the 13 failures pre-existing (§B.1) |
 
+| — | upstream merge `21edab563` (not this work) | — | — | — | — | 137,581 | +1,983 lines of concurrent upstream JS work |
+| 2 | JLS-16 Buffer → node-core; JLS-17 dead IPC | ~500 | ~35 | **−490** (IPC) | **2,468** (Buffer) | **134,648** | test262 40,261/40,261 fully passing; `test_js_gtest` 465/466 — `dom_document_cookie` fails identically on HEAD (upstream regression, §B.2); 63/63 official benchmark rows; 109-file sweep identical to HEAD bar timing lines; `test-lambda-baseline` 5,770/5,771 (same cookie test), no leaks |
+
+| 3 | JLS-1 extern hygiene; util → node-core | ~95 | ~30 | **−65** | **300** (util) | **134,283** | test262 40,261/40,261; `test_js_gtest` 465/466 (waived cookie); 63/63 official rows; sweep identical to batch 2 bar timing lines; `test-lambda-baseline` 5,770/5,771 (waived cookie), no leaks; other Tier A/D packages re-measured and dropped (§B.3) |
+
+| — | upstream merge `1cfba2714` (not this work) | — | — | — | — | 134,309 | batches 2–3 committed as `2dde16651`/`178154a35`; upstream changes |
+| 4 | JLS-5/JLS-6 JS-side dedupe (§B.4) | 140 | 93 | **−47** | 0 | **134,262** | finalized MIR byte-identical on 552 scripts; `test_js_mir_emission_gtest` 32/32; `test_js_gtest` 465/466 (waived cookie); `test-lambda-baseline` 5,774/5,775 (waived cookie), no leaks; test262 40,260/40,261 — one batch kill, reproduced identically on pristine `1cfba2714` (§B.4) |
+
 ### B.1 Batch 1 record (JLS-15)
 
 **Method.** Source scanning proved unreliable for this job: token-pasted
@@ -917,3 +925,167 @@ and outside the JLSR5 gate; the MIR budget was not edited to hide the growth.
 
 **Side effect found.** Running `test/benchmark/text` rewrites the tracked file
 `test/benchmark/text/hyphen_patterns.json`; restore it after benchmark runs.
+
+
+### B.2 Batch 2 record (JLS-16, JLS-17)
+
+**JLS-16 Buffer move.** `lambda/js/js_buffer.cpp` moved (git rename) to
+`lambda/module/node_core/node_buffer.cpp` with `node_buffer.hpp`, and is
+built only into node-core. The host keeps no Buffer code and never calls a
+module symbol:
+- the `buffer` row of the Jube host-namespace table is gone; node-core's
+  `buffer` specifier and `Buffer` global installer call `node_buffer_namespace()`
+  directly;
+- the host's lazy `Buffer` global (still gated on node-core, and needed because
+  node-core installs its own globals only after it activates) resolves
+  through `jube_specifier_resolve("buffer")`, like `crypto`;
+- property lookup on host-created Buffers (`js_buffer_from_bytes`, used by fs
+  and stdin) reads the cached prototype from the host realm slot and, if it
+  is still empty, resolves `buffer` through Jube first. Without node-core,
+  such Buffers keep only their Uint8Array methods;
+- the Jube reset clears the two Buffer realm slots itself instead of calling
+  the module.
+The first attempt missed `js_get_buffer_prototype`, a host caller found only
+by the link; name-pattern greps are not enough for a move.
+
+**JLS-17 reduced to dead IPC.** `process.send`/`disconnect`/`connected` and
+the IPC pipe, framing and write-callback machinery were enabled only by the
+internal `LAMBDA_JS_IPC*` environment markers, whose only setters were the
+deleted `child_process` and `cluster` implementations. They were deleted, not
+moved, together with the listener-liveness bookkeeping that only drove the
+IPC pipe's ref count, the uncalled IPC-accept host hook, and the
+`JsProcessState` IPC fields (its traced span went 5 -> 4 Items).
+`vibe/Lambda_Design_Runtime_Env_Vars.md` drops `LAMBDA_JS_IPC*` and the
+likewise unread `NODE_UNIQUE_ID`. Not moved: `process.stdin` is part of the
+floor (the runner feeds FASTA input to three benchmark rows on stdin), the
+process event emitter has host callers, and `process.binding` is checked by
+tests.
+
+**Gate result and the open failure.** `dom_document_cookie` fails with
+"document.cookie requires an active browsing session" on this tree and,
+identically, on HEAD with batch 2 stashed. Upstream `54e040c9b` moved
+`document.cookie` from a per-document string to the browsing-session cookie
+jar and wired the jar into `cmd_layout`'s HTTP load, but `lambda js
+--document` (`main.cpp`, `js_document_session_start`) creates neither a
+browsing session nor a resource manager, so `dom_document_cookie_jar()`
+returns NULL. Fixing it needs a Radiant ownership decision (a headless
+session jar, a document-owned in-memory jar via `cookie_jar_create(NULL)`,
+or a jar owned by the CLI document session), so it is raised with the user
+rather than patched here. Under JLSR5 batch 2 does not count as landed until
+this test passes.
+
+**Benchmark note.** `havlak2_bundle.js` timed out at 180 s on HEAD and
+finished on batch 2 in the four-wide sweep; it runs in about 70 s alone and
+passed in the official run, so this is load noise.
+
+
+### B.3 Batch 3 record (re-measured packages)
+
+Batch 3 re-measured each Tier A/D package against the code before editing it.
+The rev-1 estimates came from name-based censuses that overcounted; the
+measured values replace them.
+
+| package | rev-1 estimate | measured | outcome |
+|---|---|---|---|
+| JLS-1 extern hygiene | −650 / −900 | **−65** | **landed.** Only 35 per-file `extern` lines truly repeated a header declaration (the census had counted any header mention, including calls in inline functions, as a declaration); 17 names declared in two or more `.cpp` files now have one declaration in `js_runtime.h`, removing 49 copies (one `.cpp` that does not include `js_runtime.h` keeps its line). |
+| util → node-core (boundary) | — | **−300** moved | **landed.** `js_util_service.cpp` became `lambda/module/node_core/node_util.cpp`; the only host reference was the Jube host-namespace `util` row. node-core's `util`, `util/types` and `inherits` use the local builder. The console-format hook is still installed when `util` is first built. |
+| JLS-2 generic AST dump | −180 / −260 | ~0 | **rejected.** The dump prints labelled fields the child catalogs do not carry, and the core dumper spells operators and types differently; either route changes a diagnostic format. |
+| JLS-3 compile driver | −450 / −800 | small | **rejected for now.** The thin `transpile_js_to_mir*` / `compile_js_mir*` wrappers are public entry points with up to 38 callers across `lambda/`, `radiant/` and `test/`; a request struct lengthens every call site. |
+| JLS-4 reduction table / direct scope | −350 / −800 | small | **rejected.** Reduction cases differ in child-taking helper, arity and builder signature and are already 5–8 lines each; `direct_walk_node` already delegates its default case to the child catalog, and its explicit cases do binding or type work. |
+| JLS-8 property kernels | −700 / −1,200 | not a clone | **rejected.** `js_object_define_property` (exotic dispatch + validation) calls the `js_props` apply kernel, so the two are layers, not duplicates; the six own-keys entry points are at most 34% similar (difflib), so unifying them is a semantic rewrite of hot, conformance-critical enumeration. |
+| JLS-12 generator signals | −120 / −300 | ~6 | **rejected.** Already one kernel; the remaining wrappers are MIR import entry points. |
+| JLS-13 UTF-16 helpers | −100 / −250 | ~25 | **rejected.** `lib/utf.h` counts structurally (lead bytes) while the JS helpers decode; they differ on stray continuation bytes, `0xF8+` leads and truncated sequences. |
+| repeat linker dead-code scan | — | 0 | nothing new after batch 2. |
+
+**Gates.** All green apart from `dom_document_cookie`, which the user waived
+(2026-09-22) as an upstream regression.
+
+**Where this leaves the target.** Measured against the 139,018 baseline the
+tree is at 134,283 (−4,735, 3.4%), but upstream added 1,983 lines during the
+work, so the work itself has removed 6,718 lines (4.8%): 3,420 + 490 + 65
+credited deletions and 2,468 + 300 lines moved to node-core. The remaining
+candidates are the Tier C compiler-mechanics packages (JLS-5 numeric facts,
+JLS-6 capture facts, JLS-7 emitter stacks), which Tune14 §3.3 prescribes as
+two-client extractions inside T14-2/T14-3, and JLS-9 (one global/`with`
+reference resolver), which follows T14-5. Each is a semantic refactor of hot
+compiler or runtime paths rather than a clean-up, and needs the Tune14
+ownership decision in §10.
+
+
+### B.4 Batch 4 record (JLS-5, JLS-6) — USER: "do them here"
+
+Both packages were re-measured against the code before any cross-language
+extraction, and the shared-mechanics premise from rev 1 does not hold:
+
+- **JLS-6 capture facts.** Lambda's `collect_captures_from_node`
+  (`build_ast.cpp`, about 240 lines) is a hand-written per-kind walker whose
+  `default` case skips unlisted kinds; JS's `jm_analyze_captures` already
+  collects references from the shared `AstIndex` by owning function. The
+  environment-layout phases 1.5–1.7d that rev 1 targeted use
+  `scope_env_slot` / `grandparent_slot` / `parent_env_link_slot_override`,
+  which Lambda only initializes and never reads: they are JS-only, with no
+  Lambda twin. Sharing the collection step would simplify Lambda (moving it
+  onto the index or the core child catalog) but cannot shrink `lambda/js`.
+- **JLS-5 numeric facts.** Lambda's `infer_param_types_batched`
+  (`transpile-mir.cpp`) finds aliases and evidence by walking Lambda node
+  shapes with call-site joins; JS's `jm_infer_*` reads the `AstIndex`. They
+  share no walker or worklist, so a common engine means rewriting Lambda's
+  inference onto the index — a large, performance-sensitive Lambda change
+  that does not reduce `lambda/js`.
+
+**What landed instead (JS-side duplication inside the same passes).**
+
+| change | net |
+|---|---|
+| `jm_add_capture` returns the new record and is shared; the main capture loop in `jm_analyze_captures` and transitive propagation in `js_mir_analyze_and_plan` stop building `FnCapture` field by field | −19 |
+| `JM_FOR_EACH_CHILD_FUNC` replaces 12 three-line "collected functions with this parent" loop headers in the capture-planning phases | −18 |
+| class-field collection merges its static and instance branches; the two parameter-type debug traces share `jm_log_param_types` | −11 |
+| `[[maybe_unused]]` note on the debug-only label helper (release compiles traces out) | +1 |
+| **total** | **−47** |
+
+**Gate.** Finalized MIR for all 552 dumpable scripts in `test/js` plus the
+benchmark corpus is byte-identical to the pre-change tree (after normalising
+per-run absolute addresses and pointer-derived template-cache keys; three slow
+library scripts were dumped serially because they exceed 60 s under parallel
+debug load). `test_js_mir_emission_gtest` 32/32; `test_js_gtest` 465/466
+(waived cookie); `test-lambda-baseline` 5,774/5,775 (waived cookie), no
+leaks. test262 is 40,260/40,261 in two consecutive runs: `language_expressions_class_elements_same_line_method_rs_static_async_generator_method_privatename_identifier_js`
+is killed inside its batch and passes on the isolated retry. The identical
+result on pristine `1cfba2714` (this batch's files stashed) and a clean
+isolated rerun of its 100-test batch show it is a load-dependent instability
+that arrived with the upstream merge, not from this change; batch 3's test262
+run, before that merge, was 40,261/40,261. It is reported to the user rather
+than waived here.
+
+**Lambda-side JLS-6 — done (USER, 2026-09-22).** Lambda's capture walker
+(`collect_captures_from_node`, a 240-line per-kind switch whose `default`
+skipped 49 kinds the shared catalogs know) is replaced by `capture_visit`, a
+policy-only visitor over `walk_lambda_ast`, the Lambda-layout traversal the
+bind pass already uses. (The core `ast_visit_core_children` catalog was
+rejected: it reads `ASSIGN_STAM` as the generic assign layout, which is wrong
+for Lambda's `AstAssignStamNode`.) Explicit cases remain only for identifiers,
+the three assignment forms that mark a capture mutable, nested functions
+(copy up their outer captures, do not descend) and `for` join keys (the one
+edge `walk_lambda_ast` omits); `analyze_captures` now also walks the
+function's parameters, so defaults can capture. `build_ast.cpp` −159 net
+(+60/−219), in `lambda/runtime`, not the JS metric.
+Fixed: a binding used only in a named argument or parameter default was never
+captured (probe: expected 90, interpreter printed 0 and JIT printed 100). On
+the forced JIT tier `test_latex_pkg`, `test_math_atom_color`,
+`test_math_atom_style` and `test_math_html_output` stopped failing with
+`undeclared reg` and now match their goldens on both tiers. New regression
+test `test/lambda/closure_capture_sites.ls` (+ `.txt`). Main-module MIR is
+byte-identical for all 1,052 dumpable Lambda test scripts (imported package
+modules are compiled separately and are not in that dump);
+`test-lambda-baseline` 5,775/5,776 (waived cookie), no leaks.
+Follow-up fixed (USER, 2026-09-22): the JIT's public wrapper resolved an
+omitted default before any capture was bound, so a closure called as a value
+(`let f = make(21); f()`) failed to compile with `undefined variable` and the
+script aborted. `transpile-mir.cpp` now binds the closure's captures in the
+wrapper (shared `emit_load_closure_captures`, also used by the body prologue)
+when a parameter has a default. Lambda MIR is identical for all 1,052 existing
+test scripts; the regression test gained two dynamic-call cases.
+
+The JLS-5/6 MIR check was redone without `git stash` (pre-change files
+written from `1cfba2714`, forced rebuild on each side, both versions confirmed
+in the build): 554/554 identical.

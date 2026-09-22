@@ -12,7 +12,6 @@ extern "C" {
 }
 
 // External from runner.cpp
-extern __thread EvalContext* context;
 
 // External from js_runtime.cpp
 

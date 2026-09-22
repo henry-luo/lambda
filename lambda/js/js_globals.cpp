@@ -25,7 +25,6 @@
 #include "js_runtime_internal.hpp"
 #include "js_exec_profile.h"
 
-extern "C" bool js_promise_vmap_is(Item value);
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
@@ -60,15 +59,9 @@ extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callbac
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" Item js_global_url_search_params_new(Item init);
-extern "C" void js_intrinsic_note_prototype_mutation(Item object);
-extern __thread EvalContext* context;
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
-extern "C" uint64_t js_get_heap_epoch(void);
-extern "C" Item js_get_process_object_value(void);
-extern "C" Item js_get_buffer_namespace(void);
 extern "C" Item js_get_intl_object_value(void);
-extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
 
@@ -77,19 +70,17 @@ JS_FORWARD_STATIC_VOID( js_globals_set_native_method, (Item object, const char* 
 
 typedef Item (*JsLazyGlobalBuilder)(void);
 
-static Item js_get_jube_crypto_namespace(void) {
+static Item js_jube_namespace(const char* specifier) {
     Item namespace_item = ItemNull;
-    if (jube_specifier_resolve("crypto", &namespace_item) == JUBE_SPECIFIER_RESOLVED) {
+    if (jube_specifier_resolve(specifier, &namespace_item) == JUBE_SPECIFIER_RESOLVED) {
         return namespace_item;
     }
     return ItemNull;
 }
 
-static Item js_get_profiled_buffer_namespace(void) {
-    // Buffer remains host-owned until node-core finishes its staged extraction.
-    // The module-set gate keeps it absent from the minimal JS profile.
-    return jube_node_core_module_enabled() ? js_get_buffer_namespace() : ItemNull;
-}
+static Item js_get_jube_crypto_namespace(void) { return js_jube_namespace("crypto"); }
+// node-core owns Buffer, but its global must exist before node-core activates.
+static Item js_get_jube_buffer_namespace(void) { return js_jube_namespace("buffer"); }
 
 static Item js_get_profiled_process_object(void) {
     if (!jube_node_core_module_enabled()) return js_get_process_object_value();
@@ -112,7 +103,7 @@ struct JsLazyGlobalSpec {
 
 static const JsLazyGlobalSpec js_lazy_host_globals[] = {
     {"process", 7, js_get_profiled_process_object, false},
-    {"Buffer", 6, js_get_profiled_buffer_namespace, true},
+    {"Buffer", 6, js_get_jube_buffer_namespace, true},
     {"crypto", 6, js_get_jube_crypto_namespace, false},
     {"Math", 4, js_get_math_object_value, false},
     {"JSON", 4, js_get_json_object_value, false},
@@ -2127,14 +2118,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool*, js_process_exit_requested_slot, (void),
 #define js_process_exiting (js_process_state->exiting)
 #define process_listener_map (js_process_state->listener_map)
 #define process_total_listener_count (js_process_state->total_listener_count)
-#define process_ipc_liveness_listener_count (js_process_state->ipc_liveness_listener_count)
-#define js_process_ipc_active (js_process_state->ipc_active)
-#define js_process_ipc_closing (js_process_state->ipc_closing)
-#define js_process_ipc_disconnect_emitted (js_process_state->ipc_disconnect_emitted)
-#define js_process_ipc_force_ref (js_process_state->ipc_force_ref)
-#define js_process_ipc_pending_messages (js_process_state->ipc_pending_messages)
-#define js_process_ipc_write_callbacks (js_process_state->ipc_write_callbacks)
-#define js_process_ipc_lines (js_process_state->ipc_lines)
 JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ensure_roots, (void),
     (js_process_state && js_root_vector_ensure_registered(js_process_state)))
 
@@ -2596,7 +2579,6 @@ JS_FORWARD_EXPRESSION(int, js_is_process_object_value, (Item object),
 
 // process.exit([code])
 extern "C" void js_process_emit_exit(int code); // forward declaration
-extern "C" Item js_process_emit_before_exit(int code); // forward declaration
 
 extern "C" bool js_process_exit_requested(void) {
     bool* value = js_process_exit_requested_slot();
@@ -2777,7 +2759,6 @@ extern "C" Item js_process_report_getReport(void) {
 
 // process.emitWarning(warning, type, code) — emit a warning
 // Node.js: emits 'warning' event on process after the default stderr write.
-extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emitWarning(Item warning, Item type_item, Item code_item) {
     // Build a Warning object if warning is a string
     Item warning_obj;
@@ -2888,8 +2869,6 @@ JS_FORWARD_STATIC_VOID( js_process_set_method, (Item ns, const char* name, Targe
 // One dynamic event map owns every process listener, including lifecycle
 // events, so delivery cannot diverge from process.listeners().
 
-static void js_process_ipc_refresh_ref(void);
-static void js_process_ipc_flush_pending(void);
 static void js_process_update_events_count(void);
 
 static Item get_process_listener_map() {
@@ -2899,8 +2878,6 @@ static Item get_process_listener_map() {
     }
     return process_listener_map;
 }
-
-JS_FORWARD_STATIC_RETURN(bool, js_process_is_ipc_event, (Item event_name), js_string_equals, (event_name, "message") || js_string_equals(event_name, "disconnect"))
 
 static void js_process_record_uncaught_handler_failure(void) {
     js_process_exit_code_value = 1;
@@ -2925,16 +2902,6 @@ extern "C" Item js_process_on(Item event_name, Item listener) {
     js_array_push(arr, listener);
     process_total_listener_count++;
     js_process_update_events_count();
-
-    if (js_process_is_ipc_event(event_name)) {
-        // IPC message/disconnect listeners are liveness roots; delayed
-        // fork().send() must not lose the child before the parent writes.
-        process_ipc_liveness_listener_count++;
-        js_process_ipc_refresh_ref();
-        if (js_string_equals(event_name, "message")) {
-            js_process_ipc_flush_pending();
-        }
-    }
 
     // return process for chaining
     return js_process_object;
@@ -3000,7 +2967,6 @@ extern "C" void js_process_reset_listeners(void) {
     js_process_exiting = false;
     js_process_exit_requested_value = false;
     process_total_listener_count = 0;
-    process_ipc_liveness_listener_count = 0;
     // don't reset process_listener_map — it'll be GC'd
     process_listener_map = (Item){0};
 }
@@ -3014,14 +2980,9 @@ static Item js_process_once_wrapper(Item env_item, Item arg1, Item arg2) {
     Item wrapper = env[2];
     js_process_removeListener(event_name, wrapper);
     if (js_is_callable(listener)) {
-        // IPC message events carry the transferred handle as argv[1]; dropping
-        // it leaves forked socket owners alive until the parent drain watchdog.
         Item args[2] = { arg1, arg2 };
-        Item result = js_call_function(listener, js_process_object, args, 2);
-        js_process_ipc_refresh_ref();
-        return result;
+        return js_call_function(listener, js_process_object, args, 2);
     }
-    js_process_ipc_refresh_ref();
     return make_js_undefined();
 }
 
@@ -3072,11 +3033,6 @@ extern "C" Item js_process_removeListener(Item event_name, Item listener) {
         process_total_listener_count -= (int)removed;
         if (process_total_listener_count < 0) process_total_listener_count = 0;
         js_process_update_events_count();
-        if (js_process_is_ipc_event(event_name)) {
-            process_ipc_liveness_listener_count -= (int)removed;
-            if (process_ipc_liveness_listener_count < 0) process_ipc_liveness_listener_count = 0;
-            js_process_ipc_refresh_ref();
-        }
     }
     return js_process_object;
 }
@@ -3087,12 +3043,10 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
     TypeId etype = get_type_id(event_name);
     if (etype == LMD_TYPE_UNDEFINED || event_name.item == ITEM_JS_UNDEFINED || event_name.item == ItemNull.item) {
         process_total_listener_count = 0;
-        process_ipc_liveness_listener_count = 0;
         if (!js_process_ensure_roots()) return ItemNull;
         process_listener_map = js_new_object();
         js_process_update_events_count();
         js_promise_note_unhandled_listener_reset();
-        js_process_ipc_refresh_ref();
         return js_process_object;
     }
     bool is_sym = js_key_is_symbol_c(event_name);
@@ -3111,10 +3065,6 @@ extern "C" Item js_process_removeAllListeners(Item event_name) {
         process_total_listener_count -= (int)removed;
         if (process_total_listener_count < 0) process_total_listener_count = 0;
         js_process_update_events_count();
-    }
-    if (js_process_is_ipc_event(event_name)) {
-        process_ipc_liveness_listener_count = 0;
-        js_process_ipc_refresh_ref();
     }
     return js_process_object;
 }
@@ -3135,406 +3085,6 @@ extern "C" Item js_process_listeners(Item event_name) {
     return arr;
 }
 
-
-typedef struct JsProcessIpcWriteReq {
-    uv_write_t req;
-    char* data;
-    int64_t callback_slot;
-} JsProcessIpcWriteReq;
-
-static void js_process_ipc_resource_close(void* user);
-
-JS_FORWARD_STATIC_EXPRESSION(uv_pipe_t*, js_process_ipc_pipe_ptr, (void),
-    (js_process_state && js_process_state->ipc_resource_id != 0)
-        ? (uv_pipe_t*)runtime_resource_table_user_data(js_runtime_resource_table(),
-            js_process_state->ipc_resource_id) : NULL)
-#define js_process_ipc_pipe (*js_process_ipc_pipe_ptr())
-
-typedef struct JsProcessIpcScope {
-    bool valid;
-} JsProcessIpcScope;
-
-static bool js_process_ipc_enter(uv_handle_t* handle, JsProcessIpcScope* scope) {
-    memset(scope, 0, sizeof(*scope));
-    EvalContext* owner = handle ? (EvalContext*)handle->data : NULL;
-    if (!owner || !js_runtime_state_for(owner)) return false;
-    if (!eval_context_matches(owner) ||
-            !js_runtime_state_thread_matches(owner)) {
-        // libuv must deliver IPC completion on the context's owner loop.
-        log_error("js-process-ipc: callback arrived on non-owner thread");
-        return false;
-    }
-    scope->valid = true;
-    return true;
-}
-
-static void js_process_ipc_exit(JsProcessIpcScope* scope) {
-    if (scope) scope->valid = false;
-}
-
-static void js_process_ipc_refresh_ref(void) {
-    if (!js_process_ipc_active || js_process_ipc_closing) return;
-    bool should_ref = js_process_ipc_force_ref || process_ipc_liveness_listener_count > 0;
-    if (process_listener_map.item != 0) {
-        Item message_arr = js_get_key_cstr(process_listener_map, "message");
-        Item disconnect_arr = js_get_key_cstr(process_listener_map, "disconnect");
-        should_ref = should_ref ||
-            (get_type_id(message_arr) == LMD_TYPE_ARRAY && js_array_length(message_arr) > 0) ||
-            (get_type_id(disconnect_arr) == LMD_TYPE_ARRAY && js_array_length(disconnect_arr) > 0);
-    }
-    // child IPC starts unref'd in Node; only message/disconnect listeners make it a liveness root.
-    uv_handle_t* handle = (uv_handle_t*)&js_process_ipc_pipe;
-    if (should_ref) {
-        if (!uv_has_ref(handle)) uv_ref(handle);
-    } else {
-        if (uv_has_ref(handle)) uv_unref(handle);
-    }
-}
-
-static void js_process_set_connected(bool connected) {
-    if (js_process_cache_is_empty(js_process_object)) return;
-    js_set_key_cstr(js_process_object, "connected", (Item){.item = b2it(connected)});
-}
-
-static void js_process_ipc_emit_disconnect_once(void) {
-    if (js_process_ipc_disconnect_emitted) return;
-    js_process_ipc_disconnect_emitted = true;
-    js_process_set_connected(false);
-    js_process_emit(js_name_item("disconnect", 10), make_js_undefined());
-}
-
-static void js_process_ipc_close_cb(uv_handle_t* handle) {
-    JsProcessIpcScope scope = {};
-    if (!js_process_ipc_enter(handle, &scope)) {
-        mem_free(handle);
-        return;
-    }
-    js_process_ipc_active = false;
-    js_process_ipc_closing = false;
-    line_framer_destroy(&js_process_ipc_lines);
-    if (js_process_state && js_process_state->ipc_resource_id != 0) {
-        uint32_t resource_id = js_process_state->ipc_resource_id;
-        js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(js_runtime_resource_table(),
-            js_process_state, resource_id);
-    }
-    js_process_ipc_exit(&scope);
-    mem_free(handle);
-}
-
-static void js_process_ipc_resource_close(void* user) {
-    uv_pipe_t* pipe = (uv_pipe_t*)user;
-    if (!pipe) return;
-    if (!uv_is_closing((uv_handle_t*)pipe)) {
-        uv_close((uv_handle_t*)pipe, js_process_ipc_close_cb);
-    }
-}
-
-static void js_process_ipc_write_cb(uv_write_t* req, int status) {
-    JsProcessIpcScope scope = {};
-    if (!js_process_ipc_enter((uv_handle_t*)req->handle, &scope)) {
-        JsProcessIpcWriteReq* stale = (JsProcessIpcWriteReq*)req;
-        if (stale && stale->data) mem_free(stale->data);
-        if (stale) mem_free(stale);
-        return;
-    }
-    JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)req;
-    RootFrame roots(1);
-    Rooted<Item> callback_root(roots,
-        wr ? runtime_callback_slots_take(&js_process_ipc_write_callbacks,
-            wr->callback_slot) : make_js_undefined());
-    if (wr->data) mem_free(wr->data);
-    mem_free(wr);
-    (void)status;
-    if (js_is_callable(callback_root.get())) {
-        Item arg = make_js_undefined();
-        js_call_function(callback_root.get(), make_js_undefined(), &arg, 1);
-        js_microtask_flush();
-    }
-    js_process_ipc_refresh_ref();
-    js_process_ipc_exit(&scope);
-}
-
-static void js_process_ipc_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    buf->base = (char*)mem_alloc(suggested_size, MEM_CAT_JS_RUNTIME);
-    buf->len = buf->base ? suggested_size : 0;
-}
-JS_FORWARD_STATIC_EXPRESSION(bool, js_process_ipc_is_undefined, (Item item), (item.item == ITEM_JS_UNDEFINED || get_type_id(item) == LMD_TYPE_UNDEFINED))
-
-static Item js_process_ipc_take_pending_handle(void) {
-    Item handle = js_host_hooks_accept_ipc_handle(&js_process_ipc_pipe);
-    if (handle.item == 0) return make_js_undefined();
-    return handle;
-}
-
-static bool js_process_has_message_listener(void) {
-    Item map = get_process_listener_map();
-    Item arr = js_get_key_cstr(map, "message");
-    return get_type_id(arr) == LMD_TYPE_ARRAY && js_array_length(arr) > 0;
-}
-
-static void js_process_ipc_queue_message(Item message, Item handle) {
-    if (js_process_ipc_pending_messages.item == 0) {
-        if (!js_process_ensure_roots()) return;
-        js_process_ipc_pending_messages = js_array_new(0);
-    }
-    Item entry = js_new_object();
-    js_set_key_cstr(entry, "message", message);
-    js_set_key_cstr(entry, "handle", handle);
-    js_array_push(js_process_ipc_pending_messages, entry);
-}
-
-static Item js_process_ipc_emit_message(Item message, Item handle) {
-    Item emit_result = ItemNull;
-    if (!js_process_ipc_is_undefined(handle)) {
-        Item args[2] = { message, handle };
-        emit_result = js_process_emit_args(js_name_item("message", 7), args, 2);
-    } else {
-        emit_result = js_process_emit(js_name_item("message", 7), message);
-    }
-    if (item_is_error(emit_result)) {
-        Item error = js_error_lane_payload(emit_result);
-        // IPC message listener throws are async uncaught exceptions; leaving the
-        // throw pending aborts the buffered message loop and delays disconnect.
-        Item handled = js_process_emit(js_name_item("uncaughtException", 17), error);
-        if (handled.item != ITEM_TRUE && handled.item != b2it(true)) {
-            if (js_process_ipc_active && !js_process_ipc_closing) {
-                // Unhandled IPC listener errors terminate the child in Node;
-                // keep the pipe from remaining refed until the drain watchdog.
-                js_process_ipc_closing = true;
-                js_process_ipc_emit_disconnect_once();
-                uv_read_stop((uv_stream_t*)&js_process_ipc_pipe);
-                uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
-            }
-            return js_throw_value(error);
-        }
-    }
-    return emit_result;
-}
-
-static void js_process_ipc_flush_pending(void) {
-    if (js_process_ipc_pending_messages.item == 0 ||
-        get_type_id(js_process_ipc_pending_messages) != LMD_TYPE_ARRAY ||
-        !js_process_has_message_listener()) {
-        return;
-    }
-    Item pending = js_process_ipc_pending_messages;
-    js_process_ipc_pending_messages = js_array_new(0);
-    JS_ARRAY_FOREACH(entry, pending) {
-        Item message = js_get_key_cstr(entry, "message");
-        Item handle = js_get_key_cstr(entry, "handle");
-        Item emit_result = js_process_ipc_emit_message(message, handle);
-        if (item_is_error(emit_result)) return;
-    }
-}
-
-static bool js_process_ipc_is_disconnect_control(Item message) {
-    if (get_type_id(message) != LMD_TYPE_MAP &&
-        get_type_id(message) != LMD_TYPE_VMAP) {
-        return false;
-    }
-    Item value = js_get_key_cstr(message, "__lambda_ipc_disconnect__");
-    return value.item == ITEM_TRUE || value.item == b2it(true);
-}
-
-static bool js_process_ipc_unwrap_handle_message(Item* message) {
-    if (!message || (get_type_id(*message) != LMD_TYPE_MAP &&
-        get_type_id(*message) != LMD_TYPE_VMAP)) {
-        return false;
-    }
-    Item has_handle = js_get_key_cstr(*message, "__lambda_ipc_has_handle__");
-    if (has_handle.item != ITEM_TRUE && has_handle.item != b2it(true)) return false;
-    Item payload = js_get_key_cstr(*message, "__lambda_ipc_payload__");
-    // only handle-bearing IPC messages consume a pending descriptor; otherwise
-    // a later no-handle control/user message can steal an earlier queued fd.
-    *message = payload;
-    return true;
-}
-
-static void js_process_ipc_close_from_control(void) {
-    if (!js_process_ipc_active || js_process_ipc_closing) return;
-    js_process_ipc_closing = true;
-    // parent ChildProcess.disconnect() is an internal channel close, not a
-    // user message; close the child pipe promptly so message listeners do not
-    // keep the process alive until the drain watchdog.
-    js_process_ipc_emit_disconnect_once();
-    uv_read_stop((uv_stream_t*)&js_process_ipc_pipe);
-    uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
-}
-
-static void js_process_ipc_handle_line(const char* chars, int len) {
-    if (!chars || len <= 0) return;
-    Item json = js_name_item(chars, len);
-    Item message = js_json_parse(json);
-    if (item_is_error(message)) return;
-    if (js_process_ipc_is_disconnect_control(message)) {
-        js_process_ipc_close_from_control();
-        return;
-    }
-    bool has_handle = js_process_ipc_unwrap_handle_message(&message);
-    Item handle = has_handle ? js_process_ipc_take_pending_handle() : make_js_undefined();
-    if (!js_process_has_message_listener()) {
-        // parent IPC can arrive before user code registers process.on('message');
-        // queue it with any accepted handle instead of dropping the one-shot fd.
-        js_process_ipc_queue_message(message, handle);
-    } else {
-        js_process_ipc_emit_message(message, handle);
-    }
-}
-
-static void js_process_ipc_consume_lines(void) {
-    while (true) {
-        size_t frame_length = 0;
-        const char* line = line_framer_peek(&js_process_ipc_lines, &frame_length);
-        if (!line) break;
-        size_t line_length = frame_length;
-        if (line_length > 0 && line[line_length - 1] == '\r') line_length--;
-        js_process_ipc_handle_line(line, (int)line_length);
-        if (!line_framer_consume(&js_process_ipc_lines, frame_length + 1)) break;
-    }
-}
-
-static void js_process_ipc_read_cb(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
-    JsProcessIpcScope scope = {};
-    if (!js_process_ipc_enter((uv_handle_t*)stream, &scope)) {
-        if (buf->base) mem_free(buf->base);
-        return;
-    }
-    if (nread > 0 && !line_framer_append(&js_process_ipc_lines, buf->base, (size_t)nread)) {
-        log_error("js-process-ipc: failed to append incoming message bytes");
-    } else if (nread > 0) {
-        js_process_ipc_consume_lines();
-    }
-    if (buf->base) mem_free(buf->base);
-    if (nread < 0 && js_process_ipc_active && !js_process_ipc_closing) {
-        js_process_ipc_closing = true;
-        js_process_ipc_emit_disconnect_once();
-        uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
-    }
-    js_process_ipc_exit(&scope);
-}
-
-static void js_process_ipc_init_from_env(void) {
-    if (js_process_ipc_active || js_process_ipc_closing) return;
-    const char* ipc = getenv("LAMBDA_JS_IPC");
-    const char* fd_text = getenv("LAMBDA_JS_IPC_FD");
-    if (!ipc || !fd_text) return;
-    int fd = atoi(fd_text);
-    if (fd < 0) return;
-    uv_loop_t* loop = lambda_uv_loop();
-    if (!loop) {
-        // process is constructed during global bootstrap, before normal script
-        // entry initializes libuv; inherited IPC must attach to that first loop.
-        js_event_loop_init();
-        loop = lambda_uv_loop();
-    }
-    if (!loop) {
-        log_error("process_ipc: event loop not initialized");
-        return;
-    }
-    uv_pipe_t* pipe = (uv_pipe_t*)mem_calloc(1, sizeof(uv_pipe_t), MEM_CAT_JS_RUNTIME);
-    if (!pipe) {
-        log_error("process_ipc: failed to allocate context-owned pipe");
-        return;
-    }
-    const RuntimeResourceDescriptor* descriptor =
-        runtime_resource_descriptor_from_legacy_name("ProcessIpc");
-    js_process_state->ipc_resource_id = runtime_resource_table_add_owned(
-        js_runtime_resource_table(), js_process_state, js_process_object,
-        descriptor, js_process_ipc_resource_close, pipe, true);
-    if (js_process_state->ipc_resource_id == 0) {
-        mem_free(pipe);
-        log_error("process_ipc: failed to register context-owned pipe");
-        return;
-    }
-    if (!line_framer_init(&js_process_ipc_lines, 1024, MEM_CAT_JS_RUNTIME)) {
-        log_error("process_ipc: failed to allocate message framer");
-        uint32_t resource_id = js_process_state->ipc_resource_id;
-        js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(js_runtime_resource_table(),
-            js_process_state, resource_id);
-        mem_free(pipe);
-        return;
-    }
-    // child IPC pipes must opt into descriptor passing for ChildProcess.send(handle).
-    uv_pipe_init(loop, &js_process_ipc_pipe, 1);
-    int r = uv_pipe_open(&js_process_ipc_pipe, fd);
-    if (r != 0) {
-        log_error("process_ipc: failed to open fd %d: %s", fd, uv_strerror(r));
-        uint32_t resource_id = js_process_state->ipc_resource_id;
-        js_process_state->ipc_resource_id = 0;
-        runtime_resource_table_forget_owned(js_runtime_resource_table(),
-            js_process_state, resource_id);
-        line_framer_destroy(&js_process_ipc_lines);
-        mem_free(pipe);
-        return;
-    }
-    js_process_ipc_pipe.data = context;
-    js_process_ipc_active = true;
-    js_process_ipc_closing = false;
-    js_process_ipc_disconnect_emitted = false;
-    js_process_ipc_force_ref = getenv("LAMBDA_JS_IPC_REF") != NULL;
-    js_process_set_connected(true);
-    r = uv_read_start((uv_stream_t*)&js_process_ipc_pipe, js_process_ipc_alloc_cb, js_process_ipc_read_cb);
-    if (r != 0) {
-        log_error("process_ipc: failed to start read: %s", uv_strerror(r));
-        js_process_ipc_active = false;
-        js_process_ipc_closing = true;
-        uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
-    } else {
-        js_process_ipc_refresh_ref();
-    }
-}
-
-extern "C" Item js_process_send(Item msg, Item callback) {
-    RootFrame roots(1);
-    Rooted<Item> callback_root(roots, callback);
-    if (!js_process_ipc_active || js_process_ipc_closing) return (Item){.item = b2it(false)};
-    JS_ASSIGN_OR_RETURN(json, js_json_stringify(msg));
-    if (get_type_id(json) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
-    String* s = it2s(json);
-    if (!s) return (Item){.item = b2it(false)};
-    size_t len = s->len + 1;
-    JsProcessIpcWriteReq* wr = (JsProcessIpcWriteReq*)mem_calloc(1, sizeof(JsProcessIpcWriteReq), MEM_CAT_JS_RUNTIME);
-    if (!wr) return (Item){.item = b2it(false)};
-    wr->callback_slot = -1;
-    wr->data = (char*)mem_alloc(len, MEM_CAT_JS_RUNTIME);
-    if (!wr->data) {
-        mem_free(wr);
-        return (Item){.item = b2it(false)};
-    }
-    memcpy(wr->data, s->chars, s->len);
-    wr->data[s->len] = '\n';
-    if (js_is_callable(callback_root.get()) &&
-            !runtime_callback_slots_add(&js_process_ipc_write_callbacks,
-                callback_root.get(), &wr->callback_slot)) {
-        log_error("js-process-ipc: could not retain write callback");
-        mem_free(wr->data);
-        mem_free(wr);
-        return (Item){.item = b2it(false)};
-    }
-    uv_buf_t buf = uv_buf_init(wr->data, (unsigned int)len);
-    uv_ref((uv_handle_t*)&js_process_ipc_pipe);
-    int r = uv_write(&wr->req, (uv_stream_t*)&js_process_ipc_pipe, &buf, 1, js_process_ipc_write_cb);
-    if (r == 0) return (Item){.item = b2it(true)};
-    js_process_ipc_refresh_ref();
-    (void)runtime_callback_slots_take(&js_process_ipc_write_callbacks,
-        wr->callback_slot);
-    mem_free(wr->data);
-    mem_free(wr);
-    log_error("process_ipc: write failed: %s", uv_strerror(r));
-    return (Item){.item = b2it(false)};
-}
-
-extern "C" Item js_process_disconnect(void) {
-    js_process_set_connected(false);
-    if (js_process_ipc_active && !js_process_ipc_closing) {
-        js_process_ipc_closing = true;
-        uv_close((uv_handle_t*)&js_process_ipc_pipe, js_process_ipc_close_cb);
-    }
-    js_process_ipc_emit_disconnect_once();
-    return make_js_undefined();
-}
 
 extern "C" Item js_get_process_object_value(void) {
     if (js_process_cache_is_empty(js_process_object)) {
@@ -3574,12 +3124,6 @@ extern "C" Item js_get_process_object_value(void) {
         // Host-owned process lifecycle and event-loop methods.
         js_process_set_method(js_process_object, "exit", js_process_exit, 1);
         js_process_set_method(js_process_object, "nextTick", js_process_nextTick, -1);
-        if (getenv("LAMBDA_JS_IPC")) {
-            js_process_set_method(js_process_object, "send", js_process_send, 2);
-            js_process_set_method(js_process_object, "disconnect", js_process_disconnect, 0);
-            js_set_key_cstr(js_process_object, "connected", (Item){.item = b2it(true)});
-            js_process_ipc_init_from_env();
-        }
 #define JS_PROCESS_EVENT_METHODS(M) \
         M("on", js_process_on, 2) M("addListener", js_process_on, 2) \
         M("once", js_process_once, 2) M("emit", js_process_emit, 2) \
@@ -4580,7 +4124,6 @@ static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
-extern "C" uint64_t js_get_heap_epoch();
 
 #define g_uri_last_four_byte_string (js_runtime_state.string_caches->uri_last_four_byte_string)
 #define g_uri_last_four_byte_cp (js_runtime_state.string_caches->uri_last_four_byte_cp)
@@ -6091,7 +5634,6 @@ extern "C" Item js_get_prototype_of(Item object) {
     if (js_object_has_class(object, JS_CLASS_TYPED_ARRAY)) {
         Item custom = js_get_prototype(object);
         if (custom.item != ItemNull.item && custom.item != ITEM_JS_UNDEFINED) return custom;
-        extern Item js_get_typed_array_base_proto();
         return js_get_typed_array_base_proto();
     }
 
@@ -11755,7 +11297,7 @@ extern "C" Item js_json_parse(Item str_item) {
         return ItemNull;
     }
 
-    // large IPC JSON payloads still need a nul copy, but must not overflow
+    // large JSON payloads still need a nul copy, but must not overflow
     // the bounded stack buffer.
     size_t buf_len = (size_t)s->len + 1;
     bool heap_buf = buf_len > LAMBDA_ALLOCA_MAX_BYTES;
@@ -12712,7 +12254,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
 // =============================================================================
 
 // helper: throw DOMException with InvalidCharacterError
-extern "C" Item js_domexception_new(Item message, Item name_arg);
 static Item js_throw_domexception_invalid_char(const char* msg) {
     Item msg_item = js_name_item(msg, strlen(msg));
     Item name_item = js_name_item("InvalidCharacterError", 21);
@@ -13281,12 +12822,6 @@ extern "C" void js_globals_batch_reset() {
     js_process_exec_argv_items = (Item){.item = ITEM_NULL};
     js_process_object = (Item){.item = ITEM_NULL};
     js_permission_reset();
-    js_process_ipc_active = false;
-    js_process_ipc_closing = false;
-    js_process_ipc_disconnect_emitted = false;
-    js_process_ipc_force_ref = false;
-    js_process_ipc_pending_messages = (Item){0};
-    line_framer_destroy(&js_process_ipc_lines);
     // Preserve immutable CLI bootstrap inputs across realm teardown. Clearing
     // them here made a newly created process object lose its script arguments.
     // reset with-statement scope stack — stale Items become dangling after heap reset
@@ -14411,7 +13946,6 @@ extern "C" Item js_get_global_this() {
 
         // globalThis.DOMException constructor
         {
-            extern Item js_domexception_new(Item message, Item name);
             RootFrame dom_exception_roots(2);
             Rooted<Item> ctor_root(dom_exception_roots,
                 js_new_native_constructor(js_domexception_new));
@@ -14808,7 +14342,6 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
     return js_delete_property(global, key);
 }
 
-extern "C" uint64_t js_get_heap_epoch();
 
 static void js_global_lexical_refresh(void) {
     if (!js_global_bindings_ensure_roots()) return;
@@ -15924,7 +15457,6 @@ extern "C" Item js_resolve_unresolved_binding(Item value, NameId name_id, int64_
 // The preamble snapshot owns the realm's catalog-backed global functions too;
 // partial reset must keep their identity alongside Number.parseFloat and the
 // Function.prototype restricted accessors (D6.2.2v2).
-extern "C" bool js_proto_snapshot_is_valid();
 
 // Intrinsic caches seed their slots with ItemNull but a root-range clear zeroes
 // them, so both patterns mean "nothing cached here".
@@ -15992,7 +15524,6 @@ extern "C" Item js_get_global_builtin_fn_by_id(Item global_id_item) {
 static void js_typed_array_base_reset();
 
 // Forward declaration: snapshot mechanism preserves ctor identity across batch resets.
-extern "C" bool js_proto_snapshot_is_valid();
 
 static uint64_t js_intrinsic_next_mutation_version() {
     uint64_t version = ++js_intrinsic_state.mutation_serial;
@@ -16351,7 +15882,6 @@ extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* ru
 }
 
 extern "C" Item js_get_typed_array_base();
-extern "C" Item js_get_typed_array_per_type_proto(int element_type);
 
 static void js_proto_snapshot_bootstrap_constructors() {
     static const int intrinsic_classes[] = {
@@ -16822,10 +16352,8 @@ extern "C" void js_proto_snapshot_invalidate() {
 
 // Get the per-type prototype for a given typed array element type.
 // Creates it lazily if needed.
-extern "C" Item js_get_typed_array_per_type_proto(int element_type);
 
 
-extern "C" Item js_get_typed_array_base_proto(); // forward declaration
 
 extern "C" Item js_get_typed_array_base() {
     if (!js_realm_intrinsic_slots_ensure_roots()) return ItemError;

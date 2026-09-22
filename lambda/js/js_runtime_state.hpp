@@ -287,7 +287,6 @@ void js_code_store_destroy(JsCodeStore* store);
 // overwrite a process-wide callback for every context.
 struct JsHostHooksState {
     void (*shutdown_participant)(void) = NULL;
-    Item (*ipc_accept_hook)(void*) = NULL;
     Item (*console_format_hook)(Item) = NULL;
     bool redirect_stdout_to_stderr = false;
 };
@@ -491,21 +490,10 @@ struct JsProcessState : RootVector {
     Item exec_argv = {};
     Item object = {};
     Item listener_map = {};
-    Item ipc_pending_messages = {};
     int exit_code = 0;
     bool exit_requested = false;
     bool exiting = false;
     int total_listener_count = 0;
-    int ipc_liveness_listener_count = 0;
-    bool ipc_active = false;
-    bool ipc_closing = false;
-    bool ipc_disconnect_emitted = false;
-    bool ipc_force_ref = false;
-    // Every outstanding libuv IPC write refers to this one exact callback
-    // store; request structs retain only a POD slot index (JSCU31).
-    RuntimeCallbackSlots ipc_write_callbacks = {};
-    uint32_t ipc_resource_id = 0;
-    LineFramer ipc_lines = {};
 };
 
 JsProcessState* js_process_state_ensure(JsRuntimeState* state);

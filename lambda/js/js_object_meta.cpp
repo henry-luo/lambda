@@ -2,8 +2,8 @@
 
 #include "js_object_meta.h"
 #include "../lambda.hpp"
-
 extern "C" bool js_promise_vmap_is(Item value);
+
 
 // The array order is the frozen JsClass order. Metadata is static data: it has
 // no Items, realm prototypes, mutable caches, or module-owned callbacks.
@@ -153,7 +153,6 @@ void js_object_metadata_initialize(void) {
     // EmptyMap is the shared zero-shape blueprint used by JS allocation and
     // the explicit Input boundary. Giving it ordinary metadata makes a newly
     // published object classifiable without changing map_put's shape sentinel.
-    extern TypeMap EmptyMap;
     if (!EmptyMap.js_meta) EmptyMap.js_meta = js_class_meta_for_id(JS_CLASS_OBJECT);
 }
 

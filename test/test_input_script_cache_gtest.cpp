@@ -5,6 +5,7 @@
 
 #include "../lib/file.h"
 #include "../lambda/input/input-script-cache.h"
+#include "../lambda/runtime/module_ast_prebuild.hpp"
 #include "../lib/mem.h"
 #include "../lib/shell.h"
 
@@ -52,6 +53,102 @@ static void cache_test_restore_env(const char* name, char* previous_value) {
     } else {
         shell_unsetenv(name);
     }
+}
+
+typedef struct CacheQueuePrebuildState {
+    int generation;
+    pthread_mutex_t mutex;
+    pthread_cond_t root_discovered_cond;
+    bool root_discovered;
+    int root_resolutions;
+    bool slow_discovery_active;
+    bool left_built_after_shared;
+    bool right_built_after_shared;
+    bool dependent_built_while_slow_discovery_active;
+    int shared_builds;
+} CacheQueuePrebuildState;
+
+static bool cache_queue_prebuild_append_specifier(ArrayList* specifiers,
+        const char* specifier) {
+    char* copy = mem_strdup(specifier, MEM_CAT_SYSTEM);
+    if (!copy || !arraylist_append(specifiers, copy)) {
+        mem_free(copy);
+        return false;
+    }
+    return true;
+}
+
+static ArrayList* cache_queue_prebuild_discover(void* opaque,
+        const char* source, size_t source_length) {
+    (void)source_length;
+    CacheQueuePrebuildState* state = (CacheQueuePrebuildState*)opaque;
+    ArrayList* specifiers = arraylist_new(2);
+    if (!state || !specifiers) return specifiers;
+    if (strcmp(source, "root") == 0) {
+        if (!cache_queue_prebuild_append_specifier(specifiers, "slow") ||
+                !cache_queue_prebuild_append_specifier(specifiers, "left") ||
+                !cache_queue_prebuild_append_specifier(specifiers, "right")) {
+            for (int index = 0; index < specifiers->length; index++) {
+                mem_free(specifiers->data[index]);
+            }
+            arraylist_free(specifiers);
+            return NULL;
+        }
+    } else if (strcmp(source, "left") == 0 || strcmp(source, "right") == 0) {
+        if (!cache_queue_prebuild_append_specifier(specifiers, "shared")) {
+            arraylist_free(specifiers);
+            return NULL;
+        }
+    } else if (strcmp(source, "slow") == 0) {
+        pthread_mutex_lock(&state->mutex);
+        state->slow_discovery_active = true;
+        pthread_mutex_unlock(&state->mutex);
+        usleep(200000);
+        pthread_mutex_lock(&state->mutex);
+        state->slow_discovery_active = false;
+        pthread_mutex_unlock(&state->mutex);
+    }
+    return specifiers;
+}
+
+static bool cache_queue_prebuild_resolve(void* opaque, const char* importer_path,
+        const char* specifier, ModuleAstResolvedImport* out) {
+    CacheQueuePrebuildState* state = (CacheQueuePrebuildState*)opaque;
+    if (!state || !specifier || !out) return false;
+    char path[160];
+    snprintf(path, sizeof(path), "temp/cache_queue_prebuild_%d_%s.ls",
+        state->generation, specifier);
+    out->path = mem_strdup(path, MEM_CAT_SYSTEM);
+    out->language = MODULE_AST_LANGUAGE_LAMBDA;
+    if (importer_path && strstr(importer_path, "_root.ls")) {
+        pthread_mutex_lock(&state->mutex);
+        state->root_discovered = ++state->root_resolutions == 3;
+        if (state->root_discovered) {
+            pthread_cond_broadcast(&state->root_discovered_cond);
+        }
+        pthread_mutex_unlock(&state->mutex);
+    }
+    return out->path != NULL;
+}
+
+static bool cache_queue_prebuild_build(void* opaque, const char* path) {
+    CacheQueuePrebuildState* state = (CacheQueuePrebuildState*)opaque;
+    if (!state || !path) return false;
+    if (strstr(path, "_shared.ls")) {
+        pthread_mutex_lock(&state->mutex);
+        state->shared_builds++;
+        pthread_mutex_unlock(&state->mutex);
+    } else if (strstr(path, "_left.ls") || strstr(path, "_right.ls")) {
+        bool is_left = strstr(path, "_left.ls") != NULL;
+        pthread_mutex_lock(&state->mutex);
+        if (is_left) state->left_built_after_shared = state->shared_builds == 1;
+        else state->right_built_after_shared = state->shared_builds == 1;
+        state->dependent_built_while_slow_discovery_active =
+            state->dependent_built_while_slow_discovery_active ||
+            state->slow_discovery_active;
+        pthread_mutex_unlock(&state->mutex);
+    }
+    return true;
 }
 
 static InputScriptRequest cache_test_lifecycle_request(const char* identity,
@@ -137,6 +234,78 @@ TEST(InputScriptCacheTest, PrebuildSharedImportClosureCompletesWithoutRegistryDe
     unlink(shared_path);
     unlink(leaf_a_path);
     unlink(leaf_b_path);
+}
+
+TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    CacheQueuePrebuildState state = {};
+    state.generation = (int)getpid();
+    ASSERT_EQ(pthread_mutex_init(&state.mutex, nullptr), 0);
+    ASSERT_EQ(pthread_cond_init(&state.root_discovered_cond, nullptr), 0);
+
+    char root_path[160];
+    char slow_path[160];
+    char left_path[160];
+    char right_path[160];
+    char shared_path[160];
+    snprintf(root_path, sizeof(root_path), "temp/cache_queue_prebuild_%d_root.ls",
+        state.generation);
+    snprintf(slow_path, sizeof(slow_path), "temp/cache_queue_prebuild_%d_slow.ls",
+        state.generation);
+    snprintf(left_path, sizeof(left_path), "temp/cache_queue_prebuild_%d_left.ls",
+        state.generation);
+    snprintf(right_path, sizeof(right_path), "temp/cache_queue_prebuild_%d_right.ls",
+        state.generation);
+    snprintf(shared_path, sizeof(shared_path), "temp/cache_queue_prebuild_%d_shared.ls",
+        state.generation);
+    ASSERT_EQ(write_binary_file(root_path, "root", 4), 0);
+    ASSERT_EQ(write_binary_file(slow_path, "slow", 4), 0);
+    ASSERT_EQ(write_binary_file(left_path, "left", 4), 0);
+    ASSERT_EQ(write_binary_file(right_path, "right", 5), 0);
+    ASSERT_EQ(write_binary_file(shared_path, "shared", 6), 0);
+
+    ModuleAstPrebuildProfile profile = {
+        "queue-test", MODULE_AST_LANGUAGE_LAMBDA,
+        cache_queue_prebuild_discover, cache_queue_prebuild_resolve,
+        cache_queue_prebuild_build, &state,
+    };
+    ModuleAstPrebuildProfiles profiles = {};
+    profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = &profile;
+    const char* previous = shell_getenv("LAMBDA_MODULE_AST_THREADS");
+    char* previous_threads = previous ? mem_strdup(previous, MEM_CAT_SYSTEM) : nullptr;
+    ASSERT_TRUE(shell_setenv("LAMBDA_MODULE_AST_THREADS", "2"));
+
+    ModuleAstPrebuildStats stats = {};
+    EXPECT_TRUE(module_ast_prebuild_imports(&profiles, MODULE_AST_LANGUAGE_LAMBDA,
+        root_path, "root", 4, &stats));
+
+    // Root scheduling returns immediately. Wait only for the direct futures
+    // that make the test's temporary profile/context safe to release.
+    pthread_mutex_lock(&state.mutex);
+    while (!state.root_discovered) {
+        pthread_cond_wait(&state.root_discovered_cond, &state.mutex);
+    }
+    pthread_mutex_unlock(&state.mutex);
+    EXPECT_TRUE(module_ast_prebuild_await_import(&profile, left_path));
+    EXPECT_TRUE(module_ast_prebuild_await_import(&profile, right_path));
+    EXPECT_TRUE(module_ast_prebuild_await_import(&profile, slow_path));
+
+    cache_test_restore_env("LAMBDA_MODULE_AST_THREADS", previous_threads);
+    pthread_mutex_lock(&state.mutex);
+    EXPECT_EQ(state.shared_builds, 1);
+    EXPECT_TRUE(state.left_built_after_shared);
+    EXPECT_TRUE(state.right_built_after_shared);
+    EXPECT_TRUE(state.dependent_built_while_slow_discovery_active);
+    pthread_mutex_unlock(&state.mutex);
+    EXPECT_EQ(stats.worker_pool_runs, 1u);
+
+    unlink(root_path);
+    unlink(slow_path);
+    unlink(left_path);
+    unlink(right_path);
+    unlink(shared_path);
+    pthread_cond_destroy(&state.root_discovered_cond);
+    pthread_mutex_destroy(&state.mutex);
 }
 
 TEST(InputScriptCacheTest, DisabledCacheKeepsCrossLanguageModuleCodeAlive) {

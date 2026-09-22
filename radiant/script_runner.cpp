@@ -716,8 +716,8 @@ static bool script_task_timing_enabled() {
 
 // LambdaJS expands production bundles substantially while building their AST
 // and browser realm. Keep headless rendering below the memory envelope.
-static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 512u * 1024u;
-static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 1024u * 1024u;
+static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 5u * 1024u * 1024u;
+static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 20u * 1024u * 1024u;
 // Deferred and async scripts are not render-blocking in a browser. Bound their
 // pre-layout work so a large application bundle cannot delay the first window.
 static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
