@@ -532,6 +532,8 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"mapbox_docs", "https://docs.mapbox.com/", true},
     {"openlayers_docs", "https://openlayers.org/doc/", true},
     {"qgis_docs", "https://docs.qgis.org/latest/en/docs/", true},
+    // Keep the large, ordered documentation expansion separate for review.
+#include "radiant_online_urls_400.inc"
 };
 
 static bool online_view_file_readable(const char* path) {
@@ -1467,5 +1469,53 @@ TEST(RadiantOnlineViewTest, LoadsNewOnlinePages341To350) {
 TEST(RadiantOnlineViewTest, LoadsNewOnlinePages351To360) {
     online_view_expect_case_range(451, 461);
 }
+
+#define RADIANT_ONLINE_CASE_RANGE_TEST(name, first, past_end) \
+    TEST(RadiantOnlineViewTest, name) { \
+        online_view_expect_case_range(first, past_end); \
+    }
+
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages001To010, 461, 471)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages011To020, 471, 481)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages021To030, 481, 491)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages031To040, 491, 501)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages041To050, 501, 511)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages051To060, 511, 521)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages061To070, 521, 531)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages071To080, 531, 541)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages081To090, 541, 551)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages091To100, 551, 561)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages101To110, 561, 571)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages111To120, 571, 581)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages121To130, 581, 591)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages131To140, 591, 601)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages141To150, 601, 611)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages151To160, 611, 621)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages161To170, 621, 631)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages171To180, 631, 641)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages181To190, 641, 651)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages191To200, 651, 661)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages201To210, 661, 671)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages211To220, 671, 681)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages221To230, 681, 691)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages231To240, 691, 701)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages241To250, 701, 711)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages251To260, 711, 721)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages261To270, 721, 731)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages271To280, 731, 741)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages281To290, 741, 751)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages291To300, 751, 761)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages301To310, 761, 771)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages311To320, 771, 781)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages321To330, 781, 791)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages331To340, 791, 801)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages341To350, 801, 811)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages351To360, 811, 821)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages361To370, 821, 831)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages371To380, 831, 841)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages381To390, 841, 851)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages391To400, 851, 861)
+
+#undef RADIANT_ONLINE_CASE_RANGE_TEST
 
 #endif

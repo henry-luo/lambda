@@ -1655,6 +1655,46 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, PreservesShadowedFactoryParametersOverNamespaceImports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { result } from './rspack-entry.mjs'; export { result };";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/rspack-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item result = js_get_key_default(namespace_obj, js_make_string("result"));
+    ASSERT_FALSE(item_is_error(result));
+    Item then = js_get_name_key(result, "then", 4);
+    EXPECT_TRUE(js_is_callable(then));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, KeepsAliasedExportsSeparateFromLoopShadowBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { helper } from './alias-export-helper.mjs'; "
+        "helper({}, [['render', 0]]); "
+        "export const result = helper({}, [['render', 42]]).render;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/alias-export-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item result = js_get_key_default(namespace_obj, js_make_string("result"));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, SupportsModuleMetadataAndInlineDynamicImports) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1926,6 +1966,24 @@ TEST(JsInterpreter, ModuleDynamicImportsResolveFromDocumentReference) {
     EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
         nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, MirDynamicImportsResolveFromInlineDocumentReference) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_document_base_url = "test/js/interp_esm/document.html";
+
+    const char source[] =
+        "import('./dynamic-tla-dependency.mjs').then(function(ns) { "
+        "globalThis.__inline_dynamic_first = ns.first; });";
+    Item result = transpile_js_to_mir(&runtime, source, "<inline-script-0>", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item first = js_get_key_default(js_get_global_this(),
+        js_make_string("__inline_dynamic_first"));
+    EXPECT_EQ(js_strict_equal(first, flt2it(1.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -4635,6 +4693,23 @@ TEST(JsInterpreter, PublishesNavigatorServiceWorkerRegistrations) {
         "worker.getRegistrations() instanceof Promise;";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "navigator-service-worker.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RegistersNavigatorServiceWorkerWithoutPersistence) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var worker = navigator.serviceWorker; "
+        "typeof worker.register === 'function' && "
+        "worker.register('/service-worker.js') instanceof Promise;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "navigator-service-worker-register.js", NULL);
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));

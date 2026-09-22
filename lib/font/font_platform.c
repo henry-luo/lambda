@@ -162,7 +162,10 @@ static char* find_font_path_macos(const char* font_name, int* out_face_index) {
     CFStringRef cf_name = CFStringCreateWithCString(NULL, font_name, kCFStringEncodingUTF8);
     if (!cf_name) return NULL;
 
-    CTFontRef ct_font = CTFontCreateWithName(cf_name, 0.0, NULL);
+    // CSS family fallback may probe downloadable system assets. Never let an
+    // unavailable author-supplied family block layout on CoreText's downloader.
+    CTFontRef ct_font = CTFontCreateWithNameAndOptions(
+        cf_name, 0.0, NULL, kCTFontOptionsPreventAutoDownload);
     if (!ct_font) { CFRelease(cf_name); return NULL; }
 
     // verify the resolved font actually matches the requested name. CoreText
