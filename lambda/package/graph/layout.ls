@@ -237,6 +237,7 @@ fn semantic_edge_labels(children) {
     owner_kind: "edge",
     owner_id: string(attr_or(child, "data-edge-id", "")),
     kind: "center",
+    placement: string(attr_or(child, "data-label-placement", "center")),
     width: child_width(child),
     height: child_height(child),
     z: child_z(child, 0),
@@ -387,8 +388,15 @@ fn label_candidates(label, anchor, occupied, gap) {
   let centered = candidate_placement(label, anchor, 0.0, 0.0);
   let rings = [for (ring in 1 to 6,
     candidate in ring_candidates(label, anchor, gap, ring)) candidate];
+  // Keep DOT text clear of the spline while preserving centered Mermaid labels.
+  let offset = if (label.placement == "above")
+    candidate_placement(label, anchor, 0.0, 0.0 - label.height / 3.0)
+    else if (label.placement == "right")
+      candidate_placement(label, anchor, label.width / 3.0, 0.0)
+    else centered;
   let fallback = outside_candidate(label, anchor, occupied, gap);
-  if (label.owner_kind == "node" or label.kind == "center") { [centered, *rings, fallback] }
+  if (label.owner_kind == "node" or label.kind == "center")
+    { [offset, centered, *rings, fallback] }
   else { [*rings, centered, fallback] }
 }
 
