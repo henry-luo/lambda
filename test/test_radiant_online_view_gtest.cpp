@@ -532,9 +532,44 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"mapbox_docs", "https://docs.mapbox.com/", true},
     {"openlayers_docs", "https://openlayers.org/doc/", true},
     {"qgis_docs", "https://docs.qgis.org/latest/en/docs/", true},
-    // Keep the large, ordered documentation expansion separate for review.
-#include "radiant_online_urls_400.inc"
+    // Keep the large, ordered landing-page expansion separate for review.
+#include "radiant_online_urls_700.inc"
 };
+
+static const size_t k_saas_landing_expansion_count = 700;
+
+static const char* online_view_normalized_site_start(const char* start,
+                                                     const char* end) {
+    const char* previous_dot = NULL;
+    const char* last_dot = NULL;
+    for (const char* pos = start; pos < end; pos++) {
+        if (*pos != '.') continue;
+        previous_dot = last_dot;
+        last_dot = pos;
+    }
+    return previous_dot ? previous_dot + 1 : start;
+}
+
+static bool online_view_same_normalized_site(const char* first,
+                                              const char* second) {
+    const char* first_start = first ? strstr(first, "://") : NULL;
+    const char* second_start = second ? strstr(second, "://") : NULL;
+    if (!first_start || !second_start) return false;
+    first_start += 3;
+    second_start += 3;
+    if (strncmp(first_start, "www.", 4) == 0) first_start += 4;
+    if (strncmp(second_start, "www.", 4) == 0) second_start += 4;
+    const char* first_end = strpbrk(first_start, "/:?#");
+    const char* second_end = strpbrk(second_start, "/:?#");
+    if (!first_end) first_end = first_start + strlen(first_start);
+    if (!second_end) second_end = second_start + strlen(second_start);
+    first_start = online_view_normalized_site_start(first_start, first_end);
+    second_start = online_view_normalized_site_start(second_start, second_end);
+    size_t first_len = (size_t)(first_end - first_start);
+    size_t second_len = (size_t)(second_end - second_start);
+    return first_len == second_len &&
+        strncmp(first_start, second_start, first_len) == 0;
+}
 
 static bool online_view_file_readable(const char* path) {
     return access(path, R_OK) == 0;
@@ -919,6 +954,24 @@ static void online_view_expect_case_range(size_t first, size_t past_end) {
         SCOPED_TRACE(i);
         online_view_expect_case(i);
         if (::testing::Test::HasFatalFailure()) return;
+    }
+}
+
+TEST(RadiantOnlineViewTest, GeneratedSaasLandingUrlsStayDiverse) {
+    const size_t total = sizeof(g_online_view_cases) / sizeof(g_online_view_cases[0]);
+    ASSERT_GE(total, k_saas_landing_expansion_count);
+    const size_t first = total - k_saas_landing_expansion_count;
+    for (size_t index = first; index < total; index++) {
+        EXPECT_EQ(0, strncmp(g_online_view_cases[index].label,
+            "saas_landing_", 13));
+        size_t matches = 0;
+        for (size_t candidate = first; candidate < total; candidate++) {
+            if (online_view_same_normalized_site(g_online_view_cases[index].url,
+                    g_online_view_cases[candidate].url)) {
+                matches++;
+            }
+        }
+        EXPECT_LE(matches, 2u) << g_online_view_cases[index].url;
     }
 }
 
@@ -1515,6 +1568,36 @@ RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages361To370, 821, 831)
 RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages371To380, 831, 841)
 RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages381To390, 841, 851)
 RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages391To400, 851, 861)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages401To410, 861, 871)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages411To420, 871, 881)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages421To430, 881, 891)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages431To440, 891, 901)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages441To450, 901, 911)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages451To460, 911, 921)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages461To470, 921, 931)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages471To480, 931, 941)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages481To490, 941, 951)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages491To500, 951, 961)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages501To510, 961, 971)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages511To520, 971, 981)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages521To530, 981, 991)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages531To540, 991, 1001)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages541To550, 1001, 1011)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages551To560, 1011, 1021)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages561To570, 1021, 1031)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages571To580, 1031, 1041)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages581To590, 1041, 1051)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages591To600, 1051, 1061)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages601To610, 1061, 1071)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages611To620, 1071, 1081)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages621To630, 1081, 1091)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages631To640, 1091, 1101)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages641To650, 1101, 1111)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages651To660, 1111, 1121)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages661To670, 1121, 1131)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages671To680, 1131, 1141)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages681To690, 1141, 1151)
+RADIANT_ONLINE_CASE_RANGE_TEST(LoadsMoreOnlinePages691To700, 1151, 1161)
 
 #undef RADIANT_ONLINE_CASE_RANGE_TEST
 

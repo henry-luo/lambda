@@ -120,7 +120,13 @@ static void state_cookie_command_free(StateCookieCommand* command) {
 }
 
 static StateCookieCommand* state_cookie_command_new(StateCookieCommandKind kind) {
-    return (StateCookieCommand*)mem_calloc(1, sizeof(StateCookieCommand), MEM_CAT_NETWORK);
+    StateCookieCommand* command =
+        (StateCookieCommand*)mem_calloc(1, sizeof(StateCookieCommand), MEM_CAT_NETWORK);
+    if (command) {
+        // A zeroed delete command otherwise executes as an empty upsert.
+        command->kind = kind;
+    }
+    return command;
 }
 
 static bool state_schema_create(RadiantStateStore* store) {

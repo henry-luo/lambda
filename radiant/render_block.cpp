@@ -31,7 +31,7 @@ static bool render_block_fully_transparent(ViewBlock* block) {
         block->inl()->opacity >= 0.0f && block->inl()->opacity <= 0.0005f;
 }
 
-static bool render_block_has_visible_child_overflow(ViewBlock* block) {
+static bool render_block_has_visible_child_overflow(RenderContext* rdcon, ViewBlock* block) {
     if (!block || !block->is_element() || !block->first_child) return false;
     if (block->scroller &&
         (block->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
@@ -41,10 +41,12 @@ static bool render_block_has_visible_child_overflow(ViewBlock* block) {
 
     float min_x = 0.0f, max_x = 0.0f;
     float min_y = 0.0f, max_y = 0.0f;
-    layout_in_flow_content_bounds(lam::view_require_element(block), LAYOUT_AXIS_X, true,
-                                  &min_x, &max_x);
-    layout_in_flow_content_bounds(lam::view_require_element(block), LAYOUT_AXIS_Y, true,
-                                  &min_y, &max_y);
+    layout_in_flow_content_bounds_cached(lam::view_require_element(block), LAYOUT_AXIS_X, true,
+                                         rdcon ? rdcon->content_bounds_cache : NULL,
+                                         &min_x, &max_x);
+    layout_in_flow_content_bounds_cached(lam::view_require_element(block), LAYOUT_AXIS_Y, true,
+                                         rdcon ? rdcon->content_bounds_cache : NULL,
+                                         &min_y, &max_y);
     // Relative zero-height vlist rows paint their struts outside the border box.
     return min_x < 0.0f || max_x > block->width ||
            min_y < 0.0f || max_y > block->height;
@@ -52,7 +54,7 @@ static bool render_block_has_visible_child_overflow(ViewBlock* block) {
 
 bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->has_dirty_union) return false;
-    if (render_block_has_visible_child_overflow(block)) return false;
+    if (render_block_has_visible_child_overflow(rdcon, block)) return false;
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
@@ -85,7 +87,7 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
     if (block->position && block->positionp()->first_abs_child) {
         return false;
     }
-    if (render_block_has_visible_child_overflow(block)) return false;
+    if (render_block_has_visible_child_overflow(rdcon, block)) return false;
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
@@ -119,7 +121,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
         !rdcon->has_dirty_union || rdcon->element_marker_suppression_depth > 0) {
         return false;
     }
-    if (render_block_has_visible_child_overflow(block)) return false;
+    if (render_block_has_visible_child_overflow(rdcon, block)) return false;
 
     uint32_t view_id = static_cast<View*>(block)->id;
     const RetainedDisplayListFragment* fragment =

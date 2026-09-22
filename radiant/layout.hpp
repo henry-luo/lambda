@@ -471,6 +471,15 @@ typedef struct ReplacedSvgIntrinsicSize {
     float height;
 } ReplacedSvgIntrinsicSize;
 
+inline bool layout_replaced_image_surface_contributes(const ViewBlock* block) {
+    if (!block) return false;
+    NameId tag = block->tag();
+    return tag == MARKUP_NAME_IMG ||
+        tag == MARKUP_NAME_EMBED ||
+        tag == MARKUP_NAME_OBJECT ||
+        block->display.inner == RDT_DISPLAY_REPLACED;
+}
+
 ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
                                                       ViewBlock* block);
 bool layout_replaced_intrinsic_axis_size(LayoutContext* lycon, ViewBlock* block,
@@ -2337,6 +2346,14 @@ float layout_in_flow_content_extent(ViewElement* elem, LayoutAxis axis,
 void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
                                    bool include_out_of_flow,
                                    float* out_min, float* out_max);
+// renderer-only cache: bounds are immutable after layout and can be shared by
+// repeated paint culling without revisiting a large descendant tree.
+HashMap* layout_content_bounds_cache_create();
+void layout_content_bounds_cache_destroy(HashMap* cache);
+void layout_in_flow_content_bounds_cached(ViewElement* elem, LayoutAxis axis,
+                                          bool include_out_of_flow,
+                                          HashMap* cache,
+                                          float* out_min, float* out_max);
 
 template <typename T>
 struct LayoutAxisPair {

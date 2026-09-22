@@ -438,6 +438,22 @@ TEST_F(UrlTest, RelativeUrlWhitespaceHandling) {
     url_destroy(base);
 }
 
+TEST_F(UrlTest, RelativeResourceUrlPercentEncodesEmbeddedSpaces) {
+    Url* base = url_parse("https://example.com/index.html");
+    ASSERT_NE(base, nullptr);
+
+    Url* url = url_parse_with_base(
+        "icons/Folders & Files/Icon.svg?label=AI & Magic", base);
+    ASSERT_NE(url, nullptr);
+    EXPECT_STREQ(url->pathname->chars, "/icons/Folders%20&%20Files/Icon.svg");
+    EXPECT_STREQ(url->search->chars, "?label=AI%20&%20Magic");
+    EXPECT_STREQ(url_get_href(url),
+        "https://example.com/icons/Folders%20&%20Files/Icon.svg?label=AI%20&%20Magic");
+
+    url_destroy(url);
+    url_destroy(base);
+}
+
 TEST_F(UrlTest, RelativeUrlAbsoluteUrlInput) {
     // Test absolute URL as relative input
     Url* base = url_parse("https://example.com/path");

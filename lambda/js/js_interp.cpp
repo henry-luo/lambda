@@ -3687,6 +3687,37 @@ static bool js_interp_expression_may_suspend(JsAstNode* node) {
     return search.found;
 }
 
+static bool js_interp_argument_has_suspend_kind(JsAstNode* node,
+        int suspension_node_type) {
+    if (!node) return false;
+    if (node->node_type == suspension_node_type) return true;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_ARROW_FUNC) {
+        // Creating a nested callable does not execute its body.
+        return false;
+    }
+    struct JsInterpSuspendKindSearch {
+        int suspension_node_type;
+        bool found;
+    } search = {suspension_node_type, false};
+    js_ast_visit_children(node, [](JsAstNode* child, void* opaque) {
+        JsInterpSuspendKindSearch* search = (JsInterpSuspendKindSearch*)opaque;
+        if (search && !search->found) {
+            search->found = js_interp_argument_has_suspend_kind(child,
+                search->suspension_node_type);
+        }
+    }, &search);
+    return search.found;
+}
+
+static bool js_interp_await_argument_can_suspend(JsAstNode* node) {
+    return js_interp_argument_has_suspend_kind(node, AST_NODE_AWAIT);
+}
+
+static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
+    return js_interp_argument_has_suspend_kind(node, AST_NODE_YIELD);
+}
+
 static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) {
     if (!node) return js_interp_normal(make_js_undefined());
     Item replay_value = ItemNull;
@@ -3995,7 +4026,11 @@ static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* no
     case AST_NODE_AWAIT: {
         JsAwaitNode* awaited = (JsAwaitNode*)node;
         if (frame && frame->async_await_seen &&
-                *frame->async_await_seen < frame->async_await_skip) {
+                *frame->async_await_seen < frame->async_await_skip &&
+                !js_interp_await_argument_can_suspend(
+                    (JsAstNode*)awaited->argument)) {
+            // An inner await owns the earlier ledger value, so replay its
+            // operand before this outer await consumes a saved completion.
             return js_interp_await_value(frame, make_js_undefined());
         }
         RootFrame roots(1);
@@ -4342,26 +4377,6 @@ static JsInterpCompletion js_interp_bind_named_function_expression_self(
             : js_interp_normal(make_js_undefined());
     }
     return js_interp_normal(make_js_undefined());
-}
-
-static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
-    if (!node) return false;
-    if (node->node_type == AST_NODE_YIELD) return true;
-    if (node->node_type == AST_NODE_FUNC ||
-            node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_ARROW_FUNC) {
-        // Creating a nested function does not execute its body.
-        return false;
-    }
-    struct NestedYieldState {
-        bool found;
-    } state = {false};
-    js_ast_visit_children(node, [](JsAstNode* child, void* opaque) {
-        NestedYieldState* state = (NestedYieldState*)opaque;
-        if (!state || state->found) return;
-        state->found = js_interp_yield_argument_can_suspend(child);
-    }, &state);
-    return state.found;
 }
 
 static bool js_interp_terminal_yield_expr(JsAstNode* node) {

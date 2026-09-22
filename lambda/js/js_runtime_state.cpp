@@ -547,6 +547,7 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         state->string_caches->last_from_char_code_cp = -1;
         state->string_caches->ascii_chars_epoch = ~0ULL;
         state->clipboard.generation = 1;
+        state->clipboard.next_object_url_id = 1;
         state->intrinsics->mutation_serial = 1;
         state->promises.unhandled_strict =
             js_promise_initial_unhandled_rejections_strict();

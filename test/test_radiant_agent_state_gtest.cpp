@@ -182,6 +182,35 @@ TEST(RadiantAgentState, PersistsProfileStateAndClearsSessionState) {
     mem_free(cache_dir);
 }
 
+TEST(RadiantAgentState, FlushesClearedSessionCookieAsDelete) {
+    char* cache_dir = dir_temp_create("radiant_agent_session_cookie");
+    ASSERT_NE(cache_dir, nullptr);
+
+    RadiantStateStore* store = radiant_state_store_open(cache_dir, "agent-alpha");
+    ASSERT_NE(store, nullptr);
+    CookieJar* jar = cookie_jar_create(store);
+    ASSERT_NE(jar, nullptr);
+
+    cookie_jar_store(jar, "https://example.test/", "session=value; Path=/");
+    ASSERT_TRUE(cookie_jar_flush(jar));
+    cookie_jar_clear_session(jar);
+    EXPECT_EQ(cookie_jar_count(jar), 0);
+    EXPECT_TRUE(cookie_jar_flush(jar));
+    cookie_jar_destroy(jar);
+    radiant_state_store_close(store);
+
+    store = radiant_state_store_open(cache_dir, "agent-alpha");
+    ASSERT_NE(store, nullptr);
+    jar = cookie_jar_create(store);
+    ASSERT_NE(jar, nullptr);
+    EXPECT_EQ(cookie_jar_count(jar), 0);
+    cookie_jar_destroy(jar);
+    radiant_state_store_close(store);
+
+    EXPECT_EQ(file_delete_recursive(cache_dir), 0);
+    mem_free(cache_dir);
+}
+
 TEST(RadiantAgentState, FailsClosedWithoutReplacingCorruptDatabase) {
     char* cache_dir = dir_temp_create("radiant_agent_state_corrupt");
     ASSERT_NE(cache_dir, nullptr);

@@ -7880,6 +7880,19 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     name_root.set(name);
     obj = object_root.get();
     descriptor = descriptor_root.get();
+    if (is_virtual_container_type_id(get_type_id(obj))) {
+        Item host_result = ItemNull;
+        // Host wrappers own arbitrary fields in their expando map, which the
+        // ordinary shape path cannot observe through subsequent DOM reads.
+        if (js_dispatch_property_op(JS_EXOTIC_DEFINE_OWN, obj, 0, name, obj,
+                descriptor, ItemNull, false, &host_result)) {
+            if (item_is_error(host_result)) return host_result;
+            if (!js_is_truthy(host_result)) {
+                return js_throw_type_error("Cannot define host object property");
+            }
+            return obj;
+        }
+    }
     if (get_type_id(obj) == LMD_TYPE_FUNC) {
         // DefineOwnProperty can create a user field without passing through
         // ordinary Set; preserve function metadata's creation order first.
@@ -14191,9 +14204,13 @@ extern "C" Item js_get_global_this() {
         }
         // globalThis self-reference
         js_set_key_cstr(js_global_this_obj, "globalThis", js_global_this_obj);
-        // HTML / Web Workers spec aliases of the global object.
+        // A top-level browsing context is its own parent and top Window.
+        // These aliases keep legacy DOM bundles from treating a missing `top`
+        // as a false cross-origin frame probe.
         js_set_key_cstr(js_global_this_obj, "self", js_global_this_obj);
         js_set_key_cstr(js_global_this_obj, "window", js_global_this_obj);
+        js_set_key_cstr(js_global_this_obj, "parent", js_global_this_obj);
+        js_set_key_cstr(js_global_this_obj, "top", js_global_this_obj);
 
         // Node compatibility namespaces are ordinary own data slots, but their
         // large method graphs are built only when read. Tune4 requires this

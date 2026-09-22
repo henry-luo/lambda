@@ -449,13 +449,19 @@ extern "C" void dom_install_collection_globals(void) {
     }
     dom_install_value_constructor(global, "DOMMatrix", dom_matrix_constructor, true);
     dom_install_value_constructor(global, "DOMPoint", dom_point_constructor, true);
+    _install_iface(global, "HTMLMediaElement");
+    _link_iface_proto(global, "HTMLMediaElement", "HTMLElement");
     int html_interface_count = dom_html_interface_count();
     for (int i = 0; i < html_interface_count; i++) {
-        // Specialized HTML wrappers must inherit HTMLElement so WebIDL brand
-        // checks do not collapse every form control to the generic interface.
+        // Specialized HTML wrappers retain their browser prototype chain for
+        // WebIDL brand checks instead of collapsing to the generic interface.
         const char* ctor_name = dom_html_interface_ctor_name(i);
         _install_iface(global, ctor_name);
-        _link_iface_proto(global, ctor_name, "HTMLElement");
+        // Audio and video share HTMLMediaElement's feature-test surface.
+        const char* parent_name = strcmp(ctor_name, "HTMLAudioElement") == 0 ||
+            strcmp(ctor_name, "HTMLVideoElement") == 0
+            ? "HTMLMediaElement" : "HTMLElement";
+        _link_iface_proto(global, ctor_name, parent_name);
     }
     _install_iface(global, "CanvasRenderingContext2D");
     dom_canvas_install_html_interface(_iface_proto(global, "HTMLCanvasElement"));
@@ -485,7 +491,7 @@ extern "C" void dom_install_collection_globals(void) {
     static const char* collection_ifaces[] = {
         "Range", "Selection", "HTMLCollection", "HTMLFormControlsCollection",
         "HTMLOptionsCollection", "NodeList", "NamedNodeMap", "DOMTokenList",
-        "DOMRectList", "StyleSheetList", "CSSRuleList",
+        "DOMRectList", "StyleSheetList", "CSSRuleList", "CSSStyleDeclaration",
     };
     for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
         _install_iface(global, collection_ifaces[i]);

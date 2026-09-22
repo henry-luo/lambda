@@ -731,6 +731,7 @@ typedef enum JubeDomTokenListOperation {
     JUBE_DOM_TOKEN_LIST_REPLACE,
     JUBE_DOM_TOKEN_LIST_TO_STRING,
     JUBE_DOM_TOKEN_LIST_ITERATOR,
+    JUBE_DOM_TOKEN_LIST_SUPPORTS,
 } JubeDomTokenListOperation;
 
 // DS13: the catalog rows again, this time as a flat index space, so a module's

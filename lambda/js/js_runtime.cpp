@@ -4333,6 +4333,16 @@ static JsPropertyOpResult js_host_meta_set(Item target, uint64_t lane,
         value, &completion), completion);
 }
 
+static JsPropertyOpResult js_host_meta_define_own(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane;
+    (void)value;
+    (void)receiver;
+    Item completion = ItemNull;
+    return js_property_op_result(jube_member_define_own(target, key,
+        descriptor, &completion), completion);
+}
+
 JS_HOST_META_KEY_OP(js_host_meta_delete,
     js_host_object_delete_property(target, key, &completion))
 JS_HOST_META_KEY_OP(js_host_meta_has,
@@ -4444,7 +4454,7 @@ extern const JsPropertyOps js_iterator_property_ops = {
 };
 
 extern const JsPropertyOps js_host_property_ops = {
-    js_host_meta_get, js_host_meta_set, NULL, js_host_meta_delete,
+    js_host_meta_get, js_host_meta_set, js_host_meta_define_own, js_host_meta_delete,
     js_host_meta_has, js_host_meta_descriptor, js_host_meta_own_keys,
     js_host_meta_get_prototype, NULL, NULL, NULL,
 };
@@ -26383,6 +26393,14 @@ static Item js_intl_supported_locales_of(Item* args, int argc) {
     return result_root.get();
 }
 
+static Item js_intl_construct_plain_object(Item new_target, uint64_t* result_home) {
+    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
+    Item result = js_apply_constructed_default_prototype(result_root.get(),
+        target_root.get(), JS_CLASS_OBJECT);
+    if (result_home) *result_home = result.item;
+    return result;
+}
+
 static Item js_intl_number_format_format(Item /*this_value*/, Item* args,
         int argc) {
     Item value = argc > 0 && args ? args[0] : make_js_undefined();
@@ -26392,11 +26410,7 @@ static Item js_intl_number_format_format(Item /*this_value*/, Item* args,
 
 static Item js_intl_number_format_construct_body(Item /*callee*/, Item* /*args*/,
         int /*argc*/, Item new_target, uint64_t* result_home) {
-    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
-    Item result = js_apply_constructed_default_prototype(result_root.get(),
-        target_root.get(), JS_CLASS_OBJECT);
-    if (result_home) *result_home = result.item;
-    return result;
+    return js_intl_construct_plain_object(new_target, result_home);
 }
 
 static Item js_intl_number_format_call_body(Item callee, Item /*this_value*/,
@@ -26473,16 +26487,57 @@ static Item js_intl_collator_compare(Item /*this_value*/, Item* args, int argc) 
 
 static Item js_intl_collator_construct_body(Item /*callee*/, Item* /*args*/,
         int /*argc*/, Item new_target, uint64_t* result_home) {
-    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
-    Item result = js_apply_constructed_default_prototype(result_root.get(),
-        target_root.get(), JS_CLASS_OBJECT);
-    if (result_home) *result_home = result.item;
-    return result;
+    return js_intl_construct_plain_object(new_target, result_home);
 }
 
 static Item js_intl_collator_call_body(Item callee, Item /*this_value*/,
         Item* args, int argc, uint64_t* result_home) {
     return js_intl_collator_construct_body(callee, args, argc, callee, result_home);
+}
+
+struct JsIntlLanguageDisplayName {
+    const char* code;
+    const char* name;
+};
+
+static Item js_intl_display_names_of(Item /*this_value*/, Item* args, int argc) {
+    Item code = argc > 0 && args ? args[0] : make_js_undefined();
+    Item code_text = js_to_string(code);
+    if (item_is_error(code_text)) return code_text;
+    String* value = it2s(code_text);
+    if (!value) return code_text;
+
+    // The compact runtime has no CLDR database. Preserve unknown BCP 47 codes
+    // while supplying English names for the language set used by browser UIs.
+    static const JsIntlLanguageDisplayName names[] = {
+        {"ar", "Arabic"}, {"cs", "Czech"}, {"da", "Danish"},
+        {"de", "German"}, {"en", "English"}, {"es", "Spanish"},
+        {"fi", "Finnish"}, {"fr", "French"}, {"he", "Hebrew"},
+        {"hi", "Hindi"}, {"it", "Italian"}, {"ja", "Japanese"},
+        {"ko", "Korean"}, {"nl", "Dutch"}, {"no", "Norwegian"},
+        {"pl", "Polish"}, {"pt", "Portuguese"}, {"ru", "Russian"},
+        {"sv", "Swedish"}, {"tr", "Turkish"}, {"uk", "Ukrainian"},
+        {"zh", "Chinese"},
+    };
+    for (size_t index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+        size_t code_len = strlen(names[index].code);
+        if (value->len != code_len) continue;
+        bool matches = true;
+        for (size_t byte = 0; byte < code_len; byte++) {
+            if (js_intl_collator_fold_ascii((unsigned char)value->chars[byte]) !=
+                    (unsigned char)names[index].code[byte]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return js_name_item(names[index].name, strlen(names[index].name));
+    }
+    return code_text;
+}
+
+static Item js_intl_display_names_construct_body(Item /*callee*/, Item* /*args*/,
+        int /*argc*/, Item new_target, uint64_t* result_home) {
+    return js_intl_construct_plain_object(new_target, result_home);
 }
 
 static inline bool js_intl_segmenter_is_word_byte(unsigned char c) {
@@ -26550,7 +26605,7 @@ extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NU
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_realm_intrinsic_slots_ensure_roots();
-    RootFrame roots(11);
+    RootFrame roots(14);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
     Rooted<Item> segmenter_ctor_root(roots,
         js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
@@ -26572,6 +26627,12 @@ extern "C" Item js_get_intl_object_value() {
     Rooted<Item> collator_proto_root(roots, js_new_object());
     Rooted<Item> collator_method_root(roots,
         js_new_native_this_span_function(js_intl_collator_compare));
+    Rooted<Item> display_names_ctor_root(roots,
+        js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
+            js_intl_display_names_construct_body, 0));
+    Rooted<Item> display_names_proto_root(roots, js_new_object());
+    Rooted<Item> display_names_method_root(roots,
+        js_new_native_this_span_function(js_intl_display_names_of));
     js_set_function_name(segmenter_ctor_root.get(), js_name_item("Segmenter"));
     js_set_key_cstr(segmenter_proto_root.get(), "constructor", segmenter_ctor_root.get());
     js_set_key_cstr(segmenter_proto_root.get(), "segment", segmenter_method_root.get());
@@ -26595,10 +26656,19 @@ extern "C" Item js_get_intl_object_value() {
         collator_proto_root.get());
     js_set_key_cstr(collator_ctor_root.get(), "supportedLocalesOf",
         supported_locales_root.get());
+    js_set_function_name(display_names_ctor_root.get(), js_name_item("DisplayNames"));
+    js_set_key_cstr(display_names_proto_root.get(), "constructor",
+        display_names_ctor_root.get());
+    js_set_key_cstr(display_names_proto_root.get(), "of", display_names_method_root.get());
+    js_initialize_native_constructor_prototype(display_names_ctor_root.get(),
+        display_names_proto_root.get());
+    js_set_key_cstr(display_names_ctor_root.get(), "supportedLocalesOf",
+        supported_locales_root.get());
     js_intl_object = intl_root.get();
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());
+    js_set_key_cstr(intl_root.get(), "DisplayNames", display_names_ctor_root.get());
     js_namespace_set_to_string_tag(intl_root.get(), "Intl", 4);
     return intl_root.get();
 }

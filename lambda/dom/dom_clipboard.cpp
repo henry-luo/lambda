@@ -75,6 +75,7 @@ JS_FORWARD_STATIC_VOID( js_clipboard_set_method, (Item object, const char* name,
 #define g_file_list_proto (js_runtime_state.clipboard.file_list_prototype)
 #define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
 #define g_clipboard_generation (js_runtime_state.clipboard.generation)
+#define g_next_object_url_id (js_runtime_state.clipboard.next_object_url_id)
 JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard)))
 
 static void attach_known_prototype(Item obj, Item proto) {
@@ -237,6 +238,26 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     return obj;
 }
 JS_FORWARD_ITEM(js_blob_new, (Item parts, Item options), js_blob_new_with_class, (parts, options, JS_CLASS_BLOB))
+
+extern "C" Item js_dom_url_create_object_url(Item object) {
+    JsClass class_id = js_class_id(object);
+    if (class_id != JS_CLASS_BLOB && class_id != JS_CLASS_FILE) {
+        return dom_realm_throw_type_error("URL.createObjectURL requires a Blob");
+    }
+    // Headless Worker does not consume blob bytes, but callers still require a
+    // stable, revocable origin-scoped URL identity for feature detection.
+    StrBuf* url = strbuf_new();
+    strbuf_append_format(url, "blob:lambda/%lld", (long long)g_next_object_url_id++);
+    Item result = make_str_n(url->str, url->length);
+    strbuf_free(url);
+    return result;
+}
+
+extern "C" Item js_dom_url_revoke_object_url(Item /*url*/) {
+    // Object URLs only back headless feature probes; their Blob lifetime is
+    // already owned by the caller and the per-document heap.
+    return make_js_undefined();
+}
 
 extern "C" Item js_blob_text(void) {
     Item self = dom_realm_receiver();
@@ -1725,6 +1746,17 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     js_clipboard_set_method(g_blob_proto, name, target);
     JS_CLIPBOARD_BLOB_METHODS(JS_CLIPBOARD_INSTALL_BLOB_METHOD)
 #undef JS_CLIPBOARD_INSTALL_BLOB_METHOD
+
+    {
+        RootFrame url_roots(1);
+        Rooted<Item> url_ctor_root(url_roots, dom_realm_get_cstr(global_root.get(), "URL"));
+        if (get_type_id(url_ctor_root.get()) == LMD_TYPE_FUNC) {
+            js_clipboard_set_method(url_ctor_root.get(), "createObjectURL",
+                js_dom_url_create_object_url);
+            js_clipboard_set_method(url_ctor_root.get(), "revokeObjectURL",
+                js_dom_url_revoke_object_url);
+        }
+    }
 
     // ---- File -------------------------------------------------------------
     js_clipboard_install_interface(global_root.get(), "File", js_file_new, &g_file_proto);
