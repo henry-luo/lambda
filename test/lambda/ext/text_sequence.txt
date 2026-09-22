@@ -1,0 +1,17 @@
+"-- select / reorder keep the text kind --"
+["cba", "abc", "ab", "ab", "bc", "bc", "bc"]
+['cba', b'\x0201']
+[string, symbol, binary]
+"-- filter --"
+["ac", string, "", true]
+"-- mapping pipe: text when every result is text, else an array --"
+["ABC", "a-b-c-", [97, 98, 99], ["a", 1, "c"]]
+[string, array]
+"-- membership is by code point; contains is the substring test --"
+[true, false, true, false]
+"-- iteration and length (S8.3.1v3) --"
+[5, "h", "é", "l", "l", "o"]
+"-- indexing: out of range is null (S7.2.1) --"
+["a", "c", true, true]
+"-- placed as one value (S10.6.1) --"
+[[1, "ab"], ["ab", 1], ["ab", "cd"]]

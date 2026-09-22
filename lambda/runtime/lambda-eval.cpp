@@ -603,11 +603,11 @@ Item fn_union(Item left, Item right) {
     // Phase 6 routes value-level `|` here; preserve set order while removing duplicates.
     for (int64_t i = 0; i < left_len; i++) {
         Item item = item_at(left, i);
-        if (!array_has_item(result, item)) array_push(result, item);
+        if (!array_has_item(result, item)) array_push_verbatim(result, item);
     }
     for (int64_t i = 0; i < right_len; i++) {
         Item item = item_at(right, i);
-        if (!array_has_item(result, item)) array_push(result, item);
+        if (!array_has_item(result, item)) array_push_verbatim(result, item);
     }
     return { .array = result };
 }
@@ -626,7 +626,7 @@ Item fn_intersect(Item left, Item right) {
         if (array_has_item(result, item)) continue;
         Bool present = fn_in(item, right);
         if (present >= BOOL_ERROR) return ItemError;
-        if (present == BOOL_TRUE) array_push(result, item);
+        if (present == BOOL_TRUE) array_push_verbatim(result, item);
     }
     return { .array = result };
 }
@@ -640,7 +640,7 @@ Item fn_exclude(Item left, Item right) {
         if (array_has_item(result, item)) continue;
         Bool present = fn_in(item, right);
         if (present >= BOOL_ERROR) return ItemError;
-        if (present != BOOL_TRUE) array_push(result, item);
+        if (present != BOOL_TRUE) array_push_verbatim(result, item);
     }
     return { .array = result };
 }
@@ -1391,7 +1391,7 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
                 rest = (List*)(uintptr_t)adapter_words[fixed];
                 // Arguments are not content: append verbatim so `null` and
                 // adjacent strings survive (see emit_variadic_args).
-                array_push((Array*)rest, (Item){.item = source_words[i + 1]});
+                array_push_verbatim((Array*)rest, (Item){.item = source_words[i + 1]});
             }
         }
     }
@@ -1443,7 +1443,7 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
         for (int64_t i = 0; i < packed->length; i++) {
             // Widening must be length-preserving, and this is an argument
             // list: append verbatim (LR09-R3).
-            array_push((Array*)widened, array_num_get(packed, i));
+            array_push_verbatim((Array*)widened, array_num_get(packed, i));
         }
         return fn_call_into(fn, widened, NULL);
     }
@@ -2195,7 +2195,11 @@ Bool fn_is(Item a, Item b) {
                 a_type_id == LMD_TYPE_ARRAY_NUM || a_type_id == LMD_TYPE_VARRAY
                 ? BOOL_TRUE : BOOL_FALSE;
         }
-        if (type_b == &LIT_TYPE_LIST) return BOOL_FALSE;
+        // S2.5.1v2: `is list` tests the kind bit; `is array` holds for lists too
+        if (type_b == &LIT_TYPE_LIST) {
+            return a_type_id == LMD_TYPE_ARRAY && a.array && a.array->is_spreadable
+                ? BOOL_TRUE : BOOL_FALSE;
+        }
         if (type_nominal_record(type_b->type)) {
             TypeNominal* actual = lambda_value_nominal(a_type_id,
                 (const void*)(uintptr_t)a.item);
@@ -3673,7 +3677,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
     if (self_inclusive) {
         Bool match = fn_is(data, type_val);
         if (match == BOOL_TRUE) {
-            array_push(result, data);
+            array_push_verbatim(result, data);
         }
     }
 
@@ -3745,7 +3749,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
             if (field->name) {
                 Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
                 if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
-                    array_push(result, val);
+                    array_push_verbatim(result, val);
                 }
             }
         }
@@ -3753,7 +3757,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         for (int64_t i = 0; i < elmt->length; i++) {
             Item child = elmt->items[i];
             if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
-                array_push(result, child);
+                array_push_verbatim(result, child);
             }
         }
     } else if (type_id == LMD_TYPE_MAP) {
@@ -3763,7 +3767,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
             if (field->name) {
                 Item val = _map_field_value(map_type, map->data, field);
                 if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
-                    array_push(result, val);
+                    array_push_verbatim(result, val);
                 }
             }
         }
@@ -3771,15 +3775,24 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         // runtime lists and arrays share LMD_TYPE_ARRAY; keep spreadable query arrays here too.
         Array* arr = (Array*)data.array;
         if (arr->is_spreadable) {
-            // spreadable array (from previous query): distribute child query to each item
+            // A list (a previous query's result among them) distributes the child
+            // query over its container items; a scalar item is tested itself, so
+            // `(1, "a", 2)[int]` filters instead of querying inside scalars.
             for (int64_t i = 0; i < arr->length; i++) {
-                child_query_collect(arr->items[i], type_val, result);
+                Item child = arr->items[i];
+                TypeId child_type = get_type_id(child);
+                if (child_type == LMD_TYPE_ELEMENT || child_type == LMD_TYPE_MAP ||
+                        child_type == LMD_TYPE_ARRAY || child_type == LMD_TYPE_ARRAY_NUM) {
+                    child_query_collect(child, type_val, result);
+                } else if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
+                    array_push_verbatim(result, child);
+                }
             }
         } else {
             for (int64_t i = 0; i < arr->length; i++) {
                 Item child = arr->items[i];
                 if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
-                    array_push(result, child);
+                    array_push_verbatim(result, child);
                 }
             }
         }
@@ -3788,7 +3801,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         for (int64_t i = 0; i < arr->length; i++) {
             Item val = array_num_get(arr, i);
             if (fn_is(val, type_val) == BOOL_TRUE) {
-                array_push(result, val);
+                array_push_verbatim(result, val);
             }
         }
     }
@@ -4197,14 +4210,10 @@ String* fn_string(Item itm) {
         // convert Type value to its name string, e.g. type(123) → "int"
         TypeType* type_type = (TypeType*)itm.type;
         if (!type_type || !type_type->type) return &STR_NULL;
-        const char* name;
-        if (type_type->type == &TYPE_INTEGER) {
-            name = "integer";
-        } else if (type_type->type == &TYPE_NUMBER) {
-            name = "number";
-        } else if (type_type->type->type_id == LMD_TYPE_NUM_SIZED) {
+        const char* name = type_alias_name(type_type->type);
+        if (!name && type_type->type->type_id == LMD_TYPE_NUM_SIZED) {
             name = get_num_sized_type_name((NumSizedType)type_type->type->kind);
-        } else {
+        } else if (!name) {
             name = get_type_name(type_type->type->type_id);
         }
         if (name) return heap_strcpy((char*)name, strlen(name));
@@ -4295,6 +4304,11 @@ Type* fn_type(Item item) {
             return (Type*)type;
         }
     }
+    if (resolved_type == LMD_TYPE_ARRAY && item.array && item.array->is_spreadable) {
+        // S2.5.1v2: a list is a specialized array and type() names its kind
+        type->type = &TYPE_LIST;
+        return (Type*)type;
+    }
     if (resolved_type == LMD_TYPE_DECIMAL) {
         Decimal* dec = item.get_decimal();
         if (dec && dec->storage_kind == DECIMAL_BIGINT) {
@@ -4355,8 +4369,9 @@ static Symbol* fn_name_symbol_from_strview(StrView name) {
 
 static Symbol* fn_name_from_type(Type* type) {
     if (!type) return nullptr;
-    if (type == &TYPE_INTEGER) return fn_name_symbol_from_chars("integer", 7);
-    if (type == &TYPE_NUMBER) return fn_name_symbol_from_chars("number", 6);
+    if (const char* alias = type_alias_name(type)) {
+        return fn_name_symbol_from_chars(alias, strlen(alias));
+    }
     // D2.6.6v2 phase 2: a nominal type answers with its declared name whatever
     // its structural kind, so `name(type(p))` stays "Point" after the flip.
     if (TypeNominal* record = type_nominal_record(type)) {
@@ -6810,7 +6825,7 @@ static TypePattern* runtime_pattern_from_type(Type* type);
 static List* split_string_list(void) {
     List* result = list();
     if (!result) return NULL;
-    result->is_content = 1;
+    result->is_spreadable = 1;
     LaneStorageDesc lane = {};
     if (lambda_type_lane_storage_desc(&TYPE_STRING, &lane)) {
         // Text split has a full inferred string[] result. Construct that
@@ -6878,7 +6893,7 @@ Item fn_split(Item str_item, Item sep_item) {
             }
             List* ps = pattern_split(pattern, str_item, false);
             if (ps) {
-                ps->is_content = 1;
+                ps->is_spreadable = 1;
                 split_adopt_string_lane(ps);
             }
             return {.array = ps};
@@ -7042,7 +7057,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
             }
             List* ps = pattern_split(pattern, str_item, keep_delim);
             if (ps) {
-                ps->is_content = 1;
+                ps->is_spreadable = 1;
                 split_adopt_string_lane(ps);
             }
             return {.array = ps};
@@ -7611,7 +7626,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     }
 
     // null source -> empty list
-    if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_content = 1; return {.array = e}; }
+    if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_spreadable = 1; return {.array = e}; }
 
     if (!is_text_type_id(source_type)) {
         log_debug("fn_find: first argument must be a string or symbol");
@@ -7621,7 +7636,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     const char* str_chars = source_item.get_chars();
     uint32_t str_len = source_item.get_len();
 
-    if (!str_chars || str_len == 0) { List* e = list(); e->is_content = 1; return {.array = e}; }
+    if (!str_chars || str_len == 0) { List* e = list(); e->is_spreadable = 1; return {.array = e}; }
 
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
@@ -7635,12 +7650,12 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) {
                 List* e = list();
-                e->is_content = 1;
+                e->is_spreadable = 1;
                 return {.array = e};
             }
             int64_t pattern_limit = options_legacy_pattern_limit(options);
             List* r = pattern_find_all_options(pattern, str_chars, str_len, pattern_limit, options.ignore_case);
-            if (r) r->is_content = 1;
+            if (r) r->is_spreadable = 1;
             return {.array = r};
         }
     }
@@ -7655,7 +7670,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     uint32_t needle_len = pattern_item.get_len();
 
     List* result = list();
-    result->is_content = 1;
+    result->is_spreadable = 1;
     RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
@@ -8673,7 +8688,7 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
         src = rooted_src.get();
         rooted_child.set(clone_mutable_item(src->items[i], clone_ctx));
         // array_push can collect while relocating the destination backing.
-        array_push(rooted_dst.get(), rooted_child.get());
+        array_push_verbatim(rooted_dst.get(), rooted_child.get());
     }
     return {.array = rooted_dst.get()};
 }
@@ -8787,7 +8802,7 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
         src = rooted_src.get();
         rooted_child.set(clone_mutable_item(src->items[i], clone_ctx));
         // array_push can collect while relocating the destination backing.
-        array_push((Array*)rooted_dst.get(), rooted_child.get());
+        array_push_verbatim((Array*)rooted_dst.get(), rooted_child.get());
     }
 
     int data_cap = src->data_cap > 0 ? src->data_cap :
@@ -9241,7 +9256,7 @@ static Item cow_clone_array_one_level(Array* source) {
         source = rooted_source.get();
         Item child = source->items[index];
         cow_mark_shared(child);
-        array_push(rooted_copy.get(), child);
+        array_push_verbatim(rooted_copy.get(), child);
     }
     rooted_copy.get()->cow_state &= ~COW_STATE_SHARED;
     rooted_copy.get()->rep_cert = rooted_source.get()->rep_cert;
@@ -9297,7 +9312,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
             Object* live_dst = rooted_copy.get().object;
             Item child = src->items[index];
             cow_mark_shared(child);
-            array_push((Array*)live_dst, child);
+            array_push_verbatim((Array*)live_dst, child);
         }
         source_data = rooted_source.get().object->data;
         copy_data = &rooted_copy.get().object->data;
@@ -9316,7 +9331,7 @@ static Item cow_clone_map_like_one_level(Item source_item) {
             dst = rooted_copy.get().element;
             Item child = src->items[index];
             cow_mark_shared(child);
-            array_push((Array*)dst, child);
+            array_push_verbatim((Array*)dst, child);
         }
     }
     int data_cap = source_cap > 0 ? source_cap : (type ? type->byte_size : 0);
@@ -9872,7 +9887,7 @@ Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item k
     Rooted<Item> rooted_path(roots, {.array = array_plain()});
     Rooted<Item>* rooted_keys[3] = {&rooted_key0, &rooted_key1, &rooted_key2};
     for (int64_t i = 0; i < count && i < 3; i++) {
-        array_push(rooted_path.get().array, rooted_keys[i]->get());
+        array_push_verbatim(rooted_path.get().array, rooted_keys[i]->get());
     }
     return inplace
         ? lambda_map_path_set_checked_inplace(rooted_owner.get(), rooted_path.get(),
@@ -11084,6 +11099,10 @@ static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
     if (!typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
+    // The null placeholder is the dynamic Item lane. It preserves each
+    // instance's tagged value and has precise GC tracing, so a first source
+    // write must not turn the shared constructor recipe into a type transition.
+    if (field_type == LMD_TYPE_NULL) return false;
     // A Map pointer lane already represents a null child as a null pointer,
     // which `_map_read_field` reboxes as ItemNull. Keep the immutable recipe
     // for recursive object-literal base cases instead of creating a null-tagged
@@ -11950,14 +11969,6 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 return ItemNull;
             }
             TypeId field_type = entry->type->type_id;
-            // Publishing a null constructor field seals the shared blueprint:
-            // a later instance must not retag that earlier null as a native lane.
-            if (value_type == LMD_TYPE_NULL && map_type->is_shared_constructor_shape &&
-                    map_type_id == LMD_TYPE_MAP &&
-                    map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
-                map_type->is_shared_constructor_shape = false;
-                map_type->is_transition_shared_shape = true;
-            }
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
             if (!entry || !entry->type) return ItemError;
@@ -11968,6 +11979,14 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             }
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
+
+            if (field_type == LMD_TYPE_NULL && typemap_is_shared_shape(map_type)) {
+                // A shared constructor placeholder is a raw Item lane. Source
+                // order can move it out of the leading fixed prefix, but it
+                // must still retain the null descriptor for mixed instances.
+                map_field_store_dynamic_item(field_ptr, value);
+                return ItemNull;
+            }
 
             LaneStorageDesc lane = {};
             if (shape_entry_uses_native_lane(entry, &lane) &&

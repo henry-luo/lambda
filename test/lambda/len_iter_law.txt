@@ -24,11 +24,11 @@
 "-- element: attribute values then content, len matches the walk --"
 3
 [1, 2, "text"]
-"-- count(): splicing is syntactic, not a value property (see 8.3) --"
+"-- count(): a list splices wherever it lands as an item (S8.3.3v2) --"
 4
 4
-3
-3
+4
+4
 "-- 4.8: an int range needs a successor, so its bounds are band-limited --"
 5
 3

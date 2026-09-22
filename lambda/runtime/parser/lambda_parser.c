@@ -86,7 +86,6 @@ static const char* const error_expected_arrow_parameter_name = "expected an arro
 static const char* const error_expected_arrow_parameter_close = "expected ')' after arrow parameters";
 static const char* const error_expected_parameter_name = "expected a parameter name";
 static const char* const error_expected_parameter_close = "expected ')' after parameters";
-static const char* const error_expected_expression_inside_parentheses = "expected an expression inside parentheses";
 static const char* const error_arrow_body_expression =
     "'return', 'break', and 'continue' are statements; an arrow '=>' body is an expression";
 static const char* const error_if_condition_close = "expected ')' after if condition";
@@ -1129,9 +1128,8 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
                 error_too_many_grouped_expressions)) return 0;
     }
     parser_context(parser, LAMBDA_REDUCTION_FORM_GROUP_END, first.span, first);
-    if (empty_group) {
-        return parser_fail(parser, error_expected_expression_inside_parentheses, LAMBDA_TOK_IDENTIFIER);
-    }
+    // `()` is the empty list, which is the null value (S2.5.5v2); it reduces
+    // as a group with no children.
     SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_GROUP, LAMBDA_REDUCTION_FORM_GROUP, span, first, children, count);
 }
@@ -1829,7 +1827,12 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool 
     uint32_t function_flags = is_proc ? LAMBDA_REDUCTION_FLAG_PROC : 0u;
     if (is_colour_poly) function_flags |= LAMBDA_REDUCTION_FLAG_COLOUR_POLY;
     if (is_public) function_flags |= LAMBDA_REDUCTION_FLAG_PUBLIC;
-    parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN, (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name, function_flags, NULL, 0);
+    // Publish the declaration header before parsing the signature/body. The
+    // reduction tape can predeclare later module functions without a second
+    // lexer pass, while nested/function-expression contexts remain unmarked.
+    parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN,
+        (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name,
+        function_flags | LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER, NULL, 0);
     LambdaCallableSignature signature;
     if (!parser_parse_callable_signature(parser, false, true,
             error_expected_parameter_name,

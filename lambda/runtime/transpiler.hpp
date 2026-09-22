@@ -311,11 +311,18 @@ typedef struct InterpSatelliteImage {
     void* member_entries[INTERP_SATELLITE_CLUSTER_CAP];
 } InterpSatelliteImage;
 
+// A worker owns the cancellation context until its private image is either
+// published or destroyed. The probe is only sampled at Lambda-owned compiler
+// phase boundaries; MIR internals are never asynchronously interrupted.
+typedef bool (*InterpSatelliteCancelProbe)(void* context);
+
 // Builds a private MIR image without writing a Script, its const/type lists,
 // module state, or Function entries. `sequence` is allocated before enqueue
 // and is therefore stable regardless of worker completion order.
 bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
-        const AstFuncNode* fn, uint32_t sequence, InterpSatelliteImage** out_image);
+        const AstFuncNode* fn, uint32_t sequence,
+        InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
+        InterpSatelliteImage** out_image);
 void interp_satellite_image_destroy(InterpSatelliteImage* image);
 
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
@@ -330,6 +337,9 @@ void runner_setup_context(Runner* runner);
 void preserve_context_last_error(Item result);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 void runtime_init(Runtime* runtime);
+// Non-blocking close notification: satellite workers observe this before the
+// document/runtime owner starts its full teardown.
+void runtime_request_satellite_cancel(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
 EvalContext* runtime_get_eval_context(Runtime* runtime);

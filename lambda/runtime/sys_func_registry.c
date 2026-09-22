@@ -1378,7 +1378,7 @@ JitImport jit_runtime_imports[] = {
     {"array_limit_last_inplace", FPTR(array_limit_last_inplace)},
     {"fn_take_last", FPTR(fn_take_last)},
     {"array_push", FPTR(array_push)},
-    {"array_push_argument", FPTR(array_push_argument)},
+    {"array_push_verbatim", FPTR(array_push_verbatim)},
     {"array_push_capture", FPTR(array_push_capture)},
     {"array_push_spread", FPTR(array_push_spread)},
     {"array_push_spread_all", FPTR(array_push_spread_all)},
@@ -1409,6 +1409,9 @@ JitImport jit_runtime_imports[] = {
     {"list_push_spread", FPTR(list_push_spread)},
     {"list_get", FPTR(list_get)},
     {"list_end", FPTR(list_end)},
+    {"list_end_item", FPTR(list_end_item)},
+    {"list_collapse_value", FPTR(list_collapse_value)},
+    {"list_collapse_item", FPTR(list_collapse_item)},
 
     // ========================================================================
     // Map, Element, Object operations
@@ -2435,6 +2438,22 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    // The leaf only reads catalog/ASCII/string bytes and returns ItemNull on
+    // every coercing, Unicode, or non-intrinsic case; the caller owns fallback.
+    {"js_try_ascii_string_builtin_no_gc", FPTR(js_try_ascii_string_builtin_no_gc),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(3, JIT_ARG_BORROWED)}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_elements_set_int_completion", FPTR(js_elements_set_int_completion)},
     {"js_array_set_existing_number_no_gc", FPTR(js_array_set_existing_number_no_gc),
@@ -3715,6 +3734,9 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // existing companion map; it rejects scalar homes, holes and numeric
         // descriptor overlays.
         "js_array_get_existing_own_dense_with_props_or_missing",
+        // The string leaf reads immutable ASCII payloads and catalog metadata;
+        // ItemNull is a non-observable miss that routes to the normal call.
+        "js_try_ascii_string_builtin_no_gc",
         "js_async_iterator_close_needs_await",
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
         "fn_min2_u",

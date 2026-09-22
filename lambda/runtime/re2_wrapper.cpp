@@ -937,7 +937,7 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
 List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
                                int64_t limit, bool ignore_case) {
     List* result = list();
-    result->is_content = 1;
+    result->is_spreadable = 1;
     RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);

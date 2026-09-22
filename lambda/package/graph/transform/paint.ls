@@ -66,9 +66,10 @@ fn route_data(points) {
 fn route_kind(edge) {
   if (edge.route_mode == "none") "none"
   else if (edge.from == edge.to) "self-loop"
+  // Basis interpolation of one segment is geometrically straight.
+  else if (len(edge.points) <= 2) "straight"
   else if (edge.is_bezier == true) "curved"
   else if (edge.route_mode == "polyline") "polyline"
-  else if (len(edge.points) <= 2) "straight"
   else "orthogonal"
 }
 

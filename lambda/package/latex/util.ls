@@ -204,7 +204,7 @@ fn find_desc_rec(el, tag_name, i, n) {
 pub fn children_array(el) {
     let n = len(el)
     if (n == 0) { [] }
-    else { (for (i in 0 to (n - 1)) el[i]) }
+    else { [for (i in 0 to (n - 1)) el[i]] }
 }
 
 // get attribute value or default

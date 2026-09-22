@@ -19,12 +19,32 @@ let result = layout.compute({
   nodes: [for (node in model.nodes(graph)) {id: node.id, width: 50, height: 30}],
   edges: model.edges(graph), constraints: constraints, directed: true
 })
+let cyclic = layout.compute({
+  nodes: [
+    {id: "a", width: 50, height: 30},
+    {id: "b", width: 50, height: 30},
+    {id: "c", width: 50, height: 30},
+    {id: "d", width: 50, height: 30}
+  ],
+  edges: [
+    {from: "a", to: "b"},
+    {from: "b", to: "c"},
+    {from: "c", to: "d"},
+    {from: "c", to: "b"}
+  ]
+}, {direction: "LR"})
 let html = transform.to_html(graph)
 
 {
   valid: normalized.valid,
   layers: [for (layer in result.layers) [layer.rank, [for (node in layer.nodes) node.id]]],
   ranks: [for (node in result.nodes) [node.id, node.rank]],
+  cycle: {
+    ranks: [for (node in cyclic.nodes) [node.id, node.rank]],
+    feedback_detoured: len(cyclic.edges[3].points) > 2,
+    rank_gap: cyclic.nodes[2].x - cyclic.nodes[2].width / 2.0 -
+      (cyclic.nodes[1].x + cyclic.nodes[1].width / 2.0)
+  },
   constraints: [for (value in children(html, "constraint")) [
     value["data-constraint-scope"], value["data-constraint-value"],
     value["data-constraint-member"]]],

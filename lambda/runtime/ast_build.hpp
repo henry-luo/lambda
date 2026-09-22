@@ -201,6 +201,12 @@ LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
 // bottom-up type assembly. Rebuild the canonical lexical graph from the
 // retained AST before validation or lowering publishes any of those edges.
 bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script);
+// The bind pass collects every function while it rewrites AST edges. Later
+// validation analyses share this list instead of rescanning the whole unit.
+bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
+    AstScript* script, ArrayList** functions_out);
 
 // Run post-reduction semantic validation and analysis for an already built AST.
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script);
+bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
+    AstScript* script, ArrayList* functions);

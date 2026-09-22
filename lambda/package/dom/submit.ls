@@ -22,7 +22,7 @@ fn encoded_pair(pair) {
 }
 
 fn urlencoded(entries) {
-    join(for (pair in entries) encoded_pair(pair), "&")
+    join([for (pair in entries) encoded_pair(pair)], "&")
 }
 
 fn multipart_part(pair, boundary) {
@@ -32,7 +32,7 @@ fn multipart_part(pair, boundary) {
 }
 
 fn multipart(entries, boundary) {
-    join(for (pair in entries) multipart_part(pair, boundary), "") ++
+    join([for (pair in entries) multipart_part(pair, boundary)], "") ++
         "--" ++ boundary ++ "--\r\n"
 }
 
@@ -45,7 +45,7 @@ fn validation_enabled(form, submitter) {
 }
 
 // One submit pipeline for button activation and implicit Enter.
-pub fn run(form, submitter) {
+pub pn run(form, submitter) {
     if (form == null) { 'pass' }
     else if (validation_enabled(form, submitter) and
              not dom.check_validity(form)) {
@@ -88,7 +88,7 @@ pub fn run(form, submitter) {
     }
 }
 
-pub fn reset(form) {
+pub pn reset(form) {
     if (form == null) { 'pass' }
     else {
         dom.reset_form(form)

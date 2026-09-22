@@ -1042,7 +1042,8 @@ extern "C" Item js_pack_args_span(Item* values, int count) {
     arr->length = 0;
     arr->capacity = 0;
     for (int i = 0; i < count; i++) {
-        array_push(arr, (Item){.item = value_roots.words()[i]});
+        // an argument pack is positional: one argument, one item (D2.6.5v3)
+        array_push_verbatim(arr, (Item){.item = value_roots.words()[i]});
     }
     return (Item){.array = arr};
 }

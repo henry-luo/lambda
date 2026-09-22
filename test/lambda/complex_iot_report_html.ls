@@ -2,14 +2,14 @@
 // Generates elegant HTML dashboard with comprehensive analytics
 
 fn set_data(data) { data }
-fn slice_data(data, start, end) { for (i in start to end-1) data[i] }
+fn slice_data(data, start, end) { [for (i in start to end-1) data[i]] }
 fn float_val(val) { val }
 
 // Environmental sensor data processing and analysis
 pub fn process_environmental_data(sensor_readings) {
 
     // Data quality assessment and cleaning
-    let quality_assessment = for (reading in sensor_readings) (
+    let quality_assessment = [for (reading in sensor_readings) (
         let measurements = reading.measurements,
         let quality_flags = [],
 
@@ -20,7 +20,7 @@ pub fn process_environmental_data(sensor_readings) {
         let noise_flag = if (measurements.noise_level < 0.0 or measurements.noise_level > 120.0) "noise_anomaly" else null,
 
         let all_flags = [temp_flag, humidity_flag, pm25_flag, noise_flag],
-        let valid_flags = for (flag in all_flags where flag != null) flag,
+        let valid_flags = [for (flag in all_flags where flag != null) flag],
 
         {
             sensor_id: reading.sensor_id,
@@ -30,9 +30,9 @@ pub fn process_environmental_data(sensor_readings) {
             anomalies: valid_flags,
             is_valid: len(valid_flags) <= 1
         }
-    );
+    )];
 
-    let valid_readings = for (i in 0 to len(sensor_readings)-1 where quality_assessment[i].is_valid) sensor_readings[i];
+    let valid_readings = [for (i in 0 to len(sensor_readings)-1 where quality_assessment[i].is_valid) sensor_readings[i]];
 
     // Temporal analysis and trending
     let temporal_analysis = {
@@ -43,19 +43,19 @@ pub fn process_environmental_data(sensor_readings) {
         },
 
         air_quality_trends: {
-            avg_pm25: avg(for (reading in valid_readings) reading.measurements.air_quality_pm25),
-            avg_pm10: avg(for (reading in valid_readings) reading.measurements.air_quality_pm10),
+            avg_pm25: avg([for (reading in valid_readings) reading.measurements.air_quality_pm25]),
+            avg_pm10: avg([for (reading in valid_readings) reading.measurements.air_quality_pm10]),
             pm25_trend: (
                 let half_point = len(valid_readings) / 2,
                 let first_half = slice_data(valid_readings, 0, half_point),
                 let second_half = slice_data(valid_readings, half_point, len(valid_readings)),
-                let first_avg = avg(for (reading in first_half) reading.measurements.air_quality_pm25),
-                let second_avg = avg(for (reading in second_half) reading.measurements.air_quality_pm25),
+                let first_avg = avg([for (reading in first_half) reading.measurements.air_quality_pm25]),
+                let second_avg = avg([for (reading in second_half) reading.measurements.air_quality_pm25]),
                 if (second_avg > first_avg + 5.0) "deteriorating"
                 else if (second_avg < first_avg - 5.0) "improving"
                 else "stable"
             ),
-            air_quality_alerts: for (reading in valid_readings where reading.measurements.air_quality_pm25 > 35.0 or reading.measurements.air_quality_pm10 > 50.0) {
+            air_quality_alerts: [for (reading in valid_readings where reading.measurements.air_quality_pm25 > 35.0 or reading.measurements.air_quality_pm10 > 50.0) {
                     sensor_id: reading.sensor_id,
                     timestamp: reading.timestamp,
                     location: reading.location,
@@ -63,13 +63,13 @@ pub fn process_environmental_data(sensor_readings) {
                     severity: if (reading.measurements.air_quality_pm25 > 75.0) "hazardous"
                                 else if (reading.measurements.air_quality_pm25 > 55.0) "unhealthy"
                                 else "moderate"
-                }
+                }]
         },
 
         climate_analysis: {
-            avg_temperature: avg(for (reading in valid_readings) reading.measurements.temperature),
-            avg_humidity: avg(for (reading in valid_readings) reading.measurements.humidity),
-            heat_index_alerts: (for (reading in valid_readings) (
+            avg_temperature: avg([for (reading in valid_readings) reading.measurements.temperature]),
+            avg_humidity: avg([for (reading in valid_readings) reading.measurements.humidity]),
+            heat_index_alerts: [for (reading in valid_readings) (
                 let temp_f = (reading.measurements.temperature * 9.0 / 5.0) + 32.0,
                 let humidity = reading.measurements.humidity,
                 let heat_index = temp_f + (humidity / 10.0),
@@ -80,30 +80,30 @@ pub fn process_environmental_data(sensor_readings) {
                     risk_level: if (heat_index > 105.0) "extreme" else "caution"
                 }
                 else null
-            )) that (~ != null),
+            )] that (~ != null),
             comfort_score: (
                 let ideal_temp = 22.0,
                 let ideal_humidity = 50.0,
-                let temp_scores = for (reading in valid_readings)
-                    1.0 - (abs(reading.measurements.temperature - ideal_temp) / 20.0),
-                let humidity_scores = for (reading in valid_readings)
-                    1.0 - (abs(reading.measurements.humidity - ideal_humidity) / 50.0),
+                let temp_scores = [for (reading in valid_readings)
+                    1.0 - (abs(reading.measurements.temperature - ideal_temp) / 20.0)],
+                let humidity_scores = [for (reading in valid_readings)
+                    1.0 - (abs(reading.measurements.humidity - ideal_humidity) / 50.0)],
                 (avg(temp_scores) + avg(humidity_scores)) / 2.0
             )
         },
 
         noise_analysis: {
-            avg_noise_level: avg(for (reading in valid_readings) reading.measurements.noise_level),
-            noise_violations: for (reading in valid_readings where reading.measurements.noise_level > 70.0) {
+            avg_noise_level: avg([for (reading in valid_readings) reading.measurements.noise_level]),
+            noise_violations: [for (reading in valid_readings where reading.measurements.noise_level > 70.0) {
                     sensor_id: reading.sensor_id,
                     timestamp: reading.timestamp,
                     noise_level: reading.measurements.noise_level,
                     violation_severity: if (reading.measurements.noise_level > 85.0) "severe"
                                         else "moderate"
-                },
+                }],
             quiet_hours_compliance: (
                 let total_readings = len(valid_readings),
-                let quiet_violations = len(for (reading in valid_readings where reading.measurements.noise_level > 55.0) reading),
+                let quiet_violations = len([for (reading in valid_readings where reading.measurements.noise_level > 55.0) reading]),
                 if (total_readings > 0) ((float_val(total_readings - quiet_violations)) / float_val(total_readings)) * 100.0 else 100.0
             )
         }
@@ -113,11 +113,11 @@ pub fn process_environmental_data(sensor_readings) {
         data_quality: {
             total_readings: len(sensor_readings),
             valid_readings: len(valid_readings),
-            data_quality_score: avg(for (qa in quality_assessment) qa.quality_score),
+            data_quality_score: avg([for (qa in quality_assessment) qa.quality_score]),
             anomaly_summary: {
-                temperature_anomalies: len(for (qa in quality_assessment where len(for (anomaly in qa.anomalies where anomaly == "temperature_anomaly") anomaly) > 0) qa),
-                humidity_anomalies: len(for (qa in quality_assessment where len(for (anomaly in qa.anomalies where anomaly == "humidity_anomaly") anomaly) > 0) qa),
-                air_quality_anomalies: len(for (qa in quality_assessment where len(for (anomaly in qa.anomalies where anomaly == "pm25_anomaly") anomaly) > 0) qa)
+                temperature_anomalies: len([for (qa in quality_assessment where len([for (anomaly in qa.anomalies where anomaly == "temperature_anomaly") anomaly]) > 0) qa]),
+                humidity_anomalies: len([for (qa in quality_assessment where len([for (anomaly in qa.anomalies where anomaly == "humidity_anomaly") anomaly]) > 0) qa]),
+                air_quality_anomalies: len([for (qa in quality_assessment where len([for (anomaly in qa.anomalies where anomaly == "pm25_anomaly") anomaly]) > 0) qa])
             }
         },
         environmental_analysis: temporal_analysis,
@@ -129,35 +129,35 @@ pub fn process_environmental_data(sensor_readings) {
 pub fn analyze_traffic_patterns(traffic_data) {
 
     let flow_analysis = {
-        total_intersections: len(set_data(for (data in traffic_data) data.intersection_id)),
-        total_vehicle_count: sum(for (data in traffic_data) data.vehicle_count),
-        avg_speed_citywide: avg(for (data in traffic_data) data.avg_speed),
+        total_intersections: len(set_data([for (data in traffic_data) data.intersection_id])),
+        total_vehicle_count: sum([for (data in traffic_data) data.vehicle_count]),
+        avg_speed_citywide: avg([for (data in traffic_data) data.avg_speed]),
 
         congestion_distribution: {
-            low_congestion: len(for (data in traffic_data where data.congestion_level <= 2) data),
-            moderate_congestion: len(for (data in traffic_data where data.congestion_level >= 3 and data.congestion_level <= 6) data),
-            high_congestion: len(for (data in traffic_data where data.congestion_level >= 7) data)
+            low_congestion: len([for (data in traffic_data where data.congestion_level <= 2) data]),
+            moderate_congestion: len([for (data in traffic_data where data.congestion_level >= 3 and data.congestion_level <= 6) data]),
+            high_congestion: len([for (data in traffic_data where data.congestion_level >= 7) data])
         },
 
         speed_by_zone: {
             downtown_avg: (
-                let downtown_readings = for (data in traffic_data where data.location.zone == "downtown") data,
-                if (len(downtown_readings) > 0) avg(for (reading in downtown_readings) reading.avg_speed) else 0.0
+                let downtown_readings = [for (data in traffic_data where data.location.zone == "downtown") data],
+                if (len(downtown_readings) > 0) avg([for (reading in downtown_readings) reading.avg_speed]) else 0.0
             ),
             residential_avg: (
-                let residential_readings = for (data in traffic_data where data.location.zone == "residential") data,
-                if (len(residential_readings) > 0) avg(for (reading in residential_readings) reading.avg_speed) else 0.0
+                let residential_readings = [for (data in traffic_data where data.location.zone == "residential") data],
+                if (len(residential_readings) > 0) avg([for (reading in residential_readings) reading.avg_speed]) else 0.0
             ),
             industrial_avg: (
-                let industrial_readings = for (data in traffic_data where data.location.zone == "industrial") data,
-                if (len(industrial_readings) > 0) avg(for (reading in industrial_readings) reading.avg_speed) else 0.0
+                let industrial_readings = [for (data in traffic_data where data.location.zone == "industrial") data],
+                if (len(industrial_readings) > 0) avg([for (reading in industrial_readings) reading.avg_speed]) else 0.0
             )
         }
     };
 
     let safety_analysis = {
-        total_incidents: sum(for (data in traffic_data) len(data.incident_reports)),
-        incident_hotspots: for (data in traffic_data where len(data.incident_reports) >= 2) {
+        total_incidents: sum([for (data in traffic_data) len(data.incident_reports)]),
+        incident_hotspots: [for (data in traffic_data where len(data.incident_reports) >= 2) {
                 intersection_id: data.intersection_id,
                 location: data.location,
                 incident_count: len(data.incident_reports),
@@ -165,48 +165,48 @@ pub fn analyze_traffic_patterns(traffic_data) {
                 risk_level: if (len(data.incident_reports) >= 5) "high"
                             else if (len(data.incident_reports) >= 3) "medium"
                             else "low"
-            },
+            }],
 
         safety_score_by_zone: (
             let zones = ["downtown", "residential", "industrial"],
-            for (zone in zones) (
-                let zone_data = for (data in traffic_data where data.location.zone == zone) data,
-                let zone_incidents = sum(for (data in zone_data) len(data.incident_reports)),
+            [for (zone in zones) (
+                let zone_data = [for (data in traffic_data where data.location.zone == zone) data],
+                let zone_incidents = sum([for (data in zone_data) len(data.incident_reports)]),
                 let zone_readings = len(zone_data),
                 {
                     zone: zone,
                     incident_rate: if (zone_readings > 0) float_val(zone_incidents) / float_val(zone_readings) else 0.0,
                     safety_score: if (zone_readings > 0) max([0.0, 1.0 - (float_val(zone_incidents) / float_val(zone_readings))]) else 1.0
                 }
-            )
+            )]
         )
     };
 
     let optimization_recommendations = {
-        signal_timing_adjustments: for (data in traffic_data where data.congestion_level >= 7 and data.avg_speed < 15.0)
+        signal_timing_adjustments: [for (data in traffic_data where data.congestion_level >= 7 and data.avg_speed < 15.0)
                 {
                     intersection_id: data.intersection_id,
                     current_congestion: data.congestion_level,
                     avg_speed: data.avg_speed,
                     recommendation: "Increase green light duration for main arterial",
                     priority: "high"
-                },
+                }],
 
-        route_diversions: for (data in traffic_data where data.congestion_level >= 8)
+        route_diversions: [for (data in traffic_data where data.congestion_level >= 8)
                 {
                     intersection_id: data.intersection_id,
                     location: data.location,
                     recommendation: "Activate dynamic message signs for route diversion",
                     estimated_relief: "15-25% volume reduction"
-                },
+                }],
 
-        infrastructure_improvements: for (data in safety_analysis.incident_hotspots where data.risk_level == "high")
+        infrastructure_improvements: [for (data in safety_analysis.incident_hotspots where data.risk_level == "high")
                 {
                     location: data.intersection_id,
                     issue: "High incident rate: " ++ (data.incident_count) ++ " incidents",
                     recommendation: "Install additional safety infrastructure (cameras, improved signage)",
                     estimated_cost_category: "medium"
-                }
+                }]
     };
 
     {
@@ -229,49 +229,49 @@ pub fn analyze_traffic_patterns(traffic_data) {
 pub fn analyze_energy_consumption(energy_data) {
 
     let consumption_analysis = {
-        total_consumption: sum(for (data in energy_data) data.consumption_kwh),
-        avg_consumption_per_hour: avg(for (data in energy_data) data.consumption_kwh),
+        total_consumption: sum([for (data in energy_data) data.consumption_kwh]),
+        avg_consumption_per_hour: avg([for (data in energy_data) data.consumption_kwh]),
         peak_demand_analysis: {
-            max_peak_demand: max(for (data in energy_data) data.peak_demand_kw),
-            avg_peak_demand: avg(for (data in energy_data) data.peak_demand_kw),
+            max_peak_demand: max([for (data in energy_data) data.peak_demand_kw]),
+            avg_peak_demand: avg([for (data in energy_data) data.peak_demand_kw]),
             demand_variability: (
-                let mean_demand = avg(for (data in energy_data) data.peak_demand_kw),
-                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ** 2),
+                let mean_demand = avg([for (data in energy_data) data.peak_demand_kw]),
+                let variance = avg([for (data in energy_data) (data.peak_demand_kw - mean_demand) ** 2]),
                 variance ** 0.5
             )
         },
 
         consumption_by_type: {
-            residential_total: sum(for (data in energy_data)
-                if (data.location.building_type == "residential") data.consumption_kwh else 0.0),
-            commercial_total: sum(for (data in energy_data)
-                if (data.location.building_type == "commercial") data.consumption_kwh else 0.0),
-            industrial_total: sum(for (data in energy_data)
-                if (data.location.building_type == "industrial") data.consumption_kwh else 0.0),
-            public_total: sum(for (data in energy_data)
-                if (data.location.building_type == "public") data.consumption_kwh else 0.0)
+            residential_total: sum([for (data in energy_data)
+                if (data.location.building_type == "residential") data.consumption_kwh else 0.0]),
+            commercial_total: sum([for (data in energy_data)
+                if (data.location.building_type == "commercial") data.consumption_kwh else 0.0]),
+            industrial_total: sum([for (data in energy_data)
+                if (data.location.building_type == "industrial") data.consumption_kwh else 0.0]),
+            public_total: sum([for (data in energy_data)
+                if (data.location.building_type == "public") data.consumption_kwh else 0.0])
         },
 
         renewable_analysis: {
-            avg_renewable_percentage: avg(for (data in energy_data) data.renewable_percentage),
-            renewable_leaders: for (data in energy_data where data.renewable_percentage >= 75.0)
+            avg_renewable_percentage: avg([for (data in energy_data) data.renewable_percentage]),
+            renewable_leaders: [for (data in energy_data where data.renewable_percentage >= 75.0)
                     {
                         meter_id: data.meter_id,
                         location: data.location,
                         renewable_percentage: data.renewable_percentage,
                         category: "high_renewable"
-                    },
+                    }],
             grid_dependency: {
-                high_dependency: len(for (data in energy_data where data.renewable_percentage < 25.0) data),
-                medium_dependency: len(for (data in energy_data where data.renewable_percentage >= 25.0 and data.renewable_percentage < 50.0) data),
-                low_dependency: len(for (data in energy_data where data.renewable_percentage >= 50.0) data)
+                high_dependency: len([for (data in energy_data where data.renewable_percentage < 25.0) data]),
+                medium_dependency: len([for (data in energy_data where data.renewable_percentage >= 25.0 and data.renewable_percentage < 50.0) data]),
+                low_dependency: len([for (data in energy_data where data.renewable_percentage >= 50.0) data])
             }
         }
     };
 
     let grid_analysis = {
-        avg_stability_score: avg(for (data in energy_data) data.grid_stability_score),
-        stability_issues: for (data in energy_data where data.grid_stability_score < 0.8)
+        avg_stability_score: avg([for (data in energy_data) data.grid_stability_score]),
+        stability_issues: [for (data in energy_data where data.grid_stability_score < 0.8)
                 {
                     meter_id: data.meter_id,
                     location: data.location,
@@ -279,45 +279,45 @@ pub fn analyze_energy_consumption(energy_data) {
                     issue_severity: if (data.grid_stability_score < 0.6) "critical"
                                    else if (data.grid_stability_score < 0.7) "major"
                                    else "minor"
-                },
+                }],
 
-        load_balancing_opportunities: for (data in energy_data where data.peak_demand_kw > avg(for (d in energy_data) d.peak_demand_kw) * 1.5)
+        load_balancing_opportunities: [for (data in energy_data where data.peak_demand_kw > avg([for (d in energy_data) d.peak_demand_kw]) * 1.5)
                 {
                     meter_id: data.meter_id,
                     peak_demand: data.peak_demand_kw,
-                    load_shift_potential: (data.peak_demand_kw - avg(for (d in energy_data) d.peak_demand_kw)) * 0.3,
+                    load_shift_potential: (data.peak_demand_kw - avg([for (d in energy_data) d.peak_demand_kw])) * 0.3,
                     recommendation: "Implement demand response programs"
-                }
+                }]
     };
 
     let efficiency_recommendations = {
         consumption_optimization: {
-            high_consumers: for (data in energy_data where data.consumption_kwh > avg(for (d in energy_data) d.consumption_kwh) * 1.8)
+            high_consumers: [for (data in energy_data where data.consumption_kwh > avg([for (d in energy_data) d.consumption_kwh]) * 1.8)
                     {
                         meter_id: data.meter_id,
                         building_type: data.location.building_type,
                         consumption: data.consumption_kwh,
                         savings_potential: data.consumption_kwh * 0.15,
                         priority: "high"
-                    },
+                    }],
 
-            renewable_expansion: for (data in energy_data where data.renewable_percentage < 30.0 and data.location.building_type != "residential")
+            renewable_expansion: [for (data in energy_data where data.renewable_percentage < 30.0 and data.location.building_type != "residential")
                     {
                         meter_id: data.meter_id,
                         current_renewable: data.renewable_percentage,
                         expansion_potential: "Solar installation feasible",
                         estimated_renewable_increase: 40.0
-                    }
+                    }]
         },
 
         grid_improvements: {
-            stability_enhancements: for (issue in grid_analysis.stability_issues where issue.issue_severity == "critical" or issue.issue_severity == "major")
+            stability_enhancements: [for (issue in grid_analysis.stability_issues where issue.issue_severity == "critical" or issue.issue_severity == "major")
                     {
                         location: issue.location,
                         issue: issue.issue_severity ++ " stability issue",
                         recommendation: "Upgrade grid infrastructure and install battery storage",
                         priority: if (issue.issue_severity == "critical") "immediate" else "high"
-                    },
+                    }],
 
             smart_grid_initiatives: [
                 "Deploy advanced metering infrastructure (AMI) for real-time monitoring",

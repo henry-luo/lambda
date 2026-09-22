@@ -178,7 +178,11 @@ bool array_widen_inferred_pointer_lane(Array* array) {
     return true;
 }
 
-void array_push(Array* arr, Item item) {
+// Store one value as one item: the tail shared by the sequence and verbatim
+// appends (D2.6.5v3). A native lane stores in place or widens first; every
+// other store goes through array_set, which rehomes 64-bit scalars into the
+// array's own tail.
+static void array_append_one(Array* arr, Item item) {
     if (array_has_native_lane(arr)) {
         if (arr->length >= arr->capacity) {
             int64_t old_capacity = arr->capacity;
@@ -194,26 +198,6 @@ void array_push(Array* arr, Item item) {
             return;
         }
     }
-    TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY) {
-        List* nested = item.array;
-        if (nested && nested->is_content) {
-            RootFrame roots(2);
-            Rooted<Array*> rooted_array(roots, arr);
-            Rooted<Item> rooted_source(roots, item);
-            for (int64_t i = 0; i < nested->length; i++) {
-                arr = rooted_array.get();
-                nested = rooted_source.get().array;
-                // A source may carry a native lane, where `items[]` holds raw
-                // payloads rather than tagged Items -- `split()` returns such a
-                // content list. Reading the slot directly reinterprets a
-                // `String*` as an Item and yields null (D2.6.5).
-                array_push(arr, array_has_native_lane((Array*)nested)
-                    ? array_native_lane_read((Array*)nested, i) : nested->items[i]);
-            }
-            return;
-        }
-    }
     if (arr->length + arr->extra + 2 > arr->capacity) {
         // A collection allocation is a safepoint. Both the destination and
         // the incoming value must survive it before their storage is read.
@@ -226,6 +210,49 @@ void array_push(Array* arr, Item item) {
     }
     array_set(arr, arr->length, item);
     arr->length++;
+}
+
+void array_push(Array* arr, Item item) {
+    // The sequence append (D2.6.5v3): a list spreads wherever it lands as an
+    // item (S2.5.1v2); the item-position marker of an empty list producer
+    // contributes nothing (S2.5.5v2). Everything else is stored verbatim.
+    // Both tests precede the native-lane store, which would otherwise keep a
+    // list whole in a container lane or land the marker as `null`.
+    if (item.item == ITEM_NULL_SPREADABLE) return;
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ARRAY) {
+        List* nested = item.array;
+        if (nested && nested->is_spreadable) {
+            RootFrame roots(2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
+            for (int64_t i = 0; i < nested->length; i++) {
+                arr = rooted_array.get();
+                nested = rooted_source.get().array;
+                // A source may carry a native lane, where `items[]` holds raw
+                // payloads rather than tagged Items -- `split()` returns such a
+                // list. Reading the slot directly reinterprets a `String*` as an
+                // Item and yields null (D2.6.5).
+                Item element = array_has_native_lane((Array*)nested)
+                    ? array_native_lane_read((Array*)nested, i) : nested->items[i];
+                cow_capture_value(element);  // S9.3.1: a spliced item is captured
+                array_push(arr, element);
+            }
+            return;
+        }
+    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* nested = item.array_num;
+        if (nested && nested->is_spreadable) {
+            RootFrame roots(2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
+            for (int64_t i = 0; i < rooted_source.get().array_num->length; i++) {
+                array_push(rooted_array.get(), array_num_get(rooted_source.get().array_num, i));
+            }
+            return;
+        }
+    }
+    array_append_one(arr, item);
 }
 
 Item pn_push(Item arr_item, Item value) {
@@ -362,25 +389,16 @@ Item pn_splice_cow(Item owner, Item start_item, Item count_item) {
     return pn_splice(replacement, start_item, count_item);
 }
 
-// Positional call arguments are appended verbatim. array_push splices a
-// content list into its receiver (S16.7 content semantics) and list_push also
-// drops nulls, so a dynamic-call argument that happened to be a content list
-// (a split() result) reached fn_call_into as several arguments ("expects 4
-// arguments, got 5") once satellites routed every cross-function call through
-// the dynamic ABI. The builder's array() has no native lane; keep the fallback
-// for any caller that hands one in.
-void array_push_argument(Array* arr, Item item) {
+// The verbatim append (D2.6.5v3): the item is stored as one value whatever it
+// is -- never spliced, dropped or merged. Positional structures use it:
+// argument and rest lists, zip pairs, group/join/order keys and rows, path
+// keys, and element copies (clones, transforms). array_push splices a list
+// into its receiver (S2.5.1v2) and list_push also drops nulls, so a list
+// argument reached fn_call_into as several arguments ("expects 4 arguments,
+// got 5") and a rest list lost arity (`count_args(for …)` was 2, not 1).
+void array_push_verbatim(Array* arr, Item item) {
     if (!arr) return;
-    if (array_has_native_lane(arr)) {
-        array_push(arr, item);
-        return;
-    }
-    if (arr->length >= arr->capacity) {
-        int64_t old_capacity = arr->capacity;
-        expand_list((List*)arr, nullptr);
-        if (arr->capacity <= old_capacity) return;
-    }
-    arr->items[arr->length++] = item;
+    array_append_one(arr, item);
 }
 
 void list_push(List* list, Item item) {
@@ -389,7 +407,7 @@ void list_push(List* list, Item item) {
 
     if (type_id == LMD_TYPE_ARRAY) {
         List* nested = item.array;
-        if (nested && (uintptr_t)nested >= 0x1000 && nested->is_content) {
+        if (nested && (uintptr_t)nested >= 0x1000 && nested->is_spreadable) {
             if (!nested->items) {
                 if (nested->length == 0) return;
                 log_error("list_push: nested list has no backing storage");
@@ -421,7 +439,7 @@ void list_push(List* list, Item item) {
     if (type_id == LMD_TYPE_STRING) {
         Arena* ui_arena = ui_collection_arena();
         bool is_ui = ui_arena != nullptr;
-        if (is_ui && list->is_content) {
+        if (is_ui && list->is_spreadable) {
             item = ui_copy_string_to_arena(ui_arena, item);
         }
 

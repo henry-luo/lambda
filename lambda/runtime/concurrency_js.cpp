@@ -169,7 +169,7 @@ static Item lambda_js_procedure_call(Item env_item, Item rest_args) {
         // An argument list is not element content: list_push would drop a
         // `null` argument and concatenate adjacent string arguments, changing
         // the arity the Lambda procedure is called with (LR09-R3).
-        array_push((Array*)args, js_elements_get_int(args_root.get(), i));
+        array_push_verbatim((Array*)args, js_elements_get_int(args_root.get(), i));
     }
     handle_root.set(lambda_task_start_function(function_root.get(), args));
     if (!lambda_task_handle_is(handle_root.get())) {

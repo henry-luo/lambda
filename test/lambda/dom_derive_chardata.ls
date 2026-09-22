@@ -16,11 +16,11 @@ fn d_text_content(n) string | error {
   else join([for (k in d_child_nodes(n)) d_text_content(k)], "")
 }
 
-fn descendants(n) { for (c in d_child_nodes(n)) (c, descendants(c)) }
+fn descendants(n) { [for (c in d_child_nodes(n)) (c, *descendants(c))] }
 
 let doc = dom.load("test/js/dom_identity.html")
 let root = dom.document_element(doc)
-let nodes = (root, descendants(root))
+let nodes = [root, *descendants(root)]
 
 {
   nodes_checked: len(nodes),

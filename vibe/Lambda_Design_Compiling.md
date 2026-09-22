@@ -10,7 +10,9 @@
 > [`Lambda_Tune_Typed_Vs_C2MIR.md`](Lambda_Tune_Typed_Vs_C2MIR.md) (M1–M8 measured evidence),
 > [`Lambda_Design_Type_Enforcement.md`](Lambda_Design_Type_Enforcement.md),
 > [`impl/Lambda_Issue_Type_Support (retired).md`](impl/Lambda_Issue_Type_Support%20(retired).md) (TS-1..TS-9),
-> [`Lambda_Design_MIR_Cache_L3.md`](Lambda_Design_MIR_Cache_L3.md).
+> [`Lambda_Design_MIR_Cache_L3.md`](Lambda_Design_MIR_Cache_L3.md),
+> [`Lambda_Design_Compile_Pipeline.md`](Lambda_Design_Compile_Pipeline.md) (LC3.1–LC3.8 — front-end build-time tuning; the pipeline stage map and compile-time measurements live there),
+> [`Lambda_Design_Compiling_Pipeline_JS.md`](Lambda_Design_Compiling_Pipeline_JS.md) (LC4.1–LC4.12 — LambdaJS pipeline alignment with Lambda, shared index query layer, JS lowering pathologies, default-backend question).
 
 ---
 

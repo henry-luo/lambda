@@ -86,7 +86,7 @@ pub fn tc_selection(node) {
 }
 
 // Setting a text control's value is a state write; there is nothing else to it.
-pub fn tc_set_value(node, value) { dom.set_state(node, "value", value) }
+pub pn tc_set_value(node, value) { dom.set_state(node, "value", value) }
 
 // Where an edit would land in a contenteditable host: the resolved node and the
 // offsets within it. Null when there is no editing position at all, so callers

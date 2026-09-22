@@ -1,0 +1,6 @@
+digraph DefaultRender {
+  graph [rankdir=LR]
+  a [shape=box]
+  b [shape=box]
+  a -> b [label="go"]
+}

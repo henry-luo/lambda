@@ -18,13 +18,13 @@ import dom
 // repaint with it. reflect() runs on every keystroke, so writing unconditionally
 // would mean four DOM mutations per character — and it showed up immediately as
 // an extra repaint rect in the state dump.
-fn set_if_changed(elem, name, want) {
+pn set_if_changed(elem, name, want) {
     if (dom.get_attribute(elem, name) != want) { dom.set_attribute(elem, name, want) }
     else { false }
 }
 
 // Present-or-absent mirrors: the attribute carries meaning only when true.
-fn flag(elem, name, present) {
+pn flag(elem, name, present) {
     set_if_changed(elem, name, if (present) "true" else null)
 }
 

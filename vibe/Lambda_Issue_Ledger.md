@@ -165,7 +165,16 @@ The survey's spec gaps (behaviour no `S#` ruling covers) are not filed here —
 they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
 (S2.5.6–S2.5.8, S10.6.1, S11.1.6 and companions, semantics 29.0.0) and filed as
 [LR03-12](#lr03-12), [LR05-10](#lr05-10), [LR05-11](#lr05-11),
-[LR05-12](#lr05-12), [LR12-28](#lr12-28).
+[LR05-12](#lr05-12), [LR12-28](#lr12-28). P1 of the list fixes then found
+[LR02-18](#lr02-18) (reference grammar has no list literal) and fixed
+[LR02-19](#lr02-19) (let-group item loss, another wrong value with no error).
+The effect-colour work of the same day (D7.4.6, ES48) fixed
+[LR12-30](#lr12-30) (an `fn` could call a built-in procedure). Moving the
+effect examples into a `pn` found [LR10-9](#lr10-9): E228 is checked only in
+top-level expression statements. Triaging the baseline gate against a clean control
+then found and fixed [LR01-16](#lr01-16), an `auto`-tier satellite key-linking
+defect that made 17 baseline scripts and the MathLive gate timing-dependent, and
+filed [LR01-17](#lr01-17).
 
 ---
 
@@ -222,6 +231,100 @@ construct a temporary `EvalContext`, hand it the retained `heap` / `name_pool` /
 `type_list`, and rely on releasing the name pool only *after* heap destruction
 (`:1825`, `:1939`). The ordering and the temporary-context trick are required
 and are not free to reorder.
+
+<a id="lr01-14"></a>**LR01-14 · A rebuilt `lang-python` module bound `_map_read_field` by its C name · FIXED 2026-09-22**
+`py_runtime.h` included `lambda-data.hpp` inside its own `extern "C"` block,
+so that header's C++ declarations took C linkage in the Python module alone.
+Once 22911fb88 (2026-09-18) declared `_map_read_field` there, a freshly built
+`lang-python.dylib` imported `__map_read_field`, which `lambda.exe` does not
+export (`-undefined dynamic_lookup` bound it to null), and the first class
+definition crashed (`test_py_gtest` 13 of 43 at SIGSEGV; the dylib in use had
+been built before that commit, which hid it). The header now includes
+`lambda-data.hpp` first, outside the block, and the rebuilt module imports
+the C++ name: `test_py_gtest` 39 of 43. The remaining four fail identically
+on a clean build of upstream HEAD `bb3909e36` with the same header fix:
+`test_py_advanced_oop` prints `[]` for its plugin registry
+("py-call-into: unsupported MIR public function dispatch"), and
+`test_py_import`, `test_py_packages`, `test_py_pkg_simple` crash on import.
+
+<a id="lr01-15"></a>**LR01-15 · `test-batch` reset the heap under an in-flight satellite compile · FIXED 2026-09-22**
+After each script, `test-batch` calls `runtime_reset_heap` and only then
+`runtime_teardown_batch_scripts`, which is where a script's satellite queue
+was retired and awaited. A worker still lowering the finished script
+(`interp_satellite_compile_job`) read types the reset had freed and crashed in
+`find_shape_field_by_name` (SIGSEGV at 0x7), killing every later script in
+that batch. `run mutation_limits.ls` followed by `nesting_limits.ls` crashed
+3 of 10 runs on the pre-rebase HEAD, 0 of 10 on `bb3909e36`, and 7 of 10 with
+P1 of the list fixes (timing), taking out 41 of 105 `test_lambda_std_gtest`
+cases. `runtime_reset_heap` now quiesces satellite workers first, as
+`runtime_cleanup` already did (see [LR01-13](#lr01-13)): 0 of 10, and the std
+suite passes 105 of 105 in three runs.
+
+<a id="lr01-16"></a>**LR01-16 · The `auto` tier's output changed from run to run · FIXED 2026-09-22**
+Seventeen `test-lambda-baseline` scripts passed with `LAMBDA_TIER=jit` and with
+`LAMBDA_TIER=interp`, three runs each, but failed nondeterministically under the
+default `auto` tier. `editor/commands_basic` differed from its golden by 58, 15
+and 51 lines in three runs, and `graphviz/parser` sometimes passed. The
+affected scripts:
+- `dom_edit_protocol`;
+- eight `editor/*` scripts (`commands_basic`, `dom_adapter`,
+  `drawing_block_integration`, `editor_api_basic`, `input_intent_basic`,
+  `list_autoformat`, `multi_node_delete`, `paste_basic`);
+- six `graph/*` scripts (`graphviz/formatter`, `ordering_groups`, `parser`,
+  `route_classes`, `suite`, `structurizr/reference_semantics`);
+- two `pdf/*` scripts (`phase1_multipage`, `phase8_invoice_fixtures`).
+
+Other symptoms had the same cause:
+- The MathLive markup gate passed 279–485 of 921 cases under `auto`.
+- `graph/mermaid/scene_render` lost an edge in some runs.
+- `gc_shape_any_lane.ls` reported `nodes: 2` under forced GC, where forced GC
+  only shifted the timing.
+
+The pre-P1 binary already failed this way.
+
+**Root cause.** A satellite image reads member names through its own suffix of
+the module slab's property-key table: `lambda_module_name_id_at(state, base +
+i)`. The base was an immediate taken while compiling,
+`lambda_module_state_property_key_count()` on the pool worker. That
+thread-local read saw no runtime and returned 0. Publication
+(`lambda_module_state_prepare_layout`) then treated any count other than the
+base as "suffix already linked" and appended nothing. So the first image to
+publish owned the table, and every later image resolved its names through the
+first one's keys. In the reduced repro, `ensure` read `st.nodes` as `st.id`
+(`null`) and rebuilt the list. An image that did not use any other image's
+keys stayed correct, which is why publication timing picked the failures.
+Each tier alone was correct because only `auto` publishes worker images.
+
+**Fix** (D8.1.1v12, D8.5.1v7):
+- The base is placed at publication and recorded in the layout's new
+  `property_key_base` cell.
+- Generated satellite code loads it from its own `_sat_N_layout`, so the
+  worker reads no receiving-runtime state.
+- Publication links by content: a slab that already holds the image's key IDs
+  at the recorded base keeps them; otherwise the suffix is appended and its
+  base recorded.
+
+**Results.** All 17 scripts and mermaid pass 3 of 3 under `auto`. MathLive
+passes 921/921 on `auto` in three runs, and its `baseline.txt` is raised from
+206 to 921 cases. A new test hook, `LAMBDA_SATELLITE_SYNC=1`, publishes at the
+promoting call. With it, `test/lambda/satellite_property_keys.ls` and
+`gc_shape_any_lane.ls` fail deterministically on the old code and pass on the
+fix, at `LAMBDA_JIT_THRESHOLD` 1 and 5
+(`LambdaTierParityTests.SatellitePublicationKeepsPropertyKeys`). After the fix, `test-lambda-baseline` keeps
+only failures that predate it, the UI baseline suite passes 119/119, and the
+UI DOM suite passes 127/127. That includes `codemirror_type`,
+`pkg_context_menu`, `pkg_focus_policy` and `pkg_keyboard_activation`, which
+failed in the earlier colour-work run and had been filed as pre-existing.
+
+<a id="lr01-17"></a>**LR01-17 · The interpreter tier rejects task handles (E312) · OPEN (found 2026-09-22)**
+Thirteen `test/lambda/conc/*` scripts and three `proc/*` async scripts
+(`proc_async_partial_item_gc`, `proc_local_error_destructure_async`,
+`wide_scalar_across_await`) pass with `LAMBDA_TIER=jit`. They fail with
+`LAMBDA_TIER=interp` and under `auto`, which starts them in the interpreter.
+`conc/start_wait` reports `error[E312]: invalid task handle`. This is
+pre-existing: the pre-P1 binary fails identically on `interp` and `auto`.
+Either the interpreter must run S13 tasks, or `auto` must not admit a script
+that starts one.
 
 ---
 
@@ -290,6 +393,32 @@ builtin whenever `key` happened to spell one, instead of `null`. Any future
 change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
+
+<a id="lr02-18"></a>**LR02-18 · The Tree-sitter reference grammar has no list literal (S2.5.1v2, S2.5.5v2) · OPEN (found 2026-09-22)**
+`grammar.js` `_parenthesized_expr` admits one expression, optionally after
+`let` bindings, so `(1, 2)` parses as `ERROR` in the `lambda-cst` verifier's
+grammar (checked with `tree-sitter parse`, 2026-09-22); `()` is rejected with
+it. The C parser accepts both (`()` since P1 of
+[List Fixes](impl/Lambda_List_Fixes.md)). Neither conformance script
+(`test/ts_s16_conformance.sh`, `test/c_s16_conformance.sh`) has a list case,
+so the divergence is unguarded. Fix belongs with the grammar work of P5
+(`make generate-grammar`), with accept cases for `()`, `(a, b)` and
+`(let x = 1, x, 2)` in both scripts.
+
+<a id="lr02-19"></a>**LR02-19 · A let-group kept only its last item; a lone declaration was a value (S2.5.4, S2.5.5v2) · FIXED 2026-09-22**
+`direct_let_group` (`build_ast.cpp`) kept one non-declaration item — the
+last — so `(let x = 1, x, 2)` was `2` and `(1, let x = 2, x)` was `2`, on
+both tiers and on HEAD; both evaluators already build a list from
+declarations plus several items, so only the builder was wrong. A group
+with a single declaration skipped the let-group path and evaluated the
+declarator itself (`(let x = 5)` was `5`), and a block holding a single
+declaration took that declaration's type, so `[{ let x = 5 }, 9]` took the
+compact int lane and was `[0, 9]` on the interpreter. All three now follow
+the ruling: every non-declaration item stays, a declaration-only group or
+block is `null` and splices nothing in an item position. No script or
+package in the corpus used a multi-item let-group or a lone-declaration
+group (instrumented scan, 2026-09-22). Fixture:
+`test/lambda/list_declarations.ls`.
 
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
@@ -448,6 +577,18 @@ helper (`array_transform_copy_cert` is the nearest hook, `lambda-vector.cpp:165`
 value-decided spreading, collapse at every list-producing site.
 Implementation plan: [`vibe/impl/Lambda_List_Fixes.md`](impl/Lambda_List_Fixes.md)
 (also covers LR05-11, LR05-12, LR12-28, LR03-12, LR05-9 and the S2.6 content gaps).
+*Partially resolved 2026-09-22 (P1):* one kind bit, value-decided spreading,
+position-decided finish (void vs null), for-expression collapse, no list
+normalization, `()`, `type()`/`is list`; the per-function result kinds (P2)
+remain. Making `array_push` splice every list (it had spliced only
+`is_content` lists) exposed the positional sites that had relied on for-lists
+not splicing: a for-expression passed as one argument was spliced into the
+rest list (`count_args(for (x in [1, 2]) x)` was 2, the LR09-9 invariant).
+Every positional site — rest and argument lists (JIT, dynamic-call adapter,
+JS timer packs, concurrency args), group/join/order keys and rows, path keys,
+query matches, clones, set operators, element-copying transforms, `zip`,
+index-addressed vector results, and the hosted-Python list operations — now
+uses the verbatim append `array_push_verbatim` (D2.6.5v3).
 
 <a id="lr05-11"></a>**LR05-11 · Text sequence operations, `that`/pipe on scalars, and `++` do not follow S2.5.8, S10.1.2v2, S10.1.5v2, S10.6.1 · OPEN (found 2026-09-22)**
 `reverse`/`sort`/`unique` return a string unchanged (`lambda-vector.cpp:2396`,
@@ -652,6 +793,29 @@ found `error({code: 42, message: "m"})` reading back as `318` / `"Error"`.
 function return (E201) and the handler yields `0`. A binding declared `int`
 holds a string — violates **SI14** and **S1.6**. What `raise` may accept is
 itself unruled.
+
+<a id="lr10-9"></a>**LR10-9 · E228 is checked only in top-level expression statements · OPEN (found 2026-09-22)**
+**S7.5.1** requires a call with a `^` channel to be engaged at the immediate
+expression everywhere, and **S7.5.2** says a bare `let x = a()` never
+acknowledges. The E228 walk (`validate_enforcing_calls_in_expression`,
+`build_ast.cpp`) is entered only once per top-level item. It has no case for
+`let`/`var`/`pub` statements (the `VARIABLE_DECLARATOR` case is unreachable
+from a script) or for `for` in either form, and it returns at every `fn`/`pn`
+node. `if` bodies are walked. Inside an `fn`, E208 catches only an error that
+reaches the return value. So all of these compile with no diagnostic:
+`let x = risky()` at the top level, `for i in xs { risky() }`,
+`io.mkdir("out")` as a statement in `pn main()`, and `let a = risky(); 5`
+inside an `fn`. The existing E228
+fixtures (`type_e228_acknowledgment.ls`,
+`negative/semantic/unhandled_error_expression.ls`,
+`std/negative/unhandled_error.ls`) test only top-level expression statements,
+and the positive fixture's in-function cases are never walked. Closing the gap
+has a wide reach: by **S7.4.5** `input` raises, so every
+`let data = input(...)` would become E228. That is 165 sites in 109
+test/package files and 63 in the docs. `doc/Lambda_Error_Handling.md`
+"Handling System Function Errors" (`error=E228`) fails `check_doc_blocks.py`
+until this is fixed: its `io.mkdir` example moved into a `pn` with LR12-30, and
+neither remaining ❌ line is reported.
 
 ## 11. Mark data API (LR_11)
 
@@ -1186,6 +1350,42 @@ literal spreads it (`[…, e.a]` gains two items); S2.5.6 rules that a
 single-value slot of a persistent container stores the array image `[1, 2]`.
 `fill(2, (1, 2))` stores the list as one element twice (`len` 2) where S2.5.7
 rules the list `(1, 2, 1, 2)` (`len` 4). Both tiers.
+
+<a id="lr12-29"></a>**LR12-29 · The interpreter ran `on` handler bodies as functional blocks (S12.1.3, S2.5.3) · FIXED 2026-09-22**
+An `on` handler is a `pn` (S12.1.3), so its body yields its last value
+(S2.5.3). MIR compiles every handler with `in_proc` set, but the interpreter
+ran handler bodies in a frame with no `fn` node, so `eval_content` built the
+body as a list. That was invisible while blocks normalized like content. Once
+P1 of the list fixes made blocks keep `null`, the `<input>` keydown handler
+in `dom/form.ls` returned `(null, verdict)` — its `if (…) { return … }`
+without an `else` contributed the `null` — and the truthy list read as
+"handled", so the document-level paste shortcut never ran (paste into a text
+field was a no-op; `rsc_scale_context_menu_matrix`, `dom_pkg_paste_ime`).
+Handler frames now carry `proc_handler`, which `eval_content` treats like a
+`pn` frame.
+
+<a id="lr12-30"></a>**LR12-30 · An `fn` can call a built-in procedure (S12.1.1v2) · FIXED 2026-09-22**
+`fn f() => print("x")`, `output(…)`, `cmd(…)` and `today()` all compiled and
+ran from `fn` context, including the module top level. The colour walk
+(`colour_walk_call`, `build_ast.cpp`) skipped every system function, although
+these rows are `is_proc` in `sys_func_defs`. The walk now reads `is_proc` for
+every system-function callee, built-in rows and host-module `pn(...)` Jube
+rows (D7.4.6, ES48) alike, and reports E224. A name with both colours
+(`call`) has already resolved to its `fn` row by then. Reliance sites migrated
+with the fix:
+
+| Reliance on built-in procedures in `fn` context | Sites | Migration |
+|---|---|---|
+| Documentation examples (`check_doc_blocks.py`), mostly top-level `print` | 21 | effects moved into a `pn` (`pn main()`, or a named `pn`); three functional showcase scripts in `Lambda_Reference.md` now end with their value instead of printing it |
+| Test scripts (`input_md_simple`, `input_rst`, `datetime_funcs`), none gated | 19 | rewritten as `pn main()` |
+
+A compile-only scan of every tracked `.ls` outside `negative/` (1,708 files,
+the 168 package modules through import drivers) finds no remaining site.
+Still open around the fix: `now` and `today` are unimplemented (`func_ptr`
+NULL; any call fails with "import of undefined item pn_today"), while the
+0-argument `datetime()` and `justnow()` read the same clock but are registered
+`fn`, and the `log_*` family is `fn` although it writes the log. Which of these
+are effects is unruled.
 
 ## 13. Schema validator (LR_13)
 

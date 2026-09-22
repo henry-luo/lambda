@@ -3,13 +3,19 @@
 // py_runtime.h — C API for Python runtime functions callable from JIT code
 // All functions take and return Lambda Item values (64-bit tagged).
 
+// lambda-data.hpp declares its own linkage: its C block covers lambda.h and
+// the core headers, and the rest is C++, as lambda.exe compiles it. Included
+// inside the extern "C" block below, those C++ declarations took C linkage in
+// this module alone -- `_map_read_field` bound to a name lambda.exe does not
+// export, and the first class definition called through a null pointer. It
+// must come first so lambda.h is not first seen outside any C block.
+#include "../../../lambda-data.hpp"
+#include "../../../lambda.h"
+#include "../../../jube/jube.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "../../../lambda.h"
-#include "../../../lambda-data.hpp"
-#include "../../../jube/jube.h"
 
 // ========================================================================
 // Type conversion

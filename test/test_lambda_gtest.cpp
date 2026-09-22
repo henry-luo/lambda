@@ -333,6 +333,50 @@ TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
     }
 }
 
+// Sets an environment variable for the child scripts of one test and restores
+// the previous value when the test leaves scope, even through an assertion.
+class ScopedTestEnv {
+    const char* name_;
+    char* saved_;
+
+public:
+    ScopedTestEnv(const char* name, const char* value) : name_(name) {
+        const char* previous = shell_getenv(name);
+        saved_ = previous ? strdup(previous) : NULL;
+        shell_setenv(name, value);
+    }
+    ~ScopedTestEnv() {
+        if (saved_) shell_setenv(name_, saved_);
+        else shell_unsetenv(name_);
+        free(saved_);
+    }
+    ScopedTestEnv(const ScopedTestEnv&) = delete;
+    ScopedTestEnv& operator=(const ScopedTestEnv&) = delete;
+};
+
+// LR01-16: the auto tier hands a function to its satellite whenever a worker
+// finishes, so a defect in how satellites are published appears only for some
+// timings. LAMBDA_SATELLITE_SYNC pins each hand-off to the promoting call, and
+// the two thresholds move that call. Both fixtures read properties through
+// several satellites whose key suffixes are placed at publication (D8.5.1v7).
+TEST(LambdaTierParityTests, SatellitePublicationKeepsPropertyKeys) {
+    static const TierParityFixture fixtures[] = {
+        {"test/lambda/satellite_property_keys.ls", "test/lambda/satellite_property_keys.txt"},
+        {"test/lambda/gc_shape_any_lane.ls", "test/lambda/gc_shape_any_lane.txt"},
+    };
+    static const char* const thresholds[] = {"1", "5"};
+    ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
+    for (const char* threshold : thresholds) {
+        ScopedTestEnv jit_threshold("LAMBDA_JIT_THRESHOLD", threshold);
+        for (const TierParityFixture& fixture : fixtures) {
+            char trace[256];
+            snprintf(trace, sizeof(trace), "%s at threshold %s", fixture.script, threshold);
+            SCOPED_TRACE(trace);
+            test_lambda_script_against_file(fixture.script, fixture.expected, false, "auto");
+        }
+    }
+}
+
 // Tune31 T31-1: a nested counter initialized from the compact outer counter
 // must retain its native arithmetic in every execution tier (S4.1.1-S4.1.5).
 TEST(LambdaTune31Tests, NestedCounterAgreesOnEveryTier) {

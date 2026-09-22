@@ -32,9 +32,9 @@ pub fn parse_chart(chart_el) {
     // parse data: support both {values: [...]} and inline <row> children
     let data = if (data_el and data_el.values) data_el.values
         else if (data_el and len(data_el) > 0)
-            (for (i in 0 to (len(data_el) - 1),
+            [for (i in 0 to (len(data_el) - 1),
                   let child = data_el[i]
-                  where child != null) child)
+                  where child != null) child]
         else null;
 
     // parse mark
@@ -67,9 +67,9 @@ pub fn parse_chart(chart_el) {
 // ============================================================
 
 fn find_child(parent_el, tag_name, count) {
-    let matches = (for (i in 0 to (count - 1),
+    let matches = [for (i in 0 to (count - 1),
                         let child = parent_el[i]
-                        where child and name(child) == tag_name) child)
+                        where child and name(child) == tag_name) child]
     if (len(matches) > 0) matches[0] else null
 }
 
@@ -164,9 +164,9 @@ fn parse_channel(ch_el) {
 
 fn parse_layer(layer_el) {
     let count = len(layer_el);
-    (for (i in 0 to (count - 1),
+    [for (i in 0 to (count - 1),
           let child = layer_el[i]
-          where name(child) == 'chart') parse_chart(child))
+          where name(child) == 'chart') parse_chart(child)]
 }
 
 // ============================================================
@@ -190,9 +190,9 @@ pub fn parse_concat(concat_el) {
     let direction = if (name(concat_el) == 'hconcat') "horizontal" else "vertical";
     let spacing = if (concat_el.spacing) concat_el.spacing else 20;
     let count = len(concat_el);
-    let children = (for (i in 0 to (count - 1),
+    let children = [for (i in 0 to (count - 1),
                          let child = concat_el[i]
-                         where child != null) parse_top(child));
+                         where child != null) parse_top(child)];
     {
         concat: direction,
         spacing: spacing,
@@ -206,14 +206,14 @@ pub fn parse_concat(concat_el) {
 
 pub fn parse_repeat(repeat_el) {
     let count = len(repeat_el);
-    let children = for (i in 0 to (count - 1),
+    let children = [for (i in 0 to (count - 1),
                         let child = repeat_el[i]
-                        where child != null) child;
-    let row_el = (for (c in children where name(c) == 'row') c);
-    let col_el = (for (c in children where name(c) == 'column') c);
+                        where child != null) child];
+    let row_el = [for (c in children where name(c) == 'row') c];
+    let col_el = [for (c in children where name(c) == 'column') c];
     let row_fields = if (len(row_el) > 0) row_el[0][0] else null;
     let col_fields = if (len(col_el) > 0) col_el[0][0] else null;
-    let template = (for (c in children where name(c) == 'chart') c);
+    let template = [for (c in children where name(c) == 'chart') c];
     let tmpl = if (len(template) > 0) template[0] else null;
     {
         repeat_row: row_fields,

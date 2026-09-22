@@ -127,12 +127,14 @@ let schema = load_schema("schema.lmd", "Person")
 let person_data = {name: "Alice", age: 30}
 let result = validate(schema, person_data)
 
-if (result.valid) {
-    print("Validation passed")
-} else {
-    print("Validation failed:")
-    for (err in result.errors) {
-        print("  - " + err.message + " at " + err.path)
+pn main() {                  // print is a pn: only a pn may call it
+    if (result.valid) {
+        print("Validation passed")
+    } else {
+        print("Validation failed:")
+        for (err in result.errors) {
+            print("  - " ++ err.message ++ " at " ++ err.path)
+        }
     }
 }
 ```

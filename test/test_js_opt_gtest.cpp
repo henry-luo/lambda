@@ -74,6 +74,9 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "named_fast_probe",
     "named_fast_hit",
     "named_fast_miss",
+    "named_fast_no_entry_own",
+    "named_fast_no_entry_absent",
+    "named_fast_array_length",
     "named_fast_string_length",
     "named_fast_data_descriptor",
     "named_fast_no_receiver_string",
@@ -89,6 +92,7 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "mir_native_index_admitted",
     "mir_native_index_fallback",
     "mir_dense_index_admitted",
+    "mir_array_length_admitted",
     "mir_packed_strict_equal",
     "mir_loop_stable_name_id",
     "mir_light_call",
@@ -103,6 +107,10 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "typed_number_read",
     "own_enumerability_inspect",
     "mir_literal_field_admitted",
+    "reserved_constructor_store",
+    "reserved_constructor_direct_store",
+    "ordinary_data_store",
+    "dynamic_item_store",
     "static_numeric_array_initializer",
     "static_object_initializer",
     "string_search_ascii",
@@ -1046,6 +1054,80 @@ TEST(JsOpt, NativeAliasCompoundAssignmentKeepsGenericSemantics) {
     expect_trace_off_same("native_alias_compound", source, output);
 }
 
+TEST(JsOpt, NativeForInitializerAliasKeepsGenericSemantics) {
+    const char* source =
+        "function sumUntil(start) {\n"
+        "  let total = 0;\n"
+        "  for (let cursor = start; cursor < 5; cursor += 1) total += cursor;\n"
+        "  return total;\n"
+        "}\n"
+        "let coercions = 0;\n"
+        "let numeric = { valueOf() { coercions++; return 2; } };\n"
+        "if (sumUntil(2) !== 9 || sumUntil(2.5) !== 10.5 ||\n"
+        "    sumUntil('x') !== 0 || sumUntil(numeric) !== 9 || coercions !== 3)\n"
+        "  throw new Error('for initializer alias changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("native_for_initializer_alias", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("native_for_initializer_alias");
+    ASSERT_NE(mir, nullptr);
+    const char* native_end = NULL;
+    const char* native = find_mir_function(mir, "_js_sumUntil_", &native_end);
+    ASSERT_NE(native, nullptr);
+    ASSERT_NE(native_end, nullptr);
+    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
+    EXPECT_NE(strstr(native, "\n\tdlt\t"), nullptr);
+    const char* add = strstr(native, "\n\tcall\tjs_add");
+    EXPECT_FALSE(add && add < native_end);
+    free(mir);
+    expect_trace_off_same("native_for_initializer_alias", source, output);
+}
+
+TEST(JsOpt, BoxedBodyClosedNumberLocalKeepsDynamicArgumentsGeneric) {
+    const char* source =
+        "function countTo(limit) {\n"
+        "  let total = 0;\n"
+        "  for (let index = 0; index < limit; index += 1) total += index;\n"
+        "  return total;\n"
+        "}\n"
+        "function addOne(value) { let local = value; local += 1; return local; }\n"
+        "let coercions = 0;\n"
+        "let numeric = { valueOf() { coercions++; return 3; } };\n"
+        "if (countTo(4) !== 6 || countTo('3') !== 3 || countTo(numeric) !== 3 ||\n"
+        "    addOne('x') !== 'x1' || addOne(numeric) !== 4 || coercions !== 5)\n"
+        "  throw new Error('boxed closed number local changed semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("boxed_closed_number_local", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("boxed_closed_number_local");
+    ASSERT_NE(mir, nullptr);
+    const char* count_end = NULL;
+    const char* count = find_mir_function(mir, "_js_countTo_", &count_end,
+        "_body:\tfunc");
+    ASSERT_NE(count, nullptr);
+    ASSERT_NE(count_end, nullptr);
+    EXPECT_NE(strstr(count, "\n\tdadd\t"), nullptr);
+    const char* increment = strstr(count, "\n\tcall\tjs_increment");
+    EXPECT_FALSE(increment && increment < count_end);
+    const char* add_end = NULL;
+    const char* add = find_mir_function(mir, "_js_addOne_", &add_end,
+        "_body:\tfunc");
+    ASSERT_NE(add, nullptr);
+    ASSERT_NE(add_end, nullptr);
+    const char* generic_add = strstr(add, "\n\tcall\tjs_add");
+    EXPECT_TRUE(generic_add && generic_add < add_end);
+    free(mir);
+    expect_trace_off_same("boxed_closed_number_local", source, output);
+}
+
 TEST(JsOpt, RuntimeHelperCensusKeepsGenericCoercionAndIndexSemantics) {
     const char* source =
         "function bump(value) { return value++; }\n"
@@ -1211,6 +1293,46 @@ TEST(JsOpt, MirNativeNumberIndexKeepsKeyUnboxed) {
     expect_trace_off_same("mir_native_index", source, output);
 }
 
+TEST(JsOpt, BoxedNumericArrayKeyKeepsDenseReadAndPropertyFallback) {
+    const char* source =
+        "function repeatedRead(table, wrapped) {\n"
+        "  let total = 0;\n"
+        "  for (let index = 0; index < 128; index += 1) total += table[wrapped[0]];\n"
+        "  return total;\n"
+        "}\n"
+        "const table = [11, 22]; table.true = 7; table['1.5'] = 9; table['01'] = 5;\n"
+        "const numeric = [1]; const zero = [0]; const truthy = [true]; const fractional = [1.5]; const text = ['01'];\n"
+        "const hole = new Array(1); Object.prototype[0] = 33;\n"
+        "const result = repeatedRead(table, numeric) === 2816 &&\n"
+        "  repeatedRead(table, truthy) === 896 && repeatedRead(table, fractional) === 1152 &&\n"
+        "  repeatedRead(table, text) === 640 &&\n"
+        "  repeatedRead(hole, zero) === 4224 && hole[0] === 33;\n"
+        "delete Object.prototype[0];\n"
+        "if (!result) throw new Error('boxed numeric key changed property semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("boxed_numeric_array_key", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
+
+    char* mir = read_fixture_mir("boxed_numeric_array_key");
+    ASSERT_NE(mir, nullptr);
+    const char* repeated_end = NULL;
+    const char* repeated = find_mir_function(mir, "_js_repeatedRead_",
+        &repeated_end, "_body:\tfunc");
+    ASSERT_NE(repeated, nullptr);
+    ASSERT_NE(repeated_end, nullptr);
+    const char* dense = strstr(repeated,
+        "call\tjs_array_get_existing_own_dense_with_props_or_missing");
+    EXPECT_TRUE(dense && dense < repeated_end);
+    const char* fallback = strstr(repeated, "call\tjs_get_reference");
+    EXPECT_TRUE(fallback && fallback < repeated_end);
+    free(mir);
+    expect_trace_off_same("boxed_numeric_array_key", source, output);
+}
+
 TEST(JsOpt, MirLiteralFieldPlanUsesExactShape) {
     const char* source =
         "function literalFields() {\n"
@@ -1307,9 +1429,9 @@ TEST(JsOpt, RecursiveLiteralReturnShapeUsesGuardedMapSlots) {
 
 TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     const char* source =
-        "var ascii = 'ab,cd'; var unicode = 'A😀,B';\n"
-        "var value = ascii.indexOf('b') + ascii.split(',').length + ascii.slice(1).length +\n"
-        "  ascii.charCodeAt(0) + (ascii + 'z').length;\n"
+        "var ascii = 'ab,cd'; var asciiNeedle = new String('b'); var unicode = 'A😀,B';\n"
+        "var value = ascii.indexOf(asciiNeedle) + ascii.split(',').length + ascii.slice(1).length +\n"
+        "  ascii.charCodeAt(0.5) + (ascii + 'z').length;\n"
         "value += unicode.indexOf('😀') + unicode.split(',').length + unicode.slice(1).length +\n"
         "  unicode.charCodeAt(1) + (unicode + 'z').length;\n"
         "var escaped = '%' + 'F'; escaped = escaped + '0'; escaped = escaped + '%';\n"
@@ -1337,6 +1459,38 @@ TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_ASCII][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_UNICODE][1], 0u);
     expect_trace_off_same("string_leaves", source, output);
+}
+
+TEST(JsOpt, MirAsciiStringCallsKeepCapabilityFallback) {
+    const char* source =
+        "function scan(text, needle, index) { return text.indexOf(needle) + text.charCodeAt(index); }\n"
+        "if (scan('trace', 'a', 1) !== 116) throw new Error('ASCII intrinsic miss');\n"
+        "var original = String.prototype.indexOf; var calls = 0;\n"
+        "String.prototype.indexOf = function(value) { calls += 1; return value === 'a' ? 40 : -1; };\n"
+        "if (scan('trace', 'a', 1) !== 154 || calls !== 1) throw new Error('replacement bypassed');\n"
+        "String.prototype.indexOf = original;\n"
+        "if (scan('tracé', 'é', 4) !== 237)\n"
+        "  throw new Error('Unicode fallback changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_ascii_string_call", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("mir_ascii_string_call");
+    ASSERT_NE(mir, nullptr);
+    const char* scan_end = NULL;
+    const char* scan = find_mir_function(mir, "_js_scan_", &scan_end,
+        "_body:\tfunc");
+    ASSERT_NE(scan, nullptr);
+    ASSERT_NE(scan_end, nullptr);
+    const char* leaf = strstr(scan, "js_try_ascii_string_builtin_no_gc");
+    EXPECT_TRUE(leaf && leaf < scan_end);
+    const char* fallback = strstr(scan, "\n\tcall\tjs_call");
+    EXPECT_TRUE(fallback && fallback < scan_end);
+    free(mir);
+    expect_trace_off_same("mir_ascii_string_call", source, output);
 }
 
 TEST(JsOpt, AsciiSubstringValueCacheReusesLeaves) {
@@ -1753,6 +1907,8 @@ TEST(JsOpt, DynamicConstructorFieldsReuseReservedShapeTransitions) {
     ASSERT_TRUE(run_fixture("dynamic_constructor_fields", source, &trace,
         output, sizeof(output)));
     expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_STORE][2], 0u);
 
     char* mir = read_fixture_mir("dynamic_constructor_fields");
     ASSERT_NE(mir, nullptr);
@@ -1760,6 +1916,64 @@ TEST(JsOpt, DynamicConstructorFieldsReuseReservedShapeTransitions) {
     EXPECT_NE(strstr(mir, "js_set_name_id"), nullptr);
     free(mir);
     expect_trace_off_same("dynamic_constructor_fields", source, output);
+}
+
+TEST(JsOpt, ReservedConstructorStoresKeepSetFallbackAndSingleRhsEvaluation) {
+    const char* source =
+        "var calls = 0; var captured = null; var seen = 0;\n"
+        "function next(tag) { calls++; return { tag: tag, call: calls }; }\n"
+        "class ReservedStorePlan {\n"
+        "  constructor() {\n"
+        "    this.first = next('first');\n"
+        "    this.second = next('second');\n"
+        "  }\n"
+        "}\n"
+        "Object.defineProperty(ReservedStorePlan.prototype, 'first', {\n"
+        "  set: function(value) {\n"
+        "    seen = value.call; captured = this; Object.preventExtensions(this);\n"
+        "  }, configurable: true\n"
+        "});\n"
+        "var threw = false;\n"
+        "try { new ReservedStorePlan(); }\n"
+        "catch (error) { threw = error instanceof TypeError; }\n"
+        "if (!threw || calls !== 2 || seen !== 1 || !captured ||\n"
+        "    Object.hasOwn(captured, 'first') || Object.hasOwn(captured, 'second') ||\n"
+        "    Object.keys(captured).length !== 0) throw new Error('reserved store');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("reserved_constructor_store_set_fallback", source,
+        &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_STORE][2], 0u);
+    EXPECT_EQ(trace.events[JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE][0], 0u);
+    expect_trace_off_same("reserved_constructor_store_set_fallback", source,
+        output);
+}
+
+TEST(JsOpt, OrdinaryDataStorePublishesChangingPlainFieldTypes) {
+    const char* source =
+        "class StorePlan {\n"
+        "  constructor() { this.slot = null; }\n"
+        "  replace(value) { this.slot = value; return this.slot; }\n"
+        "}\n"
+        "var plan = new StorePlan();\n"
+        "var objectValue = { marker: 7 };\n"
+        "if (plan.replace(3) !== 3 || plan.replace(objectValue) !== objectValue ||\n"
+        "    plan.replace(undefined) !== undefined ||\n"
+        "    (Object.preventExtensions(plan), plan.replace('done')) !== 'done' ||\n"
+        "    plan.slot !== 'done' ||\n"
+        "    Object.keys(plan).join(',') !== 'slot')\n"
+        "  throw new Error('plain data store changed field semantics');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("ordinary_data_store_type_transition", source,
+        &trace, output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_DYNAMIC_ITEM_STORE][1], 0u);
+    expect_trace_off_same("ordinary_data_store_type_transition", source,
+        output);
 }
 
 TEST(JsOpt, ConstructorShapeDeclinesReceiverEscapingRhs) {
@@ -1868,6 +2082,7 @@ TEST(JsOpt, MirThisCallPreservesReceiverAndMethodHome) {
     expect_ok_output(output);
     EXPECT_GT(trace.events[JS_OPT_MIR_THIS_CALL][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_MIR_THIS_DIRECT_ACTIVATION][1], 0u);
+
     expect_trace_off_same("mir_this_call", source, output);
 }
 
@@ -2250,18 +2465,30 @@ TEST(JsOpt, NamedFunctionDataReadPreservesStrictPoisonPills) {
 
 TEST(JsOpt, ArrayLengthNameUsesOwnNoGcHead) {
     const char* source =
-        "function direct(values) { return values.length; }\n"
+        "function direct(values) {\n"
+        "  let count = 0;\n"
+        "  for (let index = 0; index < values.length; index += 1) count += 1;\n"
+        "  return count;\n"
+        "}\n"
+        "function runtimeHead(values) { return values.length; }\n"
         "function computed(values) { return values['length']; }\n"
-        "function content() { return arguments.length; }\n"
-        "if (direct([1, 2, 3]) !== 3 || computed([4, 5]) !== 2 ||\n"
-        "    content(6, 7, 8, 9) !== 4) throw new Error('array length changed');\n"
+        "function contentOverride() {\n"
+        "  Object.defineProperty(arguments, 'length', {value: 9});\n"
+        "  return direct(arguments);\n"
+        "}\n"
+        "if (direct([1, 2, 3]) !== 3 || runtimeHead([4, 5]) !== 2 ||\n"
+        "    computed([6, 7]) !== 2 ||\n"
+        "    contentOverride(1, 2) !== 9)\n"
+        "  throw new Error('array length changed');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
     ASSERT_TRUE(run_fixture("array_length_name_head", source, &trace,
                             output, sizeof(output)));
     expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_ARRAY_LENGTH][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_NAMED_FAST_HIT][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_MIR_ARRAY_LENGTH_ADMITTED][1], 0u);
 
     char* mir = read_fixture_mir("array_length_name_head");
     ASSERT_NE(mir, nullptr);

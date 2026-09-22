@@ -115,6 +115,10 @@ struct InterpFrame {
     uint32_t            var_marked_mask;
     InterpFrame*        caller;
     const AstNode*      cur;         // currently evaluating node (backtrace/step)
+    // An `on` handler activation: it has no `fn` node, yet its body is
+    // procedural (S12.1.3), so its blocks yield their last value (S2.5.3)
+    // exactly as MIR's `in_proc` handler functions do.
+    bool                proc_handler;
 };
 
 // True while a break/continue/return/error-skip is unwinding this activation:
@@ -186,6 +190,10 @@ struct InterpState {
     uint32_t     mode_fuel;
     bool         mode_exhausted;
     bool         mode_rejected;
+    // S2.5.5v2 void versus null: the list producer (for / `(…)` / block) that
+    // sits directly in an item position and so finishes with the skip marker;
+    // consumed once at the producer's entry (mirrors MirTranspiler).
+    AstNode*     list_item_producer;
 };
 
 // Per-run counters printed in the run summary; gates pin `fallback` to 0 on
@@ -246,6 +254,7 @@ const char* interp_satellite_refusal(const AstFuncNode* fn);
 bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry);
 // Retire queued worker jobs before a Script or its cached execution shell can
 // release the AST they read. Safe to call for scripts that never queued work.
+void interp_satellite_request_cancel_script(Script* script);
 void interp_satellite_cancel_script(Script* script);
 // True when an imported binding has a planned T0 owner and a stable module
 // slab slot. Satellite lowering uses this predicate before embedding that
@@ -340,6 +349,9 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
 // The callback's defining module owns both its slab and interpreter state.
 Item interp_call_runtime_function(Runtime* runtime, Function* function,
                                   const Item* args, int argc);
+// True while this thread is executing inside a T0 interpreter activation.
+// Reentrant native callbacks must reuse that state instead of opening a retained call.
+bool interp_has_active_state(void);
 // Runs a retained callback on the interpreter's bounded large-stack worker.
 // The caller must keep callback arguments rooted until this synchronous call returns.
 typedef void (*InterpLargeStackThreadHook)(void* opaque);

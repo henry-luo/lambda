@@ -106,15 +106,15 @@ fn render_single(spec) {
         (let cond = color_ch.condition,
          let default_val = if (color_ch.value) color_ch.value else color.default_color,
          let cond_field = cond.field,
-         for (d in data_stacked) (
+         [for (d in data_stacked) (
              let fv = d[cond_field],
              let cv = if (cond.equal != null) (if (fv == cond.equal) cond.value else default_val)
                  else if (cond.gt != null) (if (float(fv) > float(cond.gt)) cond.value else default_val)
                  else if (cond.lt != null) (if (float(fv) < float(cond.lt)) cond.value else default_val)
                  else default_val,
-             let pairs = for (k, val in d) for (x in [string(k), val]) x,
+             let pairs = [for (k, val in d) for (x in [string(k), val]) x],
              map([*pairs, "_cond_color", cv])
-         ))
+         )])
     else data_stacked;
 
     let color_field = if (has_condition) "_cond_color" else color_field0;
@@ -225,11 +225,11 @@ fn render_layered(spec) {
     let data = if (spec.data) spec.data else [];
 
     // each layer inherits parent data if not overridden
-    let layer_specs = (for (layer in layers) {
+    let layer_specs = [for (layer in layers) {
         data: if (layer.data) layer.data else data,
         mark: layer.mark,
         encoding: layer.encoding
-    });
+    }];
 
     // build unified scales across all layers
     let enc = if (len(layer_specs) > 0) layer_specs[0].encoding else {};
@@ -239,7 +239,7 @@ fn render_layered(spec) {
     let y_ch = parse.get_channel(enc, "y");
     // color channel: use parent encoding first, else pick from first layer that has color
     let parent_color_ch = parse.get_channel(enc, "color");
-    let all_layer_color_chs = for (ls in layer_specs, let l_enc = ls.encoding) parse.get_channel(l_enc, "color");
+    let all_layer_color_chs = [for (ls in layer_specs, let l_enc = ls.encoding) parse.get_channel(l_enc, "color")];
     let first_layer_color_ch = (all_layer_color_chs that (~ != null))[0];
     let color_ch = if (parent_color_ch) parent_color_ch else first_layer_color_ch;
     let x_field = if (x_ch) x_ch.field else null;
@@ -256,12 +256,12 @@ fn render_layered(spec) {
     let temp_x_scale = build_position_scale(x_ch, all_data, 0.0, float(spec.width), mark_type, true);
 
     // build combined y-scale covering all layers' y and y2 values
-    let y2_count = sum(for (ls in layer_specs,
+    let y2_count = sum([for (ls in layer_specs,
                             let l_enc = ls.encoding,
                             let l_y2_ch = parse.get_channel(l_enc, "y2"))
-        if (l_y2_ch) 1 else 0);
+        if (l_y2_ch) 1 else 0]);
     let use_combined_y = y2_count > 0;
-    let layer_y_mins = for (ls in layer_specs,
+    let layer_y_mins = [for (ls in layer_specs,
                             let l_enc = ls.encoding,
                             let l_y_ch = parse.get_channel(l_enc, "y"),
                             let l_y2_ch = parse.get_channel(l_enc, "y2"),
@@ -269,8 +269,8 @@ fn render_layered(spec) {
                             let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
                             let y_vals = if (ly_f) (all_data |> float(~[ly_f])) else [0.0],
                             let y2_vals = if (ly2_f) (all_data |> float(~[ly2_f])) else y_vals)
-        min([min(y_vals), min(y2_vals)]);
-    let layer_y_maxs = for (ls in layer_specs,
+        min([min(y_vals), min(y2_vals)])];
+    let layer_y_maxs = [for (ls in layer_specs,
                             let l_enc = ls.encoding,
                             let l_y_ch = parse.get_channel(l_enc, "y"),
                             let l_y2_ch = parse.get_channel(l_enc, "y2"),
@@ -278,7 +278,7 @@ fn render_layered(spec) {
                             let ly2_f = if (l_y2_ch) l_y2_ch.field else null,
                             let y_vals = if (ly_f) (all_data |> float(~[ly_f])) else [0.0],
                             let y2_vals = if (ly2_f) (all_data |> float(~[ly2_f])) else y_vals)
-        max([max(y_vals), max(y2_vals)]);
+        max([max(y_vals), max(y2_vals)])];
 
     let temp_y_scale = if (use_combined_y)
         scale.linear_scale_nice([min(layer_y_mins), max(layer_y_maxs)], float(spec.height), 0.0, false)
@@ -291,7 +291,7 @@ fn render_layered(spec) {
     else build_position_scale(y_ch, all_data, lay.plot_h, 0.0, mark_type, false);
 
     // render each layer's marks
-    let layer_marks = (for (ls in layer_specs)
+    let layer_marks = [for (ls in layer_specs)
         (let l_enc = ls.encoding,
          let l_mark = ls.mark,
          let l_mark_type = if (l_mark) l_mark.kind else "line",
@@ -315,7 +315,7 @@ fn render_layered(spec) {
              text_field: if (l_text_ch) l_text_ch.field else null
          },
          render_mark(l_mark_type, ls.data, l_ctx, l_mark))
-    );
+    ];
 
     // axes
     let x_title = if (x_ch and x_ch.title) x_ch.title
@@ -467,20 +467,20 @@ fn apply_histogram_transform(data, x_ch, y_ch) {
         let vmax = max(values);
         let range_span = vmax - vmin;
         let step = util.nice_num(range_span / float(maxbins), true);
-        let binned = for (d in data) (
+        let binned = [for (d in data) (
             let v = float(d[field]),
             let bs = floor(v / step) * step,
             let be = bs + step,
             // add both fields in one map() call to avoid chained add_field issue
-            let pairs = for (k, val in d) for (x in [k, val]) x,
+            let pairs = [for (k, val in d) for (x in [k, val]) x],
             map([*pairs, bin_field, bs, bin_end, be])
-        );
+        )];
         // aggregate: count per bin
         let bin_keys = util.unique_vals(binned |> string(~[bin_field]));
-        let counted = for (bk in bin_keys) (
+        let counted = [for (bk in bin_keys) (
             let items = binned that string(~[bin_field]) == bk,
             map([bin_field, items[0][bin_field], bin_end, items[0][bin_end], "_count", len(items)])
-        );
+        )];
         // override channels: x→nominal on bin_field, y→quantitative on _count
         let new_x = {*: x_ch, field: bin_field, dtype: "ordinal", bin: null};
         let new_y = {*: y_ch, field: "_count", dtype: "quantitative", aggregate: null};
@@ -623,7 +623,7 @@ fn render_faceted(spec) {
     let flay = layout.compute_facet_layout(n, columns, sub_w, sub_h, spacing, spec.title, spec.padding);
 
     // render each facet cell
-    let cells = (for (i in 0 to (n - 1),
+    let cells = [for (i in 0 to (n - 1),
          let fk = facet_keys[i],
          let cell_data = data that ~[facet_field] == fk,
          let cell_spec = {*:spec, data: cell_data, facet: null, title: null},
@@ -637,7 +637,7 @@ fn render_faceted(spec) {
             >
             cell_svg
         >
-    );
+    ];
 
     // background + title + cells
     let bg = <rect width: int(flay.total_w), height: int(flay.total_h), fill: theme.background>;
@@ -664,35 +664,35 @@ fn render_concat(spec) {
     let n = len(subs);
 
     // render each child chart independently (skip if already SVG)
-    let sub_svgs = for (s in subs)
+    let sub_svgs = [for (s in subs)
         if (s is element and name(s) == 'svg') s
-        else render_spec(s);
+        else render_spec(s)];
 
     // compute sizes from rendered SVGs
     let is_h = direction == "horizontal";
-    let sizes = for (s in sub_svgs) {
+    let sizes = [for (s in sub_svgs) {
         w: if (s.width) float(s.width) else 400.0,
         h: if (s.height) float(s.height) else 300.0
-    };
+    }];
 
     // accumulate offsets
     let items = position_subs(sizes, is_h, spacing, 0, 0.0, []);
 
     // total dimensions
     let total_w = if (is_h)
-        max(for (p in items) p.x + p.w)
+        max([for (p in items) p.x + p.w])
     else
-        max(for (p in items) p.w);
+        max([for (p in items) p.w]);
     let total_h = if (is_h)
-        max(for (p in items) p.h)
+        max([for (p in items) p.h])
     else
-        max(for (p in items) p.y + p.h);
+        max([for (p in items) p.y + p.h]);
 
     // wrap each sub-svg in a translated group
-    let groups = for (i in 0 to (n - 1))
+    let groups = [for (i in 0 to (n - 1))
         <g transform: svg.translate(items[i].x, items[i].y),
             sub_svgs[i]
-        >;
+        >];
 
     let bg = <rect width: int(total_w), height: int(total_h), fill: "white">;
     svg.svg_root(int(total_w), int(total_h), [bg, *groups])
@@ -727,18 +727,18 @@ fn render_repeat(spec) {
     let n_total = n_rows * n_cols;
 
     // generate all charts in row-major order using flat index
-    let sub_charts = for (i in 0 to (n_total - 1),
+    let sub_charts = [for (i in 0 to (n_total - 1),
                           let ri = int(i / n_cols),
                           let ci = i % n_cols,
                           let rf = row_fields[ri],
                           let cf = col_fields[ci])
-        substitute_and_render(tmpl, rf, cf);
+        substitute_and_render(tmpl, rf, cf)];
 
     // build each row as an hconcat of its column charts
-    let rows_svgs = for (ri in 0 to (n_rows - 1),
-                         let row_charts = for (ci in 0 to (n_cols - 1)) sub_charts[ri * n_cols + ci],
+    let rows_svgs = [for (ri in 0 to (n_rows - 1),
+                         let row_charts = [for (ci in 0 to (n_cols - 1)) sub_charts[ri * n_cols + ci]],
                          let row_spec = {concat: "horizontal", spacing: 10.0, children: row_charts})
-        render_concat(row_spec);
+        render_concat(row_spec)];
 
     if (n_rows == 1) rows_svgs[0]
     else render_concat({concat: "vertical", spacing: 10.0, children: rows_svgs})

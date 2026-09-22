@@ -94,6 +94,15 @@ Type LIT_NUM_SIZED = {.type_id = LMD_TYPE_NUM_SIZED, .is_literal = 1, .is_const 
 Type LIT_UINT64 = {.type_id = LMD_TYPE_UINT64, .is_literal = 1, .is_const = 1};
 Type LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_literal = 1, .is_const = 1};
 
+// Printing, string() and name() all name a type value; these three share
+// another kind's TypeId, so its name would say "int", "float" or "array".
+const char* type_alias_name(Type* type) {
+    if (type == &TYPE_INTEGER) return "integer";
+    if (type == &TYPE_NUMBER) return "number";
+    if (type == &TYPE_LIST) return "list";
+    return NULL;
+}
+
 // get_type_name: human-readable name for a TypeId (for error messages)
 // Moved from lambda.h static inline to reduce JIT-embedded header size (~30 lines saved).
 extern "C" const char* get_type_name(TypeId type_id) {
@@ -859,6 +868,12 @@ bool typeditem_store_item(TypedItem* titem, Item item) {
     return true;
 }
 
+bool map_field_store_dynamic_item(void* field_ptr, Item value) {
+    if (!field_ptr) return false;
+    *(Item*)field_ptr = value;
+    return true;
+}
+
 void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
     if (!field->name) { // nested map
         TypeId type_id = get_type_id(item);
@@ -882,11 +897,9 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
         switch (storage_type_id) {
         case LMD_TYPE_NULL: {
             // For dynamically-typed fields (e.g. state-bound element attributes),
-            // store non-null values as raw tagged Items. The compiler sets shape type
+            // store values as raw tagged Items. The compiler sets shape type
             // to LMD_TYPE_NULL when it can't resolve the type at compile time.
-            if (item.item != ITEM_NULL && get_type_id(item) != LMD_TYPE_NULL) {
-                *(Item*)field_ptr = item;
-            }
+            map_field_store_dynamic_item(field_ptr, item);
             break;
         }
         case LMD_TYPE_UNDEFINED:

@@ -150,7 +150,7 @@ on dragstart(evt) {
 edit <todo_list> state adding: false, new_text: "", drag_over: false {
   let items = ~.items
   let item_count = len(items)
-  let done_count = len(for (i in items where i.done) i)
+  let done_count = len([for (i in items where i.done) i])
   let count_text = (done_count) ++ "/" ++ (item_count)
   let header_class = if (drag_over) "list-header drop-active" else "list-header";
   <div class:"todo-list"
@@ -183,7 +183,7 @@ on click(evt) {
     new_text = ""
   }
   if (evt.target_class == "clear-done-btn") {
-    ~.items = for (item in ~.items where not item.done) item
+    ~.items = [for (item in ~.items where not item.done) item]
   }
 }
 on input(evt) {
@@ -202,7 +202,7 @@ on keydown(evt) {
     }
     if (evt.key == "Enter") {
       if (new_text != "") {
-        let max_id = if (len(~.items) == 0) 0 else max(for (i in ~.items) i.id)
+        let max_id = if (len(~.items) == 0) 0 else max([for (i in ~.items) i.id])
         let next_id = max_id + 1
         let new_item = {id: next_id, text: new_text, done: false, notes: ""}
         ~.items = ~.items ++ [new_item]
@@ -217,12 +217,12 @@ on keydown(evt) {
   }
 }
 on delete_item(evt) {
-  ~.items = for (item in ~.items where item.id != evt.id) item
+  ~.items = [for (item in ~.items where item.id != evt.id) item]
 }
 on update_item(evt) {
-  ~.items = for (item in ~.items)
+  ~.items = [for (item in ~.items)
     if (item.id == evt.id) {id: item.id, text: evt.text, done: item.done, notes: evt.notes}
-    else item
+    else item]
 }
 on dragover(evt) {
   drag_over = true
@@ -272,8 +272,8 @@ on click(evt) {
 edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", drag_item: null, drag_source: "" {
   // The error-handler migration must preserve a successful directory listing.
   let dir_listing = input(data_dir) ^ { [] }
-  let json_files = for (f in dir_listing where ends_with(f.name, ".json")) f
-  let file_names = for (f in json_files) replace(f.name, ".json", "")
+  let json_files = [for (f in dir_listing where ends_with(f.name, ".json")) f]
+  let file_names = [for (f in json_files) replace(f.name, ".json", "")]
 
   // auto-select first file if none active
   let eff_active = if (active_file == "" and len(file_names) > 0) file_names[0]
@@ -631,7 +631,7 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", 
 , if (file_data != null) {
           let all_items = [for (lst in file_data.lists) for (item in lst.items) item]
           let total = len(all_items)
-          let done_total = len(for (item in all_items where item.done) item);
+          let done_total = len([for (item in all_items where item.done) item]);
           ((done_total) ++ " of " ++ (total) ++ " tasks completed")
         } else {
           "No file selected"
@@ -700,16 +700,16 @@ on complete_drop(evt) {
     let data = input(active_path, 'json') ^ { null }
     if (data != null) {
       // Remove item from source list, add to target list
-      let new_lists = for (lst in data.lists)
+      let new_lists = [for (lst in data.lists)
         if (lst.name == drag_source) {
-          {name: lst.name, items: for (i in lst.items where i.id != drag_item.id) i}
+          {name: lst.name, items: [for (i in lst.items where i.id != drag_item.id) i]}
         } else if (lst.name == evt.target_list) {
-          let max_id = if (len(lst.items) == 0) 0 else max(for (i in lst.items) i.id)
+          let max_id = if (len(lst.items) == 0) 0 else max([for (i in lst.items) i.id])
           let moved = {id: max_id + 1, text: drag_item.text, done: drag_item.done, notes: drag_item.notes}
           {name: lst.name, items: lst.items ++ [moved]}
         } else {
           lst
-        }
+        }]
       let new_data = {name: data.name, lists: new_lists}
       output(new_data, active_path, 'json') ^ { null }
     }

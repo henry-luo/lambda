@@ -381,14 +381,14 @@ fn make_limits_stack(op_box, sub_box, sup_box, is_centered) {
     let pstrut = max(1.0, max(op_h, max(sub_h, sup_h))) + 2.0
     let r = ls_walk(items, 0, pstrut, depth0, depth0, depth0, [])
     let pstrut_style = "height:" ++ util.fmt_em_ceil2(pstrut)
-    let centers = (for (c in r.centers)
+    let centers = [for (c in r.centers)
         <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(c.top),
             <span class: css.PSTRUT, style: pstrut_style>
             <span style: ls_child_style(c.hd, c.fs),
                 for (e in box.elements_of(c.b)) e
             >
         >
-    )
+    ]
     let el = <span class: css.OP_GROUP,
         <span class: css.VLIST_T2,
             <span class: css.VLIST_R,

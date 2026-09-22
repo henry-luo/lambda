@@ -1040,7 +1040,9 @@ TEST(JavaScriptRegression, DocumentExitCodeAfterContextRestoreDoesNotInternWithN
         "--document", "test/js/js_document_exit_context.html", NULL};
     ShellOptions options = {};
     options.merge_stderr = true;
-    options.timeout_ms = 15000;
+    // DOM setup and teardown run beside three CPU-heavy binaries in the
+    // baseline runner; retain a finite hang detector without racing scheduling.
+    options.timeout_ms = 30000;
     ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
     const char* output = result.stdout_buf ? result.stdout_buf : "";
     ASSERT_EQ(result.exit_code, 0) << output;

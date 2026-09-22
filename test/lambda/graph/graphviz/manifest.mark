@@ -12,4 +12,5 @@
   <case id: 'ordering-groups', source: 'ordering_groups.dot'>
   <case id: 'annotations', source: 'annotations.dot'>
   <case id: 'route-classes', source: 'route_classes.dot'>
+  <case id: 'default-render', source: 'default_render.dot'>
 >

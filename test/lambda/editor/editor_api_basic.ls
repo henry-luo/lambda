@@ -12,9 +12,8 @@ let editor0 = edit_open(d0, editor_schemas.markdown, caret)
 "open schema doc role:"; editor0.schema.doc.role == 'block'
 "open history empty:"; len(editor0.history.undo) == 0
 
-let mounted = edit_mount(editor0, 'window0', 'markdown_wysiwyg')
-"mount flag:"; mounted.mounted
-"mount event:"; mounted.events[0].kind == 'mount'
+// edit_mount may bind a native surface, so it is a pn (S12.1.1v2): see
+// editor_api_mount.ls
 
 let editor1 = edit_exec(editor0, edit_cmd_insert_text("!"))
 "exec insert doc:"; doc_text(editor1.doc) == "Hello!"

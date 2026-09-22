@@ -324,7 +324,7 @@ The `in` operator tests whether a value falls within a range:
 Ranges are iterable and can be used in `for` expressions:
 
 ```lambda
-for i in 1 to 5 { print(i) }   // 1 2 3 4 5
+pn main() { for i in 1 to 5 { print(i) } }   // 1 2 3 4 5 (print is a pn)
 let squares = for (i in 1 to 5) i ** 2  // [1, 4, 9, 16, 25]
 ```
 

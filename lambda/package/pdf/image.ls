@@ -286,7 +286,7 @@ fn _resolve_inline_pair(pdf, page, p) {
 fn _inline_info_with_resources(pdf, page, info) {
     if ((info is map) and (info.kind == "inline_image") and (info.dict is array)) {
         { kind: "inline_image",
-          dict: (for (p in info.dict) _resolve_inline_pair(pdf, page, p)),
+          dict: [for (p in info.dict) _resolve_inline_pair(pdf, page, p)],
           data: info.data }
     }
     else { info }

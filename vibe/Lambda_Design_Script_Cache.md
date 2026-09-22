@@ -585,6 +585,17 @@ implementation details, not permissible shared-worker state. The receiving
 execution retains the private context through its Script overlay and binds its
 module state only at a safe point.
 
+The image's property-key suffix gets its position in that binding. The worker
+cannot know it: it reads no receiving state, and images publish in completion
+order. So the generated code reads the base its layout records
+(`LambdaModuleLayout::property_key_base`), and binding links by content. A slab
+that already holds the image's key IDs at the recorded base keeps them;
+otherwise the suffix is appended and its base recorded. *(LR01-16, fixed
+2026-09-22.)* The base used to be read while compiling, through the worker's
+thread-local runtime, which saw an empty slab. Binding then kept a suffix
+whenever the key count differed, so every image after the first resolved its
+member names through the first image's suffix.
+
 Until publication, the current call and every concurrent call execute T0.
 Publication is an optimization only: a failed, cancelled, stale, or unsupported
 worker image is discarded and pins that execution-local definition to T0, with
@@ -653,6 +664,11 @@ During migration, `LAMBDA_DISABLE_MIR_CACHE` and
 `LAMBDA_DISABLE_JS_MIR_CACHE` are compatibility aliases that map to the
 corresponding common policy and emit one migration diagnostic. They are removed
 only after all callers migrate.
+
+`LAMBDA_SATELLITE_SYNC=1` is a test control. It waits for the worker and
+publishes at the promotion that queued the image, so a test fixes the hand-off
+point and the publication order instead of depending on worker timing
+(`LambdaTierParityTests.SatellitePublicationKeepsPropertyKeys`, LR01-16).
 
 ---
 

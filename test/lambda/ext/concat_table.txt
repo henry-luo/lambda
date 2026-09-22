@@ -1,0 +1,17 @@
+"-- sequence ++ sequence: kind by S2.5.7 --"
+[list, array, array, array, array, array]
+[1, 2, 3, 4, 9]
+[[1, 2, 1, 2], 9]
+[[1, 2, 1, 2], 9]
+"-- sequence ++ scalar appends; scalar ++ sequence prepends --"
+[[1, 2, 3], [3, 1, 2], [1, "ab"], ["ab", 1], [1, 2], [1, 2]]
+[1, 2, 3, 9]
+[3, 1, 2, 9]
+[list, array, array]
+"-- scalar ++ scalar is text; the same text kind is kept --"
+["ab", 'ab', "12", "n=1", "ab", symbol, string]
+[true, binary]
+"-- null is the identity --"
+[3, 3, "a", "a", true]
+"-- numeric arrays of different element types (LR05-9) --"
+[3, 3.5, true, true, 300]

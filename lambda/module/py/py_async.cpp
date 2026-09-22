@@ -151,7 +151,7 @@ extern "C" Item py_asyncio_gather(Item a0, Item a1, Item a2,
     for (int i = 0; i < 6; i++) {
         if (get_type_id(coros[i]) == LMD_TYPE_NULL) break;
         Item val = py_coro_drive(coros[i]);
-        array_push(results, val);
+        array_push_verbatim(results, val);
     }
     return (Item){.array = results};
 }

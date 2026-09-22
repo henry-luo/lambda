@@ -4,10 +4,6 @@ true
 true
 "open history empty:"
 true
-"mount flag:"
-true
-"mount event:"
-true
 "exec insert doc:"
 true
 "exec insert caret:"

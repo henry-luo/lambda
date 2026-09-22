@@ -70,7 +70,7 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
 
     if (type_id == LMD_TYPE_ARRAY) {
         List* nested = item.array;
-        if (nested && nested->is_content) {
+        if (nested && nested->is_spreadable) {
             if (!nested->items) {
                 if (nested->length == 0) return;
                 log_error("list_push_io: content list has no backing storage");
@@ -83,7 +83,7 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
         }
     }
 
-    if (type_id == LMD_TYPE_STRING && list->is_content && ui_mode && arena) {
+    if (type_id == LMD_TYPE_STRING && list->is_spreadable && ui_mode && arena) {
         item = ui_copy_string_to_arena(arena, item);
     }
     if (type_id == LMD_TYPE_STRING && list->length > 0 && list->items) {

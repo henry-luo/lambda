@@ -43,9 +43,9 @@ pub fn nice_ticks(dlo, dhi, count: int) {
         let nice_lo = floor(float(dlo) / step) * step;
         let nice_hi = ceil(float(dhi) / step) * step;
         let n = int((nice_hi - nice_lo) / step) + 1;
-        (for (i in 0 to (n - 1))
+        [for (i in 0 to (n - 1))
             (let v = nice_lo + float(i) * step,
-            round(v * 1e10) / 1e10))
+            round(v * 1e10) / 1e10)]
     }
 }
 
@@ -142,8 +142,8 @@ pub fn unique_by(arr, key_fn) {
 // group an array by a field name, returns list of {key, items} maps
 pub fn group_by(arr, field: string) {
     let all_keys = unique_vals(arr |> ~[field]);
-    (for (k in all_keys)
-        {key: k, items: (arr that ~[field] == k)})
+    [for (k in all_keys)
+        {key: k, items: (arr that ~[field] == k)}]
 }
 
 // find extent (min, max) of numeric values in an array

@@ -599,7 +599,55 @@ extern "C" void lambda_module_state_release_from(uint32_t first_module_id) {
     }
 }
 
-extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* layout) {
+// Grows a slab's key table by already-resolved IDs; the spec append and the
+// satellite link share it so both extend the table the same way.
+static bool lambda_module_state_append_key_ids(LambdaModuleState* state,
+        const NameId* ids, uint32_t count) {
+    if (count == 0) return true;
+    if (state->property_key_count > UINT32_MAX - count) return false;
+    uint32_t old_count = state->property_key_count;
+    uint32_t total = old_count + count;
+    NameId* keys = (NameId*)mem_realloc(state->property_keys,
+        (size_t)total * sizeof(NameId), MEM_CAT_EVAL);
+    if (!keys) return false;
+    memcpy(keys + old_count, ids, (size_t)count * sizeof(NameId));
+    state->property_keys = keys;
+    state->property_key_count = total;
+    return true;
+}
+
+// LR01-16: a satellite is lowered without the receiving runtime's state
+// (D8.5.1v7) and satellites publish in completion order, so its key suffix is
+// placed only here. Link by content: a re-prepare into a slab that already
+// holds these keys at the recorded base keeps them (key IDs are local to each
+// slab, D4.6.2v2); otherwise the suffix is appended where it lands and the
+// layout records that base for the generated code. Comparing counts could not
+// tell an image's own suffix from another image's, and one satellite then read
+// another's keys.
+static bool lambda_module_state_link_satellite_keys(LambdaModuleState* state,
+        LambdaModuleLayout* layout) {
+    uint32_t count = layout->property_key_count;
+    if (count == 0) return true;
+    NameId* ids = (NameId*)mem_calloc(count, sizeof(NameId), MEM_CAT_EVAL);
+    if (!ids || !lambda_module_state_resolve_property_keys(
+            layout->property_key_specs, count, layout->property_key_bytes_size, ids)) {
+        mem_free(ids);
+        return false;
+    }
+    uint32_t base = layout->property_key_base;
+    bool linked = state->property_keys && base <= state->property_key_count &&
+        count <= state->property_key_count - base &&
+        memcmp(state->property_keys + base, ids, (size_t)count * sizeof(NameId)) == 0;
+    if (!linked) {
+        base = state->property_key_count;
+        linked = lambda_module_state_append_key_ids(state, ids, count);
+        if (linked) layout->property_key_base = base;
+    }
+    mem_free(ids);
+    return linked;
+}
+
+extern "C" bool lambda_module_state_prepare_layout(LambdaModuleLayout* layout) {
     if (!layout) return false;
     uint32_t module_state_id = lambda_module_state_id_for_unit(context,
         layout->module_id);
@@ -608,20 +656,12 @@ extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* lay
     EvalContext* owner = context;
     LambdaModuleState* state = lambda_module_state_at(owner, module_state_id);
     if (layout->reserved & LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS) {
-        uint32_t key_base = layout->reserved &
-            LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK;
-        if (!state || state->property_key_count < key_base) {
-            log_error("module-key-link: satellite key prefix is unavailable for unit %u",
+        if (!state) {
+            log_error("module-key-link: satellite owner slab is unavailable for unit %u",
                 layout->module_id);
             return false;
         }
-        // A cached satellite's image is shared, while key IDs are local to a
-        // runtime slab. A later prepare sees its already-linked suffix and
-        // must not append it a second time (D4.6.1v2, D8.5.1v2).
-        if (state->property_key_count != key_base) return true;
-        return lambda_module_state_append_property_keys(module_state_id,
-            layout->property_key_specs, layout->property_key_count,
-            layout->property_key_bytes_size);
+        return lambda_module_state_link_satellite_keys(state, layout);
     }
     if (!state || state->property_key_count == 0) {
         if (state) state->property_key_count = layout->property_key_count;
@@ -654,27 +694,12 @@ extern "C" bool lambda_module_state_append_property_keys(uint32_t module_id,
     LambdaModuleState* state = lambda_module_state_at(owner, module_id);
     if (!state) return false;
     if (count == 0) return true;
-    if (state->property_key_count > UINT32_MAX - count) return false;
 
     NameId* appended = (NameId*)mem_calloc(count, sizeof(NameId), MEM_CAT_EVAL);
-    if (!appended || !lambda_module_state_resolve_property_keys(specs, count,
-            bytes_size, appended)) {
-        mem_free(appended);
-        return false;
-    }
-    uint32_t old_count = state->property_key_count;
-    uint32_t total = old_count + count;
-    NameId* keys = (NameId*)mem_realloc(state->property_keys,
-        (size_t)total * sizeof(NameId), MEM_CAT_EVAL);
-    if (!keys) {
-        mem_free(appended);
-        return false;
-    }
-    memcpy(keys + old_count, appended, (size_t)count * sizeof(NameId));
-    state->property_keys = keys;
-    state->property_key_count = total;
+    bool linked = appended && lambda_module_state_resolve_property_keys(specs, count,
+        bytes_size, appended) && lambda_module_state_append_key_ids(state, appended, count);
     mem_free(appended);
-    return true;
+    return linked;
 }
 
 extern "C" bool lambda_module_state_reserve(uint32_t var_count,

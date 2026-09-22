@@ -132,7 +132,7 @@ fn render_cell_group(children, cell_ctx, spacing_ctx, render_fn, env_name) {
     else {
         let parts = if (env_name == "aligned" or env_name == "align")
             render_aligned_cell_parts(children, cell_ctx, render_fn, 0, [])
-            else (for (c in children) render_fn(c, cell_ctx))
+            else ([for (c in children) render_fn(c, cell_ctx)])
         box.hbox(apply_spacing(parts, spacing_ctx))
     }
 }
@@ -251,7 +251,7 @@ fn next_spacing_prev_type(prev_type, current) {
 }
 
 fn apply_spacing(boxes, context) {
-    let filtered = (for (b in boxes where b != null) b)
+    let filtered = [for (b in boxes where b != null) b]
     if (len(filtered) <= 1) filtered
     else
         (let normalized = normalize_atom_types(filtered),
@@ -633,9 +633,9 @@ fn wrap_with_delimiters(table_box, ld, rd, row_count) {
     let right_box = if (rd != null) render_matrix_delim(rd, table_box, row_count)
         else if (ld == "{") render_null_right_delim()
         else null
-    let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
-    let children = (for (p in parts) p.element)
-    let total_width = sum((for (p in parts) p.width))
+    let parts = [for (p in [left_box, table_box, right_box] where p != null) p]
+    let children = [for (p in parts) p.element]
+    let total_width = sum([for (p in parts) p.width])
     // The strut spans the taller of the content and the (axis-centred)
     // delimiter glyphs — exactly like \left..\right. The result stores the
     // full extent in the primary fields so the outer strut rounds once.
@@ -903,8 +903,8 @@ fn render_brace_mult_delim() {
 fn estimate_total_height(cell_boxes, total_cells, nrows) {
     if (total_cells == 0) 1.0
     else {
-        let max_h = max((for (i in 0 to (total_cells - 1)) cell_boxes[i].height))
-        let max_d = max((for (i in 0 to (total_cells - 1)) cell_boxes[i].depth))
+        let max_h = max([for (i in 0 to (total_cells - 1)) cell_boxes[i].height])
+        let max_d = max([for (i in 0 to (total_cells - 1)) cell_boxes[i].depth])
         let row_ht = max(max_h + max_d, 1.2)
         let gap = if (nrows > 1) 0.3 else 0.0
         float(nrows) * row_ht + float(nrows - 1) * gap
@@ -920,7 +920,7 @@ fn compute_depth(cell_boxes, total_cells, nrows) {
 }
 
 fn compute_table_width(row_boxes, ncols, env_name) {
-    let cell_w = sum((for (col in 0 to (ncols - 1)) max_col_width(row_boxes, col)))
+    let cell_w = sum([for (col in 0 to (ncols - 1)) max_col_width(row_boxes, col)])
     let sep_w = if (ncols <= 1) 0.0 else float(ncols - 1)
     let edge_w = if (env_name == "array") 1.0 else 0.0
     cell_w + sep_w + edge_w
@@ -928,5 +928,5 @@ fn compute_table_width(row_boxes, ncols, env_name) {
 
 fn max_col_width(row_boxes, col) {
     if (len(row_boxes) == 0) 0.0
-    else max((for (row in row_boxes) if (col < len(row)) row[col].width else 0.5))
+    else max([for (row in row_boxes) if (col < len(row)) row[col].width else 0.5])
 }

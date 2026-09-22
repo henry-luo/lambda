@@ -1,0 +1,18 @@
+"-- single-value slots store the array image; the source stays a list --"
+[array, [1, 2], array, [1, 2], list]
+[[1, 2], 9]
+[[1, 2], 9]
+[1, 2, 9]
+[array, [7, 8], true, 5]
+"-- bindings, arguments, returns pass a list through --"
+[list, list]
+[1, 2, 9]
+[4, 5, 9]
+"-- print/format as the array --"
+["[1, 2]", true]
+"-- a top-level list is content: one item per line --"
+1
+2
+1
+2
+3

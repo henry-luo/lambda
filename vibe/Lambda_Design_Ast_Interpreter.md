@@ -241,7 +241,8 @@ Two invariants the widening exposed (both pre-existing, both fixed):
 2. A dynamic-call argument list must be built by verbatim positional append.
    `array_push` splices a content list into its receiver (S16.7), so a
    `split()` result passed as one argument reached `fn_call_into` as several
-   (`expects 4 arguments, got 5`). `array_push_argument` is that appender;
+   (`expects 4 arguments, got 5`). `array_push_verbatim` (first named
+   `array_push_argument`) is that appender;
    the eager JIT's own >3-argument dynamic calls had the same latent defect.
 
 Gates: the auto-tier differential over all 751 `test/lambda` scripts is

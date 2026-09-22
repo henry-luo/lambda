@@ -115,7 +115,7 @@ void lambda_module_state_release(uint32_t module_id);
 // Batch hosts pair this with Runtime script-generation teardown before IDs
 // are reused by a fresh heap generation.
 void lambda_module_state_release_from(uint32_t first_module_id);
-bool lambda_module_state_prepare_layout(const struct LambdaModuleLayout* layout);
+bool lambda_module_state_prepare_layout(struct LambdaModuleLayout* layout);
 bool lambda_module_state_link_property_keys(uint32_t module_id,
     const struct PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size);
 // Validate and intern a sealed property-key image without publishing module

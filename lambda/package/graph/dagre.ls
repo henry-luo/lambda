@@ -231,6 +231,26 @@ fn rank_of(id, edges, stack) {
   }
 }
 
+fn rank_path_reaches(id, target, edges, visited) {
+  if (id == target) true
+  else if (contains(visited, id)) false
+  else len([for (edge in edges where edge.from == id and
+    rank_path_reaches(edge.to, target, edges, [*visited, id])) edge]) > 0
+}
+
+fn acyclic_rank_edges_at(edges, index, accepted) {
+  if (index >= len(edges)) accepted
+  else {
+    let edge = edges[index];
+    // Keep source order stable while removing only the edge that closes a rank cycle.
+    let next = if (rank_path_reaches(edge.to, edge.from, accepted, [])) accepted
+      else [*accepted, edge];
+    acyclic_rank_edges_at(edges, index + 1, next)
+  }
+}
+
+fn acyclic_rank_edges(edges) => acyclic_rank_edges_at(edges, 0, [])
+
 fn same_scopes(id, constraints) => [for (constraint in constraints
   where constraint.kind == "rank" and constraint.value == "same" and
     constraint.member == id) constraint.scope]
@@ -308,9 +328,10 @@ fn assign_ranks(nodes, edges, constraints, new_rank) {
     where edge.constraint and not same_rank(edge.from, edge.to, scoped_constraints) and
       not has_rank_value(edge.to, scoped_constraints, ["min", "source"]) and
       not has_rank_value(edge.from, scoped_constraints, ["max", "sink"])) edge];
-  let ranked = [for (node in nodes) {*:node, rank: rank_of(node.id, active, [])}];
-  // Cycle back-edges and self-loops cannot constrain rank during promotion relaxation.
-  let forward = [for (edge in active
+  let rank_edges = acyclic_rank_edges(active);
+  let ranked = [for (node in nodes) {*:node, rank: rank_of(node.id, rank_edges, [])}];
+  // Feedback edges stay drawable, but cannot collapse their endpoints into one rank.
+  let forward = [for (edge in rank_edges
     where node_rank(ranked, edge.from) < node_rank(ranked, edge.to)) edge];
   // Same-rank promotion must be propagated to successors or minlen can collapse to zero.
   boundary_ranks(relax_ranks(unify_same_ranks(ranked, scoped_constraints), forward,
@@ -476,46 +497,58 @@ fn node_gap(left, right, node_sep, clusters) {
     cluster_padding(clusters, right.group)
 }
 
+fn horizontal_rank_direction(direction) => direction == "LR" or direction == "RL"
+
+fn cross_axis_size(node, direction) =>
+  if (horizontal_rank_direction(direction)) node.height else node.width
+
+fn rank_axis_size(node, direction) =>
+  if (horizontal_rank_direction(direction)) node.width else node.height
+
 fn layer_gaps(nodes, node_sep, clusters) =>
   if (len(nodes) < 2) [] else [
     for (i in 1 to (len(nodes) - 1)) node_gap(nodes[i - 1], nodes[i], node_sep, clusters)
   ]
 
-fn layer_total_width(nodes, node_sep, clusters) {
+fn layer_total_width(nodes, node_sep, clusters, direction) {
   if (len(nodes) == 0) 0.0
-  else sum([for (node in nodes) node.width]) + sum(layer_gaps(nodes, node_sep, clusters))
+  else sum([for (node in nodes) cross_axis_size(node, direction)]) +
+    sum(layer_gaps(nodes, node_sep, clusters))
 }
 
-fn prefix_width(nodes, index, node_sep, clusters) {
+fn prefix_width(nodes, index, node_sep, clusters, direction) {
   if (index <= 0) 0.0
-  else sum([for (i, node in nodes where i < index) node.width]) +
+  else sum([for (i, node in nodes where i < index) cross_axis_size(node, direction)]) +
     sum([for (i in 1 to index) node_gap(nodes[i - 1], nodes[i], node_sep, clusters)])
 }
 
-fn layer_height(layer) =>
-  if (len(layer.nodes) == 0) 0.0 else max([for (node in layer.nodes) node.height])
+fn layer_rank_size(layer, direction) =>
+  if (len(layer.nodes) == 0) 0.0
+  else max([for (node in layer.nodes) rank_axis_size(node, direction)])
 
-fn rank_center(layers, index, rank_sep) =>
-  sum([for (i, layer in layers where i < index) layer_height(layer)]) +
-    float(index) * rank_sep + layer_height(layers[index]) / 2.0
+fn rank_center(layers, index, rank_sep, direction) =>
+  sum([for (i, layer in layers where i < index) layer_rank_size(layer, direction)]) +
+    float(index) * rank_sep + layer_rank_size(layers[index], direction) / 2.0
 
-fn position_layer(layer, node_sep, rank_y, clusters) {
-  let total_width = layer_total_width(layer.nodes, node_sep, clusters);
+fn position_layer(layer, node_sep, rank_y, clusters, direction) {
+  let total_width = layer_total_width(layer.nodes, node_sep, clusters, direction);
   let result = [for (i, node in layer.nodes) {*:node,
     order: i,
-    x: 0.0 - total_width / 2.0 + prefix_width(layer.nodes, i, node_sep, clusters) +
-      node.width / 2.0,
+    x: 0.0 - total_width / 2.0 +
+      prefix_width(layer.nodes, i, node_sep, clusters, direction) +
+      cross_axis_size(node, direction) / 2.0,
     y: rank_y
   }];
   result
 }
 
 fn position_nodes(layers, opts, clusters) {
-  // Rank separation is a box-to-box gap; center-only spacing makes wide LR
-  // nodes touch and collapses clipped routes to a single point.
+  // Rank separation follows the oriented rank axis so wide LR nodes retain
+  // their requested box-to-box gap for routed edge labels.
   let placed = [for (i, layer in layers,
     node in position_layer(layer, opts.node_sep,
-      rank_center(layers, i, opts.rank_sep), clusters)) node];
+      rank_center(layers, i, opts.rank_sep, opts.direction), clusters,
+      opts.direction)) node];
   if (len(placed) == 0) { [] }
   else {
     let min_x = min([for (node in placed) node.x - node.width / 2.0]);
@@ -883,6 +916,13 @@ fn clip_node(node, target_x, target_y, port_id = null, compass = null) {
   else clip_shape(node, target_x, target_y)
 }
 
+fn automatic_endpoint(port_id, compass) =>
+  (port_id == null or port_id == "") and (compass == null or compass == "")
+
+fn rank_axis_target(node, peer, vertical_rank_axis) =>
+  if (vertical_rank_axis) {x: node.x, y: peer.y}
+  else {x: peer.x, y: node.y}
+
 fn points_close(a, b) => abs(a.x - b.x) < 0.001 and abs(a.y - b.y) < 0.001
 
 fn points_collinear(a, b, c) =>
@@ -906,7 +946,7 @@ fn simplify_route(points) =>
   // Keep the original route when a dynamic point cannot be normalized.
   simplify_route_at(points, 0, []) or points
 
-fn orthogonal_points(points, vertical_first) {
+fn orthogonal_points(points, vertical_rank_axis) {
   if (len(points) < 2) points
   else {
     let start = points[0];
@@ -915,24 +955,26 @@ fn orthogonal_points(points, vertical_first) {
     let dy = abs(finish.y - start.y);
     if (dx < 1.0 or dy < 1.0) points
     else {
-      let bend = if (vertical_first) {x: start.x, y: finish.y} else {x: finish.x, y: start.y};
+      // The final segment follows the rank axis, so marker-end points into its target.
+      let bend = if (vertical_rank_axis) {x: finish.x, y: start.y}
+        else {x: start.x, y: finish.y};
       simplify_route([start, bend, finish])
     }
   }
 }
 
-fn orthogonal_waypoints_at(points, i, vertical_first, result) {
+fn orthogonal_waypoints_at(points, i, vertical_rank_axis, result) {
   if (i >= len(points)) result
   else {
-    let segment = orthogonal_points([points[i - 1], points[i]], vertical_first);
+    let segment = orthogonal_points([points[i - 1], points[i]], vertical_rank_axis);
     let appended = [*result, for (j, point in segment where j > 0) point];
-    orthogonal_waypoints_at(points, i + 1, vertical_first, simplify_route(appended))
+    orthogonal_waypoints_at(points, i + 1, vertical_rank_axis, simplify_route(appended))
   }
 }
 
-fn orthogonal_waypoints(points, vertical_first) {
+fn orthogonal_waypoints(points, vertical_rank_axis) {
   if (len(points) < 2) points
-  else orthogonal_waypoints_at(points, 1, vertical_first, [points[0]])
+  else orthogonal_waypoints_at(points, 1, vertical_rank_axis, [points[0]])
 }
 
 fn routing_rect(x, y, width, height, margin) =>
@@ -976,10 +1018,10 @@ fn route_manhattan_length(points) =>
   if (len(points) < 2) 0.0 else sum([for (i in 1 to (len(points) - 1))
     abs(points[i].x - points[i - 1].x) + abs(points[i].y - points[i - 1].y)])
 
-fn obstacle_lane_routes(start, finish, obstacles, vertical_first, gap, orthogonal) {
-  let default_route = if (orthogonal) orthogonal_points([start, finish], vertical_first)
+fn obstacle_lane_routes(start, finish, obstacles, vertical_rank_axis, gap, orthogonal) {
+  let default_route = if (orthogonal) orthogonal_points([start, finish], vertical_rank_axis)
     else [start, finish];
-  let detours = if (vertical_first) [
+  let detours = if (vertical_rank_axis) [
     for (obstacle in obstacles, lane in [obstacle.left - gap, obstacle.right + gap])
       simplify_route([start, {x: lane, y: start.y}, {x: lane, y: finish.y}, finish])
   ] else [
@@ -989,8 +1031,8 @@ fn obstacle_lane_routes(start, finish, obstacles, vertical_first, gap, orthogona
   [default_route, *detours]
 }
 
-fn route_around_obstacles(start, finish, obstacles, vertical_first, gap, orthogonal) {
-  let candidates = obstacle_lane_routes(start, finish, obstacles, vertical_first, gap,
+fn route_around_obstacles(start, finish, obstacles, vertical_rank_axis, gap, orthogonal) {
+  let candidates = obstacle_lane_routes(start, finish, obstacles, vertical_rank_axis, gap,
     orthogonal);
   let clear = [for (candidate in candidates
     where not route_hits_obstacle(candidate, obstacles)) candidate];
@@ -998,20 +1040,20 @@ fn route_around_obstacles(start, finish, obstacles, vertical_first, gap, orthogo
   else sort(clear, (candidate) => route_manhattan_length(candidate))[0]
 }
 
-fn avoid_route_segments_at(points, obstacles, vertical_first, gap, orthogonal, i, result) {
+fn avoid_route_segments_at(points, obstacles, vertical_rank_axis, gap, orthogonal, i, result) {
   if (i >= len(points)) simplify_route(result)
   else {
     let segment = route_around_obstacles(points[i - 1], points[i], obstacles,
-      vertical_first, gap, orthogonal);
+      vertical_rank_axis, gap, orthogonal);
     let appended = [*result, for (j, point in segment where j > 0) point];
-    avoid_route_segments_at(points, obstacles, vertical_first, gap, orthogonal,
+    avoid_route_segments_at(points, obstacles, vertical_rank_axis, gap, orthogonal,
       i + 1, appended)
   }
 }
 
-fn avoid_route_segments(points, obstacles, vertical_first, gap, orthogonal) =>
+fn avoid_route_segments(points, obstacles, vertical_rank_axis, gap, orthogonal) =>
   if (len(points) < 2) points
-  else avoid_route_segments_at(points, obstacles, vertical_first, gap, orthogonal,
+  else avoid_route_segments_at(points, obstacles, vertical_rank_axis, gap, orthogonal,
     1, [points[0]])
 
 fn cluster_boundary(cluster, source_x, source_y, target_x, target_y) {
@@ -1045,8 +1087,8 @@ fn compound_crossings(from_node, to_node, clusters, tail_cluster, head_cluster) 
   }
 }
 
-fn lane_waypoint(start, finish, offset, vertical_first) {
-  let point = if (vertical_first) {
+fn lane_waypoint(start, finish, offset, vertical_rank_axis) {
+  let point = if (vertical_rank_axis) {
     x: (start.x + finish.x) / 2.0 + offset,
     y: (start.y + finish.y) / 2.0
   } else {
@@ -1094,10 +1136,10 @@ fn parallel_info(edge, edges) {
   }
 }
 
-fn parallel_route_points(from_node, to_node, offset, vertical_first,
+fn lane_route_points(from_node, to_node, offset, vertical_rank_axis,
     from_port = null, to_port = null, from_compass = null, to_compass = null) {
   // Lane reconstruction must retain authored ports instead of reverting to shape clipping.
-  if (vertical_first) {
+  if (vertical_rank_axis) {
     let lane_x = (from_node.x + to_node.x) / 2.0 + offset;
     let start = clip_node(from_node, lane_x, to_node.y, from_port, from_compass);
     let finish = clip_node(to_node, lane_x, from_node.y, to_port, to_compass);
@@ -1142,23 +1184,35 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     let route_mode = if (edge.route_mode != null) edge.route_mode else opts.route_mode;
     let explicit_tail = if (opts.compound) find_cluster(clusters, edge.tail_cluster) else null;
     let explicit_head = if (opts.compound) find_cluster(clusters, edge.head_cluster) else null;
+    let vertical_rank_axis = not (opts.direction == "LR" or opts.direction == "RL");
+    let from_target = if (route_mode == "orthogonal" and explicit_tail == null and
+        automatic_endpoint(edge.from_port, edge.from_compass))
+      rank_axis_target(from_node, to_node, vertical_rank_axis)
+      else {x: to_node.x, y: to_node.y};
+    let to_target = if (route_mode == "orthogonal" and explicit_head == null and
+        automatic_endpoint(edge.to_port, edge.to_compass))
+      rank_axis_target(to_node, from_node, vertical_rank_axis)
+      else {x: from_node.x, y: from_node.y};
     // Explicit compound endpoints clip to cluster bounds, not the enclosed node bounds.
     let start = if (explicit_tail != null)
       cluster_boundary(explicit_tail, from_node.x, from_node.y, to_node.x, to_node.y)
-      else clip_node(from_node, to_node.x, to_node.y, edge.from_port, edge.from_compass);
+      else clip_node(from_node, from_target.x, from_target.y,
+        edge.from_port, edge.from_compass);
     let finish = if (explicit_head != null)
       cluster_boundary(explicit_head, to_node.x, to_node.y, from_node.x, from_node.y)
-      else clip_node(to_node, from_node.x, from_node.y, edge.to_port, edge.to_compass);
-    let vertical_first = not (opts.direction == "LR" or opts.direction == "RL");
+      else clip_node(to_node, to_target.x, to_target.y, edge.to_port, edge.to_compass);
     let parallel = parallel_info(edge, edges);
     let lane_offset = (float(parallel.index) - float(parallel.count - 1) / 2.0) * opts.edge_sep;
+    let backtracks_rank = from_node.rank >= to_node.rank;
+    let back_lane_offset = max([opts.edge_sep * 2.0,
+      max([from_node.height, to_node.height]) / 2.0 + opts.edge_sep]) + lane_offset;
     let crossings = compound_crossings(from_node, to_node, clusters,
       if (explicit_tail != null) explicit_tail.id else null,
       if (explicit_head != null) explicit_head.id else null);
     let central_start = if (len(crossings.source) > 0)
       crossings.source[len(crossings.source) - 1] else start;
     let central_finish = if (len(crossings.target) > 0) crossings.target[0] else finish;
-    let lane = lane_waypoint(central_start, central_finish, lane_offset, vertical_first);
+    let lane = lane_waypoint(central_start, central_finish, lane_offset, vertical_rank_axis);
     let lane_points = if (parallel.count > 1) [lane] else [];
     let compound_points = [start, *crossings.source,
       *lane_points,
@@ -1172,15 +1226,20 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       self_loop_points(from_node, opts.edge_sep, parallel.index,
         edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
       else if (route_mode == "line") [start, finish]
+      // A feedback edge needs its own lane: a direct route would paint over the
+      // forward edge that established the rank relation.
+      else if (backtracks_rank)
+        lane_route_points(from_node, to_node, back_lane_offset, vertical_rank_axis,
+          edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
       else if (has_compound)
         if (route_mode == "orthogonal")
-          orthogonal_waypoints(compound_points, vertical_first)
+          orthogonal_waypoints(compound_points, vertical_rank_axis)
         else simplify_route(compound_points)
       else if (parallel.count > 1)
-        parallel_route_points(from_node, to_node, lane_offset, vertical_first,
+        lane_route_points(from_node, to_node, lane_offset, vertical_rank_axis,
           edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
       else if (route_mode == "orthogonal")
-        orthogonal_points([start, finish], vertical_first)
+        orthogonal_points([start, finish], vertical_rank_axis)
       else [start, finish];
     {
       id: edge.id,
@@ -1194,7 +1253,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       head_cluster: edge.head_cluster,
       points: if (edge.from == edge.to or route_mode == "line" or
           route_mode == "none") base_points
-        else avoid_route_segments(base_points, obstacles, vertical_first,
+        else avoid_route_segments(base_points, obstacles, vertical_rank_axis,
           max([4.0, opts.edge_sep / 2.0]), route_mode == "orthogonal"),
       directed: edge.directed,
       arrow_start: edge.arrow_start,

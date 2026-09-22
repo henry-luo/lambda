@@ -819,6 +819,12 @@ TEST(InterpPromotion, SnapshotKeepsInferredFloatLaneMetadata) {
     ::remove(stderr_path);
 
     EXPECT_NE(strstr(stderr_text, "queued satellite function='fmt'"), nullptr);
+    EXPECT_NE(strstr(stderr_text, "queued satellite function='render_many'"), nullptr);
+    // With one worker, fmt is already lowering when the script exits. Its
+    // queued successor must be retired before runtime teardown, not compiled
+    // against the disappearing document Runtime.
+    EXPECT_EQ(strstr(stderr_text, "satellite image function='render_many'"), nullptr);
+    EXPECT_EQ(strstr(stderr_text, "Generating native code"), nullptr);
     EXPECT_EQ(strstr(stderr_text, "unexpected operand mode"), nullptr);
 }
 
@@ -863,13 +869,14 @@ TEST(InterpWalker, FixedArityCallsBeyondFourUseFixedAbi) {
     // fixed-arity callee read its trailing operands from unset registers. The
     // dom catalog's five-argument set_base_and_extent row exposes it: the
     // golden is the oracle, the interpreter the cross-check.
-    const char* script = "test/lambda/dom_range_selection_ops.ls";
-    RunResult jit = run_script(script, "jit");
-    RunResult interp = run_script(script, "interp");
+    // DOM mutators are procedures (D7.4.6), so the script runs as `pn main()`
+    const char* script = "test/lambda/proc/dom_range_selection_ops.ls";
+    RunResult jit = run_script(script, "jit", true);
+    RunResult interp = run_script(script, "interp", true);
     EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 1);
     EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0);
     EXPECT_EQ(trim_trailing(jit.stdout_text),
-              trim_trailing(read_file("test/lambda/dom_range_selection_ops.txt")));
+              trim_trailing(read_file("test/lambda/proc/dom_range_selection_ops.txt")));
     EXPECT_EQ(trim_trailing(jit.stdout_text), trim_trailing(interp.stdout_text));
     EXPECT_EQ(jit.exit_code, interp.exit_code);
 }

@@ -86,8 +86,8 @@ pub fn line_path(points) string {
     else {
         let first = points[0];
         let start = M(first[0], first[1]);
-        let segments = (for (i in 1 to (len(points) - 1))
-            L(points[i][0], points[i][1]));
+        let segments = [for (i in 1 to (len(points) - 1))
+            L(points[i][0], points[i][1])];
         start ++ " " ++ (segments |> join(" "))
     }
 }
@@ -100,10 +100,10 @@ pub fn area_path(top_points, bottom_points) string {
         let bottom_rev = reverse(bottom_points);
 
         let d1 = M(first[0], first[1]);
-        let top_segs = (for (i in 1 to (len(top_points) - 1))
-            L(top_points[i][0], top_points[i][1]));
+        let top_segs = [for (i in 1 to (len(top_points) - 1))
+            L(top_points[i][0], top_points[i][1])];
         let d2 = d1 ++ " " ++ (top_segs |> join(" "));
-        let bottom_segs = (for (bp in bottom_rev) L(bp[0], bp[1]));
+        let bottom_segs = [for (bp in bottom_rev) L(bp[0], bp[1])];
         let d3 = d2 ++ " " ++ (bottom_segs |> join(" "));
         d3 ++ " " ++ Z_cmd()
     }
@@ -161,10 +161,10 @@ pub fn defs(children) {
 }
 
 pub fn linear_gradient(id: string, x1, y1, x2, y2, stops) {
-    let stop_els = for (s in stops) (
+    let stop_els = [for (s in stops) (
         let op = if (s.opacity) s.opacity else 1.0,
         <stop offset: s.offset, 'stop-color': s.color, 'stop-opacity': op>
-    );
+    )];
     <linearGradient id: id, x1: x1, y1: y1, x2: x2, y2: y2,
         for (el in stop_els) el
     >

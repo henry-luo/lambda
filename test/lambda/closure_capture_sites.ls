@@ -26,7 +26,7 @@ fn where_clause(n: int) {
     inner([5, 15, 25])
 }
 let t3 = where_clause(10)
-// expect: [15, 25]
+// expect: (15, 25) — a list, so it spreads in the final array (S2.5.1v2)
 
 // Test 4: outer binding used only in a raise branch
 fn raise_branch(n: int) {

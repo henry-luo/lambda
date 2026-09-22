@@ -78,7 +78,7 @@ pub fn value(host, node, descriptor, use_css) {
 // The wrapper is first created by the generic checked range operation.  Its
 // selected text remains the invocation node, so policy can locate that wrapper
 // with ordinary DOM traversal and decorate it using the core attribute API.
-fn set_wrapper_value(host, token, node, descriptor, use_css) {
+pn set_wrapper_value(host, token, node, descriptor, use_css) {
     let tag = if (use_css and descriptor.css_property != null) "span"
               else descriptor.format_tag;
     let wrapper = wrapper_for(host, node, tag);
@@ -161,14 +161,14 @@ fn direct_format_wrapper(host, node) {
     else null
 }
 
-fn unwrap_direct_formats(host, token, node, start_offset, end_offset, changed) {
+pn unwrap_direct_formats(host, token, node, start_offset, end_offset, changed) {
     let wrapper = direct_format_wrapper(host, node);
     if (wrapper == null) changed
     else if (not dom.dom_unwrap_range(host, token, start_offset, end_offset, wrapper)) false
     else unwrap_direct_formats(host, token, node, start_offset, end_offset, true)
 }
 
-fn clear_block_style(host, node) {
+pn clear_block_style(host, node) {
     let block = structure.block_ancestor(host, node);
     if (block == null or dom.get_attribute(block, "style") == null) false
     else { dom.set_attribute(block, "style", ""); true }

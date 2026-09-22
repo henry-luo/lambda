@@ -1280,6 +1280,46 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     return 0;  // success
 }
 
+// Keep the ordinary CLI observable under the same opt-in timing contract as
+// test-batch.  The report is intentionally written after script output so it
+// cannot alter a program's result stream unless the caller requested timing.
+static void emit_lambda_compiler_timing(const char* script_path) {
+    if (!lambda_compiler_timing_enabled()) return;
+    LambdaCompilerTiming timing = {};
+    lambda_compiler_timing_get(&timing);
+    if (!timing.valid) timing.valid = 1;
+    StrBuf* report = strbuf_new_cap(384);
+    if (!report) return;
+    strbuf_append_format(report,
+        "\x01" "COMPILER_TIMING schema=1 parse_us=%llu ast_build_us=%llu "
+        "bind_us=%llu validate_us=%llu index_us=%llu analysis_us=%llu "
+        "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
+        "build_transpile_us=%llu\n",
+        (unsigned long long)timing.parse_us,
+        (unsigned long long)timing.ast_build_us,
+        (unsigned long long)timing.bind_us,
+        (unsigned long long)timing.validate_us,
+        (unsigned long long)timing.index_us,
+        (unsigned long long)timing.analysis_us,
+        (unsigned long long)timing.mir_lower_us,
+        (unsigned long long)timing.module_finalize_us,
+        (unsigned long long)timing.link_us,
+        (unsigned long long)timing.build_transpile_us);
+    if (script_path) {
+        const char* sample_name = strrchr(script_path, '/');
+        sample_name = sample_name ? sample_name + 1 : script_path;
+        strbuf_append_format(report,
+            "\x01" "MIR_VOLUME schema=1 sample_id=%s test_name=%s modules=%llu "
+            "functions=%llu insns=%llu\n", script_path, sample_name,
+            (unsigned long long)timing.mir_module_count,
+            (unsigned long long)timing.mir_function_count,
+            (unsigned long long)timing.mir_insn_count);
+    }
+    fwrite(report->str, 1, report->length, stdout);
+    fflush(stdout);
+    strbuf_free(report);
+}
+
 void run_assertions() {
 #ifdef __cplusplus
     static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -4242,7 +4282,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 if (!timing.valid) timing.valid = 1;
                 if (timing.valid) {
                     printf("\x01" "COMPILER_TIMING schema=1 parse_us=%llu ast_build_us=%llu "
-                           "bind_us=%llu validate_us=%llu index_us=%llu "
+                           "bind_us=%llu validate_us=%llu index_us=%llu analysis_us=%llu "
                            "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
                            "build_transpile_us=%llu\n",
                            (unsigned long long)timing.parse_us,
@@ -4250,6 +4290,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                            (unsigned long long)timing.bind_us,
                            (unsigned long long)timing.validate_us,
                            (unsigned long long)timing.index_us,
+                           (unsigned long long)timing.analysis_us,
                            (unsigned long long)timing.mir_lower_us,
                            (unsigned long long)timing.module_finalize_us,
                            (unsigned long long)timing.link_us,
@@ -5165,6 +5206,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // Execute script with run_main enabled
         int result = run_script_file(&runtime, script_file, true);  // true for run_main
+        emit_lambda_compiler_timing(script_file);
 
         runtime_cleanup(&runtime);
         return lambda_main_finish(result);
@@ -5254,6 +5296,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
     }
     else if (script_file) {
         ret_code = run_script_file(&runtime, script_file, false);  // false for run_main in regular execution
+        emit_lambda_compiler_timing(script_file);
     } else {
         // Start the MIR-Direct REPL by default.
         run_repl(&runtime);

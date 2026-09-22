@@ -15,7 +15,7 @@ fn item_ancestor(host, node) {
     else item_ancestor(host, dom.parent_node(node))
 }
 
-fn abort(host, token) {
+pn abort(host, token) {
     dom.edit_abort_transaction(host, token)
     false
 }
@@ -43,7 +43,7 @@ fn list_for_item(item) {
 // Capture the successor before reparenting. The core move changes the live
 // sibling chain, so asking the marker for its successor after the move can
 // revisit the child and make the checked transaction roll back (D7.2.5).
-fn move_children_from(child, destination) {
+pn move_children_from(child, destination) {
     if (child == null) true
     else {
         let next = dom.next_sibling(child);
@@ -52,13 +52,13 @@ fn move_children_from(child, destination) {
     }
 }
 
-fn move_children(source, destination) {
+pn move_children(source, destination) {
     move_children_from(dom.first_child(source), destination)
 }
 
 // A host may legally contain an inline run directly. The list policy turns
 // that run into one list item; native only carries out these ordinary moves.
-fn wrap_host_content(host, list_tag) {
+pn wrap_host_content(host, list_tag) {
     let first = dom.first_child(host);
     let document = dom.owner_document(host);
     let list_node = dom.create_node(document, 1, list_tag, null);
@@ -69,11 +69,11 @@ fn wrap_host_content(host, list_tag) {
     else move_children_after(list_node, item)
 }
 
-fn move_children_after(marker, destination) {
+pn move_children_after(marker, destination) {
     move_children_from(dom.next_sibling(marker), destination)
 }
 
-fn replace_list_tag(list_node, list_tag) {
+pn replace_list_tag(list_node, list_tag) {
     let parent = dom.parent_node(list_node);
     let replacement = dom.create_node(dom.owner_document(list_node), 1, list_tag, null);
     if (parent == null or replacement == null) false

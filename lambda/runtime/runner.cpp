@@ -362,6 +362,8 @@ typedef struct PhaseProfile {
     char script_path[PROFILE_PATH_MAX];
     double parse_ms;
     double ast_ms;
+    double build_reducer_ms;
+    double inline_analysis_ms;
     // T0 columns: `plan_ms` is the frame-plan pass, `interp_exec_ms` the walk.
     // Both stay 0 on the JIT path so the TSV reads the same for either tier.
     double plan_ms;
@@ -392,6 +394,16 @@ bool is_profile_enabled() {
     return profile_enabled;
 }
 
+extern "C" int lambda_compiler_timing_collecting(void) {
+    return lambda_compiler_timing_enabled() || is_profile_enabled();
+}
+
+extern "C" void lambda_compiler_timing_add_inline_analysis_us(
+        uint64_t elapsed_us) {
+    if (!lambda_compiler_timing_collecting()) return;
+    g_last_lambda_compiler_timing.analysis_us += elapsed_us;
+}
+
 // High-resolution profiling timer (cross-platform)
 #ifdef _WIN32
 typedef LARGE_INTEGER profile_time_t;
@@ -410,6 +422,70 @@ double elapsed_ms_val(profile_time_t t0, profile_time_t t1) {
     return sec * 1000.0 + nsec / 1e6;
 }
 #endif
+
+typedef enum LambdaOwnTimingPhase {
+    LAMBDA_OWN_TIMING_NONE,
+    LAMBDA_OWN_TIMING_PARSE,
+    LAMBDA_OWN_TIMING_BUILD,
+    LAMBDA_OWN_TIMING_BIND,
+    LAMBDA_OWN_TIMING_VALIDATE,
+    LAMBDA_OWN_TIMING_INDEX,
+    LAMBDA_OWN_TIMING_PLAN,
+    LAMBDA_OWN_TIMING_MIR,
+    LAMBDA_OWN_TIMING_COUNT,
+} LambdaOwnTimingPhase;
+
+typedef struct LambdaOwnTimingFrame {
+    struct LambdaOwnTimingFrame* parent;
+    profile_time_t started;
+    double nested_ms[LAMBDA_OWN_TIMING_COUNT];
+    LambdaOwnTimingPhase active;
+} LambdaOwnTimingFrame;
+
+static thread_local LambdaOwnTimingFrame* g_lambda_own_timing_frame = NULL;
+
+static void lambda_own_timing_enter(LambdaOwnTimingFrame* frame) {
+    if (!frame) return;
+    memset(frame, 0, sizeof(*frame));
+    profile_get_time(&frame->started);
+    frame->parent = g_lambda_own_timing_frame;
+    g_lambda_own_timing_frame = frame;
+}
+
+static void lambda_own_timing_set_phase(LambdaOwnTimingFrame* frame,
+        LambdaOwnTimingPhase phase) {
+    if (frame) frame->active = phase;
+}
+
+static double lambda_own_timing_elapsed(LambdaOwnTimingFrame* frame,
+        LambdaOwnTimingPhase phase, profile_time_t start, profile_time_t end) {
+    double elapsed = elapsed_ms_val(start, end);
+    double nested = frame && phase > LAMBDA_OWN_TIMING_NONE &&
+        phase < LAMBDA_OWN_TIMING_COUNT ? frame->nested_ms[phase] : 0;
+    return elapsed > nested ? elapsed - nested : 0;
+}
+
+static void lambda_own_timing_leave(LambdaOwnTimingFrame* frame) {
+    if (!frame || g_lambda_own_timing_frame != frame) return;
+    profile_time_t ended;
+    profile_get_time(&ended);
+    g_lambda_own_timing_frame = frame->parent;
+    if (frame->parent && frame->parent->active > LAMBDA_OWN_TIMING_NONE &&
+            frame->parent->active < LAMBDA_OWN_TIMING_COUNT) {
+        frame->parent->nested_ms[frame->parent->active] +=
+            elapsed_ms_val(frame->started, ended);
+    }
+}
+
+// An import owned by a prebuild worker is not a nested transpile on this
+// thread, but its future wait is still child compilation time rather than the
+// importer's own reducer work. Account for it on the active parent phase.
+static void lambda_own_timing_subtract_active(double elapsed_ms) {
+    LambdaOwnTimingFrame* frame = g_lambda_own_timing_frame;
+    if (!frame || elapsed_ms <= 0 || frame->active <= LAMBDA_OWN_TIMING_NONE ||
+            frame->active >= LAMBDA_OWN_TIMING_COUNT) return;
+    frame->nested_ms[frame->active] += elapsed_ms;
+}
 
 static unsigned long profile_current_thread_id() {
 #ifdef _WIN32
@@ -446,16 +522,18 @@ void profile_dump_to_file() {
     create_dir_recursive("temp");
     FILE* f = fopen("temp/phase_profile.txt", "w");
     if (!f) return;
-    // TSV format v2: `plan`, `interp_exec` and `peak_rss_mb` added for the T0
+    // TSV format v3: build own-time detail separates replay from analyses;
+    // `plan`, `interp_exec` and `peak_rss_mb` remain the T0 report columns.
     // turnaround/memory report; JIT-tier rows carry 0 in the T0 columns.
-    fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1) format=2\n");
-    fprintf(f, "# script | parse | ast | plan | transpile | jit_init | mir_gen | interp_exec | total | peak_rss_mb | code_len | worker | thread_id\n");
+    fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1) format=3\n");
+    fprintf(f, "# script | parse | ast | build_reducer | inline_analysis | plan | transpile | jit_init | mir_gen | interp_exec | total | peak_rss_mb | code_len | worker | thread_id\n");
     for (int i = 0; i < profile_count; i++) {
         PhaseProfile* p = &profile_data[i];
         double total = p->parse_ms + p->ast_ms + p->plan_ms + p->transpile_ms +
                        p->jit_init_ms + p->mir_gen_ms + p->interp_exec_ms;
-        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
-                p->script_path, p->parse_ms, p->ast_ms, p->plan_ms, p->transpile_ms,
+        fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
+                p->script_path, p->parse_ms, p->ast_ms, p->build_reducer_ms,
+                p->inline_analysis_ms, p->plan_ms, p->transpile_ms,
                 p->jit_init_ms, p->mir_gen_ms, p->interp_exec_ms,
                 total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
     }
@@ -771,25 +849,63 @@ static bool lambda_ast_template_is_reusable_shallow(const Script* script) {
         (script->interp_supported && script->interp_planned);
 }
 
-static bool lambda_ast_template_dependencies_reusable(const Script* script,
+// An executing Runtime sees a shell around a process-cache template.  Cache
+// graph operations must follow the immutable owner, never retain or validate
+// the shell's EvalContext-local edges (D8.5.1v7).
+static const Script* lambda_cache_template_owner(const Script* script) {
+    if (!script) return NULL;
+    return script->cache_owned_template ? script : script->cache_template;
+}
+
+static const ArrayList* lambda_cache_direct_imports(const Script* script) {
+    if (!script) return NULL;
+    return script->cache_owned_template && script->cache_direct_imports
+        ? script->cache_direct_imports : script->direct_imports;
+}
+
+static bool lambda_ast_template_dependencies_reusable(Script* script,
         ArrayList* seen) {
     if (!lambda_ast_template_is_reusable_shallow(script) || !seen) return false;
     if (script_ptr_list_contains(seen, (Script*)script)) return true;
     if (!arraylist_append(seen, (void*)script)) return false;
-    if (!script->direct_imports) return true;
-    for (int i = 0; i < script->direct_imports->length; i++) {
-        const Script* dependency = (const Script*)script->direct_imports->data[i];
-        // A cached parent cannot retain a runtime-only child descriptor. The
-        // child must have its own cache lease before the parent is admitted.
-        if (!dependency || !dependency->cache_owned_template ||
-                !lambda_ast_template_dependencies_reusable(dependency, seen)) {
+    const ArrayList* dependencies = lambda_cache_direct_imports(script);
+    if (!dependencies) return true;
+    for (int i = 0; i < dependencies->length; i++) {
+        const Script* dependency = (const Script*)dependencies->data[i];
+        // A prebuild worker activates a cached child through a fresh runtime
+        // shell.  Its `cache_template`, not the shell itself, owns the
+        // immutable AST lease; rejecting the shell made every importer miss
+        // despite its worker having already built the complete closure.
+        const Script* dependency_template = lambda_cache_template_owner(
+            dependency);
+        if (!dependency_template ||
+                !lambda_ast_template_dependencies_reusable(
+                    (Script*)dependency_template, seen)) {
             return false;
         }
     }
     return true;
 }
 
-static bool lambda_ast_template_is_reusable(const Script* script) {
+static bool lambda_cache_prepare_template_direct_imports(Script* script) {
+    if (!script || script->cache_direct_imports) return script != NULL;
+    if (!script->direct_imports || script->direct_imports->length == 0) return true;
+    ArrayList* dependencies = arraylist_new(script->direct_imports->length);
+    if (!dependencies) return false;
+    for (int i = 0; i < script->direct_imports->length; i++) {
+        const Script* template_owner = lambda_cache_template_owner(
+            (const Script*)script->direct_imports->data[i]);
+        if (!template_owner || !arraylist_append(dependencies,
+                (void*)template_owner)) {
+            arraylist_free(dependencies);
+            return false;
+        }
+    }
+    script->cache_direct_imports = dependencies;
+    return true;
+}
+
+static bool lambda_ast_template_is_reusable(Script* script) {
     ArrayList* seen = arraylist_new(4);
     if (!seen) return false;
     bool reusable = lambda_ast_template_dependencies_reusable(script, seen);
@@ -799,11 +915,12 @@ static bool lambda_ast_template_is_reusable(const Script* script) {
 
 static bool lambda_cache_record_direct_dependencies(InputScriptCache* cache,
         const Script* importer) {
-    if (!importer || !importer->direct_imports) return true;
+    const ArrayList* dependencies = lambda_cache_direct_imports(importer);
+    if (!importer || !dependencies) return true;
     if (!importer->cache_compilation_unit_id) return false;
-    for (int i = 0; i < importer->direct_imports->length; i++) {
-        const Script* dependency =
-            (const Script*)importer->direct_imports->data[i];
+    for (int i = 0; i < dependencies->length; i++) {
+        const Script* dependency = lambda_cache_template_owner(
+            (const Script*)dependencies->data[i]);
         if (!dependency || !dependency->cache_compilation_unit_id ||
                 !input_script_cache_record_dependency_by_unit(cache,
                     importer->cache_compilation_unit_id,
@@ -818,12 +935,14 @@ static bool lambda_cache_record_direct_dependencies(InputScriptCache* cache,
 
 static bool lambda_cache_refresh_dependencies(const Script* script,
         InputScriptCache* cache, ArrayList* seen) {
+    script = lambda_cache_template_owner(script);
     if (!script || !cache || !seen) return false;
     if (script_ptr_list_contains(seen, (Script*)script)) return false;
     if (!arraylist_append(seen, (void*)script)) return true;
-    if (!script->direct_imports) return false;
-    for (int i = 0; i < script->direct_imports->length; i++) {
-        const Script* dependency = (const Script*)script->direct_imports->data[i];
+    const ArrayList* dependencies = lambda_cache_direct_imports(script);
+    if (!dependencies) return false;
+    for (int i = 0; i < dependencies->length; i++) {
+        const Script* dependency = (const Script*)dependencies->data[i];
         if (!dependency || !dependency->reference ||
                 !dependency->cache_compilation_unit_id) {
             // A cache image with an untracked child has no safe freshness
@@ -913,6 +1032,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
     // The template's dependency list belongs to the cache image. The clone
     // graph below replaces it with fresh Script shells for this EvalContext.
     instance->direct_imports = NULL;
+    instance->cache_direct_imports = NULL;
     runtime_register_script(runtime, instance);
     return instance;
 }
@@ -942,13 +1062,15 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
             !arraylist_append(graph->instances, instance)) {
         return NULL;
     }
-    if (!cached->direct_imports || cached->direct_imports->length == 0) {
+    const ArrayList* dependencies = lambda_cache_direct_imports(cached);
+    if (!dependencies || dependencies->length == 0) {
         return instance;
     }
-    instance->direct_imports = arraylist_new(cached->direct_imports->length);
+    instance->direct_imports = arraylist_new(dependencies->length);
     if (!instance->direct_imports) return NULL;
-    for (int i = 0; i < cached->direct_imports->length; i++) {
-        const Script* dependency = (const Script*)cached->direct_imports->data[i];
+    for (int i = 0; i < dependencies->length; i++) {
+        const Script* dependency = lambda_cache_template_owner(
+            (const Script*)dependencies->data[i]);
         Script* dependency_instance = lambda_ast_template_clone_graph(runtime,
             dependency, graph);
         if (!dependency_instance || !arraylist_append(instance->direct_imports,
@@ -1205,6 +1327,7 @@ typedef struct LambdaDirectFrontendPassContext {
     const char* script_path;
     LambdaParseError parse_error;
     LambdaReductionTape* reductions;
+    ArrayList* functions;
 } LambdaDirectFrontendPassContext;
 
 static int lambda_parse_compiler_pass(void* opaque) {
@@ -1255,8 +1378,8 @@ static int lambda_bind_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
     if (!pass || !pass->tp || !pass->tp->ast_root ||
-            !lambda_ast_rebind_direct_scope_graph(pass->tp,
-                (AstScript*)pass->tp->ast_root)) {
+            !lambda_ast_rebind_direct_scope_graph_with_functions(pass->tp,
+                (AstScript*)pass->tp->ast_root, &pass->functions)) {
         if (pass && pass->tp) {
             log_error("Lambda AST binding rejected %s", pass->script_path);
         }
@@ -1268,8 +1391,12 @@ static int lambda_bind_compiler_pass(void* opaque) {
 static int lambda_validate_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
-    return pass && lambda_ast_finalize_script(pass->tp,
-        (AstScript*)pass->tp->ast_root);
+    if (!pass) return 0;
+    int valid = lambda_ast_finalize_script_with_functions(pass->tp,
+        (AstScript*)pass->tp->ast_root, pass->functions);
+    arraylist_free(pass->functions);
+    pass->functions = NULL;
+    return valid;
 }
 
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
@@ -1283,12 +1410,16 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // Phase profiling: use high-res timer for release-accurate timing.
     bool profiling = is_profile_enabled();
     bool compiler_timing = lambda_compiler_timing_enabled();
-    if (compiler_timing) lambda_compiler_timing_reset();
+    if (profiling || compiler_timing) lambda_compiler_timing_reset();
     profile_time_t p0, p1, p2, p3, p4, p5;
+    LambdaOwnTimingFrame own_timing = {};
+    bool own_timing_enabled = profiling || compiler_timing;
+    if (own_timing_enabled) lambda_own_timing_enter(&own_timing);
     if (profiling || compiler_timing) profile_get_time(&p0);
 
     get_time(&start);
     tp->source = script->source;
+    tp->defer_ast_index_columns = lambda_tier_selected() != LAMBDA_TIER_JIT;
     LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
     compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
     CompilerPassSpec parse_pass = {"parse", COMPILER_FACT_NONE,
@@ -1296,28 +1427,39 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     CompilerPassSpec build_pass = {"build", COMPILER_FACT_PARSED,
         COMPILER_FACT_AST, lambda_build_compiler_pass, &front_end};
     CompilerPassSpec bind_pass = {"bind", COMPILER_FACT_AST,
-        COMPILER_FACT_BOUND, lambda_bind_compiler_pass, &front_end};
+        COMPILER_FACT_BOUND | COMPILER_FACT_INDEXED,
+        lambda_bind_compiler_pass, &front_end};
+    lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_PARSE);
     if (!compiler_pass_manager_add(&tp->pass_manager, &parse_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
         lambda_rd_destroy_reductions(front_end.reductions);
+        if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p1);
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
+    lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BUILD);
     if (!compiler_pass_manager_add(&tp->pass_manager, &build_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
         lambda_rd_destroy_reductions(front_end.reductions);
+        if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p2);
     get_time(&end);
     print_elapsed_time("building AST", start, end);
 
+    lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BIND);
     if (!compiler_pass_manager_add(&tp->pass_manager, &bind_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
+        arraylist_free(front_end.functions);
+        if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
+    }
+    if (tp->defer_ast_index_columns) {
+        tp->pass_manager.facts &= ~COMPILER_FACT_INDEXED;
     }
     if (profiling || compiler_timing) profile_get_time(&p3);
     get_time(&end);
@@ -1326,24 +1468,18 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
         COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED,
         lambda_validate_compiler_pass, &front_end};
+    lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_VALIDATE);
     if (!compiler_pass_manager_add(&tp->pass_manager, &validate_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
         log_error("compiler validation rejected '%s'", script_path);
+        arraylist_free(front_end.functions);
+        if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
     if (profiling || compiler_timing) profile_get_time(&p4);
-
-    AstIndexPassContext index_context = {
-        &tp->ast_index, tp->ast_root, tp->profile};
-    CompilerPassSpec index_pass = {"index",
-        COMPILER_FACT_FRONTEND,
-        COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
-    if (!compiler_pass_manager_add(&tp->pass_manager, &index_pass) ||
-            !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
-        log_error("failed to run indexed AST pass for '%s'", script_path);
-        return;
-    }
-    if (profiling || compiler_timing) profile_get_time(&p5);
+    // Allocation reserves dense node IDs and bind publishes graph columns, so
+    // no post-validation index walk remains (D8.2.4/D8.2.5v2).
+    if (profiling || compiler_timing) p5 = p4;
     get_time(&end);
     print_elapsed_time("building AST", start, end);
 
@@ -1375,6 +1511,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
         if (profiling || compiler_timing) profile_get_time(&plan0);
+        lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_PLAN);
         bool supported = lambda_prepare_ast_interpreter(tp);
         if (profiling || compiler_timing) profile_get_time(&plan1);
         if (supported) {
@@ -1382,12 +1519,12 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             script_adopt_transpiler(script, tp);
             if (compiler_timing) {
                 LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
-                timing->parse_us = (uint64_t)(elapsed_ms_val(p0, p1) * 1000.0);
-                timing->ast_build_us = (uint64_t)(elapsed_ms_val(p1, p2) * 1000.0);
-                timing->bind_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
-                timing->validate_us = (uint64_t)(elapsed_ms_val(p3, p4) * 1000.0);
-                timing->index_us = (uint64_t)(elapsed_ms_val(p4, p5) * 1000.0);
-                timing->plan_us = (uint64_t)(elapsed_ms_val(plan0, plan1) * 1000.0);
+                timing->parse_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PARSE, p0, p1) * 1000.0);
+                timing->ast_build_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BUILD, p1, p2) * 1000.0);
+                timing->bind_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BIND, p2, p3) * 1000.0);
+                timing->validate_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_VALIDATE, p3, p4) * 1000.0);
+                timing->index_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_INDEX, p4, p5) * 1000.0);
+                timing->plan_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PLAN, plan0, plan1) * 1000.0);
                 timing->build_transpile_us = timing->parse_us + timing->ast_build_us +
                     timing->bind_us + timing->validate_us + timing->index_us +
                     timing->plan_us;
@@ -1397,16 +1534,23 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 PhaseProfile prof;
                 memset(&prof, 0, sizeof(prof));
                 profile_set_script_path(&prof, script_path);
-                prof.parse_ms = elapsed_ms_val(p0, p1);
-                prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3) +
-                    elapsed_ms_val(p3, p4) + elapsed_ms_val(p4, p5);
-                prof.plan_ms = elapsed_ms_val(plan0, plan1);
+                prof.parse_ms = lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PARSE, p0, p1);
+                prof.ast_ms = lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BUILD, p1, p2) + lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BIND, p2, p3) +
+                    lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_VALIDATE, p3, p4) + lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_INDEX, p4, p5);
+                prof.inline_analysis_ms =
+                    (double)g_last_lambda_compiler_timing.analysis_us / 1000.0;
+                double build_ms = lambda_own_timing_elapsed(&own_timing,
+                    LAMBDA_OWN_TIMING_BUILD, p1, p2);
+                prof.build_reducer_ms = build_ms > prof.inline_analysis_ms
+                    ? build_ms - prof.inline_analysis_ms : 0;
+                prof.plan_ms = lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PLAN, plan0, plan1);
                 prof.worker_thread = 0;
                 prof.thread_id = profile_current_thread_id();
                 profile_record_phase(&prof);
             }
             log_notice("interp: planned file=%s module_slots=%u",
                 script_path, (unsigned)tp->interp_slab_count);
+            if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
             return;
         }
         if (tp->runtime && tp->runtime->ast_prebuild_only) {
@@ -1416,12 +1560,16 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             script_adopt_transpiler(script, tp);
             log_info("module-ast-prebuild: retained unsupported Lambda AST path=%s reason=node:%s",
                 script_path, interp_node_kind_name(tp->interp_reject_kind));
+            if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
             return;
         }
         interp_run_stats()->scripts_fallback++;
         log_notice("interp: fallback file=%s reason=node:%s",
             script_path, interp_node_kind_name(tp->interp_reject_kind));
-        if (!interp_force_jit_import_cone(tp)) return;
+        if (!interp_force_jit_import_cone(tp)) {
+            if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
+            return;
+        }
     }
 
     // compile the AST directly to MIR; this is the only supported Lambda backend.
@@ -1430,6 +1578,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         uint64_t mir_module_count = 0;
         uint64_t mir_function_count = 0;
         uint64_t mir_instruction_count = 0;
+        lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_MIR);
         compile_script_as_mir_direct(tp, script, script_path,
                                       profiling || compiler_timing ? &mir_jit_init_ms : NULL,
                                       profiling || compiler_timing ? &mir_transpile_ms : NULL,
@@ -1439,11 +1588,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                                       compiler_timing ? &mir_instruction_count : NULL);
         if (compiler_timing) {
             LambdaCompilerTiming* timing = &g_last_lambda_compiler_timing;
-            timing->parse_us = (uint64_t)(elapsed_ms_val(p0, p1) * 1000.0);
-            timing->ast_build_us = (uint64_t)(elapsed_ms_val(p1, p2) * 1000.0);
-            timing->bind_us = (uint64_t)(elapsed_ms_val(p2, p3) * 1000.0);
-            timing->validate_us = (uint64_t)(elapsed_ms_val(p3, p4) * 1000.0);
-            timing->index_us = (uint64_t)(elapsed_ms_val(p4, p5) * 1000.0);
+            timing->parse_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PARSE, p0, p1) * 1000.0);
+            timing->ast_build_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BUILD, p1, p2) * 1000.0);
+            timing->bind_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BIND, p2, p3) * 1000.0);
+            timing->validate_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_VALIDATE, p3, p4) * 1000.0);
+            timing->index_us = (uint64_t)(lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_INDEX, p4, p5) * 1000.0);
             timing->module_finalize_us = (uint64_t)(mir_jit_init_ms * 1000.0);
             timing->mir_lower_us = (uint64_t)(mir_transpile_ms * 1000.0);
             timing->link_us = (uint64_t)(mir_gen_ms * 1000.0);
@@ -1459,9 +1608,15 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             PhaseProfile prof;
             memset(&prof, 0, sizeof(prof));
                 profile_set_script_path(&prof, script_path);
-                prof.parse_ms = elapsed_ms_val(p0, p1);
-                prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3) +
-                    elapsed_ms_val(p3, p4) + elapsed_ms_val(p4, p5);
+                prof.parse_ms = lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PARSE, p0, p1);
+                prof.ast_ms = lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BUILD, p1, p2) + lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_BIND, p2, p3) +
+                    lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_VALIDATE, p3, p4) + lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_INDEX, p4, p5);
+            prof.inline_analysis_ms =
+                (double)g_last_lambda_compiler_timing.analysis_us / 1000.0;
+            double build_ms = lambda_own_timing_elapsed(&own_timing,
+                LAMBDA_OWN_TIMING_BUILD, p1, p2);
+            prof.build_reducer_ms = build_ms > prof.inline_analysis_ms
+                ? build_ms - prof.inline_analysis_ms : 0;
             prof.transpile_ms = mir_transpile_ms;
             prof.jit_init_ms = mir_jit_init_ms;
             prof.mir_gen_ms = mir_gen_ms;
@@ -1470,6 +1625,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             prof.thread_id = profile_current_thread_id();
             profile_record_phase(&prof);
         }
+        if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
 
@@ -1493,8 +1649,16 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             input_script_cache_ast_enabled(input_manager_global_script_cache())) {
         // Only an ordinary consumer waits, and only for its own direct module.
         // Prebuild workers bypass this path to keep the bounded pool runnable.
+        profile_time_t await_start, await_end;
+        bool account_prebuild_wait = g_lambda_own_timing_frame != NULL;
+        if (account_prebuild_wait) profile_get_time(&await_start);
         (void)module_ast_prebuild_await_import(lambda_ast_prebuild_profile(),
             script_path);
+        if (account_prebuild_wait) {
+            profile_get_time(&await_end);
+            lambda_own_timing_subtract_active(elapsed_ms_val(await_start,
+                await_end));
+        }
     }
 
     // Normalize path to canonical absolute path for reliable deduplication
@@ -1842,7 +2006,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             script_cache, new_script));
     if (!cache_dependencies_valid) input_script_cache_mark_rejected(script_cache);
     bool cache_published = false;
-    if (cache_artifact_enabled && cache_dependencies_valid && new_script->jit_context && runtime->use_mir_direct &&
+    if (cache_artifact_enabled && cache_dependencies_valid &&
+            lambda_cache_prepare_template_direct_imports(new_script) &&
+            new_script->jit_context && runtime->use_mir_direct &&
             !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted) {
         InputScriptArtifactOps ops = {
             lambda_script_cache_destroy_artifact,
@@ -1858,7 +2024,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     else if (cache_artifact_enabled && cache_dependencies_valid &&
-            lambda_ast_template_is_reusable(new_script)) {
+            lambda_ast_template_is_reusable(new_script) &&
+            lambda_cache_prepare_template_direct_imports(new_script)) {
         InputScriptArtifactOps ops = {
             lambda_script_cache_destroy_artifact,
             lambda_script_cache_artifact_bytes,
@@ -1916,6 +2083,16 @@ static void repl_restore_scope(NameScope* scope, NameEntry* first,
     scope->first = first;
     scope->last = last;
     if (last) last->next = NULL;
+    // A rejected fragment may have populated the pointer index with bindings
+    // that are no longer in the retained list.  Drop that derived cache so
+    // the next lookup cannot observe a rolled-back declaration.
+    scope->name_index = NULL;
+    scope->name_index_capacity = 0;
+    scope->name_index_count = 0;
+    scope->entry_count = 0;
+    for (NameEntry* entry = first; entry; entry = entry->next) {
+        scope->entry_count++;
+    }
 }
 
 static void repl_restore_source(Script* script, size_t length) {
@@ -2636,6 +2813,7 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     }
     if (script->pool) pool_destroy(script->pool);
     if (script->direct_imports) arraylist_free(script->direct_imports);
+    if (script->cache_direct_imports) arraylist_free(script->cache_direct_imports);
     if (script->jit_context) {
         jit_cleanup_mode(script->jit_context, script->mir_gen_initialized ? 1 : 0);
     }
@@ -2724,8 +2902,15 @@ void runtime_log_script_load_summary(Runtime* runtime) {
 // Used between independent evaluations (e.g. test-batch) so that each
 // script starts with a clean GC heap.  The next runner_setup_context()
 // call will create fresh heap/name_pool state and store it back.
+static void runtime_quiesce_satellite_workers(Runtime* runtime);
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
+    // A satellite still lowering the finished script reads types and names
+    // this reset frees; retire and await it first, as runtime_cleanup does.
+    // test-batch resets the heap before it frees the scripts, and a worker
+    // racing that reset crashed the next script's run.
+    runtime_quiesce_satellite_workers(runtime);
     if (runtime_heap(runtime)) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
@@ -2816,8 +3001,26 @@ void runtime_reset_heap(Runtime* runtime) {
     }
 }
 
+void runtime_request_satellite_cancel(Runtime* runtime) {
+    if (!runtime || !runtime->scripts) return;
+    for (int i = 0; i < runtime->scripts->length; i++) {
+        interp_satellite_request_cancel_script((Script*)runtime->scripts->data[i]);
+    }
+}
+
+// Satellite workers lower against a Runtime-owned script shell and shared JIT
+// services. Wait only after the close request has prevented further work.
+static void runtime_quiesce_satellite_workers(Runtime* runtime) {
+    if (!runtime || !runtime->scripts) return;
+    runtime_request_satellite_cancel(runtime);
+    for (int i = 0; i < runtime->scripts->length; i++) {
+        interp_satellite_cancel_script((Script*)runtime->scripts->data[i]);
+    }
+}
+
 void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
+    runtime_quiesce_satellite_workers(runtime);
     // PTH44v2/SO20: the document context and its node table live for the
     // evaluation. Their entries point into the heap this teardown destroys, so
     // they must go with it or the next run would read freed nodes.
