@@ -13,6 +13,7 @@
 #include "runtime-state.h"
 #include "recovery_frame.h"
 #include "lambda-stack.h"
+#include "concurrency.h"
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
@@ -243,28 +244,21 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     return true;
 }
 
+bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image) {
+    if (!script || !image || !image->context) return false;
+    if (!script->interp_satellite_images) {
+        script->interp_satellite_images = arraylist_new(4);
+    }
+    return script->interp_satellite_images &&
+        arraylist_append(script->interp_satellite_images, image);
+}
+
 static bool interp_satellite_publish_image(Script* script,
         InterpSatelliteImage* image) {
     if (!script || !image || !image->context || !image->target_entry ||
             !image->module_layout) return false;
-    // Assign the suffix while the evaluator owns the module state. Workers
-    // may finish out of order, so their compile-time observations are not a
-    // valid append position; layout preparation writes property_key_base
-    // after it links this image's suffix (D8.5.1v6).
-    image->module_layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS;
-    bool prepared = lambda_module_state_bind_static(script->module_state_id,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list) && prepare_context_module_state(image->context,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list);
-    if (!prepared) return false;
-    if (!script->interp_satellite_images) {
-        script->interp_satellite_images = arraylist_new(4);
-    }
-    if (!script->interp_satellite_images ||
-            !arraylist_append(script->interp_satellite_images, image)) {
-        return false;
-    }
+    if (!interp_satellite_image_prepare(script, image) ||
+            !interp_satellite_image_retain(script, image)) return false;
     bool target_published = false;
     for (uint32_t index = 0; index < image->member_count; index++) {
         if (!image->member_entries[index] || !image->members[index]) continue;
@@ -7559,9 +7553,21 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
                         (int)get_type_id(callee));
                     break;
                 }
-                uint64_t result_home = 0;
-                tail.set(fn_call_into((Function*)(uintptr_t)callee.item, NULL,
-                    &result_home));
+                bool task_root = proc->analysis &&
+                    (proc->analysis->may_await ||
+                     proc->analysis->needs_task_context);
+                // A task-aware `main` must enter through the scheduler so its
+                // task-only builtins have a current task (D6.3.1, S7.11.2).
+                // A synchronous T0 main stays on the direct path: an untyped
+                // dynamic callee can establish its own resumable task root,
+                // while this AST caller has no durable continuation.
+                if (task_root) {
+                    tail.set(lambda_task_run_root_function(callee, NULL));
+                } else {
+                    uint64_t result_home = 0;
+                    tail.set(fn_call_into((Function*)(uintptr_t)callee.item,
+                        NULL, &result_home));
+                }
                 called_main = true;
                 break;
             }

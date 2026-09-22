@@ -350,8 +350,10 @@ must keep rejecting unknown forms.
   setter (D2.4.1–D2.4.3, D8.2.6).
 - Every Lambda MIR entry uses the shared native-stack probe against
   `Context::stack_limit` and shares its recovery-backed exit with side-stack
-  exhaustion. Native promotion therefore retains stack-fault containment;
-  fault timing may differ from the interpreter (S7.11.1v2, S7.11.4).
+  exhaustion. The finalizer inserts the probe only after root coloring, so its
+  scalar temporaries cannot perturb the body liveness plan. Native promotion
+  therefore retains stack-fault containment; fault timing may differ from the
+  interpreter (S7.11.1v2, S7.11.4).
 - The process-wide MIR import catalog is initialized once before any P2 worker
   creates a private MIR context, so each request receives the fully published
   immutable resolver table (D8.2.6).

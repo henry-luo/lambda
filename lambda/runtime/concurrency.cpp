@@ -175,6 +175,16 @@ static LambdaHandleToPromiseFn handle_to_promise;
 static bool scheduler_has_heap(void);
 static LambdaTask* lambda_current_task(void);
 
+static void task_handle_invalidate(LambdaTask* task) {
+    if (!task || get_type_id(task->handle) != LMD_TYPE_VMAP ||
+            !task->handle.vmap ||
+            task->handle.vmap->host_type != &task_handle_brand) return;
+    // JS Promise reactions retain the handle, not the task allocation.  A
+    // reaction may run in the final microtask checkpoint after scheduler
+    // teardown; clear this non-managed edge before releasing the task.
+    task->handle.vmap->host_data = NULL;
+}
+
 extern "C" void lambda_concurrency_set_promise_bridge(
     LambdaPromiseIsFn is_promise, LambdaPromiseWaitFn wait_promise,
     LambdaHandleToPromiseFn to_promise) {
@@ -689,6 +699,10 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
     LambdaTask* task = scheduler->all_tasks;
     while (task) {
         LambdaTask* next = task->next_all;
+        // D6.3.1: a JS microtask can only request a later Lambda macrotask.
+        // Once teardown starts, retained Promise reactions must become no-ops
+        // rather than dereferencing the task after this record is released.
+        task_handle_invalidate(task);
         if (task->frame_roots && task->frame_root_count > 0 && scheduler_has_heap()) {
             heap_unregister_gc_root_range((uint64_t*)task->frame_roots);
         }
@@ -1406,6 +1420,20 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     return lambda_task_handle(task);
 }
 
+extern "C" Item lambda_task_run_root_function(Item function, List* args) {
+    EvalContext* owner = context;
+    if (!owner || !owner->scheduler || get_type_id(function) != LMD_TYPE_FUNC) {
+        return task_error(ERR_INVALID_STATE, "task root requires a procedure and scheduler");
+    }
+    Item handle = lambda_task_start_function(function, args);
+    LambdaTask* task = lambda_task_from_handle(handle);
+    if (!task) return handle;
+    if (lambda_scheduler_drain(owner->scheduler) < 0) {
+        return task_error(ERR_INVALID_STATE, "task root drain did not complete");
+    }
+    return lambda_task_result(task);
+}
+
 extern "C" Item lambda_task_run_root_raw(void* function_ptr, void* env,
     int env_count, List* args) {
     EvalContext* owner = context;
@@ -1421,13 +1449,7 @@ extern "C" Item lambda_task_run_root_raw(void* function_ptr, void* env,
     lambda_function_mark_mir_context_abi(function);
     lambda_function_mark_lambda_boxed_procedure(function);
     function->closure_field_count = env_count > 0 ? (uint16_t)env_count : 0;
-    Item handle = lambda_task_start_function((Item){.function = function}, args);
-    LambdaTask* task = lambda_task_from_handle(handle);
-    if (!task) return handle;
-    if (lambda_scheduler_drain(owner->scheduler) < 0) {
-        return task_error(ERR_INVALID_STATE, "task root drain did not complete");
-    }
-    return lambda_task_result(task);
+    return lambda_task_run_root_function((Item){.function = function}, args);
 }
 
 static LambdaTask* lambda_current_task(void) {

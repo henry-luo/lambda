@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Emission-size budgets (MT7). 0% slack: any probe that emits MORE than a recorded threshold fails test-lambda-baseline. Landing intended growth means reviewing the emission diff and lifting the number here in the SAME commit, so the growth is visible in review (D8.6.1). A probe that emits LESS passes and prints the tightened values; committing them is the manual re-baseline. This file is never written by the test. Profiles are looked up as <platform>-<config>, then <platform>, then default -- a platform that legitimately emits differently (Windows commits side-stack pages in the prologue) gets its own explicit entry rather than silent slack. Instruction counts come from the finalized MIR artifact; frame shape comes from LAMBDA_MIR_LOG_FRAME_SLOTS telemetry, whose function names are a separate namespace (LambdaJS reports several emitted functions under one debug name), which is why 'functions' and 'frames' are addressed separately. Re-baseline 2026-09-22: Lambda cells include the reviewed native stack guard needed to report recoverable stack exhaustion (S7.11.1v2); the snapshot is an exact ratchet, not causal tuning attribution.",
+  "description": "Emission-size budgets (MT7). 0% slack: any probe that emits MORE than a recorded threshold fails test-lambda-baseline. Landing intended growth means reviewing the emission diff and lifting the number here in the SAME commit, so the growth is visible in review (D8.6.1). A probe that emits LESS passes and prints the tightened values; committing them is the manual re-baseline. This file is never written by the test. Profiles are looked up as <platform>-<config>, then <platform>, then default -- a platform that legitimately emits differently (Windows commits side-stack pages in the prologue) gets its own explicit entry rather than silent slack. Instruction counts come from the finalized MIR artifact; frame shape comes from LAMBDA_MIR_LOG_FRAME_SLOTS telemetry, whose function names are a separate namespace (LambdaJS reports several emitted functions under one debug name), which is why 'functions' and 'frames' are addressed separately. Re-baseline 2026-09-22: Lambda entry guards use a late scalar-only insertion, preserving root-liveness coloring while implementing recoverable native-stack exhaustion (S7.11.1v2); the snapshot is an exact ratchet, not causal tuning attribution.",
   "probes": [
     {
       "name": "lambda_scalar_home_donation",
@@ -319,7 +319,7 @@
       "description": "Picked corpus script (generator/resume-heavy), including fixed call-argument slots, merged Item error-tag branches, and generator throw-resume markers. D4.6.1v2 re-baseline: fused active-module name resolution removes the intermediate NameId-to-Item MIR import boundary. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
       "budgets": {
         "default": {
-          "module_insns": 6036
+          "module_insns": 6040
         }
       }
     },
@@ -330,7 +330,7 @@
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting. Its bound includes nested, throwing fixed argument-root extents, merged Item error-tag branches, and generator throw-resume markers. Tune4 re-baseline: 64 former name/receiver-selected calls now perform observable property Get plus per-callee dispatch with precise argument roots (D6.2.2v2, D5.4.3). JS2 reviewed growth (D8.6.1): +307 instructions above the recorded budget for guarded field/index access with the existing rooted fallback kernels. The profiling build adds 24 instructions for the existing named probe/hit/miss counters and their joins. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
       "budgets": {
         "default": {
-          "module_insns": 8868
+          "module_insns": 8899
         }
       }
     },
@@ -358,13 +358,13 @@
       "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 1172->1196; deltablue2 -12%, prettier_ast2 -14%. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
       "budgets": {
         "default": {
-          "module_insns": 1225,
+          "module_insns": 1220,
           "functions": {
             "_guarded_load_#": {
               "insns": 58
             },
             "_guarded_store_#": {
-              "insns": 104
+              "insns": 99
             }
           },
           "frames": [
@@ -539,10 +539,10 @@
       "description": "Tune30 R1: a float-only libm leaf (sqrt/fabs over a float[] row) is emitted with no GC safepoint and no root frame -- the call cannot allocate, so its arguments need no rooting and the body needs no root-frame enter/exit. Baselined 2026-09-18.",
       "budgets": {
         "default": {
-          "module_insns": 415,
+          "module_insns": 401,
           "functions": {
             "_tune30_norms_#": {
-              "insns": 172
+              "insns": 168
             }
           }
         }
@@ -555,10 +555,10 @@
       "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 14487->14499; deltablue2 -12%, prettier_ast2 -14%. Tune29 \u00a720 (2026-09-17): the MIR tier joins its may-be-shared binding facts at control-flow merges and loop entries (LR12-17), so run_cube's stores after branch-local detaches keep their share-bit checks -- module_insns 14499->14574, run_cube 9655->9730; cube3d2 time unchanged (7.78 vs 7.79 ms). Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
       "budgets": {
         "default": {
-          "module_insns": 20467,
+          "module_insns": 16089,
           "functions": {
             "_run_cube_#": {
-              "insns": 13791
+              "insns": 9790
             }
           }
         }

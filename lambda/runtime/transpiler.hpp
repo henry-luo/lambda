@@ -315,6 +315,8 @@ typedef struct InterpSatelliteImage {
 
 // seals execution-local key relocation before any entry becomes callable.
 bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image);
+// Transfers a prepared private image to its Script owner for entry lifetime.
+bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image);
 
 // A worker owns the cancellation context until its private image is either
 // published or destroyed. The probe is only sampled at Lambda-owned compiler

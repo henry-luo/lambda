@@ -402,6 +402,12 @@ uintptr_t lambda_stack_recoverable_limit(void) {
     return budget_limit > fault_floor ? budget_limit : fault_floor;
 }
 
+extern "C" uint64_t lambda_stack_is_exhausted(uintptr_t stack_limit) {
+    // The C call's frame is below its native caller, making this conservative
+    // while staying inside the recovery headroom reserved by JC23.
+    return stack_limit != 0 && lambda_stack_pointer() < stack_limit;
+}
+
 extern "C" void lambda_stack_overflow_error(const char* func_name) {
     (void)func_name;
     _lambda_stack_overflow_flag = true;

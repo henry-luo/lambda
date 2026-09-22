@@ -549,10 +549,6 @@ struct MirEmitter {
     // stale register can never leak into a different function's body.
     MIR_item_t bitcast_slot_func;
     MIR_reg_t bitcast_slot_addr;
-    // Per-function native stack pointer captured once at the function head
-    // for the JC23 stack guard; keyed by func_item like the bitcast slot.
-    MIR_item_t stack_ptr_func;
-    MIR_reg_t stack_ptr_reg;
 };
 
 // Profiles locate Item-only module slots; the common layer owns conversion.
@@ -1277,32 +1273,6 @@ static inline void em_store_at(MirEmitter* em, MIR_reg_t base, MIR_disp_t offset
     em_emit_insn(em, MIR_new_insn(em->ctx, code,
         MIR_new_mem_op(em->ctx, type, offset, base, 0, 1),
         MIR_new_reg_op(em->ctx, value)));
-}
-
-// JC23: the language-level stack guard compares the native stack pointer with
-// the thread's recoverable limit (`Context::stack_limit`). It writes nothing,
-// so the call's exit has no matching step and a fault landing has no counter
-// to rewind. MIR has no SP operand; BSTART stores SP (`mov rd, sp`) without an
-// alloca, and under the MIR interpreter it yields the interpreter's native
-// frame, which lives on the same stack. Emitted functions use no ALLOCA
-// outside their head, so SP is constant for the body: one BSTART prepended at
-// the head serves every guard. Release A/B on r7rs/ack: a BSTART per call
-// site cost +9.5%, the head BSTART +3.0%, and a constant in its place +0.4%
-// (so the residue is BSTART's presence in mir-gen, not the compare).
-static inline void em_branch_if_stack_exhausted(MirEmitter* em,
-        MIR_label_t overflow) {
-    if (!em->stack_ptr_reg || em->stack_ptr_func != em->func_item) {
-        em->stack_ptr_reg = em_new_reg(em, "stack_ptr", MIR_T_I64);
-        em->stack_ptr_func = em->func_item;
-        MIR_prepend_insn(em->ctx, em->func_item, MIR_new_insn(em->ctx,
-            MIR_BSTART, MIR_new_reg_op(em->ctx, em->stack_ptr_reg)));
-    }
-    MIR_reg_t sp = em->stack_ptr_reg;
-    MIR_reg_t limit = em_load_at(em, em->frame.runtime,
-        (MIR_disp_t)offsetof(Context, stack_limit), MIR_T_I64, "stack_limit");
-    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBLT,
-        MIR_new_label_op(em->ctx, overflow), MIR_new_reg_op(em->ctx, sp),
-        MIR_new_reg_op(em->ctx, limit)));
 }
 
 // Establish pointer/kind before dereferencing an inferred container candidate.
@@ -2194,6 +2164,35 @@ static inline void em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
     }
 }
 
+// JC23: entry guards must not allocate temporary registers before lowering a
+// body. The root liveness planner keys its candidates by those registers, so
+// early instrumentation changes an otherwise identical body's coloring.
+static inline void em_insert_native_stack_guard(MirEmitter* em,
+        MIR_insn_t before, MIR_label_t overflow) {
+    if (!em || !before || !overflow) return;
+    MIR_var_t arg = {MIR_T_I64, "stack_limit", 0};
+    MirImportEntry* stack_check = em_ensure_import(em,
+        "lambda_stack_is_exhausted", MIR_T_I64, 1, &arg, 1, false);
+    if (!stack_check || stack_check->call.effects.gc != JIT_EFFECT_NO_GC ||
+            stack_check->call.effects.reentry != JIT_REENTRY_NO) {
+        log_error("mir-stack-guard: stack probe lost its audited no-GC contract");
+        abort();
+    }
+    MIR_reg_t limit = em_new_reg(em, "stack_limit", MIR_T_I64);
+    MIR_reg_t exhausted = em_new_reg(em, "stack_exhausted", MIR_T_I64);
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, limit),
+            MIR_new_mem_op(em->ctx, MIR_T_I64,
+                (MIR_disp_t)offsetof(Context, stack_limit), em->frame.runtime, 0, 1)));
+    MIR_op_t arg_op = MIR_new_reg_op(em->ctx, limit);
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        mir_new_call_with_args(em->ctx, stack_check->proto, stack_check->import,
+            exhausted, 1, &arg_op));
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, overflow),
+            MIR_new_reg_op(em->ctx, exhausted)));
+}
+
 // Finalize reservation sizes; bound bodies skip binding, not frame reservation.
 // T-D1a: the prologue no longer *calls* lambda_side_stack_ensure_for on every
 // entry. Its fast path was already inline here — the call re-did the same top vs
@@ -2370,6 +2369,10 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
                     (MIR_disp_t)number_top_offset, frame->runtime, 0, 1),
                 MIR_new_reg_op(em->ctx, number_top_reg)));
     }
+    // Insert this after body lowering and root coloring: native promotion
+    // still checks every entry, while its two scalar temporaries cannot alter
+    // the body's liveness allocation (S7.11.1v2).
+    em_insert_native_stack_guard(em, frame->anchor, frame->native_stack_overflow);
 
     // Cold slow path. lambda_side_stack_ensure_for binds on first use and
     // advances the Windows commit watermark; on success we re-run the inline
@@ -4864,6 +4867,19 @@ static inline MIR_reg_t em_call_1(MirEmitter* em, const char* fn_name,
     MIR_type_t types[1] = {a1t};
     MIR_op_t ops[1] = {a1};
     return em_call_with_args(em, fn_name, ret_type, 1, types, ops, include_signature);
+}
+
+// JC23: BSTART changes MIR's inline-allocation lowering, so source-invocation
+// checks use this audited NO_GC leaf instead. Native entry checks are inserted
+// after body finalization by em_insert_native_stack_guard.
+static inline void em_branch_if_stack_exhausted(MirEmitter* em,
+        MIR_label_t overflow) {
+    MIR_reg_t limit = em_load_at(em, em->frame.runtime,
+        (MIR_disp_t)offsetof(Context, stack_limit), MIR_T_I64, "stack_limit");
+    MIR_reg_t exhausted = em_call_1(em, "lambda_stack_is_exhausted", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(em->ctx, limit), false);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, overflow), MIR_new_reg_op(em->ctx, exhausted)));
 }
 
 static inline MIR_reg_t em_call_2(MirEmitter* em, const char* fn_name,

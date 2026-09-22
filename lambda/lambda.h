@@ -68,6 +68,7 @@ extern bool g_dry_run;
 extern "C" {
 #endif
 void lambda_stack_overflow_error(const char* func_name);
+uint64_t lambda_stack_is_exhausted(uintptr_t stack_limit);
 void lambda_root_frame_overflow_error(void);
 #ifdef __cplusplus
 }

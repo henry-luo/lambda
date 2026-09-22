@@ -1123,6 +1123,7 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     if (fn->arity > LAMBDA_MAX_FUNCTION_ARGS) {
         return lambda_dynamic_argument_limit_error(caller, fn->arity, "function arity");
     }
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
     if ((mode == LAMBDA_DYNAMIC_CALL_FUNCTION || mode == LAMBDA_DYNAMIC_CALL_BORROWED) &&
             !lambda_dynamic_abi_is_core(fn->entry_abi) &&
             fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
@@ -1132,9 +1133,13 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
             "dynamic expression call requires a boxed Lambda callable entry");
     }
     if (mode == LAMBDA_DYNAMIC_CALL_PROCEDURE &&
-            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE) {
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
+            !(fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED &&
+              signature && signature->is_proc)) {
+        // T0 procedures retain their source entry until the scheduler invokes
+        // it; rejecting them here leaves `start` and `run pn main` tier-only.
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
-            "task launch requires a boxed Lambda procedure entry");
+            "task launch requires a Lambda procedure entry");
     }
     if (!fn->ptr && fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
@@ -1145,7 +1150,6 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
             "builtin references do not expose the boxed dynamic-call ABI");
     }
 
-    TypeFunc* signature = (TypeFunc*)fn->fn_type;
     if (lambda_dynamic_abi_is_core(fn->entry_abi) &&
             (!signature || signature->type_id != LMD_TYPE_FUNC) &&
             mode != LAMBDA_DYNAMIC_CALL_PROCEDURE) {

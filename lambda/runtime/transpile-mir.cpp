@@ -2176,9 +2176,9 @@ static void emit_jit_root_frame_enter(MirTranspiler* mt) {
     mt->em.frame.anchor = new_label(mt);
     emit_label(mt, mt->em.frame.anchor);
     // native promotion bypasses T0's call-depth budget; every native entry
-    // must retain the recovery-backed stack guard (S7.11.1v2, S7.11.4).
+    // must retain the recovery-backed stack guard (S7.11.1v2, S7.11.4). The
+    // finalizer emits it after root coloring so its scratch regs stay isolated.
     mt->em.frame.native_stack_overflow = new_label(mt);
-    em_branch_if_stack_exhausted(&mt->em, mt->em.frame.native_stack_overflow);
 }
 
 static void emit_binder_env_enter(MirTranspiler* mt, uint16_t binder_count) {
@@ -3173,13 +3173,26 @@ static MIR_reg_t mir_prepare_cow_root(MirTranspiler* mt, MirVarEntry* root) {
     return replacement;
 }
 
+// D8.1.1v12: worker images shallow-copy their selected definitions so the
+// compiler owns only immutable image state. Their bodies still point to the
+// source AST, which is the stable definition identity at every call site.
+static bool mir_same_satellite_definition(const AstFuncNode* left,
+        const AstFuncNode* right) {
+    return left == right || (left && right && left->body == right->body);
+}
+
 // D8.1.1v9: a satellite image defines its target and the target's
 // direct-callee cluster; every other local function is a dynamic target.
 static bool mir_satellite_defines(MirTranspiler* mt, AstNode* entry_node) {
     if (!mt->satellite_target) return true;
-    if (entry_node == (AstNode*)mt->satellite_target) return true;
+    if (!entry_node || (entry_node->node_type != AST_NODE_FUNC &&
+            entry_node->node_type != AST_NODE_PROC &&
+            entry_node->node_type != AST_NODE_FUNC_EXPR &&
+            entry_node->node_type != AST_NODE_ARROW_FUNC)) return false;
+    AstFuncNode* definition = (AstFuncNode*)entry_node;
+    if (mir_same_satellite_definition(definition, mt->satellite_target)) return true;
     for (int i = 0; i < mt->satellite_cluster_count; i++) {
-        if ((AstNode*)mt->satellite_cluster[i] == entry_node) return true;
+        if (mir_same_satellite_definition(definition, mt->satellite_cluster[i])) return true;
     }
     return false;
 }
@@ -39542,9 +39555,11 @@ static AstFuncNode* mir_ident_local_func(AstNode* node) {
 // is the identity every function-keyed table uses.
 static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn) {
     if (!fn || !mt->satellite_target) return fn;
-    if (fn->body == mt->satellite_target->body) return mt->satellite_target;
+    if (mir_same_satellite_definition(fn, mt->satellite_target)) return mt->satellite_target;
     for (int i = 0; i < mt->satellite_cluster_count; i++) {
-        if (mt->satellite_cluster[i]->body == fn->body) return mt->satellite_cluster[i];
+        if (mir_same_satellite_definition(fn, mt->satellite_cluster[i])) {
+            return mt->satellite_cluster[i];
+        }
     }
     return fn;
 }
@@ -41872,6 +41887,7 @@ static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
 
 static bool compile_ast_function_satellite_image(Runtime* runtime, Script* script,
         const AstFuncNode* fn, uint32_t sequence, bool snapshot,
+        bool private_context,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
     if (out_image) *out_image = NULL;
@@ -41883,7 +41899,10 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     // `--mir-interp` runs MIR's own interpreter: jit_init skips MIR_gen_init,
     // so this context has no generator to link against or to finish.
     bool satellite_interp = g_mir_interp_mode != 0;
-    MIR_context_t satellite_context = script->jit_context;
+    // An evaluator-built satellite owns a separate executable image just as a
+    // worker image does.  That ownership is independent from snapshotting:
+    // only a worker needs cloned compiler state and a one-definition image.
+    MIR_context_t satellite_context = private_context ? NULL : script->jit_context;
     bool context_owned = false;
     Pool* compile_pool = script->pool;
     NamePool* compile_name_pool = script->name_pool;
@@ -42020,7 +42039,11 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
             child; child = child->next) {
         if (child->node_type != AST_NODE_IMPORT) continue;
         AstImportNode* imp = (AstImportNode*)child;
-        if (!snapshot && imp->is_cross_lang && import_is_js(imp)) {
+        // A queued snapshot belongs to a worker and cannot mutate the shared
+        // JS-export resolver.  A synchronous private image is built on the
+        // evaluator, however, and must publish the same boxed import symbols
+        // as the former shared-context path before it links (D7.2.2).
+        if ((!snapshot || !cancel_probe) && imp->is_cross_lang && import_is_js(imp)) {
             register_cross_lang_pub_fns(runtime, imp);
         }
     }
@@ -42149,21 +42172,16 @@ bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
     return compile_ast_function_satellite_image(runtime, script, fn, sequence,
-        true, cancel_probe, cancel_context, out_image);
+        true, true, cancel_probe, cancel_context, out_image);
 }
 
 bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image) {
     if (!script || !image || !image->context || !image->module_layout) return false;
     if (image->module_state_prepared) return true;
     LambdaModuleLayout* layout = image->module_layout;
-    uint32_t key_base = lambda_module_state_property_key_count(script->module_state_id);
-    if (key_base > LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK ||
-            layout->property_key_count > LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK - key_base) {
-        return false;
-    }
-    // distinct in-flight images may finish in any order. Assign their disjoint
-    // key suffixes on the owning evaluator, never from worker TLS (D8.5.1v7).
-    layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS | key_base;
+    // The evaluator links the suffix and records property_key_base in this
+    // private image; workers cannot derive a stable append position (D8.5.1v7).
+    layout->reserved |= LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS;
     image->module_state_prepared = lambda_module_state_bind_static(script->module_state_id,
             script->const_list ? script->const_list->data : NULL,
             script->type_list) && prepare_context_module_state(image->context,
@@ -42180,44 +42198,42 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     InterpSatelliteImage* image = NULL;
     uint32_t sequence = ++script->interp_satellite_count;
     if (!compile_ast_function_satellite_image(runtime, script, fn, sequence,
-            false, NULL, NULL, &image) || !image) {
+            false, true, NULL, NULL, &image) || !image) {
         return false;
     }
-    bool installed_context = false;
-    if (!script->jit_context) {
+    // Keep the first image as the Script's lookup/teardown anchor.  Later
+    // satellites still force a new context above, so this pointer is never a
+    // compile target and cannot have its BSS layout reinitialized by MIR_link.
+    bool install_anchor = !script->jit_context;
+    if (install_anchor) {
         script->jit_context = image->context;
         script->mir_gen_initialized = image->mir_gen_initialized;
-        installed_context = true;
     }
-    // A satellite resolves literals through the current module-state image.
-    // Bind and seal it only on the evaluator thread, where its TLS owner is
-    // valid and the Function entries can be updated atomically as one step.
-    bool prepared = interp_satellite_image_prepare(script, image);
-    if (!prepared) {
+    // A synchronous task-context entry is otherwise a private image.
+    // Re-linking the anchor would reinitialize its BSS layout, so retain every
+    // later image independently before its closure becomes callable
+    // (D8.5.1v7).
+    if (!interp_satellite_image_prepare(script, image) ||
+            (!install_anchor && !interp_satellite_image_retain(script, image))) {
         log_error("interp-tier: synchronous satellite module-state publish failed");
-        if (installed_context) {
+        if (install_anchor) {
             script->jit_context = NULL;
             script->mir_gen_initialized = false;
-        } else {
-            // The Script already owned this context before this image. Keep
-            // that ownership stable; the failed satellite stays unpublished.
-            image->context = NULL;
         }
         interp_satellite_image_destroy(image);
         return false;
     }
     for (uint32_t index = 0; index < image->member_count; index++) {
-        if (image->members[index] == fn) continue;
-        if (image->member_entries[index]) {
+        if (image->members[index] != fn && image->member_entries[index]) {
             (void)interp_publish_satellite_member(script,
                 (AstFuncNode*)image->members[index], image->member_entries[index]);
         }
     }
     *out_boxed_entry = image->target_entry;
-    // The Script owns the shared legacy context. The wrapper owns only the
-    // image record in this path, unlike a private worker image.
-    image->context = NULL;
-    interp_satellite_image_destroy(image);
+    if (install_anchor) {
+        image->context = NULL;
+        interp_satellite_image_destroy(image);
+    }
     log_notice("interp-tier: satellite compiled function='%s' image=%u",
         fn->name ? fn->name->chars : "<anonymous>", (unsigned)sequence);
     return true;

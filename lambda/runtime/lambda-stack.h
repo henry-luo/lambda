@@ -97,6 +97,11 @@ void lambda_stack_set_budget(size_t bytes);
  */
 uintptr_t lambda_stack_recoverable_limit(void);
 
+// Native entries ask this leaf before their first user-code instruction. The
+// limit is already bound by the receiving Context; the helper only samples its
+// own frame address and therefore cannot allocate or re-enter Lambda.
+uint64_t lambda_stack_is_exhausted(uintptr_t stack_limit);
+
 // Native RootFrame constructors cannot return an error to their caller. A
 // reservation failure must leave through the armed execution recovery point
 // rather than continue with null, non-rooting slots.
