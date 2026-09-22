@@ -42125,7 +42125,6 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     image->compiler_name_pool = snapshot_name_pool;
     image->compiler_const_list = snapshot_const_list;
     image->compiler_type_list = snapshot_type_list;
-    image->module_layout = layout;
     image->target = fn;
     image->target_entry = entry;
     image->member_count = (uint32_t)member_count;

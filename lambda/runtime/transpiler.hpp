@@ -295,7 +295,6 @@ typedef struct InterpSatelliteImage {
     MIR_context_t context;
     bool mir_gen_initialized;
     bool module_state_prepared;
-    struct LambdaModuleLayout* module_layout;
     // Snapshot-only compiler allocations outlive MIR's copied symbol table
     // until the image is retired. Ordinary synchronous satellites leave these
     // null because their Script owns the compiler storage.

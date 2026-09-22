@@ -377,6 +377,22 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsPropertyKeys) {
     }
 }
 
+// D8.1.1v12: a published satellite lowers copied definitions, but recursive
+// calls resolve the source definition. Force publication at two call counts so
+// both functional and procedural self calls retain their tail-call identity.
+TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
+    static const char* const thresholds[] = {"1", "5"};
+    ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
+    for (const char* threshold : thresholds) {
+        ScopedTestEnv jit_threshold("LAMBDA_JIT_THRESHOLD", threshold);
+        SCOPED_TRACE(threshold);
+        test_lambda_script_against_file("test/lambda/tail_call.ls",
+            "test/lambda/tail_call.txt", false, "auto");
+        test_lambda_script_against_file("test/lambda/proc/tail_call_proc.ls",
+            "test/lambda/proc/tail_call_proc.txt", true, "auto");
+    }
+}
+
 // Tune31 T31-1: a nested counter initialized from the compact outer counter
 // must retain its native arithmetic in every execution tier (S4.1.1-S4.1.5).
 TEST(LambdaTune31Tests, NestedCounterAgreesOnEveryTier) {
