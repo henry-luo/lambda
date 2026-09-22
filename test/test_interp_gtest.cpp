@@ -796,6 +796,32 @@ TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
         << "the fifth self-tail edge did not queue its satellite image";
 }
 
+TEST(InterpPromotion, SnapshotKeepsInferredFloatLaneMetadata) {
+    // A private satellite must retain its inferred float formal while lowering
+    // Item-ABI system calls; otherwise a raw double reaches fn_string as I64.
+    char stderr_path[128];
+    snprintf(stderr_path, sizeof(stderr_path),
+        "temp/interp_satellite_float_%ld_%lu.txt", interp_test_process_id(),
+        ++interp_gtest_run_sequence);
+    char command[512];
+    snprintf(command, sizeof(command),
+        "LAMBDA_TIER=auto LAMBDA_SATELLITE_THREADS=1 %s "
+        "test/lambda/transpile_float_fmt_satellite.ls > /dev/null 2>%s",
+        LAMBDA_EXE, stderr_path);
+    EXPECT_EQ(system(command), 0);
+
+    FILE* output = fopen(stderr_path, "rb");
+    ASSERT_NE(output, nullptr);
+    char stderr_text[32768];
+    size_t length = fread(stderr_text, 1, sizeof(stderr_text) - 1, output);
+    stderr_text[length] = '\0';
+    fclose(output);
+    ::remove(stderr_path);
+
+    EXPECT_NE(strstr(stderr_text, "queued satellite function='fmt'"), nullptr);
+    EXPECT_EQ(strstr(stderr_text, "unexpected operand mode"), nullptr);
+}
+
 //==============================================================================
 // 4. Fallback accounting
 //==============================================================================
