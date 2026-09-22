@@ -14,11 +14,9 @@
 #include "../../lib/mem_grow.hpp"
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
-extern __thread EvalContext* context;
 
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
-extern "C" bool js_proto_snapshot_is_valid(void);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
@@ -27,7 +25,6 @@ extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 extern void jm_destroy_p2_mir_contexts(JsRuntimeState* state);
 struct JsGeneratorStateRecord;
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
-extern "C" void js_reset_buffer_module(void);
 
 static void js_reset_cached_realm_objects(void) {
     // Cached realm objects all point into the batch heap and must be invalidated together.
@@ -50,8 +47,14 @@ static void js_reset_cached_realm_objects(void) {
 }
 
 static void js_reset_core_module_caches(void) {
-    // Buffer's realm slots hold host-owned namespace values across Jube resets.
-    js_reset_buffer_module();
+    // node-core's Buffer caches its namespace and prototype in these host realm
+    // slots; they must not survive a Jube reset.
+    static const JsRealmSlotId buffer_slots[] = {JS_REALM_SLOT_BUFFER_NAMESPACE,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE};
+    for (JsRealmSlotId slot : buffer_slots) {
+        Item* value = js_realm_slot_existing(&js_runtime_state.realm_slots, slot);
+        if (value) *value = (Item){0};
+    }
     js_fetch_reset();
     js_history_reset();
 }
@@ -395,10 +398,7 @@ static void js_runtime_state_free_records(JsRuntimeState* state) {
         js_test262_agent_state_destroy(state->test262_agent);
         mem_free(state->test262_agent);
     }
-    if (state->process) {
-        runtime_callback_slots_destroy(&state->process->ipc_write_callbacks);
-        mem_free(state->process);
-    }
+    if (state->process) mem_free(state->process);
     state->string_caches = NULL;
     state->intrinsics = NULL;
     state->test262_agent = NULL;
@@ -449,8 +449,6 @@ JsProcessState* js_process_state_ensure(JsRuntimeState* state) {
         log_error("js-runtime-state: failed to allocate lazy process record");
         return NULL;
     }
-    runtime_callback_slots_init(&process->ipc_write_callbacks,
-        (Context*)context, "process IPC write callbacks");
     state->process = process;
     return process;
 }
@@ -738,7 +736,7 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
             "Test262 agent object", data);
     }
     if (state->process) {
-        visit(state->process, &state->process->argv, 5,
+        visit(state->process, &state->process->argv, 4,
             "process realm state", data);
     }
     visit(&state->promises, &state->promises.unhandled_storage, 2,
@@ -1512,7 +1510,6 @@ extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
 // forward declaration for array custom prototype check
 // forward declarations for module namespace cache resets
 extern "C" void js_iterator_proto_cache_reset(void);
-extern "C" void js_dynfunc_cache_reset(void);
 extern "C" void js_cjs_metadata_reset(void);
 extern "C" void js_proto_snapshot_invalidate(void);
 extern "C" void js_process_reset_listeners(void);
@@ -2341,4 +2338,3 @@ extern "C" Item js_build_arguments_object_for_call(Item* args, int argc,
     return result;
 }
 
-extern TypeMap EmptyMap;

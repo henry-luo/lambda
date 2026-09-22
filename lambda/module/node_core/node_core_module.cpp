@@ -1,5 +1,7 @@
 #include "../../jube/jube_registry.h"
 #include "node_path.hpp"
+#include "node_buffer.hpp"
+#include "node_util.hpp"
 #include "node_constants.hpp"
 #include "node_os.hpp"
 #include "node_perf_hooks.hpp"
@@ -102,13 +104,10 @@ static Item node_core_module_namespace(void) {
 }
 
 static Item node_core_buffer_namespace(void) {
-    // The typed-array implementation remains host-owned during its staged
-    // extraction; node-core owns the public builtin and global activation.
-    return node_core_host_namespace("buffer");
+    return node_buffer_namespace();
 }
 
-static Item node_core_host_namespace_property(const char* specifier, const char* property) {
-    Item namespace_item = node_core_host_namespace(specifier);
+static Item node_core_namespace_property(Item namespace_item, const char* property) {
     if (!node_core_host || !node_core_host->value || !node_core_host->value->property_get ||
             !property || namespace_item.item == 0 || !node_core_host->node ||
             !node_core_host->node->roots || !node_core_host->node->roots->root_frame_begin ||
@@ -134,17 +133,17 @@ static Item node_core_host_namespace_property(const char* specifier, const char*
     return result;
 }
 
-static Item node_core_util_namespace(void) { return node_core_host_namespace("util"); }
+static Item node_core_util_namespace(void) { return node_util_namespace(); }
 static Item node_core_util_types_namespace(void) {
-    return node_core_host_namespace_property("util", "types");
+    return node_core_namespace_property(node_util_namespace(), "types");
 }
 static Item node_core_inherits_namespace(void) {
-    return node_core_host_namespace_property("util", "inherits");
+    return node_core_namespace_property(node_util_namespace(), "inherits");
 }
 
 static Item node_core_assert_namespace(void) { return node_core_host_namespace("assert"); }
 static Item node_core_assert_strict_namespace(void) {
-    return node_core_host_namespace_property("assert", "strict");
+    return node_core_namespace_property(node_core_host_namespace("assert"), "strict");
 }
 static Item node_core_stream_namespace(void) { return node_core_host_namespace("stream"); }
 static Item node_core_stream_promises_namespace(void) {
@@ -272,9 +271,8 @@ static Item node_core_os_global(void* session) {
 
 static Item node_core_buffer_global(void* session) {
     (void)session;
-    // Buffer remains host-implemented during its staged migration, but its
-    // global must only exist while the node-core profile is active.
-    Item buffer_namespace = node_core_host_namespace("buffer");
+    // The Buffer global exists only while the node-core profile is active.
+    Item buffer_namespace = node_buffer_namespace();
     if (!node_core_host || !node_core_host->value || !node_core_host->value->property_get ||
             buffer_namespace.item == 0) {
         return ItemNull;

@@ -213,8 +213,6 @@ extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
 #include <sys/stat.h>
 #endif
 
-extern __thread EvalContext* context;
-extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
@@ -222,10 +220,7 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              Item filename_item,
                                              int64_t line_offset,
                                              int64_t column_offset);
-extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
-extern "C" Item push_d(double dval);
-extern "C" double it2d(Item item);
 
 static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     EvalContext* owner = (EvalContext*)runtime;
@@ -267,7 +262,6 @@ static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activatio
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
-extern "C" void js_intrinsic_note_prototype_mutation(Item object);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -275,7 +269,6 @@ static void js_set_prototype_fresh(Item object, Item prototype);
 static bool js_constructor_instance_shape_is_admissible(TypeMap* shape);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
-extern "C" bool js_promise_vmap_is(Item value);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
     if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
@@ -666,7 +659,6 @@ extern "C" int64_t js_eval_source_push(Item filename, Item source,
                                         int64_t line_offset, int64_t column_offset);
 extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
                                                 int64_t line_offset, int64_t column_offset);
-extern "C" void js_eval_source_pop(void);
 
 static inline Item js_native_function_source_item() {
     return js_name_item(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN);
@@ -697,7 +689,6 @@ static bool js_function_push_vm_stack_source(JsFunction* fn) {
 }
 
 extern "C" Item js_vm_swap_global_this(Item next_global);
-extern "C" uint64_t js_get_heap_epoch(void);
 static Item js_262_eval_script(Item code);
 
 static JsGlobalEnvironment* js_global_environment_current(void) {
@@ -1034,8 +1025,6 @@ static Item js_collection_node_read_item(JsCollectionOrderNode* node,
 #define JS_MAP_SIZE_CLASS 1
 
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
-extern "C" Item js_new_object_with_typemap(TypeMap* tm);
-extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm);
 static int js_typemap_storage_capacity(TypeMap* tm) {
     if (!tm) return -1;
     int64_t data_size64 = tm->byte_size;
@@ -3354,7 +3343,6 @@ JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_boolean_call_body,
 JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_symbol_call_body,
     js_symbol_create(arg0))
 
-extern "C" Item js_bigint_constructor(Item value);
 JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_bigint_call_body,
     js_bigint_constructor(arg0))
 #undef JS_CONSTRUCTOR_UNARY_BODY
@@ -4072,9 +4060,23 @@ static Item js_get_proto_key() {
 }
 
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
-extern "C" Item js_get_typed_array_base_proto();
-extern "C" Item js_get_buffer_prototype(void);
 Item js_iterator_prototype_for_object(Item object);
+
+// Buffer lives in node-core; the host reaches it only through Jube. Resolving
+// the `buffer` specifier builds the namespace, which caches the prototype in
+// this host realm slot. Without node-core, host-created Buffers keep only
+// their Uint8Array methods.
+static Item js_buffer_prototype_for_lookup(void) {
+    Item* slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    if (slot && slot->item != 0) return *slot;
+    Item buffer_namespace = ItemNull;
+    if (jube_specifier_resolve("buffer", &buffer_namespace) !=
+            JUBE_SPECIFIER_RESOLVED) return ItemNull;
+    slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    return slot && slot->item != 0 ? *slot : ItemNull;
+}
 
 extern "C" Item js_call_accessor_getter(Item getter, Item receiver) {
     // D6.2.2v2: the prototype-walk Receiver belongs only to the current Get;
@@ -4144,7 +4146,7 @@ static bool js_property_ops_property_get(Item object, Item key, Item receiver,
             if (js_property_ops_get_own(object, key, object, true, out_result)) return true;
             JsTypedArray* ta = js_get_typed_array_ptr(object.map);
             if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
-                Item buf_proto = js_get_buffer_prototype();
+                Item buf_proto = js_buffer_prototype_for_lookup();
                 if (buf_proto.item != ITEM_NULL) {
                     Item result = js_get_key_core(buf_proto, key, receiver);
                     if (item_is_error(result) ||
@@ -5915,7 +5917,6 @@ extern "C" Item js_get_key_core(Item object, Item key,
                                 fn->prototype, nm, nl);
                         }
                         {
-                            extern Item js_get_typed_array_base_proto();
                             extern bool js_is_typed_array_ctor_name(const char* name, int len);
                             if (js_is_typed_array_ctor_name(nm, nl)) {
                                 Item ta_base_proto = js_get_typed_array_base_proto();
@@ -10088,7 +10089,6 @@ static Item js_get_string_iterator_proto();
 static Item js_get_map_iterator_proto();
 static Item js_get_set_iterator_proto();
 static Item js_get_regexp_string_iterator_proto();
-extern "C" bool js_is_generator(Item obj);
 extern "C" bool js_is_async_generator(Item obj);
 extern "C" Item js_ordinary_has_instance(Item, Item);
 
@@ -10368,7 +10368,6 @@ JsBodyEntry js_function_select_body_entry(const JsFunction* fn) {
 
 
 // Forward declarations for builtin dispatch
-extern "C" Item js_string_raw(Item* args, int argc);
 // v83: Forward declarations for RegExp Symbol methods
 static Item js_regexp_symbol_match(Item this_val, Item arg0);
 static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement);
@@ -10391,8 +10390,6 @@ bool js_is_arguments_exotic_array(Item value) {
     return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
 }
 JS_FORWARD_STATIC_EXPRESSION(Item, js_arguments_companion_item, (Item arguments), ((Item){.map = js_array_props(arguments.array)}))
-extern "C" Item js_object_group_by(Item items, Item callback);
-extern "C" Item js_map_group_by(Item items, Item callback);
 extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping);
 
 static Item js_object_to_string_result(const char* tag, int tag_len) {
@@ -10609,8 +10606,6 @@ static Item js_array_generic_reverse(Item object);
 // Forward declarations for JSON functions (defined in js_globals.cpp)
 extern "C" Item js_json_raw_json(Item text);
 extern "C" Item js_json_is_raw_json_builtin(Item value);
-extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
-extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern "C" Item js_weakref_deref(Item this_val);
 extern "C" Item js_finalization_registry_register(Item this_val, Item target, Item holdings, Item unregister_token, int argc);
 extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregister_token);
@@ -20613,7 +20608,6 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
 // Forward declarations for v14 promise support
 struct JsPromise;
 static JsPromise* js_get_promise(Item promise_obj);
-extern "C" bool js_is_generator(Item obj);
 
 // Map method dispatcher: handles collection methods, falls back to property access.
 static int js_typed_array_scan_search(Item obj, Item search_value, int start,
@@ -27827,7 +27821,6 @@ extern "C" Item js_get_prototype(Item object) {
     if (proto.item == ITEM_NULL && js_object_has_class(object, JS_CLASS_TYPED_ARRAY)) {
         JsTypedArray* ta = js_get_typed_array_ptr(m);
         if (ta) {
-            extern Item js_get_typed_array_per_type_proto(int element_type);
             return js_get_typed_array_per_type_proto((int)ta->element_type);
         }
     }
@@ -30191,10 +30184,7 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void) {
     return js_promise_bootstrap_unhandled_strict;
 }
 
-extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_chars, int type_len);
-extern "C" Item js_async_hooks_enter_resource(Item resource);
-extern "C" void js_async_hooks_restore_resource(Item previous);
 extern "C" void js_async_hooks_emit_before_resource(Item resource);
 extern "C" void js_async_hooks_emit_after_resource(Item resource);
 extern "C" void js_async_hooks_emit_promise_resolve_resource(Item resource);

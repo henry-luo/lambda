@@ -834,6 +834,11 @@ line-span counts, not NLOC, for that file.
 | — | baseline `7a06981f8` (mvp excluded) | — | — | — | — | 139,018 | test262 40,261/40,261; `test_js_gtest` 466/466 |
 | 1 | JLS-15 dead Node host code | 3,438 | 18 | **−3,420** | 0 | **135,598** | `test_js_gtest` 466/466; test262 40,261/40,261 fully passing; benchmark corpus 109/109 rows identical apart from timing lines (§B.1); Node dylib imports all resolve; `test-lambda-baseline` 5,727/5,740, the 13 failures pre-existing (§B.1) |
 
+| — | upstream merge `21edab563` (not this work) | — | — | — | — | 137,581 | +1,983 lines of concurrent upstream JS work |
+| 2 | JLS-16 Buffer → node-core; JLS-17 dead IPC | ~500 | ~35 | **−490** (IPC) | **2,468** (Buffer) | **134,648** | test262 40,261/40,261 fully passing; `test_js_gtest` 465/466 — `dom_document_cookie` fails identically on HEAD (upstream regression, §B.2); 63/63 official benchmark rows; 109-file sweep identical to HEAD bar timing lines; `test-lambda-baseline` 5,770/5,771 (same cookie test), no leaks |
+
+| 3 | JLS-1 extern hygiene; util → node-core | ~95 | ~30 | **−65** | **300** (util) | **134,283** | test262 40,261/40,261; `test_js_gtest` 465/466 (waived cookie); 63/63 official rows; sweep identical to batch 2 bar timing lines; `test-lambda-baseline` 5,770/5,771 (waived cookie), no leaks; other Tier A/D packages re-measured and dropped (§B.3) |
+
 ### B.1 Batch 1 record (JLS-15)
 
 **Method.** Source scanning proved unreliable for this job: token-pasted
@@ -917,3 +922,88 @@ and outside the JLSR5 gate; the MIR budget was not edited to hide the growth.
 
 **Side effect found.** Running `test/benchmark/text` rewrites the tracked file
 `test/benchmark/text/hyphen_patterns.json`; restore it after benchmark runs.
+
+
+### B.2 Batch 2 record (JLS-16, JLS-17)
+
+**JLS-16 Buffer move.** `lambda/js/js_buffer.cpp` moved (git rename) to
+`lambda/module/node_core/node_buffer.cpp` with `node_buffer.hpp`, and is
+built only into node-core. The host keeps no Buffer code and never calls a
+module symbol:
+- the `buffer` row of the Jube host-namespace table is gone; node-core's
+  `buffer` specifier and `Buffer` global installer call `node_buffer_namespace()`
+  directly;
+- the host's lazy `Buffer` global (still gated on node-core, and needed because
+  node-core installs its own globals only after it activates) resolves
+  through `jube_specifier_resolve("buffer")`, like `crypto`;
+- property lookup on host-created Buffers (`js_buffer_from_bytes`, used by fs
+  and stdin) reads the cached prototype from the host realm slot and, if it
+  is still empty, resolves `buffer` through Jube first. Without node-core,
+  such Buffers keep only their Uint8Array methods;
+- the Jube reset clears the two Buffer realm slots itself instead of calling
+  the module.
+The first attempt missed `js_get_buffer_prototype`, a host caller found only
+by the link; name-pattern greps are not enough for a move.
+
+**JLS-17 reduced to dead IPC.** `process.send`/`disconnect`/`connected` and
+the IPC pipe, framing and write-callback machinery were enabled only by the
+internal `LAMBDA_JS_IPC*` environment markers, whose only setters were the
+deleted `child_process` and `cluster` implementations. They were deleted, not
+moved, together with the listener-liveness bookkeeping that only drove the
+IPC pipe's ref count, the uncalled IPC-accept host hook, and the
+`JsProcessState` IPC fields (its traced span went 5 -> 4 Items).
+`vibe/Lambda_Design_Runtime_Env_Vars.md` drops `LAMBDA_JS_IPC*` and the
+likewise unread `NODE_UNIQUE_ID`. Not moved: `process.stdin` is part of the
+floor (the runner feeds FASTA input to three benchmark rows on stdin), the
+process event emitter has host callers, and `process.binding` is checked by
+tests.
+
+**Gate result and the open failure.** `dom_document_cookie` fails with
+"document.cookie requires an active browsing session" on this tree and,
+identically, on HEAD with batch 2 stashed. Upstream `54e040c9b` moved
+`document.cookie` from a per-document string to the browsing-session cookie
+jar and wired the jar into `cmd_layout`'s HTTP load, but `lambda js
+--document` (`main.cpp`, `js_document_session_start`) creates neither a
+browsing session nor a resource manager, so `dom_document_cookie_jar()`
+returns NULL. Fixing it needs a Radiant ownership decision (a headless
+session jar, a document-owned in-memory jar via `cookie_jar_create(NULL)`,
+or a jar owned by the CLI document session), so it is raised with the user
+rather than patched here. Under JLSR5 batch 2 does not count as landed until
+this test passes.
+
+**Benchmark note.** `havlak2_bundle.js` timed out at 180 s on HEAD and
+finished on batch 2 in the four-wide sweep; it runs in about 70 s alone and
+passed in the official run, so this is load noise.
+
+
+### B.3 Batch 3 record (re-measured packages)
+
+Batch 3 re-measured each Tier A/D package against the code before editing it.
+The rev-1 estimates came from name-based censuses that overcounted; the
+measured values replace them.
+
+| package | rev-1 estimate | measured | outcome |
+|---|---|---|---|
+| JLS-1 extern hygiene | −650 / −900 | **−65** | **landed.** Only 35 per-file `extern` lines truly repeated a header declaration (the census had counted any header mention, including calls in inline functions, as a declaration); 17 names declared in two or more `.cpp` files now have one declaration in `js_runtime.h`, removing 49 copies (one `.cpp` that does not include `js_runtime.h` keeps its line). |
+| util → node-core (boundary) | — | **−300** moved | **landed.** `js_util_service.cpp` became `lambda/module/node_core/node_util.cpp`; the only host reference was the Jube host-namespace `util` row. node-core's `util`, `util/types` and `inherits` use the local builder. The console-format hook is still installed when `util` is first built. |
+| JLS-2 generic AST dump | −180 / −260 | ~0 | **rejected.** The dump prints labelled fields the child catalogs do not carry, and the core dumper spells operators and types differently; either route changes a diagnostic format. |
+| JLS-3 compile driver | −450 / −800 | small | **rejected for now.** The thin `transpile_js_to_mir*` / `compile_js_mir*` wrappers are public entry points with up to 38 callers across `lambda/`, `radiant/` and `test/`; a request struct lengthens every call site. |
+| JLS-4 reduction table / direct scope | −350 / −800 | small | **rejected.** Reduction cases differ in child-taking helper, arity and builder signature and are already 5–8 lines each; `direct_walk_node` already delegates its default case to the child catalog, and its explicit cases do binding or type work. |
+| JLS-8 property kernels | −700 / −1,200 | not a clone | **rejected.** `js_object_define_property` (exotic dispatch + validation) calls the `js_props` apply kernel, so the two are layers, not duplicates; the six own-keys entry points are at most 34% similar (difflib), so unifying them is a semantic rewrite of hot, conformance-critical enumeration. |
+| JLS-12 generator signals | −120 / −300 | ~6 | **rejected.** Already one kernel; the remaining wrappers are MIR import entry points. |
+| JLS-13 UTF-16 helpers | −100 / −250 | ~25 | **rejected.** `lib/utf.h` counts structurally (lead bytes) while the JS helpers decode; they differ on stray continuation bytes, `0xF8+` leads and truncated sequences. |
+| repeat linker dead-code scan | — | 0 | nothing new after batch 2. |
+
+**Gates.** All green apart from `dom_document_cookie`, which the user waived
+(2026-09-22) as an upstream regression.
+
+**Where this leaves the target.** Measured against the 139,018 baseline the
+tree is at 134,283 (−4,735, 3.4%), but upstream added 1,983 lines during the
+work, so the work itself has removed 6,718 lines (4.8%): 3,420 + 490 + 65
+credited deletions and 2,468 + 300 lines moved to node-core. The remaining
+candidates are the Tier C compiler-mechanics packages (JLS-5 numeric facts,
+JLS-6 capture facts, JLS-7 emitter stacks), which Tune14 §3.3 prescribes as
+two-client extractions inside T14-2/T14-3, and JLS-9 (one global/`with`
+reference resolver), which follows T14-5. Each is a semantic refactor of hot
+compiler or runtime paths rather than a clean-up, and needs the Tune14
+ownership decision in §10.

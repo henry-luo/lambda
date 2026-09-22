@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 10.0.6 (2026-09-22)
+**Spec version:** 11.0.0 (2026-09-22)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -335,19 +335,22 @@ language-visible counterparts are the semantics spec's SI ledger.
   `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
   no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
   under D2.5.2v3. [SF15]
-- **D2.6.5v2** **The append API selects content normalization.** Two runtime
-  appends exist and they are not interchangeable. `list_push()` is the
-  **content** constructor: it applies S2.6's normalization — a `null` or `""`
-  is dropped, a pushed content list is spliced in, and a pushed string or
-  binary is concatenated onto a preceding item of the same kind — and is
-  correct **only** when building element content or script top-level
-  content; content writes after construction must preserve the same
-  normalization (S2.6.5). `array_push()` is the
-  **collection** constructor: it stores the item verbatim, preserving `null`
-  as an element and keeping adjacent strings separate. Every other
-  collection — array and vector results, argument and rest lists, split
-  segments, zipped pairs — is built with `array_push()`, because for those
-  the element count *is* the contract and normalization silently destroys it.
+- **D2.6.5v3** **The append discipline follows the destination: content,
+  sequence, or slot.** Three runtime appends exist and they are not
+  interchangeable. The **content** append (`list_push()`) applies S2.6's
+  normalization — a `null` or `""` is dropped, a list is spliced in, a string
+  or binary is concatenated onto a preceding item of the same kind — and is
+  correct only for element content and script top-level content; content
+  writes after construction preserve it (S2.6.5). The **sequence** append
+  builds lists and array literals: it splices a list (S2.5.1v2) and stores
+  every other value verbatim, `null` included, adjacent strings apart. The
+  **verbatim** append stores the item as one value whatever it is — argument
+  and rest lists, `zip` pairs, and every single-value slot (a map field, an
+  attribute, an object field), where a list is first turned into its array
+  image (S2.5.6). Which append a site uses is decided by what it builds,
+  never by a per-format switch, and a list's spreading is decided by the
+  value's kind at run time, never by the syntax around it (S1.6): the one
+  list flag is the kind bit.
   The split is **content versus collection**, never per format: every input
   parser must yield normalized element content (S2.6.1). MarkBuilder appends
   with `array_append` and never normalizes, which is why LaTeX holds
@@ -519,7 +522,7 @@ that carries them.
   particular, `T[]` retains its immediate element, leaf element, rank, and
   leaf carrier in that graph; no array path may recover those facts from an
   erased array tag.
-  [S11.1.1v2, Lane §1, lambda-data.hpp]
+  [S11.1.1v3, Lane §1, lambda-data.hpp]
 - **D3.1.2** Types compose as values (`|` union, `?`, `[]`, constraints)
   and compare **representationally** — normalized forms, not semantic
   equivalence (undecidable with constraints); union normalization uses a
@@ -589,7 +592,7 @@ that carries them.
   publishing (S11.4.1v3). A reader that holds the carrier's proof therefore
   accesses the element or field by offset with no per-access shape-identity
   compare and no certificate re-check; the proof lasts as long as the
-  carrier's verification does (D3.2.6). [S11.1.1v2, Tune19 §11.5, Tune20
+  carrier's verification does (D3.2.6). [S11.1.1v3, Tune19 §11.5, Tune20
   §T20-6a, OB16; v4 2026-09-17, user]
 - **D3.2.5v2** The surface spelling for the shared subtype relation is the
   binary `<:` operator. It accepts two type values and returns `bool`; it is
@@ -2122,7 +2125,7 @@ slice; no formal semantic ruling or document semver changes.
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
-| D2.6.5v2 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S2.6.4 should not run — yet on 2026-09-21 `<e "a" "b">` merged at run time on both tiers, so this footnote needs re-verification. Not yet implemented at all: dropping a lone `""`, merging adjacent binaries, and normalizing content writes (S2.6.2, S2.6.4, S2.6.5); LaTeX's verbatim content is the transitional deviation named in the ruling. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
+| D2.6.5v3 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S2.6.4 should not run — yet on 2026-09-21 `<e "a" "b">` merged at run time on both tiers, so this footnote needs re-verification. v3 (2026-09-22) is not implemented: the runtime has two list flags (`is_content`, `is_spreadable`), `array_push` splices only `is_content` lists while `array_push_spread_all` splices every array, array literals decide spreading syntactically, and fields store lists unconverted — see the S2.5.6/S2.5.7 row of the semantics Appendix A and [LR05-10](../vibe/Lambda_Issue_Ledger.md). Not yet implemented at all: dropping a lone `""`, merging adjacent binaries, and normalizing content writes (S2.6.2, S2.6.4, S2.6.5); LaTeX's verbatim content is the transitional deviation named in the ruling. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |

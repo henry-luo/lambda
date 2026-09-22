@@ -1442,9 +1442,28 @@ uint64_t lambda_mir_double_bits(double dval);
 double lambda_mir_bits_double(uint64_t bits);
 void js_private_field_init_begin(void);
 void js_private_field_init_end(void);
+// Runtime entry points shared across JS translation units.
+uint64_t js_get_heap_epoch(void);
+Item js_get_typed_array_base_proto(void);
+Item js_process_emit(Item event_name, Item arg1);
+bool js_promise_vmap_is(Item value);
+bool js_proto_snapshot_is_valid(void);
+Item js_bigint_constructor(Item value);
+bool js_is_generator(Item obj);
+Item js_async_hooks_get_current_resource(void);
+Item js_async_hooks_enter_resource(Item resource);
+void js_async_hooks_restore_resource(Item previous);
+void js_intrinsic_note_prototype_mutation(Item object);
+void js_eval_source_pop(void);
+void js_dynfunc_cache_reset(void);
+Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
+Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 
 #ifdef __cplusplus
 }
+
+Item js_make_number(double value);
+extern int js_dynamic_import_suppress_module_drain;
 
 Item make_string_item(const char* str, int len);
 struct JsFunction; struct String;

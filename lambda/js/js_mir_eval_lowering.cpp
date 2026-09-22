@@ -1346,7 +1346,6 @@ static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_val
 // ============================================================================
 extern "C" int64_t js_eval_source_push(Item filename, Item source,
                                         int64_t line_offset, int64_t column_offset);
-extern "C" void js_eval_source_pop(void);
 static Item js_eval_parse_error_message(const JsTranspiler* tp) {
     char message[128];
     message[0] = '\0';

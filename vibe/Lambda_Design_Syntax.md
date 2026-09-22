@@ -7,7 +7,7 @@ mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
 (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
 (closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
 2026-08-27: handler-arm brace placement reaffirmed with rationale (§5.9,
-ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0).
+ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0). 2026-09-22: list/array kind rulings (§7.27 points 16–26) and the run/array type families (§7.28) ratified; spec v29.0.0.
 
 > **The body states current rulings only.** Superseded wording has been
 > moved out to **Appendix S — Superseded Rulings**, struck through and
@@ -35,7 +35,7 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
 S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7 (v2: now points to S2.6),
-§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2.
+§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6 + S16.8.6v2.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -2970,6 +2970,105 @@ adjacent binaries do not merge; content writes do not normalize at all
 (`e[1] = "m"` between two strings leaves three items, `e[1] = null` stores a
 null, a written list is stored as one item, and `push` rejects an element);
 LaTeX keeps unmerged strings.
+
+**Kind rulings (USER, 2026-09-21/22) — ratified as S2.5.6–S2.5.8 with
+revisions to S2.1.1v4, S2.5.1v2, S2.5.2v2, S2.5.5v2, S3.3v2, S7.10.1v2,
+S7.10.5v2, S8.3.1v3, S8.4.1v2, S10.1.2v2, S10.1.5v2, S12.3.5v2 and the new
+S10.6.1.** A 562-probe survey (`temp/spec_survey/listarray/`) showed the
+output kind of every sequence operation depended on how its input was built
+and stored — two list flags, syntactic spreading in array literals, and each
+system function choosing its own result flag — and that no ruling stated a
+kind rule at all. The rulings:
+
+16. **List is a specialized array**: `list <: array`, `type((1, 2))` is
+    `list`, `(1, 2) is int[]`; a list is at least two items and never nests
+    (`((1, 2), (3, 4))` is `(1, 2, 3, 4)`).
+17. **Transforms preserve the input kind; mixing gives an array; list with
+    list gives a list; scalars and `null` do not affect the kind.** Pipe and
+    `that` follow it; `for` always builds a list; `fill` follows its item;
+    `zip` pairs are arrays (a list pair would splice); a range input gives an
+    array output; `keys`/`values`/`names` are arrays (a projection of a
+    persistent container is a constructor — the earlier bare-comprehension
+    definition would make `keys({a: 1})` a bare `'a'`).
+18. **A list is transient.** The serialized data model has no lists; a list
+    stored in a map field, attribute, or object field becomes its array
+    image; it prints and formats as an array. Bindings, arguments, returns,
+    operands pass it through; item positions splice it.
+19. **Void versus null.** A list *expression* in item position splices what
+    it has, including nothing; a list *value* collapses, and a collapsed
+    empty list is `null`, placed as an item: `[for (x in []) x, 1]` is `[1]`
+    but `let e = for (x in []) x; [e, 1]` is `[null, 1]`, `push(a, e)` pushes
+    `null`. The alternative — an empty list distinct from `null` that lands as
+    nothing (the `-0.0` precedent) — was considered and rejected: `()` is the
+    null value, not merely equal to it.
+20. **Scalars have no content.** `len(5)` = 0, `for (i in 5)` iterates
+    nothing, `5[0]` is `null`; the mapping pipe and `that` treat a scalar as
+    one member by their own rule. This closes SO11 as "no, and they differ by
+    design" (the S8.3.1 law ties `len` to `for`, not to the pipe). Cost, taken
+    knowingly: a computed one-item list is invisible to `for`/`len`/index
+    (`len(take((10,20,30), 1))` is `len(10)` = 0) — wrap: `[take(…)]`,
+    `[for …]`. The scalar-as-one-item-sequence face (`5[0]` = 5) was proposed
+    and rejected: index ties with `for` and `len`, and is an index into
+    content.
+21. **`++`**: sequence `++` sequence concatenates (kind per 17); container
+    `++` scalar appends the scalar as one item (text values are scalars
+    here); scalar `++` scalar is text concatenation, same text kind kept;
+    `null` is `()` and so the identity; maps/elements stay an error (merge is
+    `{*: a, *: b}`).
+22. **Text walks as a sequence** (string by code point, binary by byte;
+    symbols treated as strings): `reverse("abc")` is `"cba"`, `"abc" that
+    ~ != "b"` is `"ac"`, `"a" in "cat"` is character membership; a sequence
+    operation over text yields that text kind when every result is of that
+    kind (concatenated — `"abc" |> upper(~)` is `"ABC"`) and an array
+    otherwise (`"abc" |> ord(~)`); this makes the result kind depend on the
+    body's results, accepted as the only reading that gives `"ABC"` while
+    keeping `ord` usable. For `++` and placement a text value is one item.
+23. **`*x`** splices a sequence's items, nothing for `null`, a non-sequence
+    as one item, and never modifies its operand — so `[*xs]` packages any
+    value as an array, the companion idiom for `T*` bodies (§7.28).
+24. **S7.10.1v2** states its four shapes for array and text inputs; a list
+    input gives a list result that obeys the collapse. The `-0.0`-style
+    distinct empty list was rejected under 19.
+25. **S3.3v2**: for a list, `results or default` works (empty is `null`),
+    but a single falsy result (`false`, `""`, `null`, error) reads as no
+    result; `if (r)` ≡ `if r` always, since `(r)` ≡ `r` even for a list.
+26. **D2.6.5v3**: three append disciplines — content (normalize + splice),
+    sequence (splice lists, else verbatim), verbatim (arguments, rest, pairs,
+    single-value slots with the list → array image); one list flag; spreading
+    decided by the value's kind, never by syntax.
+
+Root causes recorded for the fix: `is_content` vs `is_spreadable`
+(`lambda/lambda.h:1015`), `array_push` splicing only `is_content`
+(`collection_runtime.cpp:190`), the syntactic `has_spreadable` decision
+(`transpile-mir.cpp:20509`, `interp.cpp:2239`), per-function result flags in
+`lambda-vector.cpp` (reverse `:2409`, sort `:101`, unique `:2696`,
+take/drop/slice `:2761`, zip `:4963`), `fn_join` allocating with no flags
+(`lambda-eval.cpp:441`), `item_spread` mutating its operand
+(`lambda-data-runtime.cpp:2397`), and typed `int[]` admission rebuilding the
+value (`lambda-eval.cpp:9918`). Ledger: LR05-10, LR05-11, LR05-12, LR12-28.
+
+### 7.28 Type families: a run and an array (decided 2026-09-22 — ratified as S11.1.1v3, S11.1.6, S16.8.6v2)
+
+**Question.** `T[]` could not type a for-expression, since a list collapses
+at 0 and 1 items; and `T[n]`/`T[n+]`/`T[n, m]` were counts that looked like
+array types. What is the type of a list, and how do counts spell?
+
+**Ruling (USER).** Two families by concept. The *occurrence* family `T?`
+`T*` `T+` `T{n,m}` (regex spellings: `T{n}`, `T{n,}`) is a run of `T`s — the
+list type; the *array* family `T[]` `T[n]` `T[n][m]` is an array. In a
+sequence-pattern slot an occurrence is a run and zero is void; as a boundary
+type it admits what a run *is* once collapsed: `null`, a bare `T`, a sequence
+of ≥ 2 `T` (list or stored array image). So `T?` ≡ `T | null` with no special
+case, `T*` ≡ `T{0,}`, `{f: int*}` admits `null`/`5`/`[5, 6]` but not `[5]`
+or `[]`, `(1, 2) is int[2]`, and `[T{n,m}]` is the counted array. The full
+table and the rejected 2026-09-21 draft (`T*` admitting every array, which
+widened `T?`) are in [`Lambda_Type_Pattern.md` §1.3](Lambda_Type_Pattern.md).
+`(T*)` ≡ `T*` by S2.5.5 (parens group). `T[n+]` and `T[n, m]` are retired,
+in string islands too (`\(d{3})`).
+
+**Syntax note.** Postfix `{` in type position is a new production; S16.4's
+brace rules govern braces as *expressions*, so no conflict, but a line break
+before the `{` starts a statement under S16.2.2v2.
 
 ## Appendix S — Superseded Rulings
 

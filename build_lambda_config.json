@@ -322,6 +322,7 @@
         "LAMBDA_NODE_CORE_DYNAMIC_MODULE"
       ],
       "source_files": [
+        "lambda/module/node_core/node_buffer.cpp",
         "lambda/module/node_core/node_constants.cpp",
         "lambda/module/node_core/node_core_module.cpp",
         "lambda/module/node_core/node_os.cpp",
@@ -334,6 +335,7 @@
         "lambda/module/node_core/node_timers.cpp",
         "lambda/module/node_core/node_trace_events.cpp",
         "lambda/module/node_core/node_tty.cpp",
+        "lambda/module/node_core/node_util.cpp",
         "lambda/module/node_core/node_v8.cpp",
         "lambda/module/node_core/node_workers.cpp"
       ]

@@ -9,8 +9,6 @@
 #include "../runtime/lambda-error.h"
 #include "../jube/jube_registry.h"
 
-extern "C" void js_dynfunc_cache_reset(void);
-extern int js_dynamic_import_suppress_module_drain;
 
 static NameEntry* jm_annex_b_publish_binding(NameEntry* binding) {
     if (binding && binding->annex_b_outer_binding) {
@@ -3290,7 +3288,6 @@ static int js_mir_lower(void* opaque) {
     bool p7d_has_tla = false;
     MIR_label_t p7d_post_await_label = NULL;
     {
-        extern int js_dynamic_import_suppress_module_drain;
         if (mt->is_module && mt->in_main && mt->filename &&
                 (js_tla_module_depth_get() >= 2 ||
                  js_dynamic_import_suppress_module_drain > 0)) {
@@ -4314,7 +4311,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_info("js-mir-module-cache: hit module=%s", filename ? filename : "<module>");
         return result;
     }
-    extern int js_dynamic_import_suppress_module_drain;
     // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
     // nested calls see depth >= 2 while the outermost transpile sits at 1;
     // the matching exit at the end of the function drains continuations only
