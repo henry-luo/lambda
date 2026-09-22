@@ -1,10 +1,10 @@
 # Radiant Selection / Range Design Document
 
-## Implementation Status (2026-04-27)
+## Implementation Status (verified 2026-09-22)
 
 **Phases 1–6 have shipped.** A few design choices changed during
-implementation; this section is the authoritative summary, the rest of
-the document remains the original design narrative with inline notes
+implementation; this section is the current implementation summary, the rest
+of the document remains the original design narrative with inline notes
 where it diverges.
 
 | Phase | Status | Notes |
@@ -13,7 +13,7 @@ where it diverges.
 | 2 — JS bindings | ✅ done | `lambda/js/js_dom_selection.{hpp,cpp}`. |
 | 3 — Mutation envelopes & live ranges | ✅ done | `dom_range_replace_for_mutation` + spec adjustments. |
 | 4 — Range mutation methods | ✅ done | `cloneContents` / `extractContents` / `deleteContents` / `surroundContents` / `insertNode`. |
-| 5 — `Selection.modify` & word breaking | ✅ done | utf8proc-backed iterator. |
+| 5 — `Selection.modify` & word breaking | ✅ baseline done | all accepted argument families; bidi-aware visual character/word paths and host-aware line boundaries. Word and sentence segmentation remain approximations, not a utf8proc-backed Unicode iterator. |
 | 6 — Rendering & input wiring | ✅ done (revised, see below) | bidirectional sync, NOT a unification. |
 | 6A — `render_selection()` activated | ✅ done | inline glyph painter disabled; multi-rect overlay drives text-selection backgrounds. |
 | 6B — Consolidated legacy storage | ✅ done | `CaretState` / `SelectionState` now owned by `DomSelection`; single allocation; types preserved. |
@@ -677,7 +677,12 @@ These hooks also flip `state->selection_layout_dirty = true` and
 
 ### 7.1 `Selection.modify(alter, direction, granularity)`
 
-This is the trickiest method. WPT exercises only a subset:
+`Selection.modify` is a native checked DOM/Selection mechanism, not a
+separate contenteditable default action; the package owns policy while Radiant
+owns that generic mechanism under **D7.2.5**. Its binding delegates to
+`dom_selection_modify` in `radiant/dom_range.cpp`.
+
+The accepted browser-convention argument sets are:
 
 - `alter` ∈ {`"move"`, `"extend"`}
 - `direction` ∈ {`"forward"`, `"backward"`, `"left"`, `"right"`}
@@ -685,11 +690,25 @@ This is the trickiest method. WPT exercises only a subset:
   `"lineboundary"`, `"sentence"`, `"sentenceboundary"`,
   `"paragraphboundary"`, `"documentboundary"`}
 
-We already have `caret_move()`, `caret_move_line()`, `caret_move_to()`
-that operate at character/line/document granularity — they become the
-implementation for `modify()`. **Word/sentence boundaries** require a
-unicode word-break iterator. We adopt `unicode/icu`-equivalent tables
-already used by `lib/utf8proc/`.
+`move` collapses at the resulting focus and `extend` preserves the anchor.
+`forward`/`backward` are logical directions; `left`/`right` select visual,
+bidi-aware character and word paths. Character traversal follows visible text
+and collapsed whitespace, word traversal crosses simple word boundaries,
+line and line-boundary traversal consults editing-host layout stops where
+available, paragraph traversal recognizes blocks and `<br>`, and
+`documentboundary` reaches the tree edge. Empty selections are no-ops and
+unknown arguments report `SyntaxError`. Movement neither edits content nor
+leaves the editing host, and it skips non-selectable subtrees.
+
+This is functional baseline coverage, not exact browser segmentation:
+word breaks use an alphanumeric classifier; sentence behavior and no-layout
+line fallbacks are structural approximations. Locale-sensitive or
+complex-script results may therefore differ from a browser. That is a bounded
+`Selection.modify` conformance limit, rather than a general contenteditable
+support gap. The `SelectionModify*` tests in `test/test_dom_range_gtest.cpp`
+verify the core move/extend, collapsed-whitespace, empty-selection, and
+argument-validation contracts; `test/ui/dom_pkg_edge_text.json` exercises
+paragraph-boundary traversal through an empty inline.
 
 ### 7.2 `deleteFromDocument()`
 
@@ -1146,13 +1165,20 @@ Exit criteria: WPT range mutation tests (`addRange-*`, `removeAllRanges`,
 Exit criteria: `extractContents-*`, `deleteContents-*`,
 `surroundContents-*`, `cloneContents-*` WPT tests pass.
 
-### Phase 5 — `Selection.modify` & word breaking
+### Phase 5 — `Selection.modify` & word breaking ✅ baseline landed
 
-1. Word/sentence iterator using `lib/utf8proc/`.
-2. Implement `modify()` for all granularities.
-3. Promote layout-cache resolver to recompute on every reflow.
+`dom_selection_modify` accepts every listed `alter`, direction, and
+granularity spelling. Its movement uses the DOM boundary helpers and the
+editing-host layout stops rather than the originally proposed `caret_move()`
+adapter. Visual left/right character and word movement is bidi-aware; line,
+paragraph, and document boundaries are implemented as described in §7.1.
 
-Exit criteria: `selection-modify-*` WPT tests pass.
+The original `lib/utf8proc` word/sentence-iterator plan did not land.
+Word, sentence, and layout-free line behavior instead retain the bounded
+approximations stated in §7.1. The maintained verification is
+`SelectionModify*` in `test/test_dom_range_gtest.cpp` plus
+`test/ui/dom_pkg_edge_text.json`; full `selection-modify-*` WPT conformance
+is not currently claimed.
 
 ### Phase 6 — Rendering & input wiring ✅ done (revised)
 

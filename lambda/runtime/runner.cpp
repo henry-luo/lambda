@@ -1475,7 +1475,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     // Build the static closure before the root enters its Runtime. Workers only
     // publish AST templates; import initialization and tier selection stay on
-    // this execution path (D8.1.1v10, D8.5.1v4).
+    // this execution path (D8.1.1v11, D8.5.1v5).
     if (runtime && !runtime->ast_prebuild_only && !is_import && !source &&
             lambda_tier_selected() != LAMBDA_TIER_JIT &&
             input_script_cache_ast_enabled(input_manager_global_script_cache())) {

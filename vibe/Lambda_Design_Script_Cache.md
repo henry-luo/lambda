@@ -24,7 +24,8 @@ allocator has a named context owner), D7.1.2 (I/O versus derived-artifact
 layering), D7.2.2–D7.2.3 (transactional module initialization and in-process
 import caching), D8.1.3v10 (retained LambdaJS AST and explicit AST tier),
 D8.4.1v2 (immutable generated code), D7.1.2v2 (I/O and opaque-artifact
-layering), and D8.5.1v3 (the persistent executable-script cache).
+layering), and D8.5.1v5 (the persistent executable-script cache and static
+module-prebuild scheduler).
 This proposal records the 2026-09-13 policy decisions in §15; formal rulings
 are kept synchronized as implementation lands.
 
@@ -496,6 +497,25 @@ adapters have not yet adopted build claims. A lease prevents an entry from
 being evicted while an execution instance references it. If scope recovery
 releases an owner without `complete_build()`, the common service poisons that
 key, broadcasts every waiter, and requires source invalidation before retry.
+
+#### Static module-prebuild task graph (implemented 2026-09-22)
+
+Static import prebuild uses one bounded pool for the entire file-backed import
+closure, rather than one pool and wait barrier for each dependency depth. A
+parse-accurate discovery task immediately sends every resolved static import
+to that pool. Its request key is the canonical path plus language/profile, so
+the task graph has one node per module even when several importers name it.
+
+For example, discovery of `A -> B -> C` and `A -> D -> C` first queues `B` and
+`D`; their discovery tasks both request the one deduplicated `C` node. `C` is
+built once, and its completion notifies both direct dependents, releasing `B`
+and `D` independently. A module's AST build is queued only after its direct
+imports complete. Workers publish dependency completion; they never block on a
+child task, so a fixed pool cannot deadlock behind nested imports. The ordinary
+loader remains responsible for module instantiation, execution, MIR, and
+diagnostics. Cache build claims still provide single-flight sharing when another
+closure requests the same artifact. [D8.1.1v11,
+D8.5.1v5]
 
 ### 12.2 Memory and eviction
 

@@ -7,6 +7,15 @@
 **Retained target:** the derived editor-model fixtures under
 `test/editor-js/test/tier_f_chromium/`
 
+**Current implementation note (2026-09-22):** This is a historical record of
+the retired editor-model harvester. Its statements that line granularities
+are unavailable and that `left`/`right` are logical aliases do not describe
+current Radiant. `dom_selection_modify` now accepts all of the listed
+granularities, has bidi-aware visual character/word paths, and uses
+editing-host layout stops for line boundaries. Word and sentence segmentation
+remain approximations. This is native DOM/Selection mechanism under
+**D7.2.5**; see [RAD_18 §6](../../doc/dev/radiant/RAD_18_Editing_Selection_Ranges.md#6-dom-range-mutation-selection-modify-stringification).
+
 ---
 
 ## 0. TL;DR

@@ -392,6 +392,33 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
     return true;
 }
 
+static DomNode* dom_live_sibling(DomNodeRegistry* registry, DomNode* node) {
+    DomNodeRecord* record = dom_record_find(registry, node);
+    return record && record->state != DOM_NODE_RETIRED ? node : nullptr;
+}
+
+static void dom_retire_unlink_inbound_edges(DomNodeRegistry* registry, DomNode* node) {
+    DomNode* previous = dom_live_sibling(registry, node->prev_sibling);
+    DomNode* next = dom_live_sibling(registry, node->next_sibling);
+    for (DomNodeRecord* record = registry->all_records; record;
+         record = record->all_next) {
+        if (record->state == DOM_NODE_RETIRED || record->address == node) continue;
+        DomNode* other = record->address;
+        if (other->next_sibling == node) other->next_sibling = next;
+        if (other->prev_sibling == node) other->prev_sibling = previous;
+        if (other->is_element()) {
+            DomElement* element = other->as_element();
+            if (element->first_child == node) element->first_child = next;
+            if (element->last_child == node) element->last_child = previous;
+        }
+    }
+    // MarkEditor may replace its backing chain before unlinking the old DOM
+    // wrapper. Remove every surviving inbound raw edge before poisoning it.
+    node->parent = nullptr;
+    node->prev_sibling = nullptr;
+    node->next_sibling = nullptr;
+}
+
 static size_t dom_retire_subtree(DomDocument* doc, DomNode* node) {
     if (node && node->is_element() && node->as_element()->is_synthetic()) {
         return 0;
@@ -411,6 +438,7 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node) {
     }
 
     DomNodeRecord* record = dom_record_find(registry, node);
+    dom_retire_unlink_inbound_edges(registry, node);
     size_t primary_size = record->primary_size;
     record->candidate = false;
     record->state = DOM_NODE_RETIRED;

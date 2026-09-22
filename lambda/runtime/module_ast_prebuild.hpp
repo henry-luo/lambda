@@ -8,7 +8,7 @@
 
 // The module prebuild graph is deliberately language-neutral. A profile owns
 // syntax discovery, resolution, and the isolated AST build; this scheduler
-// only owns dependency order and worker lifetime.
+// owns one bounded closure-wide queue plus dependency continuations.
 typedef enum ModuleAstLanguage {
     MODULE_AST_LANGUAGE_LAMBDA = 0,
     MODULE_AST_LANGUAGE_JAVASCRIPT,
@@ -49,12 +49,13 @@ typedef struct ModuleAstPrebuildStats {
     uint32_t built_modules;
     uint32_t cache_ready_modules;
     uint32_t failed_modules;
-    uint32_t worker_batches;
+    uint32_t worker_pool_runs;
 } ModuleAstPrebuildStats;
 
-// Build a static import closure bottom-up. This is best-effort: a missing or
-// invalid module is left for the ordinary loader so diagnostics stay in the
-// language's established error path.
+// Build a static import closure through one dependency-aware queue. Discovery
+// jobs publish nested requests immediately; a module build waits only on its
+// direct prerequisites, never on a depth batch. This is best-effort: a missing
+// or invalid module is left for the ordinary loader's established diagnostics.
 bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
     ModuleAstLanguage root_language, const char* root_path,
     const char* root_source, size_t root_source_length,
