@@ -166,11 +166,6 @@ extern "C" int js_typed_array_element_size(JsTypedArrayType type) {
     return js_typed_array_spec(type)->byte_size;
 }
 
-extern "C" const char* js_typed_array_type_name_from_type(JsTypedArrayType type) {
-    const JsTypedArraySpec* spec = js_typed_array_spec(type);
-    return spec->name ? spec->name : "Uint8Array";
-}
-
 extern "C" bool js_typed_array_is_integer_type(JsTypedArrayType type) {
     return js_typed_array_spec(type)->integer;
 }

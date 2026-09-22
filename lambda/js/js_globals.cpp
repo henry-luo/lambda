@@ -3191,13 +3191,6 @@ static void js_process_ipc_refresh_ref(void) {
     }
 }
 
-extern "C" void js_process_ipc_clear_force_ref(void) {
-    // Cluster only force-refs IPC until the internal online/listening handshake;
-    // keeping it forced afterwards leaves idle workers alive until the watchdog.
-    js_process_ipc_force_ref = false;
-    js_process_ipc_refresh_ref();
-}
-
 static void js_process_set_connected(bool connected) {
     if (js_process_cache_is_empty(js_process_object)) return;
     js_set_key_cstr(js_process_object, "connected", (Item){.item = b2it(connected)});
@@ -3531,24 +3524,6 @@ extern "C" Item js_process_send(Item msg, Item callback) {
     mem_free(wr);
     log_error("process_ipc: write failed: %s", uv_strerror(r));
     return (Item){.item = b2it(false)};
-}
-
-extern "C" void js_process_ipc_notify_socket_closed(void) {
-    if (!js_process_ipc_active || js_process_ipc_closing) return;
-    Item control = js_new_object();
-    js_set_key_cstr(control, "__lambda_ipc_socket_closed__", (Item){.item = ITEM_TRUE});
-    // receiver-side socket close is an internal accounting edge for a
-    // transferred fd; userland must not observe this as a message event.
-    (void)js_process_send(control, make_js_undefined());
-}
-
-extern "C" void js_process_ipc_notify_handle_accepted(void) {
-    if (!js_process_ipc_active || js_process_ipc_closing) return;
-    Item control = js_new_object();
-    js_set_key_cstr(control, "__lambda_ipc_handle_accepted__", (Item){.item = ITEM_TRUE});
-    // descriptor ownership transfers only after uv_accept succeeds in the
-    // receiver; this internal frame lets the sender close its endpoint then.
-    (void)js_process_send(control, make_js_undefined());
 }
 
 extern "C" Item js_process_disconnect(void) {
@@ -14458,9 +14433,6 @@ extern "C" Item js_vm_swap_global_this(Item next_global) {
     }
     return previous;
 }
-
-// js_get_global_object: alias for js_get_global_this (used by assignment fallback)
-JS_FORWARD_ITEM(js_get_global_object, (), js_get_global_this, ())
 
 // ============================================================================
 // With-scope stack for 'with' statement support

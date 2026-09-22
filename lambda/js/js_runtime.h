@@ -46,12 +46,9 @@ Item js_strbuf_take_item(StrBuf* sb);
 Item js_make_string(const char* str);
 Item js_domexception_new(Item message, Item name_arg);
 bool js_string_equals(Item value, const char* expected);
-bool js_string_items_equal(Item left, Item right);
 bool js_is_vm_context_error(Item value);
-bool js_descriptor_is_enumerable(Item descriptor);
 
 const char* js_item_to_cstr(Item value, char* buf, int buf_size);
-bool js_item_to_integral_int64(Item value, int64_t* out, bool allow_int64);
 
 static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
     unsigned char c = (unsigned char)s[*index];
@@ -88,7 +85,6 @@ static inline int js_utf8_next_codepoint(const char* s, int len, int* index) {
 NameId js_well_known_symbol_name_id(int64_t symbol_id);
 Item js_well_known_symbol_key(int64_t symbol_id);
 bool js_is_callable(Item value);
-bool is_callable(Item value);
 bool js_has_call_capability(Item value);
 bool js_has_construct_capability(Item value);
 
@@ -185,7 +181,6 @@ Item js_status_ok(void);
 #define JS_FORWARD_LOCAL_RETURN(type, name, args, target, call_args) \
     type name args { return target call_args; }
 int64_t js_is_nullish(Item value);
-bool js_get_constructor_name(Item value, char* out, int out_size);
 
 // =============================================================================
 // Arithmetic Operators
@@ -404,7 +399,6 @@ int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 void js_array_push_item_direct(Array* arr, Item value);
 double js_math_pow_d(double base, double exp);
-int64_t js_get_length(Item object);
 
 // =============================================================================
 // Function Functions
@@ -516,9 +510,6 @@ Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_call_accessor_getter(Item getter, Item receiver);
 Item js_call_function_into(Item func_item, Item this_val, Item* args,
                            int arg_count, uint64_t* result_home);
-Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
-                                          Item* args, int arg_count,
-                                          uint64_t* result_home);
 Item js_call_constructor_body_into(Item func_item, Item this_val, Item* args,
                                    int arg_count, Item new_target,
                                    uint64_t* result_home);
@@ -556,10 +547,6 @@ Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bou
 void js_function_root_item_if_needed(void* fn, Item* slot);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
-Item js_dynamic_function_call_body(Item callee, Item this_value, Item* args,
-                                   int argc, uint64_t* result_home);
-Item js_dynamic_function_construct_body(Item callee, Item* args, int argc,
-                                        Item new_target, uint64_t* result_home);
 Item js_dynamic_async_function_call_body(Item callee, Item this_value,
                                          Item* args, int argc,
                                          uint64_t* result_home);
@@ -863,7 +850,6 @@ Item js_throw_invalid_arg_value(const char* name, const char* reason, Item actua
 Item js_throw_out_of_range(const char* name, const char* range, Item actual);
 
 /** Throw a system error (like ENOENT, EACCES) with code, errno, syscall, path. */
-Item js_throw_system_error(int uv_errno, const char* syscall, const char* path);
 
 /** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
 Item js_require_object_coercible(Item value);
@@ -1006,7 +992,6 @@ void js_mir_volume_counters_get(JsMirVolumeCounters* out);
 
 // globalThis / global object
 Item js_get_global_this(void);
-Item js_get_global_object(void);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
@@ -1449,8 +1434,6 @@ void js_private_field_init_end(void);
 
 Item make_string_item(const char* str, int len);
 struct JsFunction; struct String;
-extern "C" void js_function_set_eval_origin(struct JsFunction* fn, String* filename,
-        String* source, int64_t line_offset, int64_t column_offset);
 Item make_string_item(const char* str);
 // Interned property keys. These go through the name pool, so they keep name
 // identity and need no RootFrame — unlike make_string_item / js_get_key_cstr,

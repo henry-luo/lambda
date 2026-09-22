@@ -595,20 +595,6 @@ static void js_function_root_ast_payload(JsFunction* fn) {
     heap_try_register_gc_root((uint64_t*)&fn->payload->ast->lexical_new_target);
 }
 
-extern "C" void js_function_set_eval_origin(JsFunction* fn, String* filename,
-        String* source, int64_t line_offset, int64_t column_offset) {
-    if (!fn) return;
-    JsEvalOrigin* origin = js_fn_eval_origin_ensure(fn);
-    if (!origin) return;
-    origin->filename = filename;
-    origin->source = source;
-    origin->line_offset = line_offset;
-    origin->column_offset = column_offset;
-    if (!js_function_payload_needs_own_roots(fn)) return;
-    heap_try_register_gc_root((uint64_t*)&origin->filename);
-    heap_try_register_gc_root((uint64_t*)&origin->source);
-}
-
 // Called by the collector for every dying function value.
 extern "C" void js_function_gc_destroy(void* data) {
     JsFunction* fn = (JsFunction*)data;
