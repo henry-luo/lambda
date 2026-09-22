@@ -1429,9 +1429,9 @@ TEST(JsOpt, RecursiveLiteralReturnShapeUsesGuardedMapSlots) {
 
 TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     const char* source =
-        "var ascii = 'ab,cd'; var unicode = 'A😀,B';\n"
-        "var value = ascii.indexOf('b') + ascii.split(',').length + ascii.slice(1).length +\n"
-        "  ascii.charCodeAt(0) + (ascii + 'z').length;\n"
+        "var ascii = 'ab,cd'; var asciiNeedle = new String('b'); var unicode = 'A😀,B';\n"
+        "var value = ascii.indexOf(asciiNeedle) + ascii.split(',').length + ascii.slice(1).length +\n"
+        "  ascii.charCodeAt(0.5) + (ascii + 'z').length;\n"
         "value += unicode.indexOf('😀') + unicode.split(',').length + unicode.slice(1).length +\n"
         "  unicode.charCodeAt(1) + (unicode + 'z').length;\n"
         "var escaped = '%' + 'F'; escaped = escaped + '0'; escaped = escaped + '%';\n"
@@ -1459,6 +1459,38 @@ TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_ASCII][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_UNICODE][1], 0u);
     expect_trace_off_same("string_leaves", source, output);
+}
+
+TEST(JsOpt, MirAsciiStringCallsKeepCapabilityFallback) {
+    const char* source =
+        "function scan(text, needle, index) { return text.indexOf(needle) + text.charCodeAt(index); }\n"
+        "if (scan('trace', 'a', 1) !== 116) throw new Error('ASCII intrinsic miss');\n"
+        "var original = String.prototype.indexOf; var calls = 0;\n"
+        "String.prototype.indexOf = function(value) { calls += 1; return value === 'a' ? 40 : -1; };\n"
+        "if (scan('trace', 'a', 1) !== 154 || calls !== 1) throw new Error('replacement bypassed');\n"
+        "String.prototype.indexOf = original;\n"
+        "if (scan('tracé', 'é', 4) !== 237)\n"
+        "  throw new Error('Unicode fallback changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("mir_ascii_string_call", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("mir_ascii_string_call");
+    ASSERT_NE(mir, nullptr);
+    const char* scan_end = NULL;
+    const char* scan = find_mir_function(mir, "_js_scan_", &scan_end,
+        "_body:\tfunc");
+    ASSERT_NE(scan, nullptr);
+    ASSERT_NE(scan_end, nullptr);
+    const char* leaf = strstr(scan, "js_try_ascii_string_builtin_no_gc");
+    EXPECT_TRUE(leaf && leaf < scan_end);
+    const char* fallback = strstr(scan, "\n\tcall\tjs_call");
+    EXPECT_TRUE(fallback && fallback < scan_end);
+    free(mir);
+    expect_trace_off_same("mir_ascii_string_call", source, output);
 }
 
 TEST(JsOpt, AsciiSubstringValueCacheReusesLeaves) {
@@ -2050,6 +2082,7 @@ TEST(JsOpt, MirThisCallPreservesReceiverAndMethodHome) {
     expect_ok_output(output);
     EXPECT_GT(trace.events[JS_OPT_MIR_THIS_CALL][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_MIR_THIS_DIRECT_ACTIVATION][1], 0u);
+
     expect_trace_off_same("mir_this_call", source, output);
 }
 

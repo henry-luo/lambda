@@ -7617,6 +7617,23 @@ static void jm_call_arg_flags(JsMirTranspiler* mt, JsAstNode* arguments,
     }
 }
 
+static bool jm_is_ascii_string_builtin_candidate(JsCallNode* call) {
+    if (!call || !call->callee || call->callee->node_type != AST_NODE_MEMBER_EXPR) {
+        return false;
+    }
+    JsMemberNode* member = (JsMemberNode*)call->callee;
+    if (member->computed || !member->property ||
+            member->property->node_type != AST_NODE_IDENT) {
+        return false;
+    }
+    JsIdentifierNode* name = (JsIdentifierNode*)member->property;
+    if (!name->name) return false;
+    return (name->name->len == 7 &&
+            memcmp(name->name->chars, "indexOf", 7) == 0) ||
+        (name->name->len == 10 &&
+            memcmp(name->name->chars, "charCodeAt", 10) == 0);
+}
+
 static MIR_reg_t jm_emit_member_call_from_function(JsMirTranspiler* mt,
         JsCallNode* call, MIR_reg_t recv, MIR_reg_t fn, int arg_count,
         bool args_have_yield, bool args_have_spread) {
@@ -7631,6 +7648,36 @@ static MIR_reg_t jm_emit_member_call_from_function(JsMirTranspiler* mt,
     if (recv_arg_spill >= 0) {
         jm_gen_spill_load(mt, recv, recv_arg_spill);
         jm_gen_spill_load(mt, fn, fn_arg_spill);
+    }
+    if (!args_have_yield && !args_have_spread && arg_count == 1 &&
+            jm_is_ascii_string_builtin_candidate(call)) {
+        // Get and argument evaluation already completed. The leaf identifies
+        // only the original catalog capability and primitive ASCII operands;
+        // ItemNull transfers every other observable case to js_call.
+        MIR_reg_t result = jm_new_reg(mt, "ascii_string_call", MIR_T_I64);
+        MIR_label_t miss = jm_new_label(mt);
+        MIR_label_t done = jm_new_label(mt);
+        MIR_reg_t direct = jm_call_4(mt, "js_try_ascii_string_builtin_no_gc",
+            MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, direct),
+            MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        jm_emit_mov(mt, result, direct);
+        jm_emit_jmp(mt, done);
+
+        jm_emit_label(mt, miss);
+        bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
+        MIR_reg_t fallback = jm_call_function_into(mt,
+            MIR_new_reg_op(mt->ctx, fn), MIR_new_reg_op(mt->ctx, recv),
+            MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_new_int_op(mt->ctx, arg_count));
+        jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
+        jm_emit_mov(mt, result, fallback);
+        jm_emit_label(mt, done);
+        return result;
     }
     bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
     MIR_reg_t result;
