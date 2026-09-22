@@ -848,6 +848,9 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
             }
             if (span->transform) {
                 span->transform->functions = prop->value.transform;
+                // Keyframe lists are document-owned and may be sampled again
+                // after a retained view-pool reset.
+                span->transform->functions_owner = TRANSFORM_FUNCTIONS_DOCUMENT_POOL;
             }
             break;
         }

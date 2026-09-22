@@ -385,6 +385,21 @@ TEST_F(GifAnimationTest, FinishCleansUp) {
     EXPECT_EQ(surface.pixels, nullptr);
 }
 
+TEST_F(GifAnimationTest, SchedulerDestroyCancelsGifAndDetachesSurface) {
+    GifFrames* gif = image_gif_load_from_memory(ANIM_GIF_2FRAME, ANIM_GIF_2FRAME_LEN);
+    ASSERT_NE(gif, nullptr);
+
+    AnimationInstance* inst = gif_animation_create(scheduler, &surface, gif, 0.0, pool);
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(surface.pixels, nullptr);
+
+    animation_scheduler_destroy(scheduler);
+
+    // Shutdown must release the decoded frames before the cache destroys the surface.
+    EXPECT_EQ(surface.pixels, nullptr);
+    EXPECT_EQ(scheduler->count, 0);
+}
+
 // ============================================================================
 // GIF Scheduler Integration Tests
 // ============================================================================

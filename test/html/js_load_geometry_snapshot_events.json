@@ -1,0 +1,8 @@
+{
+  "name": "load handlers flush current host-driven geometry",
+  "viewport": {"width": 321, "height": 123},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#geometry-state"},
+     "attribute": "data-load-span", "equals": "100"}
+  ]
+}

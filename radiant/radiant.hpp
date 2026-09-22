@@ -195,6 +195,7 @@ void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* po
 void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc, Pool* pool,
                                        Url* base_url, DocumentScriptPhaseTiming* timing);
 void script_runner_set_retain_js_state(bool retain);
+void script_runner_set_static_headless_snapshot(bool snapshot);
 // Pump callbacks against the retained document runtime between host input turns.
 bool radiant_pump_js_event_loop(struct UiContext* uicon, int wait_ms);
 bool radiant_advance_js_event_loop(struct UiContext* uicon, double delta_ms, int frame_steps);

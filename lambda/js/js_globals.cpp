@@ -13693,6 +13693,10 @@ static Item js_node_filter_new(void) {
     return filter_root.get();
 }
 
+static Item js_intersection_observer_entry_new(void) {
+    return js_new_object();
+}
+
 // cumulative thread-local timing survives nested eval resetting phase counters.
 static __thread uint64_t js_realm_init_us = 0;
 
@@ -13814,6 +13818,8 @@ extern "C" Item js_get_global_this() {
             dom_resize_observer_new);
         js_install_native_constructor(js_global_this_obj, "IntersectionObserver",
             dom_intersection_observer_new);
+        js_install_native_constructor(js_global_this_obj, "IntersectionObserverEntry",
+            js_intersection_observer_entry_new);
 
         // AbortController constructor
         {
@@ -14745,6 +14751,17 @@ static bool js_define_global_var_properties_bulk_absent(Item global, const Item*
     return ok;
 }
 
+static Item js_existing_global_var_data_value(Item global, Item key) {
+    String* name = it2s(key);
+    if (!name) return make_js_undefined();
+    JsPropertyDescriptor descriptor = {};
+    if (!js_get_own_property_descriptor(global, name->chars, (int)name->len,
+            &descriptor) || (descriptor.flags & JS_PD_HAS_VALUE) == 0) {
+        return make_js_undefined();
+    }
+    return descriptor.value;
+}
+
 extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
         const uint32_t* module_name_indices, const NameId* direct_name_ids,
         int count, int define_global_var_properties) {
@@ -14779,13 +14796,20 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
     for (int i = 0; i < count; i++) {
         int index = indices[i];
         if (index < 0) continue;
-        lambda_active_module_var_store((uint32_t)index, undef);
+        Item key = ItemNull;
+        Item initial = undef;
         if (define_global_var_properties) {
             // Allocation failure may disable only the bulk acceleration; it
             // must not drop CreateGlobalVarBinding or its module-slot bridge.
-            Item key = keys ? keys[i]
+            key = keys ? keys[i]
                 : lambda_active_module_name_item(module_name_indices[i],
                     direct_name_ids[i]);
+            // A later classic script may redeclare an existing global var.
+            // Its new module slab must retain that data binding, not reset it.
+            initial = js_existing_global_var_data_value(global, key);
+        }
+        lambda_active_module_var_store((uint32_t)index, initial);
+        if (define_global_var_properties) {
             if (!js_define_global_var_property_fast_absent(global, key, undef)) {
                 js_define_global_var_property(key, undef);
             }

@@ -441,20 +441,23 @@ void free_document(DomDocument* doc) {
     }
     radiant_document_destroy_state(doc);
 
-    // State teardown releases context-owned maps, so the retained JS runtime
-    // can be destroyed only after the document has detached those references.
-    script_runner_cleanup_js_state(doc);
-
     // JS mutation records can retain detached controls with heap-owned props.
-    // Their state owner is gone, but the view tree still releases those props.
+    // Release them while the document arena is still valid: runtime teardown
+    // releases the retained JS Input that can own those detached DOM nodes.
     dom_js_mutation_records_reset(doc);
-    dom_lifecycle_release_unattached_form_props(doc);
+    if (doc->view_tree) {
+        dom_lifecycle_release_unattached_form_props(doc);
+    } else {
+        // Without a view tree there is no retained-tree teardown to own
+        // attached controls, so release every validated document element.
+        dom_lifecycle_release_all_form_props(doc);
+    }
 
     destroy_dom_owned_embed_images((DomNode*)doc->root);
 
-    if (!doc->view_tree) {
-        view_pool_release_detached_form_props((DomNode*)doc->root);
-    }
+    // State teardown releases context-owned maps, so the retained JS runtime
+    // can be destroyed only after the document has detached those references.
+    script_runner_cleanup_js_state(doc);
 
     if (doc->view_tree) {
         // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.

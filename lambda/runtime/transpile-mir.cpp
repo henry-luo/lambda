@@ -7548,8 +7548,9 @@ static bool mir_can_inline_null_item_test(MirTranspiler* mt,
 // ============================================================================
 
 // Resolve the current module's context-owned slab once in the generated
-// function.  `_mod_layout` is immutable after the module is sealed; no
-// publication state, TLS lookup, lock, or atomic operation is emitted here.
+// function. `_mod_layout` holds only image metadata; mutable bindings remain
+// in the context-owned slab, and a satellite receives its key suffix at
+// publication time.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
 static void emit_module_state_load_insn(MirTranspiler* mt, MIR_insn_t* after,
@@ -7674,18 +7675,39 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
     // definition. The cache is function-qualified because property_keys is
     // module-wide while virtual registers are function-local (D4.6.1v2-D4.6.2v2).
     MIR_reg_t state = emit_module_state(mt);
-    uint32_t state_index = index;
+    MIR_reg_t satellite_state_index = 0;
     bool satellite_keys = mt->satellite_target || mt->interp_module_owner;
     if (satellite_keys) {
-        if (index > UINT32_MAX - mt->satellite_property_key_base) return 0;
-        state_index += mt->satellite_property_key_base;
+        // The worker cannot reserve a key-table suffix while it compiles: a
+        // different completed image may be published first. Read the base
+        // assigned to this image's layout at publication instead of baking a
+        // stale worker-time count into the generated call (D8.5.1v6).
+        MIR_insn_t after = mt->module_state_tail;
+        MIR_reg_t layout = new_reg(mt, "satellite_layout", MIR_T_I64);
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, layout),
+            MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
+        MIR_reg_t key_base = new_reg(mt, "satellite_key_base", MIR_T_I64);
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, key_base),
+            MIR_new_mem_op(mt->ctx, MIR_T_U32,
+                (MIR_disp_t)offsetof(LambdaModuleLayout, reserved), layout, 0, 1)));
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, key_base), MIR_new_reg_op(mt->ctx, key_base),
+            MIR_new_int_op(mt->ctx, (int64_t)LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK)));
+        satellite_state_index = new_reg(mt, "satellite_key_index", MIR_T_I64);
+        emit_module_state_load_insn(mt, &after, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, satellite_state_index),
+            MIR_new_reg_op(mt->ctx, key_base),
+            MIR_new_int_op(mt->ctx, (int64_t)index)));
+        mt->module_state_tail = after;
     }
     mt->em.insert_after = mt->module_state_tail;
     MIR_reg_t result = 0;
     if (!satellite_keys) {
         // T28-4: for the module's own code the key table is linked from
         // exactly this transpiler's key list, and the link fails loudly if the
-        // sealed count changes (runtime-state.cpp), so `state_index` is in
+        // sealed count changes (runtime-state.cpp), so `index` is in
         // range and the table is non-null by construction. The call only ever
         // did two loads; a recursive procedure paid it once per key per
         // invocation (prettier's print_node: 13 keys). The table pointer is
@@ -7705,12 +7727,12 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_mem_op(mt->ctx, MIR_T_U32,
-                (MIR_disp_t)state_index * (MIR_disp_t)sizeof(NameId),
+                (MIR_disp_t)index * (MIR_disp_t)sizeof(NameId),
                 keys, 0, 1)));
     } else {
         result = emit_call_2(mt, "lambda_module_name_id_at", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, state),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_index));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, satellite_state_index));
     }
     MIR_insn_t inserted_tail = mt->em.insert_after;
     mt->em.insert_after = 0;
@@ -39411,6 +39433,10 @@ static Type* mir_expr_candidate_shape(MirTranspiler* mt, AstNode* expr, int dept
 // distinct shape).
 static Type* mir_module_unique_shape_for_field(MirTranspiler* mt,
         const char* name, size_t name_len) {
+    // The interpreter may extend its module type registry while a satellite
+    // lowers an immutable AST snapshot. The registry is optimisation evidence,
+    // not part of that snapshot, so only its owning compiler may traverse it.
+    if (mt->satellite_snapshot) return NULL;
     if (!mt->type_list || !name || name_len == 0) return NULL;
     Type* found = NULL;
     for (int64_t index = 0; index < mt->type_list->length; index++) {
@@ -41611,10 +41637,13 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     Pool* compile_pool = script->pool;
     NamePool* compile_name_pool = script->name_pool;
     ArrayList* compile_const_list = script->const_list;
+    ArrayList* compile_type_list = script->type_list;
     Pool* snapshot_pool = NULL;
     NamePool* snapshot_name_pool = NULL;
     ArrayList* snapshot_const_list = NULL;
+    ArrayList* snapshot_type_list = NULL;
     int source_const_count = script->const_list ? script->const_list->length : 0;
+    int source_type_count = script->type_list ? script->type_list->length : 0;
     MirModuleNames names = {};
     AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP] = {};
     AstFuncNode* compiled_members[INTERP_SATELLITE_CLUSTER_CAP] = {};
@@ -41640,16 +41669,26 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         // rejected fallback allocation leaves the hot function in T0.
         if (script->cache_cross_lang_tainted) return false;
         snapshot_pool = mem_pool_create(NULL, MEM_ROLE_CODE, "interp.satellite.snapshot");
-        snapshot_name_pool = snapshot_pool
-            ? name_pool_create(snapshot_pool, script->name_pool) : NULL;
+        // The snapshot owns compiler-generated symbols only. Source AST names
+        // remain owned by the Script, so borrowing its pool would let worker
+        // teardown release evaluator-owned storage (D8.5.1v6).
+        snapshot_name_pool = snapshot_pool ? name_pool_create(snapshot_pool, NULL) : NULL;
         snapshot_const_list = arraylist_new(source_const_count > 0 ? source_const_count : 1);
-        if (!snapshot_pool || !snapshot_name_pool || !snapshot_const_list) goto fail;
+        snapshot_type_list = arraylist_new(source_type_count > 0 ? source_type_count : 1);
+        if (!snapshot_pool || !snapshot_name_pool || !snapshot_const_list ||
+                !snapshot_type_list) goto fail;
         for (int index = 0; index < source_const_count; index++) {
             if (!arraylist_append(snapshot_const_list, script->const_list->data[index])) goto fail;
+        }
+        for (int index = 0; index < source_type_count; index++) {
+            if (!arraylist_append(snapshot_type_list, script->type_list->data[index])) goto fail;
         }
         compile_pool = snapshot_pool;
         compile_name_pool = snapshot_name_pool;
         compile_const_list = snapshot_const_list;
+        // Snapshot lowering cannot publish pool-owned descriptors into the
+        // Script registry that concurrent workers later read (D8.5.1v6).
+        compile_type_list = snapshot_type_list;
         satellite_context = jit_init(runtime->optimize_level);
         context_owned = true;
     }
@@ -41736,7 +41775,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     lowering_target = snapshot ? compiled_target : (AstFuncNode*)fn;
     lowering_members = snapshot ? compiled_members : members;
     transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
-        script->type_list, compile_const_list, compile_pool, compile_name_pool,
+        compile_type_list, compile_const_list, compile_pool, compile_name_pool,
         &names, &property_keys, &artifacts, script, lowering_target,
         lowering_members, member_count, snapshot, false, &script->ast_index);
     transpile_mir_ast_lower(&build);
@@ -41773,6 +41812,11 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
             fn->name ? fn->name->chars : "<anonymous>");
         goto fail;
     }
+    if (snapshot && compile_type_list->length != source_type_count) {
+        log_notice("interp-tier: snapshot rejected function='%s' reason=type-growth",
+            fn->name ? fn->name->chars : "<anonymous>");
+        goto fail;
+    }
     *(void**)artifacts.consts_bss->addr = script->const_list
         ? script->const_list->data : NULL;
     *(void**)artifacts.type_list_bss->addr = script->type_list;
@@ -41799,6 +41843,8 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     image->compiler_pool = snapshot_pool;
     image->compiler_name_pool = snapshot_name_pool;
     image->compiler_const_list = snapshot_const_list;
+    image->compiler_type_list = snapshot_type_list;
+    image->module_layout = layout;
     image->target = fn;
     image->target_entry = entry;
     image->member_count = (uint32_t)member_count;
@@ -41821,6 +41867,7 @@ fail:
         jit_cleanup_mode(satellite_context, satellite_interp ? 0 : 1);
     }
     if (snapshot_const_list) arraylist_free(snapshot_const_list);
+    if (snapshot_type_list) arraylist_free(snapshot_type_list);
     if (snapshot_name_pool) name_pool_release(snapshot_name_pool);
     if (snapshot_pool) pool_destroy(snapshot_pool);
     return false;
@@ -41833,6 +41880,7 @@ void interp_satellite_image_destroy(InterpSatelliteImage* image) {
         image->context = NULL;
     }
     if (image->compiler_const_list) arraylist_free(image->compiler_const_list);
+    if (image->compiler_type_list) arraylist_free(image->compiler_type_list);
     if (image->compiler_name_pool) name_pool_release(image->compiler_name_pool);
     if (image->compiler_pool) pool_destroy(image->compiler_pool);
     mem_free(image);

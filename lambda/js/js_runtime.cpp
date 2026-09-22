@@ -333,9 +333,20 @@ struct JsArrayRuntimeItemsHeader {
     Array* owner;
 };
 
+struct JsArrayImmortalPropsHeader {
+    JsArrayImmortalPropsHeader* previous;
+    JsArrayImmortalPropsHeader* next;
+    Array* owner;
+    void* original_type;
+    void* original_data;
+    int original_data_cap;
+    Item props;
+};
+
 // Runtime buffers are outside the GC data zones. The header links each buffer
 // directly to its owning array, avoiding a hash lookup on every grow and sweep.
 #define g_js_array_runtime_items (js_runtime_state.array_runtime_items)
+#define g_js_array_immortal_props (js_runtime_state.array_immortal_props)
 
 static bool js_array_has_runtime_items(const Array* owner) {
     return owner && !array_has_native_lane(owner) &&
@@ -434,6 +445,54 @@ extern "C" void js_array_runtime_items_cleanup_all(void) {
     if (!js_active_runtime_state) return;
     js_array_runtime_items_cleanup_list(g_js_array_runtime_items);
     g_js_array_runtime_items = NULL;
+}
+
+extern "C" bool js_array_immortal_props_store(Array* owner, Map* props) {
+    if (!js_active_runtime_state || !owner || !owner->is_immortal || !props) return false;
+    if (js_array_has_props(owner)) {
+        *(Item*)owner->data = {.map = props};
+        return true;
+    }
+    JsArrayImmortalPropsHeader* header = (JsArrayImmortalPropsHeader*)mem_calloc(1,
+        sizeof(JsArrayImmortalPropsHeader), MEM_CAT_JS_RUNTIME);
+    if (!header) return false;
+    header->owner = owner;
+    header->original_type = owner->type;
+    header->original_data = owner->data;
+    header->original_data_cap = owner->data_cap;
+    header->props = {.map = props};
+    if (!heap_try_register_gc_root(&header->props.item)) {
+        mem_free(header);
+        return false;
+    }
+    header->next = g_js_array_immortal_props;
+    if (header->next) header->next->previous = header;
+    g_js_array_immortal_props = header;
+    owner->type = &ArrayPropsShape;
+    owner->data = &header->props;
+    owner->data_cap = (int)sizeof(Item);
+    return true;
+}
+
+static void js_array_immortal_props_cleanup_list(JsArrayImmortalPropsHeader* header) {
+    while (header) {
+        JsArrayImmortalPropsHeader* next = header->next;
+        Array* owner = header->owner;
+        heap_unregister_gc_root(&header->props.item);
+        if (owner && owner->type == &ArrayPropsShape && owner->data == &header->props) {
+            owner->type = (TypeMap*)header->original_type;
+            owner->data = header->original_data;
+            owner->data_cap = header->original_data_cap;
+        }
+        mem_free(header);
+        header = next;
+    }
+}
+
+extern "C" void js_array_immortal_props_cleanup_all(void) {
+    if (!js_active_runtime_state) return;
+    js_array_immortal_props_cleanup_list(g_js_array_immortal_props);
+    g_js_array_immortal_props = NULL;
 }
 
 static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capacity) {
@@ -9974,6 +10033,8 @@ extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state) {
     if (!state) return;
     js_array_runtime_items_cleanup_list(state->array_runtime_items);
     state->array_runtime_items = NULL;
+    js_array_immortal_props_cleanup_list(state->array_immortal_props);
+    state->array_immortal_props = NULL;
     JsTemplateRegistryEntry* entry = state->template_registry.entries;
     while (entry) {
         JsTemplateRegistryEntry* next = entry->next;
@@ -26414,6 +26475,94 @@ static Item js_intl_number_format_call_body(Item callee, Item /*this_value*/,
         result_home);
 }
 
+static Item js_intl_date_time_format_format(Item /*this_value*/, Item* args,
+        int argc) {
+    Item value = argc > 0 && args ? args[0] : make_js_undefined();
+    return js_to_string(value);
+}
+
+static Item js_intl_date_time_format_format_get(Item /*this_value*/, Item* /*args*/,
+        int /*argc*/) {
+    // Intl.DateTimeFormat.prototype.format is an accessor whose return value
+    // remains callable after bundles cache its getter and invoke it with .call().
+    return js_new_native_this_span_function(js_intl_date_time_format_format);
+}
+
+static Item js_intl_date_time_format_format_range(Item /*this_value*/, Item* args,
+        int argc) {
+    RootFrame roots(2);
+    Rooted<Item> start_root(roots,
+        argc > 0 && args ? args[0] : make_js_undefined());
+    Rooted<Item> end_root(roots,
+        argc > 1 && args ? args[1] : make_js_undefined());
+    start_root.set(js_to_string(start_root.get()));
+    if (item_is_error(start_root.get())) return start_root.get();
+    end_root.set(js_to_string(end_root.get()));
+    if (item_is_error(end_root.get())) return end_root.get();
+    String* start = it2s(start_root.get());
+    String* end = it2s(end_root.get());
+    if (!start || !end) return make_js_undefined();
+    StrBuf* output = strbuf_new_cap((size_t)start->len + (size_t)end->len + 3);
+    if (!output) return ItemError;
+    strbuf_append_str_n(output, start->chars, start->len);
+    strbuf_append_str(output, " – ");
+    strbuf_append_str_n(output, end->chars, end->len);
+    return js_strbuf_take_item(output);
+}
+
+static Item js_intl_date_time_format_to_parts(Item /*this_value*/, Item* args,
+        int argc) {
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots,
+        argc > 0 && args ? args[0] : make_js_undefined());
+    Rooted<Item> part_root(roots, js_new_object());
+    Rooted<Item> result_root(roots, js_array_new(0));
+    Item format_arg = value_root.get();
+    value_root.set(js_intl_date_time_format_format(ItemNull, &format_arg, 1));
+    if (item_is_error(value_root.get())) return value_root.get();
+    js_set_key_cstr(part_root.get(), "type", js_name_item("literal", 7));
+    js_set_key_cstr(part_root.get(), "value", value_root.get());
+    Item pushed = js_array_push(result_root.get(), part_root.get());
+    return item_is_error(pushed) ? pushed : result_root.get();
+}
+
+static Item js_intl_date_time_format_range_to_parts(Item /*this_value*/, Item* args,
+        int argc) {
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots, js_intl_date_time_format_format_range(
+        ItemNull, args, argc));
+    Rooted<Item> part_root(roots, js_new_object());
+    Rooted<Item> result_root(roots, js_array_new(0));
+    if (item_is_error(value_root.get())) return value_root.get();
+    js_set_key_cstr(part_root.get(), "type", js_name_item("literal", 7));
+    js_set_key_cstr(part_root.get(), "value", value_root.get());
+    Item pushed = js_array_push(result_root.get(), part_root.get());
+    return item_is_error(pushed) ? pushed : result_root.get();
+}
+
+static Item js_intl_date_time_format_resolved_options(Item /*this_value*/,
+        Item* /*args*/, int /*argc*/) {
+    RootFrame roots(1);
+    Rooted<Item> options_root(roots, js_new_object());
+    js_set_key_cstr(options_root.get(), "locale", js_name_item("en", 2));
+    js_set_key_cstr(options_root.get(), "calendar", js_name_item("gregory", 7));
+    js_set_key_cstr(options_root.get(), "numberingSystem", js_name_item("latn", 4));
+    js_set_key_cstr(options_root.get(), "timeZone", js_name_item("UTC", 3));
+    js_set_key_cstr(options_root.get(), "hour12", (Item){.item = ITEM_FALSE});
+    return options_root.get();
+}
+
+static Item js_intl_date_time_format_construct_body(Item /*callee*/, Item* /*args*/,
+        int /*argc*/, Item new_target, uint64_t* result_home) {
+    return js_intl_construct_plain_object(new_target, result_home);
+}
+
+static Item js_intl_date_time_format_call_body(Item callee, Item /*this_value*/,
+        Item* args, int argc, uint64_t* result_home) {
+    return js_intl_date_time_format_construct_body(callee, args, argc, callee,
+        result_home);
+}
+
 static unsigned char js_intl_collator_fold_ascii(unsigned char value) {
     return value >= 'A' && value <= 'Z'
         ? (unsigned char)(value - 'A' + 'a') : value;
@@ -26599,7 +26748,7 @@ extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NU
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_realm_intrinsic_slots_ensure_roots();
-    RootFrame roots(14);
+    RootFrame roots(21);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
     Rooted<Item> segmenter_ctor_root(roots,
         js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
@@ -26627,6 +26776,20 @@ extern "C" Item js_get_intl_object_value() {
     Rooted<Item> display_names_proto_root(roots, js_new_object());
     Rooted<Item> display_names_method_root(roots,
         js_new_native_this_span_function(js_intl_display_names_of));
+    Rooted<Item> date_time_format_ctor_root(roots,
+        js_new_native_body_constructor(js_intl_date_time_format_call_body,
+            js_intl_date_time_format_construct_body, 0));
+    Rooted<Item> date_time_format_proto_root(roots, js_new_object());
+    Rooted<Item> date_time_format_get_root(roots,
+        js_new_native_this_span_function(js_intl_date_time_format_format_get));
+    Rooted<Item> date_time_format_range_root(roots,
+        js_new_native_this_span_function(js_intl_date_time_format_format_range));
+    Rooted<Item> date_time_format_parts_root(roots,
+        js_new_native_this_span_function(js_intl_date_time_format_to_parts));
+    Rooted<Item> date_time_format_range_parts_root(roots,
+        js_new_native_this_span_function(js_intl_date_time_format_range_to_parts));
+    Rooted<Item> date_time_format_options_root(roots,
+        js_new_native_this_span_function(js_intl_date_time_format_resolved_options));
     js_set_function_name(segmenter_ctor_root.get(), js_name_item("Segmenter"));
     js_set_key_cstr(segmenter_proto_root.get(), "constructor", segmenter_ctor_root.get());
     js_set_key_cstr(segmenter_proto_root.get(), "segment", segmenter_method_root.get());
@@ -26658,11 +26821,31 @@ extern "C" Item js_get_intl_object_value() {
         display_names_proto_root.get());
     js_set_key_cstr(display_names_ctor_root.get(), "supportedLocalesOf",
         supported_locales_root.get());
+    js_set_function_name(date_time_format_ctor_root.get(), js_name_item("DateTimeFormat"));
+    js_set_key_cstr(date_time_format_proto_root.get(), "constructor",
+        date_time_format_ctor_root.get());
+    Item format_accessor = js_define_accessor_partial(date_time_format_proto_root.get(),
+        js_name_item("format", 6), date_time_format_get_root.get(), 0,
+        JSPD_NON_ENUMERABLE);
+    if (item_is_error(format_accessor)) return format_accessor;
+    js_set_key_cstr(date_time_format_proto_root.get(), "formatRange",
+        date_time_format_range_root.get());
+    js_set_key_cstr(date_time_format_proto_root.get(), "formatToParts",
+        date_time_format_parts_root.get());
+    js_set_key_cstr(date_time_format_proto_root.get(), "formatRangeToParts",
+        date_time_format_range_parts_root.get());
+    js_set_key_cstr(date_time_format_proto_root.get(), "resolvedOptions",
+        date_time_format_options_root.get());
+    js_initialize_native_constructor_prototype(date_time_format_ctor_root.get(),
+        date_time_format_proto_root.get());
+    js_set_key_cstr(date_time_format_ctor_root.get(), "supportedLocalesOf",
+        supported_locales_root.get());
     js_intl_object = intl_root.get();
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "DisplayNames", display_names_ctor_root.get());
+    js_set_key_cstr(intl_root.get(), "DateTimeFormat", date_time_format_ctor_root.get());
     js_namespace_set_to_string_tag(intl_root.get(), "Intl", 4);
     return intl_root.get();
 }

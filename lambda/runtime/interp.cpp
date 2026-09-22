@@ -226,7 +226,18 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
 
 static bool interp_satellite_publish_image(Script* script,
         InterpSatelliteImage* image) {
-    if (!script || !image || !image->context || !image->target_entry) return false;
+    if (!script || !image || !image->context || !image->target_entry ||
+            !image->module_layout) return false;
+    uint32_t key_base = lambda_module_state_property_key_count(script->module_state_id);
+    if (key_base > LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK) {
+        log_error("interp-tier: satellite key prefix exceeds module layout capacity");
+        return false;
+    }
+    // Assign the suffix while the evaluator owns the module state. Workers
+    // may finish out of order, so their compile-time observations are not a
+    // valid append position (D8.5.1v6).
+    image->module_layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS |
+        key_base;
     bool prepared = lambda_module_state_bind_static(script->module_state_id,
             script->const_list ? script->const_list->data : NULL,
             script->type_list) && prepare_context_module_state(image->context,

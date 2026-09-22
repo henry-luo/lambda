@@ -7568,6 +7568,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 [&](const CssValue* item) {
                     return resolve_transform_function(lycon, prop_id, item);
                 }, append_transform_function);
+            span->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
             break;
         }
         case CSS_PROPERTY_TRANSFORM_ORIGIN: {

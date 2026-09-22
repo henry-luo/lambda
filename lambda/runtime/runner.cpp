@@ -2505,6 +2505,12 @@ bool runtime_type_list_is_script_owned(Runtime* runtime) {
 void runtime_free_all_scripts(Runtime* runtime) {
     if (!runtime) return;
     if (runtime->scripts) {
+        // Satellites compile a dependent script from its retained AST, which
+        // may reference Type descriptors owned by an imported script. Drain
+        // every worker before any dependency pool is released (D8.5.1v6).
+        for (int i = 0; i < runtime->scripts->length; i++) {
+            interp_satellite_cancel_script((Script*)runtime->scripts->data[i]);
+        }
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];
             if (!script) continue;

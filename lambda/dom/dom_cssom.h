@@ -42,6 +42,8 @@ bool dom_is_rule_style_decl(Item item);
  * @return Item wrapping the stylesheet
  */
 Item dom_cssom_wrap_stylesheet(void* stylesheet);
+/** `new CSSStyleSheet()` — an initially empty constructed stylesheet. */
+Item dom_cssom_stylesheet_constructor(Item options);
 Item dom_cssom_stylesheet_get_disabled(Item sheet);
 
 /**

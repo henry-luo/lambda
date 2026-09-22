@@ -76,6 +76,7 @@ Item dom_realm_prototype_of(Item object);
 Item dom_realm_prototype_lookup(Item object, Item property, bool* out_found);
 Item dom_realm_intrinsic_prototype(int class_id);
 Item dom_realm_init_constructor_prototype(Item constructor, Item prototype);
+void dom_realm_set_prototype(Item object, Item prototype);
 
 // --- promises and the job queue -----------------------------------------
 Item dom_realm_promise_new(Item executor);

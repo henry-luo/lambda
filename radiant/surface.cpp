@@ -401,18 +401,6 @@ static void load_image_cleanup_failed(UiContext* uicon, Url* abs_url, char* file
     image_cache_store_unavailable(uicon, file_path);
 }
 
-static ImageSurface* image_surface_decode_memory(const unsigned char* data,
-                                                 size_t length) {
-    if (!data || length == 0) return nullptr;
-    int width = 0, height = 0, channels = 0;
-    unsigned char* pixels = image_load_from_memory(
-        data, length, &width, &height, &channels);
-    if (!pixels) return nullptr;
-    ImageSurface* surface = image_surface_create_from(width, height, pixels);
-    if (!surface) image_free(pixels);
-    return surface;
-}
-
 static ImageSurface* image_surface_decode_file(const char* path) {
     if (!path || !*path) return nullptr;
     int width = 0, height = 0, channels = 0;
@@ -795,15 +783,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 // pixels stays NULL — decoded on demand
                 log_debug("[image] Lazy load HTTP image: %dx%d (%zu bytes)", width, height, downloaded_size);
             } else {
-                // Fallback: full decode if header read fails
-                surface = image_surface_decode_memory(downloaded_data, downloaded_size);
+                // Unsupported HTTP assets must enter the cached placeholder path
+                // instead of sending their opaque bytes to the raster decoder.
+                log_warn("image: unsupported HTTP image, using placeholder: %s", file_path);
                 mem_free(downloaded_data);
                 downloaded_data = nullptr;
-                if (!surface) {
-                    log_debug("failed to load image: %s", file_path);
-                    load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
-                    return NULL;
-                }
+                load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
+                return NULL;
             }
         } else {
             // Local files: read dimensions from file header only

@@ -1,2 +1,3 @@
+entry-interface:function:object
 sync:0
-intersection:1:true:true
+intersection:1:true:true:true

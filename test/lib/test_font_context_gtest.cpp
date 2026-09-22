@@ -129,6 +129,21 @@ TEST(FontContextTest, GlyphCacheResetDropsReusedDocumentHandleEntry) {
     hashmap_free(ctx.loaded_glyph_cache);
 }
 
+TEST(FontContextTest, LiveHandleRegistryRetainsDetachedCacheOwnersForTeardown) {
+    FontContext ctx = {};
+    FontHandle cache_replaced_handle = {};
+    FontHandle active_cache_handle = {};
+
+    // A face-cache replacement must not make the caller-owned old handle
+    // unreachable before FontContext teardown releases its external resources.
+    font_context_track_handle(&ctx, &cache_replaced_handle);
+    font_context_track_handle(&ctx, &active_cache_handle);
+
+    EXPECT_EQ(font_context_take_live_handle(&ctx), &active_cache_handle);
+    EXPECT_EQ(font_context_take_live_handle(&ctx), &cache_replaced_handle);
+    EXPECT_EQ(font_context_take_live_handle(&ctx), nullptr);
+}
+
 TEST(FontContextTest, LongSessionGlyphArenaUsePlateausAtConfiguredLimit) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

@@ -1403,6 +1403,8 @@ bool js_canvas_property_set_intercept(Item obj, Item key, Item value);
 void js_canvas_cleanup(void);
 bool js_array_runtime_items_release(Array* owner);
 void js_array_runtime_items_cleanup_all(void);
+bool js_array_immortal_props_store(Array* owner, Map* props);
+void js_array_immortal_props_cleanup_all(void);
 
 // Runtime entry points shared by the JIT import registry and JS subsystems.
 void js_set_strict_mode(int64_t strict);

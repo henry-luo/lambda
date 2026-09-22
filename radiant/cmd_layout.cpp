@@ -1790,10 +1790,10 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
 }
 
 static bool load_script_mutations_need_full_recascade(const DomDocument* dom_doc) {
-    if (!dom_doc || dom_doc->js.mutation_record_overflow ||
-        dom_doc->js.mutation_record_count <= 0) {
+    if (!dom_doc || dom_doc->js.mutation_record_overflow) {
         return true;
     }
+    if (dom_doc->js.mutation_record_count <= 0) return false;
 
     for (int i = 0; i < dom_doc->js.mutation_record_count; i++) {
         DomJsMutationKind kind = dom_doc->js.mutation_records[i].kind;
@@ -2390,6 +2390,16 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     log_mem_stage("load_html: pre_script_cascade_done");
     auto t_initial_cascade = timing ? time_now_ns() : t_inline_style;
     auto t_post_script = t_initial_cascade;
+    bool profile_recascade_completed = css_cascade_memory_force_recascade();
+    if (profile_recascade_completed) {
+        // The memory probe measures CSS reuse against the parsed DOM. Running
+        // it after scripts would fold arbitrary page mutations into the sample.
+        log_notice("[CSS_CASCADE_MEMORY] forcing clean recascade for profile");
+        view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
+                                    clear_load_stylesheet_cascade_visitor, nullptr);
+        apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "recascade");
+        log_mem_stage("load_html: profile_recascade_done");
+    }
 
     if (execute_scripts) {
         // Step 2d: Execute <script> elements (inline + external) and body onload handlers
@@ -2427,14 +2437,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             }
         }
 
-        bool force_profile_recascade = css_cascade_memory_force_recascade();
-        bool full_recascade = force_profile_recascade ||
-            load_script_mutations_need_full_recascade(dom_doc);
+        bool full_recascade = load_script_mutations_need_full_recascade(dom_doc);
         bool incremental_recascade = false;
         bool cssom_synced = false;
         const char* recascade_reason = nullptr;
-        if (full_recascade && dom_doc->js.mutation_count > 0 &&
-            !force_profile_recascade) {
+        if (full_recascade && dom_doc->js.mutation_count > 0) {
             dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
             cssom_synced = true;
             incremental_recascade = radiant_apply_load_mutation_cascade(
@@ -2455,22 +2462,17 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             timing->post_script_full_recascade = full_recascade;
             timing->post_script_incremental_recascade = incremental_recascade;
         }
-        if (full_recascade && (dom_doc->js.mutation_count > 0 || force_profile_recascade)) {
+        if (full_recascade && dom_doc->js.mutation_count > 0) {
             log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
                      dom_doc->js.mutation_count);
-
-            if (force_profile_recascade && dom_doc->js.mutation_count == 0) {
-                // The opt-in probe repeats the production clear-and-cascade path
-                // so its second sample measures reuse without synthetic DOM state.
-                log_notice("[CSS_CASCADE_MEMORY] forcing clean recascade for profile");
-            }
 
             if (!cssom_synced) {
                 dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
             }
             view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
                                         clear_load_stylesheet_cascade_visitor, nullptr);
-            apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "recascade");
+            apply_load_css_cascade(dom_doc, dom_root, css_engine, pool,
+                                   profile_recascade_completed ? "post-script" : "recascade");
             log_mem_stage("load_html: post_script_cascade_done");
         } else if (dom_doc->js.mutation_count > 0) {
             if (!incremental_recascade) {
@@ -5019,6 +5021,7 @@ static bool layout_single_file(
         const int max_redirects = 8;
         for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
             script_runner_set_retain_js_state(false);
+            script_runner_set_static_headless_snapshot(false);
             script_runner_set_execute_external_scripts(true);
             doc = load_lambda_html_doc_profiled(input_url, css_file, css_at_head_end,
                                                 viewport_width,

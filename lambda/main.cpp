@@ -35,6 +35,7 @@
 #include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
 #include "runtime/transpiler.hpp"
+#include "runtime/module_ast_prebuild.hpp"
 #include "runtime/doc_context.hpp"
 #include "runtime/write_set.hpp"
 #include "runtime/runtime-state.h"
@@ -735,6 +736,7 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
         return;
     }
     g_lambda_main_pre_memtrack_cleanup_done = true;
+    module_ast_prebuild_cleanup();
     // JS helper globals outlive Runtime teardown, so release them before
     // emitting live-allocation telemetry or entering memtrack shutdown.
     js_array_runtime_items_cleanup_all();
@@ -837,6 +839,9 @@ static int lambda_main_finish(int ret_code) {
     clipboard_store_shutdown();
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
+    // Finish the shared prebuild queue while its input-cache dependencies are
+    // still alive; the registry itself owns every queued task and path copy.
+    module_ast_prebuild_cleanup();
     // tear down the InputManager singleton so its destructor url_destroy()s
     // every tracked input->url (e.g. each parse()'s "parse://inline" dummy URL)
     // and frees its global pool — otherwise those outlive the process and show

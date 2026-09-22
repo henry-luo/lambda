@@ -1,0 +1,8 @@
+{
+  "name": "balanced multicol continuation preserves the used block width",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#geometry-state"},
+     "attribute": "data-continued-width", "equals": "688"}
+  ]
+}

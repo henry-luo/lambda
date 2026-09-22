@@ -131,6 +131,19 @@ extern "C" Item dom_cssom_wrap_stylesheet(void* stylesheet) {
     return wrapper;
 }
 
+extern "C" Item dom_cssom_stylesheet_constructor(Item options) {
+    (void)options;
+    Pool* pool = get_document_pool();
+    if (!pool) return ItemNull;
+    // Constructed sheets share the active document pool so CSSOM wrappers and
+    // their parsed rules cannot outlive the document realm that owns them.
+    CssEngine* engine = css_engine_create(pool);
+    if (!engine) return ItemNull;
+    CssStylesheet* sheet = css_parse_stylesheet(engine, "", "<constructed-stylesheet>");
+    css_engine_destroy(engine);
+    return dom_cssom_wrap_stylesheet(sheet);
+}
+
 static void* js_cssom_unwrap_host(Item item, bool (*is_host)(Item)) {
     if (!is_host(item)) return nullptr;
     if (get_type_id(item) == LMD_TYPE_VMAP) return item.vmap->host_data;

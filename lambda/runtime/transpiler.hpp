@@ -300,6 +300,10 @@ typedef struct InterpSatelliteImage {
     Pool* compiler_pool;
     NamePool* compiler_name_pool;
     ArrayList* compiler_const_list;
+    ArrayList* compiler_type_list;
+    // Publication assigns this image's key suffix after earlier completed
+    // images have sealed their own suffixes into the owning module state.
+    LambdaModuleLayout* module_layout;
     const AstFuncNode* target;
     void* target_entry;
     uint32_t member_count;

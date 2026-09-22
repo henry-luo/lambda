@@ -60,6 +60,7 @@
 #include <signal.h>
 #include <setjmp.h>
 #ifndef _WIN32
+#include <pthread.h>
 #include <unistd.h>
 #include <sys/time.h>
 #endif
@@ -142,10 +143,31 @@ static void js_exec_watchdog_arm(int timeout_seconds) {
 }
 
 static void js_exec_watchdog_disarm(void) {
+    // SIGPROF can become pending between a successful script return and the
+    // timer cancellation.  Keep it blocked until the expired timer is drained;
+    // otherwise restoring the previous (usually default) action can terminate
+    // the batch after an otherwise successful document.
+    sigset_t watchdog_signal;
+    sigset_t saved_mask;
+    sigemptyset(&watchdog_signal);
+    sigaddset(&watchdog_signal, SIGPROF);
+    bool signal_masked = pthread_sigmask(SIG_BLOCK, &watchdog_signal, &saved_mask) == 0;
+
     struct itimerval timer;
     memset(&timer, 0, sizeof(timer));
     setitimer(ITIMER_PROF, &timer, NULL);
+
+    if (signal_masked) {
+        sigset_t pending;
+        if (sigpending(&pending) == 0 && sigismember(&pending, SIGPROF)) {
+            int caught_signal = 0;
+            sigwait(&watchdog_signal, &caught_signal);
+        }
+    }
     sigaction(SIGPROF, &js_exec_old_prof, NULL);
+    if (signal_masked) {
+        pthread_sigmask(SIG_SETMASK, &saved_mask, NULL);
+    }
 }
 
 static void js_exec_watchdog_add_module_source(size_t source_length) {
@@ -178,11 +200,16 @@ static void js_exec_watchdog_begin_user_code(void) {
 static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
+static bool s_static_headless_snapshot = false;
 
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;
+}
+
+extern "C" void script_runner_set_static_headless_snapshot(bool snapshot) {
+    s_static_headless_snapshot = snapshot;
 }
 
 extern "C" void script_runner_set_execute_external_scripts(bool execute) {
@@ -718,6 +745,8 @@ static bool script_task_timing_enabled() {
 // and browser realm. Keep headless rendering below the memory envelope.
 static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 5u * 1024u * 1024u;
 static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 20u * 1024u * 1024u;
+// Static snapshot viewers have no interaction turn that can use a page bundle.
+static const size_t JS_STATIC_HEADLESS_TOTAL_SCRIPT_BUDGET_BYTES = 512u * 1024u;
 // Deferred and async scripts are not render-blocking in a browser. Bound their
 // pre-layout work so a large application bundle cannot delay the first window.
 static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
@@ -751,7 +780,9 @@ static size_t script_total_compile_limit_bytes() {
     // Several individually acceptable bundles can exhaust the same document
     // realm, so bound their aggregate before runtime initialization.
     return script_byte_limit_from_env(
-        "RADIANT_JS_TOTAL_SCRIPT_BYTES", JS_TOTAL_SCRIPT_BUDGET_BYTES);
+        "RADIANT_JS_TOTAL_SCRIPT_BYTES",
+        s_static_headless_snapshot ? JS_STATIC_HEADLESS_TOTAL_SCRIPT_BUDGET_BYTES
+                                   : JS_TOTAL_SCRIPT_BUDGET_BYTES);
 }
 
 #ifndef NDEBUG
@@ -1533,8 +1564,14 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
 static bool script_eval_context_activate(Runtime* runtime) {
     EvalContext* task_context = script_eval_context_prepare(runtime);
     if (!task_context || !eval_context_init(task_context)) return false;
-    return !js_runtime_state_for(task_context) ||
-        js_runtime_state_init(task_context);
+    if (js_runtime_state_for(task_context) &&
+            !js_runtime_state_init(task_context)) {
+        return false;
+    }
+    // Recovery clears heap-bound transient state after a script fault. Every
+    // following task, including the browser-global sync, still needs the
+    // document realm's Input owner before it can install properties.
+    return js_runtime_state_ensure_input(task_context);
 }
 
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
@@ -2369,6 +2406,15 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     js_event_loop_set_virtual_clock(dom_doc->js.virtual_clock_enabled,
                                     dom_doc->js.virtual_clock_ms);
 
+    DocState* script_state = (DocState*)dom_doc->state;
+    bool script_state_batch = script_state != nullptr;
+    if (script_state_batch) {
+        // A document lifecycle handler is one browser task. Deferring debug
+        // invariant validation avoids rescanning the interaction tree after
+        // every style write made by a large page's DOMContentLoaded handler.
+        state_begin_batch(script_state);
+    }
+
     // execute document scripts via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
     // and per-script CPU-time watchdog
@@ -2524,6 +2570,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         }
     }
     if (timing) timing->event_loop_us += time_now_us() - phase_start_us;
+
+    if (script_state_batch) {
+        state_end_batch(script_state);
+        script_state_batch = false;
+    }
 
     phase_start_us = timing ? time_now_us() : 0;
     // Retain JS state on DomDocument for interactive event handler dispatch.

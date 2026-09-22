@@ -1685,6 +1685,7 @@ typedef struct MulticolFlowItem {
     float content_height;
     float margin_before;
     float margin_after;
+    float line_advance;
     float inline_offset;
     bool can_fragment;
     bool spans_all;
@@ -1727,6 +1728,7 @@ struct MulticolGroupScratch {
     float* content_heights;
     float* margin_before;
     float* margin_after;
+    float* line_advances;
     bool* can_fragment;
     bool* break_before;
     bool* break_after;
@@ -1741,6 +1743,8 @@ struct MulticolGroupScratch {
             MAX_MULTICOL_BLOCKS * sizeof(float));
         margin_after = (float*)scratch_alloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(float));
+        line_advances = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
         can_fragment = (bool*)scratch_alloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(bool));
         break_before = (bool*)scratch_alloc(scratch,
@@ -1749,7 +1753,7 @@ struct MulticolGroupScratch {
             MAX_MULTICOL_BLOCKS * sizeof(bool));
         fragments = (ColumnFragment*)scratch_calloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
-        return heights && content_heights && margin_before && margin_after &&
+        return heights && content_heights && margin_before && margin_after && line_advances &&
             can_fragment && break_before && break_after && fragments;
     }
 
@@ -1758,6 +1762,7 @@ struct MulticolGroupScratch {
         if (break_after) scratch_free(scratch, break_after);
         if (break_before) scratch_free(scratch, break_before);
         if (can_fragment) scratch_free(scratch, can_fragment);
+        if (line_advances) scratch_free(scratch, line_advances);
         if (margin_after) scratch_free(scratch, margin_after);
         if (margin_before) scratch_free(scratch, margin_before);
         if (content_heights) scratch_free(scratch, content_heights);

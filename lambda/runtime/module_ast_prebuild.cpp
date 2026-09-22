@@ -118,6 +118,16 @@ static ModuleAstPrebuildRegistry* module_ast_prebuild_registry_get(void) {
         ? &g_module_ast_prebuild_registry : NULL;
 }
 
+static void module_ast_prebuild_free_task(ModuleAstPrebuildTask* task) {
+    if (!task) return;
+    pthread_cond_destroy(&task->completed);
+    arraylist_free(task->dependencies);
+    arraylist_free(task->dependents);
+    mem_free(task->key);
+    mem_free(task->path);
+    mem_free(task);
+}
+
 static void module_ast_prebuild_free_specs(ArrayList* specs) {
     if (!specs) return;
     for (int index = 0; index < specs->length; index++) {
@@ -605,4 +615,27 @@ bool module_ast_prebuild_await_import(const ModuleAstPrebuildProfile* profile,
     bool success = !task->failed;
     pthread_mutex_unlock(&registry->mutex);
     return success;
+}
+
+void module_ast_prebuild_cleanup(void) {
+    ModuleAstPrebuildRegistry* registry = &g_module_ast_prebuild_registry;
+    if (!registry->ready) return;
+
+    // Workers may still discover children when normal loading ends; join them
+    // before tearing down the futures they publish into the shared registry.
+    tp_destroy(registry->pool);
+    registry->pool = NULL;
+
+    pthread_mutex_lock(&registry->mutex);
+    size_t cursor = 0;
+    ModuleAstPrebuildTaskEntry* entry = NULL;
+    while (registry->tasks.next(&cursor, &entry)) {
+        module_ast_prebuild_free_task(entry->task);
+    }
+    registry->tasks.destroy();
+    memset(registry->profiles, 0, sizeof(registry->profiles));
+    registry->next_visit_mark = 0;
+    registry->ready = false;
+    pthread_mutex_unlock(&registry->mutex);
+    pthread_mutex_destroy(&registry->mutex);
 }

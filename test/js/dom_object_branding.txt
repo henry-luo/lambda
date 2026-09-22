@@ -7,3 +7,9 @@ true
 [object HTMLLinkElement]
 true
 true
+true
+true
+true
+brand
+example.test
+browser

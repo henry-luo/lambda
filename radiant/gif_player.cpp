@@ -116,6 +116,7 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
     inst->timing.type = TIMING_LINEAR;
     inst->tick = animation_player_tick<GifAnimation>;
     inst->on_finish = animation_player_finish<GifAnimation>;
+    inst->on_cancel = animation_player_finish<GifAnimation>;
 
     // Bounds: use the image surface dimensions (will be updated by layout)
     inst->bounds[0] = 0;

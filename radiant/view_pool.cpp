@@ -313,6 +313,7 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
 
 static void free_transform_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->transform) return;
+    if (elem->transform->functions_owner == TRANSFORM_FUNCTIONS_DOCUMENT_POOL) return;
     TransformFunction* function = elem->transform->functions;
     while (function) {
         TransformFunction* next = function->next;

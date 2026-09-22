@@ -23,6 +23,7 @@
 #include "../lambda.hpp"
 #include "../dom/dom.h"
 #include "../dom/dom_canvas.h"
+#include "../dom/dom_cssom.h"
 #include "../dom/dom_realm_hooks.h"
 #include "../dom/realm/dom_realm.h"
 #include "js_runtime.h"
@@ -427,6 +428,10 @@ extern "C" void dom_install_collection_globals(void) {
         js_set_prototype(global, window_proto);
     }
     _install_node_iface(global);
+    _install_iface(global, "CharacterData");
+    _link_iface_proto(global, "CharacterData", "Node");
+    dom_install_value_constructor(global, "Comment", dom_comment_ctor, true);
+    _link_iface_proto(global, "Comment", "CharacterData");
     // Document wrappers are module-owned, but bare WebIDL constructor lookup
     // must still succeed before libraries inspect static Document features.
     static const char* iface_links[][2] = {
@@ -499,12 +504,22 @@ extern "C" void dom_install_collection_globals(void) {
         // are object-like interfaces, not WebIDL collection carriers.
         if (i >= 2) _install_collection_iterator(global, collection_ifaces[i]);
     }
+    // CSSStyleSheet is constructible unlike the other CSSOM collection interfaces.
+    dom_install_value_constructor(global, "CSSStyleSheet",
+        dom_cssom_stylesheet_constructor, true);
     _install_iface(global, "CSSNestedDeclarations");
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_collection_iterator(global, "RadioNodeList");
     _install_xpath_evaluator(global);
     log_debug("dom_install_collection_globals: installed collection interfaces");
+}
+
+extern "C" void dom_install_web_animation_globals(void) {
+    Item global = js_get_global_this();
+    dom_install_value_constructor(global, "KeyframeEffect",
+        dom_keyframe_effect_ctor, true);
+    dom_install_value_constructor(global, "Animation", dom_animation_ctor, true);
 }
 
 extern "C" void dom_install_option_constructor(void) {

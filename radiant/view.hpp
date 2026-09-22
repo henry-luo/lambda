@@ -1392,6 +1392,11 @@ typedef struct TransformFunction {
     struct TransformFunction* next;                  // Next transform in chain
 } TransformFunction;
 
+typedef enum TransformFunctionOwner {
+    TRANSFORM_FUNCTIONS_VIEW_POOL,
+    TRANSFORM_FUNCTIONS_DOCUMENT_POOL,
+} TransformFunctionOwner;
+
 /**
  * TransformProp - CSS transform properties
  * Contains transform origin and list of transform functions
@@ -1399,6 +1404,9 @@ typedef struct TransformFunction {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TransformProp {
     TransformFunction* functions;    // Linked list of transform functions (applied in order)
+    // Keyframe samples borrow their immutable list from the document pool;
+    // resolved CSS functions are owned by the mutable view-property pool.
+    TransformFunctionOwner functions_owner;
     float origin_x;                  // transform-origin X (default: 50%)
     float origin_y;                  // transform-origin Y (default: 50%)
     float origin_z;                  // transform-origin Z (default: 0)

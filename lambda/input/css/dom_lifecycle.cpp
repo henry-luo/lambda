@@ -36,6 +36,7 @@ typedef struct DomNodeRegistry {
 // DOM-only unit targets do not link the Radiant view teardown implementation.
 __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*) {}
 __attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
+__attribute__((weak)) void form_control_release_prop(DomElement*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
 extern "C" __attribute__((weak)) void dom_expando_attachment_changed(
     DomDocument*, DomNode*, bool) {}
@@ -491,21 +492,44 @@ size_t dom_retire_sweep(DomDocument* doc) {
     return retired;
 }
 
-void dom_lifecycle_release_unattached_form_props(DomDocument* doc) {
+static bool dom_node_is_attached_to_document(DomNodeRegistry* registry,
+                                             DomNode* node,
+                                             DomNode* document_root) {
+    // Follow only nodes confirmed by the registry. Detached DOM trees can
+    // retain obsolete sibling links after a child has been retired.
+    for (size_t depth = 0; node && depth <= registry->record_count; depth++) {
+        if (node == document_root) return true;
+        DomNodeRecord* record = dom_record_find(registry, node);
+        if (!record || record->state == DOM_NODE_RETIRED) return false;
+        node = node->parent;
+    }
+    return false;
+}
+
+static void dom_lifecycle_release_form_props(DomDocument* doc,
+                                             bool include_attached) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry) return;
     for (DomNodeRecord* record = registry->all_records; record;
          record = record->all_next) {
-        DomNode* root = record->address;
-        if (record->state == DOM_NODE_RETIRED || !root ||
-                root == (DomNode*)doc->root || root->parent) {
+        DomNode* node = record->address;
+        if (record->state == DOM_NODE_RETIRED || !node || !node->is_element()) {
             continue;
         }
-        // A script may create a form control without ever linking it into the
-        // DOM, so normal detached-candidate retirement never releases its
-        // heap prop before the document arena is discarded.
-        view_pool_release_detached_form_props(root);
+        bool attached = dom_node_is_attached_to_document(registry, node,
+            (DomNode*)doc->root);
+        if (include_attached || !attached) form_control_release_prop(node->as_element());
     }
+}
+
+void dom_lifecycle_release_unattached_form_props(DomDocument* doc) {
+    // Releasing each validated element avoids walking stale child links in a
+    // detached script-created subtree during document teardown.
+    dom_lifecycle_release_form_props(doc, false);
+}
+
+void dom_lifecycle_release_all_form_props(DomDocument* doc) {
+    dom_lifecycle_release_form_props(doc, true);
 }
 
 void dom_lifecycle_get_stats(DomDocument* doc, DomLifecycleStats* out) {

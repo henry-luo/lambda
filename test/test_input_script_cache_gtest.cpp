@@ -68,6 +68,11 @@ typedef struct CacheQueuePrebuildState {
     int shared_builds;
 } CacheQueuePrebuildState;
 
+typedef struct CacheCleanupPrebuildState {
+    char child_path[160];
+    int builds;
+} CacheCleanupPrebuildState;
+
 static bool cache_queue_prebuild_append_specifier(ArrayList* specifiers,
         const char* specifier) {
     char* copy = mem_strdup(specifier, MEM_CAT_SYSTEM);
@@ -148,6 +153,35 @@ static bool cache_queue_prebuild_build(void* opaque, const char* path) {
             state->slow_discovery_active;
         pthread_mutex_unlock(&state->mutex);
     }
+    return true;
+}
+
+static ArrayList* cache_cleanup_prebuild_discover(void* opaque,
+        const char* source, size_t source_length) {
+    (void)opaque;
+    (void)source_length;
+    if (!source || strcmp(source, "root") != 0) return NULL;
+    ArrayList* specifiers = arraylist_new(1);
+    if (!specifiers) return NULL;
+    if (cache_queue_prebuild_append_specifier(specifiers, "child")) return specifiers;
+    arraylist_free(specifiers);
+    return NULL;
+}
+
+static bool cache_cleanup_prebuild_resolve(void* opaque, const char* importer_path,
+        const char* specifier, ModuleAstResolvedImport* out) {
+    (void)importer_path;
+    CacheCleanupPrebuildState* state = (CacheCleanupPrebuildState*)opaque;
+    if (!state || !specifier || !out || strcmp(specifier, "child") != 0) return false;
+    out->path = mem_strdup(state->child_path, MEM_CAT_SYSTEM);
+    out->language = MODULE_AST_LANGUAGE_LAMBDA;
+    return out->path != NULL;
+}
+
+static bool cache_cleanup_prebuild_build(void* opaque, const char* path) {
+    CacheCleanupPrebuildState* state = (CacheCleanupPrebuildState*)opaque;
+    if (!state || !path) return false;
+    state->builds++;
     return true;
 }
 
@@ -306,6 +340,37 @@ TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     unlink(shared_path);
     pthread_cond_destroy(&state.root_discovered_cond);
     pthread_mutex_destroy(&state.mutex);
+}
+
+TEST(InputScriptCacheTest, PrebuildCleanupJoinsFireAndForgetWorkers) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    CacheCleanupPrebuildState state = {};
+    int generation = (int)getpid();
+    char root_path[160];
+    snprintf(root_path, sizeof(root_path), "temp/cache_cleanup_prebuild_%d_root.ls",
+        generation);
+    snprintf(state.child_path, sizeof(state.child_path),
+        "temp/cache_cleanup_prebuild_%d_child.ls", generation);
+    ASSERT_EQ(write_binary_file(root_path, "root", 4), 0);
+    ASSERT_EQ(write_binary_file(state.child_path, "child", 5), 0);
+
+    ModuleAstPrebuildProfile profile = {
+        "cleanup-test", MODULE_AST_LANGUAGE_LAMBDA,
+        cache_cleanup_prebuild_discover, cache_cleanup_prebuild_resolve,
+        cache_cleanup_prebuild_build, &state,
+    };
+    ModuleAstPrebuildProfiles profiles = {};
+    profiles.profiles[MODULE_AST_LANGUAGE_LAMBDA] = &profile;
+
+    ModuleAstPrebuildStats stats = {};
+    EXPECT_TRUE(module_ast_prebuild_imports(&profiles, MODULE_AST_LANGUAGE_LAMBDA,
+        root_path, "root", 4, &stats));
+    // Cleanup joins the root's unawaited child task before releasing its graph.
+    module_ast_prebuild_cleanup();
+    EXPECT_EQ(1, state.builds);
+
+    unlink(root_path);
+    unlink(state.child_path);
 }
 
 TEST(InputScriptCacheTest, DisabledCacheKeepsCrossLanguageModuleCodeAlive) {

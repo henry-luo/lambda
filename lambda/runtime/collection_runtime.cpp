@@ -11,6 +11,7 @@
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern "C" bool js_array_runtime_items_release(Array* owner);
+extern "C" bool js_array_immortal_props_store(Array* owner, Map* props);
 
 // These UI conversion helpers require the DOM representation and remain in the
 // runtime data implementation. Collection growth calls them only for an
@@ -140,6 +141,12 @@ void js_elements_set_props(Array* arr, Map* props) {
     if (!arr || !props) return;
     if (js_array_has_props(arr)) {   // replace in place
         *(Item*)arr->data = {.map = props};
+        return;
+    }
+    // Input and constant arrays are not collector objects, so their companion
+    // reference needs the JS realm's exact root rather than a nursery buffer.
+    if (arr->is_immortal) {
+        js_array_immortal_props_store(arr, props);
         return;
     }
     RootFrame roots(2);

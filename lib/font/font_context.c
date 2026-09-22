@@ -55,6 +55,15 @@ static void face_cache_free(void* item) {
     }
 }
 
+static void font_context_release_live_handles(FontContext* ctx) {
+    FontHandle* handle = NULL;
+    while ((handle = font_context_take_live_handle(ctx))) {
+        // Destruction forces one registered handle through the bulk-release
+        // path after unlinking it from the traversal chain.
+        font_handle_release(handle);
+    }
+}
+
 // ============================================================================
 // Default fallback fonts
 // ============================================================================
@@ -218,6 +227,11 @@ void font_context_destroy(FontContext* ctx) {
         font_handle_release(ctx->cached_emoji_handle);
         ctx->cached_emoji_handle = NULL;
     }
+
+    // A replaced face-cache key can leave a caller ref as the last owner.
+    // Drain the context registry before cache teardown so that owner still
+    // releases its file-data key while the file-data cache is available.
+    font_context_release_live_handles(ctx);
 
     // free face cache (calls face_cache_free which releases handles)
     if (ctx->face_cache) {
@@ -470,7 +484,10 @@ void font_handle_release(FontHandle* handle) {
     // the grouped owner will release remaining blocks in bulk.
     bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
     if (handle->ref_count <= 0 || bulk_destroy) {
-        if (handle->resources_destroyed) return;
+        if (handle->resources_destroyed) {
+            font_context_untrack_handle(handle->ctx, handle);
+            return;
+        }
         handle->resources_destroyed = true;
         // Teardown invalidates all external FontProp refs; release native/file
         // resources on first cache release even if a stale ref kept count > 0.
@@ -525,6 +542,9 @@ void font_handle_release(FontHandle* handle) {
                 handle->memory_buffer = NULL;
             }
         }
+
+        // Unlink before a normal release returns the handle storage to its pool.
+        font_context_untrack_handle(handle->ctx, handle);
 
         // free the handle struct via pool (skip during bulk destroy)
         if (handle->ctx && !bulk_destroy) {

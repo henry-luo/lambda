@@ -5,6 +5,10 @@
 #include <thread>
 #include <vector>
 #include <mutex>
+#ifndef _WIN32
+#include <pthread.h>
+#include <signal.h>
+#endif
 
 extern "C" {
 #include "../../lib/thread_pool.h"
@@ -29,6 +33,19 @@ void slow_job(void* arg) {
     std::this_thread::sleep_for(std::chrono::milliseconds(job->delay_ms));
     job->counter->fetch_add(1, std::memory_order_relaxed);
 }
+
+#ifndef _WIN32
+struct SignalMaskJob {
+    int profile_blocked;
+};
+
+void record_profile_signal_mask(void* arg) {
+    SignalMaskJob* job = static_cast<SignalMaskJob*>(arg);
+    sigset_t mask;
+    pthread_sigmask(SIG_SETMASK, NULL, &mask);
+    job->profile_blocked = sigismember(&mask, SIGPROF);
+}
+#endif
 
 }  // namespace
 
@@ -57,6 +74,20 @@ TEST(ThreadPoolTest, CreateWithStackSize) {
     tp_wait_all(tp);
     EXPECT_EQ(counter.load(), 1);
     tp_destroy(tp);
+}
+
+TEST(ThreadPoolTest, WorkerBlocksProfileWatchdogSignal) {
+#ifdef _WIN32
+    GTEST_SKIP() << "SIGPROF is POSIX-only";
+#else
+    ThreadPool* tp = tp_create(1);
+    ASSERT_NE(tp, nullptr);
+    SignalMaskJob job = {};
+    ASSERT_TRUE(tp_submit(tp, record_profile_signal_mask, &job));
+    tp_wait_all(tp);
+    EXPECT_EQ(1, job.profile_blocked);
+    tp_destroy(tp);
+#endif
 }
 
 TEST(ThreadPoolTest, SubmitAndWait) {
