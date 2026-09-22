@@ -2486,13 +2486,41 @@ static inline bool em_root_block_terminates(MIR_insn_t insn) {
         insn->code == MIR_RET || insn->code == MIR_JRET);
 }
 
+typedef struct MirRootLabelBlock {
+    MIR_label_t label;
+    int block;
+} MirRootLabelBlock;
+
+static inline uint32_t em_root_label_slot(MIR_label_t label, uint32_t mask) {
+    uintptr_t value = (uintptr_t)label;
+    value ^= value >> 33;
+    value *= UINT64_C(0xff51afd7ed558ccd);
+    value ^= value >> 33;
+    return (uint32_t)value & mask;
+}
+
 static inline int em_root_find_label_block(MIR_label_t target,
-        MIR_label_t* labels, const int* label_blocks, int label_count) {
-    if (!target) return -1;
-    for (int i = 0; i < label_count; i++) {
-        if (labels[i] == target) return label_blocks[i];
+        const MirRootLabelBlock* map, int map_capacity) {
+    if (!target || !map || map_capacity <= 0) return -1;
+    uint32_t mask = (uint32_t)map_capacity - 1;
+    uint32_t slot = em_root_label_slot(target, mask);
+    for (;;) {
+        const MirRootLabelBlock* entry = &map[slot];
+        if (!entry->label) return -1;
+        if (entry->label == target) return entry->block;
+        slot = (slot + 1) & mask;
     }
-    return -1;
+}
+
+static inline void em_root_set_label_block(MirRootLabelBlock* map,
+        int map_capacity, MIR_label_t label, int block) {
+    if (!map || map_capacity <= 0 || !label) return;
+    uint32_t mask = (uint32_t)map_capacity - 1;
+    uint32_t slot = em_root_label_slot(label, mask);
+    while (map[slot].label && map[slot].label != label) {
+        slot = (slot + 1) & mask;
+    }
+    map[slot] = {label, block};
 }
 
 static inline void em_root_union_bits(uint64_t* destination,
@@ -2513,8 +2541,8 @@ static inline void em_root_union_successor_live(uint64_t* destination,
 
 static inline void em_root_compute_block_live_out(int block_index,
         const MirRootLivenessBlock* blocks, int block_count,
-        MIR_insn_t* instructions, MIR_label_t* labels,
-        const int* label_blocks, int label_count,
+        MIR_insn_t* instructions, const MirRootLabelBlock* label_map,
+        int label_map_capacity,
         const uint64_t* live_in, uint64_t* out, int word_count) {
     memset(out, 0, (size_t)word_count * sizeof(uint64_t));
     const MirRootLivenessBlock* block = &blocks[block_index];
@@ -2538,7 +2566,7 @@ static inline void em_root_compute_block_live_out(int block_index,
         for (unsigned oi = 1; oi < last->nops; oi++) {
             if (last->ops[oi].mode != MIR_OP_LABEL) continue;
             int successor = em_root_find_label_block(last->ops[oi].u.label,
-                labels, label_blocks, label_count);
+                label_map, label_map_capacity);
             em_root_union_successor_live(out, successor, live_in,
                 block_count, word_count);
         }
@@ -2547,7 +2575,7 @@ static inline void em_root_compute_block_live_out(int block_index,
     if (MIR_branch_code_p(last->code)) {
         if (last->nops > 0 && last->ops[0].mode == MIR_OP_LABEL) {
             int successor = em_root_find_label_block(last->ops[0].u.label,
-                labels, label_blocks, label_count);
+                label_map, label_map_capacity);
             em_root_union_successor_live(out, successor, live_in,
                 block_count, word_count);
         }
@@ -2599,8 +2627,8 @@ static inline int em_root_collect_set_candidates(const uint64_t* bits,
 
 static inline void em_root_collect_block_successors(int block_index,
         const MirRootLivenessBlock* blocks, int block_count,
-        MIR_insn_t* instructions, MIR_label_t* labels,
-        const int* label_blocks, int label_count, uint64_t* successors,
+        MIR_insn_t* instructions, const MirRootLabelBlock* label_map,
+        int label_map_capacity, uint64_t* successors,
         int successor_word_count) {
     const MirRootLivenessBlock* block = &blocks[block_index];
     if (block->end <= block->start) {
@@ -2623,7 +2651,7 @@ static inline void em_root_collect_block_successors(int block_index,
         for (unsigned oi = 1; oi < last->nops; oi++) {
             if (last->ops[oi].mode != MIR_OP_LABEL) continue;
             int successor = em_root_find_label_block(last->ops[oi].u.label,
-                labels, label_blocks, label_count);
+                label_map, label_map_capacity);
             em_root_set_block_successor(successors, successor_word_count,
                 block_count, block_index, successor);
         }
@@ -2632,7 +2660,7 @@ static inline void em_root_collect_block_successors(int block_index,
     if (MIR_branch_code_p(last->code)) {
         if (last->nops > 0 && last->ops[0].mode == MIR_OP_LABEL) {
             int successor = em_root_find_label_block(last->ops[0].u.label,
-                labels, label_blocks, label_count);
+                label_map, label_map_capacity);
             em_root_set_block_successor(successors, successor_word_count,
                 block_count, block_index, successor);
         }
@@ -2922,6 +2950,20 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             !candidate_by_reg || !candidate_by_reg_capacity) return false;
     if (result) memset(result, 0, sizeof(*result));
 
+    bool has_collecting_call = false;
+    for (MIR_insn_t current = DLIST_HEAD(MIR_insn_t, em->func->insns);
+            current; current = DLIST_NEXT(MIR_insn_t, current)) {
+        if (MIR_call_code_p(current->code) && em_root_call_may_collect(
+                current, call_sites, call_site_count)) {
+            has_collecting_call = true;
+            break;
+        }
+    }
+    // without a safepoint, eager homes are observationally inert. Leave the
+    // emitted MIR untouched instead of building a CFG whose result cannot be
+    // consumed (D8.6.1).
+    if (!has_collecting_call) return true;
+
     MirFrameState* frame = &em->frame;
 
     // Root identity follows MIR copies into narrowing, return, and join
@@ -2971,18 +3013,18 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)instruction_count * sizeof(MirRootLivenessBlock), MEM_CAT_TEMP);
     int* instruction_blocks = (int*)mem_alloc(
         (size_t)instruction_count * sizeof(int), MEM_CAT_TEMP);
-    MIR_label_t* labels = (MIR_label_t*)mem_alloc(
-        (size_t)instruction_count * sizeof(MIR_label_t), MEM_CAT_TEMP);
-    int* label_blocks = (int*)mem_alloc(
-        (size_t)instruction_count * sizeof(int), MEM_CAT_TEMP);
+    int label_map_capacity = 1;
+    while (label_map_capacity < instruction_count * 2) label_map_capacity <<= 1;
+    MirRootLabelBlock* label_map = (MirRootLabelBlock*)mem_calloc(
+        (size_t)label_map_capacity, sizeof(MirRootLabelBlock), MEM_CAT_TEMP);
     int* reg_to_candidate = (int*)mem_alloc(
         (size_t)reg_map_count * sizeof(int), MEM_CAT_TEMP);
     uint64_t* insn_uses = (uint64_t*)mem_alloc(
         (size_t)word_count * sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* insn_definitions = (uint64_t*)mem_alloc(
         (size_t)word_count * sizeof(uint64_t), MEM_CAT_TEMP);
-    if (!instructions || !blocks || !instruction_blocks || !labels ||
-            !label_blocks || !reg_to_candidate || !insn_uses ||
+    if (!instructions || !blocks || !instruction_blocks || !label_map ||
+            !reg_to_candidate || !insn_uses ||
             !insn_definitions) {
         log_error("mir-semantic-root-write-back: liveness allocation failed");
         abort();
@@ -3017,11 +3059,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             instruction_blocks[i] = bi;
         }
     }
-    int label_count = 0;
     for (int i = 0; i < instruction_count; i++) {
         if (instructions[i]->code == MIR_LABEL) {
-            labels[label_count] = instructions[i];
-            label_blocks[label_count++] = instruction_blocks[i];
+            em_root_set_label_block(label_map, label_map_capacity,
+                instructions[i], instruction_blocks[i]);
         }
     }
 
@@ -3038,8 +3079,17 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         (size_t)word_count * sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* scratch_in = (uint64_t*)mem_alloc(
         (size_t)word_count * sizeof(uint64_t), MEM_CAT_TEMP);
+    int liveness_successor_word_count = (block_count + 63) / 64;
+    uint64_t* liveness_successors = (uint64_t*)mem_calloc(
+        (size_t)block_count * (size_t)liveness_successor_word_count,
+        sizeof(uint64_t), MEM_CAT_TEMP);
+    int* liveness_worklist = (int*)mem_alloc(
+        (size_t)block_count * sizeof(int), MEM_CAT_TEMP);
+    uint8_t* liveness_queued = (uint8_t*)mem_calloc((size_t)block_count,
+        sizeof(uint8_t), MEM_CAT_TEMP);
     if (!block_uses || !block_definitions || !live_in || !live_out ||
-            !scratch_out || !scratch_in) {
+            !scratch_out || !scratch_in || !liveness_successors ||
+            !liveness_worklist || !liveness_queued) {
         log_error("mir-semantic-root-write-back: CFG allocation failed");
         abort();
     }
@@ -3064,31 +3114,43 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         }
     }
 
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (int bi = block_count - 1; bi >= 0; bi--) {
-            em_root_compute_block_live_out(bi, blocks, block_count, instructions,
-                labels, label_blocks, label_count, live_in, scratch_out,
-                word_count);
-            uint64_t* old_out = live_out +
-                (size_t)bi * (size_t)word_count;
-            uint64_t* old_in = live_in +
-                (size_t)bi * (size_t)word_count;
-            uint64_t* uses = block_uses +
-                (size_t)bi * (size_t)word_count;
-            uint64_t* definitions = block_definitions +
-                (size_t)bi * (size_t)word_count;
-            for (int word = 0; word < word_count; word++) {
-                scratch_in[word] = uses[word] |
-                    (scratch_out[word] & ~definitions[word]);
-                if (old_out[word] != scratch_out[word] ||
-                        old_in[word] != scratch_in[word]) {
-                    changed = true;
-                }
-                old_out[word] = scratch_out[word];
-                old_in[word] = scratch_in[word];
+    int liveness_count = 0;
+    for (int bi = 0; bi < block_count; bi++) {
+        em_root_collect_block_successors(bi, blocks, block_count,
+            instructions, label_map, label_map_capacity, liveness_successors,
+            liveness_successor_word_count);
+        liveness_worklist[liveness_count++] = bi;
+        liveness_queued[bi] = 1;
+    }
+    while (liveness_count > 0) {
+        int bi = liveness_worklist[--liveness_count];
+        liveness_queued[bi] = 0;
+        em_root_compute_block_live_out(bi, blocks, block_count, instructions,
+            label_map, label_map_capacity, live_in, scratch_out, word_count);
+        uint64_t* old_out = live_out + (size_t)bi * (size_t)word_count;
+        uint64_t* old_in = live_in + (size_t)bi * (size_t)word_count;
+        uint64_t* uses = block_uses + (size_t)bi * (size_t)word_count;
+        uint64_t* definitions = block_definitions +
+            (size_t)bi * (size_t)word_count;
+        bool changed = false;
+        for (int word = 0; word < word_count; word++) {
+            scratch_in[word] = uses[word] |
+                (scratch_out[word] & ~definitions[word]);
+            if (old_out[word] != scratch_out[word] ||
+                    old_in[word] != scratch_in[word]) {
+                changed = true;
             }
+            old_out[word] = scratch_out[word];
+            old_in[word] = scratch_in[word];
+        }
+        if (!changed) continue;
+        for (int predecessor = 0; predecessor < block_count; predecessor++) {
+            const uint64_t* row = liveness_successors +
+                (size_t)predecessor * (size_t)liveness_successor_word_count;
+            if ((row[bi >> 6] & (UINT64_C(1) << (bi & 63))) == 0 ||
+                    liveness_queued[predecessor]) continue;
+            liveness_worklist[liveness_count++] = predecessor;
+            liveness_queued[predecessor] = 1;
         }
     }
 
@@ -3387,7 +3449,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     memset(successors, 0, successor_block_words * sizeof(uint64_t));
     for (int bi = 0; bi < block_count; bi++) {
         em_root_collect_block_successors(bi, blocks, block_count, instructions,
-            labels, label_blocks, label_count, successors,
+            label_map, label_map_capacity, successors,
             successor_word_count);
     }
     em_compute_root_publication_frontier(instructions, blocks, block_count,
@@ -3450,7 +3512,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         }
     }
 
-    changed = true;
+    bool changed = true;
     while (changed) {
         changed = false;
         for (int bi = 0; bi < block_count; bi++) {
@@ -3617,11 +3679,13 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             stable_slot_count, scratch_slot_count, inserted_stores);
     }
     mem_free(instructions); mem_free(blocks); mem_free(instruction_blocks);
-    mem_free(labels); mem_free(label_blocks); mem_free(reg_to_candidate);
+    mem_free(label_map); mem_free(reg_to_candidate);
     mem_free(insn_uses); mem_free(insn_definitions);
     mem_free(block_uses); mem_free(block_definitions);
     mem_free(live_in); mem_free(live_out);
     mem_free(scratch_out); mem_free(scratch_in);
+    mem_free(liveness_successors); mem_free(liveness_worklist);
+    mem_free(liveness_queued);
     mem_free(call_liveness_by_instruction);
     mem_free(call_live_in); mem_free(call_live_out);
     mem_free(candidate_defined);
@@ -3842,10 +3906,10 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
         (size_t)instruction_count * sizeof(MIR_insn_t), MEM_CAT_TEMP);
     MirRootLivenessBlock* blocks = (MirRootLivenessBlock*)mem_alloc(
         (size_t)instruction_count * sizeof(MirRootLivenessBlock), MEM_CAT_TEMP);
-    MIR_label_t* labels = (MIR_label_t*)mem_alloc(
-        (size_t)instruction_count * sizeof(MIR_label_t), MEM_CAT_TEMP);
-    int* label_blocks = (int*)mem_alloc(
-        (size_t)instruction_count * sizeof(int), MEM_CAT_TEMP);
+    int label_map_capacity = 1;
+    while (label_map_capacity < instruction_count * 2) label_map_capacity <<= 1;
+    MirRootLabelBlock* label_map = (MirRootLabelBlock*)mem_calloc(
+        (size_t)label_map_capacity, sizeof(MirRootLabelBlock), MEM_CAT_TEMP);
     uint64_t* reg_homes = (uint64_t*)mem_calloc(
         (size_t)reg_count * (size_t)word_count, sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* reg_def_homes = (uint64_t*)mem_calloc(
@@ -3854,7 +3918,7 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
         (size_t)home_count, sizeof(uint8_t), MEM_CAT_TEMP);
     uint8_t* owned_env_regs = (uint8_t*)mem_calloc(
         (size_t)reg_count, sizeof(uint8_t), MEM_CAT_TEMP);
-    if (!instructions || !blocks || !labels || !label_blocks || !reg_homes ||
+    if (!instructions || !blocks || !label_map || !reg_homes ||
             !reg_def_homes || !escaped_homes || !owned_env_regs) {
         log_error("mir-scalar-homes: CFG allocation failed");
         abort();
@@ -3942,12 +4006,11 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
     if (block_start < instruction_count) {
         blocks[block_count++] = {block_start, instruction_count};
     }
-    int label_count = 0;
     for (int bi = 0; bi < block_count; bi++) {
         for (int i = blocks[bi].start; i < blocks[bi].end; i++) {
             if (instructions[i]->code == MIR_LABEL) {
-                labels[label_count] = instructions[i];
-                label_blocks[label_count++] = bi;
+                em_root_set_label_block(label_map, label_map_capacity,
+                    instructions[i], bi);
             }
         }
     }
@@ -3988,7 +4051,7 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
         changed = false;
         for (int bi = block_count - 1; bi >= 0; bi--) {
             em_root_compute_block_live_out(bi, blocks, block_count,
-                instructions, labels, label_blocks, label_count, live_in,
+                instructions, label_map, label_map_capacity, live_in,
                 scratch, word_count);
             uint64_t* out = live_out + (size_t)bi * (size_t)word_count;
             uint64_t* in = live_in + (size_t)bi * (size_t)word_count;
@@ -4100,8 +4163,8 @@ static inline int em_finalize_scalar_homes(MirEmitter* em) {
     frame->colored_scalar_home_count = color_count;
     frame->fixed_number_slots = color_count + discard_count +
         frame->plan.fixed_number_scratch_slots;
-    mem_free(instructions); mem_free(blocks); mem_free(labels);
-    mem_free(label_blocks); mem_free(reg_homes); mem_free(reg_def_homes);
+    mem_free(instructions); mem_free(blocks); mem_free(label_map);
+    mem_free(reg_homes); mem_free(reg_def_homes);
     mem_free(escaped_homes); mem_free(owned_env_regs);
     mem_free(block_uses); mem_free(block_defs); mem_free(live_in);
     mem_free(live_out); mem_free(uses); mem_free(definitions);

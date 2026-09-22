@@ -248,6 +248,72 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     return id;
 }
 
+bool ast_index_note_allocation(AstIndex* index, AstNode* node) {
+    return index && node && ast_index_add(index, node, NULL,
+        AST_FUNCTION_ID_INVALID) != AST_NODE_ID_INVALID;
+}
+
+bool ast_index_prepare_binding(AstIndex* index) {
+    if (!index) return false;
+    for (uint32_t i = 0; i < index->count; i++) {
+        index->parents[i] = NULL;
+        index->owner_functions[i] = AST_FUNCTION_ID_INVALID;
+        index->node_bindings[i] = AST_BINDING_ID_INVALID;
+        index->first_children[i] = AST_NODE_ID_INVALID;
+        index->next_siblings[i] = AST_NODE_ID_INVALID;
+    }
+    index->scope_count = 0;
+    index->binding_count = 0;
+    index->class_count = 0;
+    index->function_count = 0;
+    index->graph_published = false;
+    return true;
+}
+
+bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
+        AstFunctionId current_owner, AstFunctionId* node_owner) {
+    if (node_owner) *node_owner = current_owner;
+    if (!index || !node) return false;
+    AstNodeId id = ast_index_find(index, node);
+    if (id == AST_NODE_ID_INVALID) {
+        id = ast_index_add(index, node, NULL, AST_FUNCTION_ID_INVALID);
+        if (id == AST_NODE_ID_INVALID) return false;
+    }
+    // `next` is intrusive rather than structural. The direct binder visits it
+    // through the preceding sibling, so restore the shared structural parent.
+    if (parent && parent->next == node) {
+        AstNodeId preceding_id = ast_index_find(index, parent);
+        parent = preceding_id != AST_NODE_ID_INVALID ? index->parents[preceding_id] : NULL;
+        AstNodeId structural_parent_id = ast_index_find(index, parent);
+        current_owner = structural_parent_id != AST_NODE_ID_INVALID
+            ? index->owner_functions[structural_parent_id]
+            : AST_FUNCTION_ID_INVALID;
+    }
+    // A sibling follows the preceding node through its intrusive `next` link.
+    // Return the recovered lexical owner so its descendants do not inherit a
+    // preceding function's index context.
+    if (node_owner) *node_owner = current_owner;
+    index->parents[id] = parent;
+    index->owner_functions[id] = current_owner;
+    AstNodeId parent_id = ast_index_find(index, parent);
+    if (parent_id != AST_NODE_ID_INVALID) {
+        index->next_siblings[id] = index->first_children[parent_id];
+        index->first_children[parent_id] = id;
+    }
+    if (!ast_index_publish_node(index, node, id)) return false;
+    if (!ast_index_node_is_function(node)) return true;
+    AstFunctionId function_id = ast_index_add_function(index, node,
+        current_owner);
+    if (function_id == AST_FUNCTION_ID_INVALID) return false;
+    index->owner_functions[id] = function_id;
+    if (node_owner) *node_owner = function_id;
+    return true;
+}
+
+void ast_index_mark_published(AstIndex* index) {
+    if (index) index->graph_published = true;
+}
+
 bool ast_index_node_is_function(const AstNode* node) {
     return node && (node->node_type == AST_NODE_FUNC ||
         node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC ||
@@ -607,7 +673,9 @@ bool ast_any_binding_pattern_child(AstNode* node,
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile) {
     if (!index) return false;
     ast_index_destroy(index);
-    return ast_index_walk_root(index, root, NULL, profile);
+    bool built = ast_index_walk_root(index, root, NULL, profile);
+    if (built) ast_index_mark_published(index);
+    return built;
 }
 
 bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
@@ -618,6 +686,7 @@ bool ast_index_clone(AstIndex* destination, const AstIndex* source) {
     destination->scope_count = source->scope_count;
     destination->binding_count = source->binding_count;
     destination->class_count = source->class_count;
+    destination->graph_published = source->graph_published;
     destination->const_folded_count = source->const_folded_count;
     if (source->count) {
         memcpy(destination->nodes, source->nodes, source->count * sizeof(AstNode*));

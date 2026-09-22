@@ -1,6 +1,6 @@
 # JS Tune16 — Reduce shared helper and execution-protocol overhead
 
-**Status:** PROPOSED; analysis completed, implementation and performance acceptance open.
+**Status:** IMPLEMENTED AS A NARROW T16-5 LEAF; the proposal's broad-performance and QuickJS goals remain open.
 
 **Date:** 2026-09-22.
 
@@ -344,3 +344,40 @@ If the runtime is broadly faster but remains slower than QuickJS, record that as
 Deliver a package ledger with source changes, structural counts, focused/full correctness results, release A/B artifacts, negative results/reverts, and remaining misses. Preserve the successful Tune15 work and its unfinished gates; this proposal does not silently declare Tune15 complete.
 
 The expected route to a substantial improvement is **many fewer expensive boundaries per ordinary operation**, across the shared runtime. MVP motivates that direction, while the fresh full-JS census and generated MIR establish where to test it without adopting MVP's semantic shortcuts.
+
+## 9. Implementation ledger — 2026-09-22
+
+The following experiments used immutable release archives, interleaved same-source
+LambdaJS pairs, and per-pair stdout comparison. They are implementation evidence,
+not a substitute for the required full 63-row/QuickJS closeout in Section 7.
+
+| Package | Outcome | Evidence |
+|---|---|---|
+| T16-1 Number hit/miss MIR split | Rejected | Nine-row, nine-pair panel retained 81 matching outputs but only small, mixed deltas; its additional guard, safepoint, and boxing protocol did not establish a broad win. |
+| T16-2 ordinary-name/property preamble leaves | Rejected | Two six-row, seven-pair panels were output-identical but mixed and below the admission threshold. The shared property kernel remains unchanged. |
+| T16-3 binding/name | No new implementation | `JsMirNameCache` and `jm_module_name_id_at_index` already provide the proposed valid reuse. No independently measured missing shared cost justified a duplicate cache. |
+| T16-4 receiver body ABI | Rejected and removed | A strict-body receiver operand with a precise root passed focused and forced-GC tests, but the exact 31-pair replay confirmed Splay +4.29%, Log Pipeline +1.32%, and Havlak +0.76%. The source was reverted in full. |
+| T16-5 ASCII string capability leaf | Retained, narrow | The MIR leaf calls `js_try_ascii_string_builtin_no_gc` only after visible Get and argument evaluation, and only for the original catalog `indexOf`/`charCodeAt` capability, primitive ASCII operands, and one argument. Every miss uses the selected `js_call` fallback. Its exact 31-pair control/candidate replay confirmed Log Pipeline at 0.9291 candidate/control (upper bound 0.9484), with 27/31 wins and identical output. |
+| T16-5 cached `slice` extension | Rejected and removed | The cache-hit-only extension was output-identical but regressed Log Pipeline by 0.96% in its screen. |
+| T16-6 complete breadth/QuickJS closeout | Open | No implementation above meets Section 7's breadth thresholds. A ResultN/QuickJS matrix must not be inferred from the narrow paired panels. |
+
+The retained leaf follows **D1.2v2, D1.3v3, D5.3.1–D5.3.5, and D8.4.1v2–D8.4.3v2**: it preserves observable method selection and argument order, declares a truthful no-GC borrowed-argument contract, and routes every unsupported value, replacement, Unicode input, or coercing argument through the existing completion-capable call path. Focused optimizer coverage includes catalog replacement, Unicode fallback, emitted-MIR fallback retention, and forced/poisoned collection.
+
+Final release archives and artifacts retained for provenance:
+
+- accepted ASCII leaf candidate: `lambda-tune16-ascii-string-cf0362c2`;
+- its control: `lambda-tune16-control-2d6f5d44`;
+- accepted-leaf confirmation: `temp/tune16_ascii_string_confirm_31_20260922.json`;
+- rejected receiver candidates: `27cc5c39` and `6b0a7d38`;
+- rejected receiver exact replay: `temp/tune16_receiver_threshold_confirm_31_20260922.json`.
+
+Accordingly, Tune16 records a safe, independently verified narrow string-dispatch improvement, not a claimed broad structural improvement or a victory over QuickJS.
+
+Validation from the final retained source: `test_js_opt_gtest` passed 79/79,
+the ASCII contract passed with `LAMBDA_GC_FORCE_EVERY=1` and
+`LAMBDA_GC_POISON_FREED=1`, and `make test262-baseline` passed 40,261/40,261
+with zero baseline regressions. `make test-lambda-baseline` was not clean:
+its parallel runner reported unrelated MIR-ratchet/GC-stress, batch-result,
+and 60-second timeout failures. The leaf's optimizer contract and the
+previously timing-sensitive Navier–Stokes test both passed when rerun alone.
+This records the incomplete aggregate gate; it does not relabel it as a pass.

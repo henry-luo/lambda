@@ -65,6 +65,10 @@ extern "C" {
 void lambda_compiler_timing_reset(void);
 void lambda_compiler_timing_get(LambdaCompilerTiming* out);
 int lambda_compiler_timing_enabled(void);
+// The reducer records source-order diagnostics inline. Keep their cost apart
+// from replay so the phase report can distinguish construction from analysis.
+int lambda_compiler_timing_collecting(void);
+void lambda_compiler_timing_add_inline_analysis_us(uint64_t elapsed_us);
 void compiler_pass_manager_init(CompilerPassManager* manager, uint32_t initial_facts);
 int compiler_pass_manager_add(CompilerPassManager* manager, const CompilerPassSpec* pass);
 int compiler_pass_manager_run(CompilerPassManager* manager, void* context);

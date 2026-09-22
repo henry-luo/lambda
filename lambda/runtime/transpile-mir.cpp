@@ -189,6 +189,24 @@ struct MirInlineFrame {
     TypeId return_tid;
 };
 
+// Hash-map values can relocate as the lowering scope grows. Keep stable
+// binding identity plus the map key, then resolve the current entry on use.
+typedef struct MirBindingVarLocator {
+    NameEntry* binding;
+    int scope;
+    const char* name;
+} MirBindingVarLocator;
+
+typedef struct MirBindingGlobalLocator {
+    NameEntry* binding;
+    const char* name;
+} MirBindingGlobalLocator;
+
+typedef struct MirTypedArrayCacheLocator {
+    int scope;
+    const char* name;
+} MirTypedArrayCacheLocator;
+
 struct MirTranspiler {
     MirFlowScope* flow_scope;
     // T29-1 (D4.4.4v4): registers of the synthesized place handles bound in the
@@ -288,10 +306,18 @@ struct MirTranspiler {
 
     // Global variables: name -> GlobalVarEntry (context-module slab slots)
     struct hashmap* global_vars;
+    // Binding identity is the lowering authority. These maps avoid scanning
+    // every lexical/global table for each resolved identifier (D8.2.4).
+    struct hashmap* vars_by_binding;
+    struct hashmap* globals_by_binding;
 
     // Variable scopes: array of hashmaps, each mapping name -> MirVarEntry
     struct hashmap* var_scopes[64];
     int scope_depth;
+    // Rebuilt only after a cache is first attached to a variable. May-GC
+    // reloads then visit just typed-array cache owners in historic map order.
+    ArrayList* typed_array_caches;
+    bool typed_array_caches_dirty;
 
     // Loop label stack
     LoopLabels loop_stack[32];
@@ -584,6 +610,9 @@ struct MirTranspiler {
     // M2 call-site evidence: AstFuncNode* -> CallSiteEntry. Populated by the
     // collect stage of prepass_forward_declare before any body is transpiled.
     struct hashmap* callsite_info;
+    // A process-unique generation makes FnAnalysis inference memoization safe
+    // for retained templates and concurrent prebuild workers.
+    uint32_t inference_cache_epoch;
     // T20-1c candidate shapes: AST_NODE_PARAM* -> Type* (an untrusted TypeMap).
     struct hashmap* shape_hints;
     bool prepass_collect_only;      // collect stage: gather call sites, emit nothing
@@ -769,6 +798,21 @@ typedef TypedHashMap<GlobalVarEntry,
     HashMapCStrMemberKeyOps<GlobalVarEntry, &GlobalVarEntry::name>> GlobalVarMap;
 static inline HashMap* global_var_new(size_t capacity) {
     return GlobalVarMap::create(capacity);
+}
+
+typedef TypedHashMap<MirBindingVarLocator,
+    HashMapPointerMemberKeyOps<MirBindingVarLocator,
+        &MirBindingVarLocator::binding>> MirBindingVarMap;
+typedef TypedHashMap<MirBindingGlobalLocator,
+    HashMapPointerMemberKeyOps<MirBindingGlobalLocator,
+        &MirBindingGlobalLocator::binding>> MirBindingGlobalMap;
+
+static inline HashMap* mir_binding_var_new(size_t capacity) {
+    return MirBindingVarMap::create(capacity);
+}
+
+static inline HashMap* mir_binding_global_new(size_t capacity) {
+    return MirBindingGlobalMap::create(capacity);
 }
 
 // M2: per-function summary of how the compilation unit calls it. Body evidence
@@ -3308,6 +3352,10 @@ static void mir_cache_typed_array_layout(MirTranspiler* mt, MirVarEntry* var) {
         MIR_new_reg_op(mt->ctx, var->typed_array_cache_len),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET, var->typed_array_cache_ptr, 0, 1)));
     var->typed_array_cache_valid = true;
+    // Preserve the old scope/hash iteration order when a later collecting
+    // call emits reloads, but rebuild that compact list only after a new
+    // cache owner appears.
+    mt->typed_array_caches_dirty = true;
 }
 
 // A typed local may consume its declaration boundary after the successful
@@ -3352,33 +3400,68 @@ static void mir_rebind_typed_array_layout(MirTranspiler* mt, MirVarEntry* var) {
         MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET, var->typed_array_cache_ptr, 0, 1)));
 }
 
+static void mir_clear_typed_array_cache_locators(MirTranspiler* mt) {
+    if (!mt || !mt->typed_array_caches) return;
+    for (int i = 0; i < mt->typed_array_caches->length; i++) {
+        mem_free(mt->typed_array_caches->data[i]);
+    }
+    mt->typed_array_caches->length = 0;
+}
+
 static void lambda_after_may_gc_call(void* owner) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     if (!mt || !mt->em.func) return;
-    for (int scope = 0; scope <= mt->scope_depth; scope++) {
-        if (!mt->var_scopes[scope]) continue;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
-            VarScopeEntry* entry = (VarScopeEntry*)item;
-            MirVarEntry* var = &entry->var;
-            if (!var->typed_array_cache_valid) continue;
-            // GC compacts ArrayNum data buffers but leaves their headers stable;
-            // a data pointer cached across the call would read the old nursery.
-            // Both loads are recorded so liveness can drop the unread ones.
-            MIR_insn_t items_reload = MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->typed_array_cache_items),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_ITEMS_OFFSET,
-                    var->typed_array_cache_ptr, 0, 1));
-            emit_insn(mt, items_reload);
-            mir_record_layout_reload(mt, items_reload);
-            MIR_insn_t len_reload = MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->typed_array_cache_len),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET,
-                    var->typed_array_cache_ptr, 0, 1));
-            emit_insn(mt, len_reload);
-            mir_record_layout_reload(mt, len_reload);
+    if (!mt->typed_array_caches) return;
+    if (mt->typed_array_caches_dirty) {
+        mir_clear_typed_array_cache_locators(mt);
+        for (int scope = 0; scope <= mt->scope_depth; scope++) {
+            if (!mt->var_scopes[scope]) continue;
+            size_t iter = 0;
+            void* item = NULL;
+            while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
+                VarScopeEntry* entry = (VarScopeEntry*)item;
+                if (!entry->var.typed_array_cache_valid) continue;
+                MirTypedArrayCacheLocator* locator =
+                    (MirTypedArrayCacheLocator*)mem_calloc(1,
+                        sizeof(MirTypedArrayCacheLocator), MEM_CAT_TEMP);
+                if (!locator || !arraylist_append(mt->typed_array_caches,
+                        locator)) {
+                    mem_free(locator);
+                    log_error("mir-typed-array-cache: locator allocation failed");
+                    abort();
+                }
+                locator->scope = scope;
+                locator->name = entry->name;
+            }
         }
+        mt->typed_array_caches_dirty = false;
+    }
+    for (int i = 0; i < mt->typed_array_caches->length; i++) {
+        MirTypedArrayCacheLocator* locator =
+            (MirTypedArrayCacheLocator*)mt->typed_array_caches->data[i];
+        if (!locator || locator->scope > mt->scope_depth ||
+                !mt->var_scopes[locator->scope]) continue;
+        VarScopeEntry key = {};
+        key.name = locator->name;
+        VarScopeEntry* entry = (VarScopeEntry*)hashmap_get(
+            mt->var_scopes[locator->scope], &key);
+        MirVarEntry* var = entry ? &entry->var : NULL;
+        if (!var || !var->typed_array_cache_valid) continue;
+        // GC compacts ArrayNum data buffers but leaves their headers stable;
+        // a data pointer cached across the call would read the old nursery.
+        // Both loads are recorded so liveness can drop the unread ones.
+        MIR_insn_t items_reload = MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var->typed_array_cache_items),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_ITEMS_OFFSET,
+                var->typed_array_cache_ptr, 0, 1));
+        emit_insn(mt, items_reload);
+        mir_record_layout_reload(mt, items_reload);
+        MIR_insn_t len_reload = MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var->typed_array_cache_len),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, MIR_CONTAINER_LENGTH_OFFSET,
+                var->typed_array_cache_ptr, 0, 1));
+        emit_insn(mt, len_reload);
+        mir_record_layout_reload(mt, len_reload);
     }
 }
 
@@ -3507,17 +3590,17 @@ struct MirCowJoin {
 // remain name-only entries (D8.2.4, D8.2.6).
 static MirVarEntry* find_var_by_binding(MirTranspiler* mt,
         const NameEntry* binding) {
-    if (!mt || !binding) return NULL;
-    for (int scope = mt->scope_depth; scope >= 0; scope--) {
-        if (!mt->var_scopes[scope]) continue;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
-            VarScopeEntry* entry = (VarScopeEntry*)item;
-            if (entry->var.binding == binding) return &entry->var;
-        }
-    }
-    return NULL;
+    if (!mt || !binding || !mt->vars_by_binding) return NULL;
+    MirBindingVarLocator key = {.binding = (NameEntry*)binding};
+    MirBindingVarLocator* locator = (MirBindingVarLocator*)hashmap_get(
+        mt->vars_by_binding, &key);
+    if (!locator || locator->scope > mt->scope_depth ||
+            !mt->var_scopes[locator->scope]) return NULL;
+    VarScopeEntry var_key = {};
+    var_key.name = locator->name;
+    VarScopeEntry* entry = (VarScopeEntry*)hashmap_get(
+        mt->var_scopes[locator->scope], &var_key);
+    return entry && entry->var.binding == binding ? &entry->var : NULL;
 }
 
 struct MirStringBindingScan {
@@ -3549,6 +3632,11 @@ static void publish_var_binding(MirTranspiler* mt, const char* name,
     MirVarEntry* var = find_var(mt, name);
     if (var) {
         var->binding = binding;
+        if (binding && mt->vars_by_binding) {
+            MirBindingVarLocator locator = {binding, mt->scope_depth,
+                mir_semantic_name_cstr(mt, name).str};
+            hashmap_set(mt->vars_by_binding, &locator);
+        }
         if (var->type_id == LMD_TYPE_STRING && binding) {
             // This is a may-own fact for the whole body, including loop backedges.
             MirStringBindingScan scan = {binding, false};
@@ -3560,14 +3648,16 @@ static void publish_var_binding(MirTranspiler* mt, const char* name,
 
 static GlobalVarEntry* find_global_var_by_binding(MirTranspiler* mt,
         const NameEntry* binding) {
-    if (!mt || !mt->global_vars || !binding) return NULL;
-    size_t iter = 0;
-    void* item = NULL;
-    while (hashmap_iter(mt->global_vars, &iter, &item)) {
-        GlobalVarEntry* entry = (GlobalVarEntry*)item;
-        if (entry->binding == binding) return entry;
-    }
-    return NULL;
+    if (!mt || !mt->global_vars || !mt->globals_by_binding || !binding) return NULL;
+    MirBindingGlobalLocator key = {.binding = (NameEntry*)binding};
+    MirBindingGlobalLocator* locator = (MirBindingGlobalLocator*)hashmap_get(
+        mt->globals_by_binding, &key);
+    if (!locator) return NULL;
+    GlobalVarEntry global_key = {};
+    global_key.name = locator->name;
+    GlobalVarEntry* entry = (GlobalVarEntry*)hashmap_get(mt->global_vars,
+        &global_key);
+    return entry && entry->binding == binding ? entry : NULL;
 }
 
 static MirVarEntry* mir_var_for_binding(MirTranspiler* mt,
@@ -35646,14 +35736,90 @@ static bool mir_find_defect_origin(AstNode* node, void* data) {
     return !scan->found;
 }
 
+static bool mir_cached_return_type_get(FnAnalysis* analysis, uint32_t epoch,
+        TypeId* type_id) {
+    if (__atomic_load_n(&analysis->mir_cached_return_type_epoch,
+            __ATOMIC_ACQUIRE) != epoch) return false;
+    TypeId cached = __atomic_load_n(&analysis->mir_cached_return_type,
+        __ATOMIC_RELAXED);
+    if (__atomic_load_n(&analysis->mir_cached_return_type_epoch,
+            __ATOMIC_ACQUIRE) != epoch) return false;
+    *type_id = cached;
+    return true;
+}
+
+static void mir_cached_return_type_set(FnAnalysis* analysis, uint32_t epoch,
+        TypeId type_id) {
+    __atomic_store_n(&analysis->mir_cached_return_type_epoch, 0,
+        __ATOMIC_RELEASE);
+    __atomic_store_n(&analysis->mir_cached_return_type, type_id,
+        __ATOMIC_RELAXED);
+    __atomic_store_n(&analysis->mir_cached_return_type_epoch, epoch,
+        __ATOMIC_RELEASE);
+}
+
+static bool mir_cached_return_defer_get(FnAnalysis* analysis, uint32_t epoch,
+        bool* may_defer) {
+    if (__atomic_load_n(&analysis->mir_cached_return_defer_epoch,
+            __ATOMIC_ACQUIRE) != epoch) return false;
+    bool cached = __atomic_load_n(&analysis->mir_cached_return_defer,
+        __ATOMIC_RELAXED);
+    if (__atomic_load_n(&analysis->mir_cached_return_defer_epoch,
+            __ATOMIC_ACQUIRE) != epoch) return false;
+    *may_defer = cached;
+    return true;
+}
+
+static void mir_cached_return_defer_set(FnAnalysis* analysis, uint32_t epoch,
+        bool may_defer) {
+    __atomic_store_n(&analysis->mir_cached_return_defer_epoch, 0,
+        __ATOMIC_RELEASE);
+    __atomic_store_n(&analysis->mir_cached_return_defer, may_defer,
+        __ATOMIC_RELAXED);
+    __atomic_store_n(&analysis->mir_cached_return_defer_epoch, epoch,
+        __ATOMIC_RELEASE);
+}
+
+static bool mir_cached_defect_origin_get(FnAnalysis* analysis, uint32_t epoch,
+        bool* found) {
+    if (__atomic_load_n(&analysis->mir_cached_defect_origin_epoch,
+            __ATOMIC_ACQUIRE) != epoch) return false;
+    bool cached = __atomic_load_n(&analysis->mir_cached_defect_origin,
+        __ATOMIC_RELAXED);
+    if (__atomic_load_n(&analysis->mir_cached_defect_origin_epoch,
+            __ATOMIC_ACQUIRE) != epoch) return false;
+    *found = cached;
+    return true;
+}
+
+static void mir_cached_defect_origin_set(FnAnalysis* analysis, uint32_t epoch,
+        bool found) {
+    __atomic_store_n(&analysis->mir_cached_defect_origin_epoch, 0,
+        __ATOMIC_RELEASE);
+    __atomic_store_n(&analysis->mir_cached_defect_origin, found,
+        __ATOMIC_RELAXED);
+    __atomic_store_n(&analysis->mir_cached_defect_origin_epoch, epoch,
+        __ATOMIC_RELEASE);
+}
+
 // `descend_functions=false`: a nested function owns its own return lane, and
 // its defects reach this body only through its call result, which is already a
 // checked boundary here.
 static bool function_body_may_originate_defect(MirTranspiler* mt,
         AstFuncNode* fn_node) {
+    FnAnalysis* analysis = fn_node ? fn_node->analysis : NULL;
+    bool cached = false;
+    if (analysis && mir_cached_defect_origin_get(analysis,
+            mt->inference_cache_epoch, &cached)) {
+        return cached;
+    }
     MirDefectOriginScan scan = {mt, false};
     walk_lambda_ast(fn_node ? fn_node->body : NULL, mir_find_defect_origin,
         &scan, false);
+    if (analysis) {
+        mir_cached_defect_origin_set(analysis, mt->inference_cache_epoch,
+            scan.found);
+    }
     return scan.found;
 }
 
@@ -36261,39 +36427,62 @@ static TypeId infer_proc_native_return_lane(MirTranspiler* mt,
 }
 
 static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
-    if (function_body_may_check_array_call(mt, fn_node)) return true;
+    FnAnalysis* analysis = fn_node ? fn_node->analysis : NULL;
+    bool cached = false;
+    if (analysis && mir_cached_return_defer_get(analysis,
+            mt->inference_cache_epoch, &cached)) {
+        return cached;
+    }
+    bool may_defer = false;
+    AstNode* body = NULL;
+    AstNode* fn_as = NULL;
+    TypeFunc* signature = NULL;
+    TypeId return_tid = LMD_TYPE_ANY;
+    Type* body_decl = NULL;
+    if (function_body_may_check_array_call(mt, fn_node)) {
+        may_defer = true;
+        goto done;
+    }
     if (fn_node && ((AstNode*)fn_node)->node_type == AST_NODE_PROC &&
             infer_proc_native_return_lane(mt, fn_node) != LMD_TYPE_ANY) {
         // The same whole-function proof owns its typed local declarations:
         // recursive success calls are admitted as native before the generic
         // declaration scan sees their stale AST ANY type.
-        return false;
+        may_defer = false;
+        goto done;
     }
     // An interior checked boundary can produce a return the native ABI cannot
     // carry, independently of what the tail expression proves.
-    if (function_body_may_check_boundary(fn_node)) return true;
+    if (may_defer || function_body_may_check_boundary(fn_node)) {
+        may_defer = true;
+        goto done;
+    }
     // Native direct calls enter only after their caller has admitted every
     // declared parameter; the boxed wrapper owns the error-producing check.
     // Keeping this deferral here made an exact `pn (...: int) int` return an
     // Item from its raw entry, so the caller interpreted the Item bits as an
     // int lane. Nullable parameters still retain their contract through the
     // native lane and wrapper error channel below.
-    AstNode* body = function_body_result_expr(fn_node);
-    if (!body) return true;
+    body = function_body_result_expr(fn_node);
+    if (!body) {
+        may_defer = true;
+        goto done;
+    }
     if (body->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)body;
         AstNode* callee = ast_unwrap_primary(call->function);
         if (TypeFunc* signature = callee ? lambda_type_func_signature(callee->type) : NULL) {
-            return signature->can_raise || !signature->returned ||
+            may_defer = signature->can_raise || !signature->returned ||
                 mir_decl_type_id(signature->returned) == LMD_TYPE_ANY;
+            goto done;
         }
         Type* returned = direct_call_return_contract(body);
-        return !returned || mir_decl_type_id(returned) == LMD_TYPE_ANY;
+        may_defer = !returned || mir_decl_type_id(returned) == LMD_TYPE_ANY;
+        goto done;
     }
-    AstNode* fn_as = (AstNode*)fn_node;
-    TypeFunc* signature = fn_as && fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC
+    fn_as = (AstNode*)fn_node;
+    signature = fn_as && fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)fn_as->type : NULL;
-    TypeId return_tid = LMD_TYPE_ANY;
     if (signature) {
         (void)mir_contract_native_scalar_type(
             signature->return_contract ? signature->return_contract : signature->returned,
@@ -36311,10 +36500,13 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     // which correctly fails on the raise arm. Without this, `LMD_TYPE_TYPE !=
     // LMD_TYPE_ANY` would read the union as a proof and admit a native return
     // whose consumers still expect the boxed join (silent error loss).
-    Type* body_decl = mir_unwrap_decl_type(body->type);
+    body_decl = mir_unwrap_decl_type(body->type);
     if (body->type && mir_decl_type_id(body->type) != LMD_TYPE_ANY &&
             !lambda_type_is_union(body_decl) &&
-            return_tid != LMD_TYPE_INT) return false;
+            return_tid != LMD_TYPE_INT) {
+        may_defer = false;
+        goto done;
+    }
     // Raise-arm admission (the can_raise un-deopt, RV9): a `^E` fn whose body
     // types as exactly `float | error` returns natively after all — the raise
     // arms exit on the ERROR lane (emit_function_error_return) and contribute
@@ -36335,12 +36527,28 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
             join->left && join->left->type_id == LMD_TYPE_ERROR ? join->right
             : join->right && join->right->type_id == LMD_TYPE_ERROR ? join->left
             : NULL;
-        if (value_side && value_side->type_id == return_tid) return false;
+        if (value_side && value_side->type_id == return_tid) {
+            may_defer = false;
+            goto done;
+        }
     }
-    return !mir_expr_proves_native_return_lane(mt, body, return_tid);
+    may_defer = !mir_expr_proves_native_return_lane(mt, body, return_tid);
+
+done:
+    if (analysis) {
+        mir_cached_return_defer_set(analysis, mt->inference_cache_epoch,
+            may_defer);
+    }
+    return may_defer;
 }
 
 static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
+    FnAnalysis* analysis = fn_node ? fn_node->analysis : NULL;
+    TypeId cached = LMD_TYPE_ANY;
+    if (analysis && mir_cached_return_type_get(analysis,
+            mt->inference_cache_epoch, &cached)) {
+        return cached;
+    }
     AstNode* fn_as_node = (AstNode*)fn_node;
     bool is_proc = (fn_as_node->node_type == AST_NODE_PROC);
 
@@ -36350,6 +36558,10 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
     // publish such a body through a raw scalar return ABI.
     if (function_return_may_defer(mt, fn_node)) {
         log_debug("mir: infer_return_type - body may defer (proc=%d)", is_proc);
+        if (analysis) {
+            mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
+                LMD_TYPE_ANY);
+        }
         return LMD_TYPE_ANY;
     }
 
@@ -36380,7 +36592,15 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
                     (has_native_contract &&
                      mir_direct_pointer_lane_abi_type(ret_tid))) {
                 log_debug("mir: infer_return_type - declared type_id=%d (proc=%d)", ret_tid, is_proc);
+                if (analysis) {
+                    mir_cached_return_type_set(analysis,
+                        mt->inference_cache_epoch, ret_tid);
+                }
                 return ret_tid;
+            }
+            if (analysis) {
+                mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
+                    LMD_TYPE_ANY);
             }
             return LMD_TYPE_ANY;
         }
@@ -36389,7 +36609,13 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (is_proc) {
         TypeId proc_return = infer_proc_native_return_lane(mt, fn_node);
         log_debug("mir: infer_return_type - proc return lane=%d", proc_return);
-        if (proc_return != LMD_TYPE_ANY) return proc_return;
+        if (proc_return != LMD_TYPE_ANY) {
+            if (analysis) {
+                mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
+                    proc_return);
+            }
+            return proc_return;
+        }
     }
 
     // 2. For fn (not pn): Check the body expression's type (fn body IS the return value)
@@ -36402,10 +36628,18 @@ static TypeId infer_return_type(MirTranspiler* mt, AstFuncNode* fn_node) {
         // Only accept simple native scalar types
         if (mir_is_native_scalar_value_type(body_tid)) {
             log_debug("mir: infer_return_type - body type_id=%d", body_tid);
+            if (analysis) {
+                mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
+                    body_tid);
+            }
             return body_tid;
         }
     }
 
+    if (analysis) {
+        mir_cached_return_type_set(analysis, mt->inference_cache_epoch,
+            LMD_TYPE_ANY);
+    }
     return LMD_TYPE_ANY;
 }
 
@@ -40421,9 +40655,20 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
 // four hops deep: benchmark -> move_disks -> move_top_disk -> push_disk).
 #define MIR_CALLSITE_MAX_ROUNDS 6
 
+static uint32_t g_mir_inference_cache_epoch;
+
+static uint32_t mir_next_inference_cache_epoch(void) {
+    uint32_t epoch = __atomic_add_fetch(&g_mir_inference_cache_epoch, 1,
+        __ATOMIC_RELAXED);
+    if (epoch == 0) epoch = __atomic_add_fetch(&g_mir_inference_cache_epoch,
+        1, __ATOMIC_RELAXED);
+    return epoch;
+}
+
 static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child) {
     if (!mt->callsite_info) return;
     for (int round = 0; round < MIR_CALLSITE_MAX_ROUNDS; round++) {
+        mt->inference_cache_epoch = mir_next_inference_cache_epoch();
         // Reset the joins; `escaped` is monotone and deliberately kept.
         size_t iter = 0;
         void* item = NULL;
@@ -40479,6 +40724,9 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
         }
         if (!changed) break;
     }
+    // The completed call-site table is consumed by forward declaration and
+    // lowering after this loop. Give that final snapshot its own cache epoch.
+    mt->inference_cache_epoch = mir_next_inference_cache_epoch();
 }
 
 // ============================================================================
@@ -40494,6 +40742,13 @@ static MIR_item_t create_global_var_bss(MirTranspiler* mt, const char* name) {
     // This is an immutable cross-module reference, not the binding value.
     // The value itself is stored in the importing context's module slab.
     return MIR_new_bss(mt->ctx, bss_name, sizeof(LambdaModuleVarRef));
+}
+
+static void mir_register_global_binding(MirTranspiler* mt,
+        const GlobalVarEntry* entry) {
+    if (!mt || !entry || !entry->binding || !mt->globals_by_binding) return;
+    MirBindingGlobalLocator locator = {entry->binding, entry->name};
+    hashmap_set(mt->globals_by_binding, &locator);
 }
 
 static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
@@ -40523,6 +40778,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                     entry.type_id = tid;
                     entry.mir_type = type_to_mir(tid);
                     hashmap_set(mt->global_vars, &entry);
+                    mir_register_global_binding(mt, &entry);
 
                 } else if (decl->node_type == AST_NODE_DECOMPOSE) {
                     AstDecomposeNode* dec = (AstDecomposeNode*)decl;
@@ -40541,6 +40797,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                         entry.type_id = LMD_TYPE_ANY;
                         entry.mir_type = MIR_T_I64;
                         hashmap_set(mt->global_vars, &entry);
+                        mir_register_global_binding(mt, &entry);
                     }
                 }
                 decl = decl->next;
@@ -40582,6 +40839,7 @@ static void prepass_create_interp_module_vars(MirTranspiler* mt,
         global.type_id = type_id;
         global.mir_type = type_to_mir(type_id);
         hashmap_set(mt->global_vars, &global);
+        mir_register_global_binding(mt, &global);
     }
 }
 
@@ -41127,6 +41385,9 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.em.const_list = const_list;
     mt.local_funcs  = local_func_new(32);
     mt.global_vars  = global_var_new(32);
+    mt.vars_by_binding = mir_binding_var_new(64);
+    mt.globals_by_binding = mir_binding_global_new(64);
+    mt.typed_array_caches = arraylist_new(8);
     mt.callsite_info = callsite_info_new(32);
     mt.shape_hints   = shape_hint_new(32);
     if (out_property_keys) *out_property_keys = NULL;
@@ -41400,6 +41661,10 @@ static void transpile_mir_ast_finalize(MirModuleBuild* build,
     hashmap_free(mt.em.import_cache);
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
+    hashmap_free(mt.vars_by_binding);
+    hashmap_free(mt.globals_by_binding);
+    mir_clear_typed_array_cache_locators(&mt);
+    arraylist_free(mt.typed_array_caches);
     hashmap_free(mt.callsite_info);
     hashmap_free(mt.shape_hints);
     // native function metadata is compiler-owned and must be released with
@@ -42313,11 +42578,11 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     mir_context.link_instruction_count = &link_context.mir_instruction_count;
     // Direct MIR resumes parser work; retained ASTs begin a fresh unit.
     CompilerPassManager* pass_manager = &tp->pass_manager;
-    AstIndexPassContext index_context = {&tp->ast_index, tp->ast_root, tp->profile};
     if (pass_manager->pass_count == 0) {
         compiler_pass_manager_init(pass_manager, COMPILER_FACT_FRONTEND |
-            (tp->ast_index.count ? COMPILER_FACT_INDEXED : 0));
+            (tp->ast_index.graph_published ? COMPILER_FACT_INDEXED : 0));
     }
+    AstIndexPassContext index_context = {&tp->ast_index, tp->ast_root, tp->profile};
     CompilerPassSpec index_pass = {"index", COMPILER_FACT_FRONTEND,
         COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
     CompilerPassSpec const_fold_pass = {"const-fold", COMPILER_FACT_INDEXED,
@@ -42331,7 +42596,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         COMPILER_FACT_FINALIZED, lambda_mir_finalize_compiler_pass, &mir_context};
     CompilerPassSpec link_pass = {"mir-link-entry", COMPILER_FACT_FINALIZED,
         COMPILER_FACT_LINKED, lambda_mir_link_compiler_pass, &link_context};
-    if ((!tp->ast_index.count && !compiler_pass_manager_add(pass_manager, &index_pass)) ||
+    if ((!tp->ast_index.graph_published && !compiler_pass_manager_add(pass_manager,
+                &index_pass)) ||
             !compiler_pass_manager_add(pass_manager, &const_fold_pass) ||
             !compiler_pass_manager_add(pass_manager, &plan_pass) ||
             !compiler_pass_manager_add(pass_manager, &lower_pass) ||

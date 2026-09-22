@@ -8826,6 +8826,39 @@ static inline void js_ascii_substring_cache_store(Item value, uint32_t hash) {
     caches->ascii_substring_hashes[slot] = hash;
 }
 
+extern "C" Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver,
+        Item* args, int argc) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC || !callee.function ||
+            !js_fn_is_js_layout(callee.function) ||
+            get_type_id(receiver) != LMD_TYPE_STRING || !args || argc != 1) {
+        return ItemNull;
+    }
+    const JsFunction* function = (const JsFunction*)callee.function;
+    const JsCallableCode* code = js_fn_code(function);
+    String* source = it2s(receiver);
+    if (!code || !source || !source->is_ascii) return ItemNull;
+
+    if (code->catalog_id == JS_BUILTIN_STR_INDEX_OF) {
+        if (get_type_id(args[0]) != LMD_TYPE_STRING) return ItemNull;
+        String* needle = it2s(args[0]);
+        if (!needle || !needle->is_ascii) return ItemNull;
+        if (needle->len == 0) return (Item){.item = i2it(0)};
+        if (source->len < needle->len) return (Item){.item = i2it(-1)};
+        size_t found = str_find(source->chars, source->len, needle->chars,
+            needle->len);
+        return (Item){.item = i2it(found == STR_NPOS ? -1 : (int64_t)found)};
+    }
+
+    if (code->catalog_id == JS_BUILTIN_STR_CHAR_CODE_AT) {
+        if (get_type_id(args[0]) != LMD_TYPE_INT) return ItemNull;
+        int64_t index = it2i(args[0]);
+        if (index < 0 || index >= source->len) return ItemNull;
+        return (Item){.item = i2it((unsigned char)source->chars[index])};
+    }
+
+    return ItemNull;
+}
+
 // JS-aware substring: indices are UTF-16 code unit indices (not codepoints).
 static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
     String* s = it2s(str_item);

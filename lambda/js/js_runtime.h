@@ -47,6 +47,10 @@ Item js_make_string(const char* str);
 Item js_domexception_new(Item message, Item name_arg);
 bool js_string_equals(Item value, const char* expected);
 bool js_is_vm_context_error(Item value);
+// Returns ItemNull on every non-ASCII or semantically effectful case so the
+// MIR caller can preserve the ordinary capability call on that edge.
+Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver, Item* args,
+                                       int argc);
 
 const char* js_item_to_cstr(Item value, char* buf, int buf_size);
 
