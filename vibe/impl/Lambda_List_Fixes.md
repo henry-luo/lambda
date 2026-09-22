@@ -1,6 +1,7 @@
 # Lambda List/Array Kind, Content, Text, `++`, and Type Families — Implementation Plan
 
-> **Status:** DRAFT — not started (2026-09-22)
+> **Status:** IN PROGRESS — P0 and P1 done in the working tree, uncommitted
+> (2026-09-22; §7–§9); P2–P6 not started
 >
 > **Date:** 2026-09-22
 >
@@ -95,7 +96,7 @@ Every Lambda reader of `is_content` and its replacement:
 |---|---|---|
 | **content** (today `list_push`) | element content, script top level, content writes (S2.6.5) | drop `null` and `""`; splice any list; merge adjacent strings and adjacent binaries — **always**, no `input_context`/`input_allocation_context` gate (`collection_runtime.cpp:423` goes; the gate is the retired `disable_string_merging` in disguise, D2.6.5v3 footnote) |
 | **sequence** (new; today `array_push` + the `*_spread` variants) | list and array literals, `push`/`splice`/`a[i] = v` on arrays and lists | splice iff `is_spreadable`; store everything else verbatim, `null` included; never merge |
-| **verbatim** (today `array_push_argument`, `collection_runtime.cpp:365`) | argument and rest lists, `zip` pairs, and every single-value slot after the image conversion (§1.6) | store the item as one value whatever it is |
+| **verbatim** (`array_push_verbatim`, renamed from `array_push_argument` in P1) | argument and rest lists, `zip` pairs, every positional runtime structure (group/join/order keys and rows, path keys, query matches, index-addressed vector results), element copies (clones, set operators, `reverse`/`take`/`drop`/`slice`/`unique`), and every single-value slot after the image conversion (§1.6) | store the item as one value whatever it is |
 
 `list_push_spread` (`:486`), `array_push_spread` (`lambda-data-runtime.cpp:1815`)
 and `array_push_spread_all` (`:1824`, "spread any array unconditionally", used
@@ -234,12 +235,28 @@ Goldens that change are triaged one by one: **now-correct under a ruling →
 update the golden and cite the ruling in the fixture; anything else → a
 regression to fix before moving on.**
 
-### P0 — Fixtures first
+### P0 — Fixtures first (DONE 2026-09-22)
 
-Turn the survey probes (`temp/spec_survey/listarray/`, `…/collections/`,
-`…/strings/`, `…/types/`, `temp/ledger_repro/`) into `test/lambda/*.ls` with
-`*.txt` goldens written **from the rulings**, not from today's output. They
-fail on entry; each later phase turns its subset green. Suggested files:
+The survey probes (`temp/spec_survey/listarray/`, `…/collections/`,
+`…/strings/`, `…/types/`, `temp/ledger_repro/`) became fixtures with `*.txt`
+goldens written **from the rulings**, not from today's output. Because the
+baseline gate (`test_lambda_gtest`) auto-discovers `test/lambda/` and
+`test/lambda/proc/`, red-on-entry fixtures live in **`test/lambda/ext/`** and
+**`test/lambda/proc-ext/`** (the `test_lambda_extended_gtest` directories, run
+by `test-lambda-full`) and **move to the baseline directories as each phase
+turns them green**. Every fixture header names its phase. The two negative
+fixtures (`test/lambda/negative/semantic/occurrence_retired_{plus,range}.ls`,
+`@expect-error: E100`) are registered in `test_lambda_errors_gtest` by P5,
+with the diagnostic's final wording; the JS Arguments guard is written in P1
+next to the rename (it must be green before and after). On entry: every
+fixture parses except `type_families.ls` (`T{n,m}` is new syntax, P5); the
+goldens differ from today's output exactly where the rulings differ. Two
+fixtures pin decisions the rulings leave to §1.3: `pipe_that_kind` records
+that a pipe or `that` result is a *value* — `[L that ~ > 9, 9]` is
+`[null, 9]` and `[null |> ~ + 1]` is `[null]` — not a syntactic producer;
+`spread_star` shows the pooled-literal mutation only under `LAMBDA_TIER=jit`,
+so when it moves to the baseline it also joins the tier-pinned list in
+`test_lambda_gtest.cpp` (`interp`/`jit`/`auto`). Files:
 
 | Fixture | Pins |
 |---|---|
@@ -254,11 +271,12 @@ fail on entry; each later phase turns its subset green. Suggested files:
 | `spread_star.ls` | S12.3.5v2: `[*a, 3]` leaves `a` unchanged (call twice through a function — the JIT pooled-literal case), `*range`, `*null`, `*scalar`, `[*xs]` packager |
 | `content_normalize.ls` (extend the existing S2.6 fixtures) | S2.2.3 lone `""`, binary merge, S2.6.5 writes: `e[i] = null`/`""`/list/string-beside-string, removal merging, `push` on an element |
 | `type_families.ls` + `negative/…/occurrence_retired.ls` | S11.1.6: `null is int*`, `[] is int?`, `[5] is int*`, `[5,6] is int*`, `(1,2) is int[2]`, `{f: int*}` cases, `int{2}` vs `int[2]`, `\(d{3})`, `T[n+]`/`T[n, m]` rejected with the hint |
-| `proc/list_var_mutation.ls` | kind survives `push`/`splice`/`a[i]=` on a `var` list; COW detach keeps the bit |
+| `proc-ext/content_writes.ls` | S2.6.5 content writes in a `pn` (the write half of `content_normalize`) |
+| `proc-ext/list_var_mutation.ls` | kind survives `push`/`a[i]=` on a `var` list; `push(a, e)` pushes `null`; a field stores the image |
 
-Also add the JS guard: a `test_js_*` case that a Lambda list published into
-JS is a plain array and that Arguments objects still iterate with a snapshot
-length (the renamed bit).
+The JS guard — a `test_js_*` case that a Lambda list published into JS is a
+plain array and that Arguments objects still iterate with a snapshot length —
+belongs to P1 (see above).
 
 ### P1 — One kind bit, three appends, two finish modes (§1.1–§1.3, §1.5, §1.7)
 
@@ -348,6 +366,12 @@ bare int) — re-verify each golden against S11.1.6. User docs:
 `doc/Lambda_Type.md` §Type Occurrences (`int[3+]`, `int[2, 10]` rows, and the
 `T*`/`T+` "pattern-only cardinality" rows), `doc/Lambda_Data.md` (`s[-1]`),
 `doc/Lambda_Sys_Func.md` (`zip` shown as list pairs).
+
+Also found while writing the fixture: an occurrence type cannot be written
+inline as a `<:` operand — in value position `int* <: T` parses `*` as
+multiplication (S11.1.4v2 says the operands are type values). The fixture
+binds them first (`type IntRun = int*`); P5 decides whether `<:` should take a
+type-expression operand like `is` does, or whether binding stays the rule.
 
 Acceptance: `type_families`, the negative fixture, all migrated goldens.
 
@@ -448,10 +472,226 @@ suffixes. Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
 
 | Phase | Status | Fixtures | Baseline (jit / interp) | Notes |
 |---|---|---|---|---|
-| P0 fixtures | not started | — | — | write goldens from the rulings |
-| P1 kind bit + appends + finish modes | not started | | | JS rename included |
+| P0 fixtures | **done 2026-09-22** | 11 in `ext/`, 2 in `proc-ext/`, 2 negative | n/a (ext, red by design) | goldens from the rulings; all parse except `type_families` (P5 syntax) |
+| P1 kind bit + appends + finish modes + library migration | **done in the working tree 2026-09-22** (see §7–§9) | `list_kind_literal` green both tiers and moved to the baseline; new baseline fixtures `list_positional_verbatim`, `list_declarations`; `list_var_mutation` blocked by LR12-27 (§9); `list_collapse_void` green except its P2 `take` lines; new baseline fixture `ndim_sequence_ops` | official `make test-lambda-baseline`: every remaining failure fails on HEAD, flakes, or arrived with the 17:15 upstream rebase (§9) | library + test migration (§8); positional sites, S2.5.4 declarations, type names (§9) |
 | P2 transforms | not started | | | |
 | P3 landing + content writes | not started | | | choose image strategy by measurement |
 | P4 text, `++`, `*` | not started | | | LR05-9 first |
 | P5 type families + migration | not started | | | `make generate-grammar` |
 | P6 close-out | not started | | | Appendix A, ledger, rename file |
+
+---
+
+## 7. P1 status (2026-09-22)
+
+**Landed in the working tree (both tiers, uncommitted):** `is_content` renamed
+`is_js_arguments` (JS Arguments marker only; JS gate spot-checked); the kind
+bit `is_spreadable` set by `list_end` and every former `is_content = 1`
+producer; `array_push` is the sequence append (splices a list by its bit,
+skips the item-position marker, captures spliced items); two finish modes —
+`list_end` / `list_collapse_value` (value position) and `list_end_item` /
+`list_collapse_item` (item position), chosen by the producer's own position
+through `MirTranspiler::list_item_producer` / `InterpState::list_item_producer`
+(`mir_box_sequence_item`, `interp_eval_sequence_item`); for-expressions collapse
+whatever their clauses; list literals and functional blocks use the sequence
+append (no normalization), the script root keeps the content append;
+`array_end` no longer returns `ITEM_NULL_SPREADABLE` (the marker survives only
+as the item-position finish, consumed by the enclosing append — the plan's
+"retire" became "confine"); the syntactic `has_spreadable` push selection is
+gone (the scan still gates the compact/N-D paths; pipe items keep
+`array_push_spread_all` until P2); `()` parses as the empty list; `type()`
+names `list`, `is list` tests the bit; `child_query_collect` distributes only
+over a list's container items; async launch arguments use the verbatim append.
+
+**Baseline (`test_lambda_gtest`, debug, default tier):** 132 failures. Against a
+debug build of HEAD without these changes (`temp/p1_ctl_debug_lambda.exe`): 69
+fail on HEAD too — a flaky satellite-compile crash (`prepass_collect_call_sites`
+reads a stale AST param; `pdf/phase1_skeleton` crashes 4/6 on HEAD) and a
+deterministic `conc/*` "invalid task handle" on the interp/auto tiers (the
+synchronous `main` satellite re-loads the `worker` module, whose layout BSS is
+then read as zero: "sealed layout changed … requested var_count=0"). 52 are
+regressions from P1, in two classes, both direct consequences of S2.5.1v2 /
+S2.5.5v2:
+
+1. *Goldens that encode the old behaviour* (~20 tests): top-level lists print
+   as content (`for … order by` at the top level), empty array filters are
+   `[]`, bound for-results spread in array literals (`[t1, t2, t3]` with a
+   list-returning function), one-item for-results are their item.
+2. *Library code that treats a bound for-expression as an array* (chart,
+   latex, math, pdf, editing, dom-derive; ~120 `let x = (for …)` sites in
+   `lambda/package/`, more as bare function results): at one item the list
+   collapses (`hits[0]` on the collapsed map is `null` —
+   `pdf/resolve.ls:51 find_obj`; `latex children_array` returns the string, so
+   `[0]` is its first character), at zero it is `null`. The migration is not
+   mechanical: a data use needs `[for …]`, but a content use (building element
+   children) needs the list, and some sites are both.
+
+**Spec conflict found:** S8.3.3 ("for-expressions and spreads splice at the
+construction site — by the time `count` applies, there is one value"; pinned
+by `len_iter_law.ls` `len([1, bound_for, 4])` = 3) contradicts S2.5.1v2 /
+S2.5.6 (a bound list spreads wherever it lands: 4). Needs S8.3.3v2.
+
+## 8. P1 library and test migration (2026-09-22, USER chose "migrate now")
+
+**Finding the sites.** A temporary compile-time log in `transpile_for` and in
+the multi-value list/block paths (removed afterwards) recorded every list
+producer that finishes in **value position** — exactly the sites whose meaning
+S2.5.5v2 changed. Importing every `lambda/package` module under
+`LAMBDA_TIER=jit` gave **205 sites** (186 for-expressions, 19 multi-value
+blocks); no other list-literal site existed. Every other for-expression sits in
+an item position, where splicing is unchanged.
+
+**Rule applied.** The old value-position for-result was an array (never
+collapsed, `[]` when empty) that nevertheless spread in content and `(…)`
+lists. So: a value-position for-result used as **data** (indexed, `len`,
+iterated, `join`/`sum`/`max`/`min`, piped, filtered, spread into `map([...])`,
+stored in a field, passed to a helper that iterates it) becomes `[for …]`,
+which restores the old array exactly; a result placed **only as content**
+keeps the list (content drops `null` and splices, so collapse is invisible
+there). Callers of every function whose tail was wrapped were checked for
+content or `(…)` placement: none. 182 for-sites wrapped (152 by a
+paren-to-bracket / bracket-insertion tool, 36 by hand where the end was
+multi-line or an element literal), across chart, pdf, math, latex, openapi,
+dom, editor. Kept: `graph/transform/html.ls:357,360` (content branch),
+`dom/details.ls:32` (a `pn` effect loop).
+
+**Effect-sequencing blocks (`dom`).** A functional block now yields every
+statement's value (S2.5.3, S2.5.1v2), so
+`fn abort(host, token) { dom.edit_abort_transaction(host, token)  false }`
+returns `(null, false)` — a truthy list. Ten such blocks in `dom/` bind the
+effect instead (`let _aborted = …`, S2.5.4), which is correct under the ruling
+and under any future "blocks drop null" ruling. `let _` cannot repeat in one
+scope (E209), hence distinct names. **Raised with the user** as a language
+consequence.
+
+**Runtime bug exposed and fixed (S1.6).** `[for (i …) [x, y]]` is an array
+literal, so `array_end` promotes uniform numeric rows to one 2-D `ArrayNum`;
+`reverse`, `sort`, `unique`, `take`, `take_last`, `drop`, `slice` walked its
+flat storage (`len(reverse([[1,2],[3,4],[5,6]]))` was 6 — also at HEAD). They
+now unstack an N-D input into its leading-axis rows (`array_num_get`, the view
+indexing and `for … in` already use) and re-dispatch (`VECTOR_NDIM_ROWS`,
+`lambda-vector.cpp`). Fixture `test/lambda/ndim_sequence_ops.ls`.
+
+**Tests.** Goldens updated where the test's subject is list/for/pipe semantics
+and the new output is the ruled one: `for_clauses_test` (top-level ordered
+fors print as content; `[[84]]` → `[84]`, the LR05-10 `order by` fix),
+`pipe_where` and `that_implicit_name` (empty array pipe/`that` is `[]`),
+`map_spread_len` and `closure_capture_sites` (a bound or returned list spreads
+in an array literal), `for_group_test`, `keyword_binding_clause_priority`,
+`for_expr_content` (top-level lists are content), `len_iter_law` (S8.3.3v2),
+`proc/function_colour_poly`. Scripts migrated with `[for …]` where the list
+shape is incidental to the test's subject: `for_at_pairs`,
+`io_sqlite_for_clauses` (top-level string lists would merge as content),
+`complex_iot_report_html` (68 data sites), `dom_derive_{query,chardata,
+traversal}` (`fn descendants(n) { [for (c …) (c, *descendants(c))] }` — the
+recursive `(c, descendants(c))` now carried `null` for leaves, S2.5.5v2),
+`pdf/phase7_text_state`, `proc/type_infer_carrier_lanes`. Reverted one script
+migration (`function_colour_poly`): wrapping a `function`-typed call's result
+in `[…]` made the checker infer `(int | error)[]` and raise E208 where the
+bare for-expression did not — an asymmetry worth a ledger look.
+
+**Spec.** S8.3.3v2 (a list splices wherever it lands; `count` of a list is its
+`len`) and the S12.3.5v2 clarification that `*x` is the list of `x`'s items
+(which yields every case the ruling lists) — raised with the user.
+
+**Gate.** Debug `test_lambda_gtest` 52 failures, compared one by one against a
+debug HEAD binary run with HEAD's scripts, goldens and packages
+(`LAMBDA_HOME=temp/p1_pristine/lambda`): 44 fail there too, 8 pass on both on
+re-run (satellite-compile race under parallel load). **No new failure.** The
+pre-existing debug failures (flaky satellite teardown crash — `pdf/*`,
+`graph/*`; deterministic `conc/*` "invalid task handle" on interp/auto; large
+module MIR-interp crash importing `lambda.doc.math.metrics`) are unrelated to
+this plan.
+
+## 9. P1 official gate (2026-09-22)
+
+The full `make test-lambda-baseline` exercised suites the direct runs had not,
+and three P1 defects surfaced. All three are fixed.
+
+**Positional sites (D2.6.5v3).** `array_push` had spliced only `is_content`
+lists; P1 made it splice every list, and code that built positional
+structures with it began splitting for-results. A for-expression passed as one
+argument became several in the rest list (`count_args(for (x in [1, 2]) x)`
+was 2, the LR09-9 invariant, std `variadic_args`). Every positional site now
+uses the verbatim append `array_push_verbatim` (renamed from
+`array_push_argument`): rest and argument lists (JIT, dynamic-call adapter,
+dynamic apply, JS timer packs, concurrency args), group/join/order keys and
+rows, path keys, query matches, clones, set operators, element-copying
+transforms, `zip` pairs, index-addressed vector results, and the hosted-Python
+list operations. The sequence and verbatim appends share one single-item
+store (`array_append_one`); the verbatim append now rehomes 64-bit scalars
+through `array_set` like every other store. The sequence append tests the
+empty marker and the list bit before a native-lane store, which had kept a
+list whole in a container lane. The same sweep fixed two HEAD bugs: a
+list-valued `order by` key did not sort (`[3, 1, 2]`), and a list-valued
+`group by` key made the wrong groups. Fixture:
+`test/lambda/list_positional_verbatim.ls`.
+
+**Declarations (S2.5.4, [LR02-19](../Lambda_Issue_Ledger.md)).** The let-group
+builder kept only the last non-declaration item, so `(let x = 1, x, 2)` was
+`2` (HEAD too). A group of one declaration evaluated the declarator
+(`(let x = 5)` was `5`), and a block of one declaration took the declaration's
+type, sending `[{ let x = 5 }, 9]` down the compact int lane (`[0, 9]` on the
+interpreter). A declaration-only group or block is now `null` and splices
+nothing in an item position. An instrumented scan found no multi-item
+let-group or lone-declaration group in the test corpus or the packages.
+Fixture: `test/lambda/list_declarations.ls`.
+
+**Handlers (S12.1.3, [LR12-29](../Lambda_Issue_Ledger.md)).** The Radiant
+gate showed paste into a text field doing nothing. The interpreter ran `on`
+handler bodies as functional blocks; once blocks kept `null`, the `<input>`
+keydown handler returned `(null, verdict)`, a truthy list read as "handled".
+Handler frames are now procedural in the interpreter, as they always were in
+MIR. The todo apps behind the UI tests (`test/lambda/ui/todo.ls`, `todo2.ls`)
+held value-position for-results used as data (`len(for …)`,
+`~.items = for …`, `max(for …)`); they now use `[for …]`, the library rule.
+
+**Type names.** `print(type(l))` and `string(type(l))` said `array` for a
+list while the top-level printer said `list`. Printing, `string()` and
+`name()` now share `type_alias_name` (`integer`, `number`, `list`), which
+also retired their copies of the `integer`/`number` special cases.
+
+**Goldens and tests.** Five std goldens follow the rulings: ordered
+for-expressions spread and print as content (S2.5.2v2; `for_clauses`,
+`for_expression`, `for_group`, `for_let`) and an array filtered to nothing is
+`[]` (S10.1.5v2; `where_filter`). The parser POC's
+`(// comment\n)` rejection became an accept test for `()` (S2.5.5v2); the
+Tree-sitter reference grammar still has no list literal at all
+([LR02-18](../Lambda_Issue_Ledger.md)), so `()` there waits for P5.
+`list_kind_literal` moved to the baseline.
+
+**Residue, all outside P1.** Each was compared against a debug build of the
+pre-rebase HEAD and of the upstream HEAD pulled in at 17:15 (`bb3909e36`,
+worktree `temp/tune14/head_control`):
+- The forced-GC sweep fails 62–64 cases against 61–73 on HEAD, with the same
+  signatures: a nondeterministic memtrack leak line and a shutdown SIGTRAP.
+- `dom_document_cookie`, `mathlive` and `tune23_record_constructor` fail on
+  HEAD too. MathLive shows 90 baseline regressions with P1 against 95–101
+  without, and every P1 regression is also a HEAD regression.
+- Arrived with the upstream rebase, not with P1: the `cow_move_out_bind` crash
+  (opt contract, tier parity, `proc_cow_move_out_bind`), the
+  `js_corpus_array_methods` ratchet (+419 instructions), and the
+  `graph_layout` goldens. The upstream HEAD fails all three identically.
+- `list_var_mutation` stays red. `push` onto an unannotated int array is a
+  silent no-op ([LR12-27](../Lambda_Issue_Ledger.md), not in this plan), which
+  blocks three of its lines. The field line is P3.
+- A satellite teardown race in `test-batch` ([LR01-15](../Lambda_Issue_Ledger.md))
+  that P1's timing made frequent (7 of 10 runs of one std pair, 3 of 10 on
+  the pre-rebase HEAD) took out 41 std cases in one gate run. Fixed by
+  quiescing satellite workers in `runtime_reset_heap`.
+- Radiant (`make test-radiant-baseline`): with the handler fix and the todo
+  migration, the UI automation baseline passes 119 of 119 standalone. The
+  layout runner needs `NODE_PATH=<repo>/node_modules`, because
+  `test/layout` links into the lambda-test checkout, which has no
+  `puppeteer`. Every remaining failure fails the same way on upstream HEAD, or
+  passes standalone and flakes only under the gate's load:
+  - DOM UI: `dom_codemirror_type`, `dom_pkg_context_menu`,
+    `dom_pkg_focus_policy`, `dom_pkg_keyboard_activation`.
+  - View command: three leak checks and the script-budget test.
+  - `radiant_view_pdf2_iframe_interaction`.
+  - The page snapshot, which is stale against the lambda-test data (4 new
+    pages; same five per-file drops).
+- Rebuilding `lang-python.dylib` for the verbatim switch exposed a latent
+  linkage break from 2026-09-18 ([LR01-14](../Lambda_Issue_Ledger.md), fixed
+  in `py_runtime.h`). `test_py_gtest` passes 39 of 43, and the four failures
+  are identical on upstream HEAD.

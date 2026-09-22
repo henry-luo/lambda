@@ -497,6 +497,17 @@ struct MirTranspiler {
     // module-state slot nor the module-level native-array specialization.
     bool in_lexical_list_declaration;
 
+    // S2.5.5v2 void versus null: the list producer (a for-expression, a `(…)`
+    // literal, or a functional block) that sits directly in an item position.
+    // It finishes with the item-position marker, which only the enclosing
+    // builder's append sees; everywhere else a list producer collapses to its
+    // value. Set by mir_box_sequence_item, consumed once at the producer.
+    AstNode* list_item_producer;
+    // the finish mode of the for-expression currently being emitted
+    bool for_finish_item_position;
+    // the script's root content node: content (S2.6.1), not a block
+    AstNode* script_root_content;
+
     // Whether we're inside a proc function body (pn)
     bool in_proc;
     bool preserve_proc_if_result;
@@ -1248,6 +1259,8 @@ static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node,
         ValueRep required = VALUE_REP_NONE);
 static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node);
 static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node);
+static MIR_reg_t mir_box_sequence_item(MirTranspiler* mt, AstNode* item);
+static bool mir_take_list_item_position(MirTranspiler* mt, AstNode* producer);
 static bool mir_emit_const_folded_value(MirTranspiler* mt, AstNode* node,
         ValueRep required, MirValue* out);
 static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident);
@@ -4593,14 +4606,12 @@ static MIR_reg_t emit_variadic_args(MirTranspiler* mt, AstNode** resolved_args,
             int val_root = create_gc_root_slot(mt, val);
             val = load_gc_root_slot(mt, val_root, "varg_val");
             vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-            // An argument list is not element content. `list_push` applies
-            // S16.7's content rules — it drops `null` outright and
-            // concatenates a string onto the previous element — which
-            // silently collapsed f("a","b") to ["ab"] and f(1,null,2) to
-            // [1,2], losing both arity and values. `array_push` appends
-            // verbatim; it keeps the same content-list flattening, so only
-            // the normalization this list never wanted is dropped.
-            emit_call_void_2(mt, "array_push",
+            // A rest list is positional (D2.6.5v3): one argument is one item.
+            // The content append drops `null` and merges strings (f("a","b")
+            // arrived as ["ab"]); the sequence append splices a list argument
+            // (`count_args(for …)` counted its items). Only the verbatim
+            // append keeps arity and values.
+            emit_call_void_2(mt, "array_push_verbatim",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         }
@@ -8363,7 +8374,7 @@ static MIR_reg_t mir_emit_cow_path_array(MirTranspiler* mt, const AstCowPath* pa
         AstNode* segment = i == path->count ? terminal : path->segment[i];
         bool is_member = i == path->count ? terminal_is_member : path->is_member[i];
         MIR_reg_t key = mir_emit_cow_path_key(mt, segment, is_member);
-        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, array),
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, array),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     }
     return emit_box_container(mt, array);
@@ -8521,7 +8532,7 @@ static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
     for (int i = 0; i < path->count; i++) {
         MIR_reg_t key = mir_emit_cow_path_key(mt, path->segment[i], path->is_member[i]);
         MIR_reg_t live_keys = load_gc_root_slot(mt, keys_root, "borrow_keys");
-        emit_call_void_2(mt, "array_push", MIR_T_P,
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
             MIR_new_reg_op(mt->ctx, live_keys),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     }
@@ -15149,7 +15160,7 @@ static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool us
     for (AstJoinKey* key = loop->join_keys; key; key = (AstJoinKey*)key->next) {
         AstNode* expr = use_new_side ? key->new_expr : key->prior_expr;
         MIR_reg_t boxed = transpile_box_item(mt, expr);
-        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
     }
     return emit_box_container(mt, tuple);
@@ -15195,15 +15206,15 @@ static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_re
         mir_join_bind_item_var(mt, loop->index_name, loop->index_entry,
             mir_join_index_type(loop), idx_item);
         if (idx_vals) {
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, idx_vals),
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, idx_vals),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
         }
     }
-    emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, rows),
+    emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, rows),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, row));
     if (collect_keys) {
         MIR_reg_t key_item = mir_join_key_item(mt, loop, true);
-        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, row_keys),
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, row_keys),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item));
     }
 
@@ -15258,7 +15269,11 @@ static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node
     } else {
         final_reg = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, output));
     }
-    return final_reg;
+    // A for-expression is a list whatever its clauses (S2.5.2v2): none is null
+    // (or, in an item position, the skip marker), one is its item (S2.5.5v2).
+    return emit_call_1(mt,
+        mt->for_finish_item_position ? "list_collapse_item" : "list_collapse_value",
+        MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, final_reg));
 }
 
 static void mir_emit_for_let_clause(MirTranspiler* mt, AstForNode* for_node) {
@@ -15301,8 +15316,9 @@ static void mir_emit_for_where_clause(MirTranspiler* mt, AstForNode* for_node,
 static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
         MIR_reg_t output, MIR_reg_t keys_arr, bool result_demanded) {
     if (result_demanded) {
+        // a for body is an item position: a nested for splices (S2.5.2v2)
         MIR_reg_t boxed_result = for_node->then
-            ? transpile_box_item(mt, for_node->then) : emit_null_item_reg(mt);
+            ? mir_box_sequence_item(mt, for_node->then) : emit_null_item_reg(mt);
         emit_call_void_2(mt, "array_push_spread", MIR_T_P,
             MIR_new_reg_op(mt->ctx, output),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
@@ -15314,7 +15330,7 @@ static void mir_emit_for_body_and_order(MirTranspiler* mt, AstForNode* for_node,
         AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
         if (result_demanded) {
             MIR_reg_t boxed_key = transpile_box_item(mt, first_spec->expr);
-            emit_call_void_2(mt, "array_push", MIR_T_P,
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
                 MIR_new_reg_op(mt->ctx, keys_arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
         }
@@ -15347,7 +15363,7 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
     mir_join_bind_tuple_vars(mt, first, NULL, tuple_item);
     mir_emit_for_let_clause(mt, for_node);
     mir_emit_for_where_clause(mt, for_node, collect.continue_label);
-    emit_call_void_2(mt, "array_push", MIR_T_P,
+    emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
         MIR_new_reg_op(mt->ctx, group_rows),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, tuple_item));
 
@@ -15364,13 +15380,13 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
         for (AstGroupKey* gk = for_node->group->keys; gk;
                 gk = (AstGroupKey*)gk->next) {
             MIR_reg_t boxed_key = transpile_box_item(mt, gk->expr);
-            emit_call_void_2(mt, "array_push", MIR_T_P,
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
                 MIR_new_reg_op(mt->ctx, key_tuple),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
         }
         group_key_item = emit_box_container(mt, key_tuple);
     }
-    emit_call_void_2(mt, "array_push", MIR_T_P,
+    emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
         MIR_new_reg_op(mt->ctx, group_keys),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, group_key_item));
 
@@ -15391,7 +15407,7 @@ static MIR_reg_t transpile_for_join_grouped(MirTranspiler* mt,
         MIR_reg_t alias_str = emit_call_1(mt, "heap_create_name", MIR_T_P,
             MIR_T_P, MIR_new_reg_op(mt->ctx, alias_ptr));
         MIR_reg_t alias_item = emit_box_string(mt, alias_str);
-        emit_call_void_2(mt, "array_push", MIR_T_P,
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
             MIR_new_reg_op(mt->ctx, aliases),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, alias_item));
     }
@@ -15499,7 +15515,7 @@ static MIR_reg_t transpile_for_join(MirTranspiler* mt, AstForNode* for_node,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, pidx));
         mir_join_bind_tuple_vars(mt, first, cur, tuple_item);
         MIR_reg_t prior_key = mir_join_key_item(mt, cur, false);
-        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, prior_keys),
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, prior_keys),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, prior_key));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, pidx),
             MIR_new_reg_op(mt->ctx, pidx), MIR_new_int_op(mt->ctx, 1)));
@@ -15999,7 +16015,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         mir_emit_for_let_clause(mt, for_node);
         mir_emit_for_where_clause(mt, for_node, l_continue);
 
-        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, group_rows),
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, group_rows),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, current_item));
 
         int key_count = 0;
@@ -16013,12 +16029,12 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             MIR_reg_t tuple = emit_call_0(mt, "array_plain", MIR_T_P);
             for (AstGroupKey* gk = for_node->group->keys; gk; gk = (AstGroupKey*)gk->next) {
                 MIR_reg_t boxed_key = transpile_box_item(mt, gk->expr);
-                emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
+                emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, tuple),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
             }
             group_key_item = emit_box_container(mt, tuple);
         }
-        emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, group_keys),
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, group_keys),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, group_key_item));
 
         emit_label(mt, l_continue);
@@ -16035,7 +16051,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             MIR_reg_t alias_str = emit_call_1(mt, "heap_create_name", MIR_T_P,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, alias_ptr));
             MIR_reg_t alias_item = emit_box_string(mt, alias_str);
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, aliases_arr),
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, aliases_arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, alias_item));
         }
 
@@ -16073,7 +16089,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
 
         if (result_demanded) {
             MIR_reg_t boxed_result = for_node->then
-                ? transpile_box_item(mt, for_node->then) : emit_null_item_reg(mt);
+                ? mir_box_sequence_item(mt, for_node->then) : emit_null_item_reg(mt);
             emit_call_void_2(mt, "array_push_spread", MIR_T_P,
                 MIR_new_reg_op(mt->ctx, output),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
@@ -16084,7 +16100,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         if (has_order && result_demanded) {
             AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
             MIR_reg_t boxed_key = transpile_box_item(mt, first_spec->expr);
-            emit_call_void_2(mt, "array_push", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
         } else if (has_order) {
             // Result demand suppresses key storage, not evaluation of an
@@ -16481,22 +16497,6 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
 
     if (mt->loop_depth > 0) mt->loop_depth--;
     pop_scope(mt);
-
-    // If array_end returned ITEM_NULL_SPREADABLE (empty for-expr),
-    // convert to a proper empty Array* so [for (x in []) x] returns []
-    uint64_t NULL_SPREAD = (uint64_t)LMD_TYPE_NULL << 56 | 1;
-    MIR_reg_t is_spread = new_reg(mt, "sns", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_spread),
-        MIR_new_reg_op(mt->ctx, final_reg), MIR_new_int_op(mt->ctx, (int64_t)NULL_SPREAD)));
-    MIR_label_t l_not_spread = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_not_spread),
-        MIR_new_reg_op(mt->ctx, is_spread)));
-    // Use the Array* pointer directly — it's a valid empty container
-    MIR_reg_t empty_arr = emit_box_container(mt, output);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_reg),
-        MIR_new_reg_op(mt->ctx, empty_arr)));
-    emit_label(mt, l_not_spread);
-
     return final_reg;
 }
 
@@ -16505,8 +16505,11 @@ static MirValue transpile_for(MirTranspiler* mt, AstForNode* for_node,
     // D8.3.4: an iterator body is a separate control-flow region.
     mir_binder_raw_guard_cse_clear(mt);
 
-    return mir_value_from_reg(mt, (AstNode*)for_node,
-        emit_for_result(mt, for_node, result_demanded), VALUE_REP_ITEM,
+    bool saved_item_position = mt->for_finish_item_position;
+    mt->for_finish_item_position = mir_take_list_item_position(mt, (AstNode*)for_node);
+    MIR_reg_t result = emit_for_result(mt, for_node, result_demanded);
+    mt->for_finish_item_position = saved_item_position;
+    return mir_value_from_reg(mt, (AstNode*)for_node, result, VALUE_REP_ITEM,
         ((AstNode*)for_node)->type);
 }
 
@@ -20548,7 +20551,10 @@ static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr
 }
 
 static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
-    // Check if any child is a for-expression, spread, or let binding
+    // A child that can produce a stream (for-expression, spread, pipe) keeps the
+    // literal off the compact and N-D paths. It no longer picks the append:
+    // every item goes through the sequence append, which spreads a list by its
+    // kind bit, never by the syntax around it (S2.5.1v2, D2.6.5v3).
     bool has_spreadable = false;
     bool has_pipe_spread = false;  // pipe expressions spread their array results in array literals
     bool has_let = false;
@@ -20870,7 +20876,7 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
     MIR_reg_t arr = emit_call_0(mt, "array", MIR_T_P);
     int arr_root = create_pointer_gc_root_slot(mt, arr);
 
-    // Handle empty arrays without array_end() which returns ITEM_NULL_SPREADABLE
+    // An empty literal needs no finish.
     if (!arr_node->item) {
         // Array* pointer is already a valid Item (container pointer)
         if (has_let) pop_scope(mt);
@@ -20887,7 +20893,7 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
         bool const_folded = mir_emit_const_folded_value(mt, item, VALUE_REP_ITEM,
             &folded_item_value);
         if (const_folded) boxed = folded_item_value.reg;
-        else boxed = transpile_box_item(mt, item);
+        else boxed = mir_box_sequence_item(mt, item);
 
         // let bindings are transparent - evaluate for side effect but don't push to array
         if (item->node_type == AST_NODE_VARIABLE_DECLARATOR) {
@@ -20903,14 +20909,6 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
             emit_call_void_2(mt, "array_push_spread_all",
-                MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-        } else if (has_spreadable) {
-            // When any child is spreadable, use array_push_spread for ALL children
-            int item_root = create_gc_root_slot(mt, boxed);
-            boxed = load_gc_root_slot(mt, item_root, "arr_item");
-            arr = load_gc_root_slot(mt, arr_root, "arrb");
-            emit_call_void_2(mt, "array_push_spread",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
         } else if (item->node_type == AST_NODE_SPREAD) {
@@ -20937,24 +20935,9 @@ static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
     }
 
     arr = load_gc_root_slot(mt, arr_root, "arrb");
+    // an empty literal (every item a void list producer) is `[]`: array_end
+    // never reports the item-position marker (S2.5.5v2)
     MIR_reg_t arr_result = emit_call_1(mt, "array_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, arr));
-
-    // If array contains spreadable children (for-expressions) and all produce
-    // empty results, array_end returns ITEM_NULL_SPREADABLE. For top-level
-    // array literals [for ...], convert to proper empty array.
-    if (any_spread) {
-        uint64_t NULL_SPREAD = (uint64_t)LMD_TYPE_NULL << 56 | 1;
-        MIR_reg_t is_sn = new_reg(mt, "sn2", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_sn),
-            MIR_new_reg_op(mt->ctx, arr_result), MIR_new_int_op(mt->ctx, (int64_t)NULL_SPREAD)));
-        MIR_label_t l_not_sn = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_not_sn),
-            MIR_new_reg_op(mt->ctx, is_sn)));
-        MIR_reg_t empty_a = emit_box_container(mt, arr);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_result),
-            MIR_new_reg_op(mt->ctx, empty_a)));
-        emit_label(mt, l_not_sn);
-    }
 
     if (has_let) pop_scope(mt);
     return arr_result;
@@ -20995,19 +20978,49 @@ static bool mir_list_item_is_declaration(const AstNode* item) {
         item->node_type == AST_NODE_SYMBOL_PATTERN || item->node_type == AST_NODE_VIEW);
 }
 
+static bool mir_is_list_producer(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    return node && (node->node_type == AST_NODE_FOR_EXPR ||
+        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT);
+}
+
+// Box an item of a list, array literal, block, content, or for-body. A list
+// producer sitting here is in an item position (S2.5.5v2): it finishes with the
+// marker the sequence and content appends skip, so an empty one contributes
+// nothing while a bound empty list is the null value.
+static MIR_reg_t mir_box_sequence_item(MirTranspiler* mt, AstNode* item) {
+    AstNode* saved = mt->list_item_producer;
+    mt->list_item_producer = mir_is_list_producer(item) ? ast_unwrap_primary(item) : NULL;
+    MIR_reg_t boxed = transpile_box_item(mt, item);
+    mt->list_item_producer = saved;
+    return boxed;
+}
+
+// Consume the item-position mark at a list producer's entry: the producer's own
+// children are value positions unless they re-mark themselves.
+static bool mir_take_list_item_position(MirTranspiler* mt, AstNode* producer) {
+    bool item_position = mt->list_item_producer == producer;
+    mt->list_item_producer = NULL;
+    return item_position;
+}
+
 static void mir_lower_list_item(void* owner, AstNode* item, bool is_last) {
     (void)is_last;
     MirListLowering* list = (MirListLowering*)owner;
     if (list->skip_declarations && mir_list_item_is_declaration(item)) return;
     // The boxed fallback is the list's public element representation (S9.3.1).
     mir_note_value_captured(list->mt, item);
-    MIR_reg_t value = transpile_box_item(list->mt, item);
-    emit_call_void_2(list->mt, "list_push_spread",
+    MIR_reg_t value = mir_box_sequence_item(list->mt, item);
+    // a list does not normalize its items (S2.5.1v2): the sequence append
+    // splices a list and keeps null, "" and adjacent strings as they are
+    emit_call_void_2(list->mt, "array_push_spread",
         MIR_T_P, MIR_new_reg_op(list->mt->ctx, list->list),
         MIR_T_I64, MIR_new_reg_op(list->mt->ctx, value));
 }
 
 static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
+    bool item_position = mir_take_list_item_position(mt, (AstNode*)list_node);
+    const char* list_finish = item_position ? "list_end_item" : "list_end";
     // Check for block expression optimization: 1 value item + declarations
     // In this case, emit declarations then return the single value directly
     AstNode* declare = list_node->declare;
@@ -21029,7 +21042,13 @@ static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
             // let lowering keeps C14c's boxed div/mod result checked before a
             // typed local is materialized.
             transpile_lexical_list_declarations(mt, declare);
+            // the lone value stands where the list stands: an item position
+            // passes through to it (S2.5.5v2)
+            if (item_position && mir_is_list_producer(last_value)) {
+                mt->list_item_producer = ast_unwrap_primary(last_value);
+            }
             MirValue result = transpile_expr_value(mt, last_value);
+            mt->list_item_producer = NULL;
             pop_scope(mt);
             return result;
         }
@@ -21043,7 +21062,7 @@ static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
         MIR_reg_t ls = emit_call_0(mt, "list", MIR_T_P);
         MirListLowering list = {mt, ls, false};
         em_visit_linked_nodes(list_node->item, &list, mir_lower_list_item);
-        MIR_reg_t result = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P,
+        MIR_reg_t result = emit_call_1(mt, list_finish, MIR_T_I64, MIR_T_P,
             MIR_new_reg_op(mt->ctx, ls));
         pop_scope(mt);
         return mir_value_from_reg(mt, (AstNode*)list_node, result, VALUE_REP_ITEM,
@@ -21055,7 +21074,7 @@ static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
     MirListLowering list = {mt, ls, true};
     em_visit_linked_nodes(list_node->item, &list, mir_lower_list_item);
 
-    MIR_reg_t result = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P,
+    MIR_reg_t result = emit_call_1(mt, list_finish, MIR_T_I64, MIR_T_P,
         MIR_new_reg_op(mt->ctx, ls));
     return mir_value_from_reg(mt, (AstNode*)list_node, result, VALUE_REP_ITEM,
         ((AstNode*)list_node)->type);
@@ -21235,6 +21254,12 @@ static MirValue transpile_content_finish(MirTranspiler* mt, AstListNode* content
 }
 
 static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_node) {
+    // A functional block is a list producer (S2.5.3): it builds with the
+    // sequence append and finishes in its position's mode (S2.5.5v2). The
+    // script's root is content (S2.6.1): the content append normalizes it.
+    bool item_position = mir_take_list_item_position(mt, (AstNode*)list_node);
+    bool is_root_content = mt->script_root_content == (AstNode*)list_node;
+    const char* list_finish = item_position ? "list_end_item" : "list_end";
     MirFlowScope flow(mt);
     MirBinderRawGuardCseScope guard_cse_scope(mt);
     // Extend block-tail lowering for the proven string accumulator. Other
@@ -21336,11 +21361,16 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
         return result;
     }
 
-    // Single value without declarations: preserve the tail descriptor.
+    // Single value without declarations: preserve the tail descriptor. The lone
+    // value stands where the block stands, so an item position passes through.
     if (value_count == 1 && last_value && decl_count == 0 && stam_count == 0) {
         mt->in_tail_position = tail_position;
-        return transpile_content_finish(mt, list_node, task_scope,
-            transpile_content_tail_value(mt, last_value));
+        if (item_position && mir_is_list_producer(last_value)) {
+            mt->list_item_producer = ast_unwrap_primary(last_value);
+        }
+        MirValue tail_value = transpile_content_tail_value(mt, last_value);
+        mt->list_item_producer = NULL;
+        return transpile_content_finish(mt, list_node, task_scope, tail_value);
     }
 
     // No value items: execute side-effect statements and return null
@@ -21362,7 +21392,7 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
             return result;
         }
         MIR_reg_t ls = emit_call_0(mt, "list", MIR_T_P);
-        MIR_reg_t result_reg = emit_call_1(mt, "list_end", MIR_T_I64,
+        MIR_reg_t result_reg = emit_call_1(mt, list_finish, MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, ls));
         MirValue result = mir_value_from_reg(mt, (AstNode*)list_node,
             result_reg, VALUE_REP_ITEM, &TYPE_LIST, LMD_TYPE_ARRAY);
@@ -21394,14 +21424,14 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
             continue;
         }
         mir_note_value_captured(mt, item);  // S9.3.1
-        MIR_reg_t val = transpile_box_item(mt, item);
-        emit_call_void_2(mt, "list_push_spread",
+        MIR_reg_t val = mir_box_sequence_item(mt, item);
+        emit_call_void_2(mt, is_root_content ? "list_push_spread" : "array_push_spread",
             MIR_T_P, MIR_new_reg_op(mt->ctx, ls),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         item = item->next;
     }
 
-    MIR_reg_t result_reg = emit_call_1(mt, "list_end", MIR_T_I64,
+    MIR_reg_t result_reg = emit_call_1(mt, list_finish, MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, ls));
     MirValue result = mir_value_from_reg(mt, (AstNode*)list_node,
         result_reg, VALUE_REP_ITEM, &TYPE_LIST, LMD_TYPE_ARRAY);
@@ -22528,7 +22558,8 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
                 cscan = content_item;
                 while (cscan) {
                     mir_note_value_captured(mt, cscan);  // S9.3.1
-                    MIR_reg_t val = transpile_box_item(mt, cscan);
+                    // content children are item positions (S2.5.5v2)
+                    MIR_reg_t val = mir_box_sequence_item(mt, cscan);
                     content_roots[ci] = create_gc_root_slot(mt, val);
                     content_ops[ci++] = MIR_new_reg_op(mt->ctx, val);
                     cscan = cscan->next;
@@ -22550,7 +22581,7 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
                 // Use list_push_spread for each content item, then list_end
                 while (content_item) {
                     mir_note_value_captured(mt, content_item);  // S9.3.1
-                    MIR_reg_t val = transpile_box_item(mt, content_item);
+                    MIR_reg_t val = mir_box_sequence_item(mt, content_item);
                     int content_root = create_gc_root_slot(mt, val);
                     val = load_gc_root_slot(mt, content_root, "el_content");
                     el = load_gc_root_slot(mt, el_root, "el_live");
@@ -26953,7 +26984,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 int handle_root = create_gc_root_slot(mt, handle);
                 handles = load_gc_root_slot(mt, handles_root, "select_handles");
                 handle = load_gc_root_slot(mt, handle_root, "select_handle");
-                emit_call_void_2(mt, "array_push",
+                emit_call_void_2(mt, "array_push_verbatim",
                     MIR_T_P, MIR_new_reg_op(mt->ctx, handles),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, handle));
             }
@@ -29818,7 +29849,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             if (dyn_boxed_count < LAMBDA_MAX_FUNCTION_ARGS) {
                 dyn_boxed[dyn_boxed_count++] = boxed_arg;
             }
-            emit_call_void_2(mt, "array_push_argument", MIR_T_P,
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
                 MIR_new_reg_op(mt->ctx, args_list),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_arg));
             arg = arg->next;
@@ -31348,7 +31379,7 @@ static MIR_reg_t mir_emit_checked_map_path_store(MirTranspiler* mt,
         MIR_reg_t array = emit_call_0(mt, "array_plain", MIR_T_P);
         int array_root = create_pointer_gc_root_slot(mt, array);
         for (int i = 0; i < count; i++) {
-            emit_call_void_2(mt, "array_push", MIR_T_P,
+            emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
                 MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, array_root, "typed_path")),
                 MIR_T_I64,
                 MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, key_roots[i], "typed_key")));
@@ -32159,7 +32190,7 @@ static bool mir_emit_typed_ndim_int_store(MirTranspiler* mt, MirVarEntry* root,
     int path_root = create_pointer_gc_root_slot(mt, path_array);
     for (int i = 0; i < dimensions; i++) {
         MIR_reg_t key = emit_box_int(mt, indices[i]);
-        emit_call_void_2(mt, "array_push", MIR_T_P,
+        emit_call_void_2(mt, "array_push_verbatim", MIR_T_P,
             MIR_new_reg_op(mt->ctx,
                 load_gc_root_slot(mt, path_root, "nd_store_path")),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -37959,7 +37990,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 (uint64_t)(1 + ((is_closure || (is_method && !is_closure)) ? 1 : 0) + launch_index));
             MIR_reg_t launch_value = MIR_reg(mt->ctx, launch_name, func);
             launch_args = load_gc_root_slot(mt, launch_args_root, "launch_args");
-            emit_call_void_2(mt, "list_push",
+            // an argument list is stored verbatim: list_push would drop a null
+            // argument and splice a list one (D2.6.5v3)
+            emit_call_void_2(mt, "array_push_verbatim",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, launch_args),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, launch_value));
             launch_param = (AstNamedNode*)launch_param->next;
@@ -41202,6 +41235,7 @@ static void transpile_mir_ast_lower(MirModuleBuild* build) {
     while (child) {
         switch (child->node_type) {
         case AST_NODE_CONTENT: {
+            mt.script_root_content = child;
             MIR_reg_t content_val = transpile_content(&mt, (AstListNode*)child).reg;
             emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, result),
                 MIR_new_reg_op(ctx, content_val)));

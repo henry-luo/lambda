@@ -98,6 +98,43 @@ static Item vector_get(Item item, int64_t index) {
 static void array_transform_copy_cert(Item source, Array* result);
 static void array_transform_copy_cert(Item source, ArrayNum* result);
 
+// An N-D ArrayNum is a sequence of its leading-axis rows, exactly as indexing
+// and `for … in` already see it (S1.6: the N-D representation is invisible).
+// The packed ArrayNum fast paths of the sequence functions below walk the flat
+// storage, so an N-D input is first unstacked into a generic array of its rows.
+static bool vector_is_ndim(Item item) {
+    if (get_type_id(item) != LMD_TYPE_ARRAY_NUM || !item.array_num) return false;
+    ArrayNum* arr = item.array_num;
+    if (!arr->is_ndim || !arr->extra) return false;
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    return shape && shape->ndim >= 2;
+}
+
+static Item vector_unstack_rows(Item item) {
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<Array*> rooted_rows(roots, array_plain());
+    if (!rooted_rows.get()) return ItemError;
+    int64_t count = array_num_iter_count(rooted_source.get().array_num);
+    for (int64_t i = 0; i < count; i++) {
+        Item row = array_num_get(rooted_source.get().array_num, i);
+        array_push_verbatim(rooted_rows.get(), row);
+    }
+    return {.array = rooted_rows.get()};
+}
+
+// Re-dispatch `call` over the unstacked rows of an N-D input, keeping the
+// fresh row array rooted for the whole call.
+#define VECTOR_NDIM_ROWS(item, call) do {                                   \
+    if (vector_is_ndim(item)) {                                             \
+        RootFrame ndim_roots(1);                                            \
+        Rooted<Item> ndim_rows(ndim_roots, vector_unstack_rows(item));      \
+        if (item_is_error(ndim_rows.get())) return ndim_rows.get();         \
+        item = ndim_rows.get();                                             \
+        return call;                                                        \
+    }                                                                       \
+} while (0)
+
 static Array* vector_to_plain_array(Item item, int64_t len) {
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
@@ -582,7 +619,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         if (return_array) array_push(arr_result, res_item);
         else array_push((Array*)list_result, res_item);
     }
-    if (!return_array && list_result) list_result->is_content = 1;
+    if (!return_array && list_result) list_result->is_spreadable = 1;
     return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
 }
 
@@ -1186,7 +1223,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         if (return_array) array_push(arr_result, res_item);
         else array_push((Array*)list_result, res_item);
     }
-    if (!return_array && list_result) list_result->is_content = 1;
+    if (!return_array && list_result) list_result->is_spreadable = 1;
     return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
 }
 
@@ -1278,11 +1315,11 @@ static bool vector_store_result(Rooted<Item>* rooted_result, bool typed,
     } else {
         Array* result = rooted_result->get().array;
         while (result->length < index) {
-            array_push(result, ItemNull);
+            array_push_verbatim(result, ItemNull);
             result = rooted_result->get().array;
         }
         if (index < result->length) result->items[index] = value;
-        else array_push(result, value);
+        else array_push_verbatim(result, value);
     }
     return true;
 }
@@ -2038,7 +2075,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
             }
             symbol_key_list_free(keys);
         }
-        result->is_content = 1;
+        result->is_spreadable = 1;
         return { .array = result };
     }
 
@@ -2054,7 +2091,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
                 array_push((Array*)result, filter ? child : transformed);
             }
         }
-        result->is_content = 1;
+        result->is_spreadable = 1;
         return { .array = result };
     }
 
@@ -2070,7 +2107,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
             array_push((Array*)result, filter ? elem : transformed);
         }
     }
-    result->is_content = 1;
+    result->is_spreadable = 1;
     return { .array = result };
 }
 
@@ -2391,6 +2428,7 @@ Item fn_math_random(Item seed_item) {
 // string/symbol passthrough: strings are singular, not iterable
 Item fn_reverse(Item item) {
     GUARD_ERROR1(item);
+    VECTOR_NDIM_ROWS(item, fn_reverse(item));
     TypeId type = get_type_id(item);
     if (is_text_type_id(type)) return item;
 
@@ -2400,7 +2438,7 @@ Item fn_reverse(Item item) {
     }
     if (len == 0) {
         List* result = list();
-        result->is_content = 1;
+        result->is_spreadable = 1;
         array_transform_copy_cert(item, (Array*)result);
         return { .array = result };
     }
@@ -2409,13 +2447,13 @@ Item fn_reverse(Item item) {
         bool preserve_array = type == LMD_TYPE_ARRAY && !item.array->is_spreadable;
         List* result = list();
         for (int64_t i = len - 1; i >= 0; i--) {
-            array_push((Array*)result, vector_get(item, i));
+            array_push_verbatim((Array*)result, vector_get(item, i));
         }
         array_transform_copy_cert(item, (Array*)result);
         // sort() returns a plain non-spreadable array; reverse() must preserve that
         // container mode so method chains keep bracketed array output.
         if (preserve_array) result->is_spreadable = false;
-        else result->is_content = 1;
+        else result->is_spreadable = 1;
         return { .array = result };
     }
 }
@@ -2424,6 +2462,7 @@ Item fn_reverse(Item item) {
 // string/symbol passthrough: strings are singular, not iterable
 Item fn_sort1(Item item) {
     GUARD_ERROR1(item);
+    VECTOR_NDIM_ROWS(item, fn_sort1(item));
     TypeId type = get_type_id(item);
     if (is_text_type_id(type)) return item;
 
@@ -2433,7 +2472,7 @@ Item fn_sort1(Item item) {
     }
     if (len == 0) {
         List* result = list();
-        result->is_content = 1;
+        result->is_spreadable = 1;
         // Sorting an empty certified array is still a value-preserving
         // transform; retain its element/layout proof for the next boundary.
         array_transform_copy_cert(item, (Array*)result);
@@ -2502,6 +2541,7 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
 // string/symbol passthrough: strings are singular, not iterable
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
+    VECTOR_NDIM_ROWS(item, fn_sort2(item, dir_item));
     TypeId type = get_type_id(item);
     if (is_text_type_id(type)) return item;
 
@@ -2511,7 +2551,7 @@ Item fn_sort2(Item item, Item dir_item) {
     }
     if (len == 0) {
         List* result = list();
-        result->is_content = 1;
+        result->is_spreadable = 1;
         array_transform_copy_cert(item, (Array*)result);
         return { .array = result };
     }
@@ -2687,6 +2727,7 @@ Item fn_reduce(Item collection, Item func_item) {
 // string/symbol passthrough: strings are singular, not iterable
 Item fn_unique(Item item) {
     GUARD_ERROR1(item);
+    VECTOR_NDIM_ROWS(item, fn_unique(item));
     TypeId type = get_type_id(item);
     if (is_text_type_id(type)) return item;
 
@@ -2728,7 +2769,7 @@ Item fn_unique(Item item) {
                 }
             }
             if (!found) {
-                array_push(result, rooted_elem.get());
+                array_push_verbatim(result, rooted_elem.get());
             }
         }
         return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
@@ -2748,7 +2789,7 @@ Item fn_unique(Item item) {
             }
         }
         if (!found) {
-            array_push(result, elem);
+            array_push_verbatim(result, elem);
         }
     }
     result->is_spreadable = spreadable;
@@ -2760,6 +2801,7 @@ Item fn_unique(Item item) {
 // string/symbol: delegates to fn_substring(str, 0, n)
 Item fn_take(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+    VECTOR_NDIM_ROWS(vec, fn_take(vec, n_item));
 
     TypeId type = get_type_id(vec);
     // string/symbol: take = substring(str, 0, n)
@@ -2788,8 +2830,8 @@ Item fn_take(Item vec, Item n_item) {
     }
     else {
         List* result = list();
-        for (int64_t i = 0; i < n; i++) array_push((Array*)result, vector_get(vec, i));
-        result->is_content = 1;
+        for (int64_t i = 0; i < n; i++) array_push_verbatim((Array*)result, vector_get(vec, i));
+        result->is_spreadable = 1;
         array_transform_copy_cert(vec, (Array*)result);
         return { .array = result };
     }
@@ -2798,6 +2840,7 @@ Item fn_take(Item vec, Item n_item) {
 // take_last(vec, n) - last n elements, preserving original order
 Item fn_take_last(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+    VECTOR_NDIM_ROWS(vec, fn_take_last(vec, n_item));
 
     int64_t n = 0;
     if (!lambda_item_to_int64_exact(n_item, &n)) {
@@ -2821,6 +2864,7 @@ Item fn_take_last(Item vec, Item n_item) {
 // string/symbol: delegates to fn_substring(str, n, len)
 Item fn_drop(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+    VECTOR_NDIM_ROWS(vec, fn_drop(vec, n_item));
 
     TypeId type = get_type_id(vec);
     // string/symbol: drop = substring(str, n, char_count)
@@ -2852,8 +2896,8 @@ Item fn_drop(Item vec, Item n_item) {
     }
     else {
         List* result = list();
-        for (int64_t i = n; i < len; i++) array_push((Array*)result, vector_get(vec, i));
-        result->is_content = 1;
+        for (int64_t i = n; i < len; i++) array_push_verbatim((Array*)result, vector_get(vec, i));
+        result->is_spreadable = 1;
         array_transform_copy_cert(vec, (Array*)result);
         return { .array = result };
     }
@@ -2863,6 +2907,7 @@ Item fn_drop(Item vec, Item n_item) {
 // Works for arrays, lists, strings, and binaries
 Item fn_slice(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
+    VECTOR_NDIM_ROWS(vec, fn_slice(vec, start_item, end_item));
     TypeId type = get_type_id(vec);
 
     // null slices to null
@@ -2903,9 +2948,9 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         Array* result = array();
         for (int64_t i = start; i < end; i++) {
             // slice preserves source item boundaries; list_push would merge adjacent strings from split() results.
-            array_push(result, vector_get(vec, i));
+            array_push_verbatim(result, vector_get(vec, i));
         }
-        result->is_content = 1;
+        result->is_spreadable = 1;
         array_transform_copy_cert(vec, result);
         return { .array = result };
     }
@@ -2918,6 +2963,7 @@ Item fn_slice3(Item vec, Item start_item, Item end_item) {
 // slice(vec, start) - extract elements from start to the end
 Item fn_slice2(Item vec, Item start_item) {
     GUARD_ERROR2(vec, start_item);
+    VECTOR_NDIM_ROWS(vec, fn_slice2(vec, start_item));
     if (get_type_id(vec) == LMD_TYPE_NULL) return ItemNull;
 
     int64_t len = fn_len(vec);
@@ -3569,7 +3615,7 @@ Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
         ArrayNum* part = arr_num_slice_axis(arr, ndim, shp, str, (int)axis, c * chunk, (c + 1) * chunk);
         if (!part) return ItemError;
         result = rooted_result.get();
-        array_push((Array*)result, (Item){ .array_num = part });
+        array_push_verbatim((Array*)result, (Item){ .array_num = part });
     }
     return { .array = rooted_result.get() };
 }
@@ -4987,15 +5033,15 @@ Item fn_zip(Item a, Item b) {
         rooted_pair.set(pair);
         rooted_left.set(vector_get(rooted_a.get(), i));
         rooted_right.set(vector_get(rooted_b.get(), i));
-        array_push((Array*)rooted_pair.get(), rooted_left.get());
-        array_push((Array*)rooted_pair.get(), rooted_right.get());
-        array_push((Array*)rooted_result.get(), { .array = rooted_pair.get() });
+        array_push_verbatim((Array*)rooted_pair.get(), rooted_left.get());
+        array_push_verbatim((Array*)rooted_pair.get(), rooted_right.get());
+        array_push_verbatim((Array*)rooted_result.get(), { .array = rooted_pair.get() });
         rooted_pair.set((List*)NULL);
         rooted_left.set(ItemNull);
         rooted_right.set(ItemNull);
     }
     result = rooted_result.get();
-    result->is_content = 1;
+    result->is_spreadable = 1;
     return { .array = result };
 }
 

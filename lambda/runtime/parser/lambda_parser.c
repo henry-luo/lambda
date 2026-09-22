@@ -86,7 +86,6 @@ static const char* const error_expected_arrow_parameter_name = "expected an arro
 static const char* const error_expected_arrow_parameter_close = "expected ')' after arrow parameters";
 static const char* const error_expected_parameter_name = "expected a parameter name";
 static const char* const error_expected_parameter_close = "expected ')' after parameters";
-static const char* const error_expected_expression_inside_parentheses = "expected an expression inside parentheses";
 static const char* const error_arrow_body_expression =
     "'return', 'break', and 'continue' are statements; an arrow '=>' body is an expression";
 static const char* const error_if_condition_close = "expected ')' after if condition";
@@ -1129,9 +1128,8 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
                 error_too_many_grouped_expressions)) return 0;
     }
     parser_context(parser, LAMBDA_REDUCTION_FORM_GROUP_END, first.span, first);
-    if (empty_group) {
-        return parser_fail(parser, error_expected_expression_inside_parentheses, LAMBDA_TOK_IDENTIFIER);
-    }
+    // `()` is the empty list, which is the null value (S2.5.5v2); it reduces
+    // as a group with no children.
     SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_token(parser, LAMBDA_REDUCE_GROUP, LAMBDA_REDUCTION_FORM_GROUP, span, first, children, count);
 }

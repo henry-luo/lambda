@@ -685,6 +685,32 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
 static Item eval_list(InterpFrame* f, AstListNode* list_node);
 static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded);
 static void exec_declaration(InterpFrame* f, AstNode* node);
+
+static bool interp_is_list_producer(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    return node && (node->node_type == AST_NODE_FOR_EXPR ||
+        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT);
+}
+
+// Evaluate an item of a list, array literal, block, content, or for-body. A
+// list producer sitting here is in an item position (S2.5.5v2): it finishes
+// with the marker the sequence and content appends skip, so an empty one
+// contributes nothing while a bound empty list is the null value. Mirrors
+// mir_box_sequence_item so the tiers agree.
+static Item interp_eval_sequence_item(InterpFrame* f, AstNode* item) {
+    AstNode* saved = f->st->list_item_producer;
+    f->st->list_item_producer = interp_is_list_producer(item) ? ast_unwrap_primary(item) : NULL;
+    Item value = eval_expr(f, item);
+    f->st->list_item_producer = saved;
+    return value;
+}
+
+// Consume the item-position mark at a list producer's entry.
+static bool interp_take_list_item_position(InterpFrame* f, AstNode* producer) {
+    bool item_position = f->st->list_item_producer == producer;
+    f->st->list_item_producer = NULL;
+    return item_position;
+}
 static void interp_note_backedge(InterpFrame* frame);
 static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
@@ -1815,7 +1841,7 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
         }
         Array* keys = (Array*)(uintptr_t)path_slot.get().item;
         if (!keys) return false;
-        array_push(keys, key_slot.get());
+        array_push_verbatim(keys, key_slot.get());
     }
     // a builtin mutator's place hands a non-container link back as its value
     *leaf = value_leaf ? cow_place_leaf(root_slot.get(), path_slot.get())
@@ -2495,7 +2521,7 @@ Function* interp_bind_object_method(const TypeMethod* method, Item self) {
 // Vector functions dispatch on the runtime container type_id, so a homogeneous
 // numeric literal MUST become the same compact ArrayNum the JIT builds — a
 // generic Array would silently take a different helper branch (e.g. fn_take's
-// is_content list instead of an ArrayNum slice). Selection mirrors
+// list instead of an ArrayNum slice). Selection mirrors
 // transpile_array; interp_array_elem_kind is the shared gate, and the pre-scan
 // falls the script back for shapes this path does not build (N-D literals,
 // spreads, in-literal lets).
@@ -2628,13 +2654,9 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         return acc.get();
     }
 
-    bool pipe_spread = false;
-    bool has_spreadable = interp_array_has_spread(node, &pipe_spread);
-    bool any_spread = has_spreadable || pipe_spread;
-
     Scratch acc(f);
     acc.set(interp_ptr_item(array()));
-    if (!node->item) return acc.get();   // array_end() on an empty array is spreadable-null
+    if (!node->item) return acc.get();
     for (AstNode* item = node->item; item; item = item->next) {
         // `let` bindings inside an array literal are transparent: they bind but
         // contribute no element.
@@ -2647,13 +2669,15 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
             }
             continue;
         }
-        Item value = eval_expr(f, item);
+        Item value = interp_eval_sequence_item(f, item);
         if (interp_frame_pending(f)) return acc.get();
         // Re-read the accumulator after every element: growth may collect.
         Array* arr = (Array*)(uintptr_t)acc.get().item;
         if (!arr) return ItemError;
+        // The sequence append spreads a list by its kind bit, never by the
+        // literal's syntax (S2.5.1v2, D2.6.5v3).
         if (item->node_type == AST_NODE_PIPE) array_push_spread_all(arr, value);
-        else if (has_spreadable || item->node_type == AST_NODE_SPREAD) {
+        else if (item->node_type == AST_NODE_SPREAD) {
             array_push_spread(arr, value);
         } else if (ast_expr_insertion_needs_capture(item)) {
             // S9.3.1: only a NAMED element needs capture; a fresh one has no
@@ -2664,11 +2688,8 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         }
     }
     Array* built = (Array*)(uintptr_t)acc.get().item;
-    Item result = array_end(built);
-    // An all-empty stream reports spreadable-null; a literal `[for ...]` is an
-    // empty array instead.
-    if (any_spread && result.item == ITEM_NULL_SPREADABLE) return interp_ptr_item(built);
-    return result;
+    // an empty literal is `[]`: array_end never reports the item marker
+    return array_end(built);
 }
 
 // Same order as transpile_map's fallback path: every value is evaluated and
@@ -3269,7 +3290,8 @@ static bool interp_for_apply_row_clauses(ForCtx* fc, bool* keep) {
 // `fn_group_by_keys_items` has replaced the row scope with the `into` value.
 static bool interp_for_emit_value(ForCtx* fc) {
     InterpFrame* f = fc->f;
-    Item value = eval_expr(f, fc->node->then);
+    // a for body is an item position: a nested for splices (S2.5.2v2)
+    Item value = interp_eval_sequence_item(f, fc->node->then);
     if (interp_frame_pending(f)) return false;
     if (fc->output) {
         // Re-read the accumulator: the body evaluation above is a safepoint.
@@ -3282,7 +3304,7 @@ static bool interp_for_emit_value(ForCtx* fc) {
         if (interp_frame_pending(f)) return false;
         if (fc->keys) {
             Array* keys = (Array*)(uintptr_t)*fc->keys;
-            if (keys) array_push(keys, key);
+            if (keys) array_push_verbatim(keys, key);
         }
     }
     return true;
@@ -3356,11 +3378,11 @@ static bool interp_for_append_group_key(ForCtx* fc, uint64_t* key_stream_home) {
             key_part.set(spec->expr ? eval_expr(f, spec->expr) : ItemNull);
             if (interp_frame_pending(f)) return false;
             Array* tuple = (Array*)(uintptr_t)group_key.get().item;
-            if (tuple) array_push(tuple, key_part.get());
+            if (tuple) array_push_verbatim(tuple, key_part.get());
         }
     }
     Array* key_stream = (Array*)(uintptr_t)*key_stream_home;
-    if (key_stream) array_push(key_stream, group_key.get());
+    if (key_stream) array_push_verbatim(key_stream, group_key.get());
     return true;
 }
 
@@ -3402,7 +3424,7 @@ static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
         if (!interp_for_apply_row_clauses(fc, &keep)) break;
         if (keep) {
             Array* rows = (Array*)(uintptr_t)rows_slot.get().item;
-            if (rows) array_push(rows, row_slot.get());
+            if (rows) array_push_verbatim(rows, row_slot.get());
             if (!interp_for_append_group_key(fc, key_stream_slot.home())) break;
         }
         if (i + 1 < length) interp_note_backedge(f);
@@ -3420,7 +3442,7 @@ static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
         alias_slot.set((Item){.item = s2it(heap_create_name(
             spec->alias ? spec->alias->chars : ""))});
         Array* aliases = (Array*)(uintptr_t)aliases_slot.get().item;
-        if (aliases) array_push(aliases, alias_slot.get());
+        if (aliases) array_push_verbatim(aliases, alias_slot.get());
     }
     return fn_group_by_keys_items(rows_slot.get(), key_stream_slot.get(),
         aliases_slot.get());
@@ -3457,8 +3479,7 @@ static Item interp_for_finalize_output(InterpFrame* f, AstForNode* for_node,
         // Sorting follows MIR's dedicated ordered-output path, which closes
         // the spreadable stream before the result reaches its enclosing list.
         out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-        Item result = out ? array_end(out) : ItemNull;
-        return result.item == ITEM_NULL_SPREADABLE && out ? interp_ptr_item(out) : result;
+        return out ? array_end(out) : ItemNull;
     }
     if (for_node->offset || for_node->limit) {
         Scratch selected(f);
@@ -3484,10 +3505,7 @@ static Item interp_for_finalize_output(InterpFrame* f, AstForNode* for_node,
         }
         return selected.get();
     }
-    Item result = array_end(out);
-    // array_end reports an all-empty comprehension as spreadable-null; a
-    // top-level for-expression yields a real empty array instead.
-    return result.item == ITEM_NULL_SPREADABLE ? interp_ptr_item(out) : result;
+    return array_end(out);
 }
 
 static Item interp_eval_grouped_for(ForCtx* fc, AstLoopNode* loop,
@@ -3548,7 +3566,7 @@ static bool interp_join_make_key(InterpFrame* f, AstLoopNode* loop,
         part_slot.set(expr ? eval_expr(f, expr) : ItemNull);
         if (interp_frame_pending(f)) return false;
         Array* tuple = (Array*)(uintptr_t)key_slot.get().item;
-        if (tuple) array_push(tuple, part_slot.get());
+        if (tuple) array_push_verbatim(tuple, part_slot.get());
     }
     return true;
 }
@@ -3582,16 +3600,16 @@ static bool interp_join_collect_source(ForCtx* fc, AstLoopNode* loop,
             interp_write_binding(f, index_entry, source_index.get());
         }
         Array* rows = (Array*)(uintptr_t)rows_slot.get().item;
-        if (rows) array_push(rows, row_slot.get());
+        if (rows) array_push_verbatim(rows, row_slot.get());
         if (index_entry) {
             Array* indices = (Array*)(uintptr_t)indices_slot.get().item;
-            if (indices) array_push(indices, source_index.get());
+            if (indices) array_push_verbatim(indices, source_index.get());
         }
         if (collect_keys) {
             Scratch key_slot(f);
             if (!interp_join_make_key(f, loop, true, key_slot)) break;
             Array* row_keys = (Array*)(uintptr_t)row_keys_slot.get().item;
-            if (row_keys) array_push(row_keys, key_slot.get());
+            if (row_keys) array_push_verbatim(row_keys, key_slot.get());
         }
         if (interp_frame_pending(f)) break;
         if (i + 1 < length) interp_note_backedge(f);
@@ -3678,7 +3696,7 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
             Scratch prior_key(f);
             if (!interp_join_make_key(f, cur, false, prior_key)) return ItemNull;
             Array* prior_keys = (Array*)(uintptr_t)prior_keys_slot.get().item;
-            if (prior_keys) array_push(prior_keys, prior_key.get());
+            if (prior_keys) array_push_verbatim(prior_keys, prior_key.get());
         }
         if (interp_frame_pending(f)) return ItemNull;
         Array* tuples = fn_hash_join_tuples(tuples_slot.get(), prior_keys_slot.get(),
@@ -3708,7 +3726,7 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
             if (!interp_for_apply_row_clauses(fc, &keep)) break;
             if (keep) {
                 Array* rows = (Array*)(uintptr_t)group_rows_slot.get().item;
-                if (rows) array_push(rows, tuple_slot.get());
+                if (rows) array_push_verbatim(rows, tuple_slot.get());
                 if (!interp_for_append_group_key(fc, group_keys_slot.home())) break;
             }
             if (i + 1 < source_count) interp_note_backedge(f);
@@ -3723,7 +3741,7 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
             alias_slot.set((Item){.item = s2it(heap_create_name(
                 spec->alias ? spec->alias->chars : ""))});
             Array* aliases = (Array*)(uintptr_t)aliases_slot.get().item;
-            if (aliases) array_push(aliases, alias_slot.get());
+            if (aliases) array_push_verbatim(aliases, alias_slot.get());
         }
         Scratch groups_slot(f);
         groups_slot.set(interp_ptr_item(fn_group_by_keys_items(
@@ -3770,7 +3788,18 @@ static Item interp_eval_join_for(ForCtx* fc, AstLoopNode* first,
     return interp_for_finalize_output(f, for_node, out_slot.home(), key_slot.home());
 }
 
+static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_demanded);
+
+// A for-expression is a list whatever its clauses (S2.5.2v2): none is null
+// (or, in an item position, the skip marker), one is its item (S2.5.5v2).
 static Item eval_for(InterpFrame* f, AstForNode* for_node, bool result_demanded) {
+    bool item_position = interp_take_list_item_position(f, (AstNode*)for_node);
+    Item result = eval_for_stream(f, for_node, result_demanded);
+    if (!result_demanded || interp_frame_pending(f)) return result;
+    return item_position ? list_collapse_item(result) : list_collapse_value(result);
+}
+
+static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_demanded) {
     AstLoopNode* loop = (AstLoopNode*)for_node->loop;
     if (!loop) return ItemNull;
 
@@ -3888,7 +3917,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
         // as MIR's element lowering does.
         AstListNode* content_list = (AstListNode*)node->content;
         for (AstNode* c = content_list ? content_list->item : NULL; c; c = c->next) {
-            Item value = eval_expr(f, c);
+            Item value = interp_eval_sequence_item(f, c);
             if (interp_frame_pending(f)) return acc.get();
             // Re-read the element: content evaluation is a safepoint.
             Element* owner = (Element*)(uintptr_t)acc.get().item;
@@ -3911,13 +3940,19 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
 // run for effect, and the value expressions form the block's result — one
 // value passes through, several accumulate into a list.
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
+    // A functional block is a list producer (S2.5.3): sequence append, finished
+    // in its position's mode (S2.5.5v2). The script root (the only caller that
+    // hoists functions) is content (S2.6.1): the content append normalizes it.
+    bool item_position = interp_take_list_item_position(f, (AstNode*)list_node);
+    bool is_root_content = hoist_functions;
     // Procedural context, exactly as transpile_content decides it: inside a `pn`
-    // body, or any block declaring a `var`. It matters because a proc block's
-    // value is its LAST value expression only — every earlier one is a
-    // statement. Without this, `pn main() { print(a) … "done" }` accumulates
-    // each intermediate result into the block's list instead of discarding it.
-    bool is_proc = false;
-    if (f->fn) {
+    // or an `on` handler body, or any block declaring a `var`. It matters
+    // because a proc block's value is its LAST value expression only — every
+    // earlier one is a statement. Without this, `pn main() { print(a) … "done" }`
+    // accumulates each intermediate result into the block's list instead of
+    // discarding it.
+    bool is_proc = f->proc_handler;
+    if (!is_proc && f->fn) {
         TypeFunc* signature = (TypeFunc*)((AstNode*)f->fn)->type;
         is_proc = ((AstNode*)f->fn)->node_type == AST_NODE_PROC ||
             (signature && signature->type_id == LMD_TYPE_FUNC && signature->is_proc);
@@ -3978,7 +4013,11 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
     }
 
     if (value_count == 0 || direct_value) {
-        Item result = value_count == 0 ? list_end(list()) : ItemNull;
+        Item result = ItemNull;
+        if (value_count == 0) {
+            List* empty = list();
+            result = item_position ? list_end_item(empty) : list_end(empty);
+        }
         for (AstNode* item = list_node->item; item; item = item->next) {
             if (is_declaration_node(item->node_type)) {
                 bool already_hoisted = hoist_functions &&
@@ -3990,7 +4029,13 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                 interp_propagate_handler_error(f, item, side_effect);
                 interp_propagate_proc_side_effect_error(f, item, side_effect);
             } else if (item == last_value) {
+                // the lone value stands where the block stands: an item
+                // position passes through to it (S2.5.5v2)
+                if (item_position && interp_is_list_producer(item)) {
+                    f->st->list_item_producer = ast_unwrap_primary(item);
+                }
                 result = eval_expr(f, item);
+                f->st->list_item_producer = NULL;
             } else if (ast_for_discards_result(item)) {
                 eval_for(f, (AstForNode*)item, false);   // statement: stream discarded
             } else {
@@ -4023,20 +4068,22 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             if (interp_frame_pending(f)) return acc.get();
             continue;
         }
-        Item value = eval_expr(f, item);
+        Item value = interp_eval_sequence_item(f, item);
         if (interp_frame_pending(f)) return acc.get();
         List* ls = (List*)(uintptr_t)acc.get().item;   // re-read: push may collect
         if (!ls) return ItemError;
-        list_push_spread(ls, value);
+        if (is_root_content) list_push_spread(ls, value);
+        else array_push_spread(ls, value);
     }
     List* ls = (List*)(uintptr_t)acc.get().item;
-    return list_end(ls);
+    return item_position ? list_end_item(ls) : list_end(ls);
 }
 
 // A list block is not a content block: `(let x = …, body)` keeps its bindings
 // in `declare` and its values in `item`, and it never runs side-effect
 // statements. Mirrors transpile_list.
 static Item eval_list(InterpFrame* f, AstListNode* list_node) {
+    bool item_position = interp_take_list_item_position(f, (AstNode*)list_node);
     for (AstNode* decl = list_node->declare; decl; decl = decl->next) {
         if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
@@ -4058,20 +4105,29 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
         last_value = item;
     }
     if (list_node->declare && val_count == 1) {
-        return eval_expr(f, last_value);   // block expression: yield the value directly
+        // block expression: yield the value directly; it stands where the
+        // list stands, so an item position passes through (S2.5.5v2)
+        if (item_position && interp_is_list_producer(last_value)) {
+            f->st->list_item_producer = ast_unwrap_primary(last_value);
+        }
+        Item value = eval_expr(f, last_value);
+        f->st->list_item_producer = NULL;
+        return value;
     }
 
     Scratch acc(f);
     acc.set(interp_ptr_item(list()));
     for (AstNode* item = list_node->item; item; item = item->next) {
         if (is_declaration_node(item->node_type)) { exec_declaration(f, item); continue; }
-        Item value = eval_expr(f, item);
+        Item value = interp_eval_sequence_item(f, item);
         if (interp_frame_pending(f)) return acc.get();
         List* ls = (List*)(uintptr_t)acc.get().item;   // re-read: push may collect
         if (!ls) return ItemError;
-        list_push_spread(ls, value);
+        // a list does not normalize its items (S2.5.1v2): sequence append
+        array_push_spread(ls, value);
     }
-    return list_end((List*)(uintptr_t)acc.get().item);
+    List* built = (List*)(uintptr_t)acc.get().item;
+    return item_position ? list_end_item(built) : list_end(built);
 }
 
 // ---------------------------------------------------------------------------
@@ -5431,7 +5487,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 if (interp_frame_pending(f)) return key_slot.get();
                 Array* keys = (Array*)(uintptr_t)path_slot.get().item;
                 if (!keys) return ItemError;
-                array_push(keys, key_slot.get());
+                array_push_verbatim(keys, key_slot.get());
             }
             Scratch terminal_slot(f);
             terminal_slot.set(interp_eval_cow_path_key(f, ca->key,
@@ -5439,7 +5495,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             if (interp_frame_pending(f)) return terminal_slot.get();
             Array* keys = (Array*)(uintptr_t)path_slot.get().item;
             if (!keys) return ItemError;
-            array_push(keys, terminal_slot.get());
+            array_push_verbatim(keys, terminal_slot.get());
 
             Scratch owner_slot(f);
             owner_slot.set(interp_read_store_owner(f, root, ca));
@@ -7308,6 +7364,8 @@ static Item interp_eval_view_activation(Context* host, Script* module,
     InterpFrameGuard guard(st, NULL, module, activation_plan, NULL, 0);
     if (!guard.valid()) return ItemError;
     InterpFrame* frame = guard.frame();
+    // a template body is a pure `fn`; a handler body is a `pn` (S12.1.3)
+    frame->proc_handler = handler != NULL;
     void** saved_consts = st->ctx->consts;
     void* saved_type_list = st->ctx->type_list;
     st->ctx->consts = module->const_list ? module->const_list->data : NULL;

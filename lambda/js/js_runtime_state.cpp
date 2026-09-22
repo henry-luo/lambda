@@ -2258,8 +2258,8 @@ extern "C" Item js_build_arguments_object() {
         // inherited numeric setters must not intercept parameter materialization.
         js_array_define_dense_element_direct(arr_root.get(), i, args ? args[i] : ItemNull);
     }
-    // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
-    arr_root.get().array->is_content = 1;
+    // Mark as Arguments object via is_js_arguments flag (used by iterator to snapshot length)
+    arr_root.get().array->is_js_arguments = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
     companion_root.set(js_new_object());
     companion_root.get().map->map_kind = MAP_KIND_ARRAY_PROPS;
@@ -2302,7 +2302,7 @@ extern "C" Item js_build_arguments_object() {
                                    thrower_root.get(), thrower_root.get(),
                                    JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE);
         // Strictness is engine bookkeeping, not a property. It rides the
-        // arguments array's own header byte next to `is_content`, which already
+        // arguments array's own header byte next to `is_js_arguments`, which already
         // marks the array as an Arguments object.
         container_set_strict_arguments((Container*)arr_root.get().array);
     } else {

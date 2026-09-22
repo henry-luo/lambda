@@ -574,7 +574,7 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
 static int render_map_flattened_child_count(Item node, int depth) {
     if (!node.item || get_type_id(node) == LMD_TYPE_NULL) return 0;
     if (depth > 128) return -1;
-    if (get_type_id(node) != LMD_TYPE_ARRAY || !node.array || !node.array->is_content) {
+    if (get_type_id(node) != LMD_TYPE_ARRAY || !node.array || !node.array->is_spreadable) {
         return 1;
     }
     int total = 0;
@@ -590,7 +590,7 @@ static int render_map_flattened_child_count(Item node, int depth) {
 static int render_map_flattened_scalar_tail_count(Item node, int depth) {
     if (!node.item || get_type_id(node) == LMD_TYPE_NULL) return 0;
     if (depth > 128) return -1;
-    if (get_type_id(node) == LMD_TYPE_ARRAY && node.array && node.array->is_content) {
+    if (get_type_id(node) == LMD_TYPE_ARRAY && node.array && node.array->is_spreadable) {
         int total = 0;
         Array* fragment = node.array;
         for (int64_t i = 0; i < fragment->length; i++) {
@@ -608,7 +608,7 @@ static int render_map_flattened_scalar_tail_count(Item node, int depth) {
 static int64_t render_map_store_flattened_children(List* parent, int64_t index,
                                                     Item node, int depth) {
     if (!node.item || get_type_id(node) == LMD_TYPE_NULL || depth > 128) return index;
-    if (get_type_id(node) == LMD_TYPE_ARRAY && node.array && node.array->is_content) {
+    if (get_type_id(node) == LMD_TYPE_ARRAY && node.array && node.array->is_spreadable) {
         Array* fragment = node.array;
         for (int64_t i = 0; i < fragment->length; i++) {
             index = render_map_store_flattened_children(parent, index,

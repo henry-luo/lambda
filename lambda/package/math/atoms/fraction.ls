@@ -474,7 +474,7 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
         delimiter_box(left_delim, frac_box, "mopen") else null
     let right_box = if (right_delim != null)
         delimiter_box(right_delim, frac_box, "mclose") else null
-    let content_boxes = (for (p in [left_box, frac_box, right_box] where p != null) p)
+    let content_boxes = [for (p in [left_box, frac_box, right_box] where p != null) p]
     let elements = box.child_elements(content_boxes)
     let combined = box.hbox(content_boxes)
     let el = <span class: css.MFRAC,

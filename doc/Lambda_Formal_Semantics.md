@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 29.0.0 (2026-09-22)
+**Spec version:** 29.0.1 (2026-09-22)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1146,11 +1146,14 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   honest answer, impossible to mistake for a size. Consequently a `for` over
   a statically-infinite stream is a **compile error**; unbounded streams are
   consumed by recursion with an explicit termination condition. [§8.1 record]
-- **S8.3.3** Two lengths: `len` measures content; `count(x)` — defined, not
-  implemented — is 1 for every value, making shallowness an identity:
-  `len(container) = Σ count(item)`. For-expressions and spreads *splice at
-  the construction site* — by the time `count` applies, there is one value.
-  [§8.3 record]
+- **S8.3.3v2** Two lengths: `len` measures content; `count(x)` — defined,
+  not implemented — is the number of items `x` contributes where it lands as
+  an item: `len(x)` for a list, 1 for every other value, so
+  `len(container) = Σ count(item)` over the items as written. A list splices
+  wherever it lands as an item, bound or not (S2.5.1v2, S2.5.6): with
+  `let r = for (x in [2, 3]) x`, `len([1, r, 4])` is 4. An array counts as
+  one item — `[for …]` keeps a collection whole. [§8.3 record, Design_Syntax
+  §7.27]
 
 ### S8.4 Projections
 
@@ -1686,10 +1689,11 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   in key position — `{*: m, w: 5}` and `<div *: attrs, id: "x">` — since a key
   slot needs a key, and `*` is S16.8.6v2's any-key of the unit family. `*x`
   splices the items of a sequence (list, array, range), splices nothing for
-  `null` (it is `()`), and places a non-sequence value as one item, so
-  `[*xs]` packages any value as an array — `null` → `[]`, `5` → `[5]`,
-  `(5, 6)` → `[5, 6]`, `[5, 6]` → `[5, 6]`; spreading never modifies its
-  operand. In argument position `*x` passes its operand as one value; the
+  `null` (it is `()`), and places a non-sequence value as one item — that
+  is, `*x` is the list of `x`'s items, so it splices where it lands and
+  collapses by S2.5.5v2 — and `[*xs]` packages any value as an array:
+  `null` → `[]`, `5` → `[5]`, `(5, 6)` → `[5, 6]`, `[5, 6]` → `[5, 6]`;
+  spreading never modifies its operand. In argument position `*x` passes its operand as one value; the
   expansion was considered and **rejected** — argument in
   [LR02-R10](../vibe/Lambda_Issue_Ledger.md), `call` covers forwarding
   generally.
@@ -2374,7 +2378,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S17.2.1, S17.2.2 | **Conformant as of 2026-09-08.** `lambda.sys.*` resolves to the existing system-function registry, including the S12.3.7 shadow escape; `lambda.math`/`lambda.io` share the built-in module rows with their bare aliases; the shipped package tree uses the canonical `lambda.*` paths with math typesetting under `lambda.doc.math`; and `lambda` is rejected as a binding name by the direct lexer reservation check. Regression: `test/lambda/lambda_namespace.ls` plus `test/lambda/negative/semantic/lambda_namespace_root.ls`; focused probes passed on qualified built-ins and the document package. |
 | S16.10 | **Ruled 2026-08-27, largely not implemented.** Current divergences: element tags reject keywords (`<if a:1>` errors, legal under S16.10.2); `import edit:` parses and every use fails; `import 'edit':` parses and creates an unreachable binding (use is silently null); `let if = 1` parses and uses fail; `let type = 1` parses and `type` silently reads the base type — the silent misread is the priority defect. E201 exists for `last` and the reserved namespace root `lambda`; it must extend to the remaining table in the C parser and the reference grammar. Migration: ~55 keyword-named corpus bindings (breakdown in [Design_Syntax §7.24](../vibe/Lambda_Design_Syntax.md)). Tracked as [LR02-14](../vibe/Lambda_Issue_Ledger.md). |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). The prior `INT64_ERROR` collision is resolved in [LR03-R4](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-r4>). Residue: ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
-| S2.5.1v2, S2.5.2v2, S2.5.5v2, S2.5.6, S2.5.7 | **Ruled 2026-09-21/22; probed both tiers (identical).** Conformant: `(…)` literals and functional blocks spread into lists, array literals, and content; arrays and ranges stay one item; declarations contribute no item; blocks collapse; a `pn` body yields its last expression; `let`/`var` bindings keep the kind. Not implemented — the survey under `temp/spec_survey/listarray/` (562 probes): the runtime carries **two** list flags (`is_content` for `(…)`/blocks, `is_spreadable` for `for`), an array literal spreads a for-style list only when a sibling is written as a `for` or `*` (syntactic, so `let r = for (x in [1,2]) x; [r, 9]` is `[[1,2],9]`), for-expressions do not collapse (empty is a hidden non-null empty container, one item is `[v]`), `order by` returns an array, a list normalizes its items, `()` is a parse error, an attribute or field stores a list rather than its array image (`<e a: (1,2)>` reads back spread), `fill(2, (1,2))` nests, and no sequence function preserves kind (`sort` of a list is an array, `reverse`/`take`/slicing of a plain array or range is a list, `zip` is always a list). Design: one flag, one result-kind helper, value-decided spreading. Tracked as [LR05-10](../vibe/Lambda_Issue_Ledger.md), [LR12-28](../vibe/Lambda_Issue_Ledger.md). |
+| S2.5.1v2, S2.5.2v2, S2.5.4, S2.5.5v2, S2.5.6, S2.5.7, S8.3.3v2 | **P1 landed 2026-09-22 (both tiers).** One kind bit (`is_spreadable`; `is_content` is now LambdaJS's `is_js_arguments`); spreading is decided by the value, never by syntax; list producers finish by position — in item position they splice even nothing, elsewhere they collapse (empty → `null`, one item → the item), for-expressions included whatever their clauses; `(…)` lists and functional blocks no longer normalize (only content and the script root do); `()` parses as `null`; `type()` names `list` and `is list` tests the bit; a bound list spreads in an array literal. A let-group keeps every item besides its declarations (`(let x = 1, x, 2)` had kept only `2`), and a group or block of declarations alone is `null` (`(let x = 5)` had been `5`; `[{ let x = 5 }, 9]` was `[0, 9]` on the interpreter). Positional structures store a list as one item (D2.6.5v3): a for-expression passed as one argument stays one argument, and a list-valued `order by` or `group by` key is one key (both had been split — `order by (x, 0)` did not sort). The library (`lambda/package`) was migrated to `[for …]` wherever a for-result is data ([Lambda_List_Fixes §8](../vibe/impl/Lambda_List_Fixes.md)). Still open (P2–P5): sequence functions do not preserve kind (`sort` of a list is an array; `take`/`drop`/`slice`/`zip`/`reverse` of an array are lists), pipes and `that` do not follow S10.1.2v2/S10.1.5v2 kinds, field stores keep the list instead of its array image, `fill` nests, `*` mutates its operand and `*null` keeps the null, text and `++` rulings unimplemented. Tracked as [LR05-10](../vibe/Lambda_Issue_Ledger.md), [LR12-28](../vibe/Lambda_Issue_Ledger.md). |
 | S2.5.8, S7.10.1v2, S7.10.5v2, S8.4.1v2, S10.1.2v2, S10.1.5v2, S10.6.1 | **Ruled 2026-09-21/22.** Kind preservation for pipes, `that`, vectorized functions, and `++` is unimplemented (above). Text: `reverse`/`sort`/`unique` return a string unchanged, `in` on strings is a substring test, `that`/pipe over a string yield characters as a spreading list, `"s"[-1]` is `""`; `5 that ~ > 3` is `[5]`; `[1,2] that ~ > 9` is `null` where `[]` is ruled; `++` stringifies a container beside a text scalar (`"a" ++ [1]` is `"a[1]"`) and rejects `[1,2] ++ 3`; `null` is already the identity. `keys`/`values`/`names` are not built in. Tracked as [LR05-11](../vibe/Lambda_Issue_Ledger.md). |
 | S11.1.1v3, S11.1.2v2, S11.1.6, S16.8.6v2 | **Ruled 2026-09-22.** The parser still reads `T[n]`, `T[n+]`, `T[n, m]` as occurrence counts (`parse_type_pattern.cpp` `apply_occurrence`, `grammar.js` `occurrence_count`) and has no `T{n,m}`; islands spell `\(d[3])`. `null is int*` is false, `[] is int?` is true, `[1,2] is [int*]` trips the bare-`[T]` lint; `int*` annotations parse and admit. Migration: every `[n]`/`[n+]`/`[n, m]` occurrence in the tree and the user docs (`doc/Lambda_Type.md` §Type Occurrences). Tracked as [LR03-12](../vibe/Lambda_Issue_Ledger.md). |
 | S12.3.5v2 | **Ruled 2026-09-22.** `[*a, 3]` permanently turns `a` into a list (`item_spread` mutates its operand; on the JIT it rewrites a pooled literal, so a function returning `[1, "y"]` returns a list on later calls — tier divergence); `[*(1 to 3), 9]` does not spread the range; `[*null, 1]` keeps the null. Tracked as [LR05-12](../vibe/Lambda_Issue_Ledger.md). |

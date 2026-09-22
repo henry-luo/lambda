@@ -62,7 +62,7 @@ pub fn route_summary(spec) {
     let paths = spec.paths;
     if (paths == null) []
     else {
-        for (path, path_obj at paths)
+        [for (path, path_obj at paths)
             for (method in util.METHODS where path_obj[method] != null) {
                 let op = path_obj[method];
                 {
@@ -72,7 +72,7 @@ pub fn route_summary(spec) {
                     operation_id: util.get_or(op, "operationId", ""),
                     tags: util.get_or(op, "tags", [])
                 }
-            }
+            }]
     }
 }
 

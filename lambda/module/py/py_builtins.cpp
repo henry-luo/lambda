@@ -314,7 +314,7 @@ extern "C" Item py_builtin_enumerate(Item iterable) {
         Item tuple = py_tuple_new(2);
         py_tuple_set(tuple, 0, (Item){.item = i2it(i)});
         py_tuple_set(tuple, 1, arr->items[i]);
-        array_push(result, tuple);
+        array_push_verbatim(result, tuple);
     }
     return (Item){.array = result};
 }
@@ -342,7 +342,7 @@ extern "C" Item py_builtin_zip(Item* args, int argc) {
             Array* arr = it2arr(args[j]);
             py_tuple_set(tuple, j, arr->items[i]);
         }
-        array_push(result, tuple);
+        array_push_verbatim(result, tuple);
     }
     return (Item){.array = result};
 }
@@ -360,7 +360,7 @@ extern "C" Item py_builtin_sorted(Item iterable) {
     // copy array
     Array* result = array();
     for (int i = 0; i < src->length; i++) {
-        array_push(result, src->items[i]);
+        array_push_verbatim(result, src->items[i]);
     }
 
     insertion_sort(result->items, (size_t)result->length, sizeof(Item),
@@ -375,7 +375,7 @@ extern "C" Item py_builtin_reversed(Item iterable) {
 
     Array* result = array();
     for (int i = src->length - 1; i >= 0; i--) {
-        array_push(result, src->items[i]);
+        array_push_verbatim(result, src->items[i]);
     }
     return (Item){.array = result};
 }
@@ -643,7 +643,7 @@ extern "C" Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_
 
     // copy array
     Array* result = array();
-    for (int i = 0; i < src->length; i++) array_push(result, src->items[i]);
+    for (int i = 0; i < src->length; i++) array_push_verbatim(result, src->items[i]);
 
     // compute sort keys if key function provided
     Array* keys = NULL;
@@ -655,7 +655,7 @@ extern "C" Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_
             Item key = py_call_function_into(key_func, &arg, 1, &key_result_home);
             // Sort keys survive later callback allocations, so the Array must
             // take ownership of any wide scalar payload before the next call.
-            array_push(keys, key);
+            array_push_verbatim(keys, key);
         }
     }
 
@@ -701,7 +701,7 @@ extern "C" Item py_list_sort_ex(Item list_item, Item key_func, Item reverse_flag
             Item key = py_call_function_into(key_func, &arg, 1, &key_result_home);
             // Keep callback scalar payloads in Array-owned tail storage while
             // insertion sort may allocate or invoke comparison helpers.
-            array_push(keys, key);
+            array_push_verbatim(keys, key);
         }
     }
 
@@ -740,7 +740,7 @@ extern "C" Item py_builtin_map(Item func, Item iterable) {
         LAMBDA_SCALAR_HOME(map_result_home);
         Item val = py_call_function_into(func, &arg, 1, &map_result_home);
         // The destination list, not this callback activation, owns val's tail.
-        array_push(result, val);
+        array_push_verbatim(result, val);
     }
     return (Item){.array = result};
 }
@@ -756,7 +756,7 @@ extern "C" Item py_builtin_filter(Item func, Item iterable) {
         LAMBDA_SCALAR_HOME(filter_result_home);
         Item val = py_call_function_into(func, &arg, 1, &filter_result_home);
         if (py_is_truthy(val)) {
-            array_push(result, src->items[i]);
+            array_push_verbatim(result, src->items[i]);
         }
     }
     return (Item){.array = result};
@@ -773,7 +773,7 @@ extern "C" Item py_builtin_list(Item iterable) {
         if (!src) return py_list_new(0);
         Array* result = array();
         for (int i = 0; i < src->length; i++) {
-            array_push(result, src->items[i]);
+            array_push_verbatim(result, src->items[i]);
         }
         return (Item){.array = result};
     }
@@ -782,7 +782,7 @@ extern "C" Item py_builtin_list(Item iterable) {
         if (!s) return py_list_new(0);
         Array* result = array();
         for (int64_t i = 0; i < s->len; i++) {
-            array_push(result, (Item){.item = s2it(heap_strcpy(s->chars + i, 1))});
+            array_push_verbatim(result, (Item){.item = s2it(heap_strcpy(s->chars + i, 1))});
         }
         return (Item){.array = result};
     }
@@ -799,7 +799,7 @@ extern "C" Item py_builtin_list(Item iterable) {
             if (py_is_stop_iteration(rooted_item.get())) break;
             // A generator resume may collect before array growth; keep both
             // the accumulating list and the yielded Item in canonical slots.
-            array_push(rooted_result.get().array, rooted_item.get());
+            array_push_verbatim(rooted_result.get().array, rooted_item.get());
         }
         return rooted_result.get();
     }
@@ -824,7 +824,7 @@ extern "C" Item py_builtin_set(Item iterable) {
                 break;
             }
         }
-        if (!found) array_push(result, src->items[i]);
+        if (!found) array_push_verbatim(result, src->items[i]);
     }
     return (Item){.array = result};
 }
@@ -883,7 +883,7 @@ static Item py_str_split(String* s, Item* args, int argc) {
             if (i >= s->len) break;
             int64_t start = i;
             while (i < s->len && !isspace((uint8_t)s->chars[i])) i++;
-            array_push(result, (Item){.item = s2it(heap_strcpy(s->chars + start, i - start))});
+            array_push_verbatim(result, (Item){.item = s2it(heap_strcpy(s->chars + start, i - start))});
         }
     } else if (get_type_id(args[0]) == LMD_TYPE_STRING) {
         String* sep = it2s(args[0]);
@@ -894,7 +894,7 @@ static Item py_str_split(String* s, Item* args, int argc) {
         const char* part;
         size_t part_len;
         while (str_split_next(&split, &part, &part_len)) {
-            array_push(result, (Item){.item = s2it(heap_strcpy(part, part_len))});
+            array_push_verbatim(result, (Item){.item = s2it(heap_strcpy(part, part_len))});
         }
     }
 
@@ -1262,7 +1262,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
             if (i == s->len || s->chars[i] == '\n') {
                 int64_t end = i;
                 if (end > start && s->chars[end - 1] == '\r') end--;
-                array_push(result, (Item){.item = s2it(heap_strcpy(s->chars + start, end - start))});
+                array_push_verbatim(result, (Item){.item = s2it(heap_strcpy(s->chars + start, end - start))});
                 start = i + 1;
             }
         }
@@ -1406,14 +1406,14 @@ extern "C" Item py_list_method(Item list_item, Item method_name, Item* args, int
     if (!arr || !method) return ItemNull;
 
     if (strcmp(method->chars, "append") == 0 && argc >= 1) {
-        array_push(arr, args[0]);
+        array_push_verbatim(arr, args[0]);
         return ItemNull;
     }
     if (strcmp(method->chars, "extend") == 0 && argc >= 1) {
         if (get_type_id(args[0]) == LMD_TYPE_ARRAY) {
             Array* other = it2arr(args[0]);
             for (int i = 0; i < other->length; i++) {
-                array_push(arr, other->items[i]);
+                array_push_verbatim(arr, other->items[i]);
             }
         }
         return ItemNull;
@@ -1424,7 +1424,7 @@ extern "C" Item py_list_method(Item list_item, Item method_name, Item* args, int
         if (idx < 0) idx = 0;
         if (idx > arr->length) idx = arr->length;
         // shift elements right
-        array_push(arr, ItemNull); // expand
+        array_push_verbatim(arr, ItemNull); // expand
         for (int i = arr->length - 1; i > idx; i--) {
             arr->items[i] = arr->items[i - 1];
         }
@@ -1494,7 +1494,7 @@ extern "C" Item py_list_method(Item list_item, Item method_name, Item* args, int
     if (strcmp(method->chars, "copy") == 0) {
         Array* copy = array();
         for (int i = 0; i < arr->length; i++) {
-            array_push(copy, arr->items[i]);
+            array_push_verbatim(copy, arr->items[i]);
         }
         return (Item){.array = copy};
     }
@@ -1520,14 +1520,14 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
     if (strcmp(method->chars, "keys") == 0) {
         Array* result = array();
         FOR_EACH_MAP_FIELD(tm, field) {
-            if (field->name) array_push(result, (Item){.item = s2it(heap_create_name(field->name->str))});
+            if (field->name) array_push_verbatim(result, (Item){.item = s2it(heap_create_name(field->name->str))});
         }
         return (Item){.array = result};
     }
     if (strcmp(method->chars, "values") == 0) {
         Array* result = array();
         FOR_EACH_MAP_FIELD(tm, field) {
-            array_push(result, _map_read_field(field, m->data));
+            array_push_verbatim(result, _map_read_field(field, m->data));
         }
         return (Item){.array = result};
     }
@@ -1537,7 +1537,7 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
             Item tuple = py_tuple_new(2);
             if (field->name) py_tuple_set(tuple, 0, (Item){.item = s2it(heap_create_name(field->name->str))});
             py_tuple_set(tuple, 1, _map_read_field(field, m->data));
-            array_push(result, tuple);
+            array_push_verbatim(result, tuple);
         }
         return (Item){.array = result};
     }

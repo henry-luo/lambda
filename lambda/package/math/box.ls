@@ -483,9 +483,9 @@ pub fn null_delim() {
 
 // horizontally concatenate boxes into one
 pub fn hbox(boxes) {
-    let valid = (for (b in boxes where b != null) b)
+    let valid = [for (b in boxes where b != null) b]
     let children = collect_elements(valid, 0, [])
-    let total_width = sum((for (v in valid) v.width))
+    let total_width = sum([for (v in valid) v.width])
     let suppress_text_depth = has_suppress_hbox_text_depth(valid, 0)
     let suppress_operator_height = has_suppress_hbox_operator_height(valid, 0)
     let sup_min_shift_base = has_sup_min_shift_base(valid, 0)
@@ -511,8 +511,8 @@ fn ml_hbox_valid(valid, children, total_width, suppress_text_depth,
         <span class: css.BASE,
             for (child in children) child
         >,
-        max((for (v in valid) hbox_height_of(v, suppress_operator_height))),
-        max((for (v in valid) hbox_depth_of(v, suppress_text_depth))),
+        max([for (v in valid) hbox_height_of(v, suppress_operator_height)]),
+        max([for (v in valid) hbox_depth_of(v, suppress_text_depth)]),
         total_width,
         "ord",
         0.0,
@@ -551,7 +551,7 @@ fn ml_hbox_max_font_size(valid, i, acc, suppress_operator_height) {
 }
 
 pub fn child_elements(boxes) {
-    let valid = (for (b in boxes where b != null) b)
+    let valid = [for (b in boxes where b != null) b]
     collect_elements(valid, 0, [])
 }
 
@@ -649,22 +649,22 @@ fn is_binary_operator_text_box(bx) {
 // Returns a box wrapping the vertically-stacked content
 // helper: build vbox internals when there are children
 fn build_vbox(children) {
-    let max_width = max((for (c in children) c.box.width))
+    let max_width = max([for (c in children) c.box.width])
     // compute bounding box: position above baseline = 0.0 - shift
-    let tops = (for (c in children) (0.0 - c.shift) + c.box.height)
-    let bottoms = (for (c in children) (0.0 - c.shift) - c.box.depth)
+    let tops = [for (c in children) (0.0 - c.shift) + c.box.height]
+    let bottoms = [for (c in children) (0.0 - c.shift) - c.box.depth]
     let height = max(max(tops), 0.0)
     let depth = max(0.0 - min(bottoms), 0.0)
     let total_h = height + depth
 
     // position each child absolutely within a relative container
     // child CSS top = height + shift - child.box.height
-    let items = (for (c in children,
+    let items = [for (c in children,
                       let ct = height + c.shift - c.box.height)
         <span style: "position:absolute;top:" ++ util.fmt_em(ct) ++ ";left:0;width:100%;text-align:center",
             c.box.element
         >
-    )
+    ]
 
     // inline-block baseline = bottom edge (no in-flow content);
     // vertical-align: -depth puts bottom at depth below parent baseline

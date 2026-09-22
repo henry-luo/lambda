@@ -68,11 +68,11 @@ fn normalize_children(el) {
     if (n == 0) {
         el
     } else {
-        let kids = (for (i in 0 to (n - 1),
+        let kids = [for (i in 0 to (n - 1),
                         let child = el[i],
                         let normed = normalize(child)
                         where normed != null)
-                    normed)
+                    normed]
         // merge adjacent text nodes
         let merged = merge_adjacent_text(kids, 0, len(kids), [])
         // flatten single-child group wrappers
@@ -109,7 +109,7 @@ fn merge_text_step(items, i, n, buf, acc) {
 
 // flatten single-child group/curly_group wrappers
 fn flatten_groups(items) {
-    (for (item in items) try_flatten(item))
+    [for (item in items) try_flatten(item)]
 }
 
 fn try_flatten(item) {

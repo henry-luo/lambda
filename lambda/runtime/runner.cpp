@@ -2718,8 +2718,15 @@ void runtime_log_script_load_summary(Runtime* runtime) {
 // Used between independent evaluations (e.g. test-batch) so that each
 // script starts with a clean GC heap.  The next runner_setup_context()
 // call will create fresh heap/name_pool state and store it back.
+static void runtime_quiesce_satellite_workers(Runtime* runtime);
+
 void runtime_reset_heap(Runtime* runtime) {
     if (!runtime) return;
+    // A satellite still lowering the finished script reads types and names
+    // this reset frees; retire and await it first, as runtime_cleanup does.
+    // test-batch resets the heap before it frees the scripts, and a worker
+    // racing that reset crashed the next script's run.
+    runtime_quiesce_satellite_workers(runtime);
     if (runtime_heap(runtime)) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;

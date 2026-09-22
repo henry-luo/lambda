@@ -22,7 +22,7 @@ fn encoded_pair(pair) {
 }
 
 fn urlencoded(entries) {
-    join(for (pair in entries) encoded_pair(pair), "&")
+    join([for (pair in entries) encoded_pair(pair)], "&")
 }
 
 fn multipart_part(pair, boundary) {
@@ -32,7 +32,7 @@ fn multipart_part(pair, boundary) {
 }
 
 fn multipart(entries, boundary) {
-    join(for (pair in entries) multipart_part(pair, boundary), "") ++
+    join([for (pair in entries) multipart_part(pair, boundary)], "") ++
         "--" ++ boundary ++ "--\r\n"
 }
 
@@ -65,7 +65,7 @@ pub fn run(form, submitter) {
             "formaction", "action", dom.form_url(form));
         let target = attr_or(form, "target", "_self");
 
-        if (method_name == "get") {
+        let _navigated = if (method_name == "get") {
             let query = urlencoded(entries);
             let separator = if (index_of(action, "?") == null) "?" else "&";
             let url = if (query == "") action else action ++ separator ++ query;
@@ -91,7 +91,7 @@ pub fn run(form, submitter) {
 pub fn reset(form) {
     if (form == null) { 'pass' }
     else {
-        dom.reset_form(form)
+        let _reset = dom.reset_form(form)
         'prevent-default'
     }
 }

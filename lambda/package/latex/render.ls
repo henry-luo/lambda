@@ -419,13 +419,13 @@ fn render_maketitle_div(css_class, el, fallback_text, info) {
 fn render_toc(info) {
     if (len(info.headings) == 0) { null }
     else {
-        let items = (for (h in info.headings, let cls = "toc-l" ++ (h.level))
+        let items = [for (h in info.headings, let cls = "toc-l" ++ (h.level))
             <li class: cls,
                 <a href: "#" ++ h.id,
                     if (h.number != null) { <span class: "sec-num", h.number> }
                     h.text
                 >
-            >);
+            >];
         <nav class: "latex-toc",
             <div class: "toc-title", "Contents">
             <ul for item in items { item }>

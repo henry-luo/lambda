@@ -643,12 +643,8 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_TYPE> item) const {
         TypeType* type = (TypeType*)item.ptr();
-        if (type->type == &TYPE_NUMBER) {
-            strbuf_append_str(strbuf, "number");
-            return;
-        }
-        if (type->type == &TYPE_INTEGER) {
-            strbuf_append_str(strbuf, "integer");
+        if (const char* alias = type_alias_name(type->type)) {
+            strbuf_append_str(strbuf, alias);
             return;
         }
         if (type->type->type_id == LMD_TYPE_NUM_SIZED) {
@@ -711,9 +707,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, const char* indent) {
 }
 
 void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
-    // top-level content block (is_content flag) prints items one per line without brackets
+    // The script's top level is content (S2.6.1): a list reaching the root
+    // printer is that content and prints one item per line, without brackets.
+    // A list anywhere else prints as its array (S2.5.6, via print_item).
     TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY && item.array->is_content) {
+    if (type_id == LMD_TYPE_ARRAY && item.array->is_spreadable) {
         Array *array = item.array;
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_char(strbuf, '\n');
@@ -724,7 +722,7 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
                 strbuf->str[--strbuf->length] = '\0';
             }
         }
-    } else if (type_id == LMD_TYPE_ARRAY_NUM && item.array_num->is_content) {
+    } else if (type_id == LMD_TYPE_ARRAY_NUM && item.array_num->is_spreadable) {
         ArrayNum *array = item.array_num;
         ArrayNumElemType et = array->get_elem_type();
         if (et == ELEM_FLOAT64) {

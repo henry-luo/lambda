@@ -53,7 +53,7 @@ pub fn validate_params(spec, path, method, params) {
     if (len(param_defs) == 0)
         {valid: true, errors: []}
     else {
-        let errors = for (p in param_defs where p.required) {
+        let errors = [for (p in param_defs where p.required) {
             let val = params[p.name];
             if (val == null)
                 {
@@ -63,7 +63,7 @@ pub fn validate_params(spec, path, method, params) {
                     actual: "null"
                 }
             else null
-        };
+        }];
         // filter out nulls
         let real_errors = errors that (~ != null);
         {valid: len(real_errors) == 0, errors: real_errors}
@@ -103,8 +103,8 @@ fn check_value(schema_obj, value, all_schemas, path) {
 
     // handle allOf
     else if (schema_obj.allOf != null) {
-        for (sub in schema_obj.allOf)
-            check_value(sub, value, all_schemas, path)
+        [for (sub in schema_obj.allOf)
+            check_value(sub, value, all_schemas, path)]
     }
 
     // handle oneOf
@@ -149,7 +149,7 @@ fn check_object(schema_obj, value, all_schemas, path) {
 
         // check required fields exist
         let req_errors = if (props != null) {
-            for (field_name, _ at props
+            [for (field_name, _ at props
                  where util.list_contains(required, string(field_name))) {
                 let field_path = if (len(path) > 0) path ++ "." ++ (field_name)
                                  else string(field_name);
@@ -157,17 +157,17 @@ fn check_object(schema_obj, value, all_schemas, path) {
                     {path: field_path, message: "required field missing",
                      expected: "present", actual: "null"}
                 else null
-            }
+            }]
         } else [];
 
         // check types of present fields
         let type_errors = if (props != null) {
-            for (field_name, field_schema at props
+            [for (field_name, field_schema at props
                  where value[string(field_name)] != null) {
                 let field_path = if (len(path) > 0) path ++ "." ++ (field_name)
                                  else string(field_name);
                 check_value(field_schema, value[string(field_name)], all_schemas, field_path)
-            }
+            }]
         } else [];
 
         // combine errors, filtering nulls
@@ -203,10 +203,10 @@ fn check_array(schema_obj, value, all_schemas, path) {
         ];
 
         let item_errors = if (items_schema != null) {
-            for (i in 0 to len(value) - 1 where len(value) > 0) {
+            [for (i in 0 to len(value) - 1 where len(value) > 0) {
                 let item_path = path ++ "[" ++ (i) ++ "]";
                 check_value(items_schema, value[i], all_schemas, item_path)
-            }
+            }]
         } else [];
 
         [len_errors that (~ != null), item_errors that (~ != null)]
@@ -230,8 +230,8 @@ fn check_enum(allowed, value, path) {
 // ============================================================
 
 fn check_one_of(variants, value, all_schemas, path) {
-    let matches = for (v in variants
-                       where len(check_value(v, value, all_schemas, path)) == 0) v;
+    let matches = [for (v in variants
+                       where len(check_value(v, value, all_schemas, path)) == 0) v];
     if (len(matches) == 1) []
     else if (len(matches) == 0)
         [{path: path, message: "value matches none of oneOf variants",
@@ -244,8 +244,8 @@ fn check_one_of(variants, value, all_schemas, path) {
 }
 
 fn check_any_of(variants, value, all_schemas, path) {
-    let matches = for (v in variants
-                       where len(check_value(v, value, all_schemas, path)) == 0) v;
+    let matches = [for (v in variants
+                       where len(check_value(v, value, all_schemas, path)) == 0) v];
     if (len(matches) > 0) []
     else [{path: path, message: "value matches none of anyOf variants",
            expected: "at least one of " ++ (len(variants)) ++ " variants",

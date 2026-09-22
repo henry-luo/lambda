@@ -1,0 +1,16 @@
+"-- every clause keeps it a list --"
+[list, list]
+[list, list]
+[list, list]
+[list]
+[1, 2, 3, 9]
+[3, 2, 1, 9]
+[1, 2, 9]
+[2, 3, 9]
+[3, 9]
+"-- nested for: the inner list splices into the outer --"
+[11, 21, 12, 22]
+[1, 1, 2, 2]
+[[1, 1], [2, 2]]
+"-- empty and one-item results collapse --"
+[true, 3, int]

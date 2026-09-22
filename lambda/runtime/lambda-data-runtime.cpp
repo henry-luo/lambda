@@ -1485,14 +1485,54 @@ Item list_end(List *list) {
         else if (list->length == 1) {
             return list->items[0];
         } else {
-            list->is_content = 1;
-            // content lists use Lambda's heterogeneous element contract, so
-            // they must never be mistaken for published ordinary JS arrays.
+            // S2.5.1v2/S2.5.5v2: a list value has at least two items and
+            // carries the kind bit; one item is that item, none is null.
+            list->is_spreadable = 1;
+            // lists use Lambda's heterogeneous element contract, so they must
+            // never be mistaken for published ordinary JS arrays.
             container_set_js_elements_kind((Container*)list, JS_ELEMENTS_NONE);
             return {.array = list};
         }
     }
 }
+
+// Item-position finish of a list producer (S2.5.5v2 "void versus null"): a
+// list expression sitting directly in an item position splices what it has,
+// including nothing. Zero items is reported as ITEM_NULL_SPREADABLE, which only
+// the enclosing builder's append ever sees -- it skips it -- so the marker never
+// escapes into a value position. One or more items finish as list_end does.
+Item list_end_item(List *list) {
+    Item result = list_end(list);
+    if (list->type_id != LMD_TYPE_ELEMENT && list->length == 0) {
+        return {.item = ITEM_NULL_SPREADABLE};
+    }
+    return result;
+}
+
+// Collapse a finished list producer's result (a for-expression's output, whose
+// window/order steps may have replaced its container): none is null (or the
+// item-position marker), one item is that item, two or more keep the kind bit.
+static Item list_collapse(Item value, bool item_position) {
+    TypeId type_id = get_type_id(value);
+    int64_t length;
+    if (type_id == LMD_TYPE_ARRAY && value.array) length = value.array->length;
+    else if (type_id == LMD_TYPE_ARRAY_NUM && value.array_num) length = value.array_num->length;
+    else return value;
+    if (length == 0) {
+        return item_position ? (Item){.item = ITEM_NULL_SPREADABLE} : ItemNull;
+    }
+    if (length == 1) {
+        if (type_id == LMD_TYPE_ARRAY_NUM) return array_num_get(value.array_num, 0);
+        Array* arr = value.array;
+        return array_has_native_lane(arr) ? array_native_lane_read(arr, 0) : arr->items[0];
+    }
+    if (type_id == LMD_TYPE_ARRAY) value.array->is_spreadable = 1;
+    else value.array_num->is_spreadable = 1;
+    return value;
+}
+
+Item list_collapse_value(Item value) { return list_collapse(value, false); }
+Item list_collapse_item(Item value) { return list_collapse(value, true); }
 
 // create a plain array without frame management (for auxiliary arrays like sort keys)
 Array* array_plain() {
@@ -1561,7 +1601,7 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
     }
     if (tid == LMD_TYPE_ARRAY) {
         Array* a = it.array;
-        if (!a || a->is_spreadable || a->is_content) return false;
+        if (!a || a->is_spreadable) return false;
         if (a->length == 0) return false;
         // Scan items: retain flex-int storage unless a full-width value or a
         // float actually requires a wider semantic lane.
@@ -1622,7 +1662,7 @@ static void write_row_into_ndim(ArrayNum* dst, ArrayNumElemType etype, int64_t f
 
 static ArrayNum* try_promote_to_ndim(Array* arr) {
     if (!arr || arr->length < 2) return NULL;
-    if (arr->is_spreadable || arr->is_content) return NULL;
+    if (arr->is_spreadable) return NULL;
 
     // First child sets the shape/etype; subsequent must match
     ArrayNumElemType etype;
@@ -1762,20 +1802,20 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     return result;
 }
 
-// finalize spreadable array - returns array as Item (no flattening)
-// returns spreadable null for empty arrays so they can be skipped when spreading
+// finalize an array builder - returns the array as an Item. An empty array is
+// the empty array: list producers collapse through list_collapse_*, so this
+// never reports an item-position marker (S2.5.5v2).
 Item array_end(Array* arr) {
     if (arr->length == 0) {
-        // return spreadable null - will be skipped when added to collections
-        return {.item = ITEM_NULL_SPREADABLE};
+        return {.array = arr};
     }
     // Dynamic N-D promotion: when children are uniform ArrayNums, fold into a tensor
     ArrayNum* nd = try_promote_to_ndim(arr);
     if (nd) return {.array_num = nd};
     // 1-D promotion: when every child is a numeric scalar, fold into a typed array.
-    // Skip markup content lists and spreadable results (the latter must stay a
-    // generic List so a parent array can flatten them via array_push_spread).
-    if (!arr->is_content && !arr->is_spreadable && arr->length >= 1) {
+    // Lists are skipped: a list keeps its kind bit on a generic container
+    // (S2.5.1v2).
+    if (!arr->is_spreadable && arr->length >= 1) {
         ArrayNum* flat = try_promote_scalars_to_1d(arr);
         if (flat) return {.array_num = flat};
     }
@@ -1810,8 +1850,8 @@ static bool array_push_spread_array_num_items(Array* arr, Item item, bool requir
     return true;
 }
 
-// push item to array, spreading if the item is a spreadable array
-// skips spreadable nulls (from empty for-expressions)
+// push item to array, spreading it if it is a list (the sequence append,
+// D2.6.5v3); skips the item-position marker of an empty list producer
 void array_push_spread(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
     if (array_push_spread_array_items(arr, item, true) ||
@@ -2015,11 +2055,11 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
             // Keep member arrays in a rooted GC array and store only its index.
             int64_t group_index = rooted_member_groups.get()->length;
             rooted_new_members.set(array_plain());
-            array_push(rooted_member_groups.get(), {.array = rooted_new_members.get()});
+            array_push_verbatim(rooted_member_groups.get(), {.array = rooted_new_members.get()});
             rooted_new_members.set((Array*)NULL);
             GroupHashEntry entry = { .key = key, .group_index = group_index };
             hashmap_set(table, &entry);
-            array_push(rooted_order.get(), key);
+            array_push_verbatim(rooted_order.get(), key);
             existing = (const GroupHashEntry*)hashmap_get(table, &probe);
         }
         if (existing && existing->group_index >= 0) {
@@ -2027,7 +2067,7 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
             Item members_item = member_groups->items[existing->group_index];
             rows = rooted_rows_item.get().array;
             if (get_type_id(members_item) == LMD_TYPE_ARRAY) {
-                array_push(members_item.array, rows->items[i]);
+                array_push_verbatim(members_item.array, rows->items[i]);
             }
         }
     }
@@ -2070,7 +2110,7 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
         }
         group = rooted_group.get();
         group_type->content_length = group->length;
-        array_push(rooted_out.get(), (Item){.element = group});
+        array_push_verbatim(rooted_out.get(), (Item){.element = group});
         rooted_group.set((Element*)NULL);
     }
 
@@ -2212,7 +2252,7 @@ Array* fn_join_seed_tuples(Item rows_item, Item name_item, Item idx_name_item, I
         Item idx_val = (idx_name && idx_vals && i < idx_vals->length) ? idx_vals->items[i] : ItemNull;
         rooted_tuple.set(join_tuple_extend(ItemNull, name, rows->items[i], idx_name, idx_val));
         if (!rooted_tuple.get()) return rooted_out.get();
-        array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+        array_push_verbatim(rooted_out.get(), (Item){.element = rooted_tuple.get()});
         rooted_tuple.set((Element*)NULL);
     }
     return rooted_out.get();
@@ -2254,7 +2294,7 @@ Array* fn_cross_join_tuples(Item prior_tuples_item, Item rows_item, Item name_it
             rooted_tuple.set(join_tuple_extend(rooted_prior_tuple.get(), name, rows->items[r],
                 idx_name, idx_val));
             if (rooted_tuple.get()) {
-                array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+                array_push_verbatim(rooted_out.get(), (Item){.element = rooted_tuple.get()});
                 rooted_tuple.set((Element*)NULL);
             }
         }
@@ -2316,8 +2356,8 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
             int64_t bucket_index = rooted_row_groups.get()->length;
             rooted_new_rows.set(array_plain());
             rooted_new_idxs.set(array_plain());
-            array_push(rooted_row_groups.get(), (Item){.array = rooted_new_rows.get()});
-            array_push(rooted_idx_groups.get(), (Item){.array = rooted_new_idxs.get()});
+            array_push_verbatim(rooted_row_groups.get(), (Item){.array = rooted_new_rows.get()});
+            array_push_verbatim(rooted_idx_groups.get(), (Item){.array = rooted_new_idxs.get()});
             rooted_new_rows.set((Array*)NULL);
             rooted_new_idxs.set((Array*)NULL);
             JoinHashEntry entry = { .key = key, .bucket_index = bucket_index };
@@ -2327,14 +2367,14 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
         if (existing && existing->bucket_index >= 0) {
             rooted_bucket_item.set(rooted_row_groups.get()->items[existing->bucket_index]);
             if (get_type_id(rooted_bucket_item.get()) == LMD_TYPE_ARRAY) {
-                array_push(rooted_bucket_item.get().array, rows->items[i]);
+                array_push_verbatim(rooted_bucket_item.get().array, rows->items[i]);
             }
             Array* idx_vals = get_type_id(rooted_idx_vals_item.get()) == LMD_TYPE_ARRAY
                 ? rooted_idx_vals_item.get().array : NULL;
             Item idx_val = (idx_name && idx_vals && i < idx_vals->length) ? idx_vals->items[i] : ItemNull;
             rooted_bucket_item.set(rooted_idx_groups.get()->items[existing->bucket_index]);
             if (get_type_id(rooted_bucket_item.get()) == LMD_TYPE_ARRAY) {
-                array_push(rooted_bucket_item.get().array, idx_val);
+                array_push_verbatim(rooted_bucket_item.get().array, idx_val);
             }
         }
     }
@@ -2369,7 +2409,7 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
                     rooted_tuple.set(join_tuple_extend(rooted_prior_tuple.get(), name,
                         bucket_rows->items[r], idx_name, idx_val));
                     if (rooted_tuple.get()) {
-                        array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+                        array_push_verbatim(rooted_out.get(), (Item){.element = rooted_tuple.get()});
                         rooted_tuple.set((Element*)NULL);
                     }
                 }
@@ -2381,7 +2421,7 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
             rooted_tuple.set(join_tuple_extend(rooted_prior_tuple.get(), name, ItemNull,
                 idx_name, ItemNull));
             if (rooted_tuple.get()) {
-                array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+                array_push_verbatim(rooted_out.get(), (Item){.element = rooted_tuple.get()});
                 rooted_tuple.set((Element*)NULL);
             }
         }

@@ -8785,7 +8785,14 @@ static AstNode* direct_content_node(LambdaDirectAstSink* sink,
     // first-item shortcut reinterprets a later native result at the caller
     // boundary (D2.2.2).
     AstNode* single_value = NULL;
-    if (content->list_type->length == 1 && filtered && filtered->type) {
+    if (content->list_type->length == 1 && filtered &&
+            is_declaration_node(filtered->node_type)) {
+        // S2.5.4/S2.5.5v2: a declaration produces no item, so a block of one
+        // declaration is `null`. Typing it as the declared value made an
+        // enclosing literal take the compact lane: `[{ let x = 5 }, 9]` was
+        // `[0, 9]` on the interpreter.
+        content->type = &TYPE_NULL;
+    } else if (content->list_type->length == 1 && filtered && filtered->type) {
         content->type = filtered->type;
     } else if (!(tp->current_scope && tp->current_scope->is_proc) &&
             (single_value = ast_content_single_value(filtered)) &&
@@ -9136,13 +9143,18 @@ static void direct_move_binding(NameScope* from, NameScope* to,
     }
 }
 
+// A binding a parenthesized group collects into its `declare` chain (S2.5.4).
+static bool ast_group_child_is_declaration(AstNode* item) {
+    return item && (item->node_type == AST_NODE_VARIABLE_DECLARATOR ||
+        item->node_type == AST_NODE_DECOMPOSE ||
+        item->node_type == AST_NODE_LET_STAM);
+}
+
 static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
         AstNode* items, NameScope* existing_scope) {
     bool has_declaration = false;
     for (AstNode* item = items; item; item = item->next) {
-        if (item->node_type == AST_NODE_VARIABLE_DECLARATOR ||
-                item->node_type == AST_NODE_DECOMPOSE ||
-                item->node_type == AST_NODE_LET_STAM) {
+        if (ast_group_child_is_declaration(item)) {
             has_declaration = true;
             break;
         }
@@ -9157,7 +9169,8 @@ static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
         lambda_ast_enter_scope(tp, false);
     list->vars = scope;
     AstNode* declaration_tail = NULL;
-    AstNode* body = NULL;
+    AstNode* item_tail = NULL;
+    int item_count = 0;
     for (AstNode* item = items; item;) {
         AstNode* next = item->next;
         item->next = NULL;
@@ -9176,13 +9189,19 @@ static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
             else declaration_tail->next = declaration;
             declaration_tail = declaration;
         } else {
-            body = item;
+            // S2.5.4: a declaration contributes no item, but every other item
+            // stays, so `(let x = 1, x, 2)` is `(1, 2)`. Keeping only the
+            // last one silently returned `2`.
+            if (item_tail) item_tail->next = item;
+            else list->item = item;
+            item_tail = item;
+            item_count++;
         }
         item = next;
     }
-    list->item = body;
-    list->list_type->length = body ? 1 : 0;
-    list->type = body && body->type ? body->type : &TYPE_NULL;
+    list->list_type->length = item_count;
+    list->type = item_count == 1 ? (list->item->type ? list->item->type : &TYPE_NULL) :
+        item_count == 0 ? &TYPE_NULL : set_type_any(tp, ANY_LIST);
     if (!existing_scope) lambda_ast_leave_scope(tp, scope);
     return (AstNode*)list;
 }
@@ -14245,7 +14264,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             reduction->span, op, operand));
     }
     case LAMBDA_REDUCE_GROUP: {
-        if (reduction->child_count == 1) {
+        if (reduction->child_count == 1 && !ast_group_child_is_declaration(child0)) {
             return direct_ast_value(build_primary_wrapper_from_parts(tp,
                 reduction->span, child0));
         }

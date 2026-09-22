@@ -1,0 +1,21 @@
+"-- mapping pipe --"
+[list, array, array]
+[2, 4, 6, 9]
+[[2, 4, 6], 9]
+[6, int]
+[array, [10, 20]]
+[null]
+"-- filter --"
+[list, array]
+[2, 3, 9]
+[[2, 3], 9]
+[null, 9]
+[true, [], 0]
+[5, true]
+[array, [2]]
+[array, [2, 3]]
+"-- a one-item result collapses --"
+[3, int]
+[3, 9]
+"-- whole-value application is unchanged --"
+[6, 3]

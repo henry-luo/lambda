@@ -13,7 +13,7 @@ fn nth_from(c, i) { if (i <= 0) c else nth_from(dom.next_sibling(c), i - 1) }
 fn kids(n) array | error { [for (i in 0 to chain_len(dom.first_child(n)) - 1) nth_from(dom.first_child(n), i)] }
 
 // tree-order descendants, over core only
-fn descendants(n) { for (c in kids(n)) (c, descendants(c)) }
+fn descendants(n) { [for (c in kids(n)) (c, *descendants(c))] }
 
 // the derivations
 fn d_query_selector_all(root, sel) array | error {
@@ -50,7 +50,7 @@ fn list_eq(xs, ys) bool | error {
 
 let doc = dom.load("test/js/dom_identity.html")
 let root = dom.document_element(doc)
-let nodes = (root, descendants(root))
+let nodes = [root, *descendants(root)]
 let selectors = ["p", "li", "ul", "body", "#intro", "#list", "div p", ".missing", "em"]
 
 fn selector_agrees(sel) bool | error {

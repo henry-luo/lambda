@@ -27,12 +27,13 @@ len(null); [for (i in null) i]
 "-- element: attribute values then content, len matches the walk --"
 len(<elmt a: 1, b: 2, "text">); [for (i in <elmt a: 1, b: 2, "text">) i]
 
-"-- count(): splicing is syntactic, not a value property (see 8.3) --"
+"-- count(): a list splices wherever it lands as an item (S8.3.3v2) --"
 // a for-expression and a spread splice at the construction site...
 len([1, for (x in [2, 3]) x, 4])
 let spliced = [2, 3]
 len([1, *spliced, 4])
-// ...but binding either yields an ordinary value that counts as one item
+// ...and so does a bound list: a for-expression yields a list (S2.5.2v2), and
+// `*x` is the list of x's items (S12.3.5v2); an array would count as one item
 let bound_for = for (x in [2, 3]) x
 len([1, bound_for, 4])
 let bound_spread = *spliced

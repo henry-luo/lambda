@@ -37,9 +37,9 @@ fn _decode_operand(op, font_info) {
 }
 
 fn _decode_tj_array(items, font_info) {
-    let parts = (for (it in items
+    let parts = [for (it in items
                       where (it is map and (it.kind == "string" or it.kind == "hex")))
-                 _decode_operand(it, font_info))
+                 _decode_operand(it, font_info)]
     parts |> join("")
 }
 
@@ -149,7 +149,7 @@ fn _lookup_font(fonts, name) {
         let v = fonts[name]
         if (v is map) { v }
         else {
-            let hits = (for (p in fonts where p.name == name) p.info)
+            let hits = [for (p in fonts where p.name == name) p.info]
             if (len(hits) >= 1) { hits[0] } else { null }
         }
     }
@@ -496,7 +496,7 @@ fn _advance_text(st, dx) {
 }
 
 fn _space_count(txt) {
-    len(for (i in 0 to (len(txt) - 1) where txt[i] == " ") i)
+    len([for (i in 0 to (len(txt) - 1) where txt[i] == " ") i])
 }
 
 fn _text_space_scale(st, ctm) {
@@ -514,7 +514,7 @@ fn _text_advance(st, ctm, txt) {
 fn _text_advance_codes(st, ctm, codes) {
     let n = len(codes)
     let base = _codes_width_units(st.font_info, codes) / 1000.0 * _effective_font_size(st, ctm)
-    let words = len(for (c in codes where c == 32) c)
+    let words = len([for (c in codes where c == 32) c])
     let spacing = ((st.char_space * float(n)) + (st.word_space * float(words))) * _text_space_scale(st, ctm);
     (base + spacing) * _text_transform_hscale(st, ctm)
 }
@@ -564,7 +564,7 @@ fn _text_width_units(fi, txt) {
     let n = len(txt)
     if (n == 0) { 0.0 }
     else {
-        let parts = for (i in 0 to (n - 1)) _glyph_width_units(fi, ord(txt[i]))
+        let parts = [for (i in 0 to (n - 1)) _glyph_width_units(fi, ord(txt[i]))]
         parts |> sum()
     }
 }
@@ -572,7 +572,7 @@ fn _text_width_units(fi, txt) {
 fn _codes_width_units(fi, codes) {
     if (len(codes) == 0) { 0.0 }
     else {
-        let parts = for (c in codes) _glyph_width_units(fi, c)
+        let parts = [for (c in codes) _glyph_width_units(fi, c)]
         parts |> sum()
     }
 }
@@ -604,7 +604,7 @@ fn _operand_codes(op, font_info) {
     if (op is map and op.kind == "string") {
         let s = op.value
         if (len(s) == 0) { [] }
-        else { for (i in 0 to (len(s) - 1)) ord(s[i]) }
+        else { [for (i in 0 to (len(s) - 1)) ord(s[i])] }
     }
     else if (op is map and op.kind == "hex") { _hex_codes_at(op.value, 0, cmap) }
     else { [] }
@@ -714,7 +714,7 @@ fn _op_Tj(st, ctm, ops, page_h) {
 
 fn _append_emit(out, part) {
     if (part == null) { out }
-    else { out ++ (for (p in part) p) }
+    else { out ++ [for (p in part) p] }
 }
 
 fn _op_TJ_flush(cur, ctm, page_h, seg_text, seg_st, has_seg, emits) {

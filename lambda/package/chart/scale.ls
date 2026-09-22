@@ -86,8 +86,8 @@ pub fn scale_apply(sc, value) {
         let range_lo = sc.range[0];
         let pad = sc.padding;
         let band_w = sc.bandwidth;
-        let idx = (for (i in 0 to (n - 1))
-            if (categories[i] == value) i else null) that (~ != null);
+        let idx = [for (i in 0 to (n - 1))
+            if (categories[i] == value) i else null] that (~ != null);
         (if (len(idx) > 0) (let i = idx[0], range_lo + pad + float(i) * (band_w + pad))
         else range_lo)
     } else if sc.kind == "point" {
@@ -96,16 +96,16 @@ pub fn scale_apply(sc, value) {
         let range_lo = sc.range[0];
         let pad = sc.padding;
         let step = sc.step;
-        let idx = (for (i in 0 to (n - 1))
-            if (categories[i] == value) i else null) that (~ != null);
+        let idx = [for (i in 0 to (n - 1))
+            if (categories[i] == value) i else null] that (~ != null);
         (if (len(idx) > 0) (range_lo + pad + float(idx[0]) * step)
         else range_lo)
     } else if sc.kind == "ordinal" {
         let categories = sc.domain;
         let range_values = sc.range;
         let n = len(categories);
-        let idx = (for (i in 0 to (n - 1))
-            if (categories[i] == value) i else null) that (~ != null);
+        let idx = [for (i in 0 to (n - 1))
+            if (categories[i] == value) i else null] that (~ != null);
         (if (len(idx) > 0) range_values[idx[0] % len(range_values)]
         else range_values[0])
     } else if sc.kind == "sequential-color" {
@@ -133,7 +133,7 @@ pub fn scale_ticks(sc, count) {
         let log_hi = math.log(sc.domain[1]) / math.log(sc.base);
         let lo_exp = int(floor(log_lo));
         let hi_exp = int(ceil(log_hi));
-        for (e in lo_exp to hi_exp) sc.base ** float(e)
+        [for (e in lo_exp to hi_exp) sc.base ** float(e)]
     } else if sc.kind == "sqrt" {
         util.nice_ticks(sc.domain[0], sc.domain[1], count)
     } else if sc.kind == "band" {

@@ -84,21 +84,21 @@ fn set_wrapper_value(host, token, node, descriptor, use_css) {
     let wrapper = wrapper_for(host, node, tag);
     if (wrapper == null) false
     else if (use_css and descriptor.css_property != null) {
-        dom.set_attribute(wrapper, "style", style_entry(
+        let _set = dom.set_attribute(wrapper, "style", style_entry(
             descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
             else descriptor.css_value))
         true
     }
     else if (descriptor.attribute_name != null) {
-        dom.set_attribute(wrapper, descriptor.attribute_name,
+        let _set = dom.set_attribute(wrapper, descriptor.attribute_name,
                           descriptor.format_value)
         true
     }
     else if (descriptor.legacy_style and descriptor.css_property != null) {
         // Legacy color commands still persist CSS where HTML has no matching
         // attribute; styleWithCSS only chooses the element spelling (D7.2.5).
-        dom.set_attribute(wrapper, "style", style_entry(descriptor.css_property,
+        let _set = dom.set_attribute(wrapper, "style", style_entry(descriptor.css_property,
             if (descriptor.css_value == null) descriptor.format_value
             else descriptor.css_value))
         true
@@ -171,7 +171,7 @@ fn unwrap_direct_formats(host, token, node, start_offset, end_offset, changed) {
 fn clear_block_style(host, node) {
     let block = structure.block_ancestor(host, node);
     if (block == null or dom.get_attribute(block, "style") == null) false
-    else { dom.set_attribute(block, "style", ""); true }
+    else { let _set = dom.set_attribute(block, "style", ""); true }
 }
 
 // A collapsed removeFormat affects only future typing. Non-collapsed input

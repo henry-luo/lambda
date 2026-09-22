@@ -68,7 +68,7 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
     let domain_line = svg.line(0, ph, pw, ph, cfg.domain_color, 1);
 
     // tick marks and labels
-    let tick_elements = (for (tv in tick_values)
+    let tick_elements = [for (tv in tick_values)
         (let x_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (x_pos >= -1.0 and x_pos <= float(pw) + 1.0)
             <g class: "tick", transform: svg.translate(x_pos, ph),
@@ -82,7 +82,7 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
                 >
             >
         else null)
-    ) that (~ != null);
+    ] that (~ != null);
 
     // title
     let title_el = if (title_text)
@@ -110,14 +110,14 @@ pub fn x_axis_grid(sc, pw, ph, config) {
     let is_band = sc.kind == "band";
     let band_offset = if (is_band) float(sc.bandwidth) / 2.0 else 0.0;
 
-    let grid_lines = (for (tv in tick_values)
+    let grid_lines = [for (tv in tick_values)
         (let x_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (x_pos > 0.0 and x_pos < float(pw))
             <line x1: x_pos, y1: 0, x2: x_pos, y2: ph,
                   stroke: cfg.grid_color, 'stroke-width': 1,
                   'stroke-dasharray': "4,4">
         else null)
-    ) that (~ != null);
+    ] that (~ != null);
 
     svg.group_class("grid x-grid", grid_lines)
 }
@@ -136,7 +136,7 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
     let domain_line = svg.line(0, 0, 0, ph, cfg.domain_color, 1);
 
     // tick marks and labels
-    let tick_elements = (for (tv in tick_values)
+    let tick_elements = [for (tv in tick_values)
         (let y_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (y_pos >= -1.0 and y_pos <= float(ph) + 1.0)
             <g class: "tick", transform: svg.translate(0, y_pos),
@@ -150,7 +150,7 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
                 >
             >
         else null)
-    ) that (~ != null);
+    ] that (~ != null);
 
     // title (rotated 90 degrees)
     let title_el = if (title_text)
@@ -179,14 +179,14 @@ pub fn y_axis_grid(sc, pw, ph, config) {
     let is_band = sc.kind == "band";
     let band_offset = if (is_band) float(sc.bandwidth) / 2.0 else 0.0;
 
-    let grid_lines = (for (tv in tick_values)
+    let grid_lines = [for (tv in tick_values)
         (let y_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (y_pos > 0.0 and y_pos < float(ph))
             <line x1: 0, y1: y_pos, x2: pw, y2: y_pos,
                   stroke: cfg.grid_color, 'stroke-width': 1,
                   'stroke-dasharray': "4,4">
         else null)
-    ) that (~ != null);
+    ] that (~ != null);
 
     svg.group_class("grid y-grid", grid_lines)
 }
@@ -198,7 +198,7 @@ pub fn y_axis_grid(sc, pw, ph, config) {
 pub fn estimate_y_axis_width(sc, config) {
     let cfg = merge_config(config);
     let ticks = scale.scale_ticks(sc, cfg.tick_count);
-    let label_lens = for (tv in ticks) len(format_tick_label(sc, tv));
+    let label_lens = [for (tv in ticks) len(format_tick_label(sc, tv))];
     let max_label_len = if (len(label_lens) > 0) max(label_lens) else 3;
     float(max_label_len) * 7.0 + float(cfg.tick_size) + 10.0
 }

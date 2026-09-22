@@ -940,9 +940,9 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
             arr_builder.append(copied_child);
         }
         Item result = arr_builder.final();
-        // preserve is_content flag from source array
+        // the kind bit survives a copy: a list copies to a list (S2.5.1v2)
         if (result.array) {
-            result.array->flags |= (src_flags & 0x01); // is_content bit
+            result.array->flags |= (src_flags & 0x02); // is_spreadable bit
         }
         return result;
     } else if constexpr (Tag == LMD_TYPE_MAP) {

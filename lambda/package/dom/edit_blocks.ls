@@ -5,7 +5,9 @@ import dom
 import structure: lambda.dom.edit_structure
 
 fn abort(host, token) {
-    dom.edit_abort_transaction(host, token)
+    // a block yields every statement's value (S2.5.3); bind the effect so it
+    // contributes no item (S2.5.4)
+    let _aborted = dom.edit_abort_transaction(host, token)
     false
 }
 
@@ -24,7 +26,7 @@ fn copy_attributes(source, destination, names, index) {
     if (index >= len(names)) true
     else {
         let attr_name = names[index];
-        dom.set_attribute(destination, attr_name,
+        let _set = dom.set_attribute(destination, attr_name,
                           value_or_empty(dom.get_attribute(source, attr_name)))
         copy_attributes(source, destination, names, index + 1)
     }
@@ -66,7 +68,7 @@ fn set_style_property(node, property, value) {
     let base = style_without_property(split(current, ";"), lower(property), 0);
     // CSSOM-style declarations serialize the property/value separator with a
     // space, matching browser-visible `innerHTML` (D7.2.5).
-    dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")
+    let _set = dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")
     true
 }
 

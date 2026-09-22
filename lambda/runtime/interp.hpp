@@ -115,6 +115,10 @@ struct InterpFrame {
     uint32_t            var_marked_mask;
     InterpFrame*        caller;
     const AstNode*      cur;         // currently evaluating node (backtrace/step)
+    // An `on` handler activation: it has no `fn` node, yet its body is
+    // procedural (S12.1.3), so its blocks yield their last value (S2.5.3)
+    // exactly as MIR's `in_proc` handler functions do.
+    bool                proc_handler;
 };
 
 // True while a break/continue/return/error-skip is unwinding this activation:
@@ -186,6 +190,10 @@ struct InterpState {
     uint32_t     mode_fuel;
     bool         mode_exhausted;
     bool         mode_rejected;
+    // S2.5.5v2 void versus null: the list producer (for / `(…)` / block) that
+    // sits directly in an item position and so finishes with the skip marker;
+    // consumed once at the producer's entry (mirrors MirTranspiler).
+    AstNode*     list_item_producer;
 };
 
 // Per-run counters printed in the run summary; gates pin `fallback` to 0 on

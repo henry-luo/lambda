@@ -66,7 +66,7 @@ pub let BG = "lm_bg"
 
 // join multiple class names (skip nulls)
 pub fn classes(parts) {
-    let filtered = (for (p in parts where p != null and p != "") p)
+    let filtered = [for (p in parts where p != null and p != "") p]
     if (len(filtered) == 0) null
     else join_classes(filtered, 1, filtered[0])
 }

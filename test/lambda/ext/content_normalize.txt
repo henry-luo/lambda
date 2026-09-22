@@ -1,0 +1,7 @@
+[0, 1, ["ab"], 1, true]
+[3, 3, 1, ["a"]]
+"-- lists spread into content and are normalized there --"
+[1, ["ab"], 3]
+"-- the top level is content: nulls drop, adjacent strings merge --"
+[1]
+"ab"

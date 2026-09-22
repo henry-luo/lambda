@@ -7637,7 +7637,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     int64_t argument_unmap_index = -1;
     Item argument_unmap_value = ItemNull;
     bool have_argument_unmap_value = false;
-    if (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_content == 1 &&
+    if (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_js_arguments == 1 &&
         js_array_has_props(obj.array) && get_type_id(name) == LMD_TYPE_STRING &&
         get_type_id(descriptor) == LMD_TYPE_MAP) {
         String* str_name = it2s(name);
@@ -7673,7 +7673,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
             js_define_own_key_storage(obj, name, make_js_undefined());
         }
     }
-    if (!item_is_error(result) && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_content == 1 &&
+    if (!item_is_error(result) && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_js_arguments == 1 &&
         js_array_has_props(obj.array) && get_type_id(name) == LMD_TYPE_STRING && get_type_id(descriptor) == LMD_TYPE_MAP) {
         String* str_name = it2s(name);
         int64_t arg_index = str_name ? js_parse_array_index(str_name->chars, (int)str_name->len) : -1;
@@ -10286,7 +10286,7 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         // internal array length as an own property.
         if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) {
             Array* arr = obj.array;
-            if (arr->is_content == 1) {
+            if (arr->is_js_arguments == 1) {
                 if (!js_array_has_props(arr)) {
                     return (Item){.item = b2it(false)};
                 }
@@ -11568,7 +11568,7 @@ static Item js_json_is_array(Item value, bool* out_is_array) {
     value = unwrapped;
     TypeId type = get_type_id(value);
     *out_is_array = js_is_js_array(value) &&
-        !(type == LMD_TYPE_ARRAY && value.array->is_content == 1);
+        !(type == LMD_TYPE_ARRAY && value.array->is_js_arguments == 1);
     return ItemNull;
 }
 
@@ -12167,7 +12167,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
         if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
-            if (arr->is_content == 1 && js_array_has_props(arr)) {
+            if (arr->is_js_arguments == 1 && js_array_has_props(arr)) {
                 Item pm_item = (Item){.map = js_array_props(arr)};
                 js_shape_mark_deleted_own(pm_item, "length", 6, /*create_if_missing=*/true);
                 return (Item){.item = b2it(true)};
@@ -12216,7 +12216,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
         // Arguments exotic objects: deleting a mapped index breaks the
         // ParameterMap link, so later re-defining the index must not
         // update the formal parameter binding.
-        if (arr->is_content == 1 && js_array_has_props(arr)) {
+        if (arr->is_js_arguments == 1 && js_array_has_props(arr)) {
             Item pm_item = (Item){.map = js_array_props(arr)};
             char marker_key[64];
             snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)idx);
@@ -12246,7 +12246,7 @@ static Item js_delete_array_property(Item obj, Item key, bool strict) {
                 }
             }
         }
-        if (!arr->is_content &&
+        if (!arr->is_js_arguments &&
                 container_js_elements_kind((Container*)arr) != JS_ELEMENTS_SPARSE_TAGGED) {
             // Deleting a present indexed element creates a hole; packed
             // states therefore transition monotonically to holey storage.

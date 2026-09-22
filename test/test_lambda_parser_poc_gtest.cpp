@@ -512,10 +512,20 @@ TEST(LambdaRdParserPoc, ParsesContextualNamesPathsAndMatchPatterns) {
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
 }
 
+// S2.5.5v2: `()` is the empty list, which is `null`. A comment between the
+// parentheses is insignificant, so `(// comment\n)` is that literal too.
+TEST(LambdaRdParserPoc, ParsesEmptyListLiteral) {
+    const char* sources[] = {"()", "( )", "(// comment\n)", "let e = (); [e, 1]"};
+    for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+        LambdaParseError error = {};
+        EXPECT_EQ(lambda_rd_parse_source(sources[i], strlen(sources[i]), NULL,
+            NULL, NULL, &error), LAMBDA_PARSE_OK)
+            << sources[i] << ": " << (error.message ? error.message : "");
+    }
+}
+
 TEST(LambdaRdParserPoc, RejectsKnownStatementScopeAmbiguities) {
     LambdaParseError error = {};
-    EXPECT_NE(lambda_rd_parse_source("(// comment\n)", strlen("(// comment\n)"),
-        NULL, NULL, NULL, &error), LAMBDA_PARSE_OK);
     EXPECT_NE(lambda_rd_parse_source("\"a\" < \"b\"", strlen("\"a\" < \"b\""),
         NULL, NULL, NULL, &error), LAMBDA_PARSE_OK);
     EXPECT_EQ(lambda_rd_parse_source("(\"a\" < \"b\")", strlen("(\"a\" < \"b\")"),

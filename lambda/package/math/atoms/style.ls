@@ -83,10 +83,10 @@ fn render_children(node, context, render_fn) {
     let n = len(node)
     if (n == 0) box.text_box("", null, "ord")
     else
-        (let children = (for (i in 0 to (n - 1),
+        (let children = [for (i in 0 to (n - 1),
                              let child = node[i]
                              where child != null)
-                         render_fn(child, context)),
+                         render_fn(child, context)],
          box.hbox(children))
 }
 

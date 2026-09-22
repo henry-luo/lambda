@@ -573,7 +573,7 @@ extern "C" Item py_multiply(Item left, Item right) {
         Array* result = array();
         for (int64_t c = 0; c < count; c++) {
             for (int i = 0; i < arr->length; i++) {
-                array_push(result, arr->items[i]);
+                array_push_verbatim(result, arr->items[i]);
             }
         }
         return (Item){.array = result};
@@ -1471,7 +1471,7 @@ extern "C" Item py_list_new(int length) {
     for (int i = 0; i < length; i++) {
         // Array payloads must come from the runtime data zone so GC teardown
         // releases them; a tracked side allocation leaks when the list dies.
-        array_push(arr, ItemNull);
+        array_push_verbatim(arr, ItemNull);
     }
     return (Item){.array = arr};
 }
@@ -1479,7 +1479,7 @@ extern "C" Item py_list_new(int length) {
 extern "C" Item py_list_append(Item list, Item value) {
     if (get_type_id(list) != LMD_TYPE_ARRAY) return list;
     Array* arr = it2arr(list);
-    array_push(arr, value);
+    array_push_verbatim(arr, value);
     return list;
 }
 
@@ -1664,11 +1664,11 @@ extern "C" Item py_slice_get(Item object, Item start_item, Item stop_item, Item 
         Array* result = array();
         if (step > 0) {
             for (int64_t i = start; i < stop; i += step) {
-                if (i >= 0 && i < len) array_push(result, arr->items[i]);
+                if (i >= 0 && i < len) array_push_verbatim(result, arr->items[i]);
             }
         } else {
             for (int64_t i = start; i > stop; i += step) {
-                if (i >= 0 && i < len) array_push(result, arr->items[i]);
+                if (i >= 0 && i < len) array_push_verbatim(result, arr->items[i]);
             }
         }
         return (Item){.array = result};
@@ -1773,7 +1773,7 @@ extern "C" Item py_slice_set(Item object, Item start_item, Item stop_item, Item 
         if (new_len > len) {
             // grow: shift tail right
             for (int64_t i = 0; i < new_len - len; i++) {
-                array_push(arr, ItemNull);
+                array_push_verbatim(arr, ItemNull);
             }
             // shift tail from old stop position to new position
             for (int64_t i = len - 1; i >= stop; i--) {
@@ -2087,11 +2087,11 @@ extern "C" Item py_range_new(Item start, Item stop, Item step) {
     Array* arr = array();
     if (st > 0) {
         for (int64_t i = s; i < e; i += st) {
-            array_push(arr, (Item){.item = i2it(i)});
+            array_push_verbatim(arr, (Item){.item = i2it(i)});
         }
     } else {
         for (int64_t i = s; i > e; i += st) {
-            array_push(arr, (Item){.item = i2it(i)});
+            array_push_verbatim(arr, (Item){.item = i2it(i)});
         }
     }
     return (Item){.array = arr};

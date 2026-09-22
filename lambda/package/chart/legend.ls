@@ -52,7 +52,7 @@ pub fn color_legend(categories, color_scale, title_text, config) {
     else null;
 
     // legend entries
-    let entries = (for (i in 0 to (len(categories) - 1))
+    let entries = [for (i in 0 to (len(categories) - 1))
         (let cat = categories[i],
         let y_pos = y_start + float(i) * row_h,
         let c = scale.scale_apply(color_scale, cat),
@@ -67,7 +67,7 @@ pub fn color_legend(categories, color_scale, title_text, config) {
                 string(cat)
             >
         >)
-    );
+    ];
 
     let children = if (title_el) [title_el, *entries] else entries;
     svg.group_class("legend", children)
@@ -96,13 +96,13 @@ pub fn gradient_legend(sc, title_text, config) {
     // gradient bar rendered as a series of small rects
     let n_steps = 20;
     let step_h = float(bar_h) / float(n_steps);
-    let gradient_rects = (for (i in 0 to (n_steps - 1))
+    let gradient_rects = [for (i in 0 to (n_steps - 1))
         (let t = 1.0 - float(i) / float(n_steps),
         let c = if (sc.scheme) (let idx = int(t * float(len(sc.scheme) - 1)), sc.scheme[idx]) else "#ccc",
         <rect x: 0, y: y_start + float(i) * step_h,
               width: bar_w, height: step_h + 1.0,
               fill: c, stroke: "none">)
-    );
+    ];
 
     // labels at top and bottom
     let domain = sc.domain;

@@ -16,7 +16,9 @@ fn item_ancestor(host, node) {
 }
 
 fn abort(host, token) {
-    dom.edit_abort_transaction(host, token)
+    // a block yields every statement's value (S2.5.3); bind the effect so it
+    // contributes no item (S2.5.4)
+    let _aborted = dom.edit_abort_transaction(host, token)
     false
 }
 

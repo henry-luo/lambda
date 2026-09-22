@@ -46,9 +46,9 @@ fn build_merged(el) {
     let n = len(kid_items)
     if (n == 0) el
     else
-        (let kids = (for (child in kid_items) walk(child)),
+        (let kids = [for (child in kid_items) walk(child)],
          let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
-         let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
+         let items = [for (j in 0 to (len(merged) - 1)) merged[j]],
          // Preserve renderer metadata while rebuilding coalesced spans.
          <span class: el.class, style: el.style, id: el.id, math_data_attrs: el.math_data_attrs,
              math_raw_relation: el.math_raw_relation,
