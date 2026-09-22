@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 206 cases passing when this
+# One snapshot key per line. These are the 921 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -207,3 +207,718 @@ SURDS 1/ \\sqrt{} renders correctly 1
 SURDS 2/ ax^2+bx+c = a \\left( x - \\frac{-b + \\sqrt {b^2-4ac}}{2a} \\right) \\left( x - \\frac{-b - \\sqrt {b^2-4ac}}{2a} \\right) renders correctly 1
 SURDS 3/ \\sqrt[3]{5} renders correctly 1
 SURDS 4/ \\sqrt[3]5 renders correctly 1
+advanced_math_test.md 0/ \\twoheadleftarrow renders correctly 1
+advanced_math_test.md 1/ c\\:d renders correctly 1
+advanced_math_test.md 2/ \\int_0^1 f(x) dx renders correctly 1
+advanced_math_test.md 3/ \\iint_D f(x,y) dA renders correctly 1
+advanced_math_test.md 4/ \\[\\begin{matrix} a & b \\\\ c & d \\end{matrix}\\] renders correctly 1
+advanced_math_test.md 5/ \\[\\begin{matrix} a & b \\\\ c & d \\end{matrix}\\] renders correctly 1
+advanced_math_test.md 6/ \\[\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}\\] renders correctly 1
+advanced_math_test.md 7/ \\[\\begin{bmatrix} x & y \\\\ z & w \\end{bmatrix}\\] renders correctly 1
+advanced_math_test.md 8/ \\[\\begin{smallmatrix} p & q \\\\ r & s \\end{smallmatrix}\\] renders correctly 1
+advanced_math_test.md 9/ \\[\\begin{cases} x^2 & \\text{if } x \\geq 0 \\\\ -x^2 & \\text{if } x < 0 \\end{cases}\\] renders correctly 1
+advanced_math_test.md 10/ \\[\\begin{bmatrix} \\cos\\theta & -\\sin\\theta \\\\ \\sin\\theta & \\cos\\theta \\end{bmatrix}\\] renders correctly 1
+advanced_math_test.md 11/ \\[\\begin{bmatrix} x \\\\ y \\end{bmatrix}\\] renders correctly 1
+advanced_math_test.md 12/ \\[\\begin{bmatrix} x' \\\\ y' \\end{bmatrix}\\] renders correctly 1
+advanced_math_test.md 13/ \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} = f'(x) renders correctly 1
+comprehensive_math_test.md 0/ a + b + c renders correctly 1
+comprehensive_math_test.md 1/ x - y - z renders correctly 1
+comprehensive_math_test.md 2/ p \\cdot q \\times r * s renders correctly 1
+comprehensive_math_test.md 3/ \\frac{a}{b} / c \\div d renders correctly 1
+comprehensive_math_test.md 4/ x^2 \\cdot y^{n+1} renders correctly 1
+comprehensive_math_test.md 5/ \\sin x \\cos y \\tan z renders correctly 1
+comprehensive_math_test.md 6/ \\arcsin a \\arccos b \\arctan c renders correctly 1
+comprehensive_math_test.md 7/ \\sinh u \\cosh v \\tanh w renders correctly 1
+comprehensive_math_test.md 8/ \\log x \\ln y renders correctly 1
+comprehensive_math_test.md 9/ |x| \\lvert y \\rvert renders correctly 1
+comprehensive_math_test.md 10/ \\infty renders correctly 1
+comprehensive_math_test.md 11/ \\frac{\\partial f}{\\partial x} renders correctly 1
+comprehensive_math_test.md 12/ \\nabla \\cdot \\vec{F} renders correctly 1
+comprehensive_math_test.md 13/ \\ell renders correctly 1
+comprehensive_math_test.md 14/ \\hbar renders correctly 1
+comprehensive_math_test.md 15/ \\imath \\jmath renders correctly 1
+comprehensive_math_test.md 16/ \\frac{numerator}{denominator} renders correctly 1
+comprehensive_math_test.md 17/ \\dfrac{a}{b} renders correctly 1
+comprehensive_math_test.md 18/ \\tfrac{c}{d} renders correctly 1
+comprehensive_math_test.md 19/ \\cfrac{e}{f} renders correctly 1
+comprehensive_math_test.md 20/ \\sqrt{x} renders correctly 1
+comprehensive_math_test.md 21/ \\sqrt[3]{8} renders correctly 1
+comprehensive_math_test.md 22/ \\sqrt[4]{16} renders correctly 1
+comprehensive_math_test.md 23/ \\hat{x} \\widehat{xy} renders correctly 1
+comprehensive_math_test.md 24/ \\tilde{y} \\widetilde{abc} renders correctly 1
+comprehensive_math_test.md 25/ \\bar{z} \\overline{expression} renders correctly 1
+comprehensive_math_test.md 26/ \\dot{a} \\ddot{b} renders correctly 1
+comprehensive_math_test.md 27/ \\check{c} renders correctly 1
+comprehensive_math_test.md 28/ \\breve{d} renders correctly 1
+comprehensive_math_test.md 29/ \\vec{v} \\overrightarrow{AB} renders correctly 1
+comprehensive_math_test.md 30/ \\to \\leftarrow \\leftrightarrow renders correctly 1
+comprehensive_math_test.md 31/ \\Rightarrow \\Leftarrow \\Leftrightarrow renders correctly 1
+comprehensive_math_test.md 32/ f: A \\mapsto B renders correctly 1
+comprehensive_math_test.md 33/ \\longrightarrow \\longleftarrow renders correctly 1
+comprehensive_math_test.md 34/ \\sum_{i=1}^{n} x_i renders correctly 1
+comprehensive_math_test.md 35/ \\prod_{k=0}^{m} a_k renders correctly 1
+comprehensive_math_test.md 36/ \\int_0^1 f(x) dx renders correctly 1
+comprehensive_math_test.md 37/ \\bigcup_{i \\in I} A_i renders correctly 1
+comprehensive_math_test.md 38/ \\bigcap_{j=1}^n B_j renders correctly 1
+comprehensive_math_test.md 39/ \\bigoplus_{k} C_k renders correctly 1
+comprehensive_math_test.md 40/ \\bigotimes_i D_i renders correctly 1
+comprehensive_math_test.md 41/ (a + b) renders correctly 1
+comprehensive_math_test.md 42/ [x, y] renders correctly 1
+comprehensive_math_test.md 43/ \\{z \\mid z > 0\\} renders correctly 1
+comprehensive_math_test.md 44/ \\langle u, v \\rangle renders correctly 1
+comprehensive_math_test.md 45/ \\lvert w \\rvert renders correctly 1
+comprehensive_math_test.md 46/ \\lVert x \\rVert renders correctly 1
+comprehensive_math_test.md 47/ \\lfloor a \\rfloor \\lceil b \\rceil renders correctly 1
+comprehensive_math_test.md 48/ a = b \\neq c renders correctly 1
+comprehensive_math_test.md 49/ x < y \\leq z \\geq w > u renders correctly 1
+comprehensive_math_test.md 50/ \\pi \\approx 3.14 renders correctly 1
+comprehensive_math_test.md 51/ a \\equiv b \\pmod{n} renders correctly 1
+comprehensive_math_test.md 52/ \\sim \\simeq renders correctly 1
+comprehensive_math_test.md 53/ \\propto renders correctly 1
+comprehensive_math_test.md 54/ x \\in A \\notin B renders correctly 1
+comprehensive_math_test.md 55/ A \\subset B \\subseteq C renders correctly 1
+comprehensive_math_test.md 56/ A \\cup B \\cap C renders correctly 1
+comprehensive_math_test.md 57/ A \\setminus B renders correctly 1
+comprehensive_math_test.md 58/ \\emptyset \\varnothing renders correctly 1
+comprehensive_math_test.md 59/ A^c renders correctly 1
+comprehensive_math_test.md 60/ p \\land q \\wedge r renders correctly 1
+comprehensive_math_test.md 61/ s \\lor t \\vee u renders correctly 1
+comprehensive_math_test.md 62/ \\neg p \\lnot q renders correctly 1
+comprehensive_math_test.md 63/ p \\implies q \\Rightarrow r renders correctly 1
+comprehensive_math_test.md 64/ p \\iff q \\Leftrightarrow r renders correctly 1
+comprehensive_math_test.md 65/ \\forall x \\exists y renders correctly 1
+comprehensive_math_test.md 66/ \\mathbb{N} renders correctly 1
+comprehensive_math_test.md 67/ \\mathbb{Z} renders correctly 1
+comprehensive_math_test.md 68/ \\mathbb{Q} renders correctly 1
+comprehensive_math_test.md 69/ \\mathbb{R} renders correctly 1
+comprehensive_math_test.md 70/ \\mathbb{C} renders correctly 1
+comprehensive_math_test.md 71/ \\aleph_0 \\beth_1 renders correctly 1
+comprehensive_math_test.md 72/ \\angle ABC renders correctly 1
+comprehensive_math_test.md 73/ 90^\\circ renders correctly 1
+comprehensive_math_test.md 74/ \\triangle PQR renders correctly 1
+comprehensive_math_test.md 75/ AB \\parallel CD renders correctly 1
+comprehensive_math_test.md 76/ EF \\perp GH renders correctly 1
+comprehensive_math_test.md 77/ \\triangle ABC \\sim \\triangle DEF renders correctly 1
+comprehensive_math_test.md 78/ \\lim_{x \\to 0} \\frac{\\sin x}{x} renders correctly 1
+comprehensive_math_test.md 79/ \\frac{d}{dx} f(x) = f'(x) renders correctly 1
+comprehensive_math_test.md 80/ \\frac{\\partial^2 f}{\\partial x \\partial y} renders correctly 1
+comprehensive_math_test.md 81/ \\int_a^b f(x) dx renders correctly 1
+comprehensive_math_test.md 82/ \\iint_D f(x,y) dA renders correctly 1
+comprehensive_math_test.md 83/ \\nabla f renders correctly 1
+comprehensive_math_test.md 84/ \\det(A) = |A| renders correctly 1
+comprehensive_math_test.md 85/ \\tr(B) renders correctly 1
+comprehensive_math_test.md 86/ \\ker(T) renders correctly 1
+comprehensive_math_test.md 87/ \\text{im}(S) renders correctly 1
+comprehensive_math_test.md 88/ \\text{rank}(M) renders correctly 1
+comprehensive_math_test.md 89/ \\dim(V) renders correctly 1
+comprehensive_math_test.md 90/ \\mathbf{x} \\boldsymbol{\\alpha} renders correctly 1
+comprehensive_math_test.md 91/ \\mathit{text} renders correctly 1
+comprehensive_math_test.md 92/ \\mathcal{L} \\mathscr{F} renders correctly 1
+comprehensive_math_test.md 93/ \\mathfrak{g} \\mathfrak{A} renders correctly 1
+comprehensive_math_test.md 94/ \\mathtt{code} renders correctly 1
+comprehensive_math_test.md 95/ \\mathsf{label} renders correctly 1
+comprehensive_math_test.md 96/ \\[\\begin{matrix} a & b \\\\ c & d \\end{matrix}\\] renders correctly 1
+comprehensive_math_test.md 97/ \\[\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}\\] renders correctly 1
+comprehensive_math_test.md 98/ \\[\\begin{bmatrix} x & y \\\\ z & w \\end{bmatrix}\\] renders correctly 1
+comprehensive_math_test.md 99/ \\[\\begin{smallmatrix} p & q \\\\ r & s \\end{smallmatrix}\\] renders correctly 1
+comprehensive_math_test.md 100/ \\[f(x) = \\begin{cases} x^2 & \\text{if } x \\geq 0 \\\\ -x^2 & \\text{if } x < 0 \\end{cases}\\] renders correctly 1
+comprehensive_math_test.md 101/ a\\,b renders correctly 1
+comprehensive_math_test.md 102/ c\\:d renders correctly 1
+comprehensive_math_test.md 103/ e\\;f renders correctly 1
+comprehensive_math_test.md 104/ g\\quad h renders correctly 1
+comprehensive_math_test.md 105/ i\\qquad j renders correctly 1
+comprehensive_math_test.md 106/ k\\!l renders correctly 1
+comprehensive_math_test.md 107/ a \\bmod n renders correctly 1
+comprehensive_math_test.md 108/ x \\equiv y \\pmod{m} renders correctly 1
+comprehensive_math_test.md 109/ a \\pmod{b} renders correctly 1
+comprehensive_math_test.md 110/ a \\oplus b renders correctly 1
+comprehensive_math_test.md 111/ c \\otimes d renders correctly 1
+comprehensive_math_test.md 112/ e \\ominus f renders correctly 1
+comprehensive_math_test.md 113/ g \\odot h renders correctly 1
+comprehensive_math_test.md 114/ i \\boxplus j renders correctly 1
+comprehensive_math_test.md 115/ k \\boxtimes l renders correctly 1
+comprehensive_math_test.md 116/ m \\boxminus n renders correctly 1
+comprehensive_math_test.md 117/ o \\boxdot p renders correctly 1
+comprehensive_math_test.md 118/ \\hookrightarrow \\hookleftarrow renders correctly 1
+comprehensive_math_test.md 119/ \\twoheadrightarrow \\twoheadleftarrow renders correctly 1
+comprehensive_math_test.md 120/ \\rightsquigarrow renders correctly 1
+comprehensive_math_test.md 121/ \\uparrow \\downarrow \\updownarrow renders correctly 1
+comprehensive_math_test.md 122/ a \\ll b renders correctly 1
+comprehensive_math_test.md 123/ c \\gg d renders correctly 1
+comprehensive_math_test.md 124/ f(x) \\asymp g(x) renders correctly 1
+comprehensive_math_test.md 125/ x \\prec y \\preceq z renders correctly 1
+comprehensive_math_test.md 126/ u \\succ v \\succeq w renders correctly 1
+comprehensive_math_test.md 127/ p \\mid q renders correctly 1
+comprehensive_math_test.md 128/ r \\nmid s renders correctly 1
+comprehensive_math_test.md 129/ \\[\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\\] renders correctly 1
+comprehensive_math_test.md 130/ \\[\\begin{bmatrix} \\cos\\theta & -\\sin\\theta \\\\ \\sin\\theta & \\cos\\theta \\end{bmatrix} \\begin{bmatrix} x \\\\ y \\end{bmatrix} = \\begin{bmatrix} x' \\\\ y' \\end{bmatrix}\\] renders correctly 1
+comprehensive_math_test.md 131/ \\[\\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} = f'(x)\\] renders correctly 1
+comprehensive_math_test.md 132/ \\[e^x = \\sum_{n=0}^{\\infty} \\frac{x^n}{n!} = 1 + x + \\frac{x^2}{2!} + \\frac{x^3}{3!} + \\cdots\\] renders correctly 1
+comprehensive_test.md 0/ x + y = z renders correctly 1
+comprehensive_test.md 1/ a = b renders correctly 1
+comprehensive_test.md 2/ x^2 + y^2 = z^2 renders correctly 1
+comprehensive_test.md 3/ \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a} renders correctly 1
+comprehensive_test.md 4/ E = mc^2 renders correctly 1
+comprehensive_test.md 5/ \\int_0^1 x dx = \\frac{1}{2} renders correctly 1
+comprehensive_test.md 6/ \\lim_{x \\to 0} \\frac{\\sin x}{x} = 1 renders correctly 1
+comprehensive_test.md 7/ \\frac{d}{dx}[x^n] = nx^{n-1} renders correctly 1
+comprehensive_test.md 8/ \\sum_{i=1}^n i = \\frac{n(n+1)}{2} renders correctly 1
+comprehensive_test.md 9/ \\prod_{i=1}^n i = n! renders correctly 1
+comprehensive_test.md 10/ \\phi = \\frac{1 + \\sqrt{5}}{2} renders correctly 1
+comprehensive_test.md 11/ \\phi^2 = \\phi + 1 renders correctly 1
+comprehensive_test.md 12/ x \\in \\mathbb{R} renders correctly 1
+comprehensive_test.md 13/ \\mathbb{N} \\subset \\mathbb{Z} \\subset \\mathbb{Q} \\subset \\mathbb{R} renders correctly 1
+comprehensive_test.md 14/ |z|^2 = z \\bar{z} renders correctly 1
+comprehensive_test.md 15/ z = a + bi \\in \\mathbb{C} renders correctly 1
+comprehensive_test.md 16/ \\mathbf{v} \\cdot \\mathbf{w} = |\\mathbf{v}||\\mathbf{w}|\\cos\\theta renders correctly 1
+comprehensive_test.md 17/ P(A \\cap B) = P(A)P(B|A) renders correctly 1
+comprehensive_test.md 18/ \\[x + y = z\\] renders correctly 1
+comprehensive_test.md 19/ \\[\\sqrt{x^2 + y^2} = z\\] renders correctly 1
+comprehensive_test.md 20/ \\[\\frac{a}{b} = c\\] renders correctly 1
+comprehensive_test.md 21/ \\[\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\\] renders correctly 1
+comprehensive_test.md 22/ \\[\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}\\] renders correctly 1
+comprehensive_test.md 23/ \\[\\begin{aligned} f(x) &= ax^2 + bx + c \\\\ f'(x) &= 2ax + b \\\\ f''(x) &= 2a \\end{aligned}\\] renders correctly 1
+comprehensive_test.md 24/ \\[\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} ax + by \\\\ cx + dy \\end{pmatrix}\\] renders correctly 1
+comprehensive_test.md 25/ x_1 + x_2 = \\sum_{i=1}^{2} x_i renders correctly 1
+comprehensive_test.md 26/ \\[\\lim_{n \\to \\infty} \\sum_{k=1}^{n} \\frac{1}{k^2} = \\frac{\\pi^2}{6}\\] renders correctly 1
+comprehensive_test.md 27/ \\[\\prod_{p \\text{ prime}} \\left(1 - \\frac{1}{p^2}\\right) = \\frac{6}{\\pi^2}\\] renders correctly 1
+comprehensive_test.md 28/ \\[\\int_0^\\infty \\frac{\\sin x}{x} dx = \\frac{\\pi}{2}\\] renders correctly 1
+comprehensive_test.md 29/ \\[\\frac{1}{\\sqrt{2\\pi}} \\int_{-\\infty}^{\\infty} e^{-\\frac{x^2}{2}} dx = 1\\] renders correctly 1
+comprehensive_test.md 30/ \\[\\cfrac{1}{1+\\cfrac{1}{1+\\cfrac{1}{1+\\cdots}}} = \\frac{\\sqrt{5}-1}{2}\\] renders correctly 1
+comprehensive_test.md 31/ \\[\\frac{\\partial^2 u}{\\partial t^2} = c^2 \\nabla^2 u\\] renders correctly 1
+comprehensive_test.md 32/ \\[\\oint_C \\mathbf{F} \\cdot d\\mathbf{r} = \\iint_D \\left(\\frac{\\partial Q}{\\partial x} - \\frac{\\partial P}{\\partial y}\\right) dx\\,dy\\] renders correctly 1
+comprehensive_test.md 33/ \\[A \\cup B = \\{x : x \\in A \\lor x \\in B\\}\\] renders correctly 1
+comprehensive_test.md 34/ \\[\\forall \\epsilon > 0, \\exists \\delta > 0 : |x - a| < \\delta \\Rightarrow |f(x) - f(a)| < \\epsilon\\] renders correctly 1
+comprehensive_test.md 35/ \\[\\zeta(s) = \\sum_{n=1}^{\\infty} \\frac{1}{n^s} = \\prod_{p \\text{ prime}} \\frac{1}{1-p^{-s}}\\] renders correctly 1
+comprehensive_test.md 36/ \\[\\binom{n}{k} = \\frac{n!}{k!(n-k)!}\\] renders correctly 1
+comprehensive_test.md 37/ \\[\\alpha\\beta\\gamma\\delta\\epsilon\\zeta\\eta\\theta\\iota\\kappa\\lambda\\mu\\] renders correctly 1
+comprehensive_test.md 38/ \\[\\Gamma\\Delta\\Theta\\Lambda\\Xi\\Pi\\Sigma\\Upsilon\\Phi\\Psi\\Omega\\] renders correctly 1
+comprehensive_test.md 39/ \\[\\aleph_0 < \\aleph_1 < \\aleph_2\\] renders correctly 1
+comprehensive_test.md 40/ \\[e^{i\\pi} + 1 = 0\\] renders correctly 1
+comprehensive_test.md 41/ \\[\\sin^2 x + \\cos^2 x = 1\\] renders correctly 1
+comprehensive_test.md 42/ \\[\\tan(a + b) = \\frac{\\tan a + \\tan b}{1 - \\tan a \\tan b}\\] renders correctly 1
+comprehensive_test.md 43/ \\[\\det(A) = \\sum_{\\sigma \\in S_n} \\text{sgn}(\\sigma) \\prod_{i=1}^n a_{i,\\sigma(i)}\\] renders correctly 1
+comprehensive_test.md 44/ \\[\\mathbf{v} \\times \\mathbf{w} = \\begin{vmatrix} \\mathbf{i} & \\mathbf{j} & \\mathbf{k} \\\\ v_1 & v_2 & v_3 \\\\ w_1 & w_2 & w_3 \\end{vmatrix}\\] renders correctly 1
+comprehensive_test.md 45/ \\[P(A|B) = \\frac{P(B|A)P(A)}{P(B)}\\] renders correctly 1
+comprehensive_test.md 46/ \\[\\mathbb{E}[X] = \\int_{-\\infty}^{\\infty} x f(x) dx\\] renders correctly 1
+comprehensive_test.md 47/ \\[E = mc^2\\] renders correctly 1
+comprehensive_test.md 48/ \\[F = G\\frac{m_1 m_2}{r^2}\\] renders correctly 1
+comprehensive_test.md 49/ \\[\\nabla \\times \\mathbf{E} = -\\frac{\\partial \\mathbf{B}}{\\partial t}\\] renders correctly 1
+comprehensive_test.md 50/ \\[\\sum_{n=0}^{\\infty} \\frac{(-1)^n}{(2n)!} x^{2n} = \\cos x\\] renders correctly 1
+comprehensive_test.md 51/ \\[\\int_0^1 \\int_0^1 \\frac{x^2 + y^2}{x^2 + y^2 + z^2} \\, dx \\, dy\\] renders correctly 1
+comprehensive_test.md 52/ \\[\\left\\{ \\begin{array}{ll} x + y = 1 \\\\ x - y = 2 \\end{array} \\right.\\] renders correctly 1
+comprehensive_test.md 53/ \\[...\\] renders correctly 1
+comprehensive_test.md 54/ ... renders correctly 1
+comprehensive_test.md 55/ \\pi r^2 renders correctly 1
+comprehensive_test.tex 0/ \\[\\begin{equation} E = mc^2 \\end{equation}\\] renders correctly 1
+comprehensive.tex 0/ x + y = z renders correctly 1
+comprehensive.tex 1/ \\alpha + \\beta = \\gamma renders correctly 1
+comprehensive.tex 2/ \\sum_{i=1}^{n} x_i renders correctly 1
+comprehensive.tex 3/ \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} renders correctly 1
+comprehensive.tex 4/ \\frac{\\partial f}{\\partial x} = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} renders correctly 1
+comprehensive.tex 5/ \\[E = mc^2\\] renders correctly 1
+comprehensive.tex 6/ \\[\\begin{equation} \\label{eq:quadratic} ax^2 + bx + c = 0 \\end{equation}\\] renders correctly 1
+comprehensive.tex 7/ \\[\\begin{equation} x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} \\end{equation}\\] renders correctly 1
+comprehensive.tex 8/ \\[\\begin{align} f(x) &= ax^2 + bx + c \\\\ f'(x) &= 2ax + b \\\\ f''(x) &= 2a \\end{align}\\] renders correctly 1
+comprehensive.tex 9/ \\[\\begin{pmatrix} a & b & c \\\\ d & e & f \\\\ g & h & i \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\\\ z \\end{pmatrix} = \\begin{pmatrix} ax + by + cz \\\\ dx + ey + fz \\\\ gx + hy + iz \\end{pmatrix}\\] renders correctly 1
+comprehensive.tex 10/ \\alpha, \\beta, \\gamma, \\delta, \\epsilon, \\phi, \\psi, \\omega renders correctly 1
+comprehensive.tex 11/ \\leftarrow, \\rightarrow, \\leftrightarrow, \\Leftarrow, \\Rightarrow, \\Leftrightarrow renders correctly 1
+comprehensive.tex 12/ \\in, \\notin, \\subset, \\supset, \\cap, \\cup, \\emptyset, \\infty renders correctly 1
+enhanced_test.tex 0/ E = mc^2 renders correctly 1
+enhanced_test.tex 1/ \\pi \\approx 3.14159 renders correctly 1
+enhanced_test.tex 2/ \\[\\begin{equation} \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} \\end{equation}\\] renders correctly 1
+indexed_math_test.md 0/ x + y renders correctly 1
+indexed_math_test.md 1/ a - b renders correctly 1
+indexed_math_test.md 2/ \\frac{m}{n} renders correctly 1
+indexed_math_test.md 3/ \\sin x renders correctly 1
+indexed_math_test.md 4/ \\cos y renders correctly 1
+indexed_math_test.md 5/ \\log z renders correctly 1
+indexed_math_test.md 6/ |w| renders correctly 1
+indexed_math_test.md 7/ x^2 renders correctly 1
+indexed_math_test.md 8/ \\sqrt{a} renders correctly 1
+indexed_math_test.md 9/ \\int f(x) dx renders correctly 1
+indexed_math_test.md 10/ \\lim_{x \\to 0} f(x) renders correctly 1
+indexed_math_test.md 11/ \\tan z renders correctly 1
+indexed_math_test.md 12/ \\arcsin a renders correctly 1
+indexed_math_test.md 13/ \\arccos b renders correctly 1
+indexed_math_test.md 14/ \\arctan c renders correctly 1
+indexed_math_test.md 15/ \\sinh u renders correctly 1
+indexed_math_test.md 16/ \\cosh v renders correctly 1
+indexed_math_test.md 17/ \\tanh w renders correctly 1
+indexed_math_test.md 18/ \\ln y renders correctly 1
+indexed_math_test.md 19/ a + b + c renders correctly 1
+indexed_math_test.md 20/ x - y - z renders correctly 1
+indexed_math_test.md 21/ p \\cdot q \\times r * s renders correctly 1
+indexed_math_test.md 22/ \\frac{a}{b} / c \\div d renders correctly 1
+indexed_math_test.md 23/ x^2 \\cdot y^{n+1} renders correctly 1
+indexed_math_test.md 24/ \\sqrt[3]{8} renders correctly 1
+indexed_math_test.md 25/ \\sqrt[4]{16} renders correctly 1
+indexed_math_test.md 26/ \\dfrac{a}{b} renders correctly 1
+indexed_math_test.md 27/ \\tfrac{c}{d} renders correctly 1
+indexed_math_test.md 28/ \\cfrac{e}{f} renders correctly 1
+indexed_math_test.md 29/ \\lvert y \\rvert renders correctly 1
+indexed_math_test.md 30/ \\lVert x \\rVert renders correctly 1
+indexed_math_test.md 31/ \\lfloor a \\rfloor renders correctly 1
+indexed_math_test.md 32/ \\lceil b \\rceil renders correctly 1
+indexed_math_test.md 33/ \\langle u, v \\rangle renders correctly 1
+indexed_math_test.md 34/ \\{z \\mid z > 0\\} renders correctly 1
+indexed_math_test.md 35/ \\sum_{i=1}^{n} x_i renders correctly 1
+indexed_math_test.md 36/ \\prod_{k=0}^{m} a_k renders correctly 1
+indexed_math_test.md 37/ \\bigcup_{i \\in I} A_i renders correctly 1
+indexed_math_test.md 38/ \\bigcap_{j=1}^n B_j renders correctly 1
+indexed_math_test.md 39/ \\bigoplus_{k} C_k renders correctly 1
+indexed_math_test.md 40/ a = b renders correctly 1
+indexed_math_test.md 41/ x \\neq y renders correctly 1
+indexed_math_test.md 42/ p < q renders correctly 1
+indexed_math_test.md 43/ r \\leq s renders correctly 1
+indexed_math_test.md 44/ t \\geq u renders correctly 1
+indexed_math_test.md 45/ v > w renders correctly 1
+indexed_math_test.md 46/ \\pi \\approx 3.14 renders correctly 1
+indexed_math_test.md 47/ a \\equiv b \\pmod{n} renders correctly 1
+indexed_math_test.md 48/ \\sim \\simeq renders correctly 1
+indexed_math_test.md 49/ \\propto renders correctly 1
+indexed_math_test.md 50/ a \\ll b renders correctly 1
+indexed_math_test.md 51/ c \\gg d renders correctly 1
+indexed_math_test.md 52/ f(x) \\asymp g(x) renders correctly 1
+indexed_math_test.md 53/ x \\prec y \\preceq z renders correctly 1
+indexed_math_test.md 54/ u \\succ v \\succeq w renders correctly 1
+indexed_math_test.md 55/ p \\mid q renders correctly 1
+indexed_math_test.md 56/ r \\nmid s renders correctly 1
+indexed_math_test.md 57/ x \\in A renders correctly 1
+indexed_math_test.md 58/ y \\notin B renders correctly 1
+indexed_math_test.md 59/ A \\subset B renders correctly 1
+indexed_math_test.md 60/ C \\subseteq D renders correctly 1
+indexed_math_test.md 61/ E \\cup F renders correctly 1
+indexed_math_test.md 62/ G \\cap H renders correctly 1
+indexed_math_test.md 63/ I \\setminus J renders correctly 1
+indexed_math_test.md 64/ A^c renders correctly 1
+indexed_math_test.md 65/ \\infty renders correctly 1
+indexed_math_test.md 66/ \\partial renders correctly 1
+indexed_math_test.md 67/ \\nabla renders correctly 1
+indexed_math_test.md 68/ \\ell renders correctly 1
+indexed_math_test.md 69/ \\hbar renders correctly 1
+indexed_math_test.md 70/ \\emptyset renders correctly 1
+indexed_math_test.md 71/ \\varnothing renders correctly 1
+indexed_math_test.md 72/ \\imath renders correctly 1
+indexed_math_test.md 73/ \\jmath renders correctly 1
+indexed_math_test.md 74/ \\hat{x} renders correctly 1
+indexed_math_test.md 75/ \\widehat{xy} renders correctly 1
+indexed_math_test.md 76/ \\tilde{y} renders correctly 1
+indexed_math_test.md 77/ \\widetilde{abc} renders correctly 1
+indexed_math_test.md 78/ \\bar{z} renders correctly 1
+indexed_math_test.md 79/ \\overline{expression} renders correctly 1
+indexed_math_test.md 80/ \\dot{a} renders correctly 1
+indexed_math_test.md 81/ \\ddot{b} renders correctly 1
+indexed_math_test.md 82/ \\check{c} renders correctly 1
+indexed_math_test.md 83/ \\breve{d} renders correctly 1
+indexed_math_test.md 84/ \\vec{v} renders correctly 1
+indexed_math_test.md 85/ \\overrightarrow{AB} renders correctly 1
+indexed_math_test.md 86/ \\mathbf{x} renders correctly 1
+indexed_math_test.md 87/ \\boldsymbol{\\alpha} renders correctly 1
+indexed_math_test.md 88/ \\mathit{text} renders correctly 1
+indexed_math_test.md 89/ \\mathcal{L} renders correctly 1
+indexed_math_test.md 90/ \\mathscr{F} renders correctly 1
+indexed_math_test.md 91/ \\mathfrak{g} renders correctly 1
+indexed_math_test.md 92/ \\mathfrak{A} renders correctly 1
+indexed_math_test.md 93/ \\mathtt{code} renders correctly 1
+indexed_math_test.md 94/ \\mathsf{label} renders correctly 1
+indexed_math_test.md 95/ \\mathbb{N} renders correctly 1
+indexed_math_test.md 96/ \\mathbb{Z} renders correctly 1
+indexed_math_test.md 97/ \\mathbb{Q} renders correctly 1
+indexed_math_test.md 98/ \\mathbb{R} renders correctly 1
+indexed_math_test.md 99/ \\mathbb{C} renders correctly 1
+indexed_math_test.md 100/ \\aleph_0 renders correctly 1
+indexed_math_test.md 101/ \\beth_1 renders correctly 1
+indexed_math_test.md 102/ \\angle ABC renders correctly 1
+indexed_math_test.md 103/ 90^\\circ renders correctly 1
+indexed_math_test.md 104/ \\triangle PQR renders correctly 1
+indexed_math_test.md 105/ AB \\parallel CD renders correctly 1
+indexed_math_test.md 106/ EF \\perp GH renders correctly 1
+indexed_math_test.md 107/ \\triangle ABC \\sim \\triangle DEF renders correctly 1
+indexed_math_test.md 108/ p \\land q renders correctly 1
+indexed_math_test.md 109/ \\wedge r renders correctly 1
+indexed_math_test.md 110/ s \\lor t renders correctly 1
+indexed_math_test.md 111/ \\vee u renders correctly 1
+indexed_math_test.md 112/ \\neg p renders correctly 1
+indexed_math_test.md 113/ \\lnot q renders correctly 1
+indexed_math_test.md 114/ p \\implies q renders correctly 1
+indexed_math_test.md 115/ \\Rightarrow r renders correctly 1
+indexed_math_test.md 116/ p \\iff q renders correctly 1
+indexed_math_test.md 117/ \\Leftrightarrow r renders correctly 1
+indexed_math_test.md 118/ \\forall x renders correctly 1
+indexed_math_test.md 119/ \\exists y renders correctly 1
+indexed_math_test.md 120/ \\to renders correctly 1
+indexed_math_test.md 121/ \\leftarrow renders correctly 1
+indexed_math_test.md 122/ \\leftrightarrow renders correctly 1
+indexed_math_test.md 123/ \\Rightarrow renders correctly 1
+indexed_math_test.md 124/ \\Leftarrow renders correctly 1
+indexed_math_test.md 125/ \\Leftrightarrow renders correctly 1
+indexed_math_test.md 126/ f: A \\mapsto B renders correctly 1
+indexed_math_test.md 127/ \\longrightarrow renders correctly 1
+indexed_math_test.md 128/ \\longleftarrow renders correctly 1
+indexed_math_test.md 129/ \\hookrightarrow renders correctly 1
+indexed_math_test.md 130/ \\hookleftarrow renders correctly 1
+indexed_math_test.md 131/ \\rightsquigarrow renders correctly 1
+indexed_math_test.md 132/ \\uparrow renders correctly 1
+indexed_math_test.md 133/ \\downarrow renders correctly 1
+indexed_math_test.md 134/ \\updownarrow renders correctly 1
+indexed_math_test.md 135/ a \\oplus b renders correctly 1
+indexed_math_test.md 136/ c \\otimes d renders correctly 1
+indexed_math_test.md 137/ e \\ominus f renders correctly 1
+indexed_math_test.md 138/ g \\odot h renders correctly 1
+indexed_math_test.md 139/ i \\boxplus j renders correctly 1
+indexed_math_test.md 140/ k \\boxtimes l renders correctly 1
+indexed_math_test.md 141/ m \\boxminus n renders correctly 1
+indexed_math_test.md 142/ o \\boxdot p renders correctly 1
+indexed_math_test.md 143/ a\\,b renders correctly 1
+indexed_math_test.md 144/ e\\;f renders correctly 1
+indexed_math_test.md 145/ g\\quad h renders correctly 1
+indexed_math_test.md 146/ i\\qquad j renders correctly 1
+indexed_math_test.md 147/ k\\!l renders correctly 1
+indexed_math_test.md 148/ a \\bmod n renders correctly 1
+indexed_math_test.md 149/ x \\equiv y \\pmod{m} renders correctly 1
+indexed_math_test.md 150/ a \\pmod{b} renders correctly 1
+indexed_math_test.md 151/ \\lim_{x \\to 0} \\frac{\\sin x}{x} renders correctly 1
+indexed_math_test.md 152/ \\frac{d}{dx} f(x) = f'(x) renders correctly 1
+indexed_math_test.md 153/ \\frac{\\partial^2 f}{\\partial x \\partial y} renders correctly 1
+indexed_math_test.md 154/ \\nabla f renders correctly 1
+indexed_math_test.md 155/ \\det(A) = |A| renders correctly 1
+indexed_math_test.md 156/ \\tr(B) renders correctly 1
+indexed_math_test.md 157/ \\ker(T) renders correctly 1
+indexed_math_test.md 158/ \\text{im}(S) renders correctly 1
+indexed_math_test.md 159/ \\text{rank}(M) renders correctly 1
+indexed_math_test.md 160/ \\dim(V) renders correctly 1
+indexed_math_test.md 161/ \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} renders correctly 1
+indexed_math_test.md 162/ e^x = \\sum_{n=0}^{\\infty} \\frac{x^n}{n!} = 1 + x + \\frac{x^2}{2!} + \\frac{x^3}{3!} + \\cdots renders correctly 1
+latex-showcase.tex 0/ \\varheartsuit renders correctly 1
+latex-showcase.tex 1/ 0 renders correctly 1
+latex-showcase.tex 2/ 1 renders correctly 1
+latex-showcase.tex 3/ -1 renders correctly 1
+latex-showcase.tex 4/ - renders correctly 1
+latex-showcase.tex 5/ A renders correctly 1
+latex-showcase.tex 6/ B renders correctly 1
+latex-showcase.tex 7/ C renders correctly 1
+latex-showcase.tex 8/ a renders correctly 1
+latex-showcase.tex 9/ b renders correctly 1
+latex-showcase.tex 10/ c renders correctly 1
+latex-showcase.tex 11/ F=\\sqrt{s(s-a)(s-b)(s-c)} renders correctly 1
+latex-showcase.tex 12/ \\displaystyle s:=\\frac{a+b+c}{2} renders correctly 1
+latex-showcase.tex 13/ \\[f(n) = \\begin{cases} \\frac{n}{2}, & \\text{if } n\\text{ is even} \\\\ 3n+1, & \\text{if } n\\text{ is odd} \\end{cases}\\] renders correctly 1
+markdown_test.md 0/ E = mc^2 renders correctly 1
+markdown_test.md 1/ \\[\\int_{0}^{\\infty} e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}\\] renders correctly 1
+math_accents.txt 0/ \\hat{x} renders correctly 1
+math_arrows.txt 0/ x \\to \\infty renders correctly 1
+math_binomial.txt 0/ \\binom{n}{k} renders correctly 1
+math_comprehensive.md 0/ a + b + c renders correctly 1
+math_comprehensive.md 1/ x - y - z renders correctly 1
+math_comprehensive.md 2/ p \\cdot q \\times r renders correctly 1
+math_comprehensive.md 3/ \\frac{a}{b} renders correctly 1
+math_comprehensive.md 4/ x^2 \\cdot y^{n+1} renders correctly 1
+math_comprehensive.md 5/ \\infty renders correctly 1
+math_comprehensive.md 6/ \\frac{\\partial f}{\\partial x} renders correctly 1
+math_comprehensive.md 7/ \\nabla \\cdot \\vec{F} renders correctly 1
+math_comprehensive.md 8/ \\ell renders correctly 1
+math_comprehensive.md 9/ \\hbar renders correctly 1
+math_comprehensive.md 10/ \\imath \\jmath renders correctly 1
+math_comprehensive.md 11/ \\frac{numerator}{denominator} renders correctly 1
+math_comprehensive.md 12/ \\dfrac{a}{b} renders correctly 1
+math_comprehensive.md 13/ \\tfrac{c}{d} renders correctly 1
+math_comprehensive.md 14/ \\cfrac{e}{f} renders correctly 1
+math_comprehensive.md 15/ \\sqrt{x} renders correctly 1
+math_comprehensive.md 16/ \\sqrt[n]{x} renders correctly 1
+math_comprehensive.md 17/ \\[\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\\] renders correctly 1
+math_comprehensive.md 18/ \\[\\begin{vmatrix} x & y \\\\ z & w \\end{vmatrix}\\] renders correctly 1
+math_comprehensive.md 19/ \\[\\begin{bmatrix} 1 & 2 & 3 \\\\ 4 & 5 & 6 \\end{bmatrix}\\] renders correctly 1
+math_comprehensive.md 20/ \\[\\begin{bmatrix} x+y & 2z \\\\ 3a-b & \\frac{1}{2} \\end{bmatrix}\\] renders correctly 1
+math_comprehensive.md 21/ \\hat{x} \\widehat{xy} renders correctly 1
+math_comprehensive.md 22/ \\tilde{y} \\widetilde{abc} renders correctly 1
+math_comprehensive.md 23/ \\bar{z} \\overline{expression} renders correctly 1
+math_comprehensive.md 24/ \\dot{a} \\ddot{b} renders correctly 1
+math_comprehensive.md 25/ \\check{c} renders correctly 1
+math_comprehensive.md 26/ \\breve{d} renders correctly 1
+math_comprehensive.md 27/ \\vec{v} \\overrightarrow{AB} renders correctly 1
+math_comprehensive.md 28/ \\to \\leftarrow \\leftrightarrow renders correctly 1
+math_comprehensive.md 29/ \\Rightarrow \\Leftarrow \\Leftrightarrow renders correctly 1
+math_comprehensive.md 30/ f: A \\mapsto B renders correctly 1
+math_comprehensive.md 31/ \\longrightarrow \\longleftarrow renders correctly 1
+math_comprehensive.md 32/ \\sum_{i=1}^{n} x_i renders correctly 1
+math_comprehensive.md 33/ \\prod_{k=0}^{m} a_k renders correctly 1
+math_comprehensive.md 34/ \\int_0^1 f(x) dx renders correctly 1
+math_comprehensive.md 35/ \\bigcup_{i \\in I} A_i renders correctly 1
+math_comprehensive.md 36/ \\bigcap_{j=1}^n B_j renders correctly 1
+math_comprehensive.md 37/ \\bigoplus_{k} C_k renders correctly 1
+math_comprehensive.md 38/ \\bigotimes_i D_i renders correctly 1
+math_comprehensive.md 39/ (a + b) renders correctly 1
+math_comprehensive.md 40/ [x, y] renders correctly 1
+math_comprehensive.md 41/ \\langle u, v \\rangle renders correctly 1
+math_comprehensive.md 42/ \\lvert w \\rvert renders correctly 1
+math_comprehensive.md 43/ \\lVert x \\rVert renders correctly 1
+math_comprehensive.md 44/ \\lfloor a \\rfloor \\lceil b \\rceil renders correctly 1
+math_comprehensive.md 45/ a = b \\neq c renders correctly 1
+math_comprehensive.md 46/ x < y \\leq z \\geq w > u renders correctly 1
+math_comprehensive.md 47/ \\pi \\approx 3.14 renders correctly 1
+math_comprehensive.md 48/ a \\equiv b \\pmod{n} renders correctly 1
+math_comprehensive.md 49/ \\sim \\simeq renders correctly 1
+math_comprehensive.md 50/ \\propto renders correctly 1
+math_comprehensive.md 51/ x \\in A \\notin B renders correctly 1
+math_comprehensive.md 52/ A \\subset B \\subseteq C renders correctly 1
+math_comprehensive.md 53/ A \\cup B \\cap C renders correctly 1
+math_comprehensive.md 54/ A \\setminus B renders correctly 1
+math_comprehensive.md 55/ \\emptyset \\varnothing renders correctly 1
+math_comprehensive.md 56/ A^c renders correctly 1
+math_comprehensive.md 57/ p \\land q \\wedge r renders correctly 1
+math_comprehensive.md 58/ s \\lor t \\vee u renders correctly 1
+math_comprehensive.md 59/ \\neg p \\lnot q renders correctly 1
+math_comprehensive.md 60/ p \\implies q \\Rightarrow r renders correctly 1
+math_comprehensive.md 61/ p \\iff q \\Leftrightarrow r renders correctly 1
+math_comprehensive.md 62/ \\forall x \\exists y renders correctly 1
+math_comprehensive.md 63/ \\mathbb{N} renders correctly 1
+math_comprehensive.md 64/ \\mathbb{Z} renders correctly 1
+math_comprehensive.md 65/ \\mathbb{Q} renders correctly 1
+math_comprehensive.md 66/ \\mathbb{R} renders correctly 1
+math_comprehensive.md 67/ \\mathbb{C} renders correctly 1
+math_comprehensive.md 68/ \\aleph_0 \\beth_1 renders correctly 1
+math_comprehensive.md 69/ \\angle ABC renders correctly 1
+math_comprehensive.md 70/ 90^\\circ renders correctly 1
+math_comprehensive.md 71/ \\triangle PQR renders correctly 1
+math_comprehensive.md 72/ AB \\parallel CD renders correctly 1
+math_comprehensive.md 73/ EF \\perp GH renders correctly 1
+math_comprehensive.md 74/ \\triangle ABC \\sim \\triangle DEF renders correctly 1
+math_comprehensive.md 75/ \\lim_{x \\to 0} \\frac{\\sin x}{x} renders correctly 1
+math_comprehensive.md 76/ \\frac{d}{dx} f(x) = f'(x) renders correctly 1
+math_comprehensive.md 77/ \\frac{\\partial^2 f}{\\partial x \\partial y} renders correctly 1
+math_comprehensive.md 78/ \\int_a^b f(x) dx renders correctly 1
+math_comprehensive.md 79/ \\iint_D f(x,y) dA renders correctly 1
+math_comprehensive.md 80/ \\nabla f renders correctly 1
+math_comprehensive.md 81/ \\alpha \\beta \\gamma \\delta \\epsilon \\zeta \\eta \\theta \\iota \\kappa \\lambda \\mu \\nu \\xi \\pi \\rho \\sigma \\tau \\upsilon \\phi \\chi \\psi \\omega renders correctly 1
+math_comprehensive.md 82/ \\Gamma \\Delta \\Theta \\Lambda \\Xi \\Pi \\Sigma \\Upsilon \\Phi \\Psi \\Omega renders correctly 1
+math_comprehensive.md 83/ \\binom{n}{k} renders correctly 1
+math_comprehensive.md 84/ E = mc^2 renders correctly 1
+math_comprehensive.md 85/ F = ma renders correctly 1
+math_comprehensive.md 86/ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} renders correctly 1
+math_comprehensive.md 87/ e^{i\\pi} + 1 = 0 renders correctly 1
+math_comprehensive.md 88/ \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} renders correctly 1
+math_comprehensive.md 89/ \\[\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\\] renders correctly 1
+math_comprehensive.md 90/ \\[\\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} = f'(x)\\] renders correctly 1
+math_comprehensive.md 91/ \\[e^x = \\sum_{n=0}^{\\infty} \\frac{x^n}{n!} = 1 + x + \\frac{x^2}{2!} + \\frac{x^3}{3!} + \\cdots\\] renders correctly 1
+math_comprehensive.txt 0/ \\ell + \\hbar + \\imath + \\jmath + \\bigcup A + \\bigcap B + \\bigoplus C + \\bigotimes D + \\bigwedge E + \\bigvee F + \\dfrac{a}{b} + \\tfrac{c}{d} + \\cfrac{e}{f+\\cfrac{g}{h}} + \\cbrt{8} + \\sqrt{16} renders correctly 1
+math_derivatives.txt 0/ \\frac{d}{dx} renders correctly 1
+math_enhanced_constructs.txt 0/ \\binom{n}{k} renders correctly 1
+math_enhanced_constructs.txt 1/ \\vec{v} renders correctly 1
+math_enhanced_constructs.txt 2/ \\hat{x} renders correctly 1
+math_enhanced_constructs.txt 3/ \\frac{d}{dx} renders correctly 1
+math_enhanced_constructs.txt 4/ \\partial renders correctly 1
+math_enhanced_constructs.txt 5/ x \\to \\infty renders correctly 1
+math_enhanced_constructs.txt 6/ \\overline{x + y} renders correctly 1
+math_integral.txt 0/ \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} renders correctly 1
+math_intensive_test.tex 0/ a + b = c renders correctly 1
+math_intensive_test.tex 1/ x^2 - 1 = (x-1)(x+1) renders correctly 1
+math_intensive_test.tex 2/ \\frac{1}{2} renders correctly 1
+math_intensive_test.tex 3/ \\frac{a+b}{c+d} renders correctly 1
+math_intensive_test.tex 4/ x^2 renders correctly 1
+math_intensive_test.tex 5/ y_i renders correctly 1
+math_intensive_test.tex 6/ z^{a+b} renders correctly 1
+math_intensive_test.tex 7/ w_{i,j} renders correctly 1
+math_intensive_test.tex 8/ \\[\\begin{equation} E = mc^2 \\end{equation}\\] renders correctly 1
+math_intensive_test.tex 9/ \\[\\begin{equation} x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} \\end{equation}\\] renders correctly 1
+math_intensive_test.tex 10/ \\alpha, \\beta, \\gamma, \\delta, \\epsilon renders correctly 1
+math_intensive_test.tex 11/ \\pi, \\sigma, \\tau, \\phi, \\psi, \\omega renders correctly 1
+math_intensive_test.tex 12/ \\Gamma, \\Delta, \\Theta, \\Lambda, \\Pi, \\Sigma renders correctly 1
+math_intensive_test.tex 13/ \\sum_{i=1}^n i^2 renders correctly 1
+math_intensive_test.tex 14/ \\prod_{i=1}^n i renders correctly 1
+math_intensive_test.tex 15/ \\int_0^1 x dx renders correctly 1
+math_intensive_test.tex 16/ \\lim_{x \\to 0} \\frac{\\sin x}{x} = 1 renders correctly 1
+math_intensive_test.tex 17/ \\[\\begin{equation} A = \\begin{pmatrix} 1 & 2 & 3 \\\\ 4 & 5 & 6 \\\\ 7 & 8 & 9 \\end{pmatrix} \\end{equation}\\] renders correctly 1
+math_intensive_test.tex 18/ \\[\\begin{equation} |x| = \\begin{cases} x & \\text{if } x \\geq 0 \\\\ -x & \\text{if } x < 0 \\end{cases} \\end{equation}\\] renders correctly 1
+math_nested.txt 0/ x^{x^{x^{x^x}}} renders correctly 1
+math_overunder.txt 0/ \\overline{x + y} renders correctly 1
+math_simple.md 0/ a + b + c renders correctly 1
+math_simple.md 1/ x - y - z renders correctly 1
+math_simple.md 2/ p \\cdot q \\times r renders correctly 1
+math_simple.md 3/ \\frac{a}{b} renders correctly 1
+math_simple.md 4/ x^2 \\cdot y^{n+1} renders correctly 1
+math_simple.md 5/ \\frac{numerator}{denominator} renders correctly 1
+math_simple.md 6/ \\sqrt{x} renders correctly 1
+math_simple.md 7/ \\frac{x^2 + y^2}{z^2} renders correctly 1
+math_simple.md 8/ \\infty renders correctly 1
+math_simple.md 9/ \\pi renders correctly 1
+math_simple.md 10/ \\alpha + \\beta = \\gamma renders correctly 1
+math_simple.md 11/ a = b renders correctly 1
+math_simple.md 12/ x \\neq y renders correctly 1
+math_simple.md 13/ p \\leq q renders correctly 1
+math_simple.md 14/ \\sin x + \\cos y renders correctly 1
+math_simple.md 15/ \\log x renders correctly 1
+math_simple.md 16/ e^x renders correctly 1
+math_simple.md 17/ \\[\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\\] renders correctly 1
+math_simple.md 18/ \\[\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}\\] renders correctly 1
+math_simple.md 19/ f'(x) renders correctly 1
+math_simple.md 20/ \\int f(x) dx renders correctly 1
+math_simple.md 21/ \\lim_{x \\to 0} f(x) renders correctly 1
+math_simple.md 22/ x \\in A renders correctly 1
+math_simple.md 23/ \\forall x renders correctly 1
+math_simple.md 24/ \\exists y renders correctly 1
+math_simple.md 25/ (a + b) renders correctly 1
+math_simple.md 26/ [x, y] renders correctly 1
+math_simple.md 27/ |x| renders correctly 1
+math_summation.txt 0/ \\sum_{n=0}^{\\infty} \\frac{x^n}{n!} renders correctly 1
+math_test.tex 0/ x^2 + y^2 = z^2 renders correctly 1
+math_test.tex 1/ E = mc^2 renders correctly 1
+math_test.tex 2/ \\alpha + \\beta = \\gamma renders correctly 1
+math_test.tex 3/ \\frac{a}{b} renders correctly 1
+math_test.tex 4/ \\frac{x^2 + 1}{x - 1} renders correctly 1
+math_test.tex 5/ \\sqrt{2} renders correctly 1
+math_test.tex 6/ \\sqrt{x^2 + y^2} renders correctly 1
+math_test.tex 7/ x_1, x_2, x_n renders correctly 1
+math_test.tex 8/ a^{n+1} renders correctly 1
+math_test.tex 9/ x_i^2 renders correctly 1
+math_test.tex 10/ \\sum_{i=1}^{n} i renders correctly 1
+math_test.tex 11/ \\int_0^1 x^2 dx renders correctly 1
+math_test.tex 12/ \\pi \\approx 3.14159 renders correctly 1
+math_test.tex 13/ \\theta, \\phi, \\psi renders correctly 1
+math_test.tex 14/ \\[\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}\\] renders correctly 1
+math_test.tex 15/ \\[\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}\\] renders correctly 1
+math_test.tex 16/ \\[\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}\\] renders correctly 1
+math_vector.txt 0/ \\vec{v} renders correctly 1
+matrix_all_types.txt 0/ \\begin{matrix} a & b \\\\ c & d \\end{matrix} renders correctly 1
+matrix_all_types.txt 1/ \\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix} renders correctly 1
+matrix_all_types.txt 2/ \\begin{bmatrix} x & y \\\\ z & w \\end{bmatrix} renders correctly 1
+matrix_basic.txt 0/ \\begin{matrix} a & b \\\\ c & d \\end{matrix} renders correctly 1
+matrix_complex.txt 0/ \\begin{bmatrix} x+y & 2z \\\\ 3a-b & \\frac{1}{2} \\end{bmatrix} renders correctly 1
+phase3_comprehensive_test.tex 0/ E = mc^2 renders correctly 1
+phase3_comprehensive_test.tex 1/ \\pi \\approx 3.14159 renders correctly 1
+phase3_comprehensive_test.tex 2/ \\sum_{i=1}^{n} x_i^2 = x_1^2 + x_2^2 + \\cdots + x_n^2 renders correctly 1
+phase3_comprehensive_test.tex 3/ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} renders correctly 1
+phase3_comprehensive_test.tex 4/ ax^2 + bx + c = 0 renders correctly 1
+phase3_comprehensive_test.tex 5/ \\[\\begin{equation} \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} \\end{equation}\\] renders correctly 1
+phase3_comprehensive_test.tex 6/ \\[\\begin{equation} \\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6} \\end{equation}\\] renders correctly 1
+phase3_comprehensive_test.tex 7/ \\[\\begin{align} \\nabla \\times \\mathbf{E} &= -\\frac{\\partial \\mathbf{B}}{\\partial t} \\\\ \\nabla \\times \\mathbf{B} &= \\mu_0\\mathbf{J} + \\mu_0\\epsilon_0\\frac{\\partial \\mathbf{E}}{\\partial t} \\\\ \\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\epsilon_0} \\\\ \\nabla \\cdot \\mathbf{B} &= 0 \\end{align}\\] renders correctly 1
+phase3_comprehensive_test.tex 8/ \\[\\begin{equation} \\mathbf{A} = \\begin{pmatrix} a_{11} & a_{12} & \\cdots & a_{1n} \\\\ a_{21} & a_{22} & \\cdots & a_{2n} \\\\ \\vdots & \\vdots & \\ddots & \\vdots \\\\ a_{m1} & a_{m2} & \\cdots & a_{mn} \\end{pmatrix} \\end{equation}\\] renders correctly 1
+phase3_comprehensive_test.tex 9/ \\[\\begin{equation} f(x) = \\begin{cases} x^2 & \\text{if } x \\geq 0 \\\\ -x^2 & \\text{if } x < 0 \\end{cases} \\end{equation}\\] renders correctly 1
+phase3_comprehensive_test.tex 10/ f(x) = x^2 + 2x + 1 renders correctly 1
+phase3_comprehensive_test.tex 11/ \\sin(x) renders correctly 1
+phase3_comprehensive_test.tex 12/ \\mathbb{R} renders correctly 1
+phase3_comprehensive_test.tex 13/ [-1,1] renders correctly 1
+phase3_comprehensive_test.tex 14/ \\cos(x) renders correctly 1
+phase3_comprehensive_test.tex 15/ -\\cos(x) + C renders correctly 1
+phase3_comprehensive_test.tex 16/ \\cos(x) renders correctly 1
+phase3_comprehensive_test.tex 17/ \\mathbb{R} renders correctly 1
+phase3_comprehensive_test.tex 18/ [-1,1] renders correctly 1
+phase3_comprehensive_test.tex 19/ -\\sin(x) renders correctly 1
+phase3_comprehensive_test.tex 20/ \\sin(x) + C renders correctly 1
+phase3_comprehensive_test.tex 21/ e^x renders correctly 1
+phase3_comprehensive_test.tex 22/ \\mathbb{R} renders correctly 1
+phase3_comprehensive_test.tex 23/ (0,\\infty) renders correctly 1
+phase3_comprehensive_test.tex 24/ e^x renders correctly 1
+phase3_comprehensive_test.tex 25/ e^x + C renders correctly 1
+phase3_comprehensive_test.tex 26/ \\ln(x) renders correctly 1
+phase3_comprehensive_test.tex 27/ (0,\\infty) renders correctly 1
+phase3_comprehensive_test.tex 28/ \\mathbb{R} renders correctly 1
+phase3_comprehensive_test.tex 29/ \\frac{1}{x} renders correctly 1
+phase3_comprehensive_test.tex 30/ x\\ln(x) - x + C renders correctly 1
+phase3_comprehensive_test.tex 31/ \\alpha, \\beta, \\gamma, \\Delta, \\Sigma, \\infty, \\partial, \\nabla renders correctly 1
+phase3_comprehensive_test.tex 32/ \\Alpha, \\Beta, \\Gamma, \\Delta, \\Epsilon, \\Zeta, \\Eta, \\Theta renders correctly 1
+sample_math_document.md 0/ f renders correctly 1
+sample_math_document.md 1/ [a,b] renders correctly 1
+sample_math_document.md 2/ F renders correctly 1
+sample_math_document.md 3/ f renders correctly 1
+sample_math_document.md 4/ \\[\\int_a^b f(x) \\, dx = F(b) - F(a)\\] renders correctly 1
+sample_math_document.md 5/ \\lim_{x \\to c} f(x) = \\lim_{x \\to c} g(x) = 0 renders correctly 1
+sample_math_document.md 6/ \\pm\\infty renders correctly 1
+sample_math_document.md 7/ \\[\\lim_{x \\to c} \\frac{f(x)}{g(x)} = \\lim_{x \\to c} \\frac{f'(x)}{g'(x)}\\] renders correctly 1
+sample_math_document.md 8/ a renders correctly 1
+sample_math_document.md 9/ \\[\\sum_{n=0}^{\\infty} c_n (x-a)^n = c_0 + c_1(x-a) + c_2(x-a)^2 + \\cdots\\] renders correctly 1
+sample_math_document.md 10/ R renders correctly 1
+sample_math_document.md 11/ \\lim_{n \\to \\infty} \\left|\\frac{c_{n+1}}{c_n}\\right| = L renders correctly 1
+sample_math_document.md 12/ R = \\frac{1}{L} renders correctly 1
+sample_math_document.md 13/ f(x) renders correctly 1
+sample_math_document.md 14/ a renders correctly 1
+sample_math_document.md 15/ \\[f(x) = \\sum_{n=0}^{\\infty} \\frac{f^{(n)}(a)}{n!}(x-a)^n\\] renders correctly 1
+sample_math_document.md 16/ e^x = \\sum_{n=0}^{\\infty} \\frac{x^n}{n!} renders correctly 1
+sample_math_document.md 17/ \\sin x = \\sum_{n=0}^{\\infty} \\frac{(-1)^n x^{2n+1}}{(2n+1)!} renders correctly 1
+sample_math_document.md 18/ \\cos x = \\sum_{n=0}^{\\infty} \\frac{(-1)^n x^{2n}}{(2n)!} renders correctly 1
+sample_math_document.md 19/ u renders correctly 1
+sample_math_document.md 20/ v renders correctly 1
+sample_math_document.md 21/ \\[\\int u \\, dv = uv - \\int v \\, du\\] renders correctly 1
+sample_math_document.md 22/ \\sqrt{a^2 - x^2} renders correctly 1
+sample_math_document.md 23/ \\sqrt{a^2 + x^2} renders correctly 1
+sample_math_document.md 24/ \\sqrt{x^2 - a^2} renders correctly 1
+sample_math_document.md 25/ \\sqrt{a^2 - x^2} renders correctly 1
+sample_math_document.md 26/ x = a\\sin\\theta renders correctly 1
+sample_math_document.md 27/ \\sqrt{a^2 + x^2} renders correctly 1
+sample_math_document.md 28/ x = a\\tan\\theta renders correctly 1
+sample_math_document.md 29/ \\sqrt{x^2 - a^2} renders correctly 1
+sample_math_document.md 30/ x = a\\sec\\theta renders correctly 1
+sample_math_document.md 31/ f(x,y) renders correctly 1
+sample_math_document.md 32/ \\[\\frac{\\partial f}{\\partial x} = \\lim_{h \\to 0} \\frac{f(x+h,y) - f(x,y)}{h}\\] renders correctly 1
+sample_math_document.md 33/ \\[\\frac{\\partial f}{\\partial y} = \\lim_{h \\to 0} \\frac{f(x,y+h) - f(x,y)}{h}\\] renders correctly 1
+sample_math_document.md 34/ f(x,y) renders correctly 1
+sample_math_document.md 35/ R renders correctly 1
+sample_math_document.md 36/ \\[\\iint_R f(x,y) \\, dA = \\int_a^b \\int_{g_1(x)}^{g_2(x)} f(x,y) \\, dy \\, dx\\] renders correctly 1
+sample_math_document.md 37/ \\[\\oint_C (P \\, dx + Q \\, dy) = \\iint_D \\left(\\frac{\\partial Q}{\\partial x} - \\frac{\\partial P}{\\partial y}\\right) dA\\] renders correctly 1
+sample_math_document.md 38/ C renders correctly 1
+sample_math_document.md 39/ D renders correctly 1
+sample_math_document.md 40/ C renders correctly 1
+sample_math_document.md 41/ f(x,y) renders correctly 1
+sample_math_document.md 42/ g(x,y) = 0 renders correctly 1
+sample_math_document.md 43/ \\[\\nabla f = \\lambda \\nabla g\\] renders correctly 1
+sample_math_document.md 44/ \\[\\frac{dy}{dx} + P(x)y = Q(x)\\] renders correctly 1
+sample_math_document.md 45/ \\mu(x) = e^{\\int P(x) dx} renders correctly 1
+sample_math_document.md 46/ \\[y = \\frac{1}{\\mu(x)} \\left[ \\int \\mu(x) Q(x) dx + C \\right]\\] renders correctly 1
+sample_math_document.md 47/ \\int_a^b f(x) dx = F(b) - F(a) renders correctly 1
+sample_math_document.md 48/ \\lim_{x \\to c} \\frac{f(x)}{g(x)} = \\lim_{x \\to c} \\frac{f'(x)}{g'(x)} renders correctly 1
+sample_math_document.md 49/ f(x) = \\sum_{n=0}^{\\infty} \\frac{f^{(n)}(a)}{n!}(x-a)^n renders correctly 1
+sample_math_document.md 50/ \\int u dv = uv - \\int v du renders correctly 1
+sample_math_document.md 51/ \\oint_C (P dx + Q dy) = \\iint_D \\left(\\frac{\\partial Q}{\\partial x} - \\frac{\\partial P}{\\partial y}\\right) dA renders correctly 1
+sample.tex 0/ a^2+b^2=c^2 renders correctly 1
+sample.tex 1/ \\downarrow renders correctly 1
+simple_math_test.md 0/ x + y renders correctly 1
+simple_math_test.md 1/ 2*x renders correctly 1
+simple_math_test.md 2/ x + x renders correctly 1
+simple_math_test.md 3/ x^2 renders correctly 1
+small_math_test.md 0/ \\int_0^1 f(x) dx renders correctly 1
+small_math_test.md 1/ c\\:d renders correctly 1
+small_math_test.md 2/ \\iint_D f(x,y) dA renders correctly 1
+spacing_test.md 0/ a\\:b renders correctly 1
+spacing_test.md 1/ a\\,b renders correctly 1
+spacing_test.md 2/ a\\;b renders correctly 1
+spacing_test.md 3/ a\\!b renders correctly 1
+spacing_test.md 4/ x\\:y\\,z\\;w renders correctly 1
+test_input.tex 0/ x^2 + y^2 = z^2 renders correctly 1
+test_input.tex 1/ \\[E = mc^2\\] renders correctly 1
+test.tex 0/ x + y = z renders correctly 1
+test.tex 1/ \\alpha + \\beta = \\gamma renders correctly 1
+test.tex 2/ \\int_0^1 f(x) dx renders correctly 1
+test.tex 3/ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} renders correctly 1
+test.tex 4/ \\[E = mc^2\\] renders correctly 1
+test.tex 5/ \\[\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\\] renders correctly 1
+test.tex 6/ \\[\\begin{equation} \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} \\end{equation}\\] renders correctly 1
+test.tex 7/ \\[\\begin{align} x &= a + b \\\\ y &= c + d \\\\ z &= e + f \\end{align}\\] renders correctly 1
+test.tex 8/ \\alpha renders correctly 1
+test.tex 9/ \\beta renders correctly 1
+test.tex 10/ \\gamma renders correctly 1
+test.tex 11/ \\delta renders correctly 1
+test.tex 12/ \\pi renders correctly 1
+test.tex 13/ \\sigma renders correctly 1
+test.tex 14/ \\infty renders correctly 1
+test.tex 15/ \\cdot renders correctly 1
+test.tex 16/ \\times renders correctly 1
+test.tex 17/ \\div renders correctly 1
+test.tex 18/ \\pm renders correctly 1
+test.tex 19/ \\mp renders correctly 1
+test.tex 20/ \\leq renders correctly 1
+test.tex 21/ \\geq renders correctly 1
+test.tex 22/ \\neq renders correctly 1
+test.tex 23/ \\approx renders correctly 1
+test.tex 24/ \\equiv renders correctly 1
+test.tex 25/ \\leftarrow renders correctly 1
+test.tex 26/ \\rightarrow renders correctly 1
+test.tex 27/ \\leftrightarrow renders correctly 1
+test.tex 28/ \\Leftarrow renders correctly 1
+test.tex 29/ \\Rightarrow renders correctly 1
+test.tex 30/ math renders correctly 1
+test.tex 31/ \\[\\begin{equation} \\label{eq:quadratic} ax^2 + bx + c = 0 \\end{equation}\\] renders correctly 1
+test.tex 32/ \\sum_{i=1}^{n} x_i renders correctly 1
+typography_layout_test.tex 0/ x^2 + y^2 = r^2 renders correctly 1
+typography_layout_test.tex 1/ \\sum_{i=1}^n i = \\frac{n(n+1)}{2} renders correctly 1
+typography_layout_test.tex 2/ \\[\\begin{equation} \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} \\end{equation}\\] renders correctly 1
+typography_layout_test.tex 3/ \\[\\begin{align} f(x) &= ax^2 + bx + c \\\\ f'(x) &= 2ax + b \\\\ f''(x) &= 2a \\end{align}\\] renders correctly 1

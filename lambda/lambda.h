@@ -2505,14 +2505,17 @@ typedef struct LambdaModuleLayout {
     uint32_t property_key_count;
     uint32_t property_key_bytes_size;
     uint32_t reserved;
+    // The one link-time cell: where a satellite's key suffix sits in its
+    // owner's key table. Publication writes it; the generated code reads it.
+    uint32_t property_key_base;
     const PropertyKeySpec* property_key_specs;
 } LambdaModuleLayout;
 
-// A satellite contributes a sealed suffix to its owner's key table. The low
-// bits record the exact prefix length so a fresh runtime can link each suffix
-// once in image order (D4.6.1v2, D8.5.1v2).
+// A satellite contributes a sealed suffix to its owner's key table. The image
+// is compiled without the receiving runtime's state (D8.5.1v7), and other
+// satellites may publish first, so the suffix is placed only when publication
+// links it; `property_key_base` records where (D4.6.2v2).
 #define LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS 0x80000000u
-#define LAMBDA_MODULE_LAYOUT_PROPERTY_KEY_BASE_MASK 0x7fffffffu
 
 typedef struct LambdaModuleVarRef {
     // Uses the same physical-or-flagged-logical encoding as LambdaModuleLayout.

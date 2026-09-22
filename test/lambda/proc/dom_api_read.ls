@@ -6,24 +6,28 @@
 // deliberately absent from this module for the same reason.
 import dom
 
-let doc = dom.load("test/js/dom_identity.html")
-let root = dom.document_element(doc)
-let body = dom.closest(dom.query_selector(root, "#intro"), "body")
+pn main() {
+    let doc = dom.load("test/js/dom_identity.html")
+    let root = dom.document_element(doc)
+    let body = dom.closest(dom.query_selector(root, "#intro"), "body")
 
-// take the snapshot first, then grow the tree behind it
-let before = dom.query_selector_all(root, "p")
-let count_before = len(before)
-let extra = dom.clone_node(dom.query_selector(root, "#intro"), true)
-let _ = dom.append_child(body, extra)
+    // take the snapshot first, then grow the tree behind it
+    let before = dom.query_selector_all(root, "p")
+    let count_before = len(before)
+    let extra = dom.clone_node(dom.query_selector(root, "#intro"), true)
+    dom.append_child(body, extra)
 
-// `before` still describes the tree as it was when the query ran, while a
-// fresh query sees the added element
-let snapshot_tags = [for (n in before) dom.node_name(n)]
+    // `before` still describes the tree as it was when the query ran, while a
+    // fresh query sees the added element
+    let snapshot_tags = [for (n in before) dom.node_name(n)]
 
-{
-  count_at_query_time: count_before,
-  snapshot_len_after_mutation: len(before),
-  snapshot_tags: snapshot_tags,
-  fresh_query_len: len(dom.query_selector_all(root, "p")),
-  first_still_reachable: dom.node_name(dom.query_selector(root, "#intro"))
+    print(
+        {
+          count_at_query_time: count_before,
+          snapshot_len_after_mutation: len(before),
+          snapshot_tags: snapshot_tags,
+          fresh_query_len: len(dom.query_selector_all(root, "p")),
+          first_still_reachable: dom.node_name(dom.query_selector(root, "#intro"))
+        }
+    )
 }

@@ -544,6 +544,56 @@ existed for one boundary with only one of them visible in the core's headers,
 and `lambda-boundary-rt` is built with `-Wl,-undefined,dynamic_lookup`, so the
 check that would have caught it is configured to allow it.
 
+### ES48 (ruled by the user, 2026-09-22) — an operation with an effect is a `pn`
+
+> "Effect calls in fn blocks, not allowed." — "make those 18 fns pn and colour
+> mutating dom ops pn"
+
+Every row used to be published as an `fn`, so S12.1.1v2 (`fn` never calls
+`pn`) could not see a DOM effect: 18 package functions wrote the document from
+`fn` bodies. It surfaced when blocks stopped dropping `null` (S2.5.1v2) and
+`fn abort(h, t) { dom.edit_abort_transaction(h, t)  false }` returned
+`(null, false)`.
+
+The signature column is Lambda type syntax, so the colour goes where a Lambda
+type states it: the leading keyword. A `pn(...)` row registers a procedure, and
+the colour walk rejects an `fn` that calls it (E224); D7.4.6 states this for
+every host module. `DOM_F_MUTATES` decides which rows those are, and
+`dom_api_check.cpp` asserts `pn` exactly when the flag is set.
+
+The flag had been metadata that no code read, and it missed 32 rows with an
+effect. They now carry it, and its meaning is stated as "has an effect":
+- **Setters:** `set_selected_index`, `set_dropdown_open`, `set_hover_index`,
+  `set_password_reveal`, `set_edit_session`.
+- **Editing primitives:** `dom_insert_html` and the five `dom_*_range` writes.
+- **Engine state:** focus (`focus_set`, `mouse_focus`), scroll
+  (`scroll_into_view`, `scroll_operation`), the context menu, popover
+  activation, the clipboard buffer (`edit_clipboard_write`), listener
+  registration.
+- **Dispatch:** `dispatch`, `click`, `keyboard_click`, `keyboard_command`,
+  `key_intent`, `request_change`, `submit_event`, `check_validity`,
+  `report_validity` (both can fire `invalid` and move focus),
+  `request_navigation`.
+
+The node creators (`create_node`, `clone_node`, …) were already flagged and
+stay `pn`. Reads, and allocations of detached objects such as ranges and
+events, stay `fn`. That makes 139 `pn` rows out of 293.
+
+**Migration.** 26 `dom` and `editor` package functions became `pn`: the 18,
+the rows newly coloured, and their callers. P1's `let _x = effect` bindings are
+gone, since a `pn` body returns its last expression. Eleven DOM API tests
+moved their effects into `pn main()`, and so into `test/lambda/proc/`, where
+the harness runs scripts with `run`; their values are unchanged. `edit_mount`'s
+check moved to `proc/editor_api_mount.ls`.
+
+**Built-ins too.** The same check now reads `is_proc` for every system-function
+callee, so built-in procedures (`print`, `output`, `cmd`, `today`) are also
+rejected in `fn` context (LR12-30, fixed 2026-09-22). The doc examples and the
+three test scripts that relied on the gap moved their effects into a `pn`.
+
+**Not covered.** The `radiant` module's own functions (`free`,
+`register_layout`) are still published as `fn`.
+
 #### Class A's last eight are not defects — they are one name over two operations (2026-09-03)
 
 Asked to refactor the eight and migrate them, the investigation says there is

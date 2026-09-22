@@ -1,0 +1,4 @@
+mount flag: true
+mount event: true
+mount keeps editor pure: false
+

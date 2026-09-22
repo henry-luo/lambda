@@ -438,9 +438,6 @@ struct MirTranspiler {
     MIR_reg_t module_state_reg;
     uint32_t global_var_slot_count;
     ArrayList* property_keys;
-    // Satellite key indices are local to this image but resolve through the
-    // owner's append-only context image after its existing T0 keys.
-    uint32_t satellite_property_key_base;
     // Tail of the entry prologue chain used for module-state and static-key
     // materialization. It is reset with module_state_reg at each function
     // boundary so an entry register never crosses MIR functions.
@@ -7685,25 +7682,20 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
     // definition. The cache is function-qualified because property_keys is
     // module-wide while virtual registers are function-local (D4.6.1v2-D4.6.2v2).
     MIR_reg_t state = emit_module_state(mt);
-    uint32_t state_index = index;
     bool satellite_keys = mt->satellite_target || mt->interp_module_owner;
-    if (satellite_keys) {
-        if (index > UINT32_MAX - mt->satellite_property_key_base) return 0;
-        state_index += mt->satellite_property_key_base;
-    }
     mt->em.insert_after = mt->module_state_tail;
     MIR_reg_t result = 0;
     if (!satellite_keys) {
         // T28-4: for the module's own code the key table is linked from
         // exactly this transpiler's key list, and the link fails loudly if the
-        // sealed count changes (runtime-state.cpp), so `state_index` is in
+        // sealed count changes (runtime-state.cpp), so `index` is in
         // range and the table is non-null by construction. The call only ever
         // did two loads; a recursive procedure paid it once per key per
         // invocation (prettier's print_node: 13 keys). The table pointer is
         // read fresh here, back-to-back with its use, because a satellite link
         // may reallocate it (lambda_module_state_append_property_keys).
         // Satellites keep the checked call: their index is offset by a base
-        // that a later append establishes.
+        // that publication establishes.
         // The load below is emitted as a 32-bit read; keep it tied to NameId.
         static_assert(sizeof(NameId) == 4, "inline key load reads NameId as u32");
         MIR_reg_t keys = new_reg(mt, "property_keys", MIR_T_I64);
@@ -7716,12 +7708,31 @@ static MIR_reg_t emit_module_property_key_load(MirTranspiler* mt, uint32_t index
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, result),
             MIR_new_mem_op(mt->ctx, MIR_T_U32,
-                (MIR_disp_t)state_index * (MIR_disp_t)sizeof(NameId),
+                (MIR_disp_t)index * (MIR_disp_t)sizeof(NameId),
                 keys, 0, 1)));
     } else {
+        // LR01-16: a satellite cannot know its base while it compiles -- a
+        // worker never sees the receiving runtime (D8.5.1v7) and satellites
+        // publish in completion order -- so it reads the base publication
+        // recorded in its own layout. A compile-time guess made one image
+        // address another's keys.
+        MIR_reg_t layout = new_reg(mt, "key_layout", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, layout),
+            MIR_new_ref_op(mt->ctx, mt->module_layout_bss)));
+        MIR_reg_t state_index = new_reg(mt, "key_index", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, state_index),
+            MIR_new_mem_op(mt->ctx, MIR_T_U32,
+                (MIR_disp_t)offsetof(LambdaModuleLayout, property_key_base),
+                layout, 0, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, state_index),
+            MIR_new_reg_op(mt->ctx, state_index),
+            MIR_new_int_op(mt->ctx, (int64_t)index)));
         result = emit_call_2(mt, "lambda_module_name_id_at", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, state),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)state_index));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, state_index));
     }
     MIR_insn_t inserted_tail = mt->em.insert_after;
     mt->em.insert_after = 0;
@@ -41102,9 +41113,6 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.whole_script_poc = whole_script_poc;
     mt.satellite_module_state_id = interp_module_owner
         ? script_module_layout_id(interp_module_owner) : 0;
-    mt.satellite_property_key_base = interp_module_owner
-        ? lambda_module_state_property_key_count(interp_module_owner->module_state_id)
-        : 0;
     mt.source = source;
     mt.is_main = true;
     mt.type_list = type_list;
@@ -41823,8 +41831,8 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     layout->module_id = script_module_layout_id(script);
     // Satellites observe the exact T0 slab, including function-value slots.
     layout->var_count = script->interp_slab_count;
-    layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS |
-        build.mt.satellite_property_key_base;
+    // the key suffix is placed when publication links it (LR01-16)
+    layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS;
     if (!finalize_module_property_key_specs(artifacts.property_specs_bss,
             layout, property_keys)) {
         log_error("interp-tier: satellite property key image could not link");
@@ -42147,6 +42155,7 @@ static void finalize_context_module_layout(MIR_context_t ctx, Script* script,
     layout->module_id = script_module_layout_id(script);
     layout->var_count = slot;
     layout->reserved = 0;
+    layout->property_key_base = 0;
     if (!finalize_module_property_key_specs(find_import(ctx,
             "_mod_property_specs"), layout, property_keys)) {
         log_error("module-key-link: failed to seal property keys for '%s'",

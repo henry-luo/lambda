@@ -37,7 +37,7 @@ pub fn edit_open(doc, schema, selection) =>
    events: [], mounted: false, preset: null, surface_handle: null,
    model_revision: 0, native_selection_revision: 0}
 
-pub fn edit_mount(editor, surface, preset) {
+pub pn edit_mount(editor, surface, preset) {
   let handle = if (type(surface) == string or surface == null) null
                else dom.bind_model_edit_surface(surface, editor.model_revision);
   { *: editor, events: [*editor.events, {kind: 'mount', surface: surface, preset: preset}],

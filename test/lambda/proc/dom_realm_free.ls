@@ -15,33 +15,37 @@
 // getRootNode() answered the Document.
 import dom
 
-let doc = dom.load("test/js/dom_identity.html")
-let root = dom.document_element(doc)
-let intro = dom.get_element_by_id(root, "intro")
-let docnode = dom.parent_node(root)
+pn main() {
+    let doc = dom.load("test/js/dom_identity.html")
+    let root = dom.document_element(doc)
+    let intro = dom.get_element_by_id(root, "intro")
+    let docnode = dom.parent_node(root)
 
-// writes, previously excluded for faulting without a realm
-let _1 = dom.set_text_content(intro, "written with no realm")
-let text_after = dom.text_content(intro)
-let _2 = dom.set_inner_html(intro, "<b>bold</b> tail")
+    // writes, previously excluded for faulting without a realm
+    dom.set_text_content(intro, "written with no realm")
+    let text_after = dom.text_content(intro)
+    dom.set_inner_html(intro, "<b>bold</b> tail")
 
-// a node created through the document reached via ownerDocument
-let made = dom.create_node(dom.owner_document(intro), 1, "section", null)
-let _3 = dom.append_child(root, made)
+    // a node created through the document reached via ownerDocument
+    let made = dom.create_node(dom.owner_document(intro), 1, "section", null)
+    dom.append_child(root, made)
 
-{
-  // ESO93: the document is a node
-  document_name: dom.node_name(docnode),
-  document_type: dom.node_type(docnode),
-  document_parent: dom.parent_node(docnode),
-  document_is_root_of_intro: dom.same_node(docnode, dom.root_node(intro)),
-  owner_document_usable: dom.node_name(made),
+    print(
+        {
+          // ESO93: the document is a node
+          document_name: dom.node_name(docnode),
+          document_type: dom.node_type(docnode),
+          document_parent: dom.parent_node(docnode),
+          document_is_root_of_intro: dom.same_node(docnode, dom.root_node(intro)),
+          owner_document_usable: dom.node_name(made),
 
-  // ESO81: writes and geometry answer instead of faulting
-  text_after_write: text_after,
-  html_after_write: dom.inner_html(intro),
-  node_value_of_element: dom.node_value(intro),
-  scroll_state: dom.scroll_state(intro),
-  bounding_box_keys: len(dom.bounding_box(intro)),
-  client_rects_count: len(dom.client_rects(intro))
+          // ESO81: writes and geometry answer instead of faulting
+          text_after_write: text_after,
+          html_after_write: dom.inner_html(intro),
+          node_value_of_element: dom.node_value(intro),
+          scroll_state: dom.scroll_state(intro),
+          bounding_box_keys: len(dom.bounding_box(intro)),
+          client_rects_count: len(dom.client_rects(intro))
+        }
+    )
 }

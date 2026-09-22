@@ -317,12 +317,17 @@ void interp_satellite_request_cancel_script(Script* script) {
     pthread_mutex_unlock(&queue->mutex);
 }
 
+// The caller holds queue->mutex; returns once no worker is lowering an image.
+static void interp_satellite_wait_idle_locked(InterpSatelliteQueue* queue) {
+    while (queue->pending > 0) pthread_cond_wait(&queue->idle, &queue->mutex);
+}
+
 void interp_satellite_cancel_script(Script* script) {
     InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
     if (!queue) return;
     interp_satellite_request_cancel_script(script);
     pthread_mutex_lock(&queue->mutex);
-    while (queue->pending > 0) pthread_cond_wait(&queue->idle, &queue->mutex);
+    interp_satellite_wait_idle_locked(queue);
     ArrayList* ready = queue->ready;
     queue->ready = NULL;
     pthread_mutex_unlock(&queue->mutex);
@@ -6871,6 +6876,14 @@ static uint32_t interp_jit_backedge_threshold(void) {
     return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 1024);
 }
 
+// `LAMBDA_SATELLITE_SYNC=1` publishes each satellite at the promotion that
+// queued it. The default publishes whenever a worker finishes, so a hand-off
+// defect that depends on publication order (LR01-16) is otherwise timing noise.
+static bool interp_satellite_sync_enabled(void) {
+    const char* value = getenv("LAMBDA_SATELLITE_SYNC");
+    return value && strcmp(value, "1") == 0;
+}
+
 static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
         void* entry) {
     if (!fn || !def || !entry) return;
@@ -7202,6 +7215,18 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         cell->state = FN_PROMOTION_PINNED_INTERP;
         log_error("interp-tier: satellite queue failed function='%s'; pinned to T0",
             def->name ? def->name->chars : "<anonymous>");
+    } else if (interp_satellite_sync_enabled()) {
+        // Test hook: publish at this promotion instead of whenever the worker
+        // finishes, so tests can fix the hand-off point and publication order.
+        InterpSatelliteQueue* queue = script->interp_satellite_queue;
+        pthread_mutex_lock(&queue->mutex);
+        interp_satellite_wait_idle_locked(queue);
+        pthread_mutex_unlock(&queue->mutex);
+        interp_satellite_publish_ready(script);
+        if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
+            interp_upgrade_function_entry(fn, def, cell->boxed_entry);
+            return true;
+        }
     }
     return false;
 }

@@ -345,7 +345,9 @@ Lambda provides built-in modules (`math`, `io`) for mathematical functions and f
 // 1. No import — use full module prefix (default, always available)
 math.sqrt(16)         // 4
 math.pi               // 3.1415926536
-io.copy(\.a, \.b)
+pn backup() {         // io writes the filesystem: call it from a pn
+    io.copy(\.a, \.b)^
+}
 
 // 2. Global import — all functions available without prefix
 import math;
@@ -382,10 +384,12 @@ fn divide(a, b) int^ {
 // Propagate error with ^
 let propagated = divide(10, x)^
 
-// Or handle it locally — `~` is the error
-let handled = divide(10, x) ^ {
-    print("error: " ++ ^.message)
-    0
+// Or handle it locally — `^` is the error
+pn main() {                     // print is a pn: only a pn may call it
+    let handled = divide(10, x) ^ {
+        print("error: " ++ ^.message)
+        0
+    }
 }
 ```
 
@@ -421,7 +425,7 @@ let report = {
     timestamp: datetime()
 };
 
-print(format(report, 'json'))
+format(report, 'json')      // the script's result is its output
 ```
 
 ### Document Processing
@@ -441,7 +445,7 @@ let toc = <div class: "toc",
     >
 >;
 
-print(format(toc, 'html'))
+format(toc, 'html')         // the script's result is its output
 ```
 
 ### Mathematical Computation
@@ -462,8 +466,7 @@ fn fibonacci(n: int) int {
 let factorials = (for (i in 1 to 10) factorial(i));
 let fibs = (for (i in 1 to 15) fibonacci(i));
 
-print("Factorials:", factorials)
-print("Fibonacci:", fibs)
+{factorials: factorials, fibonacci: fibs}   // the script's result is its output
 ```
 
 ### Procedural Script with Main

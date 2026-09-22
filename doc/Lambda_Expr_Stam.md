@@ -610,14 +610,16 @@ let msg = if (x > 0) "ok" else {
 The block form uses `{ stam }` for the then-branch. `else` is optional:
 
 ```lambda
-// Block if, no else
-if x > 0 { print("positive") }
+pn report(x, temperature) {      // print is a pn: only a pn may call it
+    // Block if, no else
+    if x > 0 { print("positive") }
 
-// Block if with block else
-if temperature > 30 {
-    print("hot")
-} else {
-    print("comfortable")
+    // Block if with block else
+    if temperature > 30 {
+        print("hot")
+    } else {
+        print("comfortable")
+    }
 }
 
 // Expression else (NEW) — else branch can be an expression
@@ -1118,19 +1120,21 @@ let label = match status {
 If statements use the block form described in [If Expressions](#if-expressions). Both forms produce the same AST node and can appear in statement position:
 
 ```lambda
-// Block form (else optional)
-if x > 0 {
-    print("positive")
-}
+pn report(x, temperature) {      // print is a pn: only a pn may call it
+    // Block form (else optional)
+    if x > 0 {
+        print("positive")
+    }
 
-if temperature > 30 {
-    print("hot")
-} else {
-    print("comfortable")
-}
+    if temperature > 30 {
+        print("hot")
+    } else {
+        print("comfortable")
+    }
 
-// Expression else in statement position
-if x > 0 { print("ok") } else print("fail")
+    // Expression else in statement position
+    if x > 0 { print("ok") } else print("fail")
+}
 ```
 
 #### For Statements
@@ -1138,16 +1142,6 @@ if x > 0 { print("ok") } else print("fail")
 For statements (with curly braces) also produce spreadable arrays:
 
 ```lambda
-for item in [1, 2, 3] {
-    print(item)
-}
-
-for i in 1 to 10 {
-    if (i % 2 == 0) {
-        print(i, "is even")
-    }
-}
-
 // Nested for-statements flatten like for-expressions
 let matrix = [[1, 2], [3, 4]]
 for row in matrix {
@@ -1157,9 +1151,21 @@ for row in matrix {
 }
 // Produces: 2, 4, 6, 8 (flattened)
 
-// Multiple loop variables
-for x in [1, 2], y in [3, 4] {
-    print(x, y)
+pn main() {                      // print is a pn: only a pn may call it
+    for item in [1, 2, 3] {
+        print(item)
+    }
+
+    for i in 1 to 10 {
+        if (i % 2 == 0) {
+            print(i, "is even")
+        }
+    }
+
+    // Multiple loop variables
+    for x in [1, 2], y in [3, 4] {
+        print(x, y)
+    }
 }
 ```
 

@@ -483,8 +483,10 @@ time("10:30:45")         // parse time string
 **Related Functions:**
 
 ```lambda
-today()                  // current date (DATE_ONLY precision)
-justnow()                // current time (TIME_ONLY precision)
+pn main() {                  // today() reads the clock, so it is a pn
+    today()                  // current date (DATE_ONLY precision)
+    justnow()                // current time (TIME_ONLY precision)
+}
 ```
 
 ---

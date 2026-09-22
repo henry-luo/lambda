@@ -1,18 +1,1 @@
-{
-  b1: {
-    start_container: <p id: "intro", <#text>>,
-    start_offset: 0,
-    end_container: <p id: "intro", <#text>>,
-    end_offset: 1
-  },
-  c1: true,
-  sb: {
-    anchor_node: <#text>,
-    anchor_offset: 2,
-    focus_node: <#text>,
-    focus_offset: 2
-  },
-  cnt: 1,
-  focus_off: 1,
-  anchor_is_text: false
-}
+{ b1: { start_container: <p id: "intro", <#text>>, start_offset: 0, end_container: <p id: "intro", <#text>>, end_offset: 1}, c1: true, sb: { anchor_node: <#text>, anchor_offset: 2, focus_node: <#text>, focus_offset: 2}, cnt: 1, focus_off: 1, anchor_is_text: false}

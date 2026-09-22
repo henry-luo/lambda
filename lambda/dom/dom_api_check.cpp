@@ -74,4 +74,16 @@ static constexpr int dom_catalog_op_row_count =
 static_assert(dom_catalog_op_row_count == DOM_OP_ID_COUNT,
               "DOM_OP row count must agree with the operation-id enum");
 
+// 5. colour: a row with an effect is a procedure and no other row is, so an
+// `fn` can never reach a DOM effect (S12.1.1v2). The signature's leading
+// keyword is what `import dom` registers; the flag records why.
+constexpr bool dom_signature_is_proc(const char* signature) {
+    return signature[0] == 'p' && signature[1] == 'n' && signature[2] == '(';
+}
+#define DOM_OP(tier, name, cluster, argc, sig, body, flags, deriv, iface, member, js_name) \
+    static_assert(dom_signature_is_proc(sig) == (((flags) & DOM_F_MUTATES) != 0), \
+                  "dom_api.def: a row is `pn(...)` exactly when it is DOM_F_MUTATES: " #name);
+#include "dom_api.def"
+#undef DOM_OP
+
 }  // namespace

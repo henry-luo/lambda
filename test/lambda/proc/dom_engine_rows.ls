@@ -8,17 +8,21 @@
 // `radiant.*` spelling; those spellings are retired now, so it pins the answers.
 import dom
 
-let doc = dom.load("test/lambda/dom/value_state.html")
-let inputs = dom.query_selector_all(doc, "input")
-let first = inputs[0]
+pn main() {
+    let doc = dom.load("test/lambda/dom/value_state.html")
+    let inputs = dom.query_selector_all(doc, "input")
+    let first = inputs[0]
 
-{
-  inputs_found: len(inputs),
-  seeded_value: dom.get_state(first, "value"),
-  focused_initially: dom.focused(first),
-  request_change: dom.request_change(first),
-  set_then_get: {
-    let _ = dom.set_state(first, "value", "written by lambda")
-    dom.get_state(first, "value")
-  }
+    print(
+        {
+          inputs_found: len(inputs),
+          seeded_value: dom.get_state(first, "value"),
+          focused_initially: dom.focused(first),
+          request_change: dom.request_change(first),
+          set_then_get: {
+            let _ = dom.set_state(first, "value", "written by lambda")
+            dom.get_state(first, "value")
+          }
+        }
+    )
 }

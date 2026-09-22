@@ -861,12 +861,14 @@ Functions for date and time operations.
 | `time(dt)` | Extract time part | `time(t'2025-01-01T14:30')` | `t'14:30:00'` |
 
 ```lambda
-datetime()                 // Current date and time
-today()                    // Current date
-justnow()                  // Current time
+pn main() {                    // today() reads the clock, so it is a pn
+    datetime()                 // Current date and time
+    today()                    // Current date
+    justnow()                  // Current time
 
-date(t'2025-01-01T14:30')  // t'2025-01-01'
-time(t'2025-01-01T14:30')  // t'14:30:00'
+    date(t'2025-01-01T14:30')  // t'2025-01-01'
+    time(t'2025-01-01T14:30')  // t'14:30:00'
+}
 ```
 
 ---
@@ -1118,10 +1120,12 @@ Prints values to the console (stdout). Arguments are stringified and joined
 with a single space separator.
 
 ```lambda
-print("Hello, world!")
-print(42)
-print([1, 2, 3])
-print("x =", 42)
+pn main() {                  // print is a pn: only a pn may call it
+    print("Hello, world!")
+    print(42)
+    print([1, 2, 3])
+    print("x =", 42)
+}
 ```
 
 #### output(data, target) / output(data, target, format)
@@ -1412,8 +1416,10 @@ error("Something went wrong")
 let result = if (x == 0) error("Division by zero") else (y / x)
 
 // Check for error
-if (result is error) {
-    print("Error occurred")
+pn main() {                  // print is a pn: only a pn may call it
+    if (result is error) {
+        print("Error occurred")
+    }
 }
 ```
 

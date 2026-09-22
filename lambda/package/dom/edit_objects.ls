@@ -10,7 +10,7 @@ fn html_escape(value) {
                             ">", "&gt;"), "'", "&#39;")
 }
 
-fn wrap_with_attribute(host, edit_context, tag, attribute_name, value) {
+pn wrap_with_attribute(host, edit_context, tag, attribute_name, value) {
     let token = edit_context.token;
     let node = dom.edit_node(host, token);
     if (node == null or edit_context.collapsed) false
@@ -24,7 +24,7 @@ fn wrap_with_attribute(host, edit_context, tag, attribute_name, value) {
         let wrapper = structure.ancestor_with_tag(host, wrapped_node, tag);
         if (wrapper == null) false
         else {
-            let _set = dom.set_attribute(wrapper, attribute_name, value)
+            dom.set_attribute(wrapper, attribute_name, value)
             true
         }
     }

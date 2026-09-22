@@ -45,7 +45,7 @@ fn validation_enabled(form, submitter) {
 }
 
 // One submit pipeline for button activation and implicit Enter.
-pub fn run(form, submitter) {
+pub pn run(form, submitter) {
     if (form == null) { 'pass' }
     else if (validation_enabled(form, submitter) and
              not dom.check_validity(form)) {
@@ -65,7 +65,7 @@ pub fn run(form, submitter) {
             "formaction", "action", dom.form_url(form));
         let target = attr_or(form, "target", "_self");
 
-        let _navigated = if (method_name == "get") {
+        if (method_name == "get") {
             let query = urlencoded(entries);
             let separator = if (index_of(action, "?") == null) "?" else "&";
             let url = if (query == "") action else action ++ separator ++ query;
@@ -88,10 +88,10 @@ pub fn run(form, submitter) {
     }
 }
 
-pub fn reset(form) {
+pub pn reset(form) {
     if (form == null) { 'pass' }
     else {
-        let _reset = dom.reset_form(form)
+        dom.reset_form(form)
         'prevent-default'
     }
 }

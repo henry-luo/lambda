@@ -8,30 +8,34 @@
 // This script imports nothing but `dom`.
 import dom
 
-let doc = dom.load("test/js/dom_identity.html")
-let root = dom.query_selector(doc, "html")
-let intro = dom.query_selector(root, "#intro")
-let body = dom.closest(intro, "body")
+pn main() {
+    let doc = dom.load("test/js/dom_identity.html")
+    let root = dom.query_selector(doc, "html")
+    let intro = dom.query_selector(root, "#intro")
+    let body = dom.closest(intro, "body")
 
-// mutate, then read the mutation back out through serialization
-let _ = dom.set_attribute(intro, "data-checked", "yes")
-let copy = dom.clone_node(intro, true)
-let _appended = dom.append_child(body, copy)
-let p_after_append = len(dom.query_selector_all(root, "p"))
-let _removed = dom.remove(copy)
+    // mutate, then read the mutation back out through serialization
+    dom.set_attribute(intro, "data-checked", "yes")
+    let copy = dom.clone_node(intro, true)
+    dom.append_child(body, copy)
+    let p_after_append = len(dom.query_selector_all(root, "p"))
+    dom.remove(copy)
 
-{
-  root_tag: dom.node_name(root),
-  intro_tag: dom.node_name(intro),
-  intro_text: dom.text_content(intro),
-  body_tag: dom.node_name(body),
-  matches_html: dom.matches(root, "html"),
-  closest_body: dom.node_name(dom.closest(intro, "body")),
-  by_id: dom.node_name(dom.get_element_by_id(root, "intro")),
-  attr_read_back: dom.get_attribute(intro, "data-checked"),
-  has_attr: dom.has_attribute(intro, "data-checked"),
-  outer_html: dom.outer_html(intro),
-  p_count_with_clone: p_after_append,
-  p_count_after_remove: len(dom.query_selector_all(root, "p")),
-  contains_intro: dom.contains(root, intro)
+    print(
+        {
+          root_tag: dom.node_name(root),
+          intro_tag: dom.node_name(intro),
+          intro_text: dom.text_content(intro),
+          body_tag: dom.node_name(body),
+          matches_html: dom.matches(root, "html"),
+          closest_body: dom.node_name(dom.closest(intro, "body")),
+          by_id: dom.node_name(dom.get_element_by_id(root, "intro")),
+          attr_read_back: dom.get_attribute(intro, "data-checked"),
+          has_attr: dom.has_attribute(intro, "data-checked"),
+          outer_html: dom.outer_html(intro),
+          p_count_with_clone: p_after_append,
+          p_count_after_remove: len(dom.query_selector_all(root, "p")),
+          contains_intro: dom.contains(root, intro)
+        }
+    )
 }

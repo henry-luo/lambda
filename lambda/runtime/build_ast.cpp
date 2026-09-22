@@ -195,6 +195,15 @@ static void register_sys_func_info(SysFuncInfo* info) {
 }
 
 #ifndef SIMPLE_SCHEMA_PARSER
+// A module declares its function's colour in the signature's leading keyword,
+// as Lambda types do: `pn(...)` is a procedure (S12.1.1v2), `fn(...)` is not.
+static bool jube_signature_is_proc(const char* signature) {
+    if (!signature) return false;
+    while (*signature == ' ' || *signature == '\t') signature++;
+    return signature[0] == 'p' && signature[1] == 'n' &&
+        (signature[2] == '(' || signature[2] == ' ');
+}
+
 static int jube_signature_arg_count(const char* signature) {
     if (!signature) return -1;
     const char* open = strchr(signature, '(');
@@ -353,7 +362,7 @@ static void register_jube_sys_funcs(void) {
             record->info.name = record->name;
             record->info.arg_count = jube_signature_arg_count(fn->signature);
             record->info.return_type = jube_signature_return_type(fn->signature);
-            record->info.is_proc = false;
+            record->info.is_proc = jube_signature_is_proc(fn->signature);
             record->info.is_overloaded = false;
             record->info.is_method_eligible = (fn->flags & JUBE_FN_METHOD_ELIGIBLE) != 0;
             record->info.first_param_type = jube_signature_first_param_type_id(fn->signature);
@@ -7825,8 +7834,21 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
 
 static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
     AstNode* callee = ast_unwrap_primary(call->function);
-    // system functions carry their own colour rules (S12.1.4v2 covers user code)
-    if (!callee || callee->node_type == AST_NODE_SYS_FUNC) return;
+    if (!callee) return;
+    if (callee->node_type == AST_NODE_SYS_FUNC) {
+        // A built-in procedure (`print`, `output`, `today`) or a host-module
+        // one (a `pn(...)` row such as a DOM effect) is a pn like any other
+        // (S12.1.1v2). A system function resolves statically, and a name with
+        // both colours (`call`) has already resolved to its `fn` row here, so
+        // `is_proc` is the answer.
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (info && info->is_proc) {
+            record_semantic_error_span(walk->tp, call->source_span, ERR_PROC_IN_FN,
+                "'%s' is a procedure (pn) and cannot be called from a function (fn)",
+                info->name ? info->name : "<system function>");
+        }
+        return;
+    }
     if (AstFuncNode* direct = ast_direct_call_function(call)) {
         if (direct->node_type == AST_NODE_PROC) {
             // S12.1.1: `fn` context, including a `function` body (C20-3),

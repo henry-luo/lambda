@@ -4,10 +4,8 @@
 import dom
 import structure: lambda.dom.edit_structure
 
-fn abort(host, token) {
-    // a block yields every statement's value (S2.5.3); bind the effect so it
-    // contributes no item (S2.5.4)
-    let _aborted = dom.edit_abort_transaction(host, token)
+pn abort(host, token) {
+    dom.edit_abort_transaction(host, token)
     false
 }
 
@@ -22,11 +20,11 @@ fn canonical_tag(value) {
     else null
 }
 
-fn copy_attributes(source, destination, names, index) {
+pn copy_attributes(source, destination, names, index) {
     if (index >= len(names)) true
     else {
         let attr_name = names[index];
-        let _set = dom.set_attribute(destination, attr_name,
+        dom.set_attribute(destination, attr_name,
                           value_or_empty(dom.get_attribute(source, attr_name)))
         copy_attributes(source, destination, names, index + 1)
     }
@@ -38,7 +36,7 @@ fn value_or_empty(value) {
 
 // Capture the successor before reparenting. Live sibling links change during
 // a core move, so this remains stable for root-inline content (D7.2.5).
-fn move_children_from(child, destination) {
+pn move_children_from(child, destination) {
     if (child == null) true
     else {
         let next = dom.next_sibling(child);
@@ -47,7 +45,7 @@ fn move_children_from(child, destination) {
     }
 }
 
-fn move_children(source, destination) {
+pn move_children(source, destination) {
     move_children_from(dom.first_child(source), destination)
 }
 
@@ -62,17 +60,17 @@ fn style_without_property(parts, property, index) {
     }
 }
 
-fn set_style_property(node, property, value) {
+pn set_style_property(node, property, value) {
     let current = if (dom.get_attribute(node, "style") == null) ""
                   else dom.get_attribute(node, "style");
     let base = style_without_property(split(current, ";"), lower(property), 0);
     // CSSOM-style declarations serialize the property/value separator with a
     // space, matching browser-visible `innerHTML` (D7.2.5).
-    let _set = dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")
+    dom.set_attribute(node, "style", base ++ property ++ ": " ++ value ++ ";")
     true
 }
 
-fn wrap_host_content(host, tag) {
+pn wrap_host_content(host, tag) {
     let first = dom.first_child(host);
     let destination = dom.create_node(dom.owner_document(host), 1, tag, null);
     if (first == null or destination == null) null
@@ -81,7 +79,7 @@ fn wrap_host_content(host, tag) {
     else destination
 }
 
-fn move_children_after(marker, destination) {
+pn move_children_after(marker, destination) {
     move_children_from(dom.next_sibling(marker), destination)
 }
 

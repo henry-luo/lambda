@@ -105,12 +105,12 @@ pub fn capture(host, edit_context, descriptor) {
     else null
 }
 
-fn release_entry(host, entry) {
+pn release_entry(host, entry) {
     if (entry == null or entry.delta_id == null) true
     else dom.edit_release_delta(host, entry.delta_id)
 }
 
-fn release_entries(host, entries, index) {
+pn release_entries(host, entries, index) {
     if (entries == null or index >= len(entries)) true
     else release_entry(host, entries[index]) and
          release_entries(host, entries, index + 1)
@@ -227,7 +227,7 @@ fn value_after_replay(value, entry, is_undo) {
          slice(value, at + len(expected), len(value))
 }
 
-fn restore_selection(host, entry, is_undo) {
+pn restore_selection(host, entry, is_undo) {
     let selection = dom.document_selection(dom.owner_document(host));
     let point = if (is_undo) entry.selection_before else entry.selection_after;
     let value = dom.node_value(entry.node);
@@ -235,7 +235,7 @@ fn restore_selection(host, entry, is_undo) {
     else {
         // Selection APIs use UTF-16 offsets while all package text policy uses
         // codepoints. Convert at this one explicit boundary (D7.2.5).
-        let _set = dom.set_base_and_extent(selection, entry.node,
+        dom.set_base_and_extent(selection, entry.node,
                                 utf16_from_codepoint(value, point.anchor, 0, 0),
                                 entry.node,
                                 utf16_from_codepoint(value, point.focus, 0, 0));

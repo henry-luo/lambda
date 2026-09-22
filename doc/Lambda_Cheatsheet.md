@@ -790,11 +790,13 @@ fun()^               // propagate error, discard value
 
 **`e ^ { }` — handle the error here (`~` is the error):**
 ```lambda
-let result = divide(10, x) ^ {
-  print(^.message)            // ^ = the current handler error
-  0                           // handler value, or raise/return
+pn main() {                     // print is a pn: only a pn may call it
+  let result = divide(10, x) ^ {
+    print(^.message)            // ^ = the current handler error
+    0                           // handler value, or raise/return
+  }
+  print(result * 2)             // result is clean here
 }
-result * 2                    // result is clean here
 ```
 `e or default` rescues any falsy value without seeing it;
 `x is error` tests a soft `T | error` value.

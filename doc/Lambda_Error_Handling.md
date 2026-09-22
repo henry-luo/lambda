@@ -66,12 +66,14 @@ Lambda has a built-in `error` type with the following fields:
 ### Accessing Error Fields
 
 ```lambda
-let result = divide(10, 0) ^ {
-    print("code: " ++ str(^.code))
-    print("message: " ++ ^.message)
-    if (^.source is error)
-        print("caused by: " ++ ^.source.message)
-    0                       // the handler's value becomes `result`
+pn main() {                     // print is a pn: logging needs a procedure
+    let result = divide(10, 0) ^ {
+        print("code: " ++ str(^.code))
+        print("message: " ++ ^.message)
+        if (^.source is error)
+            print("caused by: " ++ ^.source.message)
+        0                       // the handler's value becomes `result`
+    }
 }
 ```
 
@@ -265,11 +267,13 @@ a soft `error` value, changing the result from a raised channel into
 `T | error` data.
 
 ```lambda
-let result = divide(10, x) ^ {
-    print("error: " ++ ^.message)
-    0                       // handler value becomes `result`
+pn main() {
+    let result = divide(10, x) ^ {
+        print("error: " ++ ^.message)
+        0                       // handler value becomes `result`
+    }
+    print(result * 2)
 }
-result * 2
 ```
 
 Direct `pn` call flows can branch without an intermediate union binding:
@@ -456,11 +460,13 @@ let propagated = input("file.json")^
 // ✅ Handle error explicitly
 let handled = input("file.json") ^ { log_warn(^.message); {} }
 
-// ❌ Compile error: unhandled error from 'io.mkdir'
-io.mkdir("output")
+pn main() {                      // io.mkdir writes the filesystem: a pn
+    // ❌ Compile error: unhandled error from 'io.mkdir'
+    io.mkdir("output")
 
-// ✅ Propagate error
-io.mkdir("output")^
+    // ✅ Propagate error
+    io.mkdir("output")^
+}
 ```
 
 ---
@@ -505,9 +511,11 @@ User-created errors (via `error("message")`) default to code 318 (`user_error`).
 `is error` is the way to test whether a value is an error:
 
 ```lambda
-let result = some_operation()      // soft: infers T | error
-if (result is error) {
-    print("Error occurred: " ++ result.message)
+pn main() {
+    let result = some_operation()      // soft: infers T | error
+    if (result is error) {
+        print("Error occurred: " ++ result.message)
+    }
 }
 ```
 
@@ -539,9 +547,11 @@ Because errors are falsy, the `or` operator provides a natural **default value**
 let safe_result = divide(10, x) or 0
 
 // Want the diagnostic as well? Use the handler — `or` cannot see why it failed
-let value = parse(input) ^ {
-    print("Warning: " ++ ^.message)
-    default_value
+pn main() {
+    let value = parse(input) ^ {
+        print("Warning: " ++ ^.message)
+        default_value
+    }
 }
 ```
 
@@ -594,13 +604,15 @@ fn may_fail(x) int^ {
     else x * 2
 }
 
-// Propagate with ^
-may_fail(5)^
+pn main() {
+    // Propagate with ^
+    may_fail(5)^
 
-// Handle locally with ^ { }
-let result = may_fail(-1) ^ {
-    print("Got error: " ++ ^.message)    // "negative input"
-    0                                     // fallback value
+    // Handle locally with ^ { }
+    let result = may_fail(-1) ^ {
+        print("Got error: " ++ ^.message)    // "negative input"
+        0                                     // fallback value
+    }
 }
 ```
 

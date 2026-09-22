@@ -72,9 +72,11 @@ let result = if (x > 0) "positive" else "negative"
 let doubled = (for (n in nums) n * 2)
 let add = (a, b) => a + b
 
-// Statement forms (execute actions)
-if x > 0 { print("positive") }
-for n in nums { print(n) }
+// Statement forms (execute actions; an effect such as print needs a pn)
+pn report(x, nums) {
+    if x > 0 { print("positive") }
+    for n in nums { print(n) }
+}
 pn greet(name) { print("Hello, " ++ name) }
 ```
 
@@ -99,11 +101,12 @@ for item in items { transform(item) }
 **Procedural statements** perform actions that modify state or interact with the outside world:
 
 ```lambda
-// Only allowed in pn (procedural functions)
-var counter = 0
-counter = counter + 1
-output(data, "./temp/output.json")
-io.mkdir("./output")
+pn save(data) {              // only allowed in pn (procedural functions)
+    var counter = 0
+    counter = counter + 1
+    output(data, "./temp/output.json")^
+    io.mkdir("./output")^
+}
 ```
 
 This distinction enforces functional purity in `fn` functions while allowing controlled side effects in `pn` procedures.

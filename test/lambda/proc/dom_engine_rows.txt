@@ -1,7 +1,1 @@
-{
-  inputs_found: 2,
-  seeded_value: "seeded",
-  focused_initially: false,
-  request_change: true,
-  set_then_get: "written by lambda"
-}
+{ inputs_found: 2, seeded_value: "seeded", focused_initially: false, request_change: true, set_then_get: "written by lambda"}
