@@ -859,6 +859,12 @@ bool typeditem_store_item(TypedItem* titem, Item item) {
     return true;
 }
 
+bool map_field_store_dynamic_item(void* field_ptr, Item value) {
+    if (!field_ptr) return false;
+    *(Item*)field_ptr = value;
+    return true;
+}
+
 void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
     if (!field->name) { // nested map
         TypeId type_id = get_type_id(item);
@@ -882,11 +888,9 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
         switch (storage_type_id) {
         case LMD_TYPE_NULL: {
             // For dynamically-typed fields (e.g. state-bound element attributes),
-            // store non-null values as raw tagged Items. The compiler sets shape type
+            // store values as raw tagged Items. The compiler sets shape type
             // to LMD_TYPE_NULL when it can't resolve the type at compile time.
-            if (item.item != ITEM_NULL && get_type_id(item) != LMD_TYPE_NULL) {
-                *(Item*)field_ptr = item;
-            }
+            map_field_store_dynamic_item(field_ptr, item);
             break;
         }
         case LMD_TYPE_UNDEFINED:

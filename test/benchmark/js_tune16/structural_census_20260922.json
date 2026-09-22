@@ -1,0 +1,3638 @@
+{
+  "schema": 1,
+  "snapshot_status_audit": {
+    "lambda_status_counts": {
+      "ok": 62,
+      "partial_ok": 1
+    },
+    "quickjs_status_counts": {
+      "ok": 63
+    },
+    "exception": {
+      "identity": "text/hyphen",
+      "lambdajs": {
+        "status_counts": {
+          "exit_-9": 1,
+          "ok": 2
+        },
+        "samples": [
+          {
+            "run": 1,
+            "wall_ms": 216.831833,
+            "exec_ms": null,
+            "status": "exit_-9"
+          },
+          {
+            "run": 2,
+            "wall_ms": 403.855125,
+            "exec_ms": 109.639,
+            "status": "ok"
+          },
+          {
+            "run": 3,
+            "wall_ms": 384.21825,
+            "exec_ms": 98.921,
+            "status": "ok"
+          }
+        ]
+      },
+      "lambdajs_e2e": {
+        "status_counts": {
+          "exit_-9": 1,
+          "ok": 2
+        },
+        "samples": [
+          {
+            "run": 1,
+            "wall_ms": 216.831833,
+            "exec_ms": null,
+            "status": "exit_-9"
+          },
+          {
+            "run": 2,
+            "wall_ms": 403.855125,
+            "exec_ms": 109.639,
+            "status": "ok"
+          },
+          {
+            "run": 3,
+            "wall_ms": 384.21825,
+            "exec_ms": 98.921,
+            "status": "ok"
+          }
+        ]
+      }
+    },
+    "clean_subset_sensitivity_only": {
+      "count": 62,
+      "geometric": 1.1191159202297734,
+      "e2e_geometric": 2.600305524842014,
+      "wins": 23
+    }
+  },
+  "contextual_tune15_trace": {
+    "path": "temp/js_tune15_text_search_mir_array_length.trace",
+    "sha256": "251acae44dba4e3cc2f462887b7bd3ebe20f63cda31d16128b68d927e8be5700",
+    "provenance": "Existing Tune15 trace, separate from the fresh census; original binary provenance was not independently reconstructed here",
+    "events": {
+      "named_fast_array_length": [
+        36864,
+        36864,
+        0,
+        0
+      ],
+      "runtime_number_head_hit": [
+        687187703,
+        687187703,
+        0,
+        0
+      ],
+      "runtime_number_compare_head": [
+        881713603,
+        881713603,
+        0,
+        0
+      ]
+    }
+  },
+  "date": "2026-09-22",
+  "purpose": "Diagnostic event counts and static MIR only; no new performance acceptance result",
+  "git_head": "10fddc11245fd0322d489aa7013b61ee32501669",
+  "worktree": "dirty Tune15 changes preserved; existing binaries were not rebuilt for this survey",
+  "release_binary_sha256": "f4c4288ff7326d79990ea573e5573bc5c19d5287d2cdcdc5617a1d4576886114",
+  "profile_binary_sha256": "99a0dc293faacdd8d3d139e2dfbc76c29b3a458d783eea63c7db70cd7c95df9a",
+  "snapshot_path": "test/benchmark/benchmark_results_v52.json",
+  "snapshot_sha256": "9b1ac57b35c7991e18f890a8a5aaf2c5eedc55e77e8f251cbb37f492031afe4b",
+  "snapshot_summary": {
+    "rows": 63,
+    "geometric": 1.112811339694488,
+    "sum_ratio": 1.4632571163736992,
+    "js_sum_ms": 188900.6567916546,
+    "wins": 24,
+    "e2e_geometric": 2.5924591828066745,
+    "suites": {
+      "awfy": {
+        "count": 14,
+        "geometric": 2.3798089193179988
+      },
+      "beng": {
+        "count": 8,
+        "geometric": 2.4879623376004356
+      },
+      "jetstream": {
+        "count": 6,
+        "geometric": 2.5763326444957313
+      },
+      "kostya": {
+        "count": 7,
+        "geometric": 1.050065186325045
+      },
+      "larceny": {
+        "count": 11,
+        "geometric": 0.6086229554287373
+      },
+      "r7rs": {
+        "count": 10,
+        "geometric": 0.1559416197065793
+      },
+      "text": {
+        "count": 7,
+        "geometric": 2.1409460547486647
+      }
+    },
+    "worst": [
+      {
+        "suite": "beng",
+        "name": "revcomp",
+        "js": 22.084625005722046,
+        "qjs": 2.5270000100135803,
+        "ratio": 8.739463758689642,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 7.339448267382756
+      },
+      {
+        "suite": "text",
+        "name": "microdiff",
+        "js": 1652.049,
+        "qjs": 206.16,
+        "ratio": 8.01343131548312,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 7.863734305354647
+      },
+      {
+        "suite": "awfy",
+        "name": "cd",
+        "js": 5351.990833312273,
+        "qjs": 972.1100000143051,
+        "ratio": 5.505540353698157,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 5.887812281862697
+      },
+      {
+        "suite": "jetstream",
+        "name": "hashmap",
+        "js": 2641.575,
+        "qjs": 542.407,
+        "ratio": 4.870097546676203,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 5.1558778700804115
+      },
+      {
+        "suite": "awfy",
+        "name": "bounce",
+        "js": 4.3608750104904175,
+        "qjs": 0.8989999890327454,
+        "ratio": 4.850806522458785,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 22.455649903784476
+      },
+      {
+        "suite": "awfy",
+        "name": "richards",
+        "js": 929.2186666727066,
+        "qjs": 191.8289999961853,
+        "ratio": 4.843994738497229,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 5.342317926988266
+      },
+      {
+        "suite": "awfy",
+        "name": "deltablue",
+        "js": 421.1618749797344,
+        "qjs": 100.04299998283386,
+        "ratio": 4.20980853285088,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 7.39945701093695
+      },
+      {
+        "suite": "beng",
+        "name": "pidigits",
+        "js": 0.5300833284854889,
+        "qjs": 0.12800002098083496,
+        "ratio": 4.141275324984959,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 9.491588046182496
+      },
+      {
+        "suite": "awfy",
+        "name": "towers",
+        "js": 10.252291649580002,
+        "qjs": 2.5450000166893005,
+        "ratio": 4.02840533687573,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 5.555128938201065
+      },
+      {
+        "suite": "awfy",
+        "name": "permute",
+        "js": 6.210916668176651,
+        "qjs": 1.5540000200271606,
+        "ratio": 3.996728821192742,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 5.677092125169201
+      },
+      {
+        "suite": "awfy",
+        "name": "json",
+        "js": 43.09691667556763,
+        "qjs": 10.808000028133392,
+        "ratio": 3.9875015325116285,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 19.766875114145247
+      },
+      {
+        "suite": "awfy",
+        "name": "nbody",
+        "js": 612.1852499842644,
+        "qjs": 162.4520000219345,
+        "ratio": 3.768406974993267,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 4.087401713849585
+      },
+      {
+        "suite": "r7rs",
+        "name": "nqueens",
+        "js": 29.43866667151451,
+        "qjs": 7.878000020980835,
+        "ratio": 3.736819826493134,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 7.918039291219774
+      },
+      {
+        "suite": "larceny",
+        "name": "triangl",
+        "js": 11541.876041650772,
+        "qjs": 3131.841000020504,
+        "ratio": 3.6853326977886836,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 3.727334893020613
+      },
+      {
+        "suite": "jetstream",
+        "name": "raytrace3d",
+        "js": 808.213,
+        "qjs": 232.263,
+        "ratio": 3.479732027916629,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 5.443665615023901
+      },
+      {
+        "suite": "text",
+        "name": "fast_diff",
+        "js": 3823.456,
+        "qjs": 1124.965,
+        "ratio": 3.3987332939247,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 4.399379068371034
+      },
+      {
+        "suite": "awfy",
+        "name": "queens",
+        "js": 3.420916646718979,
+        "qjs": 1.0699999928474426,
+        "ratio": 3.1971183827911696,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 6.6522628492356635
+      },
+      {
+        "suite": "kostya",
+        "name": "base64",
+        "js": 481.78933334350586,
+        "qjs": 156.2630000114441,
+        "ratio": 3.083195211331035,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 3.2479035368884306
+      },
+      {
+        "suite": "beng",
+        "name": "fasta",
+        "js": 26.707416653633118,
+        "qjs": 8.8299999833107,
+        "ratio": 3.024622503296937,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 4.914124574315461
+      },
+      {
+        "suite": "kostya",
+        "name": "brainfuck",
+        "js": 3025.8897500038147,
+        "qjs": 1021.9729999899864,
+        "ratio": 2.960831401645115,
+        "status": {
+          "mir": "ok",
+          "mir_auto_e2e": "ok",
+          "mir_typed": "ok",
+          "mir_typed_auto_e2e": "ok",
+          "c2mir": "ok",
+          "c2mir_e2e": "ok",
+          "lambdajs": "ok",
+          "lambdajs_e2e": "ok",
+          "quickjs": "ok",
+          "quickjs_e2e": "ok",
+          "nodejs": "ok",
+          "nodejs_e2e": "ok"
+        },
+        "e2e_ratio": 3.020734100111754
+      }
+    ]
+  },
+  "profile_command": [
+    "./lambda-profile.exe",
+    "js",
+    "--no-log",
+    "<source>"
+  ],
+  "profile_environment": {
+    "JS_OPT_TRACE": "1",
+    "JS_OPT_TRACE_OUT": "<absolute path under temp/tune16>"
+  },
+  "counter_tuple": [
+    "attempt",
+    "taken",
+    "fallback",
+    "invalidated"
+  ],
+  "counter_cautions": [
+    "Whole process, not just timed body; benchmark repetitions differ",
+    "mir_number_admitted/fallback, mir_native_index, mir_dense_index and mir_array_length are compiler events, not dynamic executions",
+    "Named fast probes and hits cover get/set; array/string length hits are included",
+    "Call and direct_activation events overlap; do not add them",
+    "Counters do not establish CPU share or prove every helper path is covered",
+    "All 16 exited zero; not a fresh cross-engine output-oracle run",
+    "Initial --no-log census suppressed MIR output; static MIR was captured separately without --no-log"
+  ],
+  "profiles": [
+    {
+      "identity": "r7rs/fib",
+      "source": "test/benchmark/r7rs/fib2.js",
+      "source_sha256": "6e681b5f5db08d124b8b4503375b0b880e1f557c27c031d383e73a18db315380",
+      "returncode": 0,
+      "output_sha256": "ddbd321025997b34c5539189d372380831da9608c80ffb41427d345def6ca880",
+      "trace_sha256": "bc8bec856b5cb368329877eb7e31bdcc84da92233dc9a283aa499d2ac2e1e8da",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype",
+      "stdout_without_timing": "fib: PASS",
+      "nonzero_events": {
+        "named_fast_probe": [
+          5,
+          5,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "mir_number_admitted": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          2,
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "r7rs/fft",
+      "source": "test/benchmark/r7rs/fft2.js",
+      "source_sha256": "a886ca3a6c204efc32a779acc30b27abebccc6682e9922897eb0757ef86cc896",
+      "returncode": 0,
+      "output_sha256": "f348254cad2cd4bc73692c6f1f900e1f6eb55b6282a74655d678d6e3b5070af5",
+      "trace_sha256": "e7f232e09aad17182fec6c0a580df1f75b637b51b71fedd3ee43cd63258542e1",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype",
+      "stdout_without_timing": "fft: PASS",
+      "nonzero_events": {
+        "named_fast_probe": [
+          5,
+          5,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          20494,
+          20494,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "mir_number_admitted": [
+          67,
+          67,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          18,
+          0,
+          18,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          29,
+          29,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "typed_number_store": [
+          22528,
+          22528,
+          0,
+          0
+        ],
+        "typed_number_read": [
+          94081,
+          94081,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          2,
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "awfy/bounce",
+      "source": "test/benchmark/awfy/bounce2_bundle.js",
+      "source_sha256": "d89e5664b1b3d6689b193ff386665d6f584fab5b4cfab14b421d857999bc6449",
+      "returncode": 0,
+      "output_sha256": "fff2dfd995ab7be11a9ff59440cc0dfa4bdf5668efc396d7b02cc44e15d96e38",
+      "trace_sha256": "f4367caa3cba18e032ce3d00848f2789c11aa1e5ca7bbc7e6a6bc75f663a3366",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype",
+      "stdout_without_timing": "Bounce: PASS",
+      "nonzero_events": {
+        "array_set_fast_hit": [
+          100,
+          100,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          5000,
+          5000,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          54686,
+          54686,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          54683,
+          54683,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          12514,
+          12514,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          20000,
+          20000,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          25,
+          25,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          25,
+          0,
+          25,
+          0
+        ],
+        "mir_native_index_admitted": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_native_index_fallback": [
+          12,
+          0,
+          12,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          46,
+          46,
+          0,
+          0
+        ],
+        "mir_this_call": [
+          5401,
+          5401,
+          0,
+          0
+        ],
+        "mir_this_direct_activation": [
+          5401,
+          5401,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_literal_field_admitted": [
+          38,
+          38,
+          0,
+          0
+        ],
+        "reserved_constructor_direct_store": [
+          401,
+          401,
+          0,
+          0
+        ],
+        "dynamic_item_store": [
+          13252,
+          13252,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          4,
+          4,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "awfy/richards",
+      "source": "test/benchmark/awfy/richards2_bundle.js",
+      "source_sha256": "c418c9af499ea24ec6730850acd598ae1589b64eb5a905aaffb16110606b1e14",
+      "returncode": 0,
+      "output_sha256": "152c20925dad1d84dc8a3f2289089af5d248cd1215b4e7c3ab226f2db279627b",
+      "trace_sha256": "e6b731d9ca1b6dec26bbc4dc3155f5f2f1060215d63465fa4569a02f835e6af4",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=26 top=700:link,700:identity,600:taskWaiting_,600:packetPending_,600:taskHolding_,400:datum,400:kind,400:data,300:input,300:function,300:handle,300:priority,100:workIn,100:deviceIn,100:count,100:pending",
+      "stdout_without_timing": "Richards: PASS",
+      "nonzero_events": {
+        "array_set_fast_hit": [
+          47100,
+          47100,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          212600,
+          212600,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          450,
+          450,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          10490455,
+          10490455,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          10275652,
+          10275652,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          214803,
+          0,
+          214803,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          524201,
+          524201,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          272000,
+          272000,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          5,
+          5,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          6,
+          0,
+          6,
+          0
+        ],
+        "mir_native_index_fallback": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          22,
+          22,
+          0,
+          0
+        ],
+        "mir_this_call": [
+          2265501,
+          2265501,
+          0,
+          0
+        ],
+        "mir_this_direct_activation": [
+          2265501,
+          2265501,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          300,
+          300,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          600,
+          600,
+          0,
+          0
+        ],
+        "ordinary_data_store": [
+          208350,
+          208350,
+          0,
+          0
+        ],
+        "dynamic_item_store": [
+          931200,
+          931200,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          4,
+          4,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "awfy/deltablue",
+      "source": "test/benchmark/awfy/deltablue2_bundle.js",
+      "source_sha256": "7ba866da10b2f67faa9b45cd0d27f41a013413aae7ebf5d300016a57ece8b512",
+      "returncode": 0,
+      "output_sha256": "c2761a68313b26d42caa665f53480213a4dbf8eeba617479749b1ffb52898aac",
+      "trace_sha256": "f64ed8c3e15a344ddf3b67b58ae12e061fd8b2285f45e6c2425f7e752d011101",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=14 top=6120:strength,4000:v2,4000:v1,4000:direction,2120:output,2120:satisfied,2000:scale,2000:offset,100:firstIdx,100:lastIdx,100:storage,3:prototype,2:buckets,2:size_",
+      "stdout_without_timing": "DeltaBlue: PASS",
+      "nonzero_events": {
+        "array_set_fast_hit": [
+          61164,
+          61164,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          353178,
+          353178,
+          0,
+          0
+        ],
+        "array_own_element_get_fallback": [
+          16,
+          0,
+          16,
+          0
+        ],
+        "array_runtime_items_install": [
+          1540,
+          1540,
+          0,
+          0
+        ],
+        "array_runtime_items_release": [
+          936,
+          936,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          20523,
+          20523,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          3334900,
+          3334900,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          3306693,
+          3306693,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          28207,
+          0,
+          28207,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "named_fast_array_length": [
+          62667,
+          62667,
+          0,
+          0
+        ],
+        "named_fast_function_data": [
+          12351,
+          12351,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          556297,
+          556297,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          443650,
+          443650,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          60,
+          60,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          20,
+          0,
+          20,
+          0
+        ],
+        "mir_native_index_admitted": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_native_index_fallback": [
+          12,
+          0,
+          12,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          18,
+          18,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          70,
+          70,
+          0,
+          0
+        ],
+        "mir_this_call": [
+          779768,
+          779768,
+          0,
+          0
+        ],
+        "mir_this_direct_activation": [
+          779768,
+          779768,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          62483,
+          62483,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          124964,
+          124964,
+          0,
+          0
+        ],
+        "mir_literal_field_admitted": [
+          41,
+          41,
+          0,
+          0
+        ],
+        "reserved_constructor_direct_store": [
+          92583,
+          92583,
+          0,
+          0
+        ],
+        "dynamic_item_store": [
+          122061,
+          122061,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          20,
+          20,
+          0,
+          0
+        ],
+        "runtime_increment_call": [
+          20,
+          20,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          8056,
+          8056,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          8056,
+          8056,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_holey_plain": [
+          8056,
+          8056,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "awfy/havlak",
+      "source": "test/benchmark/awfy/havlak2_bundle.js",
+      "source_sha256": "32e7e09c936c2a7d131e24aeb2558ce7b775130f35aa8eededd7fabdc9b35f72",
+      "returncode": 0,
+      "output_sha256": "8628ff3096c88a18568eb1c95d2d305be64b6747e56f10993bb4290edebafb12",
+      "trace_sha256": "cfb98df56308bdaedcb9aff0500952d7c00ec22af72714018b99ac35a6f4c753",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=23 top=347579:parent,265874:dfsNumber,265874:loop,265874:bb,163410:items,81705:counter,81705:header,81705:depthLevel,81705:isReducible,81705:children,81705:isRoot_,81705:nestingLevel,81705:basicBlocks,7836:to,7836:from,52:buckets",
+      "stdout_without_timing": "Havlak: PASS",
+      "nonzero_events": {
+        "array_set_fast_hit": [
+          4432101,
+          4432101,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          7705229,
+          7705229,
+          0,
+          0
+        ],
+        "array_own_element_get_fallback": [
+          270617,
+          0,
+          270617,
+          0
+        ],
+        "array_runtime_items_install": [
+          2179,
+          2179,
+          0,
+          0
+        ],
+        "array_runtime_items_release": [
+          2057,
+          2057,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          687831,
+          687831,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          52295421,
+          52295421,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          50315057,
+          50315057,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          1980364,
+          0,
+          1980364,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "named_fast_array_length": [
+          5581626,
+          5581626,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          14278326,
+          14278326,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          12570827,
+          12570827,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          51,
+          51,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          41,
+          0,
+          41,
+          0
+        ],
+        "mir_native_index_admitted": [
+          9,
+          9,
+          0,
+          0
+        ],
+        "mir_native_index_fallback": [
+          21,
+          0,
+          21,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          14,
+          14,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          82,
+          82,
+          0,
+          0
+        ],
+        "mir_this_call": [
+          24159104,
+          24159104,
+          0,
+          0
+        ],
+        "mir_this_direct_activation": [
+          24159104,
+          24159104,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          2395949,
+          2395949,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          4791896,
+          4791896,
+          0,
+          0
+        ],
+        "mir_literal_field_admitted": [
+          40,
+          40,
+          0,
+          0
+        ],
+        "reserved_constructor_direct_store": [
+          6256799,
+          6256799,
+          0,
+          0
+        ],
+        "dynamic_item_store": [
+          3660638,
+          3660638,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          682852,
+          682852,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          682852,
+          682852,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_holey_plain": [
+          682852,
+          682852,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "beng/knucleotide",
+      "source": "test/benchmark/beng/js/knucleotide.js",
+      "source_sha256": "59d8c8d53609d3a97e21ea0c2d93e01d717b78a4417bfb28727c1150262560bb",
+      "returncode": 0,
+      "output_sha256": "c865314e74cde340d7e115980771c33040aeaefd2e55103d6796687000b5367e",
+      "trace_sha256": "03126bf1274eff5d3ade4d868e992c547186bd3c1845549f2aad005533f068f5",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=5:prototype",
+      "stdout_without_timing": "T 31.520\nA 29.600\nC 19.480\nG 19.400\n\nAT 9.922\nTT 9.602\nTA 9.402\nAA 8.402\nGA 6.321\nTC 6.301\nTG 6.201\nGT 6.041\nCT 5.961\nAG 5.841\nCA 5.461\nAC 5.441\nCC 4.041\nCG 4.021\nGC 3.701\nGG 3.341\n\n54\tGGT\n24\tGGTA\n4\tGGTATT\n0\tGGTATTTTAATT\n0\tGGTATTTTAATTTATAGT",
+      "nonzero_events": {
+        "array_set_fast_hit": [
+          40,
+          40,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          233,
+          233,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          20,
+          20,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          35241,
+          35241,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          35236,
+          35236,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          5,
+          0,
+          5,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          5,
+          5,
+          0,
+          0
+        ],
+        "named_fast_string_length": [
+          35234,
+          35234,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          105011,
+          105011,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          35227,
+          35227,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          84,
+          84,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          6,
+          0,
+          6,
+          0
+        ],
+        "mir_native_index_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          12,
+          12,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_packed_strict_equal": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_light_call": [
+          76,
+          76,
+          0,
+          0
+        ],
+        "mir_light_direct_activation": [
+          76,
+          76,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "ordinary_data_store": [
+          42,
+          42,
+          0,
+          0
+        ],
+        "string_search_ascii": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "string_split_ascii": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "string_slice_ascii": [
+          34961,
+          34961,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          86,
+          86,
+          0,
+          0
+        ],
+        "ascii_substring_cache_hit": [
+          11972,
+          11972,
+          0,
+          0
+        ],
+        "ascii_substring_cache_miss": [
+          17989,
+          17989,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          476,
+          476,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          305,
+          305,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_holey_plain": [
+          304,
+          304,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_other": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "runtime_number_index_other": [
+          171,
+          171,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "beng/revcomp",
+      "source": "test/benchmark/beng/js/revcomp.js",
+      "source_sha256": "8e16e9b3b1631cc53fe9f938e4072f939b3397eaeccdc1c031b20e7173e352ef",
+      "returncode": 0,
+      "output_sha256": "ee7b7559dd283d973aba12f651193ed93431ac9cd37cb89fe496247ba03659ff",
+      "trace_sha256": "5278dd7133d65ffe231cf2171189e98a4089f5a7787154c617cca4fce2a734bf",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=4:prototype",
+      "stdout_without_timing": ">ONE Homo sapiens alu\nCGGAGTCTCGCTCTGTCGCCCAGGCTGGAGTGCAGTGGCGCGATCTCGGCTCACTGCAAC\nCTCCGCCTCCCGGGTTCAAGCGATTCTCCTGCCTCAGCCTCCCGAGTAGCTGGGATTACA\nGGCGCGCGCCACCACGCCCGGCTAATTTTTGTATTTTTAGTAGAGACGGGGTTTCACCAT\nGTTGGCCAGGCTGGTCTCGAACTCCTGACCTCAGGTGATCCGCCCGCCTCGGCCTCCCAA\nAGTGCTGGGATTACAGGCGTGAGCCACCGCGCCCGGCCTTTTTGAGACGGAGTCTCGCTC\nTGTCGCCCAGGCTGGAGTGCAGTGGCGCGATCTCGGCTCACTGCAACCTCCGCCTCCCGG\nGTTCAAGCGATTCTCCTGCCTCAGCCTCCCGAGTAGCTGGGATTACAGGCGCGCGCCACC\nACGCCCGGCTAATTTTTGTATTTTTAGTAGAGACGGGGTTTCACCATGTTGGCCAGGCTG\nGTCTCGAACTCCTGACCTCAGGTGATCCGCCCGCCTCGGCCTCCCAAAGTGCTGGGATTA\nCAGGCGTGAGCCACCGCGCCCGGCCTTTTTGAGACGGAGTCTCGCTCTGTCGCCCAGGCT\nGGAGTGCAGTGGCGCGATCTCGGCTCACTGCAACCTCCGCCTCCCGGGTTCAAGCGATTC\nTCCTGCCTCAGCCTCCCGAGTAGCTGGGATTACAGGCGCGCGCCACCACGCCCGGCTAAT\nTTTTGTATTTTTAGTAGAGACGGGGTTTCACCATGTTGGCCAGGCTGGTCTCGAACTCCT\nGACCTCAGGTGATCCGCCCGCCTCGGCCTCCCAAAGTGCTGGGATTACAGGCGTGAGCCA\nCCGCGCCCGGCCTTTTTGAGACGGAGTCTCGCTCTGTCGCCCAGGCTGGAGTGCAGTGGC\nGCGATCTCGGCTCACTGCAACCTCCGCCTCCCGGGTTCAAGCGATTCTCCTGCCTCAGCC\nTCCCGAGTAGCTGGGATTACAGGCGCGCGCCACCACGCCCGGCTAATTTTTGTATTTTTA\nGTAGAGACGGGGTTTCACCATGTTGGCCAGGCTGGTCTCGAACTCCTGACCTCAGGTGAT\nCCGCCCGCCTCGGCCTCCCAAAGTGCTGGGATTACAGGCGTGAGCCACCGCGCCCGGCCT\nTTTTGAGACGGAGTCTCGCTCTGTCGCCCAGGCTGGAGTGCAGTGGCGCGATCTCGGCTC\nACTGCAACCTCCGCCTCCCGGGTTCAAGCGATTCTCCTGCCTCAGCCTCCCGAGTAGCTG\nGGATTACAGGCGCGCGCCACCACGCCCGGCTAATTTTTGTATTTTTAGTAGAGACGGGGT\nTTCACCATGTTGGCCAGGCTGGTCTCGAACTCCTGACCTCAGGTGATCCGCCCGCCTCGG\nCCTCCCAAAGTGCTGGGATTACAGGCGTGAGCCACCGCGCCCGGCCTTTTTGAGACGGAG\nTCTCGCTCTGTCGCCCAGGCTGGAGTGCAGTGGCGCGATCTCGGCTCACTGCAACCTCCG\nCCTCCCGGGTTCAAGCGATTCTCCTGCCTCAGCCTCCCGAGTAGCTGGGATTACAGGCGC\nGCGCCACCACGCCCGGCTAATTTTTGTATTTTTAGTAGAGACGGGGTTTCACCATGTTGG\nCCAGGCTGGTCTCGAACTCCTGACCTCAGGTGATCCGCCCGCCTCGGCCTCCCAAAGTGC\nTGGGATTACAGGCGTGAGCCACCGCGCCCGGCCTTTTTGAGACGGAGTCTCGCTCTGTCG\nCCCAGGCTGGAGTGCAGTGGCGCGATCTCGGCTCACTGCAACCTCCGCCTCCCGGGTTCA\nAGCGATTCTCCTGCCTCAGCCTCCCGAGTAGCTGGGATTACAGGCGCGCGCCACCACGCC\nCGGCTAATTTTTGTATTTTTAGTAGAGACGGGGTTTCACCATGTTGGCCAGGCTGGTCTC\nGAACTCCTGACCTCAGGTGATCCGCCCGCCTCGGCCTCCCAAAGTGCTGGGATTACAGGC\nGTGAGCCACCGCGCCCGGCC\n>TWO IUB ambiguity codes\nTAGGDHACHATCRGTRGVTGAGWTATGYTGCTGTCABACDWVTRTAAGAVVAGATTTNDA\nGASMTCTGCATBYTTCAAKTTACMTATTACTTCATARGGYACMRTGTTTTYTATACVAAT\nTTCTAKGDACKADACTATATNTANTCGTTCACGBCGYSCBHTANGGTGATCGTAAAGTAA\nCTATBAAAAGATSTGWATBCSGAKHTTABBAACGTSYCATGCAAVATKTSKTASCGGAAT\nWVATTTNTCCTTCTTCTTDDAGTGGTTGGATACVGTTAYMTMTBTACTTTHAGCTAGBAA\nAAGAGKAAGTTRATWATCAGATTMDDTTTAAAVAAATATTKTCYTAAATTVCNKTTRACG\nADTATATTTATGATSADSCAATAWAGCGRTAGTGTAAGTGACVGRADYGTGCTACHVSDT\nCTVCARCSYTTAATATARAAAATTTAATTTACDAATTGBACAGTAYAABATBTGCAGBVG\nTGATGGDCAAAATBNMSTTABKATTGGSTCCTAGBTTACTTGTTTAGTTTATHCGATSTA\nAAGTCGAKAAASTGTTTTAWAKCAGATATACTTTTMTTTTGBATAGAGGAGCMATGATRA\nAAGGNCAYDCCDDGAAAGTHGBTAATCKYTBTACBGTBCTTTTTGDTAASSWTAAWAARA\nTTGGCTAAGWGRADTYACATAGCTCBTAGATAWAGCAATNGTATMATGTTKMMAGTAWTC\nCCNTSGAAWATWCAAAAMACTGAADNTYGATNAATCCGAYWNCTAACGTTAGAGDTTTTC\nATCTGGKRTAVGAABVCTGWGBTCTDVGKATTBTCTAAGGVADAAAVWTCTAGGGGAGGG\nTTAGAACAATTAAHTAATNAAATGCATKATCTAAYRTDTCAGSAYTTYHGATRTTWAVTA\nBGNTCDACAGBCCRCAGWCRTCABTGMMAWGMCTCAACCGATRTGBCAVAATCGTDWDAA\nCAYAWAATWCTGGTAHCCCTAAGATAACSCTTAGTGSAACAWTBGTCDTTDGACWDBAAC\nHTTTNGSKTYYAAYGGATNTGATTTAARTTAMBAATCTAAGTBTCATYTAACTTADTGTT\nTCGATACGAAHGGCYATATACCWDTKYATDCSHTDTCAAAATGTGBACTGSCCVGATGTA\nTCMMAGCCTTDAAABAATGAAGAGTAACTHATMGVTTAATAACCCGGTTVSANTGCAATT\nGTGAGATTTAMGTTTAMAAYGCTGACAYAAAAAGGCACAMYTAAGVGGCTGGAABVTACG\nGATTSTYGTBVAKTATWACCGTGTKAGTDTGTATGTTTAAAGGAAAAAGTAACATARAAA\nGGTYCAMNYAAABTATAGNTSATANAGTCATCCTATWADKAACTRGTMSACDGTATSAYT\nAAHSHGTAABYGACTYTATADTGSTATAGAGAAATCGNTAAAGGAAATCAGTTGTNCYMV\nTNACDRTATBNATATASTAGAAMSCGGGANRCKKMCAAACATTNAGTCTRMAATBMTACC\nCGTACTTCTBGDSYAATWGAAAATGACADDCHAKAAAYATATTKTTTTCACANACWAGAA\nAKATCCTTATTAYKHKCTAAACARTATTTTDATBTVWCYGCAATACTAGGKAAASTTDGA\nMGGCHTTHAATVCAHDRYAGGRCTATACGTCMAGAGAGCTBTHGNACARTCCBDCTAAGA\nGCGGCTTTARTAAAGAATCCNAGTAWBTGACTTGAATTACWTVACAGAAABCAATNAAAC\nCGTNTRANTTGAYCMAWBADTANABRGGTKTHTWTAGTTVCTMBKTAGMTVKCCAGCANT\nTVAGSWTTAGCCGCRHTTTCCTTHNTATTAAGAAGAATAGGMTRAARTCTABGTACDTTT\nTATAAVDHAHTATAGATCCTAGTAAGYTWATDWCATGAGGGATAGTAAMDMNGBASTWAM\nTSTATRBAYDABATGTATATYCGCACTGTTTTAACMCWBTATAWAGTATBTSTATVTTAR\nCCTMTTAAKADATCAACTAATYTSVTAKGDATTATGCKTCAYCAKAATACTTKAANGAGT\nATTSDAGATCGGAAATACTTAAYAAVGTATMCGCTTGTGTDCTAATYTATTTTATTTWAA\nCAGWRCTATGTAGMTGTTTGTTYKTNGTTKTCAGAACNTRACCTACKTGSRATGTGGGGG\nCTGTCATTAAGTAAATNGSTTABCCCCTCGCAGCTCWHTCGCGAAGCAVATGCKACGHCA\nACAKTTAATAACASAAADATTWNYTGTAATTGTTCGTMHACHTWATGTGCWTTTTGAAHY\nACTTTGTAYAMSAAACTTAADAAATATAGTABMATATYAATGSGGTAGTTTGTGTBYGGT\nTWSGSVGWMATTDMTCCWWCABTCSVACAGBAATGTTKATBGTCAATAATCTTCTTAAAC\nARVAATHAGYBWCTRWCABGTWWAATCTAAGTCASTAAAKTAAGVKBAATTBGABACGTA\nAGGTTAAATAAAAACTRMDTWBCTTTTTAATAAAAGATMGCCTACKAKNTBAGYRASTGT\nASSTCGTHCGAAKTTATTATATTYTTTGTAGAACATGTCAAAACTWTWTHGKTCCYAATA\nAAGTGGAYTMCYTAARCSTAAATWAKTGAATTTRAGTCTSSATACGACWAKAASATDAAA\nTGYYACTSAACAAHAKTSHYARGASTATTATTHAGGYGGASTTTBGAKGATSANAACACD\nTRGSTTRAAAAAAAACAAGARTCVTAGTAAGATAWATGVHAAKATWGAAAAGTYAHVTAC\nTCTGRTGTCAWGATRVAAKTCGCAAVCGASWGGTTRTCSAMCCTAACASGWKKAWDAATG\nACRCBACTATGTGTCTTCAAAHGSCTATATTTCGTVWAGAAGTAYCKGARAKSGKAGTAN\nTTTCYACATWATGTCTAAAADMDTWCAATSTKDACAMAADADBSAAATAGGCTHAHAGTA\nCGACVGAATTATAAAGAHCCVAYHGHTTTACATSTTTATGNCCMTAGCATATGATAVAAG\n>THREE Homo sapiens frequency\nATATTTATCTTTTCACTTCCTACATTGGTCAGACCATTATTCGACACGTGGCGTCATTTT\nGTCATACCGGGTAATGTTGGAAACAAAACGTACTGATAAAATACTGAGTTGTAAACTCTA\nATCAGATAACGCGCTTGGATATTAAGATTCACACAGGGGTTTCGGCTGTAAAAAAACTTG\nTGGAGCTGTTCTGGGACAGATAAGTTGTACCTCGTACTTAGCTAATTAATGAACCAACTG\nATTACGATAGAACAATTCTGAGGCCGCCAGGACAGCCAAATTTTAATCTTATAAAGCTGG\nAAACAGCCGGTATTAGCTTCTCGCATACTTTGCCTGCATTGGTACCTTACAGATATCAGC\nGTAGTCATATACACCTCGGTCTCAGCTAAGCTTGTATCTCTTAGAGTAGTTCAAAGATAG\nTGGACAATACCTGTGGAATCGATTGCAGATATGGATTTATTTAACTACTGAGTCTCATTC\nACAAGCTAAGCAAGGAGCACGTTTTGGTGCCGGCATACCGATTTGCTATCATGTCAGCAA\nATTTGCGTTGTATTCCTAGTTGCACCCATTAAGGCCACACTCCGAACCTAATTATTACAT\nCGCAAAGACATGTACGAAGGACCCGATGTCGAATAGAAGGGAGGACTGTTCATTGGAAGC\nTAGACCAGAGGAATCGCAAAGATGCAACTCTTACAATAAAAATCTAATTTCAGTCAACAC\nGCAATTTCTATAAGGTTTCCGATAATAATGAACCGTCTTCCACAGGGGAATTTGCCATGC\nTCGTAAAAGTAGTTAATCCAAGTAGAAGAAATTTTGATAATGTTTTAAGTTGGCACGAAG\nGAATTCAGAGAGATCTTACCTAACAAAGGCATTAGTAGATGTTCCTTGGTTCACACTCGG\nTCAATCAGAGCACATACTACGGGCGATACCGGGAATGACACAACATCAATGAGATTGTTA\nAGTGAGGTAATTGACTTTAGAGGACTCGATCAGTATACTGTCACTATGAACATCGTATTA\nATTGTTATCCGATATATACACCACCGATTTGCTTGTGCAAGGTTACAGACCCATTCGATA\nAATACAAACACGGAGCGATATTATTTAAGGAGTGCTGTCTTCAAAAGAATTATTCCCACA\nCCGACATAAGAACTTCGCTCCGTCATTCCAGATTTAAATAACATAACGTAACGCTTTGCT\nGATAACATAACATAACCGAGAATTTGCTTAGGAAATTTGGAGCAATATTGCATTGTTTCT\nCAGTCATCACAAGGCCCGCCAAAGAACTCTGAGAATCAGGATTCAACATGATTGGTAAGA\nCTCTATATATATAACTTAATTCTTGTGTCCGGAGATAGAAAGAGGACGAGAGATACTACG\nAAAGAAAGTGTACTTCGATGTATCAATTCAGACGCCTTCTCTATCATCAACATTATAGGT\nCTCGTATATGCTCGGCGCGATCTGCTTCTCTCCGCCAATAGCCCCATAGTGTATTTCAAG\nCGCAGTAACAGTGAAATCGTTACGAAGGTAGGGATGTTGCTTATAATTGTCGTAACTTAT\nCGCTTATGTATCTTTCAAGAATGAACGGCAGCATATACATACGTTCTACCTTTAGCTACA\nAAGCATCCATATACTCCCTCTCATGATTGAAACTCTTCCCTATTTTGTAGCCAATAGTGA\nAAGCGTATTAGTATAAATTCGTCGGTTTTTCACTCGCAACTGTTATACTCTGCAAACAAA\nCGAAAGCCTCATAGTACAAACCTAAAGCTACATACTTCATCATTGGCAGACCAGTGGCGG\nTATTTCTACGGAAGCATCACTATAGATATAAAGTTTCCCTTCATGTACGTCTGTTAACCA\nTATCACAAGAAACTGCTATCTCTGTCACGTAACAATTCACGCGCCTTATCGCCAAATGTT\nCATATATGCGCGGTATACGTATGAACGAATACTAATTAGTATAACGGAGGATTCACGGGA\nGGGATACTTGGGGCATTTATAAATCGTCTAAAAATTTTCTATCAGCACTTGCGGGTTATA\nGTGGATTACTAGGCAACATAATATTCTGTATTGGTCCAAATGACGCTATAGATAAATTAG\nCAAAATACATTGTTTCCATTTATGTAAGTCGAAACTCCAGGACTCCCGGGAACCAGTTAA\nACCGTCTGGAAAAGACACATTGTGAGCGGGACTTCAATGATAGCTTTCAATGAGCTTCTC\nATGCTTGGGGTCTGTACATATATGTTGGCGAAATTATCGTCTGTATTCTGTTATGCTTTG\nATCATGGGTTATTAGTATAGTGTCCGGTTAAGTACCAATACCGCTAGAGACCCGACCTAA\nGTCGATAACTAACGATCATCGACGTAAGGATCGTCTCGATCAGTACTTCAGTCTAGATCT\nGGGAATAGTAACTCGTTAGTGAACTATGTCGTGTCATAACTCTAAAATGCAATCAAATCT\nTATTATTGAGTATTGATTATATAAAGCATCCGCTTAGCTTTACCCTCAAATGTTATATGC\nAATTTAAAGCGCTTGATATCGTCTACTCAAGTTCAGGTTTCACATGGCCGCAACGTGACG\nTTATTAGAGGTGGGTCATCATCTCTGAGGCTAGTGATGTTGAATACTCATTGAATGGGAA\nGTGGAATACCATGCTCGTAGGTAACAGCATGACCTATAAAATATACTATGGGTGTGTGGT\nAGATCAATATTGTTCAAGCATATCGTAACAATAACGGCTGAAATGTTACTGACATGAAAG\nAGGGAGTCCAAACCATTCTAACAGCTGATCAAGTCGTCTAAAAACGCCTGGTTCAGCCTT\nAAGAGTTATAAGCCAGACAAATTGTATCAATAGAGAATCCGTAAATTCCTCGGCCAACCT\nCTTGCAAAGACATCACTATCAATATACTACCGTGATCTTAATTAGTGAACTTATATAAAT\nATCTACAACCAGATTCAACGGAAAAGCTTTAGTGGATTAGAAATTGCCAAGAATCACATT\nCATGTGGGTTCGAATGCTTTAGTAATACCATTTCGCCGAGTAGTCACTTCGCTGAACTGT\nCGTAAATTGCTATGACATAATCGAAAAGGATTGTCAAGAGTCGATTACTGCGGACTAATA\nATCCCCACGGGGGTGGTCTCATGTCTCCCCAGGCGAGTGGGGACGGTTGATAAACACGCT\nGCATCGCGGACTGATGTTCCCAGTATTACATAGTCACATTGGATTGCGAGTAGTCTACCT\nATTTATGAGCGAGAGATGCCTCTAACTACTTCGACTTTTAAAACCTTTCCACGCCAGTAT\nTCGGCGAAAGGGAAGTATTAAGGGTTGTCATAATTAAGCTGATACCACTTCAGACTTTGC\nTCTACTTCTGTCTTTCATTGGTTTAGTAAAGTCTGTCCATTCGTCGAGACCGTCTTTTGC\nAGCCTCATTCTACCAACTGCTCCGACTCTTAGTCTGCTTCTCCCAGCGTTATAACAAGAG\nGCATTTTGTCATCCTTAAAACAATAATAAAGAACTCGGAGCACTGATATAATGACTGAAT\nTAGAACCGCTTAAAAATACAACGAATAGATAAGACTATCGGATAAGATCTAATATGTAGT\nGATTAAGCCCTTTATTAATTAATAATAGTTACCCTTTCTGATGTAACGCGACATATTACG\nATTTAGTGGCACGTCTGAATTGCAAAGCAGATCTCTACCCGATTTTTATTATAAATCCCG\nTATACATCTTGACTTGAGTAATTGTTCATCTTTTTATATCTCTTCGTACTACAAATAATT\nAATATCTCAACCCGTATTGTGTGATTCTAATTACCAACAGAATACGAGGAGGTTTTTGCT\nTAGGGCCATATATAATGAATCTATCTCGTTTATTCGCGGAACCCGAGATAACATTACGAT\nGTAACTATTTTAGAGAACTTAATACAAGAAACATTGCTGATTACTCATAACTAAATGCTT\nGGTAATATATCCTCAGTGCCCCTACCATCTTTTACGCAGGGATGTAATTACTTAGGATTC\nATTGTGTAAGAATTACAATGAACGATGGATATGAAGGCATGTTGCGAGGTGTTCCTTGGT\nATGTGAAGTTCGCAGGGCAACAAAAATTTCGCAGAATAGGCCTCAAAGTATTGGTAAAGA\nAGACAACTAATCATCACGAGCTTCTGATATCAATACGAACGAGTCCTGTGATGGATGAAA\nGAAAGTCGTATCGAAAATGTCAAGAGTCTGCCCAATGTAACTTACTTCAAAAAATAACGC\nTTCCGCCAAGTACGTTCGAATAAACGTAATTTTAAAAATACATAAGGGGTGTTAGAAAGT\nAAGCGACGGGATATAAGTTAGACTCAAGATTCCGCCGTAAAACGAGACTGATTCCGAAGA\nTTGTTCGTGGATCTGGTCATGACTTTCACTGAGTAAGGAGTTTCGACATATGTCAATAAA\nCACAAAAATAGAAGCTATTCGATCTGAAAAATATTAGGACAAGAAACTATCTCACGCTAG\nCCCAGAATATTCACTCACCCACGGGCGATACTAAAGCACTATATAGTCGCGTGATTACTA\nTACATATGGTACACATAAGAATCACGATCAGGTTCTCAATTTTCAACAATATATGTTTAT\nTTGCATAGGTAATATTAGGCCTTTAAGAGAAGGATGGGTGAGATACTCCGGGGATGGCGG\nCAATAAAGAAAAACACGATATGAGTAATAGGATCCTAATATCTTGGCGAGAGACTTAAGG\nTACGAATTTTGCGCAATCTATTTTTTACTTGGCCAGAATTCATGTATGGTATAAGTACGA\nACTTTTTTGATCACTTTCATGGCTACCTGATTAGGATAGTTTGAGGAATTTCCCAAATAT\nACCGATTTAATATACACTAGGGCTTGTCACTTTGAGTCAGAAAAAGAATATAATTACTTA\nGGGTAATGCTGCATACATATTCTTATATTGCAAAGGTTCTCTGGGTAATCTTGAGCCTTC\nACGATACCTGGTGAAGTGTT",
+      "nonzero_events": {
+        "array_own_element_get_hit": [
+          173,
+          173,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          10527,
+          10527,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          10523,
+          10523,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          4,
+          0,
+          4,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "named_fast_string_length": [
+          10521,
+          10521,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          169,
+          169,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          10521,
+          10521,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          10168,
+          10168,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "mir_native_index_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "static_object_initializer": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "string_split_ascii": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "string_slice_ascii": [
+          168,
+          168,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          10170,
+          10170,
+          0,
+          0
+        ],
+        "ascii_substring_cache_miss": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          10172,
+          10172,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_other": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "runtime_number_index_other": [
+          10171,
+          10171,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "kostya/base64",
+      "source": "test/benchmark/kostya/base64.js",
+      "source_sha256": "5a88cafed700d281940634e82caab6dbc8d9dfe399b525317f8d6d1586dba1d7",
+      "returncode": 0,
+      "output_sha256": "ed9adfc1b97f45deea6fef447d74166aeadbd385c922391cab197c869af1c958",
+      "trace_sha256": "f946de69ae9c526205fe9f55ff8c4e6938ff98f4e8f2e39a0aeabe176f0e15d4",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype",
+      "stdout_without_timing": "base64: encoded_len=13336 decoded_len=10000\nbase64: PASS",
+      "nonzero_events": {
+        "named_fast_probe": [
+          107,
+          107,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          104,
+          104,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "named_fast_string_length": [
+          101,
+          101,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          3333701,
+          3333701,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "runtime_number_compare_head": [
+          333600,
+          333600,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          9,
+          9,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          6,
+          0,
+          6,
+          0
+        ],
+        "mir_native_index_fallback": [
+          7,
+          0,
+          7,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          14,
+          14,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          8,
+          8,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          200,
+          200,
+          0,
+          0
+        ],
+        "runtime_decrement_call": [
+          200,
+          200,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          1000000,
+          1000000,
+          0,
+          0
+        ],
+        "runtime_number_index_typed_array": [
+          1000000,
+          1000000,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "kostya/levenshtein",
+      "source": "test/benchmark/kostya/levenshtein.js",
+      "source_sha256": "de0be10e431a30dede2faea645edb3927ed2d88d38b6f831d91662fbc8c78759",
+      "returncode": 0,
+      "output_sha256": "d7e62a51bee2a46879e85aa85173bb71f67feb2048608a53957332104b65fa12",
+      "trace_sha256": "1205ed78684967c6e549595c752a5a1e25a178c539e851e958b03ba38aecb42a",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=4:prototype",
+      "stdout_without_timing": "levenshtein: d(kitten,sitting)=3\nlevenshtein: d(saturday,sunday)=3\nlevenshtein: d(aaa...,bbb...)=500\nlevenshtein: d(ababab...,babab...)=2\nlevenshtein: PASS",
+      "nonzero_events": {
+        "array_own_element_get_hit": [
+          1828,
+          1828,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          914,
+          914,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          18,
+          18,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          14,
+          14,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          4,
+          0,
+          4,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "named_fast_string_length": [
+          8,
+          8,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          9,
+          9,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          5,
+          0,
+          5,
+          0
+        ],
+        "runtime_number_compare_head": [
+          1233023,
+          1233023,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          4,
+          0,
+          4,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "typed_number_store": [
+          1831,
+          1831,
+          0,
+          0
+        ],
+        "typed_number_read": [
+          1230270,
+          1230270,
+          0,
+          0
+        ],
+        "string_char_access_ascii": [
+          411004,
+          411004,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          10,
+          10,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "larceny/gcbench",
+      "source": "test/benchmark/larceny/gcbench.js",
+      "source_sha256": "a4ce81ae58b27d4be34281f236227038d0a2f412f67e69fb7713a7b813015e28",
+      "returncode": 0,
+      "output_sha256": "818ffc155a328bd39c6cfa18b8531f1db1a50fb89b9f45d508230f437655b9a7",
+      "trace_sha256": "4c132a3d64886e62827745453c3b63ceb5f9ca7bd1f40d5d8aa1a69d33843aac",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype",
+      "stdout_without_timing": "stretch tree of depth 15 check: 65535\n16384 trees of depth 4 check: 507904\n4096 trees of depth 6 check: 520192\n1024 trees of depth 8 check: 523264\n256 trees of depth 10 check: 524032\n64 trees of depth 12 check: 524224\n16 trees of depth 14 check: 524272\nlong lived tree of depth 14 check: 32767",
+      "nonzero_events": {
+        "named_fast_probe": [
+          12,
+          12,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          9,
+          9,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          3,
+          0,
+          3,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          6422543,
+          6422543,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          23,
+          0,
+          23,
+          0
+        ],
+        "mir_number_admitted": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          8,
+          0,
+          8,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "mir_literal_field_admitted": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          40,
+          40,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "text/fast_diff",
+      "source": "test/benchmark/text/fast_diff.js",
+      "source_sha256": "aaa9ba17140a375aafa94ee1cb655a4cd81b934c538cb27814f58ca331a6902a",
+      "returncode": 0,
+      "output_sha256": "6cc19ec3a13d7b242414a493417cbc37c5c223bdb3918d73c782bf627ef885d2",
+      "trace_sha256": "6e3ef1ca9d4afb8cd4f970a0440223192b751783ae2ec756371b69db22390941",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=5:prototype",
+      "stdout_without_timing": "CHECKSUM:390912",
+      "nonzero_events": {
+        "regex_fresh_wrapper": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "regex_bulk_match_fallback": [
+          7680,
+          0,
+          7680,
+          0
+        ],
+        "array_set_fast_hit": [
+          1817600,
+          1817600,
+          0,
+          0
+        ],
+        "array_set_guard_fail": [
+          5376,
+          0,
+          5376,
+          0
+        ],
+        "array_own_element_get_hit": [
+          4078080,
+          4078080,
+          0,
+          0
+        ],
+        "array_own_element_get_fallback": [
+          3584,
+          0,
+          3584,
+          0
+        ],
+        "array_gc_items_alloc": [
+          278023,
+          278023,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          1178637,
+          1178637,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          1178626,
+          1178626,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          11,
+          0,
+          11,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          5,
+          5,
+          0,
+          0
+        ],
+        "named_fast_string_length": [
+          1178624,
+          1178624,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          11400705,
+          11400705,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "runtime_number_compare_head": [
+          8419072,
+          8419072,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          133121,
+          133121,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          72,
+          72,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          97,
+          0,
+          97,
+          0
+        ],
+        "mir_native_index_admitted": [
+          64,
+          64,
+          0,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          129,
+          129,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          39,
+          39,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          72,
+          72,
+          0,
+          0
+        ],
+        "mir_light_call": [
+          1536,
+          1536,
+          0,
+          0
+        ],
+        "mir_light_direct_activation": [
+          1536,
+          1536,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          13587,
+          13587,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          13587,
+          13587,
+          0,
+          0
+        ],
+        "ordinary_number_store": [
+          8192,
+          8192,
+          0,
+          0
+        ],
+        "ordinary_data_store": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "string_search_ascii": [
+          43520,
+          43520,
+          0,
+          0
+        ],
+        "string_slice_ascii": [
+          527616,
+          527616,
+          0,
+          0
+        ],
+        "string_char_access_ascii": [
+          2614528,
+          2614528,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          133122,
+          133122,
+          0,
+          0
+        ],
+        "ascii_substring_cache_hit": [
+          200174,
+          200174,
+          0,
+          0
+        ],
+        "ascii_substring_cache_miss": [
+          47634,
+          47634,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          1227520,
+          1227520,
+          0,
+          0
+        ],
+        "runtime_increment_call": [
+          1218816,
+          1218816,
+          0,
+          0
+        ],
+        "runtime_decrement_call": [
+          8704,
+          8704,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          1623808,
+          1623808,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          1623808,
+          1623808,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_holey_plain": [
+          1561088,
+          1561088,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_with_props": [
+          62720,
+          62720,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "text/microdiff",
+      "source": "test/benchmark/text/microdiff.js",
+      "source_sha256": "010083ba2b26117e656015605ff95f21ec0117e5a69746fb693df00b46713656",
+      "returncode": 0,
+      "output_sha256": "4d9a37b326bccc4b25c2361923bf1d96dd9bf849ec0be79b91c3cda6a15c3d52",
+      "trace_sha256": "45a9bb728c2db5f07585d6e417536b2cbd78d8da86b968666bf85fed7406a2fa",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=2 top=4:prototype,1:default",
+      "stdout_without_timing": "CHECKSUM:3278848",
+      "nonzero_events": {
+        "regex_permanent_cache_hit": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "regex_fresh_wrapper": [
+          8,
+          8,
+          0,
+          0
+        ],
+        "regex_keyless_reject": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          151552,
+          151552,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          116780,
+          116780,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          190474,
+          190474,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          161795,
+          161795,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          28679,
+          0,
+          28679,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "named_fast_string_length": [
+          20480,
+          20480,
+          0,
+          0
+        ],
+        "named_fast_no_receiver_other": [
+          28672,
+          0,
+          28672,
+          0
+        ],
+        "runtime_number_head_hit": [
+          88065,
+          88065,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          4097,
+          0,
+          4097,
+          0
+        ],
+        "runtime_number_compare_head": [
+          25088,
+          25088,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          8,
+          8,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          8,
+          0,
+          8,
+          0
+        ],
+        "mir_native_index_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          14,
+          14,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          55,
+          55,
+          0,
+          0
+        ],
+        "mir_light_call": [
+          45056,
+          45056,
+          0,
+          0
+        ],
+        "mir_light_direct_activation": [
+          45056,
+          45056,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          28674,
+          28674,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          28674,
+          28674,
+          0,
+          0
+        ],
+        "own_enumerability_inspect": [
+          151552,
+          151552,
+          0,
+          0
+        ],
+        "static_object_initializer": [
+          2058,
+          2058,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          4098,
+          4098,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          23044,
+          23044,
+          0,
+          0
+        ],
+        "runtime_increment_call": [
+          23044,
+          23044,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          4096,
+          4096,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          4096,
+          4096,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_holey_plain": [
+          4096,
+          4096,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "text/log_pipeline",
+      "source": "test/benchmark/text/log_pipeline.js",
+      "source_sha256": "798df1c71411f12080859b8789392b9be759b211f01ea8e2106ae9e76d392a41",
+      "returncode": 0,
+      "output_sha256": "53cb7a5af707851ac738abe7fa49443f1d9e5c207c5e577366dcd6b6c779a72a",
+      "trace_sha256": "036493c64e61e149c67ccf3a102967c58f7ef67a3021dd4a69af46c326624dc0",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=4:prototype",
+      "stdout_without_timing": "log_pipeline: CHECKSUM:292634526",
+      "nonzero_events": {
+        "array_own_element_get_hit": [
+          2184000,
+          2184000,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          24000,
+          24000,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          42092166,
+          42092166,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          42092162,
+          42092162,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          4,
+          0,
+          4,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "named_fast_array_length": [
+          24000,
+          24000,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          20938381,
+          20938381,
+          0,
+          0
+        ],
+        "runtime_number_head_fallback": [
+          45002,
+          0,
+          45002,
+          0
+        ],
+        "runtime_number_compare_head": [
+          37204740,
+          37204740,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          60000,
+          60000,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          32,
+          32,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          36,
+          0,
+          36,
+          0
+        ],
+        "mir_native_index_fallback": [
+          4,
+          0,
+          4,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          16,
+          16,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          7,
+          7,
+          0,
+          0
+        ],
+        "static_object_initializer": [
+          720,
+          720,
+          0,
+          0
+        ],
+        "string_search_ascii": [
+          16560000,
+          16560000,
+          0,
+          0
+        ],
+        "string_split_ascii": [
+          2160000,
+          2160000,
+          0,
+          0
+        ],
+        "string_slice_ascii": [
+          28800000,
+          28800000,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          273004,
+          273004,
+          0,
+          0
+        ],
+        "ascii_substring_cache_hit": [
+          24663929,
+          24663929,
+          0,
+          0
+        ],
+        "ascii_substring_cache_miss": [
+          4121131,
+          4121131,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          6480000,
+          6480000,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          21600000,
+          21600000,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          21600000,
+          21600000,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_other": [
+          21600000,
+          21600000,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "jetstream/splay",
+      "source": "temp/_ljs_jetstream_splay.js",
+      "source_sha256": "97e6d95220aa8c7822480e81bcdf8dbfa5ee7329dd8d723e94afadb150f5d1e0",
+      "returncode": 0,
+      "output_sha256": "17df803b0efbccb76a1d07cfe405b15519d75e7cdbf8aee422373baeffd7e591",
+      "trace_sha256": "4598650b19d47e79107710dde34ffe2f91fb8c95975b7c4bf663665625b92dde",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=15 top=48001:right,48000:left,47998:value,47998:key,4:root_,4:prototype,1:isEmpty,1:traverse_,1:insert,1:findMax,1:splay_,1:remove,1:find,1:exportKeys,1:findGreatestLessThan",
+      "stdout_without_timing": "",
+      "nonzero_events": {
+        "array_gc_items_alloc": [
+          384000,
+          384000,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          3156749,
+          3156749,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          2868101,
+          2868101,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          288648,
+          0,
+          288648,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          9,
+          9,
+          0,
+          0
+        ],
+        "named_fast_data_descriptor": [
+          10,
+          10,
+          0,
+          0
+        ],
+        "named_fast_no_receiver_function": [
+          2,
+          0,
+          2,
+          0
+        ],
+        "named_fast_function_data": [
+          48011,
+          48011,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          744451,
+          744451,
+          0,
+          0
+        ],
+        "runtime_number_compare_head": [
+          650742,
+          650742,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          384001,
+          384001,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          8,
+          8,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          4,
+          0,
+          4,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_array_length_admitted": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          13,
+          13,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          19,
+          19,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          19,
+          19,
+          0,
+          0
+        ],
+        "ordinary_data_store": [
+          96631,
+          96631,
+          0,
+          0
+        ],
+        "dynamic_item_store": [
+          366,
+          366,
+          0,
+          0
+        ],
+        "static_numeric_array_initializer": [
+          384000,
+          384000,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          768001,
+          768001,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          12050,
+          12050,
+          0,
+          0
+        ],
+        "runtime_increment_call": [
+          12050,
+          12050,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "identity": "jetstream/hashmap",
+      "source": "temp/_ljs_jetstream_hashmap.js",
+      "source_sha256": "8f60fd0c47951f3a0cacc53e81327f68f5c657ee0eba4b73e3eb7f874c0f0b77",
+      "returncode": 0,
+      "output_sha256": "63e46242e5581dabd454a9757ef39e2ea7a9fd8a2968012c0493ede33d4cd1e6",
+      "trace_sha256": "2399e9e2f1ffd83a55999ec22091b552b5be25a79a11084d235431fc62088b83",
+      "details": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=15 top=90000:value,90000:key,4:prototype,3:__proto__,1:_elementData,1:_associatedMap,1:_modCount,1:_loadFactor,1:_prevEntry,1:_expectedModCount,1:capacity,1:_futureEntry,1:_threshold,1:_currentEntry,1:_position",
+      "stdout_without_timing": "",
+      "nonzero_events": {
+        "array_set_fast_hit": [
+          319390,
+          319390,
+          0,
+          0
+        ],
+        "array_own_element_get_hit": [
+          630002,
+          630002,
+          0,
+          0
+        ],
+        "array_own_element_get_fallback": [
+          319389,
+          0,
+          319389,
+          0
+        ],
+        "array_runtime_items_install": [
+          4,
+          4,
+          0,
+          0
+        ],
+        "array_runtime_items_release": [
+          3,
+          3,
+          0,
+          0
+        ],
+        "array_gc_items_alloc": [
+          13,
+          13,
+          0,
+          0
+        ],
+        "named_fast_probe": [
+          8479088,
+          8479088,
+          0,
+          0
+        ],
+        "named_fast_hit": [
+          8299061,
+          8299061,
+          0,
+          0
+        ],
+        "named_fast_miss": [
+          180027,
+          0,
+          180027,
+          0
+        ],
+        "named_fast_no_entry_absent": [
+          180005,
+          180005,
+          0,
+          0
+        ],
+        "named_fast_array_length": [
+          892196,
+          892196,
+          0,
+          0
+        ],
+        "named_fast_data_descriptor": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "named_fast_function_data": [
+          6,
+          6,
+          0,
+          0
+        ],
+        "runtime_number_head_hit": [
+          2446926,
+          2446926,
+          0,
+          0
+        ],
+        "runtime_number_compare_head": [
+          442181,
+          442181,
+          0,
+          0
+        ],
+        "runtime_string_concat_head": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_number_admitted": [
+          15,
+          15,
+          0,
+          0
+        ],
+        "mir_number_fallback": [
+          12,
+          0,
+          12,
+          0
+        ],
+        "mir_native_index_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_native_index_fallback": [
+          7,
+          0,
+          7,
+          0
+        ],
+        "mir_dense_index_admitted": [
+          2,
+          2,
+          0,
+          0
+        ],
+        "mir_loop_stable_name_id": [
+          37,
+          37,
+          0,
+          0
+        ],
+        "mir_light_call": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_light_direct_activation": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "mir_deferred_function_finalize": [
+          59,
+          59,
+          0,
+          0
+        ],
+        "mir_lazy_function_metadata": [
+          61,
+          61,
+          0,
+          0
+        ],
+        "mir_literal_field_admitted": [
+          16,
+          16,
+          0,
+          0
+        ],
+        "reserved_constructor_direct_store": [
+          360003,
+          360003,
+          0,
+          0
+        ],
+        "dynamic_item_store": [
+          908321,
+          908321,
+          0,
+          0
+        ],
+        "string_concat_ascii": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "runtime_to_numeric_call": [
+          982149,
+          982149,
+          0,
+          0
+        ],
+        "runtime_increment_call": [
+          982149,
+          982149,
+          0,
+          0
+        ],
+        "runtime_number_index_get_call": [
+          221071,
+          221071,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_array": [
+          221071,
+          221071,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_packed_plain": [
+          1,
+          1,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_holey_plain": [
+          16382,
+          16382,
+          0,
+          0
+        ],
+        "runtime_number_index_tagged_with_props": [
+          204688,
+          204688,
+          0,
+          0
+        ]
+      }
+    }
+  ],
+  "static_mir": {
+    "command": "LAMBDA_MIR_DUMP_PATH=temp/tune16/awfy_richards.mir ./lambda.exe js test/benchmark/awfy/richards2_bundle.js",
+    "sha256": "9235337561cd6ec454f9444c8434b87074aa8ddb2370252ff87be18fb35bbb99",
+    "line_count": 24989,
+    "static_call_count": 2886,
+    "static_calls_by_target": {
+      "js_throw_value": 17,
+      "js_get_this": 133,
+      "lambda_active_module_name_item": 188,
+      "js_require_object_coercible": 80,
+      "js_get_reference": 82,
+      "%r27": 1,
+      "%r2f": 1,
+      "js_is_truthy": 8,
+      "push_d": 15,
+      "js_check_tdz": 69,
+      "lambda_side_stack_ensure_for": 53,
+      "lambda_stack_overflow_error": 53,
+      "it2d": 2,
+      "Benchmark_innerBenchmarkLoop_0_n": 1,
+      "js_cmp_raw": 6,
+      "%r86": 1,
+      "%r8e": 1,
+      "Benchmark_innerBenchmarkLoop_0_body": 1,
+      "js_get_global_property_reference": 11,
+      "lambda_unit_const_at": 112,
+      "js_construct_value": 16,
+      "Benchmark_benchmark_1_body": 1,
+      "Benchmark_verifyResult_2_body": 1,
+      "lambda_active_module_var_at": 103,
+      "lambda_active_module_name_id": 253,
+      "js_resolve_unresolved_binding": 66,
+      "js_set_name_id": 75,
+      "lambda_item_adopt_scalar_home": 155,
+      "js_eq_raw": 18,
+      "js_get_name_id": 74,
+      "RBObject_append_3_body": 1,
+      "js_get_super_this_value": 8,
+      "js_super_call_class_into": 8,
+      "js_super_bind_this": 8,
+      "TaskState_constructor_4_body": 1,
+      "TaskState_isPacketPending_5_body": 1,
+      "TaskState_isTaskHolding_6_body": 1,
+      "TaskState_isTaskWaiting_7_body": 1,
+      "TaskState_setTaskHolding_8_body": 1,
+      "TaskState_setTaskWaiting_9_body": 1,
+      "TaskState_setPacketPending_10_body": 1,
+      "TaskState_packetPending_11_body": 1,
+      "TaskState_running_12_body": 1,
+      "TaskState_waiting_13_body": 1,
+      "TaskState_waitingWithPacket_14_body": 1,
+      "js_logical_not": 2,
+      "TaskState_isTaskHoldingOrWaiting_15_body": 1,
+      "TaskState_isWaitingWithPacket_16_body": 1,
+      "%r46a": 1,
+      "TaskState_s_createRunning_17_body": 1,
+      "%r493": 1,
+      "TaskState_s_createWaiting_18_body": 1,
+      "%r4bc": 1,
+      "TaskState_s_createWaitingWithPacket_19_body": 1,
+      "DeviceTaskDataRecord_constructor_20_body": 1,
+      "HandlerTaskDataRecord_constructor_21_body": 1,
+      "%r576": 1,
+      "HandlerTaskDataRecord_deviceInAdd_22_body": 1,
+      "%r5be": 1,
+      "HandlerTaskDataRecord_workInAdd_23_body": 1,
+      "IdleTaskDataRecord_constructor_24_body": 1,
+      "%r690": 1,
+      "Packet_constructor_25_body": 1,
+      "%r718": 1,
+      "%r720": 1,
+      "%r73a": 1,
+      "%r742": 1,
+      "%r75c": 1,
+      "%r764": 1,
+      "TaskControlBlock_constructor_26_body": 1,
+      "%r7df": 1,
+      "%r827": 1,
+      "TaskControlBlock_addInputAndCheckPriority_27_body": 1,
+      "%r864": 1,
+      "%r8bf": 1,
+      "%r8d1": 1,
+      "%r8fe": 1,
+      "TaskControlBlock_runTask_28_body": 1,
+      "WorkerTaskDataRecord_constructor_29_body": 1,
+      "%r9cb": 1,
+      "Scheduler_constructor_30_body": 1,
+      "js_resolve_lexical_this": 13,
+      "%ra61": 1,
+      "%ra8c": 1,
+      "%rac4": 1,
+      "%rad7": 1,
+      "js_env_rehome_scalars": 8,
+      "_js_anon0_6838_body": 1,
+      "js_alloc_env": 4,
+      "js_get_lexical_this_binding": 15,
+      "js_new_closure_mir_pending": 4,
+      "js_finalize_function": 51,
+      "js_set_function_home_class": 51,
+      "%rb20": 1,
+      "Scheduler_createDevice_32_body": 1,
+      "%rb71": 1,
+      "%rb82": 1,
+      "%rbad": 1,
+      "%rbf3": 1,
+      "%rc1e": 1,
+      "js_add": 6,
+      "%rc83": 1,
+      "_js_anon1_7492_body": 1,
+      "%rcce": 1,
+      "Scheduler_createHandler_34_body": 1,
+      "js_subtract": 4,
+      "%rd24": 1,
+      "js_bitwise_and": 1,
+      "js_divide": 2,
+      "%rd6f": 1,
+      "js_bitwise_xor": 1,
+      "%rdae": 1,
+      "_js_anon2_8501_body": 1,
+      "%rdf7": 1,
+      "Scheduler_createIdler_36_body": 1,
+      "Scheduler_createPacket_37_body": 1,
+      "js_to_property_key": 41,
+      "js_property_lane_for_canonical_key": 2,
+      "js_set": 2,
+      "js_assignment_set_result": 2,
+      "Scheduler_createTask_38_body": 1,
+      "%rea7": 1,
+      "%rfb3": 1,
+      "_js_anon3_9466_body": 1,
+      "%rffa": 1,
+      "Scheduler_createWorker_40_body": 1,
+      "%r1042": 1,
+      "%r104a": 1,
+      "%r1078": 1,
+      "%r109d": 1,
+      "%r10c2": 1,
+      "%r10ca": 1,
+      "%r10f8": 1,
+      "%r111d": 1,
+      "%r1142": 1,
+      "%r1167": 1,
+      "%r116f": 1,
+      "%r119d": 1,
+      "%r11c2": 1,
+      "%r11e7": 1,
+      "%r120c": 1,
+      "%r1214": 1,
+      "%r1242": 1,
+      "%r124a": 1,
+      "%r1278": 1,
+      "%r1280": 1,
+      "%r1292": 1,
+      "js_strict_equal": 2,
+      "Scheduler_start_41_body": 1,
+      "Scheduler_findTask_42_body": 1,
+      "%r135a": 1,
+      "Scheduler_holdSelf_43_body": 1,
+      "%r13b4": 1,
+      "%r1440": 1,
+      "Scheduler_queuePacket_44_body": 1,
+      "%r1473": 1,
+      "%r1497": 1,
+      "Scheduler_release_45_body": 1,
+      "%r1543": 1,
+      "%r1576": 1,
+      "Scheduler_trace_46_body": 1,
+      "%r15ab": 1,
+      "Scheduler_markWaiting_47_body": 1,
+      "%r1631": 1,
+      "%r16bc": 1,
+      "%r16df": 1,
+      "Scheduler_schedule_48_body": 1,
+      "%r1713": 1,
+      "Richards_benchmark_49_body": 1,
+      "Richards_verifyResult_50_body": 1,
+      "js_evalscript_check_global_lex_decl": 17,
+      "js_global_lexical_declare": 28,
+      "lambda_active_module_var_store": 69,
+      "js_init_module_vars_undefined_bulk": 1,
+      "js_set_strict_mode": 1,
+      "js_define_global_property_v": 2,
+      "js_set_global_var_property_fast": 2,
+      "js_new_class_function": 11,
+      "js_set_function_source_known_code": 50,
+      "js_set_key_default": 22,
+      "js_mark_non_writable": 22,
+      "js_mark_non_enumerable": 22,
+      "js_set_class_name": 11,
+      "js_new_object": 11,
+      "js_set_class_instance_prototype": 22,
+      "js_mark_non_configurable": 11,
+      "js_get_key_default": 40,
+      "js_set_default_constructor_property": 22,
+      "js_new_method_function_mir": 47,
+      "js_set_function_name": 39,
+      "js_mark_method_func": 39,
+      "js_set_function_name_from_property_key_if_anonymous": 39,
+      "js_set_method_home_from_target": 75,
+      "js_private_field_init_begin": 50,
+      "js_create_data_property": 39,
+      "js_private_field_init_end": 50,
+      "js_mark_private_method_non_writable": 39,
+      "js_mark_all_non_enumerable": 22,
+      "js_get_new_target": 11,
+      "js_set_this": 22,
+      "js_set_direct_new_target": 22,
+      "js_mark_derived_constructor_func": 8,
+      "js_set_formal_length": 8,
+      "js_set_class_constructor": 8,
+      "js_check_class_prototype_parent": 9,
+      "js_set_prototype": 27,
+      "js_set_class_superclass": 9,
+      "%r1ac2": 1,
+      "%r1ad5": 1,
+      "%r1ae9": 1,
+      "js_string_concat": 3,
+      "%r1b14": 1,
+      "%r1b45": 1
+    },
+    "excerpts": [
+      {
+        "start_line": 420,
+        "lines": [
+          "L33:",
+          "\tdmov\t%r61, 0.00000000000000000000000000000000000000000000000000000e+00",
+          "\tdmov\t%r60, %r61",
+          "L38:",
+          "\tdmov\td:144(ctx), %r60",
+          "\tmov\t%r62, i64:144(ctx)",
+          "\tand\t%r63, %r62, 6917529027641081856",
+          "\tbt\tL41, %r63",
+          "\tdeq\t%r65, %r60, 0.00000000000000000000000000000000000000000000000000000e+00",
+          "\tbt\tL42, %r65",
+          "\tjmp\tL43",
+          "L41:",
+          "\tmov\t%r64, %r62",
+          "\tjmp\tL44",
+          "L42:",
+          "\tursh\t%r66, %r62, 63",
+          "\tor\t%r64, 576460752303423488, %r66",
+          "\tjmp\tL44",
+          "L43:",
+          "\tmov\ti64:(%r4d), %p0",
+          "\tmov\ti64:80(ctx), %r4e",
+          "\tcall\tpush_d_p_r6_n1_a1, push_d, %r67, %r60",
+          "\tmov\t%p0, i64:(%r4d)",
+          "\tmov\t%r64, %r67",
+          "L44:",
+          "\tmov\ti64:(%r4d), %p0",
+          "\tmov\ti64:8(%r4d), %r64",
+          "\tmov\t%ra2, i64:80(ctx)",
+          "\teq\t%ra3, %ra2, %r4d",
+          "\tbf\tL65, %ra3",
+          "\tmov\ti64:80(ctx), %r4e",
+          "L65:",
+          "\tcall\tjs_cmp_raw_p_r6_n1_a3, js_cmp_raw, %r68, 0, %r64, %p0",
+          "\tmov\t%p0, i64:(%r4d)",
+          "\tmov\t%r69, 0",
+          "\tbf\tL45, %r69",
+          "\tmov\t%r6a, 72057594037927936",
+          "\tmov\ti64:8(%r4d), %r6a",
+          "\tcall\tjs_throw_value_p_r6_n1_a1, js_throw_value, %r6b, %r6a",
+          "\tmov\t%r5f, %r6b",
+          "\tjmp\tL36",
+          "L45:",
+          "\tbf\tL40, %r68"
+        ]
+      },
+      {
+        "start_line": 1018,
+        "lines": [
+          "\tmov\t%rfe, %r123",
+          "\tjmp\tL89",
+          "L103:",
+          "\tmov\t%r126, 110",
+          "\tadd\t%r127, %rf5, 8",
+          "\tmov\t%r128, i64:112(ctx)",
+          "\tmov\ti64:56(%rf3), %r126",
+          "\tcall\tjs_get_name_id_p_r6_n1_a2, js_get_name_id, %r129, %r11a, %r126",
+          "\tmov\t%p0, i64:(%rf3)",
+          "\tmov\t%p1, i64:8(%rf3)",
+          "\tmov\t%r11a, i64:16(%rf3)",
+          "\tmov\t%r11e, i64:40(%rf3)",
+          "\tmov\t%r11f, i64:32(%rf3)",
+          "\tmov\t%r122, i64:48(%rf3)",
+          "\tursh\t%r12a, %r129, 56",
+          "\tbeq\tL104, %r12a, 6",
+          "\tbeq\tL104, %r12a, 7",
+          "\teq\t%r12b, %r12a, 8",
+          "\tbf\tL105, %r12b",
+          "\tand\t%r12c, %r129, 6917529027641081856",
+          "\tbt\tL105, %r12c",
+          "\teq\t%r12d, %r129, 576460752303423488",
+          "\tbt\tL105, %r12d",
+          "\teq\t%r12e, %r129, 576460752303423489",
+          "\tbt\tL105, %r12e",
+          "\tjmp\tL104",
+          "L105:",
+          "\tmov\t%r12f, %r129",
+          "\tjmp\tL106",
+          "L104:",
+          "\tcall\tlambda_item_adopt_scalar_home_p_r6_n1_a2, lambda_item_adopt_scalar_home, %r130, %r129, %r127",
+          "\tmov\t%r12f, %r130",
+          "L106:",
+          "\tmov\ti64:112(ctx), %r128",
+          "\tursh\t%r131, %r12f, 56",
+          "\teq\t%r132, %r131, 27",
+          "\tbf\tL107, %r132"
+        ]
+      }
+    ]
+  },
+  "mvp_release_probe": {
+    "command": "./lambda.exe js --runtime=mvp test/benchmark/r7rs/fib2.js",
+    "exit_code": 9,
+    "message": "MVP runtime is available only in debug builds",
+    "timing_eligible": false
+  },
+  "source_analysis_sha256": {
+    "lambda/js/js_runtime_value.cpp": "7670a94bc41aa9fd66fb21e2ce7950668c9533c75482c26db405e255d726c583",
+    "lambda/js/js_runtime.cpp": "a490d55af40ef3b66ecb2748d3a2a877094324976281bd8d794330749de66433",
+    "lambda/js/js_props.h": "7624dddcb98e66c7d399d6ba2c052a6b2276452c3b146295c9db3ccd16739ad6",
+    "lambda/js/js_object_meta.cpp": "a0e5ff6d443aecd0ad26476242b160b50932025732a511b36bbcb2c34e1c9960",
+    "lambda/js/js_mir_calls_boxing_types.cpp": "9d92b19be4364eee2ed8bd65c865a8eaf1b1e9616c80729a9b24be7d8ae489d5",
+    "lambda/js/js_mir_expression_lowering.cpp": "b5fd41481653431563ed96299fb8a755a62283c01d9e2a8146f21bb7c43c3331",
+    "lambda/js/js_mir_function_collection_class_inference.cpp": "f284d0abd0148dc37d26eae4c8ef36b71da2f935a5c90783b5ada0e1e11e179f",
+    "lambda/js/js_mir_module_batch_lowering.cpp": "aa68b7b84a7ca9690a94066adc5ffac66ecc5621c40a8b86306e6b4019c97e76",
+    "lambda/js/mvp/mvp_runtime.cpp": "8db7139c5afb304c294c58a704a4318c1f53017b02c0ba0aa3cbf8bb0e9b3349",
+    "lambda/js/mvp/mvp_heap.cpp": "44da8109660858084f890ed1f4fc4b0af5be19f5dd76cedd3bedd5bcd0a8cd43",
+    "lambda/js/mvp/mvp_generic_mir.cpp": "f13121a5266b36904028864f4883971da15563fcb4e8fb1d0170da6cc6852932",
+    "lambda/runtime/sys_func_registry.h": "ba59af7932c60e1c2debc03b6b9d859a0ae31c1948aef3f648ce4b0ba72a4501",
+    "lambda/runtime/sys_func_registry.c": "bd04285a25cf4c253bfa36e5fac825276361aa4ac8ff8521cfc984bbc1ef18f8",
+    "lambda/runtime/mir_emitter_shared.hpp": "113b7a34b0d09bbdd6fe4f295055f2508d349ce57b7aee18aadaf173ce292dad",
+    "lambda/runtime/runtime-state.cpp": "920bea320db91c610dcb6763ed3f944c5c4cd8ada5e3b95d01cec7e9d6421f60",
+    "lambda/lambda-data.hpp": "35faca9099415e0e7c56ada69c82e7b38cde5ef19ed3688b1d20191645336429"
+  }
+}

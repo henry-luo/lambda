@@ -4931,13 +4931,7 @@ static bool js_get_host_dynamic_property(Item object, Item key, Item* out) {
     return false;
 }
 
-static bool js_try_get_array_length_name_no_gc(Item object, Item key,
-        Item* out) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* name = it2s(key);
-    if (!name || name->len != 6 || memcmp(name->chars, "length", 6) != 0) {
-        return false;
-    }
+static bool js_try_get_array_length_no_gc(Item object, Item* out) {
     TypeId type = get_type_id(object);
     if (type != LMD_TYPE_ARRAY && !js_is_ordinary_numeric_array(object)) {
         return false;
@@ -4950,6 +4944,24 @@ static bool js_try_get_array_length_name_no_gc(Item object, Item key,
     }
     if (out) *out = (Item){.item = i2it(array->length)};
     return true;
+}
+
+static bool js_try_get_array_length_name_no_gc(Item object, Item key,
+        Item* out) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* name = it2s(key);
+    if (!name || name->len != 6 || memcmp(name->chars, "length", 6) != 0) {
+        return false;
+    }
+    return js_try_get_array_length_no_gc(object, out);
+}
+
+static bool js_try_get_array_length_name_id_no_gc(Item object,
+        NameId name_id, Item* out) {
+    // Catalog NameIds are realm-independent. Retain the shared array/property
+    // admission so content arrays with an observable length descriptor fall back.
+    return name_id == LAMBDA_NAME_LENGTH &&
+        js_try_get_array_length_no_gc(object, out);
 }
 
 static bool js_try_get_primitive_string_length_no_gc(Item object, Item* out) {
@@ -8386,6 +8398,17 @@ static inline void js_named_fast_profile_hit(void) {
         JS_OPT_OUTCOME_TAKEN);
 }
 
+static inline void js_named_fast_profile_no_entry_continuation(Item object,
+        NameRef key) {
+    if (!js_opt_trace_is_enabled() || !key) return;
+    // This diagnostic runs only in the profile build. It distinguishes a
+    // missing shape entry from a semantic prototype/absence fallback without
+    // changing the release property path.
+    JsOptEvent event = js_ordinary_has_own(object, key->chars, (int)key->len)
+        ? JS_OPT_NAMED_FAST_NO_ENTRY_OWN : JS_OPT_NAMED_FAST_NO_ENTRY_ABSENT;
+    js_opt_trace_record(event, JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+}
+
 static inline void js_named_fast_profile_no_receiver(Item object) {
     JsOptEvent event = JS_OPT_NAMED_FAST_NO_RECEIVER_OTHER;
     if (get_type_id(object) == LMD_TYPE_STRING) {
@@ -8513,6 +8536,12 @@ static bool js_named_fast_lookup(Item object, NameRef key, NameId name_id,
     }
     if (receiver_kind == JS_NAMED_FAST_RECEIVER_MAP &&
             map_ctor_offset_is_reserved(map, entry->byte_offset)) {
+        // The store path may publish this already-resolved slot after proving
+        // OrdinarySet and source-order guards. Reads must still treat it as
+        // absent until that publication succeeds.
+        if (out_map) *out_map = map;
+        if (out_entry) *out_entry = entry;
+        if (out_receiver_kind) *out_receiver_kind = receiver_kind;
         if (out_reason) *out_reason = JS_OPT_REASON_NAMED_FAST_RESERVED;
         return false;
     }
@@ -8552,7 +8581,7 @@ static inline bool js_named_fast_store_can_write_same_slot(ShapeEntry* entry,
     if (!entry || !entry->type) return false;
     TypeId field_type = entry->type->type_id;
     TypeId value_type = get_type_id(value);
-    return field_type == value_type ||
+    return field_type == LMD_TYPE_NULL || field_type == value_type ||
         (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) ||
         (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT);
 }
@@ -8571,12 +8600,57 @@ static inline bool js_named_fast_store_same_slot(ShapeEntry* entry, void* data,
         *(int64_t*)field_ptr = lambda_int_item_to_i64(value);
         return true;
     }
+    if (field_type == LMD_TYPE_NULL) {
+        bool stored = map_field_store_dynamic_item(field_ptr, value);
+        js_opt_trace_record(JS_OPT_DYNAMIC_ITEM_STORE, JS_OPT_REASON_NONE,
+            stored ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+        return stored;
+    }
     if (field_type != value_type) return false;
     return map_field_store(field_ptr, value, value_type);
 }
 
+static bool js_named_fast_reserved_constructor_slot_is_next(Map* map,
+        ShapeEntry* entry) {
+    if (!map || !entry || !map_ctor_offset_is_reserved(map,
+            entry->byte_offset)) {
+        return false;
+    }
+    // A prior source assignment can publish a later reserved field through an
+    // RHS or initializer. fn_map_set then detaches and repairs enumeration
+    // order; retain that path whenever such an out-of-order publication exists.
+    for (ShapeEntry* next = entry->next; next; next = next->next) {
+        if (!map_ctor_offset_is_reserved(map, next->byte_offset)) return false;
+    }
+    return true;
+}
+
+static bool js_named_fast_store_reserved_constructor_slot(Item object, Item key,
+        Map* map, ShapeEntry* entry, Item value) {
+    if (!map || !entry || !map->data ||
+            !js_named_fast_store_can_write_same_slot(entry, value) ||
+            !js_named_fast_reserved_constructor_slot_is_next(map, entry) ||
+            !js_ordinary_reserved_constructor_slot_can_initialize(object, key,
+                entry)) {
+        return false;
+    }
+    bool stored = js_named_fast_store_same_slot(entry, map->data, value);
+    js_opt_trace_record(JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE,
+        JS_OPT_REASON_NONE, stored ? JS_OPT_OUTCOME_TAKEN :
+            JS_OPT_OUTCOME_FALLBACK);
+    if (stored) map_ctor_initialize_offset(map, entry->byte_offset);
+    return stored;
+}
+
 extern "C" Item js_get_name_id(Item object, NameId name_id) {
     js_named_fast_profile_probe();
+    Item array_length = ItemNull;
+    if (js_try_get_array_length_name_id_no_gc(object, name_id, &array_length)) {
+        js_opt_trace_record(JS_OPT_NAMED_FAST_ARRAY_LENGTH,
+            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
+        js_named_fast_profile_hit();
+        return array_length;
+    }
     Item string_length = ItemNull;
     if (js_try_get_primitive_string_length_name_id_no_gc(object, name_id,
             &string_length)) {
@@ -8597,7 +8671,7 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
     // Window hooks, or Function metadata. Keep the full preamble for globals
     // and all other receivers before their shared property lookup.
     if (object_type != LMD_TYPE_MAP || js_is_global_this_object_value(object)) {
-        Item array_length = ItemNull;
+        array_length = ItemNull;
         if (js_try_get_array_length_name_no_gc(object, key_item, &array_length)) {
             js_named_fast_profile_hit();
             return array_length;
@@ -8636,6 +8710,7 @@ extern "C" Item js_get_name_id(Item object, NameId name_id) {
     js_named_fast_profile_miss(reason);
     if (reason == JS_OPT_REASON_NAMED_FAST_NO_ENTRY) {
         js_opt_trace_named_fast_no_entry(key->chars, key->len);
+        js_named_fast_profile_no_entry_continuation(object, key);
     }
     return js_get_reference(object, key_item);
 }
@@ -8649,11 +8724,13 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
         js_named_fast_profile_miss(JS_OPT_REASON_NAMED_FAST_NO_KEY);
         return ItemNull;
     }
+    Item key_item = (Item){.item = s2it(key)};
     Map* map = NULL;
     ShapeEntry* entry = NULL;
     JsOptReason reason = JS_OPT_REASON_NAMED_FAST_NO_RECEIVER;
-    if (js_named_fast_lookup(object, key, name_id, &map, &entry,
-            NULL, NULL, &reason, false) &&
+    bool named_fast_lookup = js_named_fast_lookup(object, key, name_id, &map,
+            &entry, NULL, NULL, &reason, false);
+    if (named_fast_lookup &&
             js_named_fast_store_can_write_same_slot(entry, value) &&
             js_named_fast_store_same_slot(entry, map->data, value)) {
         // The shared admission rejects host-dynamic receivers, so this direct
@@ -8666,6 +8743,12 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
         js_named_fast_profile_hit();
         return value;
     }
+    if (!named_fast_lookup && reason == JS_OPT_REASON_NAMED_FAST_RESERVED &&
+            js_named_fast_store_reserved_constructor_slot(object, key_item,
+                map, entry, value)) {
+        js_named_fast_profile_hit();
+        return value;
+    }
     if (reason == JS_OPT_REASON_NONE) {
         reason = JS_OPT_REASON_NAMED_FAST_VALUE_TYPE;
     }
@@ -8673,7 +8756,6 @@ extern "C" Item js_set_name_id(Item object, NameId name_id,
     if (reason == JS_OPT_REASON_NAMED_FAST_NO_ENTRY) {
         js_opt_trace_named_fast_no_entry(key->chars, key->len);
     }
-    Item key_item = (Item){.item = s2it(key)};
     // T10-3: try the ordinary-add kernel here rather than three frames deeper.
     // Reaching it through js_set_key_policy -> js_set_key_default ->
     // js_set_completion_with_key re-derives facts this frame already has and

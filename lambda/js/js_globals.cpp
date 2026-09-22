@@ -6440,6 +6440,14 @@ static ShapeEntry* js_ordinary_shape_entry_for(TypeMap* tm, NameId name_id,
     return entry ? entry : typemap_hash_lookup_idless(tm, name, name_len);
 }
 
+static void js_ordinary_add_trace_reserved_constructor_store(
+        bool reserved_constructor_slot, bool taken) {
+    if (!reserved_constructor_slot) return;
+    js_opt_trace_record(JS_OPT_RESERVED_CONSTRUCTOR_STORE,
+        JS_OPT_REASON_NAMED_FAST_RESERVED,
+        taken ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+}
+
 static bool js_ordinary_add_prototype_chain_is_clear(Item target, NameId name_id,
         uint32_t name_hash, const char* name, int name_len) {
     Item cur = js_get_prototype_of(target);
@@ -6466,6 +6474,31 @@ static bool js_ordinary_add_prototype_chain_is_clear(Item target, NameId name_id
     return false;
 }
 
+bool js_ordinary_reserved_constructor_slot_can_initialize(Item target, Item key,
+        ShapeEntry* entry) {
+    if (get_type_id(target) != LMD_TYPE_MAP || !target.map || !entry ||
+            target.map->map_kind != MAP_KIND_PLAIN ||
+            !js_object_uses_ordinary_shape(target) ||
+            entry->byte_offset < 0 || entry->flags != 0 || entry->accessor ||
+            !map_ctor_offset_is_reserved(target.map, entry->byte_offset) ||
+            get_type_id(key) != LMD_TYPE_STRING) {
+        return false;
+    }
+    NameRef key_ref = it2s(key);
+    if (!key_ref || property_key_kind(key_ref) != NAME_KEY_STRING ||
+            property_key_id(key_ref) == NAME_ID_NONE ||
+            !shape_field_name_equals(entry, key_ref->chars, key_ref->len)) {
+        return false;
+    }
+    if (key_ref->len == 9 && memcmp(key_ref->chars, "__proto__", 9) == 0) {
+        return false;
+    }
+    if (!js_map_is_extensible_storage(target.map)) return false;
+    return js_ordinary_add_prototype_chain_is_clear(target,
+        property_key_id(key_ref), property_key_hash(key_ref), key_ref->chars,
+        (int)key_ref->len);
+}
+
 bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
     if (get_type_id(target) != LMD_TYPE_MAP || !target.map) return false;
     // MAP_KIND_PLAIN means no ShapeEntry on this object carries descriptor
@@ -6485,18 +6518,51 @@ bool js_ordinary_add_own_data_property(Item target, Item key, Item value) {
     uint32_t name_hash = property_key_hash(key_ref);
     const char* name = key_ref->chars;
     int name_len = (int)key_ref->len;
-    if (js_ordinary_shape_entry_for((TypeMap*)target.map->type, name_id,
-            name_hash, name, name_len)) {
-        // Not an add: an existing own slot has its own writability and
-        // stored-type rules, which the named fast path already tried.
+    ShapeEntry* entry = js_ordinary_shape_entry_for((TypeMap*)target.map->type,
+        name_id, name_hash, name, name_len);
+    bool reserved_constructor_slot = entry && entry->byte_offset >= 0 &&
+        map_ctor_offset_is_reserved(target.map, entry->byte_offset);
+    if (entry && !reserved_constructor_slot && entry->byte_offset >= 0 &&
+            entry->flags == 0 && !entry->accessor) {
+        // A default own data property wins before the prototype chain. Reuse
+        // the storage writer because it owns TypeMap transitions for a value
+        // whose type no longer fits the named same-slot fast path.
+        Item stored = js_define_own_key_storage(target, key, value);
+        bool stored_ok = !item_is_error(stored);
+        js_opt_trace_record(JS_OPT_ORDINARY_DATA_STORE, JS_OPT_REASON_NONE,
+            stored_ok ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
+        return stored_ok;
+    }
+    if (entry && (!reserved_constructor_slot || entry->flags != 0 ||
+            entry->accessor)) {
+        // A live own slot has its own writability and stored-type rules, which
+        // the named fast path already tried. A reserved constructor slot is
+        // different: it is shape storage for a future source write, not yet an
+        // observable own property.
+        js_ordinary_add_trace_reserved_constructor_store(
+            reserved_constructor_slot, false);
         return false;
     }
-    if (!js_map_is_extensible_storage(target.map)) return false;
-    if (!js_ordinary_add_prototype_chain_is_clear(target, name_id, name_hash,
-            name, name_len)) {
+    if (reserved_constructor_slot &&
+            !js_ordinary_reserved_constructor_slot_can_initialize(target, key,
+                entry)) {
+        js_ordinary_add_trace_reserved_constructor_store(
+            reserved_constructor_slot, false);
         return false;
     }
-    return !item_is_error(js_define_own_key_storage(target, key, value));
+    if (!reserved_constructor_slot && !js_map_is_extensible_storage(target.map)) {
+        return false;
+    }
+    if (!reserved_constructor_slot &&
+            !js_ordinary_add_prototype_chain_is_clear(target, name_id, name_hash,
+                name, name_len)) {
+        return false;
+    }
+    Item stored = js_define_own_key_storage(target, key, value);
+    bool stored_ok = !item_is_error(stored);
+    js_ordinary_add_trace_reserved_constructor_store(reserved_constructor_slot,
+        stored_ok);
+    return stored_ok;
 }
 
 extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,

@@ -303,6 +303,14 @@ bool js_get_own_property_descriptor_name_id(Item object, NameId name_id,
 // prove cheaply, leaving the full algorithm as the semantics.
 bool js_ordinary_add_own_data_property(Item target, Item key, Item value);
 
+// A constructor recipe leaves its next source field absent until assignment.
+// This proves the OrdinarySet preconditions for that already-resolved slot;
+// callers still fall back when attributes, prototype state, or extensibility
+// make a direct publication observably different.
+bool js_ordinary_reserved_constructor_slot_can_initialize(Item target,
+                                                           Item key,
+                                                           ShapeEntry* entry);
+
 // ToPropertyDescriptor. Failures return the D8.4.3 merged ERROR Item.
 Item js_descriptor_from_object(Item desc_obj, JsPropertyDescriptor* out);
 

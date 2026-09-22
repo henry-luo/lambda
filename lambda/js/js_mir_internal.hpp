@@ -695,6 +695,8 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc);
 void jm_infer_native_numeric_returns(JsMirTranspiler* mt);
 void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
     JsFuncCollected* fc, FnVariantAnalysis* body);
+void jm_populate_boxed_closed_numeric_binding_facts(JsMirTranspiler* mt,
+    JsFuncCollected* fc, FnVariantAnalysis* body);
 TypeId jm_numeric_binding_type(JsMirTranspiler* mt, NameEntry* binding);
 ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
     JsFuncCollected* fc);

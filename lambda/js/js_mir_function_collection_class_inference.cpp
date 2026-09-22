@@ -783,31 +783,72 @@ static void jm_infer_rebind_direct_alias(JsFunctionNode* function,
     bindings[(*binding_count)++] = {target->entry, param_index, true};
 }
 
+static JsAstNode* jm_infer_direct_alias_expression(JsAstNode* node) {
+    if (node && node->node_type == AST_NODE_EXPR_STMT) {
+        return ((JsExpressionStatementNode*)node)->expression;
+    }
+    return node;
+}
+
+static int jm_infer_direct_alias_node_capacity(JsAstNode* node) {
+    if (!node) return 0;
+    if (node->node_type == AST_NODE_VAR_STAM) {
+        int capacity = 0;
+        JsVariableDeclarationNode* declaration =
+            (JsVariableDeclarationNode*)node;
+        for (JsAstNode* item = declaration->declarations; item;
+                item = item->next) {
+            if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* declarator =
+                (JsVariableDeclaratorNode*)item;
+            if (declarator->id && declarator->id->node_type == AST_NODE_IDENT) {
+                capacity++;
+            }
+        }
+        return capacity;
+    }
+    JsAstNode* expression = jm_infer_direct_alias_expression(node);
+    return expression && expression->node_type == AST_NODE_ASSIGN &&
+        ((JsAssignmentNode*)expression)->op == OPERATOR_ASSIGN &&
+        ((JsAssignmentNode*)expression)->left &&
+        ((JsAssignmentNode*)expression)->left->node_type == AST_NODE_IDENT;
+}
+
+static void jm_infer_collect_direct_alias_node(JsFunctionNode* function,
+        JsAstNode* node, JmParamInferenceBinding bindings[], int* binding_count,
+        int binding_capacity, int param_count) {
+    if (!function || !node || !bindings || !binding_count) return;
+    if (node->node_type == AST_NODE_VAR_STAM) {
+        JsVariableDeclarationNode* declaration =
+            (JsVariableDeclarationNode*)node;
+        for (JsAstNode* item = declaration->declarations; item;
+                item = item->next) {
+            if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+            JsVariableDeclaratorNode* declarator =
+                (JsVariableDeclaratorNode*)item;
+            jm_infer_rebind_direct_alias(function, declarator->id,
+                declarator->init, bindings, binding_count, binding_capacity,
+                param_count);
+        }
+        return;
+    }
+    JsAstNode* expression = jm_infer_direct_alias_expression(node);
+    if (!expression || expression->node_type != AST_NODE_ASSIGN) return;
+    JsAssignmentNode* assignment = (JsAssignmentNode*)expression;
+    if (assignment->op != OPERATOR_ASSIGN) return;
+    jm_infer_rebind_direct_alias(function, assignment->left, assignment->right,
+        bindings, binding_count, binding_capacity, param_count);
+}
+
 static int jm_infer_direct_alias_capacity(JsBlockNode* body) {
     int capacity = 0;
     for (JsAstNode* statement = body ? body->statements : NULL; statement;
             statement = statement->next) {
-        if (statement->node_type == AST_NODE_VAR_STAM) {
-            JsVariableDeclarationNode* declaration =
-                (JsVariableDeclarationNode*)statement;
-            for (JsAstNode* item = declaration->declarations; item;
-                    item = item->next) {
-                if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-                JsVariableDeclaratorNode* declarator =
-                    (JsVariableDeclaratorNode*)item;
-                if (declarator->id && declarator->id->node_type == AST_NODE_IDENT) {
-                    capacity++;
-                }
-            }
-            continue;
-        }
-        if (statement->node_type != AST_NODE_EXPR_STMT) continue;
-        JsAstNode* expression = ((JsExpressionStatementNode*)statement)->expression;
-        if (expression && expression->node_type == AST_NODE_ASSIGN &&
-                ((JsAssignmentNode*)expression)->op == OPERATOR_ASSIGN &&
-                ((JsAssignmentNode*)expression)->left &&
-                ((JsAssignmentNode*)expression)->left->node_type == AST_NODE_IDENT) {
-            capacity++;
+        capacity += jm_infer_direct_alias_node_capacity(statement);
+        if (statement->node_type != AST_NODE_LOOP) continue;
+        AstLoopControlNode* loop = (AstLoopControlNode*)statement;
+        if (loop->form == LOOP_FORM_FOR_C) {
+            capacity += jm_infer_direct_alias_node_capacity(loop->init);
         }
     }
     return capacity;
@@ -819,27 +860,16 @@ static void jm_infer_collect_direct_aliases(JsFunctionNode* function,
     if (!function || !body || !bindings || !binding_count) return;
     for (JsAstNode* statement = body->statements; statement;
             statement = statement->next) {
-        if (statement->node_type == AST_NODE_VAR_STAM) {
-            JsVariableDeclarationNode* declaration =
-                (JsVariableDeclarationNode*)statement;
-            for (JsAstNode* item = declaration->declarations; item;
-                    item = item->next) {
-                if (item->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-                JsVariableDeclaratorNode* declarator =
-                    (JsVariableDeclaratorNode*)item;
-                jm_infer_rebind_direct_alias(function, declarator->id,
-                    declarator->init, bindings, binding_count, binding_capacity,
-                    param_count);
-            }
-            continue;
+        jm_infer_collect_direct_alias_node(function, statement, bindings,
+            binding_count, binding_capacity, param_count);
+        if (statement->node_type != AST_NODE_LOOP) continue;
+        AstLoopControlNode* loop = (AstLoopControlNode*)statement;
+        if (loop->form == LOOP_FORM_FOR_C) {
+            // A C-style head runs before its first test, so its resolved local
+            // alias is the same numeric evidence as a direct body initializer.
+            jm_infer_collect_direct_alias_node(function, loop->init, bindings,
+                binding_count, binding_capacity, param_count);
         }
-        if (statement->node_type != AST_NODE_EXPR_STMT) continue;
-        JsAstNode* expression = ((JsExpressionStatementNode*)statement)->expression;
-        if (!expression || expression->node_type != AST_NODE_ASSIGN) continue;
-        JsAssignmentNode* assignment = (JsAssignmentNode*)expression;
-        if (assignment->op != OPERATOR_ASSIGN) continue;
-        jm_infer_rebind_direct_alias(function, assignment->left, assignment->right,
-            bindings, binding_count, binding_capacity, param_count);
     }
 }
 
@@ -1391,6 +1421,7 @@ struct JmNumericReturnCandidate {
     bool valid;
     bool has_number_base;
     bool proven;
+    bool uses_parameter;
     JsFuncCollected* dependencies[JM_NUMERIC_RETURN_MAX_DEPENDENCIES];
     int dependency_count;
 };
@@ -1507,6 +1538,11 @@ static JmNumericReturnFact jm_numeric_return_binding_fact(
     JmNumericReturnFact parameter = jm_numeric_return_parameter_fact(context->fc,
         binding);
     if (parameter != JM_NUMERIC_RETURN_INVALID || binding->is_parameter) {
+        if (parameter != JM_NUMERIC_RETURN_INVALID) {
+            // A boxed entry may receive any JS value for a formal. Keep facts
+            // that depend on it out of F64 locals (D8.2.4-D8.2.6).
+            context->candidate->uses_parameter = true;
+        }
         return parameter;
     }
     if (!jm_entry_is_owned_by_function(context->fc->node, binding)) {
@@ -1818,8 +1854,8 @@ void jm_infer_native_numeric_returns(JsMirTranspiler* mt) {
     mem_free(candidates);
 }
 
-void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
-        JsFuncCollected* fc, FnVariantAnalysis* body) {
+static void jm_populate_numeric_binding_facts_impl(JsMirTranspiler* mt,
+        JsFuncCollected* fc, FnVariantAnalysis* body, bool only_closed_locals) {
     // Local Number facts describe the guarded native entry, whose parameter
     // admission has already established Number inputs. A boxed body retains
     // JavaScript's complete value domain and cannot reuse those F64 facts.
@@ -1855,13 +1891,33 @@ void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
         candidate.valid = true;
         JmNumericReturnContext context = {mt, fc, &candidate};
         if (jm_numeric_return_binding_fact(&context, identifier->entry) !=
-                JM_NUMERIC_RETURN_NUMBER || !candidate.valid) {
+                JM_NUMERIC_RETURN_NUMBER || !candidate.valid ||
+                (only_closed_locals && candidate.uses_parameter)) {
             continue;
         }
         FnBindingAnalysis* fact = &body->bindings[body->binding_count++];
         *fact = {identifier->entry, LMD_TYPE_FLOAT, VALUE_REP_F64,
             JIT_VALUE_NON_GC_SCALAR, BINDING_STORAGE_REGISTER, 0};
     }
+}
+
+void jm_populate_numeric_binding_facts(JsMirTranspiler* mt,
+        JsFuncCollected* fc, FnVariantAnalysis* body) {
+    // Native-entry admission has already guarded every numeric parameter.
+    jm_populate_numeric_binding_facts_impl(mt, fc, body, false);
+}
+
+void jm_populate_boxed_closed_numeric_binding_facts(JsMirTranspiler* mt,
+        JsFuncCollected* fc, FnVariantAnalysis* body) {
+    if (!mt || !fc || !body || JM_JS_FACT(fc, has_direct_eval) ||
+            JM_JS_FACT(fc, uses_with) || fc->has_scope_env ||
+            fc->node->is_async || fc->node->is_generator) {
+        return;
+    }
+    // Boxed bodies may retain only locals whose initializer and every direct
+    // write prove Number without reading a formal. This leaves boxed arguments
+    // and observable dynamic scope on the generic path (D8.2.4-D8.2.6).
+    jm_populate_numeric_binding_facts_impl(mt, fc, body, true);
 }
 
 TypeId jm_numeric_binding_type(JsMirTranspiler* mt, NameEntry* binding) {
