@@ -113,7 +113,14 @@ bool array_reserve_append_slots(Array* array, int64_t append_count) {
     // array_push reserves one handoff slot beyond visible and scalar-tail
     // storage. Matching that invariant avoids a final unnecessary growth.
     int64_t required_capacity = array->length + array->extra + append_count + 1;
-    return list_reserve_capacity((List*)array, required_capacity, nullptr);
+    if (required_capacity <= array->capacity) return true;
+    // Appends must amortize like expand_list: an exact reserve made every
+    // checked push onto a typed array (`push(nodes, n)` under `Node[]`)
+    // reallocate and copy the whole buffer, O(n^2) to build n elements. A
+    // one-shot reserve on a fresh array still gets exactly what it asked for.
+    int64_t doubled = array->capacity > INT64_MAX / 2 ? INT64_MAX : array->capacity * 2;
+    return list_reserve_capacity((List*)array,
+        doubled > required_capacity ? doubled : required_capacity, nullptr);
 }
 
 // D2.6.6v2: a JS array's companion property map now lives in the array's OWN

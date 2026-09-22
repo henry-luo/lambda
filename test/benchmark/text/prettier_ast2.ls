@@ -1,12 +1,23 @@
 // Typed variant: the external JSON AST is heterogeneous, but the formatter's
 // recursive document algebra and render state use stable contracts.
+//
+// As in the C port (c2mir/prettier_ast.c), every document is ONE record shape
+// with an int kind tag; a field a kind does not use stays empty (`no_parts`,
+// null or ""). `first` holds
+// the contents of indent/group and the broken branch of if-break; `second`
+// holds the flat branch.
 
-type Doc = {kind: string} |
-    {kind: string, value: string} |
-    {kind: string, parts: Doc[]} |
-    {kind: string, contents: Doc} |
-    {kind: string, contents: Doc, break_threshold: int} |
-    {kind: string, broken: Doc, flat: Doc}
+let DOC_TEXT = 0
+let DOC_CONCAT = 1
+let DOC_INDENT = 2
+let DOC_GROUP = 3
+let DOC_IF_BREAK = 4
+let DOC_LINE = 5
+let DOC_SOFTLINE = 6
+let DOC_HARDLINE = 7
+
+type Doc = {kind: int, text: string, parts: Doc[], first: Doc?, second: Doc?,
+    threshold: int}
 type RenderContext = {column: int, indent: int}
 type RenderResult = {value: string, column: int}
 
@@ -14,22 +25,36 @@ let ast_path = "test/benchmark/text/prettier_ast.json"
 let print_width = 80
 let iterations = 256
 let large_length = 1000000000
+// the one empty part list every non-concat document shares
+let no_parts: Doc[] = []
 
-let line_doc: Doc = {kind: "line"}
-let softline_doc: Doc = {kind: "softline"}
-let hardline_doc: Doc = {kind: "hardline"}
+fn doc_leaf(kind: int) Doc =>
+    {kind: kind, text: "", parts: no_parts, first: null, second: null,
+     threshold: large_length}
 
-fn text_doc(value: any) Doc => {kind: "text", value: string(value)}
+let line_doc: Doc = doc_leaf(DOC_LINE)
+let softline_doc: Doc = doc_leaf(DOC_SOFTLINE)
+let hardline_doc: Doc = doc_leaf(DOC_HARDLINE)
 
-fn concat_docs(parts: Doc[]) Doc => {kind: "concat", parts: parts}
+fn text_doc(value: any) Doc =>
+    {kind: DOC_TEXT, text: string(value), parts: no_parts, first: null, second: null,
+     threshold: large_length}
 
-fn indent_doc(contents: Doc) Doc => {kind: "indent", contents: contents}
+fn concat_docs(parts: Doc[]) Doc =>
+    {kind: DOC_CONCAT, text: "", parts: parts, first: null, second: null,
+     threshold: large_length}
+
+fn indent_doc(contents: Doc) Doc =>
+    {kind: DOC_INDENT, text: "", parts: no_parts, first: contents, second: null,
+     threshold: large_length}
 
 fn group_doc(contents: Doc, break_threshold: int = large_length) Doc =>
-    {kind: "group", contents: contents, break_threshold: break_threshold}
+    {kind: DOC_GROUP, text: "", parts: no_parts, first: contents, second: null,
+     threshold: break_threshold}
 
 fn if_break_doc(broken: Doc, flat: Doc = text_doc("")) Doc =>
-    {kind: "if-break", broken: broken, flat: flat}
+    {kind: DOC_IF_BREAK, text: "", parts: no_parts, first: broken, second: flat,
+     threshold: large_length}
 
 fn join_docs_at(separator: Doc, parts: Doc[], index: int, count: int,
         acc: Doc[]) Doc {
@@ -44,23 +69,33 @@ fn join_docs_at(separator: Doc, parts: Doc[], index: int, count: int,
 fn join_docs(separator: Doc, parts: Doc[]) Doc =>
     join_docs_at(separator, parts, 0, len(parts), [])
 
-fn flat_length_at(doc: Doc, index: int, count: int, acc: int) int {
+// Like the C port, stop summing once the total can no longer fit: every
+// consumer only compares the result against a width below large_length, so a
+// capped total decides the same way as the full sum.
+fn flat_length_at(parts: Doc[], index: int, count: int, acc: int) int {
     if (index >= count) acc
-    else flat_length_at(doc, index + 1, count, acc + flat_length(doc.parts[index]))
+    else {
+        let child = flat_length(parts[index])
+        if (child >= large_length - acc) large_length
+        else flat_length_at(parts, index + 1, count, acc + child)
+    }
 }
 
-fn flat_length(doc: Doc) int {
-    if (doc.kind == "text") len(doc.value)
-    else if (doc.kind == "concat") flat_length_at(doc, 0, len(doc.parts), 0)
-    else if (doc.kind == "indent") flat_length(doc.contents)
-    else if (doc.kind == "group") flat_length(doc.contents)
-    else if (doc.kind == "if-break") flat_length(doc.flat)
-    else if (doc.kind == "line") 1
-    else if (doc.kind == "softline") 0
-    else large_length
+fn flat_length(doc: Doc?) int {
+    if (doc == null) 0
+    else {
+        let kind = doc.kind
+        if (kind == DOC_TEXT) len(doc.text)
+        else if (kind == DOC_CONCAT) flat_length_at(doc.parts, 0, len(doc.parts), 0)
+        else if (kind == DOC_INDENT or kind == DOC_GROUP) flat_length(doc.first)
+        else if (kind == DOC_IF_BREAK) flat_length(doc.second)
+        else if (kind == DOC_LINE) 1
+        else if (kind == DOC_SOFTLINE) 0
+        else large_length
+    }
 }
 
-fn fits(doc: Doc, remaining: int) bool => flat_length(doc) <= remaining
+fn fits(doc: Doc?, remaining: int) bool => flat_length(doc) <= remaining
 
 fn indent_string(level: int) string {
     if (level <= 0) ""
@@ -81,33 +116,37 @@ fn render_parts_at(parts: Doc[], index: int, count: int, ctx: RenderContext,
     }
 }
 
-fn render_doc(doc: Doc, ctx: RenderContext, mode: string) RenderResult {
-    if (doc.kind == "text") {
-        render_result(doc.value, ctx.column + len(doc.value))
-    } else if (doc.kind == "concat") {
-        render_parts_at(doc.parts, 0, len(doc.parts), ctx, mode, "")
-    } else if (doc.kind == "indent") {
-        let rendered = render_doc(doc.contents,
-            {column: ctx.column, indent: ctx.indent + 1}, mode)
-        render_result(rendered.value, rendered.column)
-    } else if (doc.kind == "group") {
-        let is_flat = mode == "flat" or
-            (doc.break_threshold >= flat_length(doc.contents) and
-             fits(doc.contents, print_width - ctx.column))
-        render_doc(doc.contents, ctx, if (is_flat) "flat" else "break")
-    } else if (doc.kind == "if-break") {
-        render_doc(if (mode == "flat") doc.flat else doc.broken, ctx, mode)
-    } else if (doc.kind == "line") {
-        if (mode == "flat") {
-            render_result(" ", ctx.column + 1)
+fn render_doc(doc: Doc?, ctx: RenderContext, mode: string) RenderResult {
+    if (doc == null) render_result("", ctx.column)
+    else {
+        let kind = doc.kind
+        if (kind == DOC_TEXT) {
+            render_result(doc.text, ctx.column + len(doc.text))
+        } else if (kind == DOC_CONCAT) {
+            render_parts_at(doc.parts, 0, len(doc.parts), ctx, mode, "")
+        } else if (kind == DOC_INDENT) {
+            let rendered = render_doc(doc.first,
+                {column: ctx.column, indent: ctx.indent + 1}, mode)
+            render_result(rendered.value, rendered.column)
+        } else if (kind == DOC_GROUP) {
+            let is_flat = mode == "flat" or
+                (doc.threshold >= flat_length(doc.first) and
+                 fits(doc.first, print_width - ctx.column))
+            render_doc(doc.first, ctx, if (is_flat) "flat" else "break")
+        } else if (kind == DOC_IF_BREAK) {
+            render_doc(if (mode == "flat") doc.second else doc.first, ctx, mode)
+        } else if (kind == DOC_LINE) {
+            if (mode == "flat") {
+                render_result(" ", ctx.column + 1)
+            } else {
+                render_result("\n" ++ indent_string(ctx.indent), ctx.indent * 2)
+            }
+        } else if (kind == DOC_SOFTLINE) {
+            if (mode == "flat") render_result("", ctx.column)
+            else render_result("\n" ++ indent_string(ctx.indent), ctx.indent * 2)
         } else {
             render_result("\n" ++ indent_string(ctx.indent), ctx.indent * 2)
         }
-    } else if (doc.kind == "softline") {
-        if (mode == "flat") render_result("", ctx.column)
-        else render_result("\n" ++ indent_string(ctx.indent), ctx.indent * 2)
-    } else {
-        render_result("\n" ++ indent_string(ctx.indent), ctx.indent * 2)
     }
 }
 

@@ -1471,6 +1471,10 @@ typedef void* (*fn_ptr)();
 // must travel in an array/map or a single rest argument.
 enum { LAMBDA_MAX_FUNCTION_ARGS = 16 };
 
+// Keys in one fixed-key path write: a compiled path's segments plus its
+// terminal (AST_COW_PATH_MAX + 1). Index-key bits ride in shape bits 16..63.
+enum { LAMBDA_PATH_KEYS_MAX = 33 };
+
 // Every Core Function value explicitly describes the entry stored in ptr.
 // Keep this unversioned layout local to the current JIT process: persistent
 // AOT compatibility is deliberately deferred rather than guessed.
@@ -2830,10 +2834,12 @@ extern "C" {
     // NM-O8 typed arm: validates in place instead of swapping a candidate in.
     Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         Type* expected, const char* boundary);
-    // T27-4: fixed-key twin of the two setters above; shape = count | inplace<<8
-    // | index-key bits <<16, leaf_contract resolved by the compiler (or NULL).
-    Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item key1,
-        Item key2, int64_t shape, Type* expected, Type* leaf_contract);
+    // T27-4: key-span twin of the two setters above; `keys` holds `count` keys
+    // (1..LAMBDA_PATH_KEYS_MAX) in caller memory that need not be GC-visible;
+    // shape = count | inplace<<8 | index-key bits <<16, leaf_contract resolved
+    // by the compiler (or NULL). Allocates no path array on a proven root.
+    Item lambda_map_path_set_checked_keys(Item owner, Item value, const Item* keys,
+        int64_t shape, Type* expected, Type* leaf_contract);
     // one link of a declared path's contract walk; *open_leaf below an open array
     Type* lambda_map_path_contract_step(Type* current, Item key, bool* open_leaf);
     Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
@@ -3331,6 +3337,10 @@ extern "C" {
     // link is returned as the value for the mutator to reject
     Item cow_place_leaf(Item owner, Item path);
     Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1, Item key2);
+    // key-span forms of the two borrows: `count` (1..LAMBDA_PATH_KEYS_MAX)
+    // evaluated keys in caller memory, rooted by the walker
+    Item cow_path_borrow_keys(Item owner, const Item* keys, int64_t count);
+    Item cow_place_leaf_keys(Item owner, const Item* keys, int64_t count);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array

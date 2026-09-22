@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "A static nested integer field store uses the bounded COW spine borrow and emits the guarded direct-store registers.",
+  "description": "A static nested integer field store uses the key-span COW spine borrow and emits the guarded direct-store registers.",
   "checks": [
     {
       "in_func": "*",
       "expect_seq": [
-        { "pattern": "call\tcow_path_borrow_fixed" },
+        { "pattern": "call\tcow_path_borrow_keys" },
         { "pattern": "mov\t{{r}}, u8:({{r}})" },
         { "pattern": "mov\t{{r}}, i64:8({{r}})" },
         { "pattern": "mov\t{{r}}, i64:16({{r}})" },

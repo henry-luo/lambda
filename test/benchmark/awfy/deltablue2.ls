@@ -63,7 +63,9 @@ pn vec_add(var v: Vec, item: int) any {
     push(v, item)
 }
 
-pn vec_at(var v: Vec, idx: int) int {
+// read-only: a `var` here made every caller's place copy (`cs = w.vars[i].constraints`)
+// count as mutated, so each call copied the constraint list (S9.1.2, D4.4.6)
+pn vec_at(v: Vec, idx: int) int {
     return v[idx]
 }
 
@@ -680,7 +682,7 @@ pn planner_incremental_remove(var w: World, cid: int) any {
     }
 }
 
-pn planner_extract_plan(var w: World, var constraints: Vec) Vec {
+pn planner_extract_plan(var w: World, constraints: Vec) Vec {
     var sources: Vec = vec_new()
     var csz = vec_size(constraints)
     var i: int = 0
