@@ -36,5 +36,24 @@ fn raise_branch(n: int) {
 let t4 = raise_branch(10);
 // expect: 15
 
+// Test 5: a closure called as a value resolves an omitted default in its
+// public entry, which must see the captured binding
+fn make_doubler(n: int) {
+    fn inner(x: int = n) => x * 2
+    inner
+}
+let doubler = make_doubler(21);
+let t5 = [doubler(), doubler(4)];
+// expect: [42, 8]
+
+// Test 6: a default reading both an earlier parameter and a capture
+fn make_combiner(n: int) {
+    fn inner(a: int, b: int = a + n) => a * 100 + b
+    inner
+}
+let combiner = make_combiner(5);
+let t6 = [combiner(3), combiner(3, 1)];
+// expect: [308, 301]
+
 // Final result: array of all test values
-[t1, t2, t3, t4]
+[t1, t2, t3, t4, t5, t6]
