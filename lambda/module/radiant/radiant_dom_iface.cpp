@@ -763,10 +763,11 @@ static const JubeMemberBind radiant_computed_style_members[] = {
 
 // ---- CSSOM (stylesheet / css_rule / rule_style_decl) ----
 // Pinned behaviors preserved: keys = [], descriptors undefined for open names,
-// no prototypes, unknown-name writes swallowed (stylesheet/rule) or parsed as
-// CSS declarations (rule_style_decl). The drifted has-chain is gone: `in` now
-// derives from the same declarations `get` serves, plus null-valued members
-// (owner_node, parent_style_sheet) that the legacy chain reported present.
+// unknown-name writes swallowed (stylesheet/rule) or parsed as CSS declarations
+// (rule_style_decl). Stylesheet instances expose their CSSOM interface
+// prototype; the drifted has-chain is gone: `in` now derives from the same
+// declarations `get` serves, plus null-valued members (owner_node,
+// parent_style_sheet) that the legacy chain reported present.
 
 #define RADIANT_GETTER_D(name, entry)                                        \
     static int name(Item receiver, Item* out) {                              \
@@ -1679,6 +1680,10 @@ static Item radiant_style_sheet_list_prototype(void) {
     return dom_realm_constructor_prototype("StyleSheetList");
 }
 
+static Item radiant_css_stylesheet_prototype(void) {
+    return dom_realm_constructor_prototype("CSSStyleSheet");
+}
+
 static Item radiant_css_rule_list_prototype(void) {
     return dom_realm_constructor_prototype("CSSRuleList");
 }
@@ -1792,7 +1797,7 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      NULL, NULL, NULL, NULL, NULL, NULL},
     {"stylesheet", NULL, radiant_stylesheet_members,
      (int32_t)(sizeof(radiant_stylesheet_members) / sizeof(radiant_stylesheet_members[0])),
-     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_style_no_prototype, NULL,
+     NULL, cssom_swallow_set, sh_indexed_get, NULL, radiant_css_stylesheet_prototype, NULL,
      NULL, NULL, NULL, NULL, NULL, NULL},
     {"css_rule", NULL, radiant_css_rule_members,
      (int32_t)(sizeof(radiant_css_rule_members) / sizeof(radiant_css_rule_members[0])),

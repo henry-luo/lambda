@@ -1612,14 +1612,9 @@ typedef struct FnAnalysis {
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;
-    // MIR call-site resolution owns these whole-body inference caches. Each
-    // fact publishes its own atomic epoch, because retained templates can be
-    // compiled concurrently and a new fact must not validate an older one
-    // (D8.2.5v2).
-    uint32_t mir_cached_return_type_epoch;
-    TypeId mir_cached_return_type;
-    uint32_t mir_cached_return_defer_epoch;
-    bool mir_cached_return_defer;
+    // Defect-origin scanning is invariant after a call-site round. Its atomic
+    // epoch keeps retained-template compilation from reading another worker's
+    // result (D8.2.5v2).
     uint32_t mir_cached_defect_origin_epoch;
     bool mir_cached_defect_origin;
     FnVariantAnalysis variants[4];

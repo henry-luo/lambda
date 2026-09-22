@@ -12,3 +12,13 @@ console.log(button instanceof HTMLButtonElement);
 console.log(Object.prototype.toString.call(link));
 console.log(link instanceof HTMLElement);
 console.log(link instanceof HTMLLinkElement);
+
+var comment = new Comment('brand');
+console.log(comment instanceof Comment);
+console.log(comment instanceof CharacterData);
+console.log(comment instanceof Node);
+console.log(comment.data);
+
+var browserUrl = new URL('https://example.test/path?kind=browser');
+console.log(browserUrl.hostname);
+console.log(browserUrl.searchParams.get('kind'));

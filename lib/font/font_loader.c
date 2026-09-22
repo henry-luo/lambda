@@ -101,6 +101,7 @@ static FontHandle* create_handle(FontContext* ctx,
             : (int)weight;
     }
 
+    font_context_track_handle(ctx, handle);
     return handle;
 }
 #elif defined(LAMBDA_HAS_DWRITE)
@@ -166,6 +167,7 @@ static FontHandle* create_handle(FontContext* ctx,
         }
     }
 
+    font_context_track_handle(ctx, handle);
     return handle;
 }
 #else
@@ -232,6 +234,7 @@ static FontHandle* create_handle(FontContext* ctx,
         }
     }
 
+    font_context_track_handle(ctx, handle);
     return handle;
 }
 #endif

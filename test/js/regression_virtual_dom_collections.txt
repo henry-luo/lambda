@@ -1,5 +1,8 @@
 formsLive:true
 formsBrand:true
+linksLive:true
+linksHrefOnly:true
+linksBrand:true
 controlsLive:true
 controlsNamed:true
 controlsBrand:true
@@ -23,6 +26,8 @@ rectsBrand:true
 rectsArray:false
 sheetsBrand:true
 sheetsArray:false
+sheetBrand:true
+constructedSheet:true
 rulesLive:true
 rulesBrand:true
 rulesArray:false

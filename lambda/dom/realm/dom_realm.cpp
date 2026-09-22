@@ -48,6 +48,9 @@ Item dom_realm_intrinsic_prototype(int c) { return js_get_intrinsic_prototype_fo
 Item dom_realm_init_constructor_prototype(Item ctor, Item proto) {
     return js_initialize_native_constructor_prototype(ctor, proto);
 }
+void dom_realm_set_prototype(Item object, Item prototype) {
+    js_set_prototype(object, prototype);
+}
 
 Item dom_realm_promise_new(Item e) { return js_promise_create(e); }
 Item dom_realm_promise_resolve(Item v) { return js_promise_resolve(v); }

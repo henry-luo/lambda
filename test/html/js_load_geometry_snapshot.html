@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    #track { display: flex; width: 200px; }
+    .cell { flex: none; width: 50px; height: 10px; }
+  </style>
+</head>
+<body>
+  <div id="track"><div class="cell"></div><div class="cell"></div></div>
+  <div id="geometry-state"></div>
+  <script>
+    window.addEventListener('load', function() {
+      var track = document.getElementById('track');
+      var first = document.createElement('div');
+      var last = document.createElement('div');
+      first.style.width = '0';
+      last.style.width = '0';
+      track.prepend(first);
+      track.append(last);
+      var span = last.getBoundingClientRect().left -
+          first.getBoundingClientRect().left;
+      document.getElementById('geometry-state').setAttribute(
+          'data-load-span', String(Math.round(span)));
+    });
+  </script>
+</body>
+</html>

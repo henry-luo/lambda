@@ -13,6 +13,7 @@
 #include "runtime-state.h"
 #include "recovery_frame.h"
 #include "lambda-stack.h"
+#include "concurrency.h"
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
@@ -173,33 +174,29 @@ static void interp_satellite_compile_job(void* opaque) {
     pthread_mutex_lock(&queue->mutex);
     bool retired_before_compile = queue->retiring ||
         job->generation != queue->generation;
-    if (retired_before_compile) {
-        if (queue->pending > 0) queue->pending--;
-        if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
-    }
     pthread_mutex_unlock(&queue->mutex);
-    if (retired_before_compile) {
-        interp_satellite_job_destroy(job);
-        return;
-    }
 
     InterpSatelliteImage* image = NULL;
-    bool compiled = job->runtime && compile_ast_function_satellite_snapshot(
+    bool compiled = !retired_before_compile && job->runtime && compile_ast_function_satellite_snapshot(
         job->runtime, job->script, job->def, job->sequence,
         interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
     bool retired = queue->retiring || job->generation != queue->generation;
-    if (queue->pending > 0) queue->pending--;
     if (!retired && queue->ready && arraylist_append(queue->ready, job)) {
         job->image = compiled ? image : NULL;
         job = NULL;  // the evaluator now owns this completed request
     }
-    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
-    pthread_mutex_unlock(&queue->mutex);
     if (job) {
+        // teardown must keep Script/parent pools alive until the rejected
+        // image has released all compiler-owned references (D8.5.1v7).
+        pthread_mutex_unlock(&queue->mutex);
         interp_satellite_image_destroy(image);
         interp_satellite_job_destroy(job);
+        pthread_mutex_lock(&queue->mutex);
     }
+    if (queue->pending > 0) queue->pending--;
+    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
+    pthread_mutex_unlock(&queue->mutex);
 }
 
 static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
@@ -247,22 +244,21 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     return true;
 }
 
-static bool interp_satellite_publish_image(Script* script,
-        InterpSatelliteImage* image) {
-    if (!script || !image || !image->context || !image->target_entry) return false;
-    bool prepared = lambda_module_state_bind_static(script->module_state_id,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list) && prepare_context_module_state(image->context,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list);
-    if (!prepared) return false;
+bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image) {
+    if (!script || !image || !image->context) return false;
     if (!script->interp_satellite_images) {
         script->interp_satellite_images = arraylist_new(4);
     }
-    if (!script->interp_satellite_images ||
-            !arraylist_append(script->interp_satellite_images, image)) {
-        return false;
-    }
+    return script->interp_satellite_images &&
+        arraylist_append(script->interp_satellite_images, image);
+}
+
+static bool interp_satellite_publish_image(Script* script,
+        InterpSatelliteImage* image) {
+    if (!script || !image || !image->context || !image->target_entry ||
+            !image->module_layout) return false;
+    if (!interp_satellite_image_prepare(script, image) ||
+            !interp_satellite_image_retain(script, image)) return false;
     bool target_published = false;
     for (uint32_t index = 0; index < image->member_count; index++) {
         if (!image->member_entries[index] || !image->members[index]) continue;
@@ -7557,9 +7553,21 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
                         (int)get_type_id(callee));
                     break;
                 }
-                uint64_t result_home = 0;
-                tail.set(fn_call_into((Function*)(uintptr_t)callee.item, NULL,
-                    &result_home));
+                bool task_root = proc->analysis &&
+                    (proc->analysis->may_await ||
+                     proc->analysis->needs_task_context);
+                // A task-aware `main` must enter through the scheduler so its
+                // task-only builtins have a current task (D6.3.1, S7.11.2).
+                // A synchronous T0 main stays on the direct path: an untyped
+                // dynamic callee can establish its own resumable task root,
+                // while this AST caller has no durable continuation.
+                if (task_root) {
+                    tail.set(lambda_task_run_root_function(callee, NULL));
+                } else {
+                    uint64_t result_home = 0;
+                    tail.set(fn_call_into((Function*)(uintptr_t)callee.item,
+                        NULL, &result_home));
+                }
                 called_main = true;
                 break;
             }

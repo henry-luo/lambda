@@ -33,8 +33,19 @@ struct NodeUrlSessionState {
     ArrayList* blob_urls;
     int64_t blob_url_next_id;
 };
+
+void node_url_runtime_attach(void* session);
+
 static NodeUrlSessionState* node_url_state(void) {
-    return (NodeUrlSessionState*)jube_node_current_module_state(JUBE_NODE_MODULE_STATE_URL);
+    NodeUrlSessionState* state = (NodeUrlSessionState*)
+        jube_node_current_module_state(JUBE_NODE_MODULE_STATE_URL);
+    if (state) return state;
+    void* session = jube_node_runtime_current_session();
+    if (!session) return NULL;
+    // Host-namespace imports bypass the normal module attach hook.
+    node_url_runtime_attach(session);
+    return (NodeUrlSessionState*)jube_node_current_module_state(
+        JUBE_NODE_MODULE_STATE_URL);
 }
 #define node_url_session (node_url_state()->cache_values.session)
 #define node_url_namespace_rooted \
@@ -1551,48 +1562,50 @@ static Item js_url_set_method(Item ns, const char* name, Target target,
 }
 
 Item node_url_namespace(void) {
-    if (url_module_namespace.item != 0) return url_module_namespace;
-    if (!node_url_host || !node_url_session) return ItemNull;
+    NodeUrlSessionState* state = node_url_state();
+    if (!node_url_host || !state || !state->cache_values.session) return ItemNull;
+    if (state->cache_items[0].item != 0) return state->cache_items[0];
 
-    url_module_namespace = js_new_object();
+    state->cache_items[0] = js_new_object();
+    Item namespace_item = state->cache_items[0];
     JubeRootFrame frame = {};
-    if (!node_url_roots_begin(&frame, 2)) return url_module_namespace;
+    if (!node_url_roots_begin(&frame, 2)) return namespace_item;
     uint64_t* constructor_root = node_url_host->node->roots->root_frame_take_slot(&frame);
     uint64_t* key_root = node_url_host->node->roots->root_frame_take_slot(&frame);
     if (!constructor_root || !key_root) {
         node_url_host->node->roots->root_frame_end(&frame);
-        return url_module_namespace;
+        return namespace_item;
     }
 
     // URL constructor (as a function, not class)
-    Item url_ctor = js_url_set_method(url_module_namespace, "URL", js_url_module_construct, 2, true);
+    Item url_ctor = js_url_set_method(namespace_item, "URL", js_url_module_construct, 2, true);
     *constructor_root = url_ctor.item;
     js_url_set_method(url_ctor, "createObjectURL", js_url_createObjectURL, 1);
     js_url_set_method(url_ctor, "revokeObjectURL", js_url_revokeObjectURL, 1);
     js_url_set_method(url_ctor, "resolveObjectURL", js_blob_url_resolve, 1);
 
     // legacy methods
-    js_url_set_method(url_module_namespace, "parse", js_url_parse_legacy, 2);
-    js_url_set_method(url_module_namespace, "format", js_url_format, 1);
-    js_url_set_method(url_module_namespace, "resolve", js_url_resolve, 2);
-    js_url_set_method(url_module_namespace, "resolveObject", js_url_resolve, 2);
-    js_url_set_method(url_module_namespace, "Url", js_url_legacy_construct, 0, true);
+    js_url_set_method(namespace_item, "parse", js_url_parse_legacy, 2);
+    js_url_set_method(namespace_item, "format", js_url_format, 1);
+    js_url_set_method(namespace_item, "resolve", js_url_resolve, 2);
+    js_url_set_method(namespace_item, "resolveObject", js_url_resolve, 2);
+    js_url_set_method(namespace_item, "Url", js_url_legacy_construct, 0, true);
 
     // file URL conversion
-    js_url_set_method(url_module_namespace, "fileURLToPath", js_url_fileURLToPath, 1);
-    js_url_set_method(url_module_namespace, "pathToFileURL", js_url_pathToFileURL, 1);
-    js_url_set_method(url_module_namespace, "urlToHttpOptions", js_url_to_http_options, 1);
+    js_url_set_method(namespace_item, "fileURLToPath", js_url_fileURLToPath, 1);
+    js_url_set_method(namespace_item, "pathToFileURL", js_url_pathToFileURL, 1);
+    js_url_set_method(namespace_item, "urlToHttpOptions", js_url_to_http_options, 1);
 
     // URLSearchParams constructor
-    js_url_set_method(url_module_namespace, "URLSearchParams", js_url_search_params_new, 1, true);
+    js_url_set_method(namespace_item, "URLSearchParams", js_url_search_params_new, 1, true);
 
     // default export
     Item default_key = make_string_item("default");
     *key_root = default_key.item;
-    js_set_key_default(url_module_namespace, default_key, url_module_namespace);
+    js_set_key_default(namespace_item, default_key, namespace_item);
     node_url_host->node->roots->root_frame_end(&frame);
 
-    return url_module_namespace;
+    return namespace_item;
 }
 
 static void node_url_cache_reset(void) {

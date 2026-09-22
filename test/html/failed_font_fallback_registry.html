@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face {
+    font-family: "Broken Icon Brands";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+}
+@font-face {
+    font-family: "Broken Icon Free";
+    src: url("data:font/woff2;base64,AAAA") format("woff2");
+}
+
+.brands { font-family: "Broken Icon Brands"; }
+.free { font-family: "Broken Icon Free"; }
+.catalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card { min-width: 0; padding: 4px; }
+</style>
+<main class="catalog">
+    <section class="card brands"><p>brand fallback one</p><p>brand fallback two</p></section>
+    <section class="card free"><p>free fallback one</p><p>free fallback two</p></section>
+    <section class="card brands"><p>brand fallback three</p><p>brand fallback four</p></section>
+    <section class="card free"><p>free fallback three</p><p>free fallback four</p></section>
+    <section class="card brands"><p>brand fallback five</p><p>brand fallback six</p></section>
+    <section class="card free"><p>free fallback five</p><p>free fallback six</p></section>
+    <section class="card brands"><p>brand fallback seven</p><p>brand fallback eight</p></section>
+    <section class="card free"><p>free fallback seven</p><p>free fallback eight</p></section>
+    <section class="card brands"><p>brand fallback nine</p><p>brand fallback ten</p></section>
+</main>

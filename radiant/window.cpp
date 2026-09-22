@@ -1173,12 +1173,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             log_error("view: failed to create browsing session");
         }
 
-        // Static headless smoke renders do not need retained JS event state after
-        // load-time scripts have mutated the DOM. Interactive windows and event
-        // simulations keep the compiled context alive for dispatch.
+        // Static headless views do not need retained JS event state after
+        // load-time scripts have mutated the DOM. They still execute external
+        // scripts so classic dependencies are available to following inline code.
         bool needs_interactive_js = !headless || sim_ctx != nullptr;
         script_runner_set_retain_js_state(needs_interactive_js);
-        script_runner_set_execute_external_scripts(needs_interactive_js);
+        script_runner_set_static_headless_snapshot(!needs_interactive_js);
+        script_runner_set_execute_external_scripts(true);
 
         // Load the document using its detected file format.
         Url* log_doc_url = url_parse_with_base(file_to_load, cwd);

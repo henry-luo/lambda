@@ -176,6 +176,9 @@ void animation_scheduler_destroy(AnimationScheduler* scheduler) {
     AnimationInstance* anim = scheduler->first;
     while (anim) {
         AnimationInstance* next = anim->next;
+        // Media players keep decoded frames outside the document pool; cancel
+        // them before their scheduler entry disappears at document teardown.
+        if (anim->on_cancel) anim->on_cancel(anim);
         pool_free(scheduler->pool, anim);
         anim = next;
     }

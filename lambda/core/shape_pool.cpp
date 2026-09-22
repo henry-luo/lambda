@@ -124,17 +124,18 @@ ShapePool* shape_pool_create(Pool* memory_pool, Arena* arena, ShapePool* parent)
 ShapePool* shape_pool_retain(ShapePool* pool) {
     pool = ref_counted_pool_retain(pool);
     if (!pool) return NULL;
-    log_debug("shape_pool_retain: pool=%p, ref_count=%u", pool, pool->ref_count);
+    log_debug("shape_pool_retain: pool=%p, ref_count=%u", pool,
+        __atomic_load_n(&pool->ref_count, __ATOMIC_RELAXED));
     return pool;
 }
 
 void shape_pool_release(ShapePool* pool) {
     if (!pool) return;
     
-    pool->ref_count--;
-    log_debug("shape_pool_release: pool=%p, ref_count=%u", pool, pool->ref_count);
+    uint32_t remaining = ref_counted_pool_release_count(pool);
+    log_debug("shape_pool_release: pool=%p, ref_count=%u", pool, remaining);
     
-    if (pool->ref_count == 0) {
+    if (remaining == 0) {
         ref_counted_pool_finalize_zero(pool, g_shape_pool_node_release,
                                        shape_pool_release, pool->shapes);
         // Note: pool memory freed when Pool is destroyed

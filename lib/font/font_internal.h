@@ -116,6 +116,10 @@ struct FontHandle {
     // back-pointer to owning context (for pool access)
     FontContext* ctx;
 
+    // Context registry keeps every handle reachable when a cache replacement
+    // leaves a caller-owned reference outside the face-cache entry.
+    FontHandle* lifecycle_next;
+
     // LRU tracking for face cache eviction
     uint32_t    lru_tick;
     // Number of FontProp aliases currently bound to this cache-owned handle.
@@ -276,6 +280,9 @@ struct FontContext {
     uint32_t         lru_counter;       // monotonically increasing for LRU
     uint64_t         next_handle_identity;
 
+    // Intrusive registry of handles whose external resources still need release.
+    FontHandle*      live_handles;
+
     // font file data cache: file_path → (data, len) — avoids re-reading the same file
     struct hashmap*  file_data_cache;
 
@@ -316,6 +323,33 @@ static inline uint64_t font_context_next_handle_identity(FontContext* ctx) {
     uint64_t identity = ctx->next_handle_identity++;
     if (identity == 0) identity = ctx->next_handle_identity++;
     return identity;
+}
+
+static inline void font_context_track_handle(FontContext* ctx, FontHandle* handle) {
+    if (!ctx || !handle) return;
+    handle->lifecycle_next = ctx->live_handles;
+    ctx->live_handles = handle;
+}
+
+static inline void font_context_untrack_handle(FontContext* ctx, FontHandle* handle) {
+    if (!ctx || !handle) return;
+    FontHandle** cursor = &ctx->live_handles;
+    while (*cursor) {
+        if (*cursor == handle) {
+            *cursor = handle->lifecycle_next;
+            handle->lifecycle_next = NULL;
+            return;
+        }
+        cursor = &(*cursor)->lifecycle_next;
+    }
+}
+
+static inline FontHandle* font_context_take_live_handle(FontContext* ctx) {
+    if (!ctx || !ctx->live_handles) return NULL;
+    FontHandle* handle = ctx->live_handles;
+    ctx->live_handles = handle->lifecycle_next;
+    handle->lifecycle_next = NULL;
+    return handle;
 }
 
 // ============================================================================

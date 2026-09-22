@@ -107,6 +107,7 @@ static AnimationInstance* lottie_player_register(LottiePlayer* lp,
     inst->timing.type = TIMING_LINEAR;
     inst->tick = animation_player_tick<LottiePlayer>;
     inst->on_finish = animation_player_finish<LottiePlayer>;
+    inst->on_cancel = animation_player_finish<LottiePlayer>;
 
     inst->bounds[0] = 0;
     inst->bounds[1] = 0;

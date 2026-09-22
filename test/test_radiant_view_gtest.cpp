@@ -14,7 +14,9 @@ extern "C" {
 #include <io.h>
 #include <windows.h>
 #else
+#include <arpa/inet.h>
 #include <pthread.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -66,6 +68,10 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.PreservesMarkerPropsDuringRetainedTableReflow",
      "retained_table_marker_intrinsic", "test/html/retained_table_marker_intrinsic.html",
      "test/html/retained_table_marker_intrinsic_events.json", true},
+    {"RadiantViewTest.ReleasesForeignDocumentRegistryBeyondInitialCapacity",
+     "foreign_document_registry", "test/html/js_foreign_document_registry.html", nullptr, true},
+    {"RadiantViewTest.ReleasesFailedFontFallbackHandles",
+     "failed_font_fallback_registry", "test/html/failed_font_fallback_registry.html", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -90,6 +96,114 @@ static void test_radiant_view_ensure_temp_dir() {
     mkdir("./temp", 0755);
 #endif
 }
+
+#ifndef _WIN32
+struct RadiantViewImageServer {
+    pid_t pid;
+    int port;
+};
+
+static bool test_radiant_view_send_all(int client, const char* data, size_t size) {
+    size_t sent = 0;
+    while (sent < size) {
+        ssize_t count = send(client, data + sent, size - sent, 0);
+        if (count <= 0) return false;
+        sent += (size_t)count;
+    }
+    return true;
+}
+
+static bool test_radiant_view_unsupported_image_server_start(RadiantViewImageServer* server) {
+    if (!server) return false;
+    memset(server, 0, sizeof(*server));
+
+    int listener = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener < 0) return false;
+    int reuse_address = 1;
+    if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR,
+                   &reuse_address, sizeof(reuse_address)) != 0) {
+        close(listener);
+        return false;
+    }
+    struct sockaddr_in address = {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(listener, (struct sockaddr*)&address, sizeof(address)) != 0 ||
+            listen(listener, 2) != 0) {
+        close(listener);
+        return false;
+    }
+    socklen_t address_size = sizeof(address);
+    if (getsockname(listener, (struct sockaddr*)&address, &address_size) != 0) {
+        close(listener);
+        return false;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(listener);
+        return false;
+    }
+    if (pid == 0) {
+        static const char page_document[] =
+            "<!doctype html><html><head><style>"
+            ".fixture { width: 10px; height: 10px; background-image: url('/unsupported.avif'); }"
+            "</style></head><body>"
+            "<img src=\"/unsupported.avif\" alt=\"unsupported\">"
+            "<div class=\"fixture\"></div>"
+            "</body></html>";
+        static const char prime_document[] =
+            "<!doctype html><script src=\"/unsupported.avif\"></script>";
+        bool served_document = false;
+        bool served_prime = false;
+        while (!served_document) {
+            fd_set ready;
+            FD_ZERO(&ready);
+            FD_SET(listener, &ready);
+            struct timeval timeout = {.tv_sec = 10, .tv_usec = 0};
+            int select_result = select(listener + 1, &ready, nullptr, nullptr, &timeout);
+            if (select_result <= 0) break;
+            int client = accept(listener, nullptr, nullptr);
+            if (client < 0) continue;
+            char request[1024] = {};
+            ssize_t request_size = recv(client, request, sizeof(request) - 1, 0);
+            bool is_image_request = request_size > 0 &&
+                strstr(request, "GET /unsupported.avif ") != nullptr;
+            bool is_prime_request = request_size > 0 &&
+                strstr(request, "GET /prime.html ") != nullptr;
+            static const unsigned char avif[] = {
+                0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p', 'a', 'v', 'i', 'f',
+                0x00, 0x00, 0x00, 0x00,
+            };
+            const char* body = is_image_request ? (const char*)avif :
+                (is_prime_request ? prime_document : page_document);
+            size_t body_size = is_image_request ? sizeof(avif) :
+                (is_prime_request ? sizeof(prime_document) - 1 : sizeof(page_document) - 1);
+            char header[256];
+            int header_size = snprintf(header, sizeof(header),
+                "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+                "Connection: close\r\n\r\n",
+                is_image_request ? "image/avif" : "text/html", body_size);
+            bool sent = header_size > 0 && header_size < (int)sizeof(header) &&
+                test_radiant_view_send_all(client, header, (size_t)header_size);
+            if (sent) {
+                sent = test_radiant_view_send_all(client, body, body_size);
+            }
+            close(client);
+            if (!sent) break;
+            if (is_prime_request) served_prime = true;
+            if (!is_image_request && !is_prime_request && served_prime) served_document = true;
+        }
+        close(listener);
+        _exit(served_document ? 0 : 1);
+    }
+
+    close(listener);
+    server->pid = pid;
+    server->port = ntohs(address.sin_port);
+    return true;
+}
+#endif
 
 static char* test_radiant_view_read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -438,6 +552,152 @@ TEST(RadiantViewTest, LaysOutInlineFlexWithInlineSiblingAndAbsoluteChild) {
     remove(page);
 }
 
+TEST(RadiantViewTest, RestoresDocumentRealmAfterScriptException) {
+    const char* page = "./temp/test_radiant_view_script_fault_recovery.html";
+    const char* view_log = "./temp/test_radiant_view_script_fault_recovery.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "throw Error('intentional script fault recovery probe');</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "no js_input context"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "dom_set_document: could not restore the active JS Input"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, PreservesClassicVarBindingAcrossScriptTasks) {
+    const char* page = "./temp/test_radiant_view_classic_var_binding.html";
+    const char* view_log = "./temp/test_radiant_view_classic_var_binding.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>var bloom = { doLottie: function() {} };</script>"
+        "<script>var bloom; bloom.doLottie();</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, PublishesInsertedNamedElementsWithoutRebindingDocument) {
+    const char* page = "./temp/test_radiant_view_inserted_named_element.html";
+    const char* view_log = "./temp/test_radiant_view_inserted_named_element.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><body><div id='staticNamed'></div>"
+        "<script>"
+        "if (window.staticNamed !== document.getElementById('staticNamed')) "
+        "throw Error('static named element missing');"
+        "var inserted = document.createElement('div');"
+        "inserted.id = 'insertedNamed'; document.body.appendChild(inserted);"
+        "</script>"
+        "<script>"
+        "if (window.insertedNamed !== document.getElementById('insertedNamed')) "
+        "throw Error('inserted named element missing');"
+        "</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, UsesPlaceholderForUnsupportedHttpImage) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server));
+    char page[128];
+    ASSERT_GT(snprintf(page, sizeof(page), "http://127.0.0.1:%d/page.html", server.port), 0);
+    char image_url[128];
+    ASSERT_GT(snprintf(image_url, sizeof(image_url),
+                       "http://127.0.0.1:%d/unsupported.avif", server.port), 0);
+    char prime_url[128];
+    ASSERT_GT(snprintf(prime_url, sizeof(prime_url),
+                       "http://127.0.0.1:%d/prime.html", server.port), 0);
+    const char* view_log = "./temp/test_radiant_view_unsupported_http_image.log";
+    test_radiant_view_ensure_temp_dir();
+
+    // Prime the same URL as a parser-blocking subresource so layout receives
+    // an immediately ready resource instead of a timing-dependent transfer.
+    const char* cache_args[] = {"./lambda.exe", "view", prime_url, "--headless", NULL};
+    ShellOptions cache_options = {};
+    cache_options.merge_stderr = true;
+    ShellResult cache_result = shell_exec("./lambda.exe", cache_args, &cache_options);
+    EXPECT_EQ(0, cache_result.exit_code)
+        << (cache_result.stdout_buf ? cache_result.stdout_buf : "");
+    shell_result_free(&cache_result);
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    int server_status = 0;
+    ASSERT_EQ(server.pid, waitpid(server.pid, &server_status, 0));
+    EXPECT_TRUE(WIFEXITED(server_status));
+    EXPECT_EQ(0, WEXITSTATUS(server_status));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "image: unsupported HTTP image, using placeholder"));
+    EXPECT_FALSE(test_radiant_view_file_contains(
+        view_log, "Unsupported or unrecognized image format in memory buffer"));
+    remove(view_log);
+#endif
+}
+
 TEST(RadiantViewTest, ExposesNonConstructibleCssStyleDeclarationInterface) {
     const char* page = "./temp/test_radiant_view_css_style_declaration.html";
     const char* view_log = "./temp/test_radiant_view_css_style_declaration.log";
@@ -716,8 +976,51 @@ TEST(RadiantViewTest, ReCascadesOnlyMutatedSubtreeForLoadTimeClassWrite) {
         timing_path, "\"load_post_script_incremental_recascade\":true"));
 }
 
+TEST(RadiantViewTest, SkipsRecascadeForNoOpLoadTimeClassRemovals) {
+    const char* page = "./temp/test_radiant_view_noop_class_removals.html";
+    const char* timing_path = "./temp/test_radiant_view_noop_class_removals_timing.jsonl";
+    test_radiant_view_ensure_temp_dir();
+    remove(timing_path);
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* prefix = "<!doctype html><body>";
+    ASSERT_EQ(strlen(prefix), fwrite(prefix, 1, strlen(prefix), page_file));
+    for (int index = 0; index < 65; index++) {
+        ASSERT_EQ(5u, fwrite("<div>", 1, 5, page_file));
+    }
+    const char* suffix =
+        "<script>"
+        "var rows = document.querySelectorAll('div');"
+        "for (var i = 0; i < rows.length; i++) rows[i].classList.remove('absent');"
+        "</script>";
+    ASSERT_EQ(strlen(suffix), fwrite(suffix, 1, strlen(suffix), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    ShellResult shell_result = test_radiant_view_run_layout_timing(page, timing_path);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_mutation_count\":0"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_mutation_overflow\":false"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"load_post_script_full_recascade\":false"));
+    remove(page);
+    remove(timing_path);
+}
+
 TEST(RadiantViewTest, PreservesMarkerPropsDuringRetainedTableReflow) {
     test_radiant_view_expect_case(18);
+}
+
+TEST(RadiantViewTest, ReleasesForeignDocumentRegistryBeyondInitialCapacity) {
+    test_radiant_view_expect_case(19);
+}
+
+TEST(RadiantViewTest, ReleasesFailedFontFallbackHandles) {
+    test_radiant_view_expect_case(20);
 }
 
 TEST(RadiantViewTest, ExposesCurrentScriptDuringClassicExecution) {
@@ -817,6 +1120,32 @@ TEST(RadiantViewTest, DefersPrecommitGeometryReadInHostDrivenView) {
     shell_result_free(&shell_result);
 }
 
+TEST(RadiantViewTest, FlushesLoadGeometryInHostDrivenView) {
+    const char* page = "test/html/js_load_geometry_snapshot.html";
+    const char* events = "test/html/js_load_geometry_snapshot_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, nullptr);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, BalancesFragmentedMulticolBlocksAtTheirUsedWidth) {
+    const char* page = "test/html/js_multicol_balanced_continuation.html";
+    const char* events = "test/html/js_multicol_balanced_continuation_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, nullptr);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+}
+
 TEST(RadiantViewTest, RecoversTimedOutLoadScriptWithoutUnsafeBatchReset) {
     const char* page = "test/ui/js_load_watchdog_recovery.html";
     ASSERT_TRUE(test_radiant_view_file_readable(page));
@@ -836,11 +1165,38 @@ TEST(RadiantViewTest, RecoversTimedOutLoadScriptWithoutUnsafeBatchReset) {
     shell_result_free(&shell_result);
 }
 
+TEST(RadiantViewTest, ContinuesLayoutBatchAfterTimedOutLoadScript) {
+    const char* timed_out_page = "test/ui/js_load_watchdog_recovery.html";
+    const char* following_page = "test/layout/data/page/sample1.html";
+    ASSERT_TRUE(test_radiant_view_file_readable(timed_out_page));
+    ASSERT_TRUE(test_radiant_view_file_readable(following_page));
+
+    const char* args[] = {
+        "./lambda.exe", "layout", timed_out_page, following_page,
+        "--stream-layout-results", "--continue-on-error", "--auto-close", "--no-log", NULL,
+    };
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "1"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    options.timeout_ms = 10000;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(shell_result.timed_out);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << "the watchdog must not terminate the batch before its next document";
+    shell_result_free(&shell_result);
+}
+
 TEST(RadiantViewTest, SkipsDefaultCumulativeBrowserScriptBudget) {
     const char* page = "./temp/test_radiant_view_script_budget.html";
     const char* view_log = "./temp/test_radiant_view_script_budget.log";
-    const size_t script_bytes = 32u * 1024u;
-    const int script_count = 32;
+    // Exceed the static snapshot admission limit without an environment
+    // override, so page bundles cannot starve parallel smoke renders.
+    const size_t script_bytes = 768u * 1024u;
+    const int script_count = 1;
     test_radiant_view_ensure_temp_dir();
 
     FILE* page_file = fopen(page, "wb");
@@ -913,6 +1269,40 @@ TEST(RadiantViewTest, SkipsExternalScriptResponseThatIsHtml) {
     remove(page);
     remove(script);
     remove(events);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ExecutesExternalDependencyInStaticHeadlessView) {
+    const char* page = "./temp/test_radiant_view_headless_external.html";
+    const char* script = "./temp/test_radiant_view_headless_external.js";
+    const char* view_log = "./temp/test_radiant_view_headless_external.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* script_file = fopen(script, "wb");
+    ASSERT_NE(nullptr, script_file);
+    ASSERT_GE(fputs("window.headlessExternalDependency = 'ready';", script_file), 0);
+    ASSERT_EQ(0, fclose(script_file));
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    ASSERT_GE(fputs("<!doctype html><html><head><script src=\"test_radiant_view_headless_external.js\"></script><script>if (window.headlessExternalDependency !== 'ready') { throw new Error('headless external dependency unavailable'); }</script></head><body>headless external dependency</body></html>", page_file), 0);
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "script_runner: external scripts: 1 loaded, 0 failed"));
+    EXPECT_FALSE(test_radiant_view_file_contains(
+        view_log, "headless external dependency unavailable"));
+    shell_result_free(&shell_result);
+    remove(page);
+    remove(script);
     remove(view_log);
 }
 

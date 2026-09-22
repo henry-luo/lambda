@@ -14,6 +14,7 @@
 #include <string.h>
 
 #if defined(__APPLE__) || defined(__linux__)
+#include <signal.h>
 #include <unistd.h>
 #endif
 
@@ -61,6 +62,14 @@ static TpJob* tp_dequeue_locked(ThreadPool* tp) {
 
 static void* tp_worker_main(void* arg) {
     ThreadPool* tp = (ThreadPool*)arg;
+#if defined(__APPLE__) || defined(__linux__)
+    // Script execution recovers its CPU watchdog only on the document thread.
+    // A compiler worker must not receive that process-directed signal.
+    sigset_t watchdog_signal;
+    sigemptyset(&watchdog_signal);
+    sigaddset(&watchdog_signal, SIGPROF);
+    pthread_sigmask(SIG_BLOCK, &watchdog_signal, NULL);
+#endif
     for (;;) {
         pthread_mutex_lock(&tp->mutex);
         while (!tp->shutdown && tp->pending == 0) {

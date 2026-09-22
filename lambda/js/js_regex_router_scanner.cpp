@@ -70,6 +70,10 @@ struct JsRegexScannerQuantifier {
     int max;
 };
 
+// RE2 rejects counted repetitions above this bound, while ECMAScript permits
+// them and the iterative simple-atom backtracker path can execute them safely.
+static const int JS_REGEX_RE2_MAX_REPEAT = 1000;
+
 enum JsRegexScannerQuantifierParse {
     JS_REGEX_SCANNER_QUANTIFIER_NONE,
     JS_REGEX_SCANNER_QUANTIFIER_OK,
@@ -194,6 +198,10 @@ static JsRegexScannerSummary js_regex_scanner_apply_quantifier(
     JsRegexScannerSummary body, const JsRegexScannerQuantifier& quantifier,
     JsRegexScannerAnalysis* analysis) {
     if (!quantifier.present) return body;
+    if (quantifier.min > JS_REGEX_RE2_MAX_REPEAT ||
+            quantifier.max > JS_REGEX_RE2_MAX_REPEAT) {
+        analysis->reasons |= JS_REGEX_SCANNER_REASON_RE2_REPEAT_LIMIT;
+    }
     bool has_optional_iteration = quantifier.max < 0 || quantifier.max > quantifier.min;
     bool can_repeat = quantifier.max < 0 || quantifier.max > 1;
     if (has_optional_iteration && body.nullable) {

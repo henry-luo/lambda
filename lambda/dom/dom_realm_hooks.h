@@ -3,12 +3,13 @@
 /**
  * dom_realm_hooks.h — the core callbacks a JS realm installer publishes.
  *
- * ES33 splits *what a DOM object is* from *how a realm exposes it*. These three
- * build DOM objects and therefore stay in the core; the realm installer in
- * lambda/js/js_dom_realm.cpp publishes them as `DocumentFragment`,
- * `XPathEvaluator` and `Option` constructors. Keeping them behind one small
- * header is what lets the installers leave without dragging the DOM algorithms
- * (XPath matching, option selectedness) out with them.
+ * ES33 splits *what a DOM object is* from *how a realm exposes it*. These
+ * constructor bodies build DOM-backed values and therefore stay in the core;
+ * the realm installer in lambda/js/js_dom_realm.cpp chooses which realm
+ * exposes `DocumentFragment`, `XPathEvaluator`, `Option`, `KeyframeEffect`,
+ * and `Animation`. Keeping them behind one small header lets the installers
+ * avoid pulling DOM algorithms (XPath, option selectedness, animation state)
+ * out with them.
  */
 
 #include "../lambda.h"
@@ -16,12 +17,19 @@
 /** `new DocumentFragment()` — a detached fragment on the current document. */
 extern "C" Item dom_document_fragment_ctor(void);
 
+/** `new Comment(data)` — a detached CharacterData comment on the current document. */
+extern "C" Item dom_comment_ctor(Item data);
+
 /** `new XPathEvaluator()` — the evaluator object with its methods bound. */
 extern "C" Item dom_xpath_evaluator_ctor(void);
 
 /** `new Option(text, value, defaultSelected, selected)` — an <option> element. */
 extern "C" Item dom_option_ctor(Item text_arg, Item value_arg,
-                                Item def_sel_arg, Item sel_arg);
+                                 Item def_sel_arg, Item sel_arg);
+
+/** Web Animations constructors share Element.animate's native state path. */
+extern "C" Item dom_keyframe_effect_ctor(Item target, Item keyframes, Item options);
+extern "C" Item dom_animation_ctor(Item effect);
 
 /** `Image(width?, height?)` — a detached HTMLImageElement. */
 extern "C" Item dom_image_constructor_body(Item callee, Item this_value,
@@ -59,6 +67,7 @@ extern "C" Item dom_window_prompt(Item message_item, Item default_item);
 // these when it binds a document that has a browsing context; each is a no-op
 // for a document with no JS realm.
 extern "C" void dom_install_collection_globals(void);
+extern "C" void dom_install_web_animation_globals(void);
 extern "C" void dom_install_option_constructor(void);
 extern "C" void dom_install_image_constructor(void);
 extern "C" void dom_install_window_dialog_globals(void);

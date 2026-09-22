@@ -1,0 +1,10 @@
+{
+  "name": "Contenteditable selection respects ancestor overflow clipping",
+  "html": "test/ui/test_editing_contenteditable_overflow_selection_clip.html",
+  "viewport": {"width": 480, "height": 140},
+  "events": [
+    {"type": "set_editing_selection", "target": {"selector": "#editor"}, "start": 0, "end": 320},
+    {"type": "render", "file": "./temp/contenteditable-overflow-selection-clip.png"},
+    {"type": "assert_pixel", "target": {"selector": "#outside", "offset_x": 20, "offset_y": 15}, "force_render": false, "min_r": 220, "max_g": 40, "max_b": 40}
+  ]
+}

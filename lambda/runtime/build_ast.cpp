@@ -5185,6 +5185,9 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
         AST_NODE_MAP, span, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     TypeMap* type = (TypeMap*)ast_node->type;
+    // An AST literal site reuses this shape for every evaluation; retain it as
+    // an immutable recipe so a field write cannot retag a sibling's layout (S1.6, S9.1.2).
+    type->is_transition_shared_shape = true;
 
     if (ast_map_items_require_runtime_shape(tp, items)) {
         // S16.8.9: source order, including spreads, reaches the runtime

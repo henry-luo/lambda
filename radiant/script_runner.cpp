@@ -60,8 +60,11 @@
 #include <signal.h>
 #include <setjmp.h>
 #ifndef _WIN32
-#include <unistd.h>
+#include <pthread.h>
+#include <sys/resource.h>
 #include <sys/time.h>
+#include <unistd.h>
+#include <time.h>
 #endif
 
 extern __thread EvalContext* context;
@@ -88,11 +91,20 @@ static struct sigaction js_exec_old_segv, js_exec_old_bus;
 static volatile sig_atomic_t js_exec_timed_out = 0;
 static volatile sig_atomic_t js_exec_watchdog_started = 0;
 static size_t js_exec_watchdog_source_len = 0;
-static int js_exec_watchdog_budget_seconds = 0;
+static volatile sig_atomic_t js_exec_watchdog_budget_seconds = 0;
 
-// Per-document script timeout: covers parse/transpile plus execution.
+// Per-document script timeout: covers parse/transpile plus execution.  An
+// interval timer may deliver SIGPROF to any process thread, while recovery
+// must run on the document thread that owns js_exec_jmpbuf.
 static struct sigaction js_exec_old_prof;
+static pthread_t js_exec_watchdog_thread;
+static pthread_t js_exec_watchdog_owner;
+static bool js_exec_watchdog_thread_active = false;
+static bool js_exec_watchdog_handler_installed = false;
+static volatile sig_atomic_t js_exec_watchdog_running = 0;
+
 static void js_exec_timeout_handler(int sig) {
+    (void)sig;
     if (js_exec_guarded) {
         js_exec_timed_out = 1;
         const char* msg = "execute_document_scripts: JS execution timed out by watchdog\n";
@@ -100,7 +112,6 @@ static void js_exec_timeout_handler(int sig) {
         js_exec_guarded = 0;
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
-        sigaction(SIGPROF, &js_exec_old_prof, NULL);
         siglongjmp(js_exec_jmpbuf, 2);
     }
 }
@@ -129,23 +140,88 @@ static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
     }
 }
 
-static void js_exec_watchdog_arm(int timeout_seconds) {
+static bool js_exec_watchdog_process_cpu_us(uint64_t* out_cpu_us) {
+    if (!out_cpu_us) return false;
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return false;
+    *out_cpu_us = (uint64_t)usage.ru_utime.tv_sec * 1000000ULL +
+        (uint64_t)usage.ru_utime.tv_usec +
+        (uint64_t)usage.ru_stime.tv_sec * 1000000ULL +
+        (uint64_t)usage.ru_stime.tv_usec;
+    return true;
+}
+
+static void* js_exec_watchdog_main(void* unused) {
+    (void)unused;
+    uint64_t start_cpu_us = 0;
+    if (!js_exec_watchdog_process_cpu_us(&start_cpu_us)) {
+        log_error("script_runner_timeout: unable to read process CPU time");
+        return NULL;
+    }
+    const struct timespec poll_interval = {0, 10000000L};
+    while (js_exec_watchdog_running) {
+        uint64_t current_cpu_us = 0;
+        if (!js_exec_watchdog_process_cpu_us(&current_cpu_us)) {
+            log_error("script_runner_timeout: process CPU clock became unavailable");
+            return NULL;
+        }
+        uint64_t budget_cpu_us =
+            (uint64_t)js_exec_watchdog_budget_seconds * 1000000ULL;
+        if (current_cpu_us >= start_cpu_us &&
+                current_cpu_us - start_cpu_us >= budget_cpu_us) {
+            // Targeting the owner preserves the sigsetjmp/siglongjmp thread
+            // pairing; process-directed SIGPROF can instead hit a compiler worker.
+            int signal_status = pthread_kill(js_exec_watchdog_owner, SIGPROF);
+            if (signal_status != 0) {
+                log_error("script_runner_timeout: failed to signal watchdog owner (%d)",
+                          signal_status);
+            }
+            return NULL;
+        }
+        nanosleep(&poll_interval, NULL);
+    }
+    return NULL;
+}
+
+static bool js_exec_watchdog_arm(int timeout_seconds) {
+    if (timeout_seconds <= 0) return false;
     struct sigaction timeout_action;
     memset(&timeout_action, 0, sizeof(timeout_action));
     timeout_action.sa_handler = js_exec_timeout_handler;
-    sigaction(SIGPROF, &timeout_action, &js_exec_old_prof);
-
-    struct itimerval timer;
-    memset(&timer, 0, sizeof(timer));
-    timer.it_value.tv_sec = timeout_seconds;
-    setitimer(ITIMER_PROF, &timer, NULL);
+    if (sigaction(SIGPROF, &timeout_action, &js_exec_old_prof) != 0) {
+        log_error("script_runner_timeout: failed to install SIGPROF handler");
+        return false;
+    }
+    js_exec_watchdog_handler_installed = true;
+    js_exec_watchdog_owner = pthread_self();
+    js_exec_watchdog_budget_seconds = timeout_seconds;
+    js_exec_watchdog_running = 1;
+    int create_status = pthread_create(&js_exec_watchdog_thread, NULL,
+                                       js_exec_watchdog_main, NULL);
+    if (create_status != 0) {
+        js_exec_watchdog_running = 0;
+        sigaction(SIGPROF, &js_exec_old_prof, NULL);
+        js_exec_watchdog_handler_installed = false;
+        log_error("script_runner_timeout: failed to create CPU watchdog thread (%d)",
+                  create_status);
+        return false;
+    }
+    js_exec_watchdog_thread_active = true;
+    return true;
 }
 
 static void js_exec_watchdog_disarm(void) {
-    struct itimerval timer;
-    memset(&timer, 0, sizeof(timer));
-    setitimer(ITIMER_PROF, &timer, NULL);
-    sigaction(SIGPROF, &js_exec_old_prof, NULL);
+    // Joining the sender closes the signal-delivery race before the previous
+    // action is restored, so a completed document cannot die from late SIGPROF.
+    js_exec_watchdog_running = 0;
+    if (js_exec_watchdog_thread_active) {
+        pthread_join(js_exec_watchdog_thread, NULL);
+        js_exec_watchdog_thread_active = false;
+    }
+    if (js_exec_watchdog_handler_installed) {
+        sigaction(SIGPROF, &js_exec_old_prof, NULL);
+        js_exec_watchdog_handler_installed = false;
+    }
 }
 
 static void js_exec_watchdog_add_module_source(size_t source_length) {
@@ -160,29 +236,29 @@ static void js_exec_watchdog_add_module_source(size_t source_length) {
         js_exec_watchdog_source_len);
     if (expanded_budget <= js_exec_watchdog_budget_seconds) return;
 
-    struct itimerval timer;
-    if (getitimer(ITIMER_PROF, &timer) != 0) return;
-    timer.it_value.tv_sec += expanded_budget - js_exec_watchdog_budget_seconds;
-    if (setitimer(ITIMER_PROF, &timer, NULL) != 0) return;
     js_exec_watchdog_budget_seconds = expanded_budget;
     log_info("script_runner_timeout: module graph %zu bytes gets %ds watchdog",
         js_exec_watchdog_source_len, expanded_budget);
 }
 
 static void js_exec_watchdog_begin_user_code(void) {
-    js_exec_watchdog_started = 1;
-    js_exec_watchdog_arm(js_exec_watchdog_budget_seconds);
+    js_exec_watchdog_started = js_exec_watchdog_arm(js_exec_watchdog_budget_seconds);
 }
 #endif  // !_WIN32
 
 static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
+static bool s_static_headless_snapshot = false;
 
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;
+}
+
+extern "C" void script_runner_set_static_headless_snapshot(bool snapshot) {
+    s_static_headless_snapshot = snapshot;
 }
 
 extern "C" void script_runner_set_execute_external_scripts(bool execute) {
@@ -718,6 +794,8 @@ static bool script_task_timing_enabled() {
 // and browser realm. Keep headless rendering below the memory envelope.
 static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 5u * 1024u * 1024u;
 static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 20u * 1024u * 1024u;
+// Static snapshot viewers have no interaction turn that can use a page bundle.
+static const size_t JS_STATIC_HEADLESS_TOTAL_SCRIPT_BUDGET_BYTES = 512u * 1024u;
 // Deferred and async scripts are not render-blocking in a browser. Bound their
 // pre-layout work so a large application bundle cannot delay the first window.
 static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
@@ -751,7 +829,9 @@ static size_t script_total_compile_limit_bytes() {
     // Several individually acceptable bundles can exhaust the same document
     // realm, so bound their aggregate before runtime initialization.
     return script_byte_limit_from_env(
-        "RADIANT_JS_TOTAL_SCRIPT_BYTES", JS_TOTAL_SCRIPT_BUDGET_BYTES);
+        "RADIANT_JS_TOTAL_SCRIPT_BYTES",
+        s_static_headless_snapshot ? JS_STATIC_HEADLESS_TOTAL_SCRIPT_BUDGET_BYTES
+                                   : JS_TOTAL_SCRIPT_BUDGET_BYTES);
 }
 
 #ifndef NDEBUG
@@ -1533,8 +1613,14 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
 static bool script_eval_context_activate(Runtime* runtime) {
     EvalContext* task_context = script_eval_context_prepare(runtime);
     if (!task_context || !eval_context_init(task_context)) return false;
-    return !js_runtime_state_for(task_context) ||
-        js_runtime_state_init(task_context);
+    if (js_runtime_state_for(task_context) &&
+            !js_runtime_state_init(task_context)) {
+        return false;
+    }
+    // Recovery clears heap-bound transient state after a script fault. Every
+    // following task, including the browser-global sync, still needs the
+    // document realm's Input owner before it can install properties.
+    return js_runtime_state_ensure_input(task_context);
 }
 
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
@@ -2369,6 +2455,15 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     js_event_loop_set_virtual_clock(dom_doc->js.virtual_clock_enabled,
                                     dom_doc->js.virtual_clock_ms);
 
+    DocState* script_state = (DocState*)dom_doc->state;
+    bool script_state_batch = script_state != nullptr;
+    if (script_state_batch) {
+        // A document lifecycle handler is one browser task. Deferring debug
+        // invariant validation avoids rescanning the interaction tree after
+        // every style write made by a large page's DOMContentLoaded handler.
+        state_begin_batch(script_state);
+    }
+
     // execute document scripts via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
     // and per-script CPU-time watchdog
@@ -2524,6 +2619,11 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         }
     }
     if (timing) timing->event_loop_us += time_now_us() - phase_start_us;
+
+    if (script_state_batch) {
+        state_end_batch(script_state);
+        script_state_batch = false;
+    }
 
     phase_start_us = timing ? time_now_us() : 0;
     // Retain JS state on DomDocument for interactive event handler dispatch.

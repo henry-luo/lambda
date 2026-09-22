@@ -830,6 +830,7 @@ struct JsAsyncAwaitState : RootVector {
 };
 
 struct JsArrayRuntimeItemsHeader;
+struct JsArrayImmortalPropsHeader;
 
 struct JsRuntimeState {
     JsRealmSlots realm_slots = {};
@@ -854,8 +855,10 @@ struct JsRuntimeState {
     JsModuleRuntimeState modules = {};
     JsPerformanceState performance = {};
     // Native dense-array buffers form a realm-local intrusive ownership list;
-    // tagged-template identity uses its own registry below.
+    // immortal-array property references use an exact rooted list; tagged-template
+    // identity uses its own registry below.
     JsArrayRuntimeItemsHeader* array_runtime_items = NULL;
+    JsArrayImmortalPropsHeader* array_immortal_props = NULL;
     JsTemplateRegistry template_registry = {};
     JsAstLiteralCache ast_literal_cache = {};
     JsPrototypeSnapshotState* prototype_snapshot_state = NULL;

@@ -4334,8 +4334,9 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
     for (NameEntry* entry = scope->first; entry; entry = entry->next) {
         Item initial = entry->is_lexical ? (Item){.item = ITEM_JS_TDZ}
             : make_js_undefined();
-        if (frame->script->is_eval_script && !entry->is_lexical &&
-                entry->scope == frame->script->global_scope && !frame->script->is_module) {
+        if (!entry->is_lexical && entry->scope == frame->script->global_scope &&
+                !frame->script->is_module) {
+            // A later classic script reuses its existing global var binding.
             Item key = js_interp_name_key(entry->name);
             Item global = js_get_global_this();
             Item exists = js_has_own_property(global, key);

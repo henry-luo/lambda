@@ -7,7 +7,7 @@
       "count": {
         "1535": 1,
         "call\tcow_place_leaf_fixed": 1,
-        "call\tlambda_map_path_set_checked_fixed": 2
+        "call\tlambda_map_path_set_checked_keys": 2
       },
       "forbid": [
         "call\titem_at",

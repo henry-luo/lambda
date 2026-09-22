@@ -663,7 +663,12 @@ TEST(LambdaOptAdmission, TypedArrayPathPreservesGraphProof) {
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 2u);
     EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 48u);
-    EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 0u);
+    // Admission copies the uncertified `rows` literal one level (D4.4.2), so
+    // its Row children are shared and marked; the first `values` write then
+    // detaches that one-element array once. The count stays 1 for any number
+    // of updates -- it replaces the deep clone of the whole graph that
+    // admission used to make -- and must never grow per update.
+    EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 1u);
 }
 
 // The refusal control: an ANY-bearing contract must keep reifying at declared

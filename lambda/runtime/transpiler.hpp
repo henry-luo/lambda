@@ -294,18 +294,28 @@ enum { INTERP_SATELLITE_CLUSTER_CAP = 64 };
 typedef struct InterpSatelliteImage {
     MIR_context_t context;
     bool mir_gen_initialized;
+    bool module_state_prepared;
     // Snapshot-only compiler allocations outlive MIR's copied symbol table
     // until the image is retired. Ordinary synchronous satellites leave these
     // null because their Script owns the compiler storage.
     Pool* compiler_pool;
     NamePool* compiler_name_pool;
     ArrayList* compiler_const_list;
+    ArrayList* compiler_type_list;
+    // Publication assigns this image's key suffix after earlier completed
+    // images have sealed their own suffixes into the owning module state.
+    LambdaModuleLayout* module_layout;
     const AstFuncNode* target;
     void* target_entry;
     uint32_t member_count;
     const AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP];
     void* member_entries[INTERP_SATELLITE_CLUSTER_CAP];
 } InterpSatelliteImage;
+
+// seals execution-local key relocation before any entry becomes callable.
+bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image);
+// Transfers a prepared private image to its Script owner for entry lifetime.
+bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image);
 
 // A worker owns the cancellation context until its private image is either
 // published or destroyed. The probe is only sampled at Lambda-owned compiler

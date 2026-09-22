@@ -356,6 +356,7 @@ TEST_F(RuntimeShapeTransition, PackedAssignmentsRebuildWithoutMovingFixedSlots) 
     Map* map = make_transition_map();
     ASSERT_NE(map, nullptr);
     Item map_item = {.map = map};
+    const int source_type_count = input.type_list->length;
 
     TypeMap* initial_shape = (TypeMap*)map->type;
     ASSERT_NE(initial_shape, nullptr);
@@ -424,6 +425,10 @@ TEST_F(RuntimeShapeTransition, PackedAssignmentsRebuildWithoutMovingFixedSlots) 
     expect_packed_sibling(map, LMD_TYPE_FLOAT, 2 * (int64_t)sizeof(void*),
                            3 * (int64_t)sizeof(void*));
     EXPECT_DOUBLE_EQ(shape_transition_read_field(map, late_flag).get_double(), 3.5);
+    // runtime rebuilds must not publish execution-pool shapes into a cached
+    // compiler registry that outlives this execution (D8.5.1v7).
+    EXPECT_EQ(input.type_list->length, source_type_count);
+    EXPECT_EQ(((TypeMap*)map->type)->type_index, -1);
 }
 
 TEST_F(RuntimeShapeTransition, ArrayNumIntLaneRoundTripsAndWidensSafely) {
@@ -633,6 +638,7 @@ TEST_F(RuntimeShapeTransition, ElementContentAndAttributesKeepSeparateStorage) {
     Element* element = make_transition_element();
     ASSERT_NE(element, nullptr);
     Item element_item = {.element = element};
+    const int source_type_count = input.type_list->length;
 
     int64_t content_int64 = INT64_MIN + 7;
     double content_float = ldexp(1.0, -1074);
@@ -672,6 +678,38 @@ TEST_F(RuntimeShapeTransition, ElementContentAndAttributesKeepSeparateStorage) {
         late_flag).item, b2it(BOOL_TRUE));
     EXPECT_EQ(element->items[0].get_int64(), content_int64);
     EXPECT_EQ(element->items[1].get_double(), content_float);
+    EXPECT_EQ(input.type_list->length, source_type_count);
+    EXPECT_EQ(map_type->type_index, -1);
+}
+
+TEST_F(RuntimeShapeTransition, OpenFieldGrowthDoesNotExtendCompilerTypeList) {
+    Map* map = make_transition_map();
+    ASSERT_NE(map, nullptr);
+    String* key = shape_transition_test_name(pool, "added");
+    ASSERT_NE(key, nullptr);
+    const int source_type_count = input.type_list->length;
+    EXPECT_EQ(fn_map_set({.map = map}, {.item = s2it(key)},
+        {.item = i2it(99)}).item, ItemNull.item);
+    EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, key)), 99);
+    EXPECT_EQ(input.type_list->length, source_type_count);
+    EXPECT_EQ(((TypeMap*)map->type)->type_index, -1);
+}
+
+TEST_F(RuntimeShapeTransition, MatchResultsDoNotExtendCompilerTypeList) {
+    String* source = shape_transition_test_name(pool, "aba");
+    String* needle = shape_transition_test_name(pool, "a");
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(needle, nullptr);
+    const int source_type_count = input.type_list->length;
+    Item matches = fn_find2({.item = s2it(source)}, {.item = s2it(needle)});
+    ASSERT_EQ(get_type_id(matches), LMD_TYPE_ARRAY);
+    ASSERT_EQ(matches.array->length, 2);
+    for (int index = 0; index < 2; index++) {
+        Item match = matches.array->items[index];
+        ASSERT_EQ(get_type_id(match), LMD_TYPE_MAP);
+        EXPECT_EQ(((TypeMap*)match.map->type)->type_index, -1);
+    }
+    EXPECT_EQ(input.type_list->length, source_type_count);
 }
 
 TEST_F(RuntimeShapeTransition, ObjectShapeMutationRebuildsPackedFields) {

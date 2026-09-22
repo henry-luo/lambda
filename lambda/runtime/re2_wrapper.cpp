@@ -873,7 +873,6 @@ static String* make_heap_string(const char* src, size_t len) {
 // allocates TypeMap + ShapeEntry chain + data buffer on heap
 Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     Pool* pool = context->pool;
-    ArrayList* tl = (ArrayList*)context->type_list;
 
     // create shape entries: value(string), index(int)
     // entry 1: "value" -> string
@@ -908,9 +907,10 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     mt->last = e_index;
     mt->length = 2;
     mt->byte_size = byte_size;
-    mt->type_index = tl->length;
+    // match shapes die with the execution pool and must not enter a cached
+    // module's compiler registry (D8.5.1v7).
+    mt->type_index = -1;
     typemap_hash_build(mt, pool);
-    arraylist_append(tl, mt);
 
     // create Map container
     Map* mp = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);

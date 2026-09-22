@@ -788,6 +788,24 @@ static bool observer_threshold_crossed(JsObserverState* observer,
     return false;
 }
 
+static Item observer_new_intersection_entry(void) {
+    RootFrame roots(4);
+    Rooted<Item> entry_root(roots, js_new_object());
+    Rooted<Item> global_root(roots, dom_realm_global());
+    Rooted<Item> constructor_root(roots, dom_realm_get_name(global_root.get(),
+        "IntersectionObserverEntry"));
+    Rooted<Item> prototype_root(roots, dom_realm_get_name(constructor_root.get(),
+        "prototype"));
+    TypeId prototype_type = get_type_id(prototype_root.get());
+    if (prototype_type == LMD_TYPE_MAP || prototype_type == LMD_TYPE_ARRAY ||
+            prototype_type == LMD_TYPE_FUNC) {
+        // Observer notifications are platform records, so keep their interface
+        // identity rather than exposing them as unrelated plain objects.
+        dom_realm_set_prototype(entry_root.get(), prototype_root.get());
+    }
+    return entry_root.get();
+}
+
 extern "C" void dom_observers_post_layout(void) {
     // Host-driven layout can finish after the loader restored its JS context;
     // sampling is deferred until the retained runtime is installed by the pump.
@@ -799,26 +817,32 @@ extern "C" void dom_observers_post_layout(void) {
         if (observer->kind == JS_OBSERVER_MUTATION) continue;
         for (int j = 0; j < observer->target_count; j++) {
             JsObserverTarget* target = &observer->targets[j];
-            Item target_item = dom_wrap_element(target->node);
+            RootFrame roots(6);
+            Rooted<Item> target_root(roots, dom_wrap_element(target->node));
             float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
-            Item rect = observer_rect(target_item, &x, &y, &width, &height);
+            Rooted<Item> rect_root(roots, observer_rect(target_root.get(),
+                &x, &y, &width, &height));
+            Rooted<Item> entry_root(roots, ItemNull);
+            Rooted<Item> box_root(roots, ItemNull);
+            Rooted<Item> boxes_root(roots, ItemNull);
+            Rooted<Item> intersection_root(roots, ItemNull);
             if (observer->kind == JS_OBSERVER_RESIZE) {
                 if (target->sampled && fabsf(width - target->last_width) < 0.01f &&
                     fabsf(height - target->last_height) < 0.01f) continue;
                 target->sampled = true;
                 target->last_width = width;
                 target->last_height = height;
-                Item entry = js_new_object();
-                dom_realm_set(entry, observer_key("target"), target_item);
-                dom_realm_set(entry, observer_key("contentRect"), rect);
-                Item box = js_new_object();
-                dom_realm_set(box, observer_key("inlineSize"), js_make_number(width));
-                dom_realm_set(box, observer_key("blockSize"), js_make_number(height));
-                Item boxes = js_array_new(0);
-                js_array_push(boxes, box);
-                dom_realm_set(entry, observer_key("contentBoxSize"), boxes);
-                dom_realm_set(entry, observer_key("borderBoxSize"), boxes);
-                observer_queue_record(observer, entry);
+                entry_root.set(js_new_object());
+                dom_realm_set(entry_root.get(), observer_key("target"), target_root.get());
+                dom_realm_set(entry_root.get(), observer_key("contentRect"), rect_root.get());
+                box_root.set(js_new_object());
+                dom_realm_set(box_root.get(), observer_key("inlineSize"), js_make_number(width));
+                dom_realm_set(box_root.get(), observer_key("blockSize"), js_make_number(height));
+                boxes_root.set(js_array_new(0));
+                js_array_push(boxes_root.get(), box_root.get());
+                dom_realm_set(entry_root.get(), observer_key("contentBoxSize"), boxes_root.get());
+                dom_realm_set(entry_root.get(), observer_key("borderBoxSize"), boxes_root.get());
+                observer_queue_record(observer, entry_root.get());
                 continue;
             }
 
@@ -852,18 +876,18 @@ extern "C" void dom_observers_post_layout(void) {
             target->sampled = true;
             target->last_intersecting = intersecting;
             target->last_ratio = ratio;
-            Item entry = js_new_object();
-            dom_realm_set(entry, observer_key("target"), target_item);
-            dom_realm_set(entry, observer_key("boundingClientRect"), rect);
-            dom_realm_set(entry, observer_key("intersectionRatio"), js_make_number(ratio));
-            dom_realm_set(entry, observer_key("isIntersecting"), (Item){.item = b2it(intersecting)});
-            Item intersection = observer_make_rect(left, top,
-                intersection_width, intersection_height);
-            dom_realm_set(entry, observer_key("intersectionRect"), intersection);
-            dom_realm_set(entry, observer_key("rootBounds"), observer_make_rect(
+            entry_root.set(observer_new_intersection_entry());
+            dom_realm_set(entry_root.get(), observer_key("target"), target_root.get());
+            dom_realm_set(entry_root.get(), observer_key("boundingClientRect"), rect_root.get());
+            dom_realm_set(entry_root.get(), observer_key("intersectionRatio"), js_make_number(ratio));
+            dom_realm_set(entry_root.get(), observer_key("isIntersecting"), (Item){.item = b2it(intersecting)});
+            intersection_root.set(observer_make_rect(left, top,
+                intersection_width, intersection_height));
+            dom_realm_set(entry_root.get(), observer_key("intersectionRect"), intersection_root.get());
+            dom_realm_set(entry_root.get(), observer_key("rootBounds"), observer_make_rect(
                 root_left, root_top, root_right - root_left, root_bottom - root_top));
-            dom_realm_set(entry, observer_key("time"), js_make_number(0.0));
-            observer_queue_record(observer, entry);
+            dom_realm_set(entry_root.get(), observer_key("time"), js_make_number(0.0));
+            observer_queue_record(observer, entry_root.get());
         }
     }
 }

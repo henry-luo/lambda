@@ -320,9 +320,10 @@ static char* download_http_content_with_enhanced_cache(const char* url,
 char* download_http_content_with_cookie_jar(const char* url, size_t* content_size,
                                             CookieJar* cookie_jar,
                                             char** effective_url) {
-    if (!cookie_jar) return download_http_content(url, content_size, NULL, effective_url);
-
     HttpConfig config = default_http_config;
+    // A document navigation owns the resource manager's 60-second page-load
+    // budget, rather than the 30-second limit intended for each subresource.
+    config.timeout_seconds = 60;
     config.cookie_jar = cookie_jar;
     return download_http_content(url, content_size, &config, effective_url);
 }

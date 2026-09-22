@@ -466,6 +466,33 @@ TEST_F(AnimationTickTest, ColorAnimation) {
     EXPECT_EQ(mock.in_line.color.a, 255);
 }
 
+TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    TransformProp transform = {};
+    element->transform = &transform;
+
+    TransformFunction keyframe_function = {};
+    keyframe_function.type = TRANSFORM_TRANSLATEX;
+    keyframe_function.params.translate.x = 24.0f;
+    CssAnimatedProp property = {};
+    property.property_code = CSS_PROPERTY_TRANSFORM;
+    property.value_type = ANIM_VAL_TRANSFORM;
+    property.value.transform = &keyframe_function;
+    CssKeyframeStop stop = {0.0f, &property, 1, NULL};
+    CssKeyframes keyframes = {"slide", &stop, 1};
+
+    CssAnimProp animation = defaultAnimProp("slide", 1.0f);
+    AnimationInstance* instance = css_animation_create(
+        scheduler, element, &animation, &keyframes, 0.0, pool);
+    ASSERT_NE(instance, nullptr);
+
+    css_animation_tick(instance, 0.0f);
+
+    EXPECT_EQ(transform.functions, &keyframe_function);
+    EXPECT_EQ(transform.functions_owner, TRANSFORM_FUNCTIONS_DOCUMENT_POOL);
+}
+
 TEST_F(AnimationTickTest, ThreeStopInterpolation) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);

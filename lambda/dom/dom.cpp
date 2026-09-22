@@ -701,11 +701,17 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 static thread_local bool dom_geometry_flush_in_progress = false;
 
 static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
-    // The host loop's committed snapshot is authoritative during a simulated
-    // event turn. Do this before consulting the ambient JS Runtime, whose
-    // context scope may already have ended for a native EventSim assertion.
-    if (!doc || doc->js.host_driven_loop) {
+    if (!doc) return false;
+    // Host event turns expose their last committed tree. Re-entering layout
+    // from a callback advances geometry before that turn has settled and
+    // breaks the shared snapshot contract. Initial load has no snapshot yet,
+    // so only completion/load handlers may establish one before reading geometry.
+    if (doc->js.host_driven_loop && dom_has_committed_geometry_snapshot(doc)) {
         return dom_has_committed_geometry_snapshot(doc);
+    }
+    if (doc->js.host_driven_loop &&
+            (!doc->js.ready_state || strcmp(doc->js.ready_state, "complete") != 0)) {
+        return false;
     }
     // Native callers (including headless EventSim assertions) can run after
     // the script runtime has released its ambient UI pointer. The document's
@@ -728,9 +734,8 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     uicon->document = doc;
     dom_geometry_flush_in_progress = true;
 
-    // CSSOM View geometry reads synchronously flush style and layout. The
-    // host-driven loop owns its event-turn checkpoint, so its readers retain
-    // the committed geometry snapshot until the handler has returned.
+    // Standalone callers synchronously flush style and layout. The host loop
+    // above owns its event-turn commit boundary.
     if (doc->view_tree && doc->view_tree->root) {
         if (doc->js.mutation_count > 0) {
             dom_engine_reconcile_dom_mutations(uicon, doc);
@@ -944,6 +949,11 @@ static inline void dom_post_insert(DomNode* parent, DomNode* node,
                                    bool record_mutation = true) {
     DocState* st = dom_state_for_nodes(node, parent);
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
+    if (js_active_runtime_state && node && node->is_element() &&
+        node->as_element()->doc == _js_main_document) {
+        // Named Window properties follow insertion, not later script entry.
+        dom_register_named_elements(node->as_element());
+    }
     if (record_mutation) {
         dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
     }
@@ -1703,8 +1713,22 @@ extern "C" void dom_set_document(void* dom_doc) {
     // Host teardown may notify after the document Runtime has released its
     // capsule. There is then no JS realm whose DOM bindings may be changed.
     if (!js_active_runtime_state) return;
-    _js_current_document = (DomDocument*)dom_doc;
-    _js_main_document = (DomDocument*)dom_doc;
+    // Script-fault recovery clears transient, heap-bound JS state. Rebinding
+    // DOM globals must restore the active realm's Input before allocating
+    // named-element and interface properties.
+    if (!js_runtime_state_ensure_input((EvalContext*)context)) {
+        log_error("dom_set_document: could not restore the active JS Input");
+        return;
+    }
+    DomDocument* doc = (DomDocument*)dom_doc;
+    if (_js_current_document == doc && _js_main_document == doc) {
+        // Script execution and host turns rebind their owning document. The
+        // realm setup below is already complete for this context; rescanning a
+        // large tree here makes every script pay for every element ID again.
+        return;
+    }
+    _js_current_document = doc;
+    _js_main_document = doc;
     if (dom_doc) {
         // document binding creates Radiant-owned wrappers before the first JS
         // DOM property read; lazy module activation must therefore complete at
@@ -1715,7 +1739,6 @@ extern "C" void dom_set_document(void* dom_doc) {
             return;
         }
         dom_doc_mark_has_browsing_context(dom_doc);
-        DomDocument* doc = (DomDocument*)dom_doc;
         // Batch-mode page scripts enter a fresh JS realm after document load;
         // rebind XHR to the retained document URL instead of leaving relative
         // requests with the reset batch's empty base.
@@ -1741,6 +1764,9 @@ extern "C" void dom_set_document(void* dom_doc) {
         // HTMLOptionsCollection) so existence and instanceof checks work.
         extern void dom_install_collection_globals(void);
         dom_install_collection_globals();
+        // Element.animate and the public Web Animations constructors must
+        // build the same DOM-owned animation state.
+        dom_install_web_animation_globals();
         // Image reuses the HTMLImageElement interface installed above.
         dom_install_image_constructor();
         // F-5: install HTMLOptionElement Option() constructor.
@@ -1962,6 +1988,9 @@ static const char* dom_svg_interface_name(DomElement* elem) {
 extern "C" Item dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)dom_unwrap_element(obj);
     const char* ctor_name = "Node";
+    if (node && node->is_comment()) {
+        ctor_name = "Comment";
+    }
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
         if (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0) {
@@ -2040,6 +2069,7 @@ typedef enum DomCollectionVArrayKind {
     DOM_VARRAY_CHILD_NODES,
     DOM_VARRAY_ELEMENT_CHILDREN,
     DOM_VARRAY_DOCUMENT_FORMS,
+    DOM_VARRAY_DOCUMENT_LINKS,
     DOM_VARRAY_FORM_ELEMENTS,
     DOM_VARRAY_LOOKUP_TAG,
     DOM_VARRAY_LOOKUP_CLASS,
@@ -2119,6 +2149,10 @@ static bool dom_collection_varray_matches(DomElement* elem,
     switch (collection->kind) {
     case DOM_VARRAY_DOCUMENT_FORMS:
         return elem->tag_name && str_icmp_cstr(elem->tag_name, "form") == 0;
+    case DOM_VARRAY_DOCUMENT_LINKS:
+        // HTMLDocument.links contains only hyperlink-bearing a and area elements.
+        return elem->has_attribute("href") &&
+            (_is_tag(elem, "a") || _is_tag(elem, "area"));
     case DOM_VARRAY_FORM_ELEMENTS:
         return _is_listed_form_control(elem);
     case DOM_VARRAY_LOOKUP_TAG:
@@ -2617,6 +2651,12 @@ extern "C" Item dom_live_document_forms_bridge(void* doc_ptr) {
         ItemNull, true, radiant_dom_html_collection_host_type());
 }
 
+static Item dom_live_document_links_bridge(DomDocument* doc) {
+    Item owner = doc && doc->root ? dom_wrap_element(doc->root) : ItemNull;
+    return dom_collection_varray_new(owner, DOM_VARRAY_DOCUMENT_LINKS,
+        ItemNull, true, radiant_dom_html_collection_host_type());
+}
+
 extern "C" Item dom_live_form_elements_bridge(void* elem_ptr) {
     DomElement* form = (DomElement*)elem_ptr;
     Item owner = form ? dom_wrap_element(form) : ItemNull;
@@ -2850,12 +2890,13 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
 
 // Wrap a DomDocument* as a foreign-doc Map for JS access.
 // Cached so repeated calls for the same DomDocument* return the same wrapper
-// (required for `===` identity comparisons).
-static const int FOREIGN_DOC_CACHE_SIZE = 16;
+// (required for `===` identity comparisons). The registry grows with the
+// document realm: page libraries commonly create more than a fixed handful.
 struct ForeignDocCacheEntry {
     DomDocument* doc;
     uint64_t item;
     bool owns_doc;
+    ForeignDocCacheEntry* next;
 };
 
 // iframe element -> foreign DomDocument* (lazy created on first access).
@@ -2873,7 +2914,7 @@ static const int DOC_WIN_TABLE_SIZE = 32;
 // Wrapper identity and foreign-document ownership are document-realm state.
 // Calls below use this direct capsule after their normal JS/host entry bind.
 struct JsDomForeignDocumentRuntimeState {
-    ForeignDocCacheEntry foreign_doc_cache[FOREIGN_DOC_CACHE_SIZE] = {};
+    ForeignDocCacheEntry* foreign_doc_cache = nullptr;
     int foreign_doc_cache_count = 0;
     DomDocument* doc_with_window[DOC_WIN_TABLE_SIZE] = {};
     int doc_with_window_count = 0;
@@ -2945,46 +2986,25 @@ static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
     return NULL;
 }
 
-static bool doc_already_destroyed(DomDocument** docs, int doc_count, DomDocument* doc) {
-    if (!doc) return true;
-    for (int i = 0; i < doc_count; i++) {
-        if (docs[i] == doc) return true;
-    }
-    return false;
-}
-
-static void destroy_cached_doc_once(DomDocument** docs, int* doc_count, DomDocument* doc) {
-    if (!doc || doc == _js_main_document || doc_already_destroyed(docs, *doc_count, doc)) {
-        return;
-    }
-    if (*doc_count < FOREIGN_DOC_CACHE_SIZE + IFRAME_CACHE_SIZE) {
-        docs[*doc_count] = doc;
-        (*doc_count)++;
-    }
-    free_document(doc);
-}
-
 static void reset_foreign_document_cache() {
     if (!dom_foreign_document_state_get()) return;
-    DomDocument* destroyed_docs[FOREIGN_DOC_CACHE_SIZE + IFRAME_CACHE_SIZE] = {};
-    int destroyed_doc_count = 0;
-
-    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
-        heap_unregister_gc_root(&s_foreign_doc_cache[i].item);
-        if (s_foreign_doc_cache[i].owns_doc) {
-            destroy_cached_doc_once(
-                destroyed_docs, &destroyed_doc_count, s_foreign_doc_cache[i].doc);
+    ForeignDocCacheEntry* entry = s_foreign_doc_cache;
+    while (entry) {
+        ForeignDocCacheEntry* next = entry->next;
+        heap_unregister_gc_root(&entry->item);
+        if (entry->owns_doc && entry->doc != _js_main_document) {
+            free_document(entry->doc);
         }
-        s_foreign_doc_cache[i].doc = nullptr;
-        s_foreign_doc_cache[i].item = 0;
-        s_foreign_doc_cache[i].owns_doc = false;
+        mem_free(entry);
+        entry = next;
     }
+    s_foreign_doc_cache = nullptr;
     s_foreign_doc_cache_count = 0;
 
     for (int i = 0; i < s_iframe_cache_count; i++) {
         if (s_iframe_cache[i].owns_doc) {
-            destroy_cached_doc_once(
-                destroyed_docs, &destroyed_doc_count, s_iframe_cache[i].doc);
+            DomDocument* doc = s_iframe_cache[i].doc;
+            if (doc && doc != _js_main_document) free_document(doc);
         }
         s_iframe_cache[i].iframe = nullptr;
         s_iframe_cache[i].doc = nullptr;
@@ -3009,10 +3029,10 @@ static bool dom_transfer_document_storage(DomDocument* source,
 
     ForeignDocCacheEntry* foreign_owner = nullptr;
     IframeContentEntry* iframe_owner = nullptr;
-    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
-        if (s_foreign_doc_cache[i].doc == source &&
-            s_foreign_doc_cache[i].owns_doc) {
-            foreign_owner = &s_foreign_doc_cache[i];
+    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry;
+         entry = entry->next) {
+        if (entry->doc == source && entry->owns_doc) {
+            foreign_owner = entry;
             break;
         }
     }
@@ -3080,25 +3100,32 @@ static bool dom_prepare_cross_document_insertion(DomNode* node,
 static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
     if (!dom_foreign_document_state_ensure()) return ItemNull;
     // Look up cache first.
-    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
-        if (s_foreign_doc_cache[i].doc == doc) {
-            if (!owns_doc) s_foreign_doc_cache[i].owns_doc = false;
-            return (Item){.item = s_foreign_doc_cache[i].item};
+    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry;
+         entry = entry->next) {
+        if (entry->doc == doc) {
+            if (!owns_doc) entry->owns_doc = false;
+            return (Item){.item = entry->item};
         }
     }
     DomNode* node = (DomNode*)dom_get_or_create_doc_node(doc);
     Item it = node ? radiant_dom_wrap_node(node) : ItemNull;
     if (get_type_id(it) != LMD_TYPE_VELMT) return ItemNull;
+    ForeignDocCacheEntry* entry = (ForeignDocCacheEntry*)mem_calloc(
+        1, sizeof(ForeignDocCacheEntry), MEM_CAT_JS_RUNTIME);
+    if (!entry) {
+        log_error("dom-foreign-document: failed to retain document wrapper");
+        return ItemNull;
+    }
     // The foreign brand selects active-document behavior; structural reads
     // retain the same document-node backend as every other DOM Velmt.
     virtual_host_set(it, radiant_dom_foreign_document_host_type(), node);
-    if (s_foreign_doc_cache_count < FOREIGN_DOC_CACHE_SIZE) {
-        s_foreign_doc_cache[s_foreign_doc_cache_count].doc = doc;
-        s_foreign_doc_cache[s_foreign_doc_cache_count].item = it.item;
-        s_foreign_doc_cache[s_foreign_doc_cache_count].owns_doc = owns_doc;
-        heap_register_gc_root(&s_foreign_doc_cache[s_foreign_doc_cache_count].item);
-        s_foreign_doc_cache_count++;
-    }
+    entry->doc = doc;
+    entry->item = it.item;
+    entry->owns_doc = owns_doc;
+    entry->next = s_foreign_doc_cache;
+    s_foreign_doc_cache = entry;
+    s_foreign_doc_cache_count++;
+    heap_register_gc_root(&entry->item);
     return it;
 }
 JS_FORWARD_STATIC_ITEM(wrap_foreign_doc, (DomDocument* doc), wrap_foreign_doc_owned, (doc, true))
@@ -3106,9 +3133,10 @@ JS_FORWARD_STATIC_ITEM(wrap_foreign_doc, (DomDocument* doc), wrap_foreign_doc_ow
 // Returns the foreign-doc wrapper for `doc` if one exists, else ItemNull.
 static Item lookup_foreign_doc_wrapper(DomDocument* doc) {
     if (!dom_foreign_document_state_get()) return ItemNull;
-    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
-        if (s_foreign_doc_cache[i].doc == doc) {
-            return (Item){.item = s_foreign_doc_cache[i].item};
+    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry;
+         entry = entry->next) {
+        if (entry->doc == doc) {
+            return (Item){.item = entry->item};
         }
     }
     return ItemNull;
@@ -3422,7 +3450,9 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
             s_iframe_cache[s_iframe_cache_count].owns_doc = true;
             s_iframe_cache_count++;
         }
-        return wrap_foreign_doc(doc);
+        // The iframe cache owns this browsing-context document; the wrapper
+        // cache only preserves identity and must not duplicate that ownership.
+        return wrap_foreign_doc_owned(doc, false);
     }
     return wrap_foreign_doc_owned(e->doc, e->owns_doc);
 }
@@ -6429,6 +6459,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(LAST_CHILD,                "lastChild") \
     X(LAST_ELEMENT_CHILD,        "lastElementChild") \
     X(LENGTH,                    "length") \
+    X(LINKS,                     "links") \
     X(LOCAL_NAME,                "localName") \
     X(LOCATION,                  "location") \
     X(MAX,                       "max") \
@@ -6702,6 +6733,10 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
     if (prop_id == JS_DOM_PROP_FORMS) {
         DomDocument* doc = doc_arg;
         return dom_live_document_forms_bridge((void*)doc);
+    }
+
+    if (prop_id == JS_DOM_PROP_LINKS) {
+        return dom_live_document_links_bridge(doc_arg);
     }
 
     // HTMLDocument.scripts is a live HTMLCollection in document order.
@@ -8928,6 +8963,7 @@ typedef enum JsDomReflectKind {
         DOM_TAG_SOURCE | DOM_TAG_TRACK | DOM_TAG_AUDIO | DOM_TAG_VIDEO | DOM_TAG_INPUT) \
     X("href", "href", STR, 0, DOM_TAG_A | DOM_TAG_AREA | DOM_TAG_LINK | DOM_TAG_BASE) \
     X("alt", "alt", STR, 0, DOM_TAG_IMG) \
+    X("dir", "dir", STR, 0, DOM_TAG_ANY) \
     X("width", "width", STR, 0, DOM_TAG_IFRAME) \
     X("height", "height", STR, 0, DOM_TAG_IFRAME) \
     X("acceptCharset", "accept-charset", STR, 0, DOM_TAG_FORM) \
@@ -8961,10 +8997,12 @@ static const JsDomReflectSpec* dom_reflect_spec(const DomElement* elem,
                                                    JsDomReflectKind kind) {
     if (!elem || !prop) return NULL;
     uint32_t tag = dom_tag_bit(elem);
-    if (!tag) return NULL;
     for (size_t i = 0; i < sizeof(k_dom_reflected_attrs) / sizeof(k_dom_reflected_attrs[0]); i++) {
         const JsDomReflectSpec* spec = &k_dom_reflected_attrs[i];
-        if (spec->kind != kind || (spec->tags & tag) == 0) continue;
+        // Global attributes must also match ordinary tags omitted from the
+        // element-specific bit table, such as div and section.
+        if (spec->kind != kind ||
+            (spec->tags != DOM_TAG_ANY && (spec->tags & tag) == 0)) continue;
         if (strcmp(spec->idl, prop) == 0) return spec;
     }
     return NULL;
@@ -16206,7 +16244,11 @@ static Item js_token_list_operation(DomCollectionVArray* collection,
     if (operation == JUBE_DOM_TOKEN_LIST_REMOVE) {
         for (int index = 0; index < argc; index++) {
             const char* token = fn_to_cstr(args[index]);
-            if (token && token[0]) dom_token_list_rewrite(collection, token, nullptr, nullptr);
+            // Removing a token that is not present leaves the token set and its
+            // content attribute unchanged, so it must not publish a DOM mutation.
+            if (token && token[0] && dom_token_list_contains_token(collection, token)) {
+                dom_token_list_rewrite(collection, token, nullptr, nullptr);
+            }
         }
         return ItemNull;
     }
@@ -16643,6 +16685,22 @@ extern "C" Item dom_document_fragment_ctor(void) {
     return dom_create_document_fragment(_js_current_document);
 }
 
+extern "C" Item dom_comment_ctor(Item data_arg) {
+    DomDocument* doc = _js_current_document;
+    if (!doc) return ItemNull;
+
+    RootFrame roots(2);
+    Rooted<Item> data_root(roots, is_js_undefined(data_arg)
+        ? js_name_item("") : js_to_string(data_arg));
+    if (item_is_error(data_root.get())) return data_root.get();
+    Rooted<Item> document_root(roots,
+        dom_wrap_element(dom_get_or_create_doc_node(doc)));
+    Item kind = {.item = i2it(DOM_NODE_COMMENT)};
+    // Reuse the shared creator so Comment and document.createComment agree.
+    return dom_core_create_node(document_root.get(), kind, ItemNull,
+        data_root.get());
+}
+
 
 
 
@@ -16873,30 +16931,35 @@ static Item js_web_animation_current_time_set(Item value) {
     return value;
 }
 
-extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
-    DomElement* element = (DomElement*)dom_unwrap_element(dom_realm_receiver());
+// Element.animate and new Animation(effect) converge here so their host state
+// has one allocation, timing, and property-sampling path.
+static Item js_web_animation_create(DomElement* element, Item keyframes_item,
+                                    Item options_item) {
     if (!element || !element->doc) return ItemNull;
 
+    RootFrame roots(5);
+    Rooted<Item> keyframes_root(roots, keyframes_item);
+    Rooted<Item> options_root(roots, options_item);
     CssKeyframes* keyframes = js_web_animation_parse_keyframes(
-        element, keyframes_item);
+        element, keyframes_root.get());
     if (!keyframes) return ItemNull;
 
     double duration_ms = 0.0;
     TimingFunction timing = {};
     timing.type = TIMING_LINEAR;
-    if (get_type_id(options_item) == LMD_TYPE_MAP ||
-        get_type_id(options_item) == LMD_TYPE_VMAP) {
-        Item duration = dom_realm_get_cstr(options_item, "duration");
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP ||
+        get_type_id(options_root.get()) == LMD_TYPE_VMAP) {
+        Item duration = dom_realm_get_cstr(options_root.get(), "duration");
         if (!is_js_undefined(duration) && duration.item != ITEM_NULL) {
             duration_ms = js_web_animation_number(duration, 0.0f);
         }
-        Item easing = dom_realm_get_cstr(options_item, "easing");
+        Item easing = dom_realm_get_cstr(options_root.get(), "easing");
         const char* easing_text = fn_to_cstr(easing);
         if (easing_text) {
             css_animation_parse_timing_function_text(easing_text, &timing);
         }
     } else {
-        Item duration = js_to_number(options_item);
+        Item duration = js_to_number(options_root.get());
         TypeId duration_type = get_type_id(duration);
         if (duration_type == LMD_TYPE_FLOAT) duration_ms = it2d(duration);
         else if (duration_type == LMD_TYPE_INT || duration_type == LMD_TYPE_INT64) {
@@ -16913,7 +16976,6 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
     if (!host) return ItemNull;
     host->state = state;
 
-    RootFrame roots(3);
     Rooted<Item> holder_root(roots, vmap_new());
     if (get_type_id(holder_root.get()) != LMD_TYPE_VMAP || !holder_root.get().vmap) {
         return ItemNull;
@@ -16927,6 +16989,8 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
                     holder_root.get());
     dom_realm_set_native(animation_root.get(), js_string_key("pause"),
                       js_web_animation_pause);
+    dom_realm_set_native(animation_root.get(), js_string_key("play"),
+                      js_web_animation_pause);
     dom_realm_set_native(animation_root.get(), js_string_key("reverse"),
                       js_web_animation_reverse);
     dom_realm_install_accessor(animation_root.get(), js_string_key("currentTime"),
@@ -16938,7 +17002,47 @@ extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
     // `then` getter, unlike the internal ready promise in Web Animations.
     dom_realm_set_cstr(animation_root.get(), "ready",
                     dom_realm_promise_resolve(make_js_undefined()));
+    dom_realm_apply_prototype(animation_root.get(), "Animation");
     return animation_root.get();
+}
+
+extern "C" Item dom_element_animate(Item keyframes_item, Item options_item) {
+    return js_web_animation_create(
+        (DomElement*)dom_unwrap_element(dom_realm_receiver()),
+        keyframes_item, options_item);
+}
+
+extern "C" Item dom_keyframe_effect_ctor(Item target, Item keyframes,
+                                           Item options) {
+    // Keep the WebIDL constructor value-shaped; Animation consumes these
+    // rooted fields and delegates to the Element.animate state builder.
+    RootFrame roots(4);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> keyframes_root(roots, keyframes);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> effect_root(roots, js_new_object());
+    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_target",
+                       target_root.get());
+    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_keyframes",
+                       keyframes_root.get());
+    dom_realm_set_cstr(effect_root.get(), "__lambda_keyframe_effect_options",
+                       options_root.get());
+    dom_realm_apply_prototype(effect_root.get(), "KeyframeEffect");
+    return effect_root.get();
+}
+
+extern "C" Item dom_animation_ctor(Item effect) {
+    RootFrame roots(4);
+    Rooted<Item> effect_root(roots, effect);
+    Rooted<Item> target_root(roots, dom_realm_get_cstr(
+        effect_root.get(), "__lambda_keyframe_effect_target"));
+    Rooted<Item> keyframes_root(roots, dom_realm_get_cstr(
+        effect_root.get(), "__lambda_keyframe_effect_keyframes"));
+    Rooted<Item> options_root(roots, dom_realm_get_cstr(
+        effect_root.get(), "__lambda_keyframe_effect_options"));
+    return js_web_animation_create(
+        (DomElement*)dom_unwrap_element(target_root.get()),
+        keyframes_root.get(), options_root.get());
 }
 
 

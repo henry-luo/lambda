@@ -1549,7 +1549,10 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_reset_core_module_caches();
     if (full_reset) js_eval_preamble_cache_reset();
     js_dynfunc_cache_reset();
-    if (full_reset) js_array_runtime_items_cleanup_all();
+    if (full_reset) {
+        js_array_runtime_items_cleanup_all();
+        js_array_immortal_props_cleanup_all();
+    }
     // Preamble reuse retains catalog callable/constructor identity; a full reset, or a partial reset without a valid snapshot, drops
     // the complete realm-slot store (D6.2.2v2).
     if (full_reset || !js_proto_snapshot_is_valid()) {
@@ -2338,4 +2341,3 @@ extern "C" Item js_build_arguments_object_for_call(Item* args, int argc,
     js_pending_args_callee = saved_callee;
     return result;
 }
-

@@ -1308,6 +1308,14 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
+    // This leaf samples only the native frame address against a context-bound
+    // scalar limit; it cannot allocate, retain a value, or re-enter Lambda.
+    {"lambda_stack_is_exhausted", FPTR(lambda_stack_is_exhausted),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED | JIT_IMPORT_PURE_SCALAR_CALL,
+      JIT_EXCEPTION_PRESERVES, 0}},
     // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS).
     // The metadata is load-bearing, not decoration: an unannotated row defaults
     // to JIT_EFFECT_MAY_GC with JIT_VALUE_UNKNOWN arguments, which would make
@@ -2065,6 +2073,8 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_borrow_typed_map_field", FPTR(cow_path_borrow_typed_map_field)},
     {"cow_place_leaf", FPTR(cow_place_leaf)},
     {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
+    {"cow_path_borrow_keys", FPTR(cow_path_borrow_keys)},
+    {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},
     {"pn_push_cow", FPTR(pn_push_cow)},
@@ -2102,7 +2112,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
-    {"lambda_map_path_set_checked_fixed", FPTR(lambda_map_path_set_checked_fixed)},
+    {"lambda_map_path_set_checked_keys", FPTR(lambda_map_path_set_checked_keys)},
     {"lambda_array_push_checked", FPTR(lambda_array_push_checked)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
@@ -3693,6 +3703,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #else
     static const char* audited[] = {
         "memset", "memcpy", "fmod",
+        "lambda_stack_is_exhausted",
 #if defined(__APPLE__) || defined(__linux__)
         "sigsetjmp",
 #else

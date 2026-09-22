@@ -5,6 +5,20 @@ var form = document.createElement("form");
 document.body.appendChild(form);
 console.log("formsLive:" + (forms.length === formCount + 1));
 console.log("formsBrand:" + (forms instanceof HTMLCollection));
+var links = document.links;
+var linkCount = links.length;
+var link = document.createElement("a");
+link.setAttribute("href", "/linked");
+document.body.appendChild(link);
+var plainAnchor = document.createElement("a");
+document.body.appendChild(plainAnchor);
+var area = document.createElement("area");
+area.setAttribute("href", "/mapped");
+document.body.appendChild(area);
+console.log("linksLive:" + (links.length === linkCount + 2));
+console.log("linksHrefOnly:" + (links[linkCount] === link &&
+    links[linkCount + 1] === area));
+console.log("linksBrand:" + (links instanceof HTMLCollection));
 
 var controls = form.elements;
 var input = document.createElement("input");
@@ -61,6 +75,10 @@ console.log("rectsArray:" + Array.isArray(rects));
 var sheets = document.styleSheets;
 console.log("sheetsBrand:" + (sheets instanceof StyleSheetList));
 console.log("sheetsArray:" + Array.isArray(sheets));
+console.log("sheetBrand:" + (sheets[0] instanceof CSSStyleSheet));
+var constructedSheet = new CSSStyleSheet();
+console.log("constructedSheet:" +
+    (constructedSheet instanceof CSSStyleSheet && constructedSheet.cssRules.length === 0));
 var rules = sheets[0].cssRules;
 var ruleCount = rules.length;
 sheets[0].insertRule(".virtual-css-rule { display: block; }", ruleCount);

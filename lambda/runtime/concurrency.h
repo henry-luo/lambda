@@ -98,6 +98,9 @@ int lambda_task_has_current(void);
 
 Item lambda_task_start_function(Item function, List* args);
 Item lambda_task_start_function_scoped(Item function, List* args, bool escapes);
+// Drives a procedure through the context scheduler so task-only builtins see
+// the same root task at every execution tier (D6.3.1, S7.11.2).
+Item lambda_task_run_root_function(Item function, List* args);
 Item lambda_task_run_root_raw(void* function_ptr, void* env, int env_count,
     List* args);
 LambdaTaskScope* lambda_task_scope_enter(void);

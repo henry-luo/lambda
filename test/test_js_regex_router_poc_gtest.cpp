@@ -340,6 +340,8 @@ TEST(JsRegexRouterPoc, StructuralRoutesExactRepetitionShapes) {
         { "(?:(a)|b)+", true, JS_REGEX_SCANNER_REASON_CAPTURE_RESET },
         { "((a)?b)*", true, JS_REGEX_SCANNER_REASON_CAPTURE_RESET },
         { "(?:(a)|b){2}", true, JS_REGEX_SCANNER_REASON_CAPTURE_RESET },
+        { "[A-Za-z0-9_-]{80,16384}", true, JS_REGEX_SCANNER_REASON_RE2_REPEAT_LIMIT },
+        { "[\\s\\S]{0,2048}", true, JS_REGEX_SCANNER_REASON_RE2_REPEAT_LIMIT },
         { "(a)\\1", true, JS_REGEX_SCANNER_REASON_BACKREFERENCE },
         { "(?=a)a", true, JS_REGEX_SCANNER_REASON_ASSERTION },
     };

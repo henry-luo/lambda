@@ -1318,6 +1318,7 @@ void heap_destroy() {
         // Runtime item cleanup may neuter owning Array objects, so it must run
         // while the runtime owner group and GC extents are still alive.
         js_array_runtime_items_cleanup_all();
+        js_array_immortal_props_cleanup_all();
         if (context->heap->gc) {
             // finalize all GC-managed objects: free sub-allocations (items[], data, mpd_t, closure_env)
             // that were malloc'd/calloc'd separately from the pool

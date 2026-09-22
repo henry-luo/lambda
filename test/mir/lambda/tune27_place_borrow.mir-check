@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "description": "Tune27 T27-4 / S9.2.2 / T27-7: `push(m.a, v)` borrows its place (cow_place_leaf_fixed) and appends raw (pn_push) instead of going through a path setter; the two named array insertions (`m.a = x`, `m.b = x`) are the only captures -- the scalar `push(acc.items, i)` needs none.",
+  "description": "Tune27 T27-4 / S9.2.2 / T27-7: `push(m.a, v)` borrows its place (cow_place_leaf_keys) and appends raw (pn_push) instead of going through a path setter; the two named array insertions (`m.a = x`, `m.b = x`) are the only captures -- the scalar `push(acc.items, i)` needs none.",
   "checks": [
     {
       "in_func": "_main_#",
       "expect": [
-        "call\tcow_place_leaf_fixed_p, cow_place_leaf_fixed",
+        "call\tcow_place_leaf_keys_p, cow_place_leaf_keys",
         "call\tpn_push_p, pn_push"
       ],
       "forbid": [

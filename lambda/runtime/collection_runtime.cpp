@@ -11,6 +11,7 @@
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern "C" bool js_array_runtime_items_release(Array* owner);
+extern "C" bool js_array_immortal_props_store(Array* owner, Map* props);
 
 // These UI conversion helpers require the DOM representation and remain in the
 // runtime data implementation. Collection growth calls them only for an
@@ -112,7 +113,14 @@ bool array_reserve_append_slots(Array* array, int64_t append_count) {
     // array_push reserves one handoff slot beyond visible and scalar-tail
     // storage. Matching that invariant avoids a final unnecessary growth.
     int64_t required_capacity = array->length + array->extra + append_count + 1;
-    return list_reserve_capacity((List*)array, required_capacity, nullptr);
+    if (required_capacity <= array->capacity) return true;
+    // Appends must amortize like expand_list: an exact reserve made every
+    // checked push onto a typed array (`push(nodes, n)` under `Node[]`)
+    // reallocate and copy the whole buffer, O(n^2) to build n elements. A
+    // one-shot reserve on a fresh array still gets exactly what it asked for.
+    int64_t doubled = array->capacity > INT64_MAX / 2 ? INT64_MAX : array->capacity * 2;
+    return list_reserve_capacity((List*)array,
+        doubled > required_capacity ? doubled : required_capacity, nullptr);
 }
 
 // D2.6.6v2: a JS array's companion property map now lives in the array's OWN
@@ -140,6 +148,12 @@ void js_elements_set_props(Array* arr, Map* props) {
     if (!arr || !props) return;
     if (js_array_has_props(arr)) {   // replace in place
         *(Item*)arr->data = {.map = props};
+        return;
+    }
+    // Input and constant arrays are not collector objects, so their companion
+    // reference needs the JS realm's exact root rather than a nursery buffer.
+    if (arr->is_immortal) {
+        js_array_immortal_props_store(arr, props);
         return;
     }
     RootFrame roots(2);

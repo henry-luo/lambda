@@ -35,6 +35,7 @@
 #include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
 #include "runtime/transpiler.hpp"
+#include "runtime/module_ast_prebuild.hpp"
 #include "runtime/doc_context.hpp"
 #include "runtime/write_set.hpp"
 #include "runtime/runtime-state.h"
@@ -271,6 +272,13 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
         log_error("[JS-DOM-LAYOUT] failed to initialize headless UI context");
         return false;
     }
+    // A headless document still owns session-scoped cookies (S1.6).
+    session->uicon.browsing_session = session_create(nullptr, nullptr);
+    if (!session->uicon.browsing_session) {
+        log_error("[JS-DOM-LAYOUT] failed to create headless browsing session");
+        ui_context_cleanup(&session->uicon);
+        return false;
+    }
     session->initialized = true;
     session->uicon.document = dom_doc;
     dom_set_ui_context(&session->uicon);
@@ -278,6 +286,8 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
     session->uicon.window_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
     session->uicon.viewport_width = JS_DOCUMENT_VIEWPORT_WIDTH;
     session->uicon.viewport_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
+    session_attach_document(session->uicon.browsing_session, dom_doc);
+    session_seed_document(session->uicon.browsing_session, dom_doc);
 
     if (!radiant_document_ensure_state(dom_doc, "js_document_initial_layout")) {
         log_error("[JS-DOM-LAYOUT] failed to ensure DocState");
@@ -297,6 +307,8 @@ static void js_document_session_finish(JsDocumentSession* session) {
 
     dom_set_ui_context(nullptr);
     session->uicon.document = nullptr;
+    session_destroy(session->uicon.browsing_session);
+    session->uicon.browsing_session = nullptr;
     ui_context_cleanup(&session->uicon);
     js_document_session_init(session);
 }
@@ -735,6 +747,7 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
         return;
     }
     g_lambda_main_pre_memtrack_cleanup_done = true;
+    module_ast_prebuild_cleanup();
     // JS helper globals outlive Runtime teardown, so release them before
     // emitting live-allocation telemetry or entering memtrack shutdown.
     js_array_runtime_items_cleanup_all();
@@ -837,6 +850,9 @@ static int lambda_main_finish(int ret_code) {
     clipboard_store_shutdown();
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
+    // Finish the shared prebuild queue while its input-cache dependencies are
+    // still alive; the registry itself owns every queued task and path copy.
+    module_ast_prebuild_cleanup();
     // tear down the InputManager singleton so its destructor url_destroy()s
     // every tracked input->url (e.g. each parse()'s "parse://inline" dummy URL)
     // and frees its global pool — otherwise those outlive the process and show

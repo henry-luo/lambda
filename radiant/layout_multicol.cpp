@@ -330,6 +330,7 @@ static float multicol_balanced_target_search(
     float* item_content_heights = nullptr,
     float* item_margin_before = nullptr,
     float* item_margin_after = nullptr,
+    float* item_line_advances = nullptr,
     bool adjacent_to_spanner = false,
     ViewBlock* adjacent_item = nullptr
 );
@@ -2734,6 +2735,11 @@ static void multicol_init_flow_item(MulticolFlowItem* item,
     bool has_descendant_fragmentable_lines = fixed_size_overflow &&
         multicol_find_fragmentable_line_metrics(
             child, &descendant_line_count, &descendant_line_advance);
+    int line_count = 0;
+    float line_advance = 0.0f;
+    item->line_advance = multicol_inline_line_metrics(
+        child, &line_count, &line_advance, nullptr) && line_count > 1
+            ? line_advance : descendant_line_advance;
     // css fragmentation: the root body's direct avoid-break sequence is
     // fragmented by the containing multicol context.
     bool root_body_flow = container &&
@@ -2979,6 +2985,7 @@ static int multicol_collect_flow_group(
     float* item_content_heights,
     float* item_margin_before,
     float* item_margin_after,
+    float* item_line_advances,
     bool* item_can_fragment,
     bool* break_before,
     bool* break_after,
@@ -3011,6 +3018,7 @@ static int multicol_collect_flow_group(
             item_content_heights[group_item_count] = item->content_height;
             item_margin_before[group_item_count] = item->margin_before;
             item_margin_after[group_item_count] = item->margin_after;
+            item_line_advances[group_item_count] = item->line_advance;
             item_can_fragment[group_item_count] = item->can_fragment;
             break_before[group_item_count] = item->break_before_column;
             break_after[group_item_count] = item->break_after_column;
@@ -6272,8 +6280,7 @@ static float multicol_fragmented_child_union(
         : (zero_width_fragment ? 0.0f
            : has_authored_inline_size && child->width > 0.0f
                ? child->width
-               : has_in_flow_block_child && child->width > 0.0f &&
-                    child->width < column_width
+               : child->width > 0.0f && child->width < column_width
                    ? child->width
                : column_width);
     float union_width;
@@ -7169,7 +7176,7 @@ static float multicol_split_child_around_spanners(
         int group_item_count = multicol_collect_flow_group(
             children, child_count, &i, group_scratch.heights,
             group_scratch.content_heights, group_scratch.margin_before,
-            group_scratch.margin_after,
+            group_scratch.margin_after, group_scratch.line_advances,
             group_scratch.can_fragment, group_scratch.break_before,
             group_scratch.break_after, &group_total_height);
         int group_end = i;
@@ -7195,7 +7202,8 @@ static float multicol_split_child_around_spanners(
             group_item_count, column_count, target_height, group_total_height,
             group_has_margins ? group_scratch.content_heights : nullptr,
             group_has_margins ? group_scratch.margin_before : nullptr,
-            group_has_margins ? group_scratch.margin_after : nullptr);
+            group_has_margins ? group_scratch.margin_after : nullptr,
+            group_has_margins ? group_scratch.line_advances : nullptr);
         if (target_height <= 0) target_height = balanced_height;
         if (first_group_target_height < 0) {
             first_group_target_height = target_height;
@@ -7937,6 +7945,7 @@ static bool multicol_reflow_mixed_direct_flow(
         balance_scratch.content_heights[i] = items[i].flow.content_height;
         balance_scratch.margin_before[i] = items[i].flow.margin_before;
         balance_scratch.margin_after[i] = items[i].flow.margin_after;
+        balance_scratch.line_advances[i] = items[i].flow.line_advance;
         balance_scratch.can_fragment[i] = items[i].flow.can_fragment;
         balance_scratch.break_before[i] = items[i].flow.break_before_column;
         balance_scratch.break_after[i] = items[i].flow.break_after_column;
@@ -7952,7 +7961,7 @@ static bool multicol_reflow_mixed_direct_flow(
             balance_scratch.break_before, balance_scratch.break_after,
             item_count, column_count, target_height, total_height,
             balance_scratch.content_heights, balance_scratch.margin_before,
-            balance_scratch.margin_after);
+            balance_scratch.margin_after, balance_scratch.line_advances);
     }
     balance_scratch.release(&lycon->scratch);
     if (target_height <= 0.0f) {
@@ -8674,7 +8683,8 @@ static int multicol_simulate_column_count(
     float target_height,
     float* item_content_heights,
     float* item_margin_before,
-    float* item_margin_after
+    float* item_margin_after,
+    float* item_line_advances
 ) {
     if (item_count <= 0 || target_height <= 0) return 1;
 
@@ -8688,6 +8698,13 @@ static int multicol_simulate_column_count(
             fragment_used = 0.0f;
             pending_margin_after = 0.0f;
             has_item = false;
+        };
+        auto fragmentable_content_in_space = [&](int item_index, float available) {
+            if (available <= 0.5f) return 0.0f;
+            float line_advance = item_line_advances ? item_line_advances[item_index] : 0.0f;
+            if (line_advance <= 0.0f) return available;
+            // Breaks inside text blocks occur after a complete line box.
+            return floorf(available / line_advance) * line_advance;
         };
         for (int i = 0; i < item_count; i++) {
             if (break_before[i] && has_item) {
@@ -8708,12 +8725,14 @@ static int multicol_simulate_column_count(
                 }
                 // A fragmentable block spends its start margin only in the
                 // first fragment; its remaining content continues normally.
-                float available = target_height - margin_before;
-                if (available <= 0.0f) {
+                    float available = target_height - margin_before;
+                    if (available <= 0.0f) {
                     fragment_count++;
                     fragment_used = item_content_heights[i];
-                } else if (item_content_heights[i] > available) {
-                    fragment_count++;
+                    } else if (item_content_heights[i] > available) {
+                        available = fragmentable_content_in_space(i, available);
+                        if (available <= 0.5f) return column_count + 1;
+                        fragment_count++;
                     fragment_used = item_content_heights[i] - available;
                     while (fragment_used > target_height + 0.5f) {
                         fragment_used -= target_height;
@@ -8737,17 +8756,42 @@ static int multicol_simulate_column_count(
                 continue;
             }
             if (has_item && fragment_used + needed > target_height + 0.5f) {
+                if (item_can_fragment[i]) {
+                    // A fragmentable block consumes the remaining line space
+                    // before continuing; treating it as atomic overstates the
+                    // balanced fragmentainer height.
+                    float remaining_content = fragmentable_content_in_space(
+                        i, target_height - fragment_used - margin_before);
+                    if (remaining_content > 0.5f) {
+                        float continued_content = item_content_heights[i] - remaining_content;
+                        fragment_count++;
+                        fragment_used = continued_content;
+                        while (fragment_used > target_height + 0.5f) {
+                            fragment_used -= target_height;
+                            fragment_count++;
+                        }
+                        pending_margin_after = item_margin_after[i];
+                        has_item = true;
+                        if (break_after[i] && i + 1 < item_count) {
+                            advance_fragment();
+                        }
+                        continue;
+                    }
+                }
                 advance_fragment();
                 needed = item_content_heights[i];
             }
 
             if (!has_item && item_content_heights[i] > target_height + 0.5f) {
                 if (item_can_fragment[i]) {
-                    int extra_fragments = (int)ceilf(
-                        item_content_heights[i] / target_height) - 1; // INT_CAST_OK: fragment count from positive heights
-                    if (extra_fragments > 0) fragment_count += extra_fragments;
-                    fragment_used = fmodf(item_content_heights[i], target_height);
-                    if (fragment_used <= 0.5f) fragment_used = target_height;
+                    float remaining_content = item_content_heights[i];
+                    while (remaining_content > target_height + 0.5f) {
+                        float consumed = fragmentable_content_in_space(i, target_height);
+                        if (consumed <= 0.5f) return column_count + 1;
+                        remaining_content -= consumed;
+                        fragment_count++;
+                    }
+                    fragment_used = remaining_content;
                 } else {
                     fragment_used = item_content_heights[i];
                 }
@@ -8816,6 +8860,7 @@ static float multicol_balanced_target_search(
     float* item_content_heights,
     float* item_margin_before,
     float* item_margin_after,
+    float* item_line_advances,
     bool adjacent_to_spanner,
     ViewBlock* adjacent_item
 ) {
@@ -8879,7 +8924,7 @@ static float multicol_balanced_target_search(
             // unbreakable line boxes beside a column spanner.
             lower = max(lower, item_heights[flow_item_index]);
         }
-        if (block->multicol_prop()->column_count > 0 &&
+        if (item_count == 1 && block->multicol_prop()->column_count > 0 &&
             !multicol_has_vertical_inline_axis(block) &&
             multicol_content_box_height_limit(block) < 0.0f) {
             int line_count = 0;
@@ -8893,8 +8938,9 @@ static float multicol_balanced_target_search(
             }
             if (has_line_metrics &&
                 line_count > 1 && line_advance > 0.0f) {
-                // css fragmentation: balanced columns break only between line
-                // boxes, so arithmetic balancing cannot select a smaller target.
+                // A lone line flow has no preceding block offset, so its
+                // fragmentainer must end on a line boundary. Mixed block flow
+                // applies that boundary at each item's remaining space instead.
                 float line_floor = ceilf(fallback_target / line_advance) * line_advance;
                 line_balance_floor = max(line_balance_floor, line_floor);
             }
@@ -8980,7 +9026,8 @@ static float multicol_balanced_target_search(
         int fragments = multicol_simulate_column_count(
             item_heights, item_can_fragment, break_before, break_after, item_count,
             column_count, mid,
-            item_content_heights, item_margin_before, item_margin_after);
+            item_content_heights, item_margin_before, item_margin_after,
+            item_line_advances);
         if (fragments <= column_count) {
             best = mid;
             upper = mid;
@@ -10567,7 +10614,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         int group_item_count = multicol_collect_flow_group(
             blocks, block_count, &i, group_scratch.heights,
             group_scratch.content_heights, group_scratch.margin_before,
-            group_scratch.margin_after,
+            group_scratch.margin_after, group_scratch.line_advances,
             group_scratch.can_fragment, group_scratch.break_before,
             group_scratch.break_after, &group_total_height);
         int group_end = i;  // exclusive
@@ -10611,6 +10658,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             group_has_margins ? group_scratch.content_heights : nullptr,
             group_has_margins ? group_scratch.margin_before : nullptr,
             group_has_margins ? group_scratch.margin_after : nullptr,
+            group_has_margins ? group_scratch.line_advances : nullptr,
             group_adjacent_to_spanner,
             group_item_count == 1 ? blocks[group_start].block : nullptr);
         group_target = multicol_avoid_break_target_floor(

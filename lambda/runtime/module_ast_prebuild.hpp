@@ -68,3 +68,7 @@ bool module_ast_prebuild_imports(const ModuleAstPrebuildProfiles* profiles,
 // this entry so a bounded pool never blocks behind its own queued work.
 bool module_ast_prebuild_await_import(const ModuleAstPrebuildProfile* profile,
     const char* path);
+
+// Join prebuild workers and release their process-wide dependency futures.
+// Call only after normal module consumers have finished.
+void module_ast_prebuild_cleanup(void);

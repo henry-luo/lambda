@@ -163,6 +163,9 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
     mir_check::ProcessSpec base;
     base.language = script.language;
     base.procedural = script.procedural;
+    // This suite validates emitted MIR roots; AUTO would run supported Lambda
+    // scripts in T0 instead and turn forced collection into an interpreter test.
+    base.env.emplace_back("LAMBDA_TIER", "jit");
     // stress runs want no MIR artifacts and no log I/O; --no-log is the master
     // gate for both. Emission-pattern checks are a different binary.
     base.quiet = true;
@@ -181,7 +184,9 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
         if (mode.mir_interp && script.language == mir_check::LANG_JS) continue;
         mir_check::ProcessSpec spec = base;
         spec.mir_interp = mode.mir_interp;
-        spec.env = mode.env;
+        for (size_t i = 0; i < mode.env.size(); i++) {
+            spec.env.push_back(mode.env[i]);
+        }
 
         mir_check::ProcessResult stressed = mir_check::run_lambda_process(script.path, spec);
 

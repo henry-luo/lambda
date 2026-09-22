@@ -2491,6 +2491,35 @@ TEST(JsInterpreter, KeepsAccessorCellsVirtualAndAliveAcrossCollection) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, KeepsImmortalArrayPropertiesRootedAcrossCollection) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char bootstrap[] = "0;";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, bootstrap,
+        sizeof(bootstrap) - 1, "immortal-array-bootstrap.js", NULL)));
+
+    Pool* pool = runtime_heap(&runtime)->pool;
+    ASSERT_NE(pool, nullptr);
+    Array* array = array_pooled(pool);
+    ASSERT_NE(array, nullptr);
+    Item array_item = {.array = array};
+    Item key = js_name_item("payload", 7);
+    {
+        RootFrame roots(1);
+        Rooted<Item> payload_root(roots, js_new_object());
+        ASSERT_EQ(get_type_id(payload_root.get()), LMD_TYPE_MAP);
+        ASSERT_FALSE(item_is_error(js_set_key_default(array_item, key,
+            payload_root.get())));
+    }
+
+    // The companion map is reachable only through the immortal array handle.
+    for (int pass = 0; pass < 4; pass++) heap_gc_collect();
+    Item payload = js_get_key_default(array_item, key);
+    EXPECT_EQ(get_type_id(payload), LMD_TYPE_MAP);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ConvertsAccessorDescriptorsBetweenVirtualAndDataStorage) {
     Runtime runtime = {};
     runtime_init(&runtime);
