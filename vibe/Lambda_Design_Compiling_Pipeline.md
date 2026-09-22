@@ -1,9 +1,9 @@
-# Lambda Compile Pipeline — stage map, build-time budget, and tuning proposal
+# Lambda Compile Pipeline — stage map, build-time budget, and implementation
 
-> **Status**: **PROPOSAL (2026-09-22), not ratified.** Nothing here changes a
-> semantic or design ruling; every item is an implementation of the existing
-> pipeline contract (**D8.2.4**, **D8.2.5v2**) under the shipped **AUTO** tier
-> policy (**D8.1.1v13**). Rulings marked *proposed* below await the user.
+> **Status**: **IMPLEMENTED (2026-09-22).** This is an implementation of the
+> existing pipeline contract (**D8.2.4**, **D8.2.5v2**) under the shipped
+> **AUTO** tier policy (**D8.1.1v13**); it introduces no semantic or design
+> ruling.
 > **Role**: the design home for the *cost* of the Lambda compile pipeline from
 > source to a runnable unit — which stages exist, what each walks, where the
 > time goes, and how the front end is brought to a linear budget. The
@@ -56,10 +56,10 @@ source ──lex+parse──▶ reduction tape ──replay──▶ typed AST (
 | # | Pass (fact) | Owner | What it does | Tree walks |
 |---|---|---|---|---|
 | 1 | `parse` (PARSED) | `parser/lambda_lexer.c`, `parser/lambda_parser.c`, sink `direct_tape_reduce` in `build_ast.cpp` | Lex + recursive-descent/Pratt parse. The parser never builds nodes; it emits a **reduction tape** (§1.2). | source ×1 |
-| 2 | `build` (AST) | `lambda_rd_build_reductions`, `direct_ast_reduce` | Re-lexes the source once to predeclare top-level `fn`/`pn` names, then replays the tape bottom-up into typed `AstNode`s. Scope entry/exit, `push_name`, `lookup_name`, type inference and several validators run **inline** in the reducer; at each `FUNCTION_END` it runs capture analysis, cross-frame-read validation and the CW29 param-effect sweep on that body. Imports are loaded (and, on a template miss, fully compiled) inside this pass. | source ×1, tape ×1, plus one body walk per analysis per function |
-| 3 | `bind` (BOUND) | `lambda_ast_rebind_direct_scope_graph` | Clones every `NameScope`/`NameEntry` reachable from the tree into fresh pool objects, rewrites every AST edge to the clone (visited set = hashmap), rewrites entry-to-entry links, collects all functions, and recomputes captures per function (inner first). | ×2 full + per function |
-| 4 | `validate` (VALIDATED) | `lambda_ast_finalize_script` | Proc-method-as-value reject walk; call-colour walk (per function); per-top-level-item enforcing-call and cross-frame scans; `lambda_ast_decide_cow_borrows` (collects functions again, then 7 per-function analyses incl. two O(F²) passes over the function list); `analyze_lambda_concurrency` (collects functions a third time, 2 full walks, then up to 5 fixed-point body walks per procedure). | ≈9 full + per fn |
-| 5 | `index` (INDEXED) | `ast_index_compiler_pass` (`ast-core.cpp`) | Flat node table: node, parent, owner function, binding IDs, first-child/next-sibling, pointer→ID hash (D8.2.4). | ×1 full |
+| 2 | `build` (AST) | `lambda_rd_build_reductions`, `direct_ast_reduce` | Replays the tape bottom-up into typed `AstNode`s and predeclares top-level `fn`/`pn` names from parser `FUNCTION_HEADER` reductions. Scope entry/exit, `push_name`, `lookup_name`, type inference and source-ordered validators run **inline** in the reducer. | tape ×1, plus required per-body analysis |
+| 3 | `bind` (BOUND) | `lambda_ast_rebind_direct_scope_graph` | Clones every `NameScope`/`NameEntry` reachable from the tree into fresh pool objects, rewrites AST edges by bind epoch, remaps entry links and existing captures, and collects the one function list. | ×1 full |
+| 4 | `validate` (VALIDATED) | `lambda_ast_finalize_script` | Proc-method-as-value reject walk; call-colour walk (per function); enforcing-call and cross-frame checks; COW and concurrency consume bind's function list. One concurrency body visitor gathers facts before its call-graph fixed point. | bounded full + per fn |
+| 5 | `index` (INDEXED) | bind and `ast_index_compiler_pass` (`ast-core.cpp`) | Allocation reserves dense node IDs. Bind publishes graph columns for JIT; AUTO/interp defer JIT-only graph columns until an index consumer needs them (D8.2.4). | no T0 walk; one deferred JIT walk when needed |
 | 6 | plan (AUTO/interp) | `interp_scan_supported`, `interp_plan_script` (`interp_plan.cpp`) | Kind-support scan; frame-slot assignment; tail-call marks. Reject → whole-module `jit` fallback. | ×2 full |
 | 7 | `const-fold` (ANALYZED, jit) | `lambda_const_materialize_script`, `interp_const_fold_script` | Pools literal containers, folds constants over the **index**, not the tree. | index ×2 |
 | 8 | `mir-plan` (PLANNED) | `transpile_mir_ast_begin` | Pattern prepass, global-var BSS, **call-site collection: up to 6 rounds** of a whole-tree walk each running `infer_param_types_batched` per callee, then `prepass_forward_declare` with `infer_return_type` (itself a body walk) called 1–3× per function. | ≤7 full |
@@ -68,17 +68,15 @@ source ──lex+parse──▶ reduction tape ──replay──▶ typed AST (
 
 Three structural facts matter for cost:
 
-- **Facts are computed more than once.** Captures are computed at build
-  (`FUNCTION_END`) and again in bind. The function list is collected in bind,
-  in the COW pass and in the concurrency pass. `infer_return_type` and its
-  body scan `function_return_may_defer` run per round of call-site
-  collection, again in forward-declare, and again in `transpile_func_def`.
-- **The index is built in every tier but consumed only by the JIT path**
-  (const-fold and `transpile-mir.cpp`); T0 planning reads the tree directly.
-- **Import compilation nests inside the build pass** (`build_ast.cpp`
-  `load_script(..., is_import=true)` from the IMPORT reduction). The main
-  script's `ast` phase time therefore includes every import that missed the
-  prebuilt AST template.
+- **Facts have one owner where possible.** Captures are analysed at build
+  (`FUNCTION_END`) and remapped during bind; COW and concurrency reuse the
+  bind function list. MIR return/defer/defect inference is epoch-cached for a
+  call-site round.
+- **T0 does not materialize JIT-only index columns.** It retains stable IDs
+  but reads the AST directly; an on-demand JIT consumer materializes the
+  complete graph.
+- **Profile phases record own time.** Import compilation and prebuild-worker
+  waits are subtracted from the importer so its row represents its own work.
 
 ### 1.2 The reduction tape
 
@@ -89,7 +87,8 @@ records, so the tape is a post-order serialization of the parse tree. The
 build pass replays it forward with a `values[]` array of node pointers. The
 split keeps the parser a pure recognizer with no `Transpiler` knowledge and
 lets a comparison sink verify the C parser against the reference grammar
-(D8.1.2v3). Cost: two `mem_alloc` per record and one memcpy; small (§1.3).
+(D8.1.2v3). Record payloads come from one tape-owned arena, so destruction is
+one arena release rather than per-record frees.
 
 ### 1.3 Where the time goes (measured)
 
@@ -195,7 +194,7 @@ quadratic. LCO1.
    (`LR_01` §6: whole-history replay per line), so every millisecond saved
    in build is saved per keystroke as well.
 
-Target, proposed as the acceptance bar for §4: **build ≤ 3 × parse on every
+Target, used as the acceptance bar for §4: **build ≤ 3 × parse on every
 corpus script, and build linear in module-scope size** (`lets_8000` ≤ 4 ×
 `lets_2000`). The healthy rows of the corpus already sit at 3–4× (§4.1), so
 the bar states that the pathological rows join them, not that the reducer
@@ -203,14 +202,14 @@ gets faster than the lexer.
 
 ---
 
-## 3. Tuning proposal
+## 3. Implemented tuning
 
 Ordered by measured payoff on the T0 critical path. LC3.1–LC3.3 are the
 initial-load items; LC3.4–LC3.6 are accounting and hygiene that make the
 gain measurable and durable; LC3.7–LC3.8 are JIT-side and developer-loop
 items recorded here because the same investigation found them.
 
-### LC3.1 (proposed) — Scope lookups are indexed; the entry list stays the order
+### LC3.1 — Scope lookups are indexed; the entry list stays the order
 
 **Decision.** `NameScope` gains a lazily built open-addressing index keyed
 by the interned `String*` (pointer identity, since every binding name is
@@ -231,14 +230,14 @@ global table would need rekeying at the clone and a second lifetime to
 manage. Small scopes (parameters, `for` clauses, blocks) stay list-only, so
 the common case pays nothing.
 
-**Expected effect.** `oracle_poc` build 150 → ~15 ms (the residual is the
+**Design-time target.** `oracle_poc` build 150 → ~15 ms (the residual is the
 reducer proper, which the corpus shows at ≈3× parse); `lets_8000` 746 →
 ~15 ms; the duplicate-definition check in `push_name_with_spelling` becomes
 O(1). Constraint: the pointer-identity fast path already present in
 `lookup_name_in_current_scope` must remain the *only* comparison — the
 index never falls back to `memcmp`.
 
-### LC3.2 (proposed) — Import templates are consumed, never rebuilt, on the importer's thread
+### LC3.2 — Import templates are consumed, never rebuilt, on the importer's thread
 
 **Decision.** An IMPORT reduction that finds a prebuilt AST template
 (D8.5.1v7) adopts it; a miss for a module that a prebuild worker owns
@@ -251,7 +250,7 @@ modules that also appear as worker rows in the phase profile.
 compiles that a worker had already produced (§1.3). Until the miss cause is
 known (LCO2) the design ruling is the invariant, not the fix.
 
-### LC3.3 (proposed) — One function list, one capture pass, fused post-build walks
+### LC3.3 — One function list, one capture pass, fused post-build walks
 
 **Decision.**
 - Build assigns the index ID at node allocation (`alloc_ast_node_from_span`
@@ -283,10 +282,10 @@ known (LCO2) the design ruling is the invariant, not the fix.
 half of the front end after LC3.1 lands, but it is the half that scales with
 node count on *every* script, and it is where the D8.2.4 prohibition on new
 private core-child walks is being eroded (the COW and concurrency passes each
-grew their own collectors). Expected effect: front-end minus build ≈13 → ≈6
+grew their own collectors). Design-time target: front-end minus build ≈13 → ≈6
 ms on `oracle_poc`; a constant-factor gain on the corpus.
 
-### LC3.4 (proposed) — Build-time inline analyses run once per body
+### LC3.4 — Build-time inline analyses run once per body
 
 **Decision.** The analyses that run at `FUNCTION_END` inside the reducer
 (`analyze_captures`, `validate_cross_frame_binding_reads`,
@@ -301,7 +300,7 @@ an outer body's analysis does not descend into inner bodies
 `descend=true` sites in `lambda_ast_note_fixed_array_lengths` and
 `direct_bind_collect_function` are justified in a comment or fixed).
 
-### LC3.5 (proposed) — Compile-time profile records own time, and the breakdown is reachable
+### LC3.5 — Compile-time profile records own time, and the breakdown is reachable
 
 **Decision.** `PhaseProfile` and `LambdaCompilerTiming` record a script's
 **own** phase time: a nested `load_script` for an import subtracts its
@@ -316,7 +315,7 @@ is the reference driver.
 from its closure's, and the `jit` tier's `ast` column reads 731 ms for a
 150 ms build (§1.3).
 
-### LC3.6 (proposed) — Tape records are arena-allocated; predeclaration comes from the parser
+### LC3.6 — Tape records are arena-allocated; predeclaration comes from the parser
 
 **Decision.** `LambdaReductionTape` allocates child-index arrays and name
 tokens from one bump arena freed with the tape, replacing two `mem_alloc`
@@ -329,7 +328,7 @@ priority; recorded so the second lex is not mistaken for a necessary
 design element. Constraint: the tape's fail-closed `default:` arm (§1.2)
 must keep rejecting unknown forms.
 
-### LC3.7 (proposed) — JIT lowering: label→block map, worklist liveness, binding-keyed tables, cached inference
+### LC3.7 — JIT lowering: label→block map, worklist liveness, binding-keyed tables, cached inference
 
 **Decision.**
 - `em_finalize_semantic_root_write_back`: build a label→block array once
@@ -350,7 +349,7 @@ must keep rejecting unknown forms.
 emission ratchet (D8.6.1): emitted MIR must be byte-identical before and
 after, since these are analysis-order changes only.
 
-### LC3.8 (proposed) — Hot-path `log_debug` calls are removed from name lookup and registration
+### LC3.8 — Hot-path `log_debug` calls are removed from name lookup and registration
 
 **Decision.** `lookup_name`, `push_name_with_spelling` and the reducer's
 per-node arms emit no per-call `log_debug`. Diagnostics that matter stay at
@@ -370,7 +369,7 @@ end pays it, and the timing numbers it produces are misleading.
 - No semantic effect: every item is verified by golden identity across
   tiers (§4.3), and the reducer's diagnostics keep their source order.
 
-### 3.10 Priority and expected effect
+### 3.10 Priority and measured effect
 
 | Item | Path | `oracle_poc` build+bind+validate+index | Corpus effect |
 |---|---|---|---|
@@ -382,6 +381,35 @@ end pays it, and the timing numbers it produces are misleading.
 | LC3.6 tape arena | T0 critical | ≈1–2 ms | all rows, small |
 | LC3.7 JIT liveness/tables | jit + satellites | — | `lets_1000` 73 s → sub-second; jit tier −40–50% |
 | LC3.8 log gating | dev loop | — | debug-build compile 3× faster |
+
+### 3.11 Implementation record (2026-09-22)
+
+- `NameScope` now keeps declaration order in its existing list and adds a
+  lazily grown pointer-identity table for construction-time lookup. Imported
+  spellings are re-interned in the importing `name_pool` before they reach
+  that table, preserving the D8.2.4 identity invariant across template
+  owners.
+- The direct parser writes a tape-owned `FUNCTION_HEADER` record; top-level
+  predeclaration consumes those records, and tape payload memory is released
+  with its single arena.
+- Binding uses an epoch mark, remaps the reducer-built capture list in place,
+  and returns one function list to validation. Allocation reserves node IDs;
+  bind publishes graph columns, with the JIT-only columns deferred for T0 as
+  permitted by D8.2.4 and D8.2.5v2.
+- Cache templates keep a cache-only dependency list of immutable template
+  owners. Execution keeps its distinct Runtime-local `direct_imports` shell
+  graph, so both AST and MIR cache publication avoid retaining stale module
+  state (D8.5.1v7).
+- The call validator resolves source offsets to line numbers only when it
+  emits a diagnostic. Successful calls previously scanned the source prefix
+  solely to prepare an unused line number, producing a second quadratic
+  build cost after scope indexing; this does not alter diagnostics or their
+  source order (D8.2.5v2).
+- Release scaling, interleaving 12 runs per size, measured median
+  `ast_build_us` of 1,135 for `fns_500` and 3,997 for `fns_2000` (3.52×),
+  and 2,443 for `lets_2000` and 9,478 for `lets_8000` (3.88×). The focused
+  cache suite, compiler-pass suite, and interp/JIT output parity checks are
+  recorded with the implementation handoff.
 
 ---
 
@@ -400,8 +428,9 @@ longer compile (`wip/scientific_computing_research.ls`,
 
 Baseline, interp tier, debug build, `--no-log --dry-run`, min of 3
 (2026-09-22, commit `0ccf73a4a` + working tree). `ast` = build + bind +
-validate + index. Rows marked † have imports and their `ast` includes
-nested import compiles until LC3.5 lands.
+validate + index. Rows marked † are historical nested totals; current
+profiles subtract nested compile and prebuild-wait time from the importer's
+own phase under LC3.5.
 
 | Script | KB | top-level decls | parse ms | ast ms | plan ms | ast/parse |
 |---|---|---|---|---|---|---|
@@ -443,8 +472,7 @@ utils/compile_phase_bench.sh jit 3 > temp/compile_phase_after_jit.tsv
 
 # scaling witnesses
 for N in 1000 2000 4000 8000; do
-  LAMBDA_PROFILE=1 LAMBDA_TIER=interp ./lambda.exe --no-log --dry-run temp/astscale/lets_$N.ls
-  grep -v '^#' temp/phase_profile.txt | cut -f1-4
+  LAMBDA_COMPILER_TIMING=1 LAMBDA_TIER=interp ./lambda.exe temp/astscale/lets_$N.ls --no-log
 done
 ```
 
@@ -452,9 +480,8 @@ Rules: same binary type before and after (both debug or both release —
 `make release` is the number that ships, the debug build is the number a
 developer sees); `--no-log` always; one benchmark process at a time; report
 min of 3 per phase; keep both TSVs under `temp/` and quote them in the impl
-record. Until LC3.5 lands, import-heavy rows are compared on their nested
-total and separately on the leaf modules' own rows from
-`temp/phase_profile.txt`.
+record. LC3.5 profiles import-heavy rows on own time and retain their worker
+rows separately in `temp/phase_profile.txt`.
 
 ### 4.3 Acceptance
 
@@ -482,14 +509,14 @@ total and separately on the leaf modules' own rows from
 
 | Site | Walks | Note |
 |---|---|---|
-| `direct_predeclare_top_level_functions` (`build_ast.cpp`) | source lex ×1 | second lex of the file |
+| `direct_predeclare_top_level_functions` (`build_ast.cpp`) | tape ×1 | parser-owned `FUNCTION_HEADER` records; no second lex |
 | `lambda_rd_build_reductions` | tape ×1 | `values[]` replay |
 | `FUNCTION_END` arm of `direct_ast_reduce` | per fn: `analyze_captures` (params + body), `validate_cross_frame_binding_reads`, `lambda_ast_note_param_cow_effects` | inline analyses |
-| `lambda_ast_rebind_direct_scope_graph` | full ×2 + per fn `analyze_captures` | visited hashmap |
+| `lambda_ast_rebind_direct_scope_graph` | full ×1 | epoch mark, capture-entry remap, and one returned function list |
 | `lambda_ast_finalize_script` | `reject_proc_method_value` ×1, `colour_walk_visit` ×1 (+ per fn), per top-level item ×2 | |
-| `lambda_ast_decide_cow_borrows` | collect ×1; `note_returned_params`, `note_var_root_sharing` O(F²) over the list; 5 per-fn analyses, `note_fixed_array_lengths` walks each body ×2 | |
-| `analyze_lambda_concurrency` | collect ×1, validate ×1, handler-await ×1, per proc: may-await (fixed point), task-context (fixed point), await-points, handler-state | up to 5 body walks per proc per round |
-| `ast_index_compiler_pass` | full ×1 | unused by T0 |
+| `lambda_ast_decide_cow_borrows` | returned function list; per-function facts only | no independent function collector |
+| `analyze_lambda_concurrency` | returned function list; one combined body scan and shared call-graph worklist | consolidated per-procedure facts |
+| `ast_index_compiler_pass` | no T0 full walk | allocation reserves IDs; bind publishes core graph columns; JIT-only columns are lazy |
 | `interp_scan_supported`, `interp_plan_script` | full ×2 | T0 only |
 | `lambda_const_materialize_script`, `interp_const_fold_script` | index ×2 | jit only |
 | `prepass_collect_call_sites` | full × ≤6 rounds | `infer_param_types_batched` per callee per round |
@@ -502,10 +529,10 @@ total and separately on the leaf modules' own rows from
 - **LCO1** `complex_iot_report_html.ls` parses at 50× the corpus rate per
   KB, linear in size. No backtracking found in `lambda_parser.c` by
   keyword search; needs a sample of a longer instance.
-- **LCO2** Prebuilt AST templates miss on the importer's thread
-  (`ast_misses=18` for a 15-entry closure; modules built on a worker are
-  rebuilt on main). Identify the key mismatch or ordering that defeats
-  `module_ast_prebuild_await_import`.
+- **LCO2 (resolved)** Cached template dependency validation had normalized
+  execution-local imports in place. Template-owner dependencies now live in
+  `cache_direct_imports`, so prebuilt AST and MIR graphs do not reuse an
+  earlier Runtime's module shells (D8.5.1v7).
 - **LCO3** `ui/todo2.ls` rejects T0 (view template without body) and falls
   back to whole-module JIT (79.7 ms). Either T0 support or a satellite-only
   path for the rejected kind.
@@ -524,7 +551,8 @@ total and separately on the leaf modules' own rows from
 - Tooling: `LAMBDA_PROFILE=1` writes `temp/phase_profile.txt` per process
   (`runner.cpp` `profile_dump_to_file`); rows are appended in completion
   order, so nested import rows precede their importer. `LAMBDA_COMPILER_
-  TIMING=1` currently prints only on the `test-batch` path (`main.cpp`).
+  TIMING=1` also prints the stable schema-1 record for ordinary script paths
+  (`main.cpp`), including parse/build/bind/validate/index and analysis time.
 - Sampling: macOS `sample <pid> 2 1` launched right after the process, on a
   longer synthetic input; `-wait` attaches too late for a 150 ms compile.
   The compile runs on the large-stack thread, not the main thread.
