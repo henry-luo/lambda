@@ -90,7 +90,10 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
         layout_ensure_replaced_image_surface(
             lycon, block, block->as_element());
     }
-    if (block->embed && block->embedp()->img) {
+    // EmbedProp also carries flex/grid state, so only replaced boxes may
+    // interpret its image slot as intrinsic content.
+    if (layout_replaced_image_surface_contributes(block) &&
+        block->embed && block->embedp()->img) {
         ImageSurface* image = block->embedp()->img;
         if (image->has_intrinsic_size && image->width > 0 && image->height > 0) {
             replaced_facts_set_pair(&facts, (float)image->width,

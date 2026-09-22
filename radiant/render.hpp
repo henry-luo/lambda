@@ -1660,6 +1660,10 @@ typedef struct RenderContext {
     // LIFO scratch allocator for scoped temporary buffers (pixel buffers, clip masks, etc.)
     ScratchArena scratch;
 
+    // per-frame memoization of immutable post-layout descendant bounds used by
+    // viewport and dirty-region culling.
+    HashMap* content_bounds_cache;
+
     // Per-render profiling counters and timers.
     RenderProfiler* profiler;
 

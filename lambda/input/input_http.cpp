@@ -44,6 +44,19 @@ static void http_set_request_body(CURL* curl, const FetchConfig* config) {
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
 }
 
+static struct curl_slist* http_document_navigation_headers() {
+    struct curl_slist* headers =
+        curl_slist_append(NULL, RADIANT_HTTP_DOCUMENT_ACCEPT_HEADER);
+    if (!headers) return NULL;
+    struct curl_slist* with_language =
+        curl_slist_append(headers, RADIANT_HTTP_DOCUMENT_LANGUAGE_HEADER);
+    if (!with_language) {
+        curl_slist_free_all(headers);
+        return NULL;
+    }
+    return with_language;
+}
+
 // Maximum response size (50 MB) — prevents unbounded memory growth from large pages
 #define HTTP_MAX_RESPONSE_SIZE (50 * 1024 * 1024)
 #define HTTP_CACHE_MAX_SIZE (100 * 1024 * 1024)
@@ -124,6 +137,13 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     response.cookie_jar = config ? config->cookie_jar : NULL;
     response.curl = curl;
     response.request_url = url;
+    struct curl_slist* document_headers = http_document_navigation_headers();
+    if (!document_headers) {
+        log_error("HTTP: Failed to allocate document request headers");
+        byte_builder_destroy(&response.body);
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
     CURLcode res;
 
     // Configure curl options
@@ -141,6 +161,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, config ? config->max_redirects : default_http_config.max_redirects);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, config ? config->user_agent : default_http_config.user_agent);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, document_headers);
 
     // SSL/TLS configuration
     if (config ? config->verify_ssl : default_http_config.verify_ssl) {
@@ -195,6 +216,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
             log_error("HTTP: failed to persist response cookies");
         }
         byte_builder_destroy(&response.body);
+        curl_slist_free_all(document_headers);
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -209,6 +231,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
             log_error("HTTP: failed to persist response cookies");
         }
         byte_builder_destroy(&response.body);
+        curl_slist_free_all(document_headers);
         curl_easy_cleanup(curl);
         return NULL;
     }
@@ -235,6 +258,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     if (response.cookie_jar && !cookie_jar_flush(response.cookie_jar)) {
         log_error("HTTP: failed to persist response cookies");
     }
+    curl_slist_free_all(document_headers);
     curl_easy_cleanup(curl);
     return (char*)byte_builder_take(&response.body, NULL);
 }

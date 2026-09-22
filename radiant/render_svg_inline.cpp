@@ -1440,11 +1440,6 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
     if (!tag || strcmp(tag, "pattern") != 0) return false;
     if (pattern_elem->length <= 0) return false;
 
-    float x = parse_svg_length(get_svg_attr(pattern_elem, "x"), 0.0f);
-    float y = parse_svg_length(get_svg_attr(pattern_elem, "y"), 0.0f);
-    float w = parse_svg_length(get_svg_attr(pattern_elem, "width"), 0.0f);
-    float h = parse_svg_length(get_svg_attr(pattern_elem, "height"), 0.0f);
-    if (w <= 0.0f || h <= 0.0f) return false;
     if (bw <= 0.0f || bh <= 0.0f) {
         bx = ctx->viewbox_x;
         by = ctx->viewbox_y;
@@ -1452,6 +1447,27 @@ static bool draw_pattern_fill(SvgInlineRenderContext* ctx, RdtPath* path, Elemen
         bh = ctx->viewbox_height;
     }
     if (bw <= 0.0f || bh <= 0.0f) return false;
+
+    const char* units = get_svg_attr(pattern_elem, "patternUnits");
+    bool user_space = units && strcmp(units, "userSpaceOnUse") == 0;
+    float x;
+    float y;
+    float w;
+    float h;
+    if (user_space) {
+        x = parse_svg_length(get_svg_attr(pattern_elem, "x"), 0.0f);
+        y = parse_svg_length(get_svg_attr(pattern_elem, "y"), 0.0f);
+        w = parse_svg_length(get_svg_attr(pattern_elem, "width"), 0.0f);
+        h = parse_svg_length(get_svg_attr(pattern_elem, "height"), 0.0f);
+    } else {
+        // SVG defaults patternUnits to objectBoundingBox, so unitless and
+        // percentage geometry is expressed as a fraction of the painted path.
+        x = bx + parse_svg_pct_or_num(get_svg_attr(pattern_elem, "x"), 0.0f) * bw;
+        y = by + parse_svg_pct_or_num(get_svg_attr(pattern_elem, "y"), 0.0f) * bh;
+        w = parse_svg_pct_or_num(get_svg_attr(pattern_elem, "width"), 0.0f) * bw;
+        h = parse_svg_pct_or_num(get_svg_attr(pattern_elem, "height"), 0.0f) * bh;
+    }
+    if (w <= 0.0f || h <= 0.0f) return false;
 
     RdtMatrix saved_transform = ctx->transform;
     RdtMatrix pattern_matrix = rdt_matrix_identity();

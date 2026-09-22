@@ -192,8 +192,8 @@ static char* url_idna_encode_hostname(const char* hostname) {
     return out;
 }
 
-// percent-encode non-ASCII bytes in a URL component.
-// Characters already percent-encoded (%XX) are preserved.
+// Percent-encode URL-component bytes that cannot be handed to a network
+// client literally. Characters already percent-encoded (%XX) are preserved.
 // Returns a malloc'd string; caller must free.
 static char* url_percent_encode(const char* input, size_t len) {
     // worst case: every byte becomes %XX (3x expansion)
@@ -209,8 +209,9 @@ static char* url_percent_encode(const char* input, size_t len) {
             out[j++] = input[i+1];
             out[j++] = input[i+2];
             i += 2;
-        } else if (c > 0x7E) {
-            // non-ASCII: percent-encode each byte
+        } else if (c <= 0x20 || c > 0x7E) {
+            // Components built during relative resolution need the same
+            // whitespace/control normalization as directly parsed URLs.
             int written = snprintf(out + j, 4, "%%%02X", c);
             if (written > 0) j += (size_t)written;
         } else {
@@ -219,6 +220,18 @@ static char* url_percent_encode(const char* input, size_t len) {
     }
     out[j] = '\0';
     return out;
+}
+
+static bool url_normalize_percent_encoded_component(String** component) {
+    if (!component || !*component) return true;
+    char* encoded = url_percent_encode((*component)->chars, (*component)->len);
+    if (!encoded) return false;
+    String* normalized = url_create_string(encoded);
+    mem_free(encoded);
+    if (!normalized) return false;
+    url_free_string(*component);
+    *component = normalized;
+    return true;
 }
 
 // Create URL parser
@@ -1457,6 +1470,13 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
 
     if (error != URL_OK) {
         return error;
+    }
+
+    // Relative resolution builds path/query strings directly and otherwise
+    // skips url_parse_into()'s component normalization.
+    if (!url_normalize_percent_encoded_component(&result->pathname) ||
+        !url_normalize_percent_encoded_component(&result->search)) {
+        return URL_ERROR_MEMORY_ALLOCATION;
     }
 
     // Build complete href using the robust function from url.c

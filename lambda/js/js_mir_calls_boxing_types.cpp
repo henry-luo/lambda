@@ -1001,10 +1001,33 @@ static bool jm_is_native_number_type(TypeId type_id) {
     return type_id == LMD_TYPE_INT || type_id == LMD_TYPE_FLOAT;
 }
 
+static bool jm_is_current_boxed_parameter(JsMirTranspiler* mt,
+        NameEntry* binding) {
+    if (!mt || mt->in_native_func || !mt->current_fc ||
+            !mt->current_fc->node || !binding) {
+        return false;
+    }
+    for (JsAstNode* parameter = mt->current_fc->node->params; parameter;
+            parameter = parameter->next) {
+        JsIdentifierNode* identifier =
+            js_ast_parameter_binding_identifier(parameter);
+        if (identifier && identifier->entry == binding) return true;
+    }
+    return false;
+}
+
 // The AST builder owns all profile transfer rules. MIR only adds facts that
 // depend on the current binding or a collected callee (D8.2.4-D8.2.6).
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return LMD_TYPE_ANY;
+    if (node->node_type == AST_NODE_IDENT &&
+            jm_is_current_boxed_parameter(mt,
+                ((JsIdentifierNode*)node)->entry)) {
+        // A guarded sibling may use its inferred ABI, but this body receives
+        // every JS value. Do not let the source profile bypass GetValue and
+        // ToPrimitive here (D8.2.4-D8.2.6).
+        return LMD_TYPE_ANY;
+    }
     TypeId published = jm_published_ast_type(node);
     if (published != LMD_TYPE_ANY) return published;
 

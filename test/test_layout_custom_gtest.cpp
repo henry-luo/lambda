@@ -239,6 +239,26 @@ TEST_F(CustomLayoutTest, ExplicitParentSizeWinsOverPlacedChildBounds) {
     EXPECT_FLOAT_EQ(parent_blk.first_line_baseline, 17.0f);
 }
 
+TEST_F(CustomLayoutTest, FlexEmbedImageDoesNotBecomeLinkIntrinsicSize) {
+    ViewBlock link = {};
+    EmbedProp embed = EMBED_PROP_DEFAULT;
+    ImageSurface image = {};
+    image.width = 640;
+    image.height = 360;
+    image.has_intrinsic_size = true;
+
+    init_block(&link, "a", 0.0f, 0.0f);
+    link.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false};
+    link.embed = &embed;
+    link.embed->img = &image;
+
+    EXPECT_FALSE(layout_replaced_image_surface_contributes(&link));
+
+    ViewBlock image_block = {};
+    init_block(&image_block, "img", 0.0f, 0.0f);
+    EXPECT_TRUE(layout_replaced_image_surface_contributes(&image_block));
+}
+
 TEST_F(CustomLayoutTest, AutoParentSizeHonorsMinMaxConstraints) {
     ViewBlock parent = {};
     ViewBlock first = {};

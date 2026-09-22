@@ -401,6 +401,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
     }
 
     mem_scratch_init(NULL, &rdcon->scratch, view_tree->scratch_arena, MEM_ROLE_RENDER, "render.scratch");
+    rdcon->content_bounds_cache = layout_content_bounds_cache_create();
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
     rdcon->paint_list = (PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER);
@@ -419,6 +420,8 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
 }
 
 static void render_output_cleanup_context(RenderContext* rdcon) {
+    layout_content_bounds_cache_destroy(rdcon->content_bounds_cache);
+    rdcon->content_bounds_cache = nullptr;
     if (rdcon->paint_list) {
         paint_list_destroy(rdcon->paint_list);
         rdcon->paint_list->~PaintList();

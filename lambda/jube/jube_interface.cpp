@@ -827,6 +827,32 @@ int jube_member_set(Item receiver, Item key, Item value, Item* out) {
     return 1;
 }
 
+int jube_member_define_own(Item receiver, Item key, Item descriptor, Item* out) {
+    JubeTypeRecord* trec = jube_record_for(receiver);
+    if (!trec || !out) return 0;
+    if (!jube_native_alive(receiver)) {
+        *out = jube_undefined_item();
+        return 1;
+    }
+    RootFrame roots(4);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> descriptor_root(roots, descriptor);
+    Rooted<Item> expando_root(roots, ItemNull);
+    expando_root.set(jube_expando_object(receiver_root.get(), true));
+    if (get_type_id(expando_root.get()) != LMD_TYPE_MAP) return 0;
+    // DOM and other virtual hosts keep arbitrary own fields in this map; use
+    // DefineOwnProperty so descriptor attributes remain observable.
+    Item result = js_object_define_property(expando_root.get(), key_root.get(),
+        descriptor_root.get());
+    if (item_is_error(result)) {
+        *out = result;
+        return 1;
+    }
+    *out = (Item){.item = ITEM_TRUE};
+    return 1;
+}
+
 int jube_member_has(Item receiver, Item key, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;

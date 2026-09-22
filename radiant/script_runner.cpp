@@ -1156,6 +1156,16 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
+        // An idle task is a cooperative timer in the headless event loop.  It
+        // keeps browser feature probes and deferred page initialization on the
+        // same callback queue as other document tasks.
+        "function requestIdleCallback(callback, options) {\n"
+        "  if (typeof callback !== 'function') throw new TypeError('requestIdleCallback callback must be a function');\n"
+        "  return setTimeout(function(){ callback({ didTimeout: false, timeRemaining: function(){ return 0; } }); }, 0);\n"
+        "}\n"
+        "function cancelIdleCallback(handle) { clearTimeout(handle); }\n"
+        "window.requestIdleCallback = requestIdleCallback;\n"
+        "window.cancelIdleCallback = cancelIdleCallback;\n"
     );
     // Bootstrap screen metrics come from the host viewport, not a CSSOM read
     // that would synchronously lay out an otherwise uncommitted document.

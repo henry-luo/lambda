@@ -186,6 +186,25 @@ static bool test_radiant_view_write_script_bytes(FILE* file, size_t bytes) {
     return true;
 }
 
+static bool test_radiant_view_write_large_registry_table(FILE* file, int row_count) {
+    if (!file || row_count <= 0) return false;
+    if (fputs("<!doctype html><style>table{border-collapse:collapse}td{padding:2px}</style>"
+              "<table><tbody>", file) < 0) {
+        return false;
+    }
+    for (int row = 0; row < row_count; row++) {
+        char cells[256];
+        int count = snprintf(cells, sizeof(cells),
+            "<tr><td>%d</td><td>Protocol registry row</td>"
+            "<td>RFC %04d</td><td>stable table culling coverage</td></tr>",
+            row, row);
+        if (count <= 0 || count >= (int)sizeof(cells) || fputs(cells, file) < 0) {
+            return false;
+        }
+    }
+    return fputs("</tbody></table>", file) >= 0;
+}
+
 static void test_radiant_view_run_case(size_t index) {
     RadiantViewCaseResult* result = &g_radiant_view_results[index];
     const RadiantViewCase* view_case = &g_radiant_view_cases[index];
@@ -363,6 +382,288 @@ TEST(RadiantViewTest, PreservesDocumentUrlAcrossScriptFormSubmit) {
 
 TEST(RadiantViewTest, LaysOutDenseCollapsedTable) {
     test_radiant_view_expect_case(17);
+}
+
+TEST(RadiantViewTest, CullsLargeOffscreenRegistryTableWithoutRepeatedBoundsWalks) {
+    const char* page = "./temp/test_radiant_view_large_registry_table.html";
+    const char* view_log = "./temp/test_radiant_view_large_registry_table.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    bool page_written = test_radiant_view_write_large_registry_table(page_file, 3000);
+    ASSERT_EQ(0, fclose(page_file));
+    ASSERT_TRUE(page_written);
+
+    const char* args[] = {"./lambda.exe", "view", page, "--headless", NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.merge_stderr = true;
+    options.timeout_ms = 20000;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(shell_result.timed_out);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        view_log, "view command completed with result: 0"));
+    shell_result_free(&shell_result);
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, LaysOutInlineFlexWithInlineSiblingAndAbsoluteChild) {
+    const char* page = "./temp/test_radiant_view_inline_flex_absolute.html";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><style>"
+        ".container{width:240px}.flex{display:inline-flex;border:1px solid #000}"
+        ".absolute{position:absolute;top:0}</style>"
+        "<div class=container><span class=flex><span>inline sibling</span>"
+        "<span class=absolute>absolute child</span></span></div>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, nullptr);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    remove(page);
+}
+
+TEST(RadiantViewTest, ExposesNonConstructibleCssStyleDeclarationInterface) {
+    const char* page = "./temp/test_radiant_view_css_style_declaration.html";
+    const char* view_log = "./temp/test_radiant_view_css_style_declaration.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "if(typeof CSSStyleDeclaration!=='function')throw Error('missing CSSStyleDeclaration');"
+        "try{new CSSStyleDeclaration();throw Error('CSSStyleDeclaration constructed')}"
+        "catch(error){if(!(error instanceof TypeError))throw error}</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ExposesSupportedLinkRelationsThroughRelList) {
+    const char* page = "./temp/test_radiant_view_link_rel_list.html";
+    const char* view_log = "./temp/test_radiant_view_link_rel_list.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "var link=document.createElement('link');var rels=link.relList;"
+        "if(!(rels instanceof DOMTokenList)||rels!==link.relList)"
+        "throw Error('missing stable link relList');"
+        "if(!rels.supports('prefetch')||!rels.supports('modulepreload')||"
+        "rels.supports('not-a-link-relation'))throw Error('invalid rel support');"
+        "rels.add('preload');if(!rels.contains('preload')||rels.length!==1)"
+        "throw Error('relList add failed');"
+        "rels.remove('preload');if(rels.length!==0)throw Error('relList remove failed');"
+        "</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ExposesMediaElementInterfacesForMediaNodes) {
+    const char* page = "./temp/test_radiant_view_media_interfaces.html";
+    const char* view_log = "./temp/test_radiant_view_media_interfaces.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "var video=document.createElement('video');"
+        "var audio=document.createElement('audio');"
+        "if(!(video instanceof HTMLVideoElement)||!(video instanceof HTMLMediaElement)||"
+        "!(audio instanceof HTMLAudioElement)||!(audio instanceof HTMLMediaElement))"
+        "throw Error('media element interface mismatch');"
+        "try{new HTMLVideoElement();throw Error('HTMLVideoElement constructed')}"
+        "catch(error){if(!(error instanceof TypeError))throw error}</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ExposesScriptElementInterfaceForScriptNodes) {
+    const char* page = "./temp/test_radiant_view_script_interface.html";
+    const char* view_log = "./temp/test_radiant_view_script_interface.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "var script=document.createElement('script');"
+        "if(!(script instanceof HTMLScriptElement)||!(script instanceof HTMLElement))"
+        "throw Error('script element interface mismatch');"
+        "try{new HTMLScriptElement();throw Error('HTMLScriptElement constructed')}"
+        "catch(error){if(!(error instanceof TypeError))throw error}</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ReflectsInlineScriptSourceThroughScriptText) {
+    const char* page = "./temp/test_radiant_view_script_text.html";
+    const char* view_log = "./temp/test_radiant_view_script_text.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script type=\"framer/appear\" id=\"appearData\">{\"entry\":true}</script>"
+        "<script>var data=window.appearData;"
+        "if(data!==document.getElementById('appearData')||data.text!=='{\"entry\":true}')"
+        "throw Error('script text getter mismatch');"
+        "data.text='{\"entry\":false}';"
+        "if(data.text!==data.textContent||data.text!=='{\"entry\":false}')"
+        "throw Error('script text setter mismatch');</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, SchedulesIdleCallbackWithDeadline) {
+    const char* page = "./temp/test_radiant_view_idle_callback.html";
+    const char* view_log = "./temp/test_radiant_view_idle_callback.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "var idle=requestIdleCallback(function(deadline){"
+        "if(deadline.didTimeout!==false||typeof deadline.timeRemaining!=='function'||"
+        "deadline.timeRemaining()!==0)throw Error('invalid idle deadline');"
+        "document.documentElement.setAttribute('data-idle-ran','yes');});"
+        "if(idle===undefined||idle===null)throw Error('missing idle callback handle');</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, RendersObjectBoundingBoxPatternWithoutUserUnitTiling) {
+    const char* page = "./temp/test_radiant_view_object_bounding_box_pattern.html";
+    const char* view_log = "./temp/test_radiant_view_object_bounding_box_pattern.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><svg width=200 height=100 viewBox='0 0 200 100'>"
+        "<defs><pattern id=grid width=.1 height=.1>"
+        "<rect width=1 height=1 fill='#246'/></pattern></defs>"
+        "<rect width=200 height=100 fill='url(#grid)'/></svg>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_FALSE(shell_result.timed_out);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(view_log,
+        "view command completed with result: 0"));
+    remove(page);
+    remove(view_log);
 }
 
 TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {

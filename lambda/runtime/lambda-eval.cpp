@@ -11084,6 +11084,10 @@ static bool map_shared_ctor_shape_should_detach_for_type(TypeMap* tm,
         TypeId field_type, TypeId value_type) {
     if (!typemap_is_shared_shape(tm)) return false;
     if (field_type == value_type) return false;
+    // The null placeholder is the dynamic Item lane. It preserves each
+    // instance's tagged value and has precise GC tracing, so a first source
+    // write must not turn the shared constructor recipe into a type transition.
+    if (field_type == LMD_TYPE_NULL) return false;
     // A Map pointer lane already represents a null child as a null pointer,
     // which `_map_read_field` reboxes as ItemNull. Keep the immutable recipe
     // for recursive object-literal base cases instead of creating a null-tagged
@@ -11950,14 +11954,6 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 return ItemNull;
             }
             TypeId field_type = entry->type->type_id;
-            // Publishing a null constructor field seals the shared blueprint:
-            // a later instance must not retag that earlier null as a native lane.
-            if (value_type == LMD_TYPE_NULL && map_type->is_shared_constructor_shape &&
-                    map_type_id == LMD_TYPE_MAP &&
-                    map_ctor_offset_is_reserved(map_item.map, entry->byte_offset)) {
-                map_type->is_shared_constructor_shape = false;
-                map_type->is_transition_shared_shape = true;
-            }
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
             if (!entry || !entry->type) return ItemError;
@@ -11968,6 +11964,14 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             }
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
+
+            if (field_type == LMD_TYPE_NULL && typemap_is_shared_shape(map_type)) {
+                // A shared constructor placeholder is a raw Item lane. Source
+                // order can move it out of the leading fixed prefix, but it
+                // must still retain the null descriptor for mixed instances.
+                map_field_store_dynamic_item(field_ptr, value);
+                return ItemNull;
+            }
 
             LaneStorageDesc lane = {};
             if (shape_entry_uses_native_lane(entry, &lane) &&

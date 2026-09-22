@@ -4255,6 +4255,23 @@ TEST(JsInterpreter, DoesNotReplayCommaSequenceBeforeAwait) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, ResumesNestedAwaitAtItsInnerOperand) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let effects = 0; async function run() { return await (await Promise.resolve(++effects)); } run();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "nested-await-replay.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(1.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ClosesForAwaitIteratorAfterValueAwaitRejection) {
     Runtime runtime = {};
     runtime_init(&runtime);

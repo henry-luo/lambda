@@ -1422,129 +1422,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Eval completion: ForBodyEvaluation starts with V = undefined (spec §13.7.4.8)
     jm_eval_cptn_reset(mt);
 
-    // --- For-loop specialization: detect a native-compatible loop bound ---
-    // Three tiers of test optimization:
-    //   1. full_native:  both sides typed numeric → native compare + branch (existing)
-    //   2. semi_native:  one side typed, other untyped → coerce the live bound
-    //                    and use a native compare each iteration
-    //   3. boxed:        no type info → boxed runtime comparison (fallback)
-    bool semi_native_test = false;
-    JsAstNode* semi_native_bound_node = NULL;
-    MIR_insn_code_t cached_cmp_insn = MIR_LTS;
-    bool cached_bound_on_right = true;
-    JsAstNode* cached_counter_node = NULL;
-    TypeId cached_cmp_target = LMD_TYPE_INT;
-
-    if (for_node->test && for_node->test->node_type == AST_NODE_BINARY) {
-        JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
-        TypeId lt = jm_get_effective_type(mt, test_bin->left);
-        TypeId rt = jm_get_effective_type(mt, test_bin->right);
-        bool left_num  = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
-        bool right_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-        bool full_native = left_num && right_num;
-
-        // Only consider semi-native when one side is typed, other isn't
-        if (!full_native && (left_num || right_num)) {
-            bool is_cmp = false;
-            switch (test_bin->op) {
-            case OPERATOR_LT: case OPERATOR_LE: case OPERATOR_GT: case OPERATOR_GE:
-            case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_JS_STRICT_EQ: case OPERATOR_JS_STRICT_NE:
-                is_cmp = true; break;
-            default: break;
-            }
-
-            if (is_cmp) {
-                // Identify the loop counter from the init statement to avoid
-                // confusing counter/bound.  The counter is the variable being
-                // initialized in for(init; test; update).
-                const char* init_var_name = NULL;
-                int init_var_len = 0;
-                if (for_node->init && for_node->init->node_type == AST_NODE_VAR_STAM) {
-                    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)for_node->init;
-                    if (vd->declarations && vd->declarations->node_type == AST_NODE_VARIABLE_DECLARATOR) {
-                        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
-                        if (d->id && d->id->node_type == AST_NODE_IDENT) {
-                            JsIdentifierNode* vid = (JsIdentifierNode*)d->id;
-                            init_var_name = vid->name->chars;
-                            init_var_len = (int)vid->name->len;
-                        }
-                    }
-                } else if (for_node->init && for_node->init->node_type == AST_NODE_ASSIGN) {
-                    JsAssignmentNode* asgn = (JsAssignmentNode*)for_node->init;
-                    if (asgn->op == OPERATOR_ASSIGN &&
-                        asgn->left && asgn->left->node_type == AST_NODE_IDENT) {
-                        JsIdentifierNode* vid = (JsIdentifierNode*)asgn->left;
-                        init_var_name = vid->name->chars;
-                        init_var_len = (int)vid->name->len;
-                    }
-                }
-
-                // Determine which side is the counter (must match init variable)
-                bool left_is_counter = false;
-                bool right_is_counter = false;
-                if (init_var_name) {
-                    if (test_bin->left->node_type == AST_NODE_IDENT) {
-                        JsIdentifierNode* lid = (JsIdentifierNode*)test_bin->left;
-                        if (lid->name->len == (size_t)init_var_len &&
-                            strncmp(lid->name->chars, init_var_name, init_var_len) == 0)
-                            left_is_counter = true;
-                    }
-                    if (test_bin->right->node_type == AST_NODE_IDENT) {
-                        JsIdentifierNode* rid = (JsIdentifierNode*)test_bin->right;
-                        if (rid->name->len == (size_t)init_var_len &&
-                            strncmp(rid->name->chars, init_var_name, init_var_len) == 0)
-                            right_is_counter = true;
-                    }
-                }
-
-                // Only use semi-native if we can identify counter and the typed
-                // side is the counter (so we can unbox it; bound is cached as native)
-                bool can_semi = false;
-                JsAstNode* bound_expr = NULL;
-                bool use_float = false;
-
-                if (left_is_counter && !right_is_counter && left_num) {
-                    // Pattern: typed_counter CMP untyped_bound  (e.g. i < n)
-                    cached_counter_node = test_bin->left;
-                    bound_expr = test_bin->right;
-                    use_float = (lt == LMD_TYPE_FLOAT);
-                    cached_bound_on_right = true;
-                    can_semi = true;
-                } else if (right_is_counter && !left_is_counter && right_num) {
-                    // Pattern: untyped_bound CMP typed_counter  (e.g. 0 <= i)
-                    cached_counter_node = test_bin->right;
-                    bound_expr = test_bin->left;
-                    use_float = (rt == LMD_TYPE_FLOAT);
-                    cached_bound_on_right = false;
-                    can_semi = true;
-                }
-
-                if (can_semi) {
-                    cached_cmp_target = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-                    semi_native_bound_node = bound_expr;
-
-                    switch (test_bin->op) {
-                    case OPERATOR_LT:        cached_cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
-                    case OPERATOR_LE:        cached_cmp_insn = use_float ? MIR_DLE : MIR_LES; break;
-                    case OPERATOR_GT:        cached_cmp_insn = use_float ? MIR_DGT : MIR_GTS; break;
-                    case OPERATOR_GE:        cached_cmp_insn = use_float ? MIR_DGE : MIR_GES; break;
-                    case OPERATOR_EQ:
-                    case OPERATOR_JS_STRICT_EQ: cached_cmp_insn = use_float ? MIR_DEQ : MIR_EQ;  break;
-                    case OPERATOR_NE:
-                    case OPERATOR_JS_STRICT_NE: cached_cmp_insn = use_float ? MIR_DNE : MIR_NE;  break;
-                    default: break;
-                    }
-
-                    // A call in the body may resize an array used by the bound
-                    // (for example splice() under `i < array.length`). Re-read
-                    // dynamic bounds at the loop test so native comparison does
-                    // not change JavaScript's per-iteration evaluation semantics.
-                    semi_native_test = true;
-                }
-            }
-        }
-    }
-
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_update = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -1559,31 +1436,15 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // inner-function (closure) calls made during the previous iteration.
     jm_scope_env_reload_vars(mt);
 
-    // Test
+    // Test. A one-sided numeric profile is not a conversion proof: the other
+    // operand can be a String, BigInt, or object with observable coercion.
     if (for_node->test) {
-        if (semi_native_test) {
-            // Semi-native: read the counter and current bound as native values.
-            MIR_reg_t counter_reg = jm_transpile_as_native(mt, cached_counter_node, cached_cmp_target);
-            MIR_reg_t current_bound = jm_transpile_as_native(mt, semi_native_bound_node,
-                cached_cmp_target);
-
-            MIR_reg_t left_cmp  = cached_bound_on_right ? counter_reg  : current_bound;
-            MIR_reg_t right_cmp = cached_bound_on_right ? current_bound : counter_reg;
-
-            MIR_reg_t test_r = jm_new_reg(mt, "fltest", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, cached_cmp_insn,
-                MIR_new_reg_op(mt->ctx, test_r),
-                MIR_new_reg_op(mt->ctx, left_cmp),
-                MIR_new_reg_op(mt->ctx, right_cmp)));
-            jm_emit_branch(mt, MIR_BF, l_end, test_r);
-        } else {
-            // v23b: unified condition handling (native numeric + raw facades + fallback)
-            MIR_reg_t test_cond = jm_transpile_condition(mt, for_node->test);
-            // keep each fallible edge before its control-flow join: a later
-            // update register is not defined when this condition exits first.
-            jm_emit_error_lane_propagate_check(mt);
-            jm_emit_branch(mt, MIR_BF, l_end, test_cond);
-        }
+        // v23b: unified condition handling (native numeric + raw facades + fallback)
+        MIR_reg_t test_cond = jm_transpile_condition(mt, for_node->test);
+        // keep each fallible edge before its control-flow join: a later
+        // update register is not defined when this condition exits first.
+        jm_emit_error_lane_propagate_check(mt);
+        jm_emit_branch(mt, MIR_BF, l_end, test_cond);
     }
 
     // Body

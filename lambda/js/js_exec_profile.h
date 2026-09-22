@@ -50,6 +50,11 @@ typedef enum JsOptEvent {
     JS_OPT_NAMED_FAST_PROBE,
     JS_OPT_NAMED_FAST_HIT,
     JS_OPT_NAMED_FAST_MISS,
+    // Distinguish a missed named fast lookup whose generic continuation will
+    // read an existing own property from a true prototype/absence continuation.
+    JS_OPT_NAMED_FAST_NO_ENTRY_OWN,
+    JS_OPT_NAMED_FAST_NO_ENTRY_ABSENT,
+    JS_OPT_NAMED_FAST_ARRAY_LENGTH,
     JS_OPT_NAMED_FAST_STRING_LENGTH,
     JS_OPT_NAMED_FAST_DATA_DESCRIPTOR,
     JS_OPT_NAMED_FAST_NO_RECEIVER_STRING,
@@ -65,6 +70,7 @@ typedef enum JsOptEvent {
     JS_OPT_MIR_NATIVE_INDEX_ADMITTED,
     JS_OPT_MIR_NATIVE_INDEX_FALLBACK,
     JS_OPT_MIR_DENSE_INDEX_ADMITTED,
+    JS_OPT_MIR_ARRAY_LENGTH_ADMITTED,
     JS_OPT_MIR_PACKED_STRICT_EQUAL,
     JS_OPT_MIR_LOOP_STABLE_NAME_ID,
     JS_OPT_MIR_LIGHT_CALL,
@@ -79,6 +85,19 @@ typedef enum JsOptEvent {
     JS_OPT_TYPED_NUMBER_READ,
     JS_OPT_OWN_ENUMERABILITY_INSPECT,
     JS_OPT_MIR_LITERAL_FIELD_ADMITTED,
+    // A constructor recipe reserves storage before the source assignment
+    // publishes the ordinary own property. Track that first-store proof at
+    // runtime; compile-time field admission alone does not establish a hit.
+    JS_OPT_RESERVED_CONSTRUCTOR_STORE,
+    // A reservation was published directly after proving the OrdinarySet
+    // guards and the next-source-slot ordering.
+    JS_OPT_RESERVED_CONSTRUCTOR_DIRECT_STORE,
+    // An existing ordinary own slot changed storage type, so the same-slot
+    // write fast path declined and the shared storage writer published it.
+    JS_OPT_ORDINARY_DATA_STORE,
+    // A null-domain slot carries a tagged Item, so mixed-value constructor
+    // fields can retain their shared recipe across direct named stores.
+    JS_OPT_DYNAMIC_ITEM_STORE,
     JS_OPT_STATIC_NUMERIC_ARRAY_INITIALIZER,
     JS_OPT_STATIC_OBJECT_INITIALIZER,
     JS_OPT_STRING_SEARCH_ASCII,

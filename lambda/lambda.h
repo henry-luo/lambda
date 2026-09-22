@@ -2574,6 +2574,7 @@ extern "C" {
     Map* map_alloc_for_type(struct TypeMap* map_type, LambdaRegion* region,
         int64_t minimum_capacity);
     bool map_field_store(void* field_ptr, Item value, TypeId value_type);
+    bool map_field_store_dynamic_item(void* field_ptr, Item value);
     Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Map* map_with_region_tl(LambdaRegion* region, int64_t type_index,
         void* type_list_ptr);

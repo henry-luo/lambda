@@ -302,6 +302,7 @@ struct JsClipboardState : RootVector {
     Item file_list_prototype = {};
     Item drag_data_transfer = {};
     int64_t generation = 1;
+    int64_t next_object_url_id = 1;
 };
 
 // DOM singleton wrappers are per browsing context. The native document itself
