@@ -165,7 +165,7 @@ fn convert_transforms(transforms) {
 // ============================================================
 
 fn convert_layer(layers, parent_data) {
-    (for (layer in layers)
+    [for (layer in layers)
         (let layer_data = if (layer.data and layer.data.values) layer.data.values
             else parent_data,
         {
@@ -180,5 +180,5 @@ fn convert_layer(layers, parent_data) {
             config: null,
             layer: null,
             facet: null
-        }))
+        })]
 }

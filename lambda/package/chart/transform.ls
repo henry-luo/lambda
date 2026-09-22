@@ -60,9 +60,9 @@ fn apply_sort(data, sort_el) {
     let field_name = sort_el.field;
     let order = if (sort_el.order) sort_el.order else "ascending";
     if order == "descending" {
-        for (d in data order by d[field_name] desc) d
+        [for (d in data order by d[field_name] desc) d]
     } else {
-        for (d in data order by d[field_name]) d
+        [for (d in data order by d[field_name]) d]
     }
 }
 
@@ -91,13 +91,13 @@ pub fn compute_agg(data, op, field) {
 
 fn apply_aggregate(data, agg_el) {
     let n = len(agg_el);
-    let group_fields = for (i in 0 to (n - 1),
+    let group_fields = [for (i in 0 to (n - 1),
                             let child = agg_el[i]
-                            where child and name(child) == 'group') child.field;
-    let agg_specs = for (i in 0 to (n - 1),
+                            where child and name(child) == 'group') child.field];
+    let agg_specs = [for (i in 0 to (n - 1),
                          let child = agg_el[i]
                          where child and name(child) == 'agg')
-                     {op: child.op, field: child.field, as: child.as};
+                     {op: child.op, field: child.field, as: child.as}];
     do_aggregate(data, group_fields, agg_specs)
 }
 
@@ -106,22 +106,22 @@ fn do_aggregate(data, group_fields, agg_specs) {
         [build_agg_row(data, [], agg_specs)]
     } else {
         let gkeys = util.unique_vals(data |> group_key_str(~, group_fields));
-        for (gk in gkeys) (
+        [for (gk in gkeys) (
             let items = data that group_key_str(~, group_fields) == gk,
             build_agg_row(items, group_fields, agg_specs)
-        )
+        )]
     }
 }
 
 fn group_key_str(row, fields) {
-    let parts = for (f in fields) string(row[f]);
+    let parts = [for (f in fields) string(row[f])];
     join(parts, "|||")
 }
 
 fn build_agg_row(items, group_fields, agg_specs) {
-    let group_pairs = for (f in group_fields) for (x in [f, items[0][f]]) x;
-    let agg_pairs = for (spec in agg_specs)
-        for (x in [spec.as, float(compute_agg(items, spec.op, spec.field))]) x;
+    let group_pairs = [for (f in group_fields) for (x in [f, items[0][f]]) x];
+    let agg_pairs = [for (spec in agg_specs)
+        for (x in [spec.as, float(compute_agg(items, spec.op, spec.field))]) x];
     map([*group_pairs, *agg_pairs])
 }
 
@@ -136,7 +136,7 @@ fn apply_calculate(data, calc_el) {
     let field2 = calc_el.field2;
     let field = if (calc_el.field) calc_el.field else field1;
     if (not as_field) data
-    else for (d in data) add_field(d, as_field, calc_value(d, op, field, field2))
+    else [for (d in data) add_field(d, as_field, calc_value(d, op, field, field2))]
 }
 
 fn calc_value(d, op, field, field2) {
@@ -170,12 +170,12 @@ fn apply_bin(data, bin_el) {
         let step = if (step_override) float(step_override)
                    else util.nice_num(range_span / float(maxbins), true);
         let as_end = as_field ++ "_end";
-        for (d in data) (
+        [for (d in data) (
             let v = float(d[field]),
             let bin_start = floor(v / step) * step,
             let bin_end = bin_start + step,
             add_field(add_field(d, as_field, bin_start), as_end, bin_end)
-        )
+        )]
     }
 }
 
@@ -191,8 +191,8 @@ fn apply_fold(data, fold_el) {
     } else {
         let key_name = as_names[0];
         let val_name = if (len(as_names) > 1) as_names[1] else "value";
-        for (d in data) for (f in fields)
-            add_field(add_field(d, key_name, f), val_name, d[f])
+        [for (d in data) for (f in fields)
+            add_field(add_field(d, key_name, f), val_name, d[f])]
     }
 }
 
@@ -208,8 +208,8 @@ fn apply_flatten(data, flat_el) {
     } else if len(fields) == 1 {
         let src_field = fields[0];
         let dst_field = if (as_names and len(as_names) > 0) as_names[0] else src_field;
-        for (d in data) for (val in d[src_field])
-            add_field(d, dst_field, val)
+        [for (d in data) for (val in d[src_field])
+            add_field(d, dst_field, val)]
     } else {
         data
     }
@@ -220,6 +220,6 @@ fn apply_flatten(data, flat_el) {
 // ============================================================
 
 pub fn add_field(row, field_name, value) {
-    let existing_pairs = for (k, v in row) for (x in [string(k), v]) x;
+    let existing_pairs = [for (k, v in row) for (x in [string(k), v]) x];
     map([*existing_pairs, field_name, value])
 }

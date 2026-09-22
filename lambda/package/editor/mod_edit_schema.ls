@@ -217,11 +217,11 @@ fn validate_node(schema, node, path) {
       else if (not match_content(schema, kids, entry.content))
         [mk_violation(path, tag, "content does not match schema")]
       else []
-    let nested = for (i in 0 to len(kids) - 1)
+    let nested = [for (i in 0 to len(kids) - 1)
         if (type(kids[i]) == element)
           validate_node(schema, kids[i], [*path, i])
-        else [];
-    [*attr_violations, *mark_violations, *local, *(for (vs in nested) for (v in vs) v)]
+        else []];
+    [*attr_violations, *mark_violations, *local, *[for (vs in nested) for (v in vs) v]]
   }
 }
 

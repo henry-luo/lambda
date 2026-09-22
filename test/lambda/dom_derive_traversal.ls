@@ -43,11 +43,11 @@ fn list_eq(xs, ys) bool | error {
 }
 
 // ---- the corpus: every node in the document, in tree order ----
-fn descendants(n) { for (c in d_child_nodes(n)) (c, descendants(c)) }
+fn descendants(n) { [for (c in d_child_nodes(n)) (c, *descendants(c))] }
 
 let doc = dom.load("test/js/dom_identity.html")
 let root = dom.document_element(doc)
-let nodes = (root, descendants(root))
+let nodes = [root, *descendants(root)]
 
 fn agrees(n) bool | error {
   node_eq(d_first_element_child(n), dom.first_element_child(n)) and

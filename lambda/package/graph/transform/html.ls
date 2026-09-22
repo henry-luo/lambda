@@ -468,7 +468,23 @@ fn html_cluster_label(entry, index, palette) {
   }
 }
 
-fn html_edge_label(edge, index, group, palette) {
+fn edge_label_placement(graph, direction) {
+  // Graphviz positions ordinary labels beside the spline, unlike Mermaid's centered labels.
+  if (graph is element and graph.flavor == "dot") {
+    if (direction == "LR" or direction == "RL") "above" else "right"
+  } else "center"
+}
+
+fn graph_route_mode(graph, config) {
+  if (config.curve == "linear") "line"
+  else if (config.curve == "step") "orthogonal"
+  else if (config.use_splines == true) "curved"
+  // splines defaults to true for DOT, but absence remains distinct in its source model.
+  else if (graph is element and graph.flavor == "dot") "curved"
+  else "orthogonal"
+}
+
+fn html_edge_label(edge, index, group, palette, placement) {
   let label = label_source(edge);
   let format = label_format(edge);
   let content = canonical_content(edge);
@@ -477,6 +493,7 @@ fn html_edge_label(edge, index, group, palette) {
     <'edge-label' class: "graph-edge-label", 'data-graph-role': "edge-label",
         'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
         'data-subgraph-id': group, 'data-label': label, 'data-label-format': format,
+        'data-label-placement': placement,
         'data-font-name': source_attr(edge, "font-name", null),
         'data-font-size': source_attr(edge, "font-size", null),
         'data-font-color': source_attr(edge, "font-color", null),
@@ -541,9 +558,7 @@ pub fn to_html(graph, opts = null) {
   let config = if (graph is element and graph.flavor == "mermaid")
     mermaid_config.options(graph) else {};
   let route_mode = string(opt(opts, "route_mode", source_attr(graph, "route-mode",
-    if (config.curve == "linear") "line"
-    else if (config.curve == "step") "orthogonal"
-    else if (config.use_splines == true) "curved" else "orthogonal")));
+    graph_route_mode(graph, config))));
   let node_sep = string(opt(opts, "node_sep", source_attr(graph, "node-sep",
     if (config.node_sep != null) config.node_sep else 60)));
   let rank_sep = string(opt(opts, "rank_sep", source_attr(graph, "rank-sep",
@@ -559,6 +574,7 @@ pub fn to_html(graph, opts = null) {
     else if (config.title != null) config.title else source_attr(graph, "title", null);
   let description = if (graph is element) model.description(graph)
     else source_attr(graph, "description", null);
+  let label_placement = edge_label_placement(graph, direction);
   let children = [
     *(if (graph is element) html_constraints(graph) else []),
     for (i, annotation in if (graph is element) model.annotations(graph) else [],
@@ -578,7 +594,7 @@ pub fn to_html(graph, opts = null) {
       palette),
     for (i, entry in port_entries) html_port(entry, i),
     for (i, entry in edge_entries,
-      let label = html_edge_label(entry.value, i, entry.group, palette)
+      let label = html_edge_label(entry.value, i, entry.group, palette, label_placement)
       where label != null) label,
     for (i, entry in edge_entries,
       let edge_id = string(source_attr(entry.value, "id", "e" ++ string(i))),

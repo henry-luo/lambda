@@ -80,7 +80,7 @@ pub fn from_k_ops(ops) {
 // scn/SCN may carry a trailing /PatternName operand; the leading
 // numeric operands still indicate the underlying tint values.
 pub fn from_sc_ops(ops) {
-    let nums = (for (op in ops where (op is float or op is int)) op)
+    let nums = [for (op in ops where (op is float or op is int)) op]
     let n = len(nums)
     if      (n >= 4) { cmyk(nums[0], nums[1], nums[2], nums[3]) }
     else if (n >= 3) { rgb(nums[0], nums[1], nums[2]) }
@@ -93,7 +93,7 @@ pub fn from_sc_ops(ops) {
 // ============================================================
 
 fn _numeric_ops(ops) {
-    for (op in ops where (op is float or op is int)) op
+    [for (op in ops where (op is float or op is int)) op]
 }
 
 fn _resource_color_space(pdf, page, name) {

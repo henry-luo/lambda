@@ -24,11 +24,11 @@ pn main() {
     // carrier is a boxed Item, and typing it `int` without the oracle's
     // CONTENT case produced `[inf, inf, inf]` from the for-expression
     // collector.
-    let collected = for (x in ints) {
+    let collected = [for (x in ints) {
         var scaled = x * 2
         scaled = scaled + 1
         scaled
-    }
+    }]
 
     // the same shapes on the float lane
     let g = floats[2] + 0.5

@@ -235,7 +235,7 @@ fn restore_selection(host, entry, is_undo) {
     else {
         // Selection APIs use UTF-16 offsets while all package text policy uses
         // codepoints. Convert at this one explicit boundary (D7.2.5).
-        dom.set_base_and_extent(selection, entry.node,
+        let _set = dom.set_base_and_extent(selection, entry.node,
                                 utf16_from_codepoint(value, point.anchor, 0, 0),
                                 entry.node,
                                 utf16_from_codepoint(value, point.focus, 0, 0));

@@ -18,8 +18,8 @@ pub fn spec_to_schema(spec) {
     let schemas = spec.components.schemas;
     if (schemas == null) ""
     else {
-        let defs = for (type_name, schema_obj at schemas)
-            convert_type(string(type_name), schema_obj, schemas);
+        let defs = [for (type_name, schema_obj at schemas)
+            convert_type(string(type_name), schema_obj, schemas)];
         join(defs, "\n\n")
     }
 }
@@ -80,12 +80,12 @@ fn convert_object(schema, all_schemas) {
     if (props == null) "{}"
     else {
         let required = schema.required;
-        let fields = for (field_name, field_schema at props) {
+        let fields = [for (field_name, field_schema at props) {
             let type_str = convert_schema(field_schema, all_schemas);
             let is_required = util.list_contains(required, string(field_name));
             let suffix = if (is_required) "" else "?";
             "    " ++ (field_name) ++ ": " ++ type_str ++ suffix
-        };
+        }];
         "{\n" ++ join(fields, ",\n") ++ "\n}"
     }
 }
@@ -111,7 +111,7 @@ fn convert_array(schema, all_schemas) {
 // ============================================================
 
 fn convert_union(variants, all_schemas) {
-    let types = for (v in variants) convert_schema(v, all_schemas);
+    let types = [for (v in variants) convert_schema(v, all_schemas)];
     join(types, " | ")
 }
 
@@ -121,7 +121,7 @@ fn convert_union(variants, all_schemas) {
 
 fn convert_all_of(schemas, all_schemas) {
     // collect all property maps and required arrays, then merge
-    let parts = for (s in schemas) convert_schema(s, all_schemas);
+    let parts = [for (s in schemas) convert_schema(s, all_schemas)];
 
     // if all parts are type references, emit first (inheritance)
     // for now, join as union — the validator resolves structurally
@@ -134,10 +134,10 @@ fn convert_all_of(schemas, all_schemas) {
 // ============================================================
 
 fn convert_enum(values) {
-    let items = for (v in values) {
+    let items = [for (v in values) {
         if (v is string) "\"" ++ v ++ "\""
         else string(v)
-    };
+    }];
     join(items, " | ")
 }
 
@@ -218,13 +218,13 @@ pub fn param_schemas(spec, path, method) {
     if (op == null) []
     else {
         let params = util.get_or(op, "parameters", []);
-        for (p in params) {
+        [for (p in params) {
             name: string(p.name),
             location: string(p["in"]),
             required: util.get_or(p, "required", false),
             schema_type: if (p.schema != null)
                 util.schema_type_name(p.schema.type, p.schema.format)
                 else "string"
-        }
+        }]
     }
 }

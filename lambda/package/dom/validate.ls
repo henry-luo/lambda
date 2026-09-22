@@ -35,7 +35,7 @@ pub fn value_is_number(text) {
     // whole string has to be checked, not just whether a parse succeeds
     if (as_number(text) == null) { false }
     else {
-        all(for (i in 0 to len(text) - 1) numeric_char(slice(text, i, i + 1), i))
+        all([for (i in 0 to len(text) - 1) numeric_char(slice(text, i, i + 1), i)])
     }
 }
 

@@ -70,10 +70,16 @@
 "--- Pipe with nested structures ---"
 [1, 2, 3]
 [2, 4, 6]
-"===== EDGE CASES =====--- Empty collections ------ Single element ---"
+"===== EDGE CASES =====--- Empty collections ---"
+[]
+[]
+"--- Single element ---"
 [84]
 [5]
+[]
 [101]
-"--- All elements filtered ------ No elements filtered ---"
+"--- All elements filtered ---"
+[]
+"--- No elements filtered ---"
 [1, 2, 3]
 "===== END PIPE AND WHERE TESTS ====="

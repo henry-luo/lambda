@@ -483,7 +483,7 @@ static bool js_array_value_is_numeric(Item value) {
 extern "C" bool js_is_ordinary_numeric_array(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY_NUM || !value.array_num) return false;
     ArrayNum* arr = value.array_num;
-    return !arr->is_content && !arr->is_ndim && !arr->is_view &&
+    return !arr->is_js_arguments && !arr->is_ndim && !arr->is_view &&
         container_js_elements_kind((Container*)arr) == JS_ELEMENTS_PACKED_NUMERIC &&
         (arr->get_elem_type() == ELEM_INT ||
          arr->get_elem_type() == ELEM_INT64 ||
@@ -605,7 +605,7 @@ JS_FORWARD_RETURN(bool, js_array_promote_numeric, (Item array_item), js_array_pr
 
 static void js_array_store_owned(Array* arr, int64_t index, Item value) {
     if (!arr || index < 0) return;
-    if (arr->is_content) {
+    if (arr->is_js_arguments) {
         container_set_js_elements_kind((Container*)arr, JS_ELEMENTS_NONE);
     } else {
         JsElementsKind kind = container_js_elements_kind((Container*)arr);
@@ -4920,7 +4920,7 @@ static bool js_try_get_array_length_no_gc(Item object, Item* out) {
     Array* array = object.array;
     // Content arrays can carry a companion length property. Let the complete
     // property kernel observe that descriptor rather than reading storage.
-    if (!array || (array->is_content == 1 && js_array_has_props(array))) {
+    if (!array || (array->is_js_arguments == 1 && js_array_has_props(array))) {
         return false;
     }
     if (out) *out = (Item){.item = i2it(array->length)};
@@ -5336,7 +5336,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
             String* str_key = it2s(key);
             // Check for "length" property
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                if (object.array->is_content == 1 && js_array_has_props(object.array)) {
+                if (object.array->is_js_arguments == 1 && js_array_has_props(object.array)) {
                     Item pm_item = (Item){.map = js_array_props(object.array)};
                     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
                     Item own_value = ItemNull;
@@ -5363,7 +5363,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     // own-get helper above handles IS_ACCESSOR and deleted
                     // shape state for companion-map properties.
                     // v29: strict arguments — throw TypeError on callee/caller access
-                    if (object.array->is_content == 1 &&
+                    if (object.array->is_js_arguments == 1 &&
                         ((str_key->len == 6 && strncmp(str_key->chars, "callee", 6) == 0) ||
                          (str_key->len == 6 && strncmp(str_key->chars, "caller", 6) == 0))) {
                         if (container_is_strict_arguments(
@@ -5373,7 +5373,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     }
                 }
                 // v18c: .constructor for arrays → Array constructor
-                if (object.array->is_content == 1) {
+                if (object.array->is_js_arguments == 1) {
                     if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
                         Item obj_name = (Item){.item = s2it(heap_create_name("Object", 6))};
                         return js_get_constructor(obj_name);
@@ -5489,7 +5489,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 if (js_array_sparse_get(object.array, idx, &sparse_val)) return sparse_val;
             }
             // Arguments overflow: numeric index stored in companion map
-            if (idx_d == idx_d && idx >= 0 && object.array->is_content == 1 && js_array_has_props(object.array)) {
+            if (idx_d == idx_d && idx >= 0 && object.array->is_js_arguments == 1 && js_array_has_props(object.array)) {
                 int idx_len = 0;
                 const char* idx_buf = js_property_index_chars(idx, &idx_len);
                 Map* pm = js_array_props(object.array);
@@ -6317,7 +6317,7 @@ static bool js_array_should_keep_length_sparse(Array* arr, int64_t new_length) {
 
 static bool js_array_should_promote_sparse_dense(Array* arr, SparseArrayMap* sm) {
     if (!arr || !sm || !sm->sparse_indices) return false;
-    if (arr->is_content == 1) return false;
+    if (arr->is_js_arguments == 1) return false;
     if (arr->length <= JS_ARRAY_DENSE_GAP_ALWAYS_OK ||
             arr->length > JS_ARRAY_SPARSE_PROMOTE_MAX_LENGTH) {
         return false;
@@ -6375,7 +6375,7 @@ static void js_array_try_promote_sparse_dense(Item array_item) {
 static void js_array_store_sparse_property(Item array_item, int64_t index, Item value, bool update_length) {
     if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return;
     Array* arr = array_item.array;
-    if (arr->is_content) {
+    if (arr->is_js_arguments) {
         container_set_js_elements_kind((Container*)arr, JS_ELEMENTS_NONE);
     } else {
         container_set_js_elements_kind((Container*)arr, JS_ELEMENTS_SPARSE_TAGGED);
@@ -6545,7 +6545,7 @@ extern "C" bool js_array_try_get_existing_own_dense_no_gc(Item object,
         int64_t index, Item* out) {
     if (get_type_id(object) != LMD_TYPE_ARRAY || !out) return false;
     Array* arr = object.array;
-    if (!arr || arr->is_content == 1) return false;
+    if (!arr || arr->is_js_arguments == 1) return false;
     if (index < 0 || index >= arr->length || index >= js_array_dense_capacity(arr)) return false;
     Item value = arr->items[index];
     if (value.item == JS_DELETED_SENTINEL_VAL) return false;
@@ -6583,7 +6583,7 @@ extern "C" Item js_array_get_existing_own_dense_with_props_or_missing(
 static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item value) {
     assert (get_type_id(object) == LMD_TYPE_ARRAY && index >= 0);
     Array* arr = object.array;
-    if (arr->is_content == 1) return false;
+    if (arr->is_js_arguments == 1) return false;
     if (index >= arr->length || index >= js_array_dense_capacity(arr)) return false;
     if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
     if (js_array_has_props(arr)) {
@@ -6776,7 +6776,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
                 // Strict arguments expose callee/caller through a throwing own
                 // accessor; do not route the assignment through the companion
                 // map's generic named-property fast path.
-                if (object.array->is_content == 1 &&
+                if (object.array->is_js_arguments == 1 &&
                     ((sk->len == 6 && strncmp(sk->chars, "callee", 6) == 0) ||
                      (sk->len == 6 && strncmp(sk->chars, "caller", 6) == 0)) &&
                     container_is_strict_arguments(
@@ -6903,7 +6903,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
         }
     }
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
-    if (object.array->is_content == 1) {
+    if (object.array->is_js_arguments == 1) {
         double idx_d = js_get_number(key);
         int64_t idx = (int64_t)idx_d;
         if (idx_d == idx_d && idx >= 0 && idx >= object.array->length) {
@@ -9031,7 +9031,7 @@ static int64_t js_utf16_index_from_byte(const char* chars, int str_len, int byte
 // Direct JS array push shares Lambda's owned-scalar tail representation.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
     if (!arr) return;
-    if (arr->is_content) {
+    if (arr->is_js_arguments) {
         // Arguments/content carriers share List storage but are not ordinary
         // JS arrays; keeping state NONE prevents the ordinary elements tier
         // from interpreting mapped-index metadata as array elements.
@@ -9181,7 +9181,7 @@ extern "C" Item js_array_new_with_class(int length, int class_id) {
 JS_FORWARD_ITEM(js_array_hole, (), lam::hole_sentinel_item, ())
 
 extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value) {
-    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || !js_array_has_props(arguments.array)) {
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_js_arguments != 1 || !js_array_has_props(arguments.array)) {
         return current_value;
     }
     // ParameterMap links only the actually supplied argument indices. A
@@ -9207,7 +9207,7 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
 }
 
 extern "C" Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value) {
-    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || !js_array_has_props(arguments.array)) {
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_js_arguments != 1 || !js_array_has_props(arguments.array)) {
         return js_set_key_default(arguments, (Item){.item = i2it(index)}, value);
     }
     // Initializing or assigning an omitted formal cannot create an Arguments
@@ -9640,7 +9640,7 @@ static Item js_elements_set_int_mode(Item array, int64_t index, Item value,
         }
     }
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
-    if (arr->is_content == 1 && index >= 0 && index >= arr->length) {
+    if (arr->is_js_arguments == 1 && index >= 0 && index >= arr->length) {
         return js_array_set_arguments_index(array, index, value,
             bypass_accessor_dispatch);
     }
@@ -9715,7 +9715,7 @@ extern "C" bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t in
         return false;
     }
     Array* arr = array.array;
-    if (!arr || arr->is_content == 1 || arr->extra != 0 ||
+    if (!arr || arr->is_js_arguments == 1 || arr->extra != 0 ||
             index >= arr->length || index >= js_array_dense_capacity(arr) ||
             arr->items[index].item == JS_DELETED_SENTINEL_VAL ||
             (js_array_has_props(arr) &&
@@ -9801,7 +9801,7 @@ extern "C" Item js_elements_set_int_completion(Item array, int64_t index,
         return ItemNull;
     }
     Array* arr = array.array;
-    if (!arr || arr->is_content == 1 ||
+    if (!arr || arr->is_js_arguments == 1 ||
             js_array_companion_has_array_index_shape(arr) ||
             js_array_proto_index_guard_is_dirty(array)) {
         js_opt_trace_record(JS_OPT_ARRAY_SET_GUARD_FAIL,
@@ -9948,7 +9948,7 @@ static Item js_elements_set_mode(Item array, Item index, Item value, bool strict
     }
 
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
-    if (arr->is_content == 1 && idx >= 0 && idx >= arr->length) {
+    if (arr->is_js_arguments == 1 && idx >= 0 && idx >= arr->length) {
         return js_array_set_arguments_index(array, idx, value, false);
     }
 
@@ -10504,7 +10504,7 @@ static bool js_regex_internal_has_indices(Item obj);
 
 bool js_is_arguments_exotic_array(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
-        value.array->is_content != 1 || !js_array_has_props(value.array)) {
+        value.array->is_js_arguments != 1 || !js_array_has_props(value.array)) {
         return false;
     }
     Map* props = js_array_props(value.array);
@@ -23328,9 +23328,10 @@ static Item js_string_intrinsic_algorithm(Item str,
             return units_result;
         }
         Item result = fn_split(str, sep);
-        // Clear is_content flag to prevent array flattening in JS context
+        // A Lambda list never spreads inside JS: clear the kind bit on the value
+        // published to JS (S2.5.6; the flag is Lambda's, not an Arguments mark).
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
-            result.array->is_content = 0;
+            result.array->is_spreadable = 0;
             // fn_split returns a content list on an inferred pointer lane, whose
             // `items[]` words are raw `String*` rather than tagged Items. Every
             // JS array read goes straight to `items[]`, so an un-widened lane
@@ -24742,7 +24743,7 @@ static bool js_array_try_fast_fill(Item object, Item value, int64_t start, int64
     if (!arr) return false;
     if (start >= end) return true;
     if (start < 0 || end < start || end > arr->length) return false;
-    if (arr->is_content == 1 || js_array_has_props(arr)) return false;
+    if (arr->is_js_arguments == 1 || js_array_has_props(arr)) return false;
     if (!js_is_extensible(object_root.get())) return false;
     if (js_array_proto_index_guard_is_dirty(object_root.get())) return false;
 
@@ -24843,7 +24844,7 @@ static Item js_array_generic_push(Item object, Item* args, int argc) {
     // and non-extensible receivers continue through the generic ES path
     // (D8.4.3v2).
     if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
-            !object.array->is_content) {
+            !object.array->is_js_arguments) {
         RootFrame roots(1);
         Rooted<Item> object_root(roots, object);
         if (!roots.valid()) return ItemError;
@@ -26264,7 +26265,7 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
     // toString — join elements with comma
     if (operation == JS_ARRAY_INTRINSIC_TO_STRING) {
         if (arr_type != LMD_TYPE_ARRAY) return js_to_string(arr);
-        if (arr.array->is_content == 1) {
+        if (arr.array->is_js_arguments == 1) {
             return js_intrinsic_object_to_string_body(
                 ItemNull, arr, args, argc, NULL);
         }

@@ -48,7 +48,7 @@ pub fn metadata(pdf) {
 // found. O(n) — callers that need many lookups should cache results.
 fn find_obj(pdf, num) {
     let objs = if (pdf and pdf.objects) pdf.objects else [];
-    let hits = (for (o in objs where o.object_num == num) o);
+    let hits = [for (o in objs where o.object_num == num) o];
     if len(hits) > 0 { hits[0] } else { null }
 }
 
@@ -85,8 +85,8 @@ pub fn page_content_bytes(pdf, page) {
     else {
         if cref is array {
             // array of refs → concat each stream's data with "\n"
-            let parts = (for (r in cref)
-                (let s = deref(pdf, r), _stream_bytes(s)));
+            let parts = [for (r in cref)
+                (let s = deref(pdf, r), _stream_bytes(s))];
             parts |> join("\n")
         }
         else {

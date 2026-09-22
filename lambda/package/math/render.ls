@@ -476,9 +476,9 @@ fn render_unknown_command_node(node, name_str, context) {
     // Render only the brace/bracket-group arguments as math (skip the bare
     // command-name string). The grouped atom follows the tail argument's type;
     // treating it as `minner` adds a spurious thin space before the next token.
-    let arg_boxes = (for (child in node
+    let arg_boxes = [for (child in node
         where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
-        render_node(child, context))
+        render_node(child, context)]
     // A bare unknown control word is an ordinary atom. Marking it punctuation
     // reclassifies a preceding binary operator and creates a thin trailing gap.
     if (len(arg_boxes) == 0) box_with_type(err_box, "mord")
@@ -495,9 +495,9 @@ fn render_unknown_command_node(node, name_str, context) {
 }
 
 fn unknown_numeric_args(node) {
-    let arg_texts = (for (child in node
+    let arg_texts = [for (child in node
         where child is element and (name(child) == 'group' or name(child) == 'brack_group'))
-        plain_text(child));
+        plain_text(child)];
     (len(arg_texts) > 0) and all_plain_number_text(arg_texts, 0)
 }
 
@@ -2124,7 +2124,7 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
         >,
         out_h,
         out_d,
-        sum((for (p in parts where p != null) p.width)),
+        sum([for (p in parts where p != null) p.width]),
         "minner",
         0.0,
         0.0,
@@ -2808,10 +2808,10 @@ fn render_text_group(node, context) {
     let n = len(node)
     if (n == 0) box.text_box("", null, "mord")
     else {
-        let children = (for (i in 0 to (n - 1),
+        let children = [for (i in 0 to (n - 1),
             let child = node[i]
             where child != null and not is_brace_string(child))
-            render_node(child, context))
+            render_node(child, context)]
         if (len(children) == 0) box.text_box("", null, "mord")
         else box.hbox(children)
     }
@@ -2884,7 +2884,7 @@ fn render_children(node, context) {
 
 fn transparent_hbox(children) {
     let hb = box.hbox(children)
-    let filtered = (for (b in children where b != null) b)
+    let filtered = [for (b in children where b != null) b]
     if (len(filtered) == 0) hb
     else
         (let last_idx = len(filtered) - 1,
@@ -3732,7 +3732,7 @@ fn next_spacing_prev_type(prev_type, current) {
 
 // apply_flag inter-atom spacing between boxes
 fn apply_spacing(boxes, context) {
-    let filtered = (for (b in boxes where b != null) b)
+    let filtered = [for (b in boxes where b != null) b]
     if (len(filtered) <= 1) filtered
     else
         (let normalized = normalize_atom_types(filtered),

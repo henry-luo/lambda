@@ -84,8 +84,8 @@ pn main() {
 
     print({
         A_state: rA.state,
-        A_emits: (for (e in rA.emits) format(e, 'xml')),
-        B_emits: (for (e in rB.emits) format(e, 'xml')),
+        A_emits: [for (e in rA.emits) format(e, 'xml')],
+        B_emits: [for (e in rB.emits) format(e, 'xml')],
         C_emit_count: rC.emit_count
     })
 }

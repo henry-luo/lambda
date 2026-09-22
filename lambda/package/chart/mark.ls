@@ -31,7 +31,7 @@ pub fn bar(data, ctx, mark_config) {
     let rx = if (mark_config and mark_config.corner_radius) mark_config.corner_radius else 0;
     let tooltip_field = if (ctx.tooltip_field) ctx.tooltip_field else null;
 
-    let bars = (for (d in data) (
+    let bars = [for (d in data) (
         let x_val = d[x_field],
         let y_val = float(d[y_field]),
         let x_pos = float(scale.scale_apply(x_scale, x_val)),
@@ -73,7 +73,7 @@ pub fn bar(data, ctx, mark_config) {
         else
             <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
                   fill: bar_fill, opacity: bar_opacity, rx: rx>
-    ));
+    )];
 
     svg.group_class("marks bars", bars)
 }
@@ -89,7 +89,7 @@ pub fn bar_horizontal(data, ctx, mark_config) {
     let fill = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
 
-    let bars = (for (d in data) (
+    let bars = [for (d in data) (
         let y_val = d[y_field],
         let x_val = float(d[x_field]),
         let y_pos = float(scale.scale_apply(y_scale, y_val)),
@@ -100,7 +100,7 @@ pub fn bar_horizontal(data, ctx, mark_config) {
         let bar_h = if (y_scale.bandwidth) y_scale.bandwidth else 20.0,
         <rect x: 0, y: y_pos, width: x_pos, height: bar_h,
               fill: bar_fill, opacity: opacity>
-    ));
+    )];
 
     svg.group_class("marks bars-horizontal", bars)
 }
@@ -126,7 +126,7 @@ pub fn line_mark(data, ctx, mark_config) {
     let group_field = if (detail_field) detail_field else color_field;
     let series = if (group_field)
         (let groups = util.unique_vals(data |> ~[group_field]),
-        (for (g in groups) (
+        [for (g in groups) (
             let group_items = data that ~[group_field] == g,
             {
                 key: g,
@@ -134,28 +134,28 @@ pub fn line_mark(data, ctx, mark_config) {
                 color: if (color_scale and color_field)
                     scale.scale_apply(color_scale, group_items[0][color_field])
                 else stroke_color
-            })))
+            })])
     else [{key: null, items: data, color: stroke_color}];
 
-    let line_elements = (for (s in series) (
-        let points = (for (d in s.items) (
+    let line_elements = [for (s in series) (
+        let points = [for (d in s.items) (
             let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
             let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
-            [x_pos + bw, y_pos])),
+            [x_pos + bw, y_pos])],
         let d = svg.line_path(points),
         let line_el = <path d: d, fill: "none", stroke: s.color,
                             'stroke-width': stroke_w, opacity: opacity>,
         let point_els = if (show_points)
-            (for (p in points)
+            [for (p in points)
                 <circle cx: p[0], cy: p[1], r: 3, fill: s.color,
-                        stroke: "white", 'stroke-width': 1>)
+                        stroke: "white", 'stroke-width': 1>]
         else [],
         [line_el, *point_els]
-    ));
+    )];
 
     // flatten the nested arrays
-    let all = (for (group in line_elements) for (el in group) el);
+    let all = [for (group in line_elements) for (el in group) el];
     svg.group_class("marks lines", all)
 }
 
@@ -180,7 +180,7 @@ pub fn area_mark(data, ctx, mark_config) {
     let group_field = if (detail_field) detail_field else color_field;
     let series = if (group_field)
         (let groups = util.unique_vals(data |> ~[group_field]),
-        (for (g in groups) (
+        [for (g in groups) (
             let group_items = data that ~[group_field] == g,
             {
                 key: g,
@@ -188,27 +188,27 @@ pub fn area_mark(data, ctx, mark_config) {
                 color: if (color_scale and color_field)
                     scale.scale_apply(color_scale, group_items[0][color_field])
                 else fill_color
-            })))
+            })])
     else [{key: null, items: data, color: fill_color}];
 
-    let area_elements = (for (s in series) (
-        let top_points = (for (d in s.items) (
+    let area_elements = [for (s in series) (
+        let top_points = [for (d in s.items) (
             let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
             let y_pos = if (is_stacked)
                 float(scale.scale_apply(y_scale, float(d["_y1"])))
             else float(scale.scale_apply(y_scale, d[y_field])),
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
-            [x_pos + bw, y_pos])),
-        let bottom_points = (for (d in s.items) (
+            [x_pos + bw, y_pos])],
+        let bottom_points = [for (d in s.items) (
             let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
             let y_bottom = if (is_stacked)
                 float(scale.scale_apply(y_scale, float(d["_y0"])))
             else plot_h,
-            [x_pos + bw, y_bottom])),
+            [x_pos + bw, y_bottom])],
         let d = svg.area_path(top_points, bottom_points),
         <path d: d, fill: s.color, opacity: opacity, stroke: "none">
-    ));
+    )];
 
     svg.group_class("marks areas", area_elements)
 }
@@ -234,7 +234,7 @@ pub fn point_mark(data, ctx, mark_config) {
     let base_size = if (mark_config and mark_config.size) mark_config.size else 30;
     let base_r = math.sqrt(float(base_size) / util.PI);
 
-    let points = (for (d in data) (
+    let points = [for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
         let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
         let bw_x = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
@@ -260,7 +260,7 @@ pub fn point_mark(data, ctx, mark_config) {
             <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
                     fill: pt_fill, opacity: pt_opacity,
                     stroke: "white", 'stroke-width': 0.5>
-    ));
+    )];
 
     svg.group_class("marks points", points)
 }
@@ -284,23 +284,23 @@ pub fn arc_mark(data, ctx, mark_config) {
     let total = sum(data |> float(~[theta_field]));
 
     // build cumulative angle array
-    let angle_data = (for (i in 0 to (len(data) - 1)) (
+    let angle_data = [for (i in 0 to (len(data) - 1)) (
         let val = float(data[i][theta_field]),
         let start = if (i == 0) 0.0
             else
-                (let preceding = (for (j in 0 to (i - 1)) float(data[j][theta_field])),
+                (let preceding = [for (j in 0 to (i - 1)) float(data[j][theta_field])],
                 sum(preceding) / total * util.TAU),
         let end = start + val / total * util.TAU,
         {index: i, start: start + pad / 2.0, end: end - pad / 2.0, datum: data[i]}
-    ));
+    )];
 
-    let arcs = (for (a in angle_data) (
+    let arcs = [for (a in angle_data) (
         let fill = if (color_scale and color_field)
             scale.scale_apply(color_scale, a.datum[color_field])
         else color.pick_color(color.category10, a.index),
         let d = svg.arc_path(cx, cy, inner_radius, outer_radius, a.start - util.PI / 2.0, a.end - util.PI / 2.0),
         <path d: d, fill: fill, opacity: opacity, stroke: "white", 'stroke-width': 1>
-    ));
+    )];
 
     svg.group_class("marks arcs", arcs)
 }
@@ -318,7 +318,7 @@ pub fn text_mark(data, ctx, mark_config) {
     let font_size = if (mark_config and mark_config.font_size) mark_config.font_size else 11;
     let fill_color = if (mark_config and mark_config.color) mark_config.color else "#333";
 
-    let texts = (for (d in data) (
+    let texts = [for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
         let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
         let bw_x = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
@@ -327,7 +327,7 @@ pub fn text_mark(data, ctx, mark_config) {
               'text-anchor': "middle", 'font-size': font_size, fill: fill_color,
             label
         >
-    ));
+    )];
 
     svg.group_class("marks text-labels", texts)
 }
@@ -348,7 +348,7 @@ pub fn rule_mark(data, ctx, mark_config) {
     let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 1.0;
     let dash = if (mark_config and mark_config.stroke_dash) mark_config.stroke_dash else null;
 
-    let rules = (for (d in data)
+    let rules = [for (d in data)
         if (y_field and not x_field)
             // horizontal rule
             (let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
@@ -375,7 +375,7 @@ pub fn rule_mark(data, ctx, mark_config) {
             let y2_px = float(scale.scale_apply(y_scale, float(d[y2_field]))),
             svg.line(x_pos + bw, y0_px, x_pos + bw, y2_px, stroke_color, stroke_w))
         else null
-    ) that (~ != null);
+    ] that (~ != null);
 
     svg.group_class("marks rules", rules)
 }
@@ -395,12 +395,12 @@ pub fn tick_mark(data, ctx, mark_config) {
     let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 1.5;
     let half = float(tick_length) / 2.0;
 
-    let ticks = (for (d in data) (
+    let ticks = [for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
         let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let y_pos = if (y_field) float(scale.scale_apply(y_scale, d[y_field])) else plot_h,
         svg.line(x_pos + bw, y_pos - half, x_pos + bw, y_pos + half, stroke_color, stroke_w)
-    ));
+    )];
 
     svg.group_class("marks ticks", ticks)
 }
@@ -422,10 +422,10 @@ pub fn boxplot_mark(data, ctx, mark_config) {
 
     // group data by x field
     let groups = util.unique_vals(data |> ~[x_field]);
-    let elements = (for (g in groups) (
+    let elements = [for (g in groups) (
         let items = data that ~[x_field] == g,
-        let vals = (for (d in items) float(d[y_field])),
-        let sorted_vals = (for (v in vals order by v) v),
+        let vals = [for (d in items) float(d[y_field])],
+        let sorted_vals = [for (v in vals order by v) v],
         let q1 = math.quantile(sorted_vals, 0.25),
         let q3 = math.quantile(sorted_vals, 0.75),
         let med = math.quantile(sorted_vals, 0.5),
@@ -464,13 +464,13 @@ pub fn boxplot_mark(data, ctx, mark_config) {
         let whi_cap = <line x1: cx - box_w / 4.0, y1: y_whi, x2: cx + box_w / 4.0, y2: y_whi,
                             stroke: "#333", 'stroke-width': 1>,
         // outlier circles
-        let outlier_els = (for (o in outliers)
+        let outlier_els = [for (o in outliers)
             <circle cx: cx, cy: float(scale.scale_apply(y_scale, o)), r: 3,
-                    fill: "none", stroke: "#333", 'stroke-width': 1>),
+                    fill: "none", stroke: "#333", 'stroke-width': 1>],
         [wlo_line, wlo_cap, whi_line, whi_cap, box_rect, med_line, *outlier_els]
-    ));
+    )];
 
-    let all = (for (group in elements) for (el in group) el);
+    let all = [for (group in elements) for (el in group) el];
     svg.group_class("marks boxplots", all)
 }
 
@@ -488,7 +488,7 @@ pub fn errorbar_mark(data, ctx, mark_config) {
     let stroke_w = if (mark_config and mark_config.stroke_width) mark_config.stroke_width else 1.5;
     let cap_w = 6.0;
 
-    let bars = (for (d in data) (
+    let bars = [for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
         let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let cx = x_pos + bw,
@@ -503,9 +503,9 @@ pub fn errorbar_mark(data, ctx, mark_config) {
         let cap_hi = <line x1: cx - cap_w, y1: y_hi, x2: cx + cap_w, y2: y_hi,
                            stroke: stroke_color, 'stroke-width': stroke_w>,
         [stem, cap_lo, cap_hi]
-    ));
+    )];
 
-    let all = (for (group in bars) for (el in group) el);
+    let all = [for (group in bars) for (el in group) el];
     svg.group_class("marks errorbars", all)
 }
 
@@ -522,18 +522,18 @@ pub fn errorband_mark(data, ctx, mark_config) {
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 0.3;
 
-    let top_points = (for (d in data) (
+    let top_points = [for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
         let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let y_pos = float(scale.scale_apply(y_scale, float(d[y_field]))),
-        [x_pos + bw, y_pos]));
+        [x_pos + bw, y_pos])];
 
     let bottom_points = if (y2_field)
-        (for (d in data) (
+        [for (d in data) (
             let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
             let bw = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
             let y_pos = float(scale.scale_apply(y_scale, float(d[y2_field]))),
-            [x_pos + bw, y_pos]))
+            [x_pos + bw, y_pos])]
     else top_points;
 
     let d = svg.area_path(top_points, bottom_points);
@@ -555,7 +555,7 @@ pub fn rect_mark(data, ctx, mark_config) {
     let fill_color = if (mark_config and mark_config.color) mark_config.color else color.default_color;
     let opacity = if (mark_config and mark_config.opacity) mark_config.opacity else 1.0;
 
-    let rects = (for (d in data) (
+    let rects = [for (d in data) (
         let x_pos = float(scale.scale_apply(x_scale, d[x_field])),
         let y_pos = float(scale.scale_apply(y_scale, d[y_field])),
         let w = abs(if (x_scale.bandwidth) x_scale.bandwidth else 20.0),
@@ -567,13 +567,13 @@ pub fn rect_mark(data, ctx, mark_config) {
         else fill_color,
         <rect x: x_pos, y: rect_y, width: w, height: h,
               fill: rect_fill, opacity: opacity, stroke: "white", 'stroke-width': 0.5>
-    ));
+    )];
 
     svg.group_class("marks rects", rects)
 }
 
 fn find_cat_index(cats, val) {
-    let matches = (for (i in 0 to (len(cats) - 1))
-        if (cats[i] == val) i else null) that (~ != null)
+    let matches = [for (i in 0 to (len(cats) - 1))
+        if (cats[i] == val) i else null] that (~ != null)
     if (len(matches) > 0) matches[0] else 0
 }

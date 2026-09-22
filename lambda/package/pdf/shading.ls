@@ -51,7 +51,7 @@ fn _sampled_values(f, d, ncomp, sample_index) {
     let off = sample_index * ncomp
     if (data == null or data == "") { [] }
     else {
-        for (i in 0 to (ncomp - 1)) _sample_range_value(d, i, util.byte_at(data, off + i))
+        [for (i in 0 to (ncomp - 1)) _sample_range_value(d, i, util.byte_at(data, off + i))]
     }
 }
 
@@ -115,11 +115,11 @@ fn _alpha_at(alpha_mask, offset) {
 
 fn _stop_elements(stops, alpha_mask) {
     if (alpha_mask == null) {
-        for (s in stops) <stop offset: s.offset, 'stop-color': s.color>
+        [for (s in stops) <stop offset: s.offset, 'stop-color': s.color>]
     }
     else {
-        for (s in stops) <stop offset: s.offset, 'stop-color': s.color,
-                              'stop-opacity': util.fmt_num(_alpha_at(alpha_mask, s.value))>
+        [for (s in stops) <stop offset: s.offset, 'stop-color': s.color,
+                              'stop-opacity': util.fmt_num(_alpha_at(alpha_mask, s.value))>]
     }
 }
 
@@ -381,7 +381,7 @@ fn _do_name_from_operands(ops) {
 fn _pop_ctm(stack, fallback) {
     let m = len(stack)
     if (m >= 1) {
-        { ctm: stack[m - 1], stack: (for (k, v in stack where k < (m - 1)) v) }
+        { ctm: stack[m - 1], stack: [for (k, v in stack where k < (m - 1)) v] }
     }
     else { { ctm: fallback, stack: stack } }
 }
@@ -443,7 +443,7 @@ fn _tiling_pattern_children_loop(pdf, page, ops, i, n, ctm, stack, fill, defs, r
         }
         else if (opr == "Do" and _do_name_from_operands(operands) != null) {
             let imgs = image.apply_do(pdf, page, ctm, operands)
-            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, rect, out ++ (for (img in imgs) img), id)
+            _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, rect, out ++ [for (img in imgs) img], id)
         }
         else { _tiling_pattern_children_loop(pdf, page, ops, i + 1, n, ctm, stack, fill, defs, rect, out, id) }
     }

@@ -7,6 +7,7 @@
 #include "ast_build.hpp"
 #include "write_set.hpp"
 #include "parse_type_pattern.hpp"
+#include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
 #include "../jube/jube_language.h"
@@ -74,6 +75,11 @@ static char* ast_copy_source_text(Transpiler* tp, StrView source,
 static LambdaSourcePoint ast_node_start_point(Transpiler* tp, const AstNode* node) {
     SourceSpan span = node ? node->source_span : (SourceSpan){0, 0};
     return lambda_source_span_start_point(tp->source, span);
+}
+
+static int source_span_start_line(Transpiler* tp, SourceSpan span) {
+    return tp && tp->source
+        ? (int)lambda_source_span_start_point(tp->source, span).row + 1 : 0;
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
@@ -451,7 +457,6 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
     };
     const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
     if (found) {
-        log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
         return found->info;
     }
 
@@ -459,11 +464,9 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
     key.arg_count = -1;
     found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
     if (found) {
-        log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
         return found->info;
     }
 
-    log_debug("don't have sys func: %.*s, %d", (int)name->length, name->str, arg_count);
     return NULL;
 }
 
@@ -513,8 +516,6 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
     };
     const SysFuncEntry* found = (const SysFuncEntry*)hashmap_get(sys_func_map, &key);
     if (!found) {
-        log_debug("method_call no sys func: %.*s, args=%d",
-            (int)method_name->length, method_name->str, total_arg_count);
         return NULL;
     }
 
@@ -522,8 +523,6 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
 
     // Check if this function is method-eligible
     if (!info->is_method_eligible) {
-        log_debug("method_call sys func '%.*s' not method-eligible",
-            (int)method_name->length, method_name->str);
         return NULL;
     }
 
@@ -532,16 +531,11 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
         if (info->first_param_type != obj_type_id) {
             bool type_compatible = false;
             if (!type_compatible) {
-                log_debug("method_call type mismatch for '%.*s': expected %d, got %d",
-                    (int)method_name->length, method_name->str,
-                    info->first_param_type, obj_type_id);
                 return NULL;
             }
         }
     }
 
-    log_debug("method_call found sys func: %.*s, args=%d",
-        (int)method_name->length, method_name->str, total_arg_count);
     return info;
 }
 
@@ -1737,6 +1731,10 @@ bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
 // Check if a name entry is in global scope
 bool is_global_entry(NameEntry* entry, NameScope* global_scope) {
     if (!global_scope) return false;
+    // Every direct-builder binding records its defining scope. Capture
+    // analysis runs once per function, so walking a large module list here
+    // would make a chain of top-level functions quadratic.
+    if (entry && entry->scope) return entry->scope == global_scope;
     NameEntry* e = global_scope->first;
     while (e) {
         if (e == entry) return true;
@@ -1925,7 +1923,6 @@ void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* 
     capture->is_mutable = false;
     capture->next = *captures;
     *captures = capture;
-    log_debug("capture added: %.*s", (int)name->len, name->chars);
 }
 
 // Mark an existing capture as mutable (called when assignment to captured var is detected)
@@ -1936,7 +1933,6 @@ void mark_capture_mutable(FnCapture** captures, String* name) {
             c->lambda_name->len == name->len &&
             memcmp(c->lambda_name->chars, name->chars, name->len) == 0)) {
             c->is_mutable = true;
-            log_debug("capture marked mutable: %.*s", (int)name->len, name->chars);
             return;
         }
         c = c->next;
@@ -2035,14 +2031,10 @@ void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_sc
     fn_node->analysis->capture_count = 0;
 
     if (fn_node->captures) {
-        log_debug("function %.*s has captures:",
-            fn_node->name ? (int)fn_node->name->len : 5,
-            fn_node->name ? fn_node->name->chars : "anon");
         FnCapture* c = fn_node->captures;
         while (c) {
             fn_node->analysis->capture_count++;
             String* capture_name = c->lambda_name;
-            log_debug("  - %.*s", (int)capture_name->len, capture_name->chars);
             // A mutable capture is an explicit cross-frame write only when the
             // outer binding itself is a `var`; immutable captures remain pure.
             if (c->is_mutable && (!c->entry || !c->entry->is_mutable)) {
@@ -2071,6 +2063,12 @@ AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;
     ast_node->source_span = span;
+    if (!ast_index_note_allocation(&tp->ast_index, ast_node)) {
+        // A partially indexed unit must not reach the pass manager: the index
+        // is an allocation-time compiler fact under D8.2.4.
+        tp->build_allocation_failed = true;
+        return NULL;
+    }
     return ast_node;
 }
 
@@ -2123,17 +2121,102 @@ static bool ast_node_declares_binding(AstNode* node) {
 
 // lookup a name in the current scope only (not in parent scopes)
 // returns the existing entry if found, NULL otherwise
-NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
-    NameEntry* entry = tp->current_scope->first;
-    while (entry) {
-        if (entry->name == name ||  // pointer comparison (interned strings)
-            (entry->name->len == name->len &&
-             memcmp(entry->name->chars, name->chars, name->len) == 0)) {
-            return entry;
+static uint32_t name_scope_pointer_hash(const String* name) {
+    uintptr_t value = (uintptr_t)name;
+    value ^= value >> 33;
+    value *= UINT64_C(0xff51afd7ed558ccd);
+    value ^= value >> 33;
+    return (uint32_t)value;
+}
+
+static NameEntry* name_scope_lookup(const NameScope* scope,
+        const String* name) {
+    if (!scope || !name) return NULL;
+    if (scope->name_index && scope->name_index_capacity) {
+        uint32_t slot = name_scope_pointer_hash(name) &
+            (scope->name_index_capacity - 1);
+        for (;;) {
+            NameEntry* entry = scope->name_index[slot];
+            if (!entry) return NULL;
+            if (entry->name == name) return entry;
+            slot = (slot + 1) & (scope->name_index_capacity - 1);
         }
-        entry = entry->next;
+    }
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (entry->name == name) return entry;
     }
     return NULL;
+}
+
+static bool name_scope_index_insert(NameScope* scope, NameEntry* entry) {
+    if (!scope || !entry || !entry->name || !scope->name_index ||
+            !scope->name_index_capacity) return true;
+    uint32_t slot = name_scope_pointer_hash(entry->name) &
+        (scope->name_index_capacity - 1);
+    for (;;) {
+        NameEntry* current = scope->name_index[slot];
+        if (!current) {
+            scope->name_index[slot] = entry;
+            scope->name_index_count++;
+            return true;
+        }
+        // Duplicate declarations still remain in source order for diagnostic
+        // recovery; name resolution has always selected the first declaration.
+        if (current->name == entry->name) return true;
+        slot = (slot + 1) & (scope->name_index_capacity - 1);
+    }
+}
+
+static bool name_scope_index_prepare(Transpiler* tp, NameScope* scope,
+        uint32_t capacity) {
+    if (!tp || !tp->pool || !scope || capacity < 16 ||
+            (capacity & (capacity - 1))) return false;
+    NameEntry** index = (NameEntry**)pool_calloc(tp->pool,
+        (size_t)capacity * sizeof(NameEntry*));
+    if (!index) return false;
+    scope->name_index = index;
+    scope->name_index_capacity = capacity;
+    scope->name_index_count = 0;
+    return true;
+}
+
+static uint32_t name_scope_index_capacity_for_entries(uint32_t entry_count) {
+    uint32_t capacity = 16;
+    while (entry_count * 4 >= capacity * 3) capacity *= 2;
+    return capacity;
+}
+
+static bool name_scope_index_rebuild(Transpiler* tp, NameScope* scope,
+        uint32_t capacity) {
+    if (!name_scope_index_prepare(tp, scope, capacity)) return false;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (!name_scope_index_insert(scope, entry)) return false;
+    }
+    return true;
+}
+
+static void name_scope_index_note_entry(Transpiler* tp, NameScope* scope,
+        NameEntry* entry) {
+    if (!scope || !entry) return;
+    scope->entry_count++;
+    if (!scope->name_index && scope->entry_count > 8) {
+        // Keep small parameter and block scopes list-only; wide module scopes
+        // build one fixed table and grow before the load factor reaches 0.75.
+        if (!name_scope_index_rebuild(tp, scope,
+                name_scope_index_capacity_for_entries(scope->entry_count))) return;
+    }
+    if (scope->name_index &&
+            (scope->name_index_count + 1) * 4 >=
+                scope->name_index_capacity * 3) {
+        if (!name_scope_index_rebuild(tp, scope,
+                scope->name_index_capacity * 2)) return;
+    }
+    (void)name_scope_index_insert(scope, entry);
+}
+
+NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
+    if (!tp || !tp->current_scope || !name) return NULL;
+    return name_scope_lookup(tp->current_scope, name);
 }
 
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
@@ -2178,8 +2261,14 @@ static String* binding_node_name(AstNode* node) {
 
 static void push_name_with_spelling(Transpiler* tp, AstNode* node,
         String* name, AstImportNode* import) {
-    log_debug("pushing name %.*s, %p", (int)name->len, name->chars, node->type);
-
+    if (!tp || !tp->name_pool || !name) return;
+    // An imported declaration's AST belongs to its provider and its `String`
+    // may therefore be interned in a different name pool. Re-intern the
+    // spelling here so this scope's pointer-identity index sees the same key
+    // that later identifier reads obtain from the importing pool.
+    StrView canonical_spelling = {name->chars, name->len};
+    name = name_pool_create_strview(tp->name_pool, canonical_spelling);
+    if (!name) return;
     StrView name_view = {name->chars, name->len};
     if (ast_node_declares_binding(node) &&
             is_reserved_identifier_keyword(name_view)) {
@@ -2223,6 +2312,7 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
+    name_scope_index_note_entry(tp, tp->current_scope, entry);
     // An import publishes a local view of a declaration owned by another
     // script. The source AST is shared with that provider, so never rewrite
     // its declaration edge: doing so would redirect both its closure identity
@@ -2337,8 +2427,6 @@ AstNode* build_array_from_items(Transpiler* tp, SourceSpan span,
     }
     ast_node->item = items;
     type->nested = nested_type;
-    log_debug("build array from items: nested type %d",
-        nested_type ? nested_type->type_id : -1);
     return (AstNode*)ast_node;
 }
 
@@ -2355,7 +2443,6 @@ static void add_namespace(Transpiler* tp, String* prefix, Target* target) {
     entry->target = target;
     entry->next = tp->namespaces;
     tp->namespaces = entry;
-    log_debug("namespace added: %.*s", (int)prefix->len, prefix->chars);
 }
 
 // Lookup a namespace by prefix string
@@ -2779,8 +2866,9 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     TypeParam* expected_param = func_type->param;
     AstNode* arg = call->argument;
     int arg_index = 0;
-    int line = (int)lambda_source_span_start_point(tp->source,
-        diagnostic_span).row + 1;
+    // Calls normally succeed. Source points scan from the input head, so only
+    // recover this diagnostic value on a failing path (D8.2.4).
+    int line = 0;
     NameEntry* var_arg_root_entries[64];
     int var_arg_root_count = 0;
     bool parameter_short_circuits_error = false;
@@ -2799,9 +2887,8 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             static_contract_binder_site(parameter_boundary_type(binder_param));
         if (!binder) continue;
         if (!static_bind_argument(binder_env, binder_written, binder, binder_arg)) {
-            int binder_line = (int)lambda_source_span_start_point(tp->source,
-                diagnostic_span).row + 1;
-            record_type_error_code(tp, binder_line, ERR_ARGUMENT_TYPE_MISMATCH,
+            if (!line) line = source_span_start_line(tp, diagnostic_span);
+            record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                 binder->bound == &TYPE_TYPE
                     ? "argument %d must be an explicit type value"
                     : "argument %d cannot establish binder '%.*s'",
@@ -2839,6 +2926,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             snprintf(expected, sizeof(expected), "%d to %d arguments",
                 min_args, max_args);
         }
+        if (!line) line = source_span_start_line(tp, diagnostic_span);
         record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
             "function expects %s, got %d", expected, arg_count);
         if (!should_continue_transpiling(tp)) {
@@ -2915,6 +3003,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                 char actual_name[128];
                 lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
                 lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
+                if (!line) line = source_span_start_line(tp, diagnostic_span);
                 record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                     "argument %d for `var` parameter must match exactly: expected %s, got %s; declare as any[] or use a value parameter",
                     arg_index + 1, expected_name, actual_name);
@@ -2944,6 +3033,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             char actual_name[128];
             lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
             lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
+            if (!line) line = source_span_start_line(tp, diagnostic_span);
             record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
                 "argument %d expected %s, got %s",
                 arg_index + 1, expected_name, actual_name);
@@ -2977,34 +3067,15 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
 
 
 NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
-    // lookup the name
+    if (!tp || !tp->current_scope || !tp->name_pool) return NULL;
+    // Name bindings are interned, so each scope probe is pointer-only. This
+    // avoids repeated spelling comparisons for every reference in a wide
+    // module scope (D8.2.4).
+    String* name = name_pool_lookup_strview(tp->name_pool, var_name);
+    if (!name) return NULL;
     NameScope* scope = tp->current_scope;
     FIND_VAR_NAME:
-    NameEntry* entry = scope->first;
-    // Cycle guard: the old fixed 1000-entry cap fired on legitimately large
-    // module scopes (thousands of top-level lets), silently returning NULL and
-    // leaving idents entry-less — the JIT recovered via its name-keyed global
-    // table, but the T0 interpreter read null (tier mismatch, SI3v2). Use
-    // tortoise-hare so only a genuinely circular entry list bails out.
-    NameEntry* chase = scope->first;
-    while (entry) {
-        if (chase) {
-            chase = chase->next ? chase->next->next : NULL;
-            if (chase && chase == entry) {
-                log_error("ERROR: circular entry list detected in scope");
-                return NULL;
-            }
-        }
-
-        StrView entry_name = strview_init(entry->name->chars, entry->name->len);
-        // no per-comparison trace here: this loop runs O(scope_size) per lookup
-        // and a large module scope (thousands of lets) turns a per-entry
-        // log_debug into tens of millions of log writes that dominate build time.
-        if (strview_eq(&entry_name, &var_name)) {
-            break;
-        }
-        entry = entry->next;
-    }
+    NameEntry* entry = name_scope_lookup(scope, name);
     if (!entry) {
         if (scope->parent) {
             // Defensive check: prevent infinite loop if parent pointer is circular
@@ -3013,20 +3084,14 @@ NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
                 return NULL;
             }
             scope = scope->parent;
-            log_debug("checking parent scope: %p", scope);
             goto FIND_VAR_NAME;
         }
-        log_debug("missing identifier %.*s", (int)var_name.length, var_name.str);
         return NULL;
     }
-    else {
-        log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
-        return entry;
-    }
+    return entry;
 }
 
 AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
-    log_debug("building identifier");
     AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node_from_span(tp,
         AST_NODE_IDENT, span, sizeof(AstIdentNode));
 
@@ -3036,14 +3101,11 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
     ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
 
     // lookup the name
-    log_debug("looking up name: %.*s", (int)var_name.length, var_name.str);
     NameEntry* entry = lookup_name(tp, var_name);
     if (!entry) {
         // In 'that' clause, rewrite bare identifier to ~.name (member access on current item)
         // Name resolution order: 1) scope names, 2) ~.name fields, 3) system properties
         if (tp->in_that_clause) {
-            log_debug("that clause: rewriting bare '%.*s' to ~.%.*s",
-                (int)var_name.length, var_name.str, (int)var_name.length, var_name.str);
             AstFieldNode* field_node = (AstFieldNode*)alloc_ast_node_from_span(tp,
                 AST_NODE_MEMBER_EXPR, span, sizeof(AstFieldNode));
             // create ~ (current item) as the object
@@ -3077,7 +3139,6 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
                 AstPrimaryNode* pn = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
                     AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
                 pn->type = (Type*)ft;
-                log_debug("global import math constant resolved: %.*s", (int)var_name.length, var_name.str);
                 return (AstNode*)pn;
             }
         }
@@ -3104,7 +3165,6 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
         ast_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
     }
     else {
-        log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
         ast_node->entry = entry;
         if (entry->is_binder && entry->binder) {
             // A binder read is a first-class runtime type value. Its contained
@@ -3121,9 +3181,6 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
         if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
             // clone and remove is_const flag
             // todo: full type clone
-            log_debug("got imported identifier %.*s from module %.*s",
-                (int)entry->name->len, entry->name->chars,
-                (int)entry->import->module.length, entry->import->module.str);
             if (entry->node->type->type_id == LMD_TYPE_TYPE) {
                 // for imported type definitions (pub type T = ...), preserve the full TypeType wrapper
                 ast_node->type = entry->node->type;
@@ -3144,8 +3201,6 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
             }
         }
         else {
-            log_debug("Debug: entry->node->type is %p for identifier %.*s",
-                entry->node->type, (int)entry->name->len, entry->name->chars);
             ast_node->type = entry->node->type;
             if (entry->node->node_type == AST_NODE_PARAM && entry->node->type &&
                     entry->node->type->kind == TYPE_KIND_PARAM) {
@@ -3172,8 +3227,6 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
                 TypeType* type_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
                 type_type->type = entry->node->type;
                 ast_node->type = (Type*)type_type;
-                log_debug("Wrapped type definition %.*s in TypeType",
-                    (int)entry->name->len, entry->name->chars);
             }
             // Handle string/symbol pattern definitions - wrap in TypeType for use in type expressions
             else if (entry->node->node_type == AST_NODE_STRING_PATTERN ||
@@ -3181,15 +3234,7 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
                 TypeType* type_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
                 type_type->type = entry->node->type;  // TypePattern*
                 ast_node->type = (Type*)type_type;
-                log_debug("Wrapped pattern definition %.*s in TypeType",
-                    (int)entry->name->len, entry->name->chars);
             }
-        }
-        if (ast_node->type) {
-            log_debug("ident %p type: %d", ast_node->type, ast_node->type->type_id);
-        }
-        else {
-            log_debug("ident %p type: null", ast_node);
         }
     }
     return (AstNode*)ast_node;
@@ -3262,7 +3307,6 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
     String* str;
     bool is_binary = kind == LAMBDA_AST_LITERAL_BINARY;
     bool is_symbol = kind == LAMBDA_AST_LITERAL_SYMBOL;
-    log_debug("build lit string with kind: %d", kind);
 
     // Handle binary separately — extract content between b' and '
     if (is_binary) {
@@ -3289,7 +3333,6 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             return &TYPE_ERROR;
         }
         if (decoded_len == 0) {
-            log_debug("build_lit_string: empty binary literal, returning null type");
             strbuf_free(decoded);
             return &LIT_NULL;
         }
@@ -3321,7 +3364,6 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
     // Empty symbol literals are rejected by grammar; keep a null fallback for generated/stale parsers.
     if (content_len == 0) {
         if (is_symbol) {
-            log_debug("build_lit_string: empty symbol literal, returning null type");
             return &LIT_NULL;
         }
     }
@@ -3472,11 +3514,9 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
         str = stringbuf_to_string(str_buf);
         str->flags = 0;
         str->is_ascii = str_is_ascii(str->chars, str->len) ? 1 : 0;
-        log_debug("final string: %.*s", str->len, str->chars);
 
         // Escapes can only produce empty solid values through generated/stale parsers.
         if (str->len == 0 && is_symbol) {
-            log_debug("build_lit_string: empty symbol after escape processing, returning null type");
             return &LIT_NULL;
         }
 
@@ -3527,13 +3567,8 @@ static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
     // Check if parsing was successful
     // On success: dt != NULL and parse_end > datetime_start (parsing progressed)
     // On error: dt == NULL and parse_end == datetime_start (no progress)
-    if (dt && parse_end > datetime_start) {
-        log_debug("parsed datetime fields: %d, %d, %d, %d, %d",
-            dt->year_month, dt->day, dt->hour, dt->minute, dt->second);
-    }
-    else {
+    if (!dt || parse_end <= datetime_start) {
         // Fallback to default if parsing fails
-        log_debug("Failed to parse datetime: %.*s, using default", datetime_len, datetime_start);
         return NULL;
     }
 
@@ -3542,7 +3577,6 @@ static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
     // Add to const list
     arraylist_append(tp->const_list, &dt_type->datetime);
     dt_type->const_index = tp->const_list->length - 1;
-    log_debug("build lit datetime: %.*s, type: %d", datetime_len, datetime_start, dt_type->type_id);
     return (Type*)dt_type;
 }
 
@@ -3568,7 +3602,6 @@ static bool track_decimal_constant(Transpiler* tp, Decimal* decimal) {
 static Type* build_lit_float_from_span(Transpiler* tp, SourceSpan span) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
-    log_debug("build lit float");
     StrView source = source_span_text(tp, span);
     char* number_text = ast_copy_source_text(tp, source, span);
     if (!number_text) return &TYPE_ERROR;
@@ -3578,20 +3611,16 @@ static Type* build_lit_float_from_span(Transpiler* tp, SourceSpan span) {
     if (num_str[0] == '-') { has_sign = true;  num_str++; } // skip the sign
     while (*num_str == ' ' || *num_str == '\t' || *num_str == '\n' || *num_str == '\r') { num_str++; } // skip leading spaces
     // str_to_double_default() does not handle 'inf', 'nan' — add special handling
-    log_debug("build lit float: %s", num_str);
     // add special handling for "inf", "-inf", "nan"
     if (str_istarts_with_const(num_str, strlen(num_str), "inf")) {
         item_type->double_val = INFINITY;
-        log_debug("build lit float: inf");
         if (has_sign) { item_type->double_val = -item_type->double_val; }
     }
     else if (str_istarts_with_const(num_str, strlen(num_str), "nan")) {
         item_type->double_val = NAN;
-        log_debug("build lit float: nan");
     }
     else { // normal float parsing
         item_type->double_val = str_to_double_default(num_str, strlen(num_str), 0.0);
-        log_debug("build lit float: %s, value: %f", num_str, item_type->double_val);
         if (has_sign) { item_type->double_val = -item_type->double_val; }
     }
     arraylist_append(tp->const_list, &item_type->double_val);
@@ -3672,7 +3701,6 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
     if (suffix_char == 'n' || suffix_char == 'm') {
         num_str[num_sv.length - 1] = '\0';  // clear the suffix
     }
-    log_debug("build lit decimal: %s", num_str);
 
     // A.5 suffix split (Lambda_Semantics_Number_Model.md): the suffix alone
     // names the type — 'n' is integer always, 'm' is decimal always. The old
@@ -3857,8 +3885,6 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
         default: item_type->raw_bits = 0; break;
     }
     item_type->is_const = 1;  item_type->is_literal = 1;
-    log_debug("build_lit_sized_integer: type=%s value=%lld raw_bits=%u",
-              get_num_sized_type_name(num_type), value, item_type->raw_bits);
     return (Type*)item_type;
 }
 
@@ -3909,8 +3935,6 @@ static Type* build_lit_sized_float_from_span(Transpiler* tp,
         item_type->raw_bits = (uint32_t)f32_to_f16_bits((float)dval);
     }
     item_type->is_const = 1;  item_type->is_literal = 1;
-    log_debug("build_lit_sized_float: type=%s dval=%g raw_bits=%u",
-              get_num_sized_type_name(num_type), dval, item_type->raw_bits);
     return (Type*)item_type;
 }
 
@@ -4438,13 +4462,11 @@ bool has_current_item_ref(AstNode* node) {
 AstNode* build_current_item_from_span(Transpiler* tp, SourceSpan span,
         bool is_index) {
     if (is_index) {
-        log_debug("build current index (~#)");
         AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_INDEX,
             span, sizeof(AstNode));
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
         return ast_node;
     } else {
-        log_debug("build current item (~)");
         AstNode* ast_node = alloc_ast_node_from_span(tp, AST_NODE_CURRENT_ITEM,
             span, sizeof(AstNode));
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
@@ -4487,7 +4509,6 @@ AstNode* build_current_error_from_span(Transpiler* tp, SourceSpan span) {
         record_semantic_error_span(tp, span, ERR_INVALID_EXPR_CONTEXT,
             "current error `^` is only valid inside an error-handler body");
     }
-    log_debug("build current handler error (^)");
     return ast_node;
 }
 
@@ -5061,7 +5082,6 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
         }
     }
 
-    log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
 }
 
 AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
@@ -5080,11 +5100,6 @@ AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
     set_function_return_contract(fn_type_info, returned, true);
     fn_type_info->error_type = error_type;
     fn_type_info->can_raise = can_raise;
-
-    log_debug("return type: ok=%d, error=%d, can_raise=%d",
-        returned ? returned->type_id : -1,
-        error_type ? error_type->type_id : -1,
-        can_raise);
 
     return (AstNode*)wrapper_node;
 }
@@ -5125,8 +5140,6 @@ static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode
             log_error("invalid map item type %s, should be map or any",
                 get_type_name(field_type->type_id));
         } else {
-            log_debug("invalid map item type %d, should be map or any",
-                field_type->type_id);
         }
     }
     return shape_entry;
@@ -5532,7 +5545,6 @@ AstNamedNode* build_named_argument_from_parts(Transpiler* tp,
     ast_node->as = value;
     ast_node->type = value ? value->type : &TYPE_ANY;
 
-    log_debug("named argument: %s", ast_node->name);
     return ast_node;
 }
 
@@ -6432,8 +6444,6 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     StrView qualified = {buf, total_len};
     String* qualified_name = name_pool_create_strview(tp->name_pool, qualified);
 
-    log_debug("pushing qualified name %.*s", (int)qualified_name->len, qualified_name->chars);
-
     NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
     entry->name = qualified_name;
     entry->node = node;  entry->import = import;
@@ -6441,6 +6451,7 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
+    name_scope_index_note_entry(tp, tp->current_scope, entry);
 }
 
 static void register_imported_object_type(Transpiler* tp, AstObjectTypeNode* obj_node) {
@@ -6450,14 +6461,10 @@ static void register_imported_object_type(Transpiler* tp, AstObjectTypeNode* obj
     TypeObject* obj_type = (TypeObject*)tt->type;
     arraylist_append(tp->type_list, (void*)tt);
     obj_type->type_index = tp->type_list->length - 1;
-    log_debug("registered imported object type '%.*s' at local index %d",
-        (int)obj_node->name->len, obj_node->name->chars, obj_type->type_index);
 }
 
 void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
-    log_debug("declare_module_import");
     if (!import_node->script) { log_error("Missing script");  return; }
-    log_debug("script reference: %s", import_node->script->reference);
     if (!import_node->script->ast_root) { log_error("Missing AST root");  return; }
     AstNode* node = import_node->script->ast_root;
     if (node->node_type != AST_SCRIPT) {
@@ -6473,8 +6480,6 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
         }
         else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
             AstFuncNode* func_node = (AstFuncNode*)node;
-            log_debug("got imported fn/pn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
-                ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 if (has_alias) {
                     push_qualified_name(tp, (AstNode*)func_node, import_node, import_node->alias);
@@ -6496,16 +6501,13 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                     } else {
                         push_name(tp, (AstNamedNode*)obj_node, import_node);
                     }
-                    log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
                 } else {
                     AstNode* dec_node = declare;
-                    String* dec_name = binding_node_name(dec_node);
                     if (has_alias) {
                         push_qualified_name(tp, dec_node, import_node, import_node->alias);
                     } else {
                         push_name(tp, dec_node, import_node);
                     }
-                    log_debug("got pub var: %.*s", (int)dec_name->len, dec_name->chars);
                     // re-register type aliases in importing script's type_list
                     if (dec_node->type && dec_node->type->type_id == LMD_TYPE_TYPE) {
                         TypeType* tt = (TypeType*)dec_node->type;
@@ -6514,8 +6516,6 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                             || inner->type_id == LMD_TYPE_ARRAY)) {
                             arraylist_append(tp->type_list, (void*)tt);
                             ((TypeMap*)inner)->type_index = tp->type_list->length - 1;
-                            log_debug("registered imported type alias '%.*s' at local index %d",
-                                (int)dec_name->len, dec_name->chars, ((TypeMap*)inner)->type_index);
                         }
                     }
                 }
@@ -6532,7 +6532,6 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
                 } else {
                     push_name(tp, (AstNamedNode*)obj_node, import_node);
                 }
-                log_debug("got pub type: %.*s", (int)obj_node->name->len, obj_node->name->chars);
             }
         }
         node = node->next;
@@ -6769,17 +6768,27 @@ typedef struct DirectBindEntryMap {
     NameEntry* rebound;
 } DirectBindEntryMap;
 
-typedef struct DirectBindNodeMap {
-    AstNode* node;
-} DirectBindNodeMap;
-
 typedef struct DirectBindContext {
     Transpiler* tp;
     HashMap* scopes;
     HashMap* entries;
-    HashMap* visited;
+    ArrayList* functions;
+    AstFunctionId current_function;
     bool failed;
 } DirectBindContext;
+
+// Retained ASTs can be rebound by a later compiler unit, including on a
+// prebuild worker. A shared atomic stamp prevents an old node mark from being
+// mistaken for this pass without restoring the old pointer visited table.
+static uint32_t g_direct_bind_epoch;
+
+static uint32_t direct_bind_next_epoch(void) {
+    uint32_t epoch = __atomic_add_fetch(&g_direct_bind_epoch, 1,
+        __ATOMIC_RELAXED);
+    if (epoch == 0) epoch = __atomic_add_fetch(&g_direct_bind_epoch, 1,
+        __ATOMIC_RELAXED);
+    return epoch;
+}
 
 static uint64_t direct_bind_pointer_hash(const void* item, uint64_t seed0,
         uint64_t seed1) {
@@ -6809,19 +6818,32 @@ static DirectBindEntryMap* direct_bind_find_entry(DirectBindContext* bind,
         bind->entries, &key) : NULL;
 }
 
-static bool direct_bind_init(DirectBindContext* bind, Transpiler* tp) {
+static bool direct_bind_init(DirectBindContext* bind, Transpiler* tp,
+        uint32_t expected_entries) {
     if (!bind || !tp) return false;
     *bind = (DirectBindContext){.tp = tp};
+    uint32_t entry_capacity = expected_entries > 64
+        ? (expected_entries > UINT32_MAX / 2 ? UINT32_MAX : expected_entries * 2)
+        : 128;
     bind->scopes = hashmap_new(sizeof(DirectBindScopeMap), 64, 0, 0,
         direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
-    bind->entries = hashmap_new(sizeof(DirectBindEntryMap), 128, 0, 0,
+    bind->entries = hashmap_new(sizeof(DirectBindEntryMap), entry_capacity, 0, 0,
         direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
-    bind->visited = hashmap_new(sizeof(DirectBindNodeMap), 256, 0, 0,
-        direct_bind_pointer_hash, direct_bind_pointer_compare, NULL, NULL);
-    if (bind->scopes && bind->entries && bind->visited) return true;
+    bind->functions = arraylist_new(8);
+    bind->tp->bind_epoch = direct_bind_next_epoch();
+    if (!bind->tp->defer_ast_index_columns &&
+            !ast_index_prepare_binding(&bind->tp->ast_index)) {
+        hashmap_free(bind->scopes);
+        hashmap_free(bind->entries);
+        arraylist_free(bind->functions);
+        *bind = {};
+        return false;
+    }
+    bind->current_function = AST_FUNCTION_ID_INVALID;
+    if (bind->scopes && bind->entries && bind->functions) return true;
     hashmap_free(bind->scopes);
     hashmap_free(bind->entries);
-    hashmap_free(bind->visited);
+    arraylist_free(bind->functions);
     *bind = {};
     return false;
 }
@@ -6830,7 +6852,7 @@ static void direct_bind_destroy(DirectBindContext* bind) {
     if (!bind) return;
     hashmap_free(bind->scopes);
     hashmap_free(bind->entries);
-    hashmap_free(bind->visited);
+    arraylist_free(bind->functions);
     *bind = {};
 }
 
@@ -6862,6 +6884,15 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
     *rebound = *source;
     rebound->first = NULL;
     rebound->last = NULL;
+    rebound->name_index = NULL;
+    rebound->name_index_capacity = 0;
+    rebound->name_index_count = 0;
+    rebound->entry_count = 0;
+    if (source->entry_count > 8 && !name_scope_index_prepare(bind->tp,
+            rebound, name_scope_index_capacity_for_entries(source->entry_count))) {
+        bind->failed = true;
+        return NULL;
+    }
     DirectBindScopeMap map = {.source = source, .rebound = rebound};
     hashmap_set(bind->scopes, &map);
     if (hashmap_oom(bind->scopes)) {
@@ -6890,6 +6921,7 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
         if (rebound->last) rebound->last->next = copy;
         else rebound->first = copy;
         rebound->last = copy;
+        name_scope_index_note_entry(bind->tp, rebound, copy);
     }
     return rebound;
 }
@@ -6923,22 +6955,17 @@ static void direct_bind_rewrite_entry_links(DirectBindContext* bind) {
 
 static bool direct_bind_mark_visited(DirectBindContext* bind, AstNode* node) {
     if (!bind || !node) return false;
-    DirectBindNodeMap item = {.node = node};
-    if (hashmap_get(bind->visited, &item)) return false;
-    hashmap_set(bind->visited, &item);
-    if (hashmap_oom(bind->visited)) {
-        bind->failed = true;
-        return false;
-    }
+    if (node->last_bind_epoch == bind->tp->bind_epoch) return false;
+    node->last_bind_epoch = bind->tp->bind_epoch;
     return true;
 }
 
-static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node);
+static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
+        AstNode* parent);
 
 static void direct_bind_rewrite_child(AstNode* child, AstNode* parent,
         void* opaque) {
-    (void)parent;
-    direct_bind_rewrite_node((DirectBindContext*)opaque, child);
+    direct_bind_rewrite_node((DirectBindContext*)opaque, child, parent);
 }
 
 static void direct_bind_rewrite_function_captures(DirectBindContext* bind,
@@ -6973,126 +7000,126 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
             ((AstListNode*)node)->vars);
         // Parenthesized let groups retain declarations beside their result
         // item; the shared child visitor only sees the latter.
-        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare);
-        direct_bind_rewrite_node(bind, ((AstArrayNode*)node)->item);
+        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare, node);
+        direct_bind_rewrite_node(bind, ((AstArrayNode*)node)->item, node);
         break;
     case AST_NODE_ELEMENT:
-        direct_bind_rewrite_node(bind, ((AstMapNode*)node)->item);
+        direct_bind_rewrite_node(bind, ((AstMapNode*)node)->item, node);
         if (node->node_type == AST_NODE_ELEMENT) {
-            direct_bind_rewrite_node(bind, ((AstElementNode*)node)->content);
+            direct_bind_rewrite_node(bind, ((AstElementNode*)node)->content, node);
         }
         break;
     case AST_NODE_CONTENT:
         // The shared child walker owns CONTENT's items; retain the scope edge.
         ((AstListNode*)node)->vars = direct_bind_scope(bind,
             ((AstListNode*)node)->vars);
-        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare);
+        direct_bind_rewrite_node(bind, ((AstListNode*)node)->declare, node);
         break;
     case AST_NODE_FOR_EXPR: {
         AstForNode* loop = (AstForNode*)node;
         loop->vars = direct_bind_scope(bind, loop->vars);
-        direct_bind_rewrite_node(bind, loop->loop);
-        direct_bind_rewrite_node(bind, loop->let_clause);
-        direct_bind_rewrite_node(bind, loop->where);
+        direct_bind_rewrite_node(bind, loop->loop, node);
+        direct_bind_rewrite_node(bind, loop->let_clause, node);
+        direct_bind_rewrite_node(bind, loop->where, node);
         if (loop->group) {
             loop->group->entry = direct_bind_entry(bind, loop->group->entry);
-            direct_bind_rewrite_node(bind, (AstNode*)loop->group->keys);
+            direct_bind_rewrite_node(bind, (AstNode*)loop->group->keys, node);
         }
-        direct_bind_rewrite_node(bind, loop->order);
-        direct_bind_rewrite_node(bind, loop->limit);
-        direct_bind_rewrite_node(bind, loop->offset);
-        direct_bind_rewrite_node(bind, loop->then);
+        direct_bind_rewrite_node(bind, loop->order, node);
+        direct_bind_rewrite_node(bind, loop->limit, node);
+        direct_bind_rewrite_node(bind, loop->offset, node);
+        direct_bind_rewrite_node(bind, loop->then, node);
         break;
     }
     case AST_NODE_FOR_CLAUSE: {
         AstLoopNode* loop = (AstLoopNode*)node;
         loop->entry = direct_bind_entry(bind, loop->entry);
         loop->index_entry = direct_bind_entry(bind, loop->index_entry);
-        direct_bind_rewrite_node(bind, loop->as);
-        direct_bind_rewrite_node(bind, loop->on);
-        direct_bind_rewrite_node(bind, (AstNode*)loop->join_keys);
+        direct_bind_rewrite_node(bind, loop->as, node);
+        direct_bind_rewrite_node(bind, loop->on, node);
+        direct_bind_rewrite_node(bind, (AstNode*)loop->join_keys, node);
         break;
     }
     case AST_NODE_GROUP_KEY:
-        direct_bind_rewrite_node(bind, ((AstGroupKey*)node)->expr);
+        direct_bind_rewrite_node(bind, ((AstGroupKey*)node)->expr, node);
         break;
     case AST_NODE_JOIN_KEY: {
         AstJoinKey* key = (AstJoinKey*)node;
-        direct_bind_rewrite_node(bind, key->prior_expr);
-        direct_bind_rewrite_node(bind, key->new_expr);
+        direct_bind_rewrite_node(bind, key->prior_expr, node);
+        direct_bind_rewrite_node(bind, key->new_expr, node);
         break;
     }
     case AST_NODE_ORDER_SPEC:
-        direct_bind_rewrite_node(bind, ((AstOrderSpec*)node)->expr);
+        direct_bind_rewrite_node(bind, ((AstOrderSpec*)node)->expr, node);
         break;
     case AST_NODE_VIEW: {
         AstViewNode* view = (AstViewNode*)node;
         view->vars = direct_bind_scope(bind, view->vars);
-        direct_bind_rewrite_node(bind, view->pattern);
-        direct_bind_rewrite_node(bind, (AstNode*)view->param);
-        direct_bind_rewrite_node(bind, view->body);
+        direct_bind_rewrite_node(bind, view->pattern, node);
+        direct_bind_rewrite_node(bind, (AstNode*)view->param, node);
+        direct_bind_rewrite_node(bind, view->body, node);
         for (AstStateEntry* state = view->state; state; state = state->next_state) {
             state->entry = direct_bind_entry(bind, state->entry);
-            direct_bind_rewrite_node(bind, state->value);
+            direct_bind_rewrite_node(bind, state->value, node);
         }
         for (AstEventHandler* handler = view->handler; handler;
                 handler = handler->next_handler) {
-            direct_bind_rewrite_node(bind, (AstNode*)handler);
+            direct_bind_rewrite_node(bind, (AstNode*)handler, node);
         }
         break;
     }
     case AST_NODE_EVENT_HANDLER: {
         AstEventHandler* handler = (AstEventHandler*)node;
         handler->vars = direct_bind_scope(bind, handler->vars);
-        direct_bind_rewrite_node(bind, (AstNode*)handler->param);
-        direct_bind_rewrite_node(bind, handler->body);
+        direct_bind_rewrite_node(bind, (AstNode*)handler->param, node);
+        direct_bind_rewrite_node(bind, handler->body, node);
         break;
     }
     case AST_NODE_OBJECT_TYPE: {
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
         object->entry = direct_bind_entry(bind, object->entry);
         direct_bind_rewrite_object_shape(bind, object);
-        direct_bind_rewrite_node(bind, object->item);
-        direct_bind_rewrite_node(bind, object->base_type);
-        direct_bind_rewrite_node(bind, object->content);
-        direct_bind_rewrite_node(bind, object->methods);
-        direct_bind_rewrite_node(bind, object->constraints);
+        direct_bind_rewrite_node(bind, object->item, node);
+        direct_bind_rewrite_node(bind, object->base_type, node);
+        direct_bind_rewrite_node(bind, object->content, node);
+        direct_bind_rewrite_node(bind, object->methods, node);
+        direct_bind_rewrite_node(bind, object->constraints, node);
         break;
     }
     case AST_NODE_OBJECT_LITERAL:
-        direct_bind_rewrite_node(bind, ((AstObjectLiteralNode*)node)->content);
+        direct_bind_rewrite_node(bind, ((AstObjectLiteralNode*)node)->content, node);
         break;
     case AST_NODE_CONSTRAINED_TYPE: {
         AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)node;
-        direct_bind_rewrite_node(bind, constrained->base);
-        direct_bind_rewrite_node(bind, constrained->constraint);
+        direct_bind_rewrite_node(bind, constrained->base, node);
+        direct_bind_rewrite_node(bind, constrained->constraint, node);
         break;
     }
     case AST_NODE_PATTERN_ISLAND:
-        direct_bind_rewrite_node(bind, ((AstPatternIslandNode*)node)->pattern);
+        direct_bind_rewrite_node(bind, ((AstPatternIslandNode*)node)->pattern, node);
         break;
     case AST_NODE_PATTERN_RANGE: {
         AstPatternRangeNode* range = (AstPatternRangeNode*)node;
-        direct_bind_rewrite_node(bind, range->start);
-        direct_bind_rewrite_node(bind, range->end);
+        direct_bind_rewrite_node(bind, range->start, node);
+        direct_bind_rewrite_node(bind, range->end, node);
         break;
     }
     case AST_NODE_PATTERN_SEQ:
-        direct_bind_rewrite_node(bind, ((AstPatternSeqNode*)node)->first);
+        direct_bind_rewrite_node(bind, ((AstPatternSeqNode*)node)->first, node);
         break;
     case AST_NODE_PATH_INDEX_EXPR: {
         AstPathIndexNode* index = (AstPathIndexNode*)node;
-        direct_bind_rewrite_node(bind, index->base_path);
-        direct_bind_rewrite_node(bind, index->segment_expr);
+        direct_bind_rewrite_node(bind, index->base_path, node);
+        direct_bind_rewrite_node(bind, index->segment_expr, node);
         break;
     }
     case AST_NODE_NAVIGATION_EXPR:
-        direct_bind_rewrite_node(bind, ((AstNavigationNode*)node)->object);
+        direct_bind_rewrite_node(bind, ((AstNavigationNode*)node)->object, node);
         break;
     case AST_NODE_QUERY_EXPR: {
         AstQueryNode* query = (AstQueryNode*)node;
-        direct_bind_rewrite_node(bind, query->object);
-        direct_bind_rewrite_node(bind, query->query);
+        direct_bind_rewrite_node(bind, query->object, node);
+        direct_bind_rewrite_node(bind, query->query, node);
         break;
     }
     default:
@@ -7100,7 +7127,8 @@ static void direct_bind_rewrite_extension_children(DirectBindContext* bind,
     }
 }
 
-static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node) {
+static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node,
+        AstNode* parent) {
     if (!node || !bind || bind->failed || !direct_bind_mark_visited(bind, node)) return;
     switch (node->node_type) {
     case AST_SCRIPT:
@@ -7128,6 +7156,8 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node) {
         AstFuncNode* function = (AstFuncNode*)node;
         function->vars = direct_bind_scope(bind, function->vars);
         direct_bind_rewrite_function_captures(bind, function);
+        if (node->node_type != AST_NODE_METHOD &&
+                !arraylist_append(bind->functions, function)) bind->failed = true;
         break;
     }
     case AST_NODE_LOOP:
@@ -7177,8 +7207,18 @@ static void direct_bind_rewrite_node(DirectBindContext* bind, AstNode* node) {
     default:
         break;
     }
+    AstFunctionId previous_function = bind->current_function;
+    AstFunctionId node_function = previous_function;
+    if (!bind->tp->defer_ast_index_columns && !ast_index_bind_node(
+            &bind->tp->ast_index, node, parent, previous_function,
+            &node_function)) {
+        bind->failed = true;
+        return;
+    }
+    bind->current_function = node_function;
     ast_visit_core_children(node, direct_bind_rewrite_child, bind);
     direct_bind_rewrite_extension_children(bind, node);
+    bind->current_function = previous_function;
 }
 
 static bool direct_bind_collect_function(AstNode* node, void* opaque) {
@@ -7189,38 +7229,38 @@ static bool direct_bind_collect_function(AstNode* node, void* opaque) {
     return true;
 }
 
-bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script) {
+bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
+        AstScript* script, ArrayList** functions_out) {
+    if (functions_out) *functions_out = NULL;
     if (!tp || !script || !script->global_vars) return false;
     DirectBindContext bind = {};
-    if (!direct_bind_init(&bind, tp)) return false;
-    direct_bind_rewrite_node(&bind, (AstNode*)script);
+    if (!direct_bind_init(&bind, tp, script->global_vars->entry_count)) return false;
+    direct_bind_rewrite_node(&bind, (AstNode*)script, NULL);
     if (bind.failed || !script->global_vars) {
         direct_bind_destroy(&bind);
         return false;
     }
     direct_bind_rewrite_entry_links(&bind);
-    // Captures name declaration identities, so recompute them only after all
-    // identifier and declaration edges point at the rebuilt graph. Process
-    // inner functions first: an outer closure's transitive capture proof reads
-    // its completed nested closure facts.
-    ArrayList* functions = arraylist_new(8);
-    if (!functions) {
-        direct_bind_destroy(&bind);
-        return false;
-    }
-    walk_lambda_ast((AstNode*)script, direct_bind_collect_function, functions, true);
-    for (int i = functions->length - 1; i >= 0; i--) {
-        AstFuncNode* function = (AstFuncNode*)functions->data[i];
-        analyze_captures(tp, function, find_global_scope(function->vars));
-    }
-    arraylist_free(functions);
     if (bind.failed) {
         direct_bind_destroy(&bind);
         return false;
     }
+    if (!tp->defer_ast_index_columns) ast_index_mark_published(&tp->ast_index);
     tp->current_scope = script->global_vars;
+    if (functions_out) {
+        *functions_out = bind.functions;
+        bind.functions = NULL;
+    }
     direct_bind_destroy(&bind);
     return true;
+}
+
+bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script) {
+    ArrayList* functions = NULL;
+    bool rebound = lambda_ast_rebind_direct_scope_graph_with_functions(tp,
+        script, &functions);
+    arraylist_free(functions);
+    return rebound;
 }
 
 static bool shift_source_span(AstNode* node, void* data) {
@@ -7316,72 +7356,71 @@ static bool scan_may_await_node(AstNode* node, void* data) {
     return !scan->found;
 }
 
-typedef struct TaskContextScan {
-    bool found;
-} TaskContextScan;
+// The old concurrency planner independently walked each body for await
+// closure, task context, continuation count, and handler states. Keep the
+// AST traversal linear by recording the syntax facts once, then solve only
+// the direct-call dependency edges to a fixed point.
+typedef struct ConcurrencyBodyFacts {
+    AstFuncNode* function;
+    ArrayList* calls;
+    ArrayList* async_handlers;
+    bool static_may_await;
+    bool static_task_context;
+    bool indirect;
+    bool failed;
+    const char* cause;
+    int await_point_base;
+} ConcurrencyBodyFacts;
 
-static bool scan_task_context_node(AstNode* node, void* data) {
-    TaskContextScan* scan = (TaskContextScan*)data;
-    if (scan->found) return false;
+static bool concurrency_record_node(ArrayList** nodes, AstNode* node) {
+    if (!*nodes) *nodes = arraylist_new(4);
+    return *nodes && arraylist_append(*nodes, node);
+}
+
+static bool scan_concurrency_body_node(AstNode* node, void* data) {
+    ConcurrencyBodyFacts* facts = (ConcurrencyBodyFacts*)data;
+    if (facts->failed) return false;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
     if (node->node_type == AST_NODE_START) {
-        scan->found = true;
+        AstStartNode* start = (AstStartNode*)node;
+        facts->static_task_context = true;
+        if (!start->escapes && !facts->static_may_await) {
+            facts->static_may_await = true;
+            facts->cause = "implicit scoped-task join";
+        }
         return false;
     }
-    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_PROC) return false;
-    if (node->node_type != AST_NODE_CALL_EXPR) return true;
-    AstCallNode* call = (AstCallNode*)node;
-    if (call_may_await(call, NULL, NULL)) {
-        scan->found = true;
-        return false;
+    if (node->node_type == AST_NODE_HANDLER_STAM) {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        if (handler->is_statement && handler_operand_is_proc(handler->operand) &&
+                !concurrency_record_node(&facts->async_handlers, node)) {
+            facts->failed = true;
+            return false;
+        }
     }
-    AstFuncNode* callee = direct_pn_callee(call);
-    if (callee && callee->analysis && callee->analysis->needs_task_context) {
-        scan->found = true;
-        return false;
-    }
-    return true;
-}
-
-typedef struct AwaitPointScan {
-    int count;
-} AwaitPointScan;
-
-typedef struct HandlerStateScan {
-    int base_state;
-    int count;
-} HandlerStateScan;
-
-static bool assign_async_handler_state(AstNode* node, void* data) {
-    if (node->node_type != AST_NODE_HANDLER_STAM) return true;
-    AstHandlerNode* handler = (AstHandlerNode*)node;
-    HandlerStateScan* scan = (HandlerStateScan*)data;
-    if (handler->is_statement && handler_operand_is_proc(handler->operand)) {
-        handler->async_fault_state = scan->base_state + ++scan->count;
-    }
-    return true;
-}
-
-static bool count_await_point_node(AstNode* node, void* data) {
-    if (node->node_type == AST_NODE_START) return false;
-    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_PROC) return false;
-    AwaitPointScan* scan = (AwaitPointScan*)data;
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
-        // Lowering can insert an error-unwind continuation for a dynamic call
-        // result and for each dynamic argument checked against a parameter
-        // contract. Those continuations are not represented as AST exit nodes,
-        // but must have dispatcher labels before MIR lowering begins.
-        scan->count++;
+        // Dynamic call and argument checks own continuation labels. The final
+        // suspend bit is added after the direct-call dependency closure.
+        facts->await_point_base++;
         for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            scan->count++;
+            facts->await_point_base++;
         }
-        if (call_may_await(call, NULL, NULL)) {
-            scan->count++;
+        if (call->propagate) facts->await_point_base++;
+        if (!concurrency_record_node(&facts->calls, node)) {
+            facts->failed = true;
+            return false;
         }
-        if (call->propagate) {
-            scan->count++;
+        bool indirect = false;
+        const char* cause = NULL;
+        if (call_may_await(call, &indirect, &cause)) {
+            facts->static_task_context = true;
+            if (!facts->static_may_await) {
+                facts->static_may_await = true;
+                facts->indirect = indirect;
+                facts->cause = cause;
+            }
         }
     }
     if (node->node_type == AST_NODE_LET_STAM ||
@@ -7390,7 +7429,7 @@ static bool count_await_point_node(AstNode* node, void* data) {
         // A declared binding can lower to a runtime type check whose failure
         // leaves the current task scope. Untyped bindings reserve an unused
         // label, keeping this planner conservative and syntax-directed.
-        scan->count++;
+        facts->await_point_base++;
     }
     if (node->node_type == AST_NODE_RETURN_STAM ||
             node->node_type == AST_NODE_RAISE_STAM ||
@@ -7400,14 +7439,46 @@ static bool count_await_point_node(AstNode* node, void* data) {
             node->node_type == AST_NODE_PIPE_FILE_STAM) {
         // These syntax edges can leave a lexical block before its tail, so
         // each owns an unwind continuation in the resumable transform.
-        scan->count++;
+        facts->await_point_base++;
     }
     if (node->node_type == AST_NODE_CONTENT) {
         // Every lexical content block in a resumable pn has a synthetic scope
         // leave. Empty scopes return immediately; owning scopes may park.
-        scan->count++;
+        facts->await_point_base++;
     }
     return true;
+}
+
+static bool concurrency_fact_calls_may_await(ConcurrencyBodyFacts* facts,
+        const char** cause) {
+    if (!facts || !facts->calls) return false;
+    for (int i = 0; i < facts->calls->length; i++) {
+        AstCallNode* call = (AstCallNode*)facts->calls->data[i];
+        AstFuncNode* callee = direct_pn_callee(call);
+        if (callee && callee->analysis && callee->analysis->may_await) {
+            if (cause) *cause = callee->name ? callee->name->chars : "anonymous pn";
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool concurrency_fact_needs_task_context(ConcurrencyBodyFacts* facts) {
+    if (!facts || !facts->calls) return false;
+    for (int i = 0; i < facts->calls->length; i++) {
+        AstFuncNode* callee = direct_pn_callee((AstCallNode*)facts->calls->data[i]);
+        if (callee && callee->analysis && (callee->analysis->may_await ||
+                callee->analysis->needs_task_context)) return true;
+    }
+    return false;
+}
+
+static void concurrency_body_facts_destroy(ConcurrencyBodyFacts* facts,
+        int count) {
+    for (int i = 0; facts && i < count; i++) {
+        arraylist_free(facts[i].calls);
+        arraylist_free(facts[i].async_handlers);
+    }
 }
 
 typedef struct ConcurrencyValidation {
@@ -7473,10 +7544,16 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
     return true;
 }
 
-static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
-    ArrayList* functions = arraylist_new(16);
-    if (!functions) return;
-    walk_lambda_ast((AstNode*)script, collect_concurrency_function, functions, true);
+static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
+        ArrayList* functions) {
+    bool owns_functions = false;
+    if (!functions) {
+        functions = arraylist_new(16);
+        if (!functions) return;
+        walk_lambda_ast((AstNode*)script, collect_concurrency_function,
+            functions, true);
+        owns_functions = true;
+    }
 
     for (int i = 0; i < functions->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
@@ -7494,29 +7571,51 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     ConcurrencyValidation validation = {.tp = tp};
     walk_lambda_ast((AstNode*)script, validate_concurrency_node, &validation, true);
 
-    // Re-scan to a fixed point because forward calls can make callers suspend
-    // only after the callee's bit becomes known.
+    ConcurrencyBodyFacts* facts = (ConcurrencyBodyFacts*)pool_calloc(tp->pool,
+        sizeof(ConcurrencyBodyFacts) * functions->length);
+    if (!facts && functions->length > 0) {
+        log_error("concurrency planner could not allocate body facts");
+        if (owns_functions) arraylist_free(functions);
+        return;
+    }
+    for (int i = 0; i < functions->length; i++) {
+        facts[i].function = (AstFuncNode*)functions->data[i];
+        if (facts[i].function->node_type == AST_NODE_PROC) {
+            walk_lambda_ast(facts[i].function->body, scan_concurrency_body_node,
+                &facts[i], false);
+        }
+        if (facts[i].failed) {
+            log_error("concurrency planner could not record procedure body facts");
+            concurrency_body_facts_destroy(facts, functions->length);
+            if (owns_functions) arraylist_free(functions);
+            return;
+        }
+    }
+
+    // The body pass produced a compact call graph. Solve it to a fixed point
+    // so forward and recursive direct calls never require another AST walk.
     bool changed = true;
     while (changed) {
         changed = false;
         for (int i = 0; i < functions->length; i++) {
             AstFuncNode* fn = (AstFuncNode*)functions->data[i];
             if (fn->node_type != AST_NODE_PROC || fn->analysis->may_await) continue;
-            MayAwaitScan scan = {};
-            walk_lambda_ast(fn->body, scan_may_await_node, &scan, false);
-            if (scan.found) {
+            const char* cause = facts[i].cause;
+            if (facts[i].static_may_await || concurrency_fact_calls_may_await(
+                    &facts[i], &cause)) {
                 fn->analysis->may_await = true;
-                fn->analysis->has_indirect_pn_call = scan.indirect;
-                fn->analysis->may_await_cause = scan.cause;
+                fn->analysis->has_indirect_pn_call = facts[i].indirect;
+                fn->analysis->may_await_cause = cause;
                 changed = true;
-                if (strcmp(scan.cause, "implicit scoped-task join") == 0) {
+                if (cause && strcmp(cause, "implicit scoped-task join") == 0) {
                     log_debug("concurrency explain: pn %.*s suspends because it owns an %s",
                         fn->name ? (int)fn->name->len : 6,
-                        fn->name ? fn->name->chars : "<anon>", scan.cause);
+                        fn->name ? fn->name->chars : "<anon>", cause);
                 } else {
                     log_debug("concurrency explain: pn %.*s suspends because it calls %s",
                         fn->name ? (int)fn->name->len : 6,
-                        fn->name ? fn->name->chars : "<anon>", scan.cause);
+                        fn->name ? fn->name->chars : "<anon>",
+                        cause ? cause : "a suspend-capable procedure");
                 }
             }
         }
@@ -7535,9 +7634,8 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
         for (int i = 0; i < functions->length; i++) {
             AstFuncNode* fn = (AstFuncNode*)functions->data[i];
             if (fn->node_type != AST_NODE_PROC || fn->analysis->needs_task_context) continue;
-            TaskContextScan scan = {};
-            walk_lambda_ast(fn->body, scan_task_context_node, &scan, false);
-            if (scan.found) {
+            if (facts[i].static_task_context || concurrency_fact_needs_task_context(
+                    &facts[i])) {
                 fn->analysis->needs_task_context = true;
                 changed = true;
             }
@@ -7547,15 +7645,25 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     for (int i = 0; i < functions->length; i++) {
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
         if (fn->node_type != AST_NODE_PROC || !fn->analysis->may_await) continue;
-        AwaitPointScan scan = {};
-        walk_lambda_ast(fn->body, count_await_point_node, &scan, false);
-        fn->analysis->await_point_count = scan.count;
-        HandlerStateScan handler_scan = {scan.count, 0};
-        walk_lambda_ast(fn->body, assign_async_handler_state, &handler_scan, false);
-        fn->analysis->async_fault_handler_count = handler_scan.count;
+        int await_points = facts[i].await_point_base;
+        for (int call_index = 0; facts[i].calls && call_index < facts[i].calls->length;
+                call_index++) {
+            if (call_may_await((AstCallNode*)facts[i].calls->data[call_index],
+                    NULL, NULL)) await_points++;
+        }
+        fn->analysis->await_point_count = await_points;
+        fn->analysis->async_fault_handler_count = facts[i].async_handlers
+            ? facts[i].async_handlers->length : 0;
+        for (int handler_index = 0; facts[i].async_handlers &&
+                handler_index < facts[i].async_handlers->length; handler_index++) {
+            AstHandlerNode* handler = (AstHandlerNode*)facts[i].async_handlers->data[
+                handler_index];
+            handler->async_fault_state = await_points + handler_index + 1;
+        }
     }
 
-    arraylist_free(functions);
+    concurrency_body_facts_destroy(facts, functions->length);
+    if (owns_functions) arraylist_free(functions);
 }
 
 static bool reject_proc_method_value(AstNode* node, void* data) {
@@ -7585,10 +7693,16 @@ static void lambda_ast_note_insertion_moves(AstFuncNode* fn);
 // is built and bound.
 static void lambda_ast_note_fixed_array_lengths(Transpiler* tp, AstFuncNode* fn);
 
-static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script) {
-    ArrayList* functions = arraylist_new(8);
-    if (!functions) return;
-    walk_lambda_ast((AstNode*)script, direct_bind_collect_function, functions, true);
+static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script,
+        ArrayList* functions) {
+    bool owns_functions = false;
+    if (!functions) {
+        functions = arraylist_new(8);
+        if (!functions) return;
+        walk_lambda_ast((AstNode*)script, direct_bind_collect_function,
+            functions, true);
+        owns_functions = true;
+    }
     lambda_ast_note_returned_params(functions);
     lambda_ast_note_var_root_sharing(functions);
     for (int i = 0; i < functions->length; i++) {
@@ -7599,7 +7713,7 @@ static void lambda_ast_decide_cow_borrows(Transpiler* tp, AstScript* script) {
         lambda_ast_note_fixed_array_lengths(tp, fn);
         lambda_ast_note_insertion_moves(fn);
     }
-    arraylist_free(functions);
+    if (owns_functions) arraylist_free(functions);
 }
 
 // T28-7: fixed-length array locals. An index store never grows an array
@@ -7872,7 +7986,8 @@ static bool colour_walk_visit(AstNode* node, void* data) {
     return true;
 }
 
-bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
+bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
+        AstScript* script, ArrayList* functions) {
     if (!tp || !script || tp->error_count != 0) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
@@ -7888,9 +8003,15 @@ bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     // both parser front ends share this final pass. Direct AST construction
     // used to skip it, leaving suspend-capable procedures without their
     // resumable task state machine (D6.1.2).
-    if (tp->error_count == 0) lambda_ast_decide_cow_borrows(tp, script);
-    if (tp->error_count == 0) analyze_lambda_concurrency(tp, script);
+    if (tp->error_count == 0) lambda_ast_decide_cow_borrows(tp, script,
+        functions);
+    if (tp->error_count == 0) analyze_lambda_concurrency(tp, script,
+        functions);
     return tp->error_count == 0;
+}
+
+bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
+    return lambda_ast_finalize_script_with_functions(tp, script, NULL);
 }
 
 
@@ -7985,6 +8106,7 @@ struct LambdaReductionRecord {
 
 struct LambdaReductionTape {
     LambdaReductionRecord* records;
+    Arena* arena;
     uint32_t count;
     uint32_t capacity;
     bool failed;
@@ -8010,8 +8132,8 @@ static LambdaParseValue direct_tape_reduce(void* context,
     memset(record, 0, sizeof(*record));
     record->reduction = *reduction;
     if (reduction->child_count) {
-        record->children = (LambdaParseValue*)mem_alloc(
-            (size_t)reduction->child_count * sizeof(LambdaParseValue), MEM_CAT_TEMP);
+        record->children = (LambdaParseValue*)arena_alloc(tape->arena,
+            (size_t)reduction->child_count * sizeof(LambdaParseValue));
         if (!record->children) {
             tape->failed = true;
             return 0;
@@ -8021,10 +8143,9 @@ static LambdaParseValue direct_tape_reduce(void* context,
         record->reduction.children = record->children;
     }
     if (reduction->name_count) {
-        record->name_tokens = (LambdaToken*)mem_alloc(
-            (size_t)reduction->name_count * sizeof(LambdaToken), MEM_CAT_TEMP);
+        record->name_tokens = (LambdaToken*)arena_alloc(tape->arena,
+            (size_t)reduction->name_count * sizeof(LambdaToken));
         if (!record->name_tokens) {
-            mem_free(record->children);
             record->children = NULL;
             tape->failed = true;
             return 0;
@@ -8277,72 +8398,85 @@ static bool direct_function_name_token(LambdaTokenKind kind) {
 }
 
 static void direct_predeclare_top_level_functions(Transpiler* tp,
-        const char* source, size_t length) {
-    LambdaLexer lexer;
-    lambda_lexer_init(&lexer, source, length);
-    LambdaToken token = lambda_lexer_next(&lexer);
-    uint32_t delimiter_depth = 0;
-    bool public_pending = false;
-    while (token.kind != LAMBDA_TOK_EOF && token.kind != LAMBDA_TOK_ERROR) {
-        if (delimiter_depth == 0 && token.kind == LAMBDA_TOK_PUB) {
-            public_pending = true;
-            token = lambda_lexer_next(&lexer);
+        const LambdaReductionTape* tape) {
+    if (!tp || !tape) return;
+    uint32_t function_depth = 0;
+    uint32_t object_depth = 0;
+    uint32_t lexical_depth = 0;
+    for (uint32_t i = 0; i < tape->count; i++) {
+        const LambdaParseReduction* reduction = &tape->records[i].reduction;
+        if (reduction->kind != LAMBDA_REDUCE_CONTEXT) continue;
+        switch (reduction->form) {
+        case LAMBDA_REDUCTION_FORM_OPEN_BEGIN:
+        case LAMBDA_REDUCTION_FORM_MATCH_ARM_BEGIN:
+        case LAMBDA_REDUCTION_FORM_HANDLER_BEGIN:
+        case LAMBDA_REDUCTION_FORM_FOR_BEGIN:
+        case LAMBDA_REDUCTION_FORM_WHILE_BEGIN:
+        case LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT_BEGIN:
+        case LAMBDA_REDUCTION_FORM_GROUP_BEGIN:
+        case LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN:
+        case LAMBDA_REDUCTION_FORM_THAT_BEGIN:
+        case LAMBDA_REDUCTION_FORM_VIEW_BEGIN:
+        case LAMBDA_REDUCTION_FORM_VIEW_HANDLER_BEGIN:
+            lexical_depth++;
+            continue;
+        case LAMBDA_REDUCTION_FORM_OPEN_END:
+        case LAMBDA_REDUCTION_FORM_MATCH_ARM_END:
+        case LAMBDA_REDUCTION_FORM_HANDLER_END:
+        case LAMBDA_REDUCTION_FORM_FOR_END:
+        case LAMBDA_REDUCTION_FORM_WHILE_END:
+        case LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT_END:
+        case LAMBDA_REDUCTION_FORM_GROUP_END:
+        case LAMBDA_REDUCTION_FORM_IF_BRANCH_END:
+        case LAMBDA_REDUCTION_FORM_THAT_END:
+        case LAMBDA_REDUCTION_FORM_VIEW_END:
+        case LAMBDA_REDUCTION_FORM_VIEW_HANDLER_END:
+            if (lexical_depth) lexical_depth--;
+            continue;
+        default:
+            break;
+        }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_BEGIN) {
+            object_depth++;
             continue;
         }
-        // S12.1.4v2: `function name` predeclares like `fn name`; `function`
-        // is lexed as a base-type word, so match its spelling here.
-        bool colour_poly_word = token.kind == LAMBDA_TOK_BASE_TYPE &&
-            token.span.end_byte - token.span.start_byte == 8 &&
-            memcmp(source + token.span.start_byte, "function", 8) == 0;
-        if (delimiter_depth == 0 && (token.kind == LAMBDA_TOK_FN ||
-                token.kind == LAMBDA_TOK_PN || colour_poly_word)) {
-            bool is_proc = token.kind == LAMBDA_TOK_PN;
-            LambdaToken name = lambda_lexer_next(&lexer);
-            if (colour_poly_word && (name.nl_before ||
-                    !direct_function_name_token(name.kind))) {
-                // a bare `function` type word, not a declaration
-                token = name;
-                continue;
-            }
-            if (direct_function_name_token(name.kind)) {
-                StrView name_view = {source + name.span.start_byte,
-                    name.span.end_byte - name.span.start_byte};
-                String* pooled_name = name_pool_create_strview(tp->name_pool,
-                    name_view);
-                NameEntry* existing = lookup_name_in_current_scope(tp,
-                    pooled_name);
-                if (!existing || !existing->node ||
-                        (existing->node->source_span.start_byte !=
-                            token.span.start_byte)) {
-                    AstFuncNode* fn = build_function_placeholder_from_parts(tp,
-                        (SourceSpan){token.span.start_byte, name.span.end_byte},
-                        name_view, is_proc);
-                    ((TypeFunc*)fn->type)->is_public = public_pending;
-                    ((TypeFunc*)fn->type)->is_colour_poly = colour_poly_word;
-                    lambda_ast_register_name(tp, (AstNamedNode*)fn);
-                } else if (existing->node->node_type == AST_NODE_FUNC ||
-                        existing->node->node_type == AST_NODE_PROC) {
-                    ((TypeFunc*)existing->node->type)->is_public = public_pending;
-                }
-            }
-            public_pending = false;
-            token = lambda_lexer_next(&lexer);
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_END) {
+            if (object_depth) object_depth--;
             continue;
         }
-        if (token.kind == LAMBDA_TOK_NEWLINE ||
-                token.kind == LAMBDA_TOK_SEMICOLON) {
-            public_pending = false;
+        if (reduction->form == LAMBDA_REDUCTION_FORM_FUNCTION_END) {
+            if (function_depth) function_depth--;
+            continue;
         }
-        if (token.kind == LAMBDA_TOK_LPAREN ||
-                token.kind == LAMBDA_TOK_LBRACKET ||
-                token.kind == LAMBDA_TOK_LBRACE) {
-            delimiter_depth++;
-        } else if (token.kind == LAMBDA_TOK_RPAREN ||
-                token.kind == LAMBDA_TOK_RBRACKET ||
-                token.kind == LAMBDA_TOK_RBRACE) {
-            if (delimiter_depth) delimiter_depth--;
+        if (reduction->form != LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN) continue;
+        bool top_level_header = function_depth == 0 && object_depth == 0 &&
+            lexical_depth == 0 &&
+            (reduction->flags & LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER) != 0;
+        function_depth++;
+        if (!top_level_header ||
+                !direct_function_name_token(reduction->secondary_token.kind)) {
+            continue;
         }
-        token = lambda_lexer_next(&lexer);
+        StrView name = direct_token_text(tp, reduction->secondary_token);
+        if (!name.length) continue;
+        String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+        NameEntry* existing = lookup_name_in_current_scope(tp, pooled_name);
+        bool is_proc = (reduction->flags & LAMBDA_REDUCTION_FLAG_PROC) != 0;
+        if (!existing || !existing->node ||
+                existing->node->source_span.start_byte !=
+                    reduction->detail_token.span.start_byte) {
+            AstFuncNode* fn = build_function_placeholder_from_parts(tp,
+                reduction->span, name, is_proc);
+            ((TypeFunc*)fn->type)->is_public =
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0;
+            ((TypeFunc*)fn->type)->is_colour_poly =
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_COLOUR_POLY) != 0;
+            lambda_ast_register_name(tp, (AstNamedNode*)fn);
+        } else if (existing->node->node_type == AST_NODE_FUNC ||
+                existing->node->node_type == AST_NODE_PROC) {
+            ((TypeFunc*)existing->node->type)->is_public =
+                (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0;
+        }
     }
 }
 
@@ -8785,7 +8919,14 @@ static AstNode* direct_content_node(LambdaDirectAstSink* sink,
     // first-item shortcut reinterprets a later native result at the caller
     // boundary (D2.2.2).
     AstNode* single_value = NULL;
-    if (content->list_type->length == 1 && filtered && filtered->type) {
+    if (content->list_type->length == 1 && filtered &&
+            is_declaration_node(filtered->node_type)) {
+        // S2.5.4/S2.5.5v2: a declaration produces no item, so a block of one
+        // declaration is `null`. Typing it as the declared value made an
+        // enclosing literal take the compact lane: `[{ let x = 5 }, 9]` was
+        // `[0, 9]` on the interpreter.
+        content->type = &TYPE_NULL;
+    } else if (content->list_type->length == 1 && filtered && filtered->type) {
         content->type = filtered->type;
     } else if (!(tp->current_scope && tp->current_scope->is_proc) &&
             (single_value = ast_content_single_value(filtered)) &&
@@ -8974,6 +9115,7 @@ static void direct_append_binder_name(Transpiler* tp, NameEntry* entry) {
     if (!tp->current_scope->first) tp->current_scope->first = entry;
     else tp->current_scope->last->next = entry;
     tp->current_scope->last = entry;
+    name_scope_index_note_entry(tp, tp->current_scope, entry);
 }
 
 typedef struct DirectBinderForwardRef {
@@ -9136,13 +9278,18 @@ static void direct_move_binding(NameScope* from, NameScope* to,
     }
 }
 
+// A binding a parenthesized group collects into its `declare` chain (S2.5.4).
+static bool ast_group_child_is_declaration(AstNode* item) {
+    return item && (item->node_type == AST_NODE_VARIABLE_DECLARATOR ||
+        item->node_type == AST_NODE_DECOMPOSE ||
+        item->node_type == AST_NODE_LET_STAM);
+}
+
 static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
         AstNode* items, NameScope* existing_scope) {
     bool has_declaration = false;
     for (AstNode* item = items; item; item = item->next) {
-        if (item->node_type == AST_NODE_VARIABLE_DECLARATOR ||
-                item->node_type == AST_NODE_DECOMPOSE ||
-                item->node_type == AST_NODE_LET_STAM) {
+        if (ast_group_child_is_declaration(item)) {
             has_declaration = true;
             break;
         }
@@ -9157,7 +9304,8 @@ static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
         lambda_ast_enter_scope(tp, false);
     list->vars = scope;
     AstNode* declaration_tail = NULL;
-    AstNode* body = NULL;
+    AstNode* item_tail = NULL;
+    int item_count = 0;
     for (AstNode* item = items; item;) {
         AstNode* next = item->next;
         item->next = NULL;
@@ -9176,13 +9324,19 @@ static AstNode* direct_let_group(Transpiler* tp, SourceSpan span,
             else declaration_tail->next = declaration;
             declaration_tail = declaration;
         } else {
-            body = item;
+            // S2.5.4: a declaration contributes no item, but every other item
+            // stays, so `(let x = 1, x, 2)` is `(1, 2)`. Keeping only the
+            // last one silently returned `2`.
+            if (item_tail) item_tail->next = item;
+            else list->item = item;
+            item_tail = item;
+            item_count++;
         }
         item = next;
     }
-    list->item = body;
-    list->list_type->length = body ? 1 : 0;
-    list->type = body && body->type ? body->type : &TYPE_NULL;
+    list->list_type->length = item_count;
+    list->type = item_count == 1 ? (list->item->type ? list->item->type : &TYPE_NULL) :
+        item_count == 0 ? &TYPE_NULL : set_type_any(tp, ANY_LIST);
     if (!existing_scope) lambda_ast_leave_scope(tp, scope);
     return (AstNode*)list;
 }
@@ -14127,6 +14281,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // Capture analysis must run after the body and nested functions
             // are complete; otherwise an outer closure loses transitive
             // captures and MIR sees those names as undefined variables.
+            uint64_t inline_analysis_started = 0;
+            if (lambda_compiler_timing_collecting()) {
+                inline_analysis_started = time_now_ns();
+            }
             if (fn) {
                 analyze_captures(tp, fn, find_global_scope(function_scope->parent));
                 validate_cross_frame_binding_reads(tp, fn);
@@ -14135,6 +14293,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // excuse a place-copy mutation has now been seen.
             lambda_ast_flush_place_copy_diagnostics(tp);
             if (fn) lambda_ast_note_param_cow_effects(tp, fn);  // CW29 sweep
+            if (inline_analysis_started) {
+                lambda_compiler_timing_add_inline_analysis_us(time_elapsed_us(
+                    inline_analysis_started, time_now_ns()));
+            }
             return 0;
         }
     }
@@ -14245,7 +14407,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             reduction->span, op, operand));
     }
     case LAMBDA_REDUCE_GROUP: {
-        if (reduction->child_count == 1) {
+        if (reduction->child_count == 1 && !ast_group_child_is_declaration(child0)) {
             return direct_ast_value(build_primary_wrapper_from_parts(tp,
                 reduction->span, child0));
         }
@@ -14961,10 +15123,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
 
 void lambda_rd_destroy_reductions(LambdaReductionTape* tape) {
     if (!tape) return;
-    for (uint32_t i = 0; i < tape->count; i++) {
-        mem_free(tape->records[i].children);
-        mem_free(tape->records[i].name_tokens);
-    }
+    arena_destroy(tape->arena);
     mem_free(tape->records);
     mem_free(tape);
 }
@@ -14976,6 +15135,12 @@ LambdaParseStatus lambda_rd_parse_reductions(const char* source, size_t length,
     LambdaReductionTape* tape = (LambdaReductionTape*)mem_calloc(1,
         sizeof(LambdaReductionTape), MEM_CAT_TEMP);
     if (!tape) return LAMBDA_PARSE_ERROR;
+    tape->arena = mem_arena_create(NULL, MEM_ROLE_TEMP,
+        "lambda.reduction_tape");
+    if (!tape->arena) {
+        mem_free(tape);
+        return LAMBDA_PARSE_ERROR;
+    }
     LambdaParseSink sink = {direct_tape_reduce};
     LambdaParseStatus status = lambda_rd_parse_source(source, length, &sink,
         tape, NULL, error);
@@ -15015,7 +15180,7 @@ LambdaParseStatus lambda_rd_build_reductions(Transpiler* tp, const char* source,
     // Match the top-level pass: every named function is visible
     // while earlier bodies are reduced, so a declaration cannot be mistaken
     // for a same-spelled system function (for example `gamma`).
-    direct_predeclare_top_level_functions(tp, source, length);
+    direct_predeclare_top_level_functions(tp, tape);
 
     LambdaParseValue* values = (LambdaParseValue*)mem_calloc(tape->count,
         sizeof(LambdaParseValue), MEM_CAT_TEMP);

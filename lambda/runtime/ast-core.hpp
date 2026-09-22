@@ -463,6 +463,13 @@ struct NameScope {
     AstScopeId scope_id;
     NameEntry* first;
     NameEntry* last;
+    // Declaration order remains in first/last/next. The optional table is a
+    // pointer-identity index for construction-time name resolution: it makes
+    // wide module scopes linear to build without changing iteration order.
+    NameEntry** name_index;
+    uint32_t name_index_capacity;
+    uint32_t name_index_count;
+    uint32_t entry_count;
     bool is_proc;
     NameScope* parent;
     ScopeKind kind;
@@ -503,13 +510,14 @@ typedef enum AstConstKind : uint16_t {
 
 struct AstNode {
     AstNodeType node_type;
-    // Const-value handle, in the padding after the 16-bit tag -- AstNode stays
-    // 32 bytes. `node->type` already carries the inferred type, and the few
-    // declaring nodes carry their own `declared_type`, so this is the only
-    // per-node compiler fact that needed a home. Zero-initialized allocation
-    // makes AST_CONST_NONE the default with no init pass (RC12, D8.2.5v2).
+    // Const-value handle. `node->type` already carries the inferred type, and
+    // the few declaring nodes carry their own `declared_type`; zero-initialized
+    // allocation makes AST_CONST_NONE the default (RC12, D8.2.5v2).
     AstConstKind const_kind;
     uint32_t const_index;
+    // The direct binder stamps this instead of allocating a per-pass visited
+    // set. A process-wide epoch keeps retained and replayed ASTs disjoint.
+    uint32_t last_bind_epoch;
     Type *type;
     AstNode* next;
     SourceSpan source_span;
@@ -555,6 +563,9 @@ typedef struct AstIndex {
     uint32_t scope_count;
     uint32_t binding_count;
     uint32_t class_count;
+    // Allocation reserves node IDs in every tier. Graph-sensitive columns are
+    // materialized only for MIR/const consumers; T0 reads the AST directly.
+    bool graph_published;
     AstNode** slots;
     AstNodeId* slot_ids;
     uint32_t slot_capacity;
@@ -580,6 +591,14 @@ void ast_visit_binding_pattern_children(AstNode* node, AstChildVisitor visitor,
 bool ast_any_binding_pattern_child(AstNode* node,
     AstBindingChildPredicate predicate, void* ctx);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+// Direct reduction reserves the stable node ID as soon as a node is born.
+// Binding later fills graph-sensitive columns after provisional scopes have
+// been remapped (D8.2.4/D8.2.5v2).
+bool ast_index_note_allocation(AstIndex* index, AstNode* node);
+bool ast_index_prepare_binding(AstIndex* index);
+bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
+    AstFunctionId current_owner, AstFunctionId* node_owner);
+void ast_index_mark_published(AstIndex* index);
 // Copy index tables without copying the immutable AST nodes they describe.
 // Cache consumers use this before appending per-execution synthetic nodes.
 bool ast_index_clone(AstIndex* destination, const AstIndex* source);
@@ -1593,6 +1612,16 @@ typedef struct FnAnalysis {
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;
+    // MIR call-site resolution owns these whole-body inference caches. Each
+    // fact publishes its own atomic epoch, because retained templates can be
+    // compiled concurrently and a new fact must not validate an older one
+    // (D8.2.5v2).
+    uint32_t mir_cached_return_type_epoch;
+    TypeId mir_cached_return_type;
+    uint32_t mir_cached_return_defer_epoch;
+    bool mir_cached_return_defer;
+    uint32_t mir_cached_defect_origin_epoch;
+    bool mir_cached_defect_origin;
     FnVariantAnalysis variants[4];
     int variant_count;
     // T0 activation shape, filled by the frame-plan pass (AI5). FnAnalysis is

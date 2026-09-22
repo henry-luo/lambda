@@ -24,7 +24,7 @@ fn wrap_with_attribute(host, edit_context, tag, attribute_name, value) {
         let wrapper = structure.ancestor_with_tag(host, wrapped_node, tag);
         if (wrapper == null) false
         else {
-            dom.set_attribute(wrapper, attribute_name, value)
+            let _set = dom.set_attribute(wrapper, attribute_name, value)
             true
         }
     }

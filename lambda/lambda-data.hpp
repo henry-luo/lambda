@@ -1154,6 +1154,10 @@ extern Type TYPE_TYPE;
 extern Type TYPE_FUNC;
 extern Type TYPE_ANY;
 extern Type TYPE_ERROR;
+// The name of a type that shares another kind's TypeId (S2.1.1v4): the
+// numeric unions `integer` and `number`, and the array subkind `list`. NULL
+// for every other type; callers fall back to the TypeId's name.
+const char* type_alias_name(Type* type);
 // Internal contract tops carry exclusions by pointer identity only. They do
 // not add a value-level Item tag and must not be compacted into TypeParam's
 // carrier prefix.

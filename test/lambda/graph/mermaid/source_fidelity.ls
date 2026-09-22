@@ -5,6 +5,9 @@ let graph = (input('./test/lambda/graph/mermaid/source_fidelity.mmd',
   {type: "graph", flavor: "mermaid"})) ^ { null }
 let edges = model.edges(graph)
 let html = transform.to_html(graph)
+let default_graph = (input('./test/input/test_graph.mmd',
+  {type: "graph", flavor: "mermaid"})) ^ { null }
+let default_html = transform.to_html(default_graph)
 let nodes = [for (child in model.child_items(html)
   where child is element and model.tag(child) == "node") child]
 let html_edges = [for (child in model.child_items(html)
@@ -20,5 +23,7 @@ let html_edges = [for (child in model.child_items(html)
     node["data-href"], node["data-callback"], node["data-tooltip"]]],
   [for (edge in html_edges where edge["data-edge-id"] == "e1:0")
     [edge.class, edge["data-animate"], edge["data-animation"], edge["data-curve"],
-      edge["data-style-declarations"]]]
+      edge["data-style-declarations"]]],
+  [default_html["data-curve"], default_html["data-route-mode"],
+    default_html["data-use-splines"]]
 ]

@@ -524,9 +524,24 @@ static void window_save_document_scroll(BrowsingSession* session, DomDocument* d
     session_save_scroll_position(session, scroll_y);
 }
 
+static void window_request_document_satellite_cancel(void) {
+    Runtime* runtime = dom_document_script_runtime(ui_context.document);
+    runtime_request_satellite_cancel(runtime);
+}
+
+static void window_request_close(GLFWwindow* window) {
+    window_request_document_satellite_cancel();
+    glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
+
+static void window_close_callback(GLFWwindow*) {
+    // GLFW invokes this at the user's close click, before document cleanup.
+    window_request_document_satellite_cancel();
+}
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
+        window_request_close(window);
         return;
     }
 
@@ -977,6 +992,7 @@ static int window_finish_event_sim(EventSimContext* sim_ctx) {
 static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
                                         EnhancedFileCache* file_cache,
                                         bool log_memory) {
+    window_request_document_satellite_cancel();
     view_cleanup_js_batch_state();
     if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
     if (ui_context.browsing_session) {
@@ -1074,6 +1090,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
         glfwSetWindowContentScaleCallback(window, window_content_scale_callback);
         glfwSetWindowRefreshCallback(window, window_refresh_callback);
+        glfwSetWindowCloseCallback(window, window_close_callback);
 
         glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
 
@@ -1391,7 +1408,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     bool auto_close_enabled = (shell_getenv("LAMBDA_AUTO_CLOSE") != NULL);
     if (auto_close_enabled) {
         log_info("First frame rendered, auto-closing window for testing");
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
+        window_request_close(window);
     }
 
     // Initial render to screen - must call render() to set up OpenGL state and blit surface to screen
@@ -1448,7 +1465,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             if (!sim_running && sim_ctx->auto_close) {
                 // Simulation complete, auto-close window
                 log_info("Simulation complete, auto-closing window");
-                glfwSetWindowShouldClose(window, GLFW_TRUE);
+                window_request_close(window);
             }
             do_redraw = 1;  // redraw after each simulated event
         }
@@ -1531,6 +1548,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     }
 
     radiant_video_set_wake_callback(NULL, NULL);
+    window_request_document_satellite_cancel();
     radiant_frame_clock_shutdown(&frame_clock);
 
     // Get simulation results before cleanup

@@ -366,7 +366,7 @@ fn _seg_str(s) {
 }
 
 fn _segments_to_d(segments) {
-    let parts = (for (s in segments) _seg_str(s))
+    let parts = [for (s in segments) _seg_str(s)]
     parts |> join(" ")
 }
 
@@ -412,7 +412,7 @@ fn _format_dash(arr) {
     if (arr == null) { "none" }
     else if (len(arr) == 0) { "none" }
     else {
-        let parts = (for (n in arr) util.fmt_num(n))
+        let parts = [for (n in arr) util.fmt_num(n)]
         parts |> join(",")
     }
 }
@@ -588,7 +588,7 @@ fn _op_M(st, ops) {
 fn _op_d(st, ops) {
     if (len(ops) >= 2 and ops[0] is map and ops[0].kind == "array") {
         let raw = ops[0].value
-        let nums = (for (n in raw) util.num(n))
+        let nums = [for (n in raw) util.num(n)]
         _set_dash(st, nums, util.num(ops[1]))
     }
     else { st }

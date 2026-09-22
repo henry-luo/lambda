@@ -1012,8 +1012,8 @@ struct Container {
         uint8_t flags;
         struct {
             // lifecycle / allocation flags
-            uint8_t is_content:1;        // whether it is a content list, or value list
-            uint8_t is_spreadable:1;     // whether this array should be spread when added to collections
+            uint8_t is_js_arguments:1;   // LambdaJS: this array is an Arguments object (no Lambda meaning)
+            uint8_t is_spreadable:1;     // the list kind bit (S2.5.1v2): set ⇔ the value is a list
             uint8_t is_heap:1;           // whether allocated from runtime heap (vs arena for input docs)
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
             uint8_t is_static:1;         // read-only const-pool/static data container
@@ -1063,8 +1063,8 @@ LAMBDA_STATIC_ASSERT(offsetof(Container, reserved_state) == 7,
                      "Container reserved-state ABI offset changed");
 
 // `reserved_state` carries per-container state with no room in the two flag
-// bytes. Bit 0 marks a strict-mode Arguments object: `is_content` on the same
-// array already means "this is an Arguments object", and this says which kind.
+// bytes. Bit 0 marks a strict-mode Arguments object: `is_js_arguments` on the
+// same array already means "this is an Arguments object", and this says which kind.
 // It used to be an own `__strict_arguments__` property on the companion map,
 // which was visible to Object.keys and is still visible to
 // Object.getOwnPropertyNames — engine bookkeeping must not be a user property.
@@ -1386,7 +1386,10 @@ List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
 void list_push_spread(List *list, Item item);  // push item, spreading if spreadable array
-Item list_end(List *list);
+Item list_end(List *list);  // value finish: none is null, one is the item (S2.5.5v2)
+Item list_end_item(List *list);  // item-position finish: none is a skip marker
+Item list_collapse_value(Item value);  // collapse a finished for-expression result
+Item list_collapse_item(Item value);   // same, in an item position
 
 // Spreadable array functions for for-expression results
 Array* array_plain();  // constructs a plain empty array (no frame management)
@@ -1433,9 +1436,9 @@ Array* array_spreadable();  // constructs a spreadable empty array
 // so any consumer that reads `items[]` directly must widen first. Returns false
 // when the array has no inferred pointer lane to widen.
 bool array_widen_inferred_pointer_lane(Array* array);
-void array_push(Array* arr, Item item);  // push item to array
-void array_push_argument(Array* arr, Item item);  // verbatim positional append (dynamic-call args)
-// S9.3.1 capturing append for Lambda literals/comprehensions; array_push is raw.
+void array_push(Array* arr, Item item);  // sequence append: splices a list (D2.6.5v3)
+void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value, one item (D2.6.5v3)
+// S9.3.1 capturing append for Lambda literals/comprehensions; array_push does not capture.
 void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
 void array_push_spread_all(Array* arr, Item item);  // push item, spreading any array (for pipe exprs in array literals)

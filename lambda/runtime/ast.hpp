@@ -945,7 +945,11 @@ struct Script : Input {
     // Used by build_debug_info_table() to get user-friendly names
     struct hashmap* func_name_map;  // maps char* (MIR name) → char* (Lambda name)
 
-    ArrayList* direct_imports;  // direct Lambda import dependencies, populated by MIR cache phases
+    ArrayList* direct_imports;  // execution-local direct Lambda import dependencies
+    // Cache templates retain immutable dependency owners separately: replacing
+    // `direct_imports` would redirect a live interpreter to another Runtime's
+    // module-state IDs (D8.5.1v7).
+    ArrayList* cache_direct_imports;
 
     // ---- T0 AST interpreter (D8.1.1v2) ----
     // Module top level owns a frame plan just like a function does; its
@@ -1017,6 +1021,13 @@ typedef struct Transpiler : Script {
 
     // Compiler unit resumes indexing into MIR; retained ASTs restart it.
     CompilerPassManager pass_manager;
+
+    // The current direct-binding traversal stamp. Nodes retain their previous
+    // stamp, so each pass receives a unique epoch rather than a visited map.
+    uint32_t bind_epoch;
+    // AUTO/T0 reserves node IDs during reduction but defers graph columns
+    // until a MIR consumer needs them; explicit JIT publishes in bind.
+    bool defer_ast_index_columns;
 
     // RC6: word -> const_list index, so equal constants share one pool slot.
     // Scoped to the compilation unit, not the Script: the REPL rolls a failed

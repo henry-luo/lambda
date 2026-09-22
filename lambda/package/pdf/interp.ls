@@ -119,7 +119,7 @@ fn _restore_state(saved) {
 fn _font_resource_names(pdf, page) {
     let res = resolve.page_resources(pdf, page)
     let table = if (res and res.Font) resolve.deref(pdf, res.Font) else null
-    if (table) { for (k, v in table) string(k) } else { [] }
+    if (table) { [for (k, v in table) string(k)] } else { [] }
 }
 
 // Wrap each emitted path in <g transform="matrix(ctm)"> so the outer
@@ -151,7 +151,7 @@ fn _wrap_emit_with_ctm(emit, ctm, clip_ids) {
 // ============================================================
 
 fn _lookup_resolved(fonts, name) {
-    let hits = (for (p in fonts where p.name == name) p.info)
+    let hits = [for (p in fonts where p.name == name) p.info]
     if (len(hits) >= 1) { hits[0] } else { null }
 }
 
@@ -469,10 +469,10 @@ fn _int_of(d, key, fallback) {
 
 fn _dash_numbers(raw) {
     if (raw is map and raw.kind == "array") {
-        for (n in raw.value where (n is int or n is float)) util.num(n)
+        [for (n in raw.value where (n is int or n is float)) util.num(n)]
     }
     else if (raw is array) {
-        for (n in raw where (n is int or n is float)) util.num(n)
+        [for (n in raw where (n is int or n is float)) util.num(n)]
     }
     else { [] }
 }
@@ -553,7 +553,7 @@ fn _is_tf_name(op_record) {
 }
 
 fn _list_contains(lst, name) {
-    let hits = (for (s in lst where s == name) s);
+    let hits = [for (s in lst where s == name) s];
     (len(hits) >= 1)
 }
 
@@ -794,7 +794,7 @@ fn _run_ops_with_clip_prefix(pdf, page, ops, init_ctm, fonts, page_h, clip_prefi
 }
 
 fn _append_all(a, b) {
-    a ++ (for (x in b) x)
+    a ++ [for (x in b) x]
 }
 
 fn _initial_ctx(fonts, init_ctm, inherited_st) {
@@ -873,7 +873,7 @@ fn _pop_graphics_state(ctx) {
         let restored0 = _restore_state(saved.st)
         let restored1 = _with_fill_cs(restored0, saved.fill_cs)
         let restored2 = _with_stroke_cs(restored1, saved.stroke_cs)
-           _ctx(restored2, (for (k, v in ctx.stack where k < (m - 1)) v), ctx.texts, ctx.paths,
+           _ctx(restored2, [for (k, v in ctx.stack where k < (m - 1)) v], ctx.texts, ctx.paths,
                saved.pending_clip_d, saved.pending_clip_rule, saved.has_pending_clip,
                saved.active_clip_ids, saved.fill_pattern_name, saved.fill_pattern_id,
                saved.has_fill_pattern, saved.fill_pattern_emitted, ctx.def_ctr, ctx.emitted_pattern_ids)

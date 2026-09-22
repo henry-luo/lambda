@@ -42,7 +42,9 @@ pub fn options(graph) {
   let clean_front_options = front_options or {};
   let clean_init_options = init_options or {};
   let combined = {*:clean_front_options, *:clean_init_options};
-  let curve = if (combined.curve != null) string(combined.curve) else null;
+  // Mermaid flowcharts use basis interpolation unless the source overrides it.
+  let curve = if (combined.curve != null) string(combined.curve)
+    else if (family == "flowchart") "basis" else null;
   {
     title: if (front != null and front.title != null) string(front.title) else null,
     node_sep: if (combined.nodeSpacing != null) float(combined.nodeSpacing) else null,

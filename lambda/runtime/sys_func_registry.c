@@ -1378,7 +1378,7 @@ JitImport jit_runtime_imports[] = {
     {"array_limit_last_inplace", FPTR(array_limit_last_inplace)},
     {"fn_take_last", FPTR(fn_take_last)},
     {"array_push", FPTR(array_push)},
-    {"array_push_argument", FPTR(array_push_argument)},
+    {"array_push_verbatim", FPTR(array_push_verbatim)},
     {"array_push_capture", FPTR(array_push_capture)},
     {"array_push_spread", FPTR(array_push_spread)},
     {"array_push_spread_all", FPTR(array_push_spread_all)},
@@ -1409,6 +1409,9 @@ JitImport jit_runtime_imports[] = {
     {"list_push_spread", FPTR(list_push_spread)},
     {"list_get", FPTR(list_get)},
     {"list_end", FPTR(list_end)},
+    {"list_end_item", FPTR(list_end_item)},
+    {"list_collapse_value", FPTR(list_collapse_value)},
+    {"list_collapse_item", FPTR(list_collapse_item)},
 
     // ========================================================================
     // Map, Element, Object operations

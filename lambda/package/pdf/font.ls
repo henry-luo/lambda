@@ -266,7 +266,7 @@ fn _implicit_encoding(stripped: string, explicit) {
 // dispatch — see the note above resolve_font).
 fn _strip_subset(name: string) {
     if (len(name) > 7 and name[6] == "+") {
-        let parts = (for (k in 7 to (len(name) - 1)) name[k])
+        let parts = [for (k in 7 to (len(name) - 1)) name[k]]
         parts |> join("")
     }
     else { name }
@@ -329,8 +329,8 @@ fn _ends_with(s: string, suffix: string) {
     if (n < m) { false }
     else {
         // compare last m chars; AND-reduce equality across the range
-        let hits = (for (i in 0 to (m - 1)) (s[n - m + i] == suffix[i]))
-        let bad  = (for (b in hits where b == false) b)
+        let hits = [for (i in 0 to (m - 1)) (s[n - m + i] == suffix[i])]
+        let bad  = [for (b in hits where b == false) b]
         len(bad) == 0
     }
 }
@@ -388,9 +388,9 @@ fn _strip_quoted_prefix(family: string, name: string) {
     if (flen <= plen) { family }
     else {
         // build the leading slice as a string and compare
-        let head = (for (i in 0 to (plen - 1)) family[i]) |> join("")
+        let head = [for (i in 0 to (plen - 1)) family[i]] |> join("")
         if (head == prefix) {
-            (for (i in plen to (flen - 1)) family[i]) |> join("")
+            [for (i in plen to (flen - 1)) family[i]] |> join("")
         }
         else { family }
     }
@@ -455,7 +455,7 @@ fn _hex_to_codes(hex: string) {
     let pairs: int = int((n + 1) div 2)
     if (pairs == 0) { [] }
     else {
-        for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)
+        [for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)]
     }
 }
 
@@ -636,7 +636,7 @@ pub fn decode_hex(hex: string, to_unicode) {
     if (to_unicode != null) { _decode_hex_cmap_at(clean, 0, to_unicode, null) }
     else {
         let codes = _hex_to_codes(clean)
-        let parts = (for (c in codes) _decode_code(c, null))
+        let parts = [for (c in codes) _decode_code(c, null)]
         parts |> join("")
     }
 }
@@ -648,7 +648,7 @@ pub fn decode_hex_with_font(hex: string, font_info) {
     if (cmap != null) { _decode_hex_cmap_at(clean, 0, cmap, enc) }
     else {
         let codes = _hex_to_codes(clean)
-        let parts = (for (c in codes) _decode_code_with_encoding(c, null, enc))
+        let parts = [for (c in codes) _decode_code_with_encoding(c, null, enc)]
         parts |> join("")
     }
 }
@@ -660,7 +660,7 @@ pub fn decode_literal(s: string, to_unicode) {
     if (to_unicode == null) { s }
     else {
         let n = len(s)
-        let parts = (for (i in 0 to (n - 1)) _decode_code(ord(s[i]), to_unicode))
+        let parts = [for (i in 0 to (n - 1)) _decode_code(ord(s[i]), to_unicode)]
         parts |> join("")
     }
 }
@@ -671,7 +671,7 @@ pub fn decode_literal_with_font(s: string, font_info) {
     let n = len(s)
     if (n == 0) { "" }
     else {
-        let parts = (for (i in 0 to (n - 1)) _decode_code_with_encoding(ord(s[i]), cmap, enc))
+        let parts = [for (i in 0 to (n - 1)) _decode_code_with_encoding(ord(s[i]), cmap, enc)]
         parts |> join("")
     }
 }
