@@ -2057,29 +2057,20 @@ static int js_mir_analyze_and_plan(void* opaque) {
                             cap_is_parent_nfe = (strcmp(cap_name, parent_self_name) == 0);
                         }
 
-                        // Add as capture to parent
-                        jm_ensure_captures_capacity(parent);
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].name = jm_persist_name(cap_name);
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].scope_env_key = jm_persist_name(
-                            JM_CAPTURE_ARRAY(child)[ci].scope_env_key &&
-                            JM_CAPTURE_ARRAY(child)[ci].scope_env_key &&
-                            JM_CAPTURE_ARRAY(child)[ci].scope_env_key[0]
-                                ? JM_CAPTURE_ARRAY(child)[ci].scope_env_key : cap_name);
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].scope_env_slot = -1;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].private_env_slot = -1;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].grandparent_slot = -1;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].parent_env_link_slot_override = -1;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].entry = JM_CAPTURE_ARRAY(child)[ci].entry;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].is_let_const = JM_CAPTURE_ARRAY(child)[ci].is_let_const;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].is_const = JM_CAPTURE_ARRAY(child)[ci].is_const;
-                        // A child closure can reference its enclosing named function
-                        // expression's private name. Preserve that as an NFE binding
-                        // so creation patches a private env slot instead of falling
-                        // through to an outer same-named var.
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].is_nfe_binding =
-                            JM_CAPTURE_ARRAY(child)[ci].is_nfe_binding || cap_is_parent_nfe;
-                        JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].force_env_capture = JM_CAPTURE_ARRAY(child)[ci].force_env_capture;
-                        JM_CAPTURE_COUNT(parent)++;
+                        // Add as capture to parent. A child closure can reference
+                        // its enclosing named function expression's private name;
+                        // preserve that as an NFE binding so creation patches a
+                        // private env slot instead of an outer same-named var.
+                        FnCapture* inherited = &JM_CAPTURE_ARRAY(child)[ci];
+                        FnCapture* added = jm_add_capture(parent, cap_name,
+                            inherited->entry,
+                            inherited->is_nfe_binding || cap_is_parent_nfe,
+                            inherited->force_env_capture);
+                        added->scope_env_key = jm_persist_name(
+                            inherited->scope_env_key && inherited->scope_env_key[0]
+                                ? inherited->scope_env_key : cap_name);
+                        added->is_let_const = inherited->is_let_const;
+                        added->is_const = inherited->is_const;
                         if (!queued[parent->function_id]) {
                             arraylist_append(worklist, parent);
                             queued[parent->function_id] = true;
@@ -2119,9 +2110,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 jm_name_hash, jm_name_cmp, NULL, NULL);
 
             int nfe_extra_count = 0;
-            for (int ci = 0; ci < mt->func_count; ci++) {
-                JsFuncCollected* child = &mt->func_entries[ci];
-                if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+            JM_FOR_EACH_CHILD_FUNC(mt, ci, child, parent_fc->function_id) {
                 if (JM_CAPTURE_COUNT(child) == 0) continue;
                 // Determine child's NFE self-name (if any)
                 const char* child_self_name = child->node && child->node->name
@@ -2159,9 +2148,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 int fill_idx = 0;
                 if (base_count > 0) {
                     hashmap_clear(scope_vars, false);
-                    for (int ci = 0; ci < mt->func_count; ci++) {
-                        JsFuncCollected* child = &mt->func_entries[ci];
-                        if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+                    JM_FOR_EACH_CHILD_FUNC(mt, ci, child, parent_fc->function_id) {
                         if (JM_CAPTURE_COUNT(child) == 0) continue;
                         const char* child_self_name2 = child->node && child->node->name
                             ? jm_var_name(child->node->name) : NULL;
@@ -2191,9 +2178,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 // Each NFE gets its own slot so self-patches don't conflict.
                 // Function declarations are NOT given extra slots (parent manages them).
                 int extra_slot = normal_slot_count;
-                for (int ci = 0; ci < mt->func_count; ci++) {
-                    JsFuncCollected* child = &mt->func_entries[ci];
-                    if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+                JM_FOR_EACH_CHILD_FUNC(mt, ci, child, parent_fc->function_id) {
                     if (!child->node || !child->node->name) continue;
                     const char* csn = jm_var_name(child->node->name);
                     // Only true NFEs (not function declarations) get extra slots
@@ -2225,9 +2210,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     }
 
                     // Remap child capture indices to scope env slots
-                    for (int ci = 0; ci < mt->func_count; ci++) {
-                        JsFuncCollected* child = &mt->func_entries[ci];
-                        if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+                    JM_FOR_EACH_CHILD_FUNC(mt, ci, child, parent_fc->function_id) {
                         if (JM_CAPTURE_COUNT(child) == 0) continue;
                         // Build child's NFE self-name to skip during remap
                         const char* child_self_remap = child->node && child->node->name
@@ -2346,9 +2329,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             return has_private && has_shared;
         };
 
-        for (int ci = 0; ci < mt->func_count; ci++) {
-            JsFuncCollected* child = &mt->func_entries[ci];
-            if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
+        JM_FOR_EACH_CHILD_FUNC(mt, ci, child, AST_FUNCTION_ID_INVALID) {
             if (JM_CAPTURE_COUNT(child) == 0) continue;
             for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                 if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
@@ -2359,10 +2340,8 @@ static int js_mir_analyze_and_plan(void* opaque) {
         int total = (int)hashmap_count(scope_vars);
         if (total > 0) {
             int scope_env_capacity = total + 2;
-            for (int ci = 0; ci < mt->func_count; ci++) {
-                JsFuncCollected* child = &mt->func_entries[ci];
-                if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID ||
-                        !closure_needs_mixed_module_env(child)) continue;
+            JM_FOR_EACH_CHILD_FUNC(mt, ci, child, AST_FUNCTION_ID_INVALID) {
+                if (!closure_needs_mixed_module_env(child)) continue;
                 int private_count = 0;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (capture_needs_private_module_slot(child, &JM_CAPTURE_ARRAY(child)[k])) {
@@ -2384,9 +2363,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             // Deterministic fill: iterate children in collection order
             hashmap_clear(scope_vars, false);
             int fill_idx = 0;
-            for (int ci = 0; ci < mt->func_count; ci++) {
-                JsFuncCollected* child = &mt->func_entries[ci];
-                if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
+            JM_FOR_EACH_CHILD_FUNC(mt, ci, child, AST_FUNCTION_ID_INVALID) {
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
                     const char* key = capture_slot_key(&JM_CAPTURE_ARRAY(child)[k]);
@@ -2404,9 +2381,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
             // Slots stay -1 for closures that didn't qualify (any in-loop /
             // for-init capture disqualifies the whole closure) so the existing
             // per-closure-env fallback handles them.
-            for (int ci = 0; ci < mt->func_count; ci++) {
-                JsFuncCollected* child = &mt->func_entries[ci];
-                if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
+            JM_FOR_EACH_CHILD_FUNC(mt, ci, child, AST_FUNCTION_ID_INVALID) {
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
                     int slot = jm_scope_env_slot_for_capture(&mt->module_fc,
@@ -2520,9 +2495,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                     if (grandparent_slot + 1 > max_slot) max_slot = grandparent_slot + 1;
 
                     // Remap all children's captures of this var
-                    for (int ci = 0; ci < mt->func_count; ci++) {
-                        JsFuncCollected* child = &mt->func_entries[ci];
-                        if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+                    JM_FOR_EACH_CHILD_FUNC(mt, ci, child, parent_fc->function_id) {
                         for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                             if (jm_captures_same_binding(&JM_CAPTURE_ARRAY(child)[k],
                                     &JM_CAPTURE_ARRAY(parent_fc)[c])) {
@@ -2652,9 +2625,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
 
         // For transitive captures in direct children, set grandparent_slot
         // NO slot shifting needed — existing slots remain unchanged
-        for (int ci = 0; ci < mt->func_count; ci++) {
-            JsFuncCollected* child = &mt->func_entries[ci];
-            if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+        JM_FOR_EACH_CHILD_FUNC(mt, ci, child, parent_fc->function_id) {
             if (JM_CAPTURE_COUNT(child) == 0) continue;
 
             for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
@@ -2751,9 +2722,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
         int parent_env_link_slot = fc->scope_env_count;
         fc->scope_env_names[fc->scope_env_count] = jm_persist_name("__parent_env__");
         fc->scope_env_count++;
-        for (int ci = 0; ci < mt->func_count; ci++) {
-            JsFuncCollected* child = &mt->func_entries[ci];
-            if (jm_parent_function_id(mt, child) != fc->function_id) continue;
+        JM_FOR_EACH_CHILD_FUNC(mt, ci, child, fc->function_id) {
             for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                 for (int s = 0; s < fc->scope_env_count; s++) {
                     if (jm_scope_env_slot_matches_capture(fc, s,
@@ -2792,9 +2761,7 @@ static int js_mir_analyze_and_plan(void* opaque) {
                 // Remapping them through the child's pre-reuse layout aliases
                 // unrelated siblings when the slot orders differ.
                 JsFuncCollected* capture_env_owner = JM_JS_FACT(child, reuse_parent_env) ? fc : child;
-                for (int gi = 0; gi < mt->func_count; gi++) {
-                    JsFuncCollected* grandchild = &mt->func_entries[gi];
-                    if (jm_parent_function_id(mt, grandchild) != child->function_id) continue;
+                JM_FOR_EACH_CHILD_FUNC(mt, gi, grandchild, child->function_id) {
                     for (int gk = 0; gk < JM_CAPTURE_COUNT(grandchild); gk++) {
                         for (int s = 0; s < capture_env_owner->scope_env_count; s++) {
                             if (jm_scope_env_slot_matches_capture(capture_env_owner,
