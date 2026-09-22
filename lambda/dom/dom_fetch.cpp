@@ -10,6 +10,7 @@
 #include "dom_xhr.h"
 #include "realm/dom_realm.h"
 #include "../input/css/dom_element.hpp"
+#include "../network/cookie_jar.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
 #include "../jube/jube_node_permission.h"
@@ -27,6 +28,7 @@
 #include <cstdlib>
 #include <sys/stat.h>
 #include "../../lib/mem.h"
+#include "../../radiant/radiant.hpp"
 
 #define MAX_FETCH_RESPONSES 256
 
@@ -63,6 +65,7 @@ typedef struct JsFetchWork {
     char*              body;     // owned, NULL → no body
     size_t             body_len;
     struct curl_slist* req_headers; // owned
+    CookieJar*          cookie_jar; // borrowed from the owning browsing session
 
     // response data (filled by worker thread)
     ByteBuilder response;
@@ -173,6 +176,29 @@ static size_t fetch_write_cb(char* ptr, size_t size, size_t nmemb, void* userdat
     return byte_builder_append(&fw->response, ptr, bytes) ? bytes : 0;
 }
 
+static size_t fetch_header_cb(char* buffer, size_t size, size_t nmemb, void* userdata) {
+    size_t total = size * nmemb;
+    JsFetchWork* fw = (JsFetchWork*)userdata;
+    if (!fw || !fw->cookie_jar || !str_istarts_with(buffer, total, "Set-Cookie:", 11)) {
+        return total;
+    }
+    const char* effective_url = fw->url;
+    char* curl_url = NULL;
+    if (fw->easy) curl_easy_getinfo(fw->easy, CURLINFO_EFFECTIVE_URL, &curl_url);
+    if (curl_url && curl_url[0]) effective_url = curl_url;
+    char* header = mem_dup_n(buffer, total, MEM_CAT_NETWORK);
+    if (!header) return 0;
+    cookie_jar_store(fw->cookie_jar, effective_url, header);
+    mem_free(header);
+    return total;
+}
+
+static CookieJar* fetch_profile_cookie_jar(void) {
+    UiContext* uicon = (UiContext*)dom_get_ui_context();
+    return uicon && uicon->browsing_session
+        ? session_cookie_jar(uicon->browsing_session) : nullptr;
+}
+
 static void fetch_work_destroy(JsFetchWork* fw) {
     if (!fw) return;
     if (fw->method) mem_free(fw->method);
@@ -211,10 +237,13 @@ static void fetch_work_cb(uv_work_t* req) {
     curl_easy_setopt(fw->easy, CURLOPT_URL, fw->url);
     curl_easy_setopt(fw->easy, CURLOPT_WRITEFUNCTION, fetch_write_cb);
     curl_easy_setopt(fw->easy, CURLOPT_WRITEDATA, fw);
+    curl_easy_setopt(fw->easy, CURLOPT_HEADERFUNCTION, fetch_header_cb);
+    curl_easy_setopt(fw->easy, CURLOPT_HEADERDATA, fw);
     curl_easy_setopt(fw->easy, CURLOPT_ERRORBUFFER, fw->error_msg);
     curl_easy_setopt(fw->easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(fw->easy, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(fw->easy, CURLOPT_NOSIGNAL, 1L);  // thread-safe
+    if (fw->cookie_jar) cookie_jar_import_curl(fw->cookie_jar, fw->easy);
 
     if (fw->method) {
         curl_easy_setopt(fw->easy, CURLOPT_CUSTOMREQUEST, fw->method);
@@ -428,6 +457,10 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
         js_runtime_resource_table(), entry, 1));
     Rooted<Item> reject_root(roots, runtime_resource_table_root_value(
         js_runtime_resource_table(), entry, 2));
+
+    if (fw->cookie_jar && !cookie_jar_flush(fw->cookie_jar)) {
+        log_error("fetch: failed to persist response cookies");
+    }
 
     if (status != 0 || fw->curl_error != 0) {
         // network error
@@ -671,6 +704,7 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
     }
 
     snprintf(fw->url, sizeof(fw->url), "%s", url);
+    fw->cookie_jar = fetch_profile_cookie_jar();
     fw->work.data = fw;
 
     // parse options (method, headers, body)

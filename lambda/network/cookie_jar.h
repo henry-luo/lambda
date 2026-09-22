@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+struct RadiantStateStore;
+
 // SameSite attribute values
 typedef enum {
     SAME_SITE_NONE   = 0,
@@ -39,7 +41,7 @@ typedef struct CookieJar {
     int count;
     int capacity;
     pthread_mutex_t lock;
-    char* storage_path;   // persistent file path (e.g., "./temp/cookies.dat")
+    struct RadiantStateStore* state_store;  // borrowed profile-owned SQLite store
 } CookieJar;
 
 // RFC 6265 §5.1.3 domain-match, shared by cookie and legacy document-domain
@@ -47,7 +49,7 @@ typedef struct CookieJar {
 bool cookie_domain_matches(const char* request_host, const char* cookie_domain);
 
 // Lifecycle
-CookieJar*  cookie_jar_create(const char* storage_path);
+CookieJar*  cookie_jar_create(struct RadiantStateStore* state_store);
 void        cookie_jar_destroy(CookieJar* jar);
 
 // Store cookies from one or more Set-Cookie response headers.
@@ -55,15 +57,15 @@ void        cookie_jar_destroy(CookieJar* jar);
 void cookie_jar_store(CookieJar* jar, const char* request_url,
                       const char* set_cookie_header);
 
-// Build the "Cookie: name=val; name2=val2" header value for an outgoing request.
-// Returns heap-allocated string or NULL if no cookies match.
-// Caller must free() the returned string.
-char* cookie_jar_build_request_header(CookieJar* jar, const char* request_url,
-                                       bool is_secure);
+// Commits queued worker-side cookie mutations on the profile owner thread.
+bool cookie_jar_flush(CookieJar* jar);
 
-// Persistence
-void cookie_jar_save(CookieJar* jar);
-void cookie_jar_load(CookieJar* jar);
+// Imports matching jar entries into a libcurl easy handle's cookie engine.
+// `curl_handle` is a CURL* supplied as void* to avoid exposing libcurl here.
+void cookie_jar_import_curl(CookieJar* jar, void* curl_handle);
+
+// Build the script-visible cookie string. HttpOnly entries are excluded.
+char* cookie_jar_build_document_cookie(CookieJar* jar, const char* request_url);
 
 // Maintenance
 void cookie_jar_clear_expired(CookieJar* jar);

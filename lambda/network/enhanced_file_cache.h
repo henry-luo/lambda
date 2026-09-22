@@ -61,6 +61,8 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir,
                                          size_t max_size_bytes, 
                                          int max_entries);
 void enhanced_cache_destroy(EnhancedFileCache* cache);
+// Returns the configured cache directory; the returned pointer is borrowed.
+const char* enhanced_cache_get_directory(const EnhancedFileCache* cache);
 
 // Lookup and store operations (thread-safe)
 char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url);

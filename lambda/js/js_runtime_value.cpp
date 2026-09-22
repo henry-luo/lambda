@@ -30,7 +30,6 @@ extern "C" Item js_make_string_len(const char* str, int len) {
 JS_FORWARD_EXPRESSION(Item, js_make_string, (const char* str),
     str ? js_make_string_len(str, (int)strlen(str)) : ItemNull)
 JS_FORWARD_RETURN(bool, js_is_callable, (Item value), js_has_call_capability, (value))
-JS_FORWARD_RETURN(bool, is_callable, (Item value), js_is_callable, (value))
 
 JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str, int len),
     js_make_string_len, (str, len))
@@ -859,23 +858,6 @@ extern "C" int64_t js_is_nullish(Item value) {
     AutoAssertNoGC no_gc;
     TypeId type = get_type_id(value);
     return (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) ? 1 : 0;
-}
-
-extern "C" bool js_get_constructor_name(Item value, char* out, int out_size) {
-    if (!out || out_size <= 0 || get_type_id(value) != LMD_TYPE_MAP) return false;
-    out[0] = '\0';
-    Item ctor = js_get_key_cstr(value, "constructor");
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
-        Item proto = js_get_prototype_of(value);
-        if (get_type_id(proto) == LMD_TYPE_MAP) ctor = js_get_key_cstr(proto, "constructor");
-    }
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
-    Item name = js_get_key_cstr(ctor, "name");
-    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
-    if (!ns || ns->len == 0) return false;
-    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
-    str_copy(out, out_size, ns->chars, len);
-    return true;
 }
 
 // =============================================================================

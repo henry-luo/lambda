@@ -46,8 +46,6 @@ void js_event_loop_shutdown(void);
 void js_event_loop_set_auto_close_mode(bool enabled);
 void js_event_loop_set_auto_close_after_load(bool enabled);
 void js_event_loop_set_auto_close_settle_ms(double settle_ms);
-bool js_event_loop_auto_close_mode(void);
-bool js_event_loop_is_shutting_down(void);
 
 // =============================================================================
 // Microtask Queue
@@ -90,7 +88,6 @@ void js_clearInterval(Item timer_id);
 void js_event_loop_cancel_document_timers(void* dom_doc);
 void js_event_loop_abandon_document_timers(void* dom_doc);
 void js_event_loop_abandon_all_timers(void);
-void js_event_loop_state_destroy(struct JsEventLoopState* state);
 
 // Dynamic native callers keep every actual in one Array argument pack.
 Item js_pack_args_span(Item* values, int count);
