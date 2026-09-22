@@ -61,8 +61,10 @@
 #include <setjmp.h>
 #ifndef _WIN32
 #include <pthread.h>
-#include <unistd.h>
+#include <sys/resource.h>
 #include <sys/time.h>
+#include <unistd.h>
+#include <time.h>
 #endif
 
 extern __thread EvalContext* context;
@@ -89,11 +91,20 @@ static struct sigaction js_exec_old_segv, js_exec_old_bus;
 static volatile sig_atomic_t js_exec_timed_out = 0;
 static volatile sig_atomic_t js_exec_watchdog_started = 0;
 static size_t js_exec_watchdog_source_len = 0;
-static int js_exec_watchdog_budget_seconds = 0;
+static volatile sig_atomic_t js_exec_watchdog_budget_seconds = 0;
 
-// Per-document script timeout: covers parse/transpile plus execution.
+// Per-document script timeout: covers parse/transpile plus execution.  An
+// interval timer may deliver SIGPROF to any process thread, while recovery
+// must run on the document thread that owns js_exec_jmpbuf.
 static struct sigaction js_exec_old_prof;
+static pthread_t js_exec_watchdog_thread;
+static pthread_t js_exec_watchdog_owner;
+static bool js_exec_watchdog_thread_active = false;
+static bool js_exec_watchdog_handler_installed = false;
+static volatile sig_atomic_t js_exec_watchdog_running = 0;
+
 static void js_exec_timeout_handler(int sig) {
+    (void)sig;
     if (js_exec_guarded) {
         js_exec_timed_out = 1;
         const char* msg = "execute_document_scripts: JS execution timed out by watchdog\n";
@@ -101,7 +112,6 @@ static void js_exec_timeout_handler(int sig) {
         js_exec_guarded = 0;
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
-        sigaction(SIGPROF, &js_exec_old_prof, NULL);
         siglongjmp(js_exec_jmpbuf, 2);
     }
 }
@@ -130,43 +140,87 @@ static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
     }
 }
 
-static void js_exec_watchdog_arm(int timeout_seconds) {
+static bool js_exec_watchdog_process_cpu_us(uint64_t* out_cpu_us) {
+    if (!out_cpu_us) return false;
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return false;
+    *out_cpu_us = (uint64_t)usage.ru_utime.tv_sec * 1000000ULL +
+        (uint64_t)usage.ru_utime.tv_usec +
+        (uint64_t)usage.ru_stime.tv_sec * 1000000ULL +
+        (uint64_t)usage.ru_stime.tv_usec;
+    return true;
+}
+
+static void* js_exec_watchdog_main(void* unused) {
+    (void)unused;
+    uint64_t start_cpu_us = 0;
+    if (!js_exec_watchdog_process_cpu_us(&start_cpu_us)) {
+        log_error("script_runner_timeout: unable to read process CPU time");
+        return NULL;
+    }
+    const struct timespec poll_interval = {0, 10000000L};
+    while (js_exec_watchdog_running) {
+        uint64_t current_cpu_us = 0;
+        if (!js_exec_watchdog_process_cpu_us(&current_cpu_us)) {
+            log_error("script_runner_timeout: process CPU clock became unavailable");
+            return NULL;
+        }
+        uint64_t budget_cpu_us =
+            (uint64_t)js_exec_watchdog_budget_seconds * 1000000ULL;
+        if (current_cpu_us >= start_cpu_us &&
+                current_cpu_us - start_cpu_us >= budget_cpu_us) {
+            // Targeting the owner preserves the sigsetjmp/siglongjmp thread
+            // pairing; process-directed SIGPROF can instead hit a compiler worker.
+            int signal_status = pthread_kill(js_exec_watchdog_owner, SIGPROF);
+            if (signal_status != 0) {
+                log_error("script_runner_timeout: failed to signal watchdog owner (%d)",
+                          signal_status);
+            }
+            return NULL;
+        }
+        nanosleep(&poll_interval, NULL);
+    }
+    return NULL;
+}
+
+static bool js_exec_watchdog_arm(int timeout_seconds) {
+    if (timeout_seconds <= 0) return false;
     struct sigaction timeout_action;
     memset(&timeout_action, 0, sizeof(timeout_action));
     timeout_action.sa_handler = js_exec_timeout_handler;
-    sigaction(SIGPROF, &timeout_action, &js_exec_old_prof);
-
-    struct itimerval timer;
-    memset(&timer, 0, sizeof(timer));
-    timer.it_value.tv_sec = timeout_seconds;
-    setitimer(ITIMER_PROF, &timer, NULL);
+    if (sigaction(SIGPROF, &timeout_action, &js_exec_old_prof) != 0) {
+        log_error("script_runner_timeout: failed to install SIGPROF handler");
+        return false;
+    }
+    js_exec_watchdog_handler_installed = true;
+    js_exec_watchdog_owner = pthread_self();
+    js_exec_watchdog_budget_seconds = timeout_seconds;
+    js_exec_watchdog_running = 1;
+    int create_status = pthread_create(&js_exec_watchdog_thread, NULL,
+                                       js_exec_watchdog_main, NULL);
+    if (create_status != 0) {
+        js_exec_watchdog_running = 0;
+        sigaction(SIGPROF, &js_exec_old_prof, NULL);
+        js_exec_watchdog_handler_installed = false;
+        log_error("script_runner_timeout: failed to create CPU watchdog thread (%d)",
+                  create_status);
+        return false;
+    }
+    js_exec_watchdog_thread_active = true;
+    return true;
 }
 
 static void js_exec_watchdog_disarm(void) {
-    // SIGPROF can become pending between a successful script return and the
-    // timer cancellation.  Keep it blocked until the expired timer is drained;
-    // otherwise restoring the previous (usually default) action can terminate
-    // the batch after an otherwise successful document.
-    sigset_t watchdog_signal;
-    sigset_t saved_mask;
-    sigemptyset(&watchdog_signal);
-    sigaddset(&watchdog_signal, SIGPROF);
-    bool signal_masked = pthread_sigmask(SIG_BLOCK, &watchdog_signal, &saved_mask) == 0;
-
-    struct itimerval timer;
-    memset(&timer, 0, sizeof(timer));
-    setitimer(ITIMER_PROF, &timer, NULL);
-
-    if (signal_masked) {
-        sigset_t pending;
-        if (sigpending(&pending) == 0 && sigismember(&pending, SIGPROF)) {
-            int caught_signal = 0;
-            sigwait(&watchdog_signal, &caught_signal);
-        }
+    // Joining the sender closes the signal-delivery race before the previous
+    // action is restored, so a completed document cannot die from late SIGPROF.
+    js_exec_watchdog_running = 0;
+    if (js_exec_watchdog_thread_active) {
+        pthread_join(js_exec_watchdog_thread, NULL);
+        js_exec_watchdog_thread_active = false;
     }
-    sigaction(SIGPROF, &js_exec_old_prof, NULL);
-    if (signal_masked) {
-        pthread_sigmask(SIG_SETMASK, &saved_mask, NULL);
+    if (js_exec_watchdog_handler_installed) {
+        sigaction(SIGPROF, &js_exec_old_prof, NULL);
+        js_exec_watchdog_handler_installed = false;
     }
 }
 
@@ -182,18 +236,13 @@ static void js_exec_watchdog_add_module_source(size_t source_length) {
         js_exec_watchdog_source_len);
     if (expanded_budget <= js_exec_watchdog_budget_seconds) return;
 
-    struct itimerval timer;
-    if (getitimer(ITIMER_PROF, &timer) != 0) return;
-    timer.it_value.tv_sec += expanded_budget - js_exec_watchdog_budget_seconds;
-    if (setitimer(ITIMER_PROF, &timer, NULL) != 0) return;
     js_exec_watchdog_budget_seconds = expanded_budget;
     log_info("script_runner_timeout: module graph %zu bytes gets %ds watchdog",
         js_exec_watchdog_source_len, expanded_budget);
 }
 
 static void js_exec_watchdog_begin_user_code(void) {
-    js_exec_watchdog_started = 1;
-    js_exec_watchdog_arm(js_exec_watchdog_budget_seconds);
+    js_exec_watchdog_started = js_exec_watchdog_arm(js_exec_watchdog_budget_seconds);
 }
 #endif  // !_WIN32
 
