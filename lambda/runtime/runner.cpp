@@ -2810,8 +2810,26 @@ void runtime_reset_heap(Runtime* runtime) {
     }
 }
 
+void runtime_request_satellite_cancel(Runtime* runtime) {
+    if (!runtime || !runtime->scripts) return;
+    for (int i = 0; i < runtime->scripts->length; i++) {
+        interp_satellite_request_cancel_script((Script*)runtime->scripts->data[i]);
+    }
+}
+
+// Satellite workers lower against a Runtime-owned script shell and shared JIT
+// services. Wait only after the close request has prevented further work.
+static void runtime_quiesce_satellite_workers(Runtime* runtime) {
+    if (!runtime || !runtime->scripts) return;
+    runtime_request_satellite_cancel(runtime);
+    for (int i = 0; i < runtime->scripts->length; i++) {
+        interp_satellite_cancel_script((Script*)runtime->scripts->data[i]);
+    }
+}
+
 void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
+    runtime_quiesce_satellite_workers(runtime);
     // PTH44v2/SO20: the document context and its node table live for the
     // evaluation. Their entries point into the heap this teardown destroys, so
     // they must go with it or the next run would read freed nodes.

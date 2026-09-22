@@ -41597,10 +41597,12 @@ static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
 
 static bool compile_ast_function_satellite_image(Runtime* runtime, Script* script,
         const AstFuncNode* fn, uint32_t sequence, bool snapshot,
+        InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image) {
     if (out_image) *out_image = NULL;
     if (!runtime || !script || !fn || !fn->analysis || !out_image ||
-            !interp_satellite_supported(fn)) {
+            !interp_satellite_supported(fn) ||
+            (cancel_probe && cancel_probe(cancel_context))) {
         return false;
     }
     // `--mir-interp` runs MIR's own interpreter: jit_init skips MIR_gen_init,
@@ -41653,6 +41655,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         satellite_context = jit_init(runtime->optimize_level);
         context_owned = true;
     }
+    if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     if (!satellite_context) {
         satellite_context = jit_init(runtime->optimize_level);
         // Must mirror jit_init's own branch. Claiming a generator that was
@@ -41669,6 +41672,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         log_error("interp-tier: could not allocate satellite symbol names");
         goto fail;
     }
+    if (cancel_probe && cancel_probe(cancel_context)) goto fail;
 
     // `AstFuncNode::next` is the module declaration chain. The temporary root
     // must contain exactly the compiled definitions or a promotion would
@@ -41716,6 +41720,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         }
     }
     if (!compiled_target) goto fail;
+    if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     satellite_root.node_type = AST_SCRIPT;
     satellite_root.child = (AstNode*)&copies[0];
     satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
@@ -41743,16 +41748,19 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     mem_free(copies);
     copies = NULL;
     transpile_mir_ast_finalize(&build, &property_keys, &artifacts);
+    if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     // Follow the same mode branch the module compiler uses so a satellite
     // matches the interface its context actually carries.
     MIR_link(satellite_context, satellite_interp ? MIR_set_interp_interface :
         MIR_set_gen_interface, import_resolver);
+    if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     entry_name = strbuf_new_cap(96);
     write_fn_name_ex(entry_name, (AstFuncNode*)fn, NULL, "_b");
     entry = !entry_name ? NULL
         : (satellite_interp ? find_func(satellite_context, entry_name->str)
                             : jit_gen_func(satellite_context, entry_name->str));
     if (entry_name) strbuf_free(entry_name);
+    if (cancel_probe && cancel_probe(cancel_context)) goto fail;
     if (!entry || !artifacts.consts_bss || !artifacts.consts_bss->addr ||
             !artifacts.type_list_bss || !artifacts.type_list_bss->addr ||
             !artifacts.layout_bss || !artifacts.layout_bss->addr) {
@@ -41839,9 +41847,11 @@ void interp_satellite_image_destroy(InterpSatelliteImage* image) {
 }
 
 bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
-        const AstFuncNode* fn, uint32_t sequence, InterpSatelliteImage** out_image) {
+        const AstFuncNode* fn, uint32_t sequence,
+        InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
+        InterpSatelliteImage** out_image) {
     return compile_ast_function_satellite_image(runtime, script, fn, sequence,
-        true, out_image);
+        true, cancel_probe, cancel_context, out_image);
 }
 
 bool compile_ast_function_satellite(Runtime* runtime, Script* script,
@@ -41852,7 +41862,7 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     InterpSatelliteImage* image = NULL;
     uint32_t sequence = ++script->interp_satellite_count;
     if (!compile_ast_function_satellite_image(runtime, script, fn, sequence,
-            false, &image) || !image) {
+            false, NULL, NULL, &image) || !image) {
         return false;
     }
     bool installed_context = false;

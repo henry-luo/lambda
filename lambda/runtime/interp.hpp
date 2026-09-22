@@ -246,6 +246,7 @@ const char* interp_satellite_refusal(const AstFuncNode* fn);
 bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* entry);
 // Retire queued worker jobs before a Script or its cached execution shell can
 // release the AST they read. Safe to call for scripts that never queued work.
+void interp_satellite_request_cancel_script(Script* script);
 void interp_satellite_cancel_script(Script* script);
 // True when an imported binding has a planned T0 owner and a stable module
 // slab slot. Satellite lowering uses this predicate before embedding that

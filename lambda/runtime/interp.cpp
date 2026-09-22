@@ -26,6 +26,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/atomic.h"
 #include "../../lib/thread_pool.h"
 #include "../../lib/url.h"
 #include <stdlib.h>
@@ -65,6 +66,7 @@ struct InterpSatelliteQueue {
     uint64_t generation;
     uint32_t next_sequence;
     uint32_t pending;
+    atomic_int32 cancel_requested;
     bool retiring;
 };
 
@@ -77,6 +79,10 @@ typedef struct InterpSatelliteJob {
     uint32_t sequence;
     InterpSatelliteImage* image;
 } InterpSatelliteJob;
+
+static bool interp_satellite_compile_cancelled(void* opaque) {
+    return opaque && atomic_load32((const atomic_int32*)opaque) != 0;
+}
 
 static ThreadPool* g_interp_satellite_pool = NULL;
 static pthread_once_t g_interp_satellite_pool_once = PTHREAD_ONCE_INIT;
@@ -161,9 +167,26 @@ static void interp_satellite_compile_job(void* opaque) {
         return;
     }
     InterpSatelliteQueue* queue = job->queue;
+    // A shutdown can retire this request while it waits in the process-wide
+    // pool. Drop it before touching Script/Runtime compiler state so closing
+    // a document waits only for work that was already lowering.
+    pthread_mutex_lock(&queue->mutex);
+    bool retired_before_compile = queue->retiring ||
+        job->generation != queue->generation;
+    if (retired_before_compile) {
+        if (queue->pending > 0) queue->pending--;
+        if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
+    }
+    pthread_mutex_unlock(&queue->mutex);
+    if (retired_before_compile) {
+        interp_satellite_job_destroy(job);
+        return;
+    }
+
     InterpSatelliteImage* image = NULL;
     bool compiled = job->runtime && compile_ast_function_satellite_snapshot(
-        job->runtime, job->script, job->def, job->sequence, &image);
+        job->runtime, job->script, job->def, job->sequence,
+        interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
     bool retired = queue->retiring || job->generation != queue->generation;
     if (queue->pending > 0) queue->pending--;
@@ -282,12 +305,23 @@ static void interp_satellite_publish_ready(Script* script) {
     }
 }
 
-void interp_satellite_cancel_script(Script* script) {
+void interp_satellite_request_cancel_script(Script* script) {
     InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
     if (!queue) return;
     pthread_mutex_lock(&queue->mutex);
-    queue->retiring = true;
-    queue->generation++;
+    if (!queue->retiring) {
+        queue->retiring = true;
+        atomic_store32(&queue->cancel_requested, 1);
+        queue->generation++;
+    }
+    pthread_mutex_unlock(&queue->mutex);
+}
+
+void interp_satellite_cancel_script(Script* script) {
+    InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
+    if (!queue) return;
+    interp_satellite_request_cancel_script(script);
+    pthread_mutex_lock(&queue->mutex);
     while (queue->pending > 0) pthread_cond_wait(&queue->idle, &queue->mutex);
     ArrayList* ready = queue->ready;
     queue->ready = NULL;

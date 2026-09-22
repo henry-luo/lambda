@@ -819,6 +819,12 @@ TEST(InterpPromotion, SnapshotKeepsInferredFloatLaneMetadata) {
     ::remove(stderr_path);
 
     EXPECT_NE(strstr(stderr_text, "queued satellite function='fmt'"), nullptr);
+    EXPECT_NE(strstr(stderr_text, "queued satellite function='render_many'"), nullptr);
+    // With one worker, fmt is already lowering when the script exits. Its
+    // queued successor must be retired before runtime teardown, not compiled
+    // against the disappearing document Runtime.
+    EXPECT_EQ(strstr(stderr_text, "satellite image function='render_many'"), nullptr);
+    EXPECT_EQ(strstr(stderr_text, "Generating native code"), nullptr);
     EXPECT_EQ(strstr(stderr_text, "unexpected operand mode"), nullptr);
 }
 
