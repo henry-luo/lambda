@@ -27,9 +27,9 @@ typedef struct JsInterpModuleBinding {
     String* local_name;
     String* source;
     String* export_name;
-    // Direct scope attaches the source binding after parsing. The AST tier
-    // uses it before ordinary environment lookup so imports remain live; it
-    // is NULL for export plans.
+    // Direct scope attaches the local binding after parsing. The AST tier
+    // uses import bindings before ordinary environment lookup and export
+    // bindings to publish only writes to their declared local cell.
     NameEntry* entry;
     JsInterpModuleBindingKind kind;
     // `export * as ns from source` exposes source's namespace object itself,

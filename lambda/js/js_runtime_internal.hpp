@@ -149,7 +149,6 @@ bool js_realm_intrinsic_slots_ensure_roots(void);
 void js_deep_batch_reset();
 
 double js_get_number(Item value);
-Item js_make_number(double d);
 int32_t js_to_int32(double d);
 
 extern "C" Item js_number_function(Item value);

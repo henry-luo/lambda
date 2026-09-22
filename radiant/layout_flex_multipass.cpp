@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "../lib/hashmap_helpers.h"
 #include "render.hpp"
 #include "event.hpp"
 
@@ -226,12 +227,66 @@ static void flex_normalize_break_item_boxes(LayoutContext* lycon,
     }
 }
 
-void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
-                                   bool include_out_of_flow,
-                                   float* out_min, float* out_max) {
+typedef struct LayoutContentBoundsCacheEntry {
+    ViewElement* elem;
+    LayoutAxis axis;
+    bool include_out_of_flow;
+    float min_edge;
+    float max_edge;
+} LayoutContentBoundsCacheEntry;
+
+static uint64_t layout_content_bounds_cache_hash(const void* item,
+                                                 uint64_t seed0, uint64_t seed1) {
+    const LayoutContentBoundsCacheEntry* entry =
+        (const LayoutContentBoundsCacheEntry*)item;
+    uint64_t hash = hashmap_hash_pointer_identity(entry->elem, seed0, seed1);
+    hash ^= hashmap_hash_bytes(&entry->axis, sizeof(entry->axis), seed0, seed1);
+    hash ^= hashmap_hash_bytes(&entry->include_out_of_flow,
+                               sizeof(entry->include_out_of_flow), seed0, seed1);
+    return hash;
+}
+
+static int layout_content_bounds_cache_compare(const void* first, const void* second,
+                                               void* udata) {
+    (void)udata;
+    const LayoutContentBoundsCacheEntry* a =
+        (const LayoutContentBoundsCacheEntry*)first;
+    const LayoutContentBoundsCacheEntry* b =
+        (const LayoutContentBoundsCacheEntry*)second;
+    if (a->elem != b->elem) return 1;
+    if (a->axis != b->axis) return a->axis < b->axis ? -1 : 1;
+    return a->include_out_of_flow == b->include_out_of_flow ? 0 :
+        (a->include_out_of_flow ? 1 : -1);
+}
+
+HashMap* layout_content_bounds_cache_create() {
+    return hashmap_new(sizeof(LayoutContentBoundsCacheEntry), 256, 0, 0,
+                       layout_content_bounds_cache_hash,
+                       layout_content_bounds_cache_compare, NULL, NULL);
+}
+
+void layout_content_bounds_cache_destroy(HashMap* cache) {
+    if (cache) hashmap_free(cache);
+}
+
+static void layout_in_flow_content_bounds_impl(ViewElement* elem, LayoutAxis axis,
+                                               bool include_out_of_flow,
+                                               HashMap* cache,
+                                               float* out_min, float* out_max) {
     if (out_min) *out_min = 0.0f;
     if (out_max) *out_max = 0.0f;
     if (!elem) return;
+
+    LayoutContentBoundsCacheEntry key = {elem, axis, include_out_of_flow, 0.0f, 0.0f};
+    if (cache) {
+        const LayoutContentBoundsCacheEntry* cached =
+            (const LayoutContentBoundsCacheEntry*)hashmap_get(cache, &key);
+        if (cached) {
+            if (out_min) *out_min = cached->min_edge;
+            if (out_max) *out_max = cached->max_edge;
+            return;
+        }
+    }
 
     float min_edge = 0.0f;
     float max_edge = 0.0f;
@@ -261,8 +316,9 @@ void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
             if (child_overflow_visible) {
                 float nested_min_edge = 0.0f;
                 float nested_max_edge = 0.0f;
-                layout_in_flow_content_bounds(
+                layout_in_flow_content_bounds_impl(
                     child_elem, axis, include_out_of_flow,
+                    cache,
                     &nested_min_edge, &nested_max_edge);
                 child_min_edge = min(0.0f, nested_min_edge);
                 child_max_edge = max(child_size, nested_max_edge);
@@ -281,8 +337,28 @@ void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
             }
         }
     }
+    if (cache) {
+        key.min_edge = min_edge;
+        key.max_edge = max_edge;
+        hashmap_set(cache, &key);
+    }
     if (out_min) *out_min = min_edge;
     if (out_max) *out_max = max_edge;
+}
+
+void layout_in_flow_content_bounds(ViewElement* elem, LayoutAxis axis,
+                                   bool include_out_of_flow,
+                                   float* out_min, float* out_max) {
+    layout_in_flow_content_bounds_impl(elem, axis, include_out_of_flow, NULL,
+                                       out_min, out_max);
+}
+
+void layout_in_flow_content_bounds_cached(ViewElement* elem, LayoutAxis axis,
+                                          bool include_out_of_flow,
+                                          HashMap* cache,
+                                          float* out_min, float* out_max) {
+    layout_in_flow_content_bounds_impl(elem, axis, include_out_of_flow, cache,
+                                       out_min, out_max);
 }
 
 float layout_in_flow_content_extent(ViewElement* elem, LayoutAxis axis,

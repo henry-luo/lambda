@@ -757,7 +757,7 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
         << "] stderr=[" << interp.stderr_text << "]";
 }
 
-TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
+TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
     // four self-tail edges leave a definition one edge short of the default
     // threshold. This guards against accidentally using call_count (which
     // also includes the outer entry) as the handoff budget (D8.1.1v5).
@@ -776,8 +776,9 @@ TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
     EXPECT_EQ(trim_trailing(below.stdout_text), "4");
     EXPECT_EQ(below.stderr_text.find("satellite compiled function='loop'"), (size_t)-1);
 
-    // the fifth direct self-tail boundary compiles and transfers the same
-    // activation into T1; the remaining fifteen iterations must stay correct.
+    // The fifth direct self-tail boundary queues a private image. The active
+    // frame remains T0 (there is no loop-entry OSR), and later call boundaries
+    // publish the completed image (D8.1.1v12).
     const char* handoff_path = "temp/interp_case_tail_handoff.ls";
     write_script(handoff_path,
         "pn loop(n: int, acc: int) int {\n"
@@ -791,8 +792,34 @@ TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
     RunResult handoff = run_script(handoff_path, "auto", /*procedural=*/true);
     EXPECT_EQ(handoff.exit_code, 0);
     EXPECT_EQ(trim_trailing(handoff.stdout_text), "20");
-    EXPECT_NE(handoff.stderr_text.find("satellite compiled function='loop'"), (size_t)-1)
-        << "the fifth self-tail edge did not hand off the active activation";
+    EXPECT_NE(handoff.stderr_text.find("queued satellite function='loop'"), (size_t)-1)
+        << "the fifth self-tail edge did not queue its satellite image";
+}
+
+TEST(InterpPromotion, SnapshotKeepsInferredFloatLaneMetadata) {
+    // A private satellite must retain its inferred float formal while lowering
+    // Item-ABI system calls; otherwise a raw double reaches fn_string as I64.
+    char stderr_path[128];
+    snprintf(stderr_path, sizeof(stderr_path),
+        "temp/interp_satellite_float_%ld_%lu.txt", interp_test_process_id(),
+        ++interp_gtest_run_sequence);
+    char command[512];
+    snprintf(command, sizeof(command),
+        "LAMBDA_TIER=auto LAMBDA_SATELLITE_THREADS=1 %s "
+        "test/lambda/transpile_float_fmt_satellite.ls > /dev/null 2>%s",
+        LAMBDA_EXE, stderr_path);
+    EXPECT_EQ(system(command), 0);
+
+    FILE* output = fopen(stderr_path, "rb");
+    ASSERT_NE(output, nullptr);
+    char stderr_text[32768];
+    size_t length = fread(stderr_text, 1, sizeof(stderr_text) - 1, output);
+    stderr_text[length] = '\0';
+    fclose(output);
+    ::remove(stderr_path);
+
+    EXPECT_NE(strstr(stderr_text, "queued satellite function='fmt'"), nullptr);
+    EXPECT_EQ(strstr(stderr_text, "unexpected operand mode"), nullptr);
 }
 
 //==============================================================================

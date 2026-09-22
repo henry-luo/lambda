@@ -5964,6 +5964,7 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
         case DOM_JS_MUTATION_TEXT: return "text";
         case DOM_JS_MUTATION_ATTRIBUTE: return "attribute";
         case DOM_JS_MUTATION_STYLE: return "style";
+        case DOM_JS_MUTATION_INLINE_STYLE: return "inline-style";
         case DOM_JS_MUTATION_TREE_REPLACE: return "tree-replace";
         case DOM_JS_MUTATION_STYLE_REPAINT: return "style-repaint";
         case DOM_JS_MUTATION_CONTROL_VALUE: return "control-value";
@@ -6536,9 +6537,11 @@ static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
     return false;
 }
 
-static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reason) {
+static bool dom_js_mutation_can_incremental(DomDocument* doc,
+                                            bool require_layout_state,
+                                            const char** reason) {
     if (reason) *reason = "eligible";
-    if (!doc || !doc->root || !doc->view_tree) {
+    if (!doc || !doc->root || (require_layout_state && !doc->view_tree)) {
         if (reason) *reason = "missing-layout-state";
         return false;
     }
@@ -6637,6 +6640,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
 
     if (kind == DOM_JS_MUTATION_CONTROL_VALUE) return;
     if (kind == DOM_JS_MUTATION_STYLE ||
+        kind == DOM_JS_MUTATION_INLINE_STYLE ||
         kind == DOM_JS_MUTATION_STYLE_REPAINT ||
         kind == DOM_JS_MUTATION_TEXT) {
         root->set_styles_resolved(false);
@@ -6651,6 +6655,32 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     radiant_apply_css_stylesheets_to_tree(
         doc, root, doc->stylesheets, doc->stylesheet_count,
         pool, css_engine, matcher);
+}
+
+bool radiant_apply_load_mutation_cascade(DomDocument* doc,
+                                         const char** fallback_reason) {
+    const char* reason = nullptr;
+    if (!dom_js_mutation_can_incremental(doc, false, &reason)) {
+        if (fallback_reason) *fallback_reason = reason ? reason : "unknown";
+        return false;
+    }
+
+    Pool* pool = doc->document_pool;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) {
+        if (fallback_reason) *fallback_reason = "matcher-allocation";
+        return false;
+    }
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
+
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
+        if (!dom_js_record_has_connected_endpoint(doc, record)) continue;
+        DomElement* root = dom_js_record_cascade_root(doc, record);
+        if (root) dom_js_recascade_subtree(doc, root, record->kind, matcher);
+    }
+    if (fallback_reason) *fallback_reason = "eligible";
+    return true;
 }
 
 static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
@@ -6712,6 +6742,7 @@ static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (record->kind != DOM_JS_MUTATION_STYLE &&
+            record->kind != DOM_JS_MUTATION_INLINE_STYLE &&
             record->kind != DOM_JS_MUTATION_STYLE_REPAINT &&
             record->kind != DOM_JS_MUTATION_ATTRIBUTE) {
             continue;
@@ -6722,6 +6753,7 @@ static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
                 static_cast<DomNode*>(candidate))) {
             DomElement* table_root = nullptr;
             if (record->kind == DOM_JS_MUTATION_STYLE ||
+                record->kind == DOM_JS_MUTATION_INLINE_STYLE ||
                 record->kind == DOM_JS_MUTATION_STYLE_REPAINT ||
                 record->kind == DOM_JS_MUTATION_ATTRIBUTE) {
                 table_root = dom_js_table_layout_root(static_cast<DomNode*>(candidate));
@@ -6912,7 +6944,7 @@ static bool post_html_handler_incremental_rebuild(
         int mutations,
         const char** fallback_reason_out) {
     const char* reason = nullptr;
-    if (!dom_js_mutation_can_incremental(doc, &reason)) {
+    if (!dom_js_mutation_can_incremental(doc, true, &reason)) {
         log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
         if (fallback_reason_out) *fallback_reason_out = reason ? reason : "unknown";
         return false;

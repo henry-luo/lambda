@@ -1,4 +1,5 @@
 #include "dom_platform.h"
+#include "dom.h"
 #include "../runtime/context_capsule.h"
 #include "realm/dom_realm.h"
 #include "dom_events.h"
@@ -7,14 +8,22 @@
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../input/css/dom_element.hpp"
+#include "../network/radiant_state_store.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+
+#ifndef LAMBDA_HEADLESS
+#include "../../radiant/radiant.hpp"
+#endif
 
 #include <string.h>
 
 typedef JsDomStorageEntry JsStorageEntry;
 typedef JsDomStorageState JsStorageState;
 typedef JsDomMediaQueryState JsMediaQueryState;
+
+static JsDomPlatformState* dom_platform_state_if_present(void);
 
 extern "C" bool dom_evaluate_media_query(const char* query);
 extern "C" uint64_t js_get_heap_epoch(void);
@@ -51,6 +60,41 @@ static void storage_entries_clear(JsStorageState* storage) {
     }
     arraylist_free(storage->entries);
     storage->entries = nullptr;
+}
+
+static bool storage_is_local(const JsStorageState* storage) {
+    JsDomPlatformState* state = dom_platform_state_if_present();
+    return state && storage == &state->local_storage;
+}
+
+static RadiantStateStorageScope storage_scope(const JsStorageState* storage) {
+    return storage_is_local(storage) ? RADIANT_STATE_STORAGE_LOCAL :
+                                       RADIANT_STATE_STORAGE_SESSION;
+}
+
+static bool storage_persistent_binding(const JsStorageState* storage,
+                                       RadiantStateStore** out_store,
+                                       const char** out_context_id,
+                                       const char** out_origin) {
+    if (out_store) *out_store = nullptr;
+    if (out_context_id) *out_context_id = nullptr;
+    if (out_origin) *out_origin = nullptr;
+#ifndef LAMBDA_HEADLESS
+    JsDomPlatformState* state = dom_platform_state_if_present();
+    UiContext* uicon = (UiContext*)dom_get_ui_context();
+    if (!state || !storage || !uicon || !uicon->browsing_session ||
+        !state->storage_origin || !state->storage_origin[0]) return false;
+    RadiantStateStore* store = session_state_store(uicon->browsing_session);
+    const char* context_id = session_browsing_context_id(uicon->browsing_session);
+    if (!store || (!storage_is_local(storage) && (!context_id || !context_id[0]))) return false;
+    if (out_store) *out_store = store;
+    if (out_context_id) *out_context_id = context_id;
+    if (out_origin) *out_origin = state->storage_origin;
+    return true;
+#else
+    (void)storage;
+    return false;
+#endif
 }
 
 // Read paths must not materialise the capsule: a batch reset or a receiver
@@ -178,28 +222,58 @@ static Item js_storage_set_item(Item key_item, Item value_item) {
     if (!stable_key || !stable_value) {
         if (stable_key) mem_free(stable_key);
         if (stable_value) mem_free(stable_value);
-        return make_js_undefined();
+        return js_throw_named_error_text("QuotaExceededError",
+            "Web Storage entry allocation failed");
     }
     int index = storage_find(storage, stable_key);
+    JsStorageEntry* new_entry = nullptr;
+    if (index < 0) {
+        if (!storage->entries) storage->entries = arraylist_new(16);
+        if (!storage->entries ||
+            !arraylist_reserve(storage->entries, storage->entries->length + 1)) {
+            mem_free(stable_key);
+            mem_free(stable_value);
+            return js_throw_named_error_text("QuotaExceededError",
+                "Web Storage entry allocation failed");
+        }
+        new_entry = (JsStorageEntry*)mem_calloc(1, sizeof(JsStorageEntry),
+            MEM_CAT_JS_RUNTIME);
+        if (!new_entry) {
+            mem_free(stable_key);
+            mem_free(stable_value);
+            return js_throw_named_error_text("QuotaExceededError",
+                "Web Storage entry allocation failed");
+        }
+    }
+    RadiantStateStore* store = nullptr;
+    const char* context_id = nullptr;
+    const char* origin = nullptr;
+    if (storage_persistent_binding(storage, &store, &context_id, &origin) &&
+        !radiant_state_store_storage_set(store, storage_scope(storage), context_id,
+                                         origin, stable_key, stable_value)) {
+        mem_free(new_entry);
+        mem_free(stable_key);
+        mem_free(stable_value);
+        return js_throw_named_error_text("QuotaExceededError",
+            "persistent Web Storage update failed");
+    }
     if (index >= 0) {
         JsStorageEntry* entry = storage_entry_at(storage, index);
         mem_free(entry->value);
         entry->value = stable_value;
         mem_free(stable_key);
     } else {
-        if (!storage->entries) storage->entries = arraylist_new(16);
-        JsStorageEntry* entry = (JsStorageEntry*)mem_calloc(1,
-            sizeof(JsStorageEntry), MEM_CAT_JS_RUNTIME);
-        if (entry && storage->entries && arraylist_append(storage->entries, entry)) {
-            entry->key = stable_key;
-            entry->value = stable_value;
-        } else {
-            mem_free(entry);
-            // A failed native allocation is observable only as an unavailable
-            // host-store update; never report a successful-looking write.
-            log_error("dom-storage: could not grow entry table");
-            mem_free(stable_key);
-            mem_free(stable_value);
+        // Capacity and entry allocation complete before SQLite commits, so
+        // this append cannot leave the durable and realm views divergent.
+        new_entry->key = stable_key;
+        new_entry->value = stable_value;
+        if (!arraylist_append(storage->entries, new_entry)) {
+            log_error("dom-storage: reserved entry append unexpectedly failed");
+            new_entry->key = nullptr;
+            new_entry->value = nullptr;
+            mem_free(new_entry);
+            return js_throw_named_error_text("InvalidStateError",
+                "Web Storage cache update failed after persistence");
         }
     }
     return make_js_undefined();
@@ -207,8 +281,18 @@ static Item js_storage_set_item(Item key_item, Item value_item) {
 
 static Item js_storage_remove_item(Item key_item) {
     JsStorageState* storage = storage_from_this();
-    int index = storage_find(storage, platform_string(key_item));
+    const char* key = platform_string(key_item);
+    int index = storage_find(storage, key);
     if (!storage || index < 0) return make_js_undefined();
+    RadiantStateStore* store = nullptr;
+    const char* context_id = nullptr;
+    const char* origin = nullptr;
+    if (storage_persistent_binding(storage, &store, &context_id, &origin) &&
+        !radiant_state_store_storage_remove(store, storage_scope(storage), context_id,
+                                            origin, key)) {
+        return js_throw_named_error_text("InvalidStateError",
+            "persistent Web Storage removal failed");
+    }
     JsStorageEntry* entry = storage_entry_at(storage, index);
     mem_free(entry->key);
     mem_free(entry->value);
@@ -220,6 +304,15 @@ static Item js_storage_remove_item(Item key_item) {
 static Item js_storage_clear(void) {
     JsStorageState* storage = storage_from_this();
     if (!storage) return make_js_undefined();
+    RadiantStateStore* store = nullptr;
+    const char* context_id = nullptr;
+    const char* origin = nullptr;
+    if (storage_persistent_binding(storage, &store, &context_id, &origin) &&
+        !radiant_state_store_storage_clear(store, storage_scope(storage), context_id,
+                                           origin)) {
+        return js_throw_named_error_text("InvalidStateError",
+            "persistent Web Storage clear failed");
+    }
     storage_entries_clear(storage);
     return make_js_undefined();
 }
@@ -261,11 +354,97 @@ static void reset_storage(JsStorageState* storage) {
     storage->object = ItemNull;
 }
 
+typedef struct StorageLoadContext {
+    JsStorageState* storage;
+    bool loaded;
+} StorageLoadContext;
+
+static bool storage_load_entry(const char* key, const char* value, int ordinal,
+                               void* user_data) {
+    (void)ordinal;
+    StorageLoadContext* context = (StorageLoadContext*)user_data;
+    if (!context || !context->storage) return false;
+    JsStorageState* storage = context->storage;
+    JsStorageEntry* entry = (JsStorageEntry*)mem_calloc(1, sizeof(JsStorageEntry),
+                                                        MEM_CAT_JS_RUNTIME);
+    if (!entry) return false;
+    entry->key = mem_strdup(key, MEM_CAT_JS_RUNTIME);
+    entry->value = mem_strdup(value, MEM_CAT_JS_RUNTIME);
+    if (!entry->key || !entry->value) {
+        mem_free(entry->key);
+        mem_free(entry->value);
+        mem_free(entry);
+        return false;
+    }
+    if (!storage->entries) storage->entries = arraylist_new(16);
+    if (!storage->entries || !arraylist_append(storage->entries, entry)) {
+        mem_free(entry->key);
+        mem_free(entry->value);
+        mem_free(entry);
+        return false;
+    }
+    context->loaded = true;
+    return true;
+}
+
+extern "C" void dom_storage_bind_document(void) {
+    JsDomPlatformState* state = dom_platform_state();
+    if (!state) return;
+
+#ifndef LAMBDA_HEADLESS
+    DomDocument* document = (DomDocument*)dom_get_document();
+    // The host loop rebinds its active document before every timer and event
+    // turn.  Rebinding the same opaque-origin document must retain the realm's
+    // in-memory storage, just as it does for an HTTP(S) document.
+    if (state->storage_document == document) return;
+    storage_entries_clear(&state->local_storage);
+    storage_entries_clear(&state->session_storage);
+    mem_free(state->storage_origin);
+    state->storage_origin = nullptr;
+    state->storage_document = document;
+    UiContext* uicon = (UiContext*)dom_get_ui_context();
+    if (!document || !document->url || !uicon || !uicon->browsing_session ||
+        (document->url->scheme != URL_SCHEME_HTTP && document->url->scheme != URL_SCHEME_HTTPS)) {
+        return;
+    }
+    RadiantStateStore* store = session_state_store(uicon->browsing_session);
+    const char* context_id = session_browsing_context_id(uicon->browsing_session);
+    const char* origin = url_get_origin(document->url);
+    if (!store || !context_id || !origin || !origin[0]) return;
+    state->storage_origin = mem_strdup(origin, MEM_CAT_JS_RUNTIME);
+    if (!state->storage_origin) return;
+    StorageLoadContext local = {&state->local_storage, false};
+    StorageLoadContext session = {&state->session_storage, false};
+    bool local_ok = radiant_state_store_storage_load(store, RADIANT_STATE_STORAGE_LOCAL,
+        context_id, state->storage_origin, storage_load_entry, &local);
+    bool session_ok = radiant_state_store_storage_load(store, RADIANT_STATE_STORAGE_SESSION,
+        context_id, state->storage_origin, storage_load_entry, &session);
+    if (!local_ok || !session_ok) {
+        log_error("dom-storage: failed to load persistent storage for origin %s",
+                  state->storage_origin);
+        storage_entries_clear(&state->local_storage);
+        storage_entries_clear(&state->session_storage);
+        mem_free(state->storage_origin);
+        state->storage_origin = nullptr;
+    }
+#else
+    // Headless callers retain the previous realm-only storage behavior.
+    storage_entries_clear(&state->local_storage);
+    storage_entries_clear(&state->session_storage);
+    mem_free(state->storage_origin);
+    state->storage_origin = nullptr;
+    state->storage_document = nullptr;
+#endif
+}
+
 extern "C" void dom_storage_reset(void) {
     JsDomPlatformState* state = dom_platform_state_if_present();
     if (!state) return;   // nothing was ever stored in this realm
     reset_storage(&state->local_storage);
     reset_storage(&state->session_storage);
+    mem_free(state->storage_origin);
+    state->storage_origin = nullptr;
+    state->storage_document = nullptr;
 }
 
 static JsMediaQueryState* media_query_from_this(void) {
@@ -395,6 +574,9 @@ static void dom_platform_capsule_destroy(void* capsule) {
     if (!state) return;
     reset_storage(&state->local_storage);
     reset_storage(&state->session_storage);
+    mem_free(state->storage_origin);
+    state->storage_origin = nullptr;
+    state->storage_document = nullptr;
     media_queries_clear(state);
     if (state->media_query_roots_initialized) {
         root_vector_destroy(&state->media_query_objects);

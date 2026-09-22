@@ -855,8 +855,10 @@ static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
     return fn && fn->node_type == AST_NODE_METHOD;
 }
 
-static void jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* entry,
-                           bool is_nfe_binding, bool force_env_capture) {
+// Appends a capture with no environment slot assigned yet; callers adjust the
+// binding-kind fields and the environment key when they differ from the name.
+FnCapture* jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* entry,
+                          bool is_nfe_binding, bool force_env_capture) {
     jm_ensure_captures_capacity(fc);
     FnCapture* capture = &JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)++];
     capture->name = jm_persist_name(name);
@@ -867,6 +869,7 @@ static void jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* ent
     capture->is_mutable = capture->is_let_const = capture->is_const = false;
     capture->is_nfe_binding = is_nfe_binding;
     capture->force_env_capture = force_env_capture;
+    return capture;
 }
 
 static bool jm_capture_binding_is_lexical_ancestor(JsMirTranspiler* mt,
@@ -997,34 +1000,19 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         bool is_lexical_for_head = jm_entry_is_lexical_for_head(ref->entry);
 
         // This is a capture
-        {
-            jm_ensure_captures_capacity(fc);
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].name = jm_persist_name(ref->name);
-            if (ref->binding_start != 0 || ref->binding_end != 0) {
-                JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_key = jm_format_name(
-                    "%s@%u:%u", ref->name, ref->binding_start, ref->binding_end);
-            } else {
-                JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_key = jm_persist_name(ref->name);
-            }
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_slot = -1;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].private_env_slot = -1;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].grandparent_slot = -1;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].parent_env_link_slot_override = -1;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].entry = ref->entry;
-            // Binding metadata is authoritative when scope analysis resolved
-            // the reference; name-only ancestor scans can confuse an outer
-            // const with a nearer same-named var in minified code.
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].is_let_const = ref->var_kind != 0 ||
-                is_lexical_for_head;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].is_const = ref->var_kind == JS_VAR_CONST;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].is_nfe_binding = false;
-            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].force_env_capture = force_env_capture ||
-                is_lexical_for_head;
-            const char* capture_key = JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_key;
-            JM_CAPTURE_COUNT(fc)++;
-            log_debug("js-mir: capture '%s' [%s] in function '%s'",
-                ref->name, capture_key, fc->name);
+        FnCapture* capture = jm_add_capture(fc, ref->name, ref->entry, false,
+            force_env_capture || is_lexical_for_head);
+        if (ref->binding_start != 0 || ref->binding_end != 0) {
+            capture->scope_env_key = jm_format_name(
+                "%s@%u:%u", ref->name, ref->binding_start, ref->binding_end);
         }
+        // Binding metadata is authoritative when scope analysis resolved
+        // the reference; name-only ancestor scans can confuse an outer
+        // const with a nearer same-named var in minified code.
+        capture->is_let_const = ref->var_kind != 0 || is_lexical_for_head;
+        capture->is_const = ref->var_kind == JS_VAR_CONST;
+        log_debug("js-mir: capture '%s' [%s] in function '%s'",
+            ref->name, capture->scope_env_key, fc->name);
     }
 
     // If the function references itself (e.g., recursive calls, or Box2D constructor

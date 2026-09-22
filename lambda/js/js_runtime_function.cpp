@@ -10,7 +10,6 @@
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/side_stack.h"
 
-extern __thread EvalContext* context;
 
 // =============================================================================
 // Function object wrappers
@@ -595,20 +594,6 @@ static void js_function_root_ast_payload(JsFunction* fn) {
     heap_try_register_gc_root((uint64_t*)&fn->payload->ast->lexical_new_target);
 }
 
-extern "C" void js_function_set_eval_origin(JsFunction* fn, String* filename,
-        String* source, int64_t line_offset, int64_t column_offset) {
-    if (!fn) return;
-    JsEvalOrigin* origin = js_fn_eval_origin_ensure(fn);
-    if (!origin) return;
-    origin->filename = filename;
-    origin->source = source;
-    origin->line_offset = line_offset;
-    origin->column_offset = column_offset;
-    if (!js_function_payload_needs_own_roots(fn)) return;
-    heap_try_register_gc_root((uint64_t*)&origin->filename);
-    heap_try_register_gc_root((uint64_t*)&origin->source);
-}
-
 // Called by the collector for every dying function value.
 extern "C" void js_function_gc_destroy(void* data) {
     JsFunction* fn = (JsFunction*)data;
@@ -717,7 +702,6 @@ extern "C" void js_func_cache_suppress_pop(void) {
     }
 }
 
-extern "C" Item* js_with_capture_stack(int* out_depth);
 
 static void js_function_capture_with_env(JsFunction* fn) {
     if (!fn || !js_with_depth_active()) return;
@@ -846,6 +830,12 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     fn->code = code;
     ast->env = environment;
     fn->flags = flags;
+    // A later closure of a promoted definition enters the already-published
+    // satellite with the same ordinary call ABI.
+    if (code->body_kind == JS_FUNCTION_BODY_CODE && code->func_ptr &&
+            code->runtime_context == (Context*)context) {
+        fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+    }
     fn->home_global = js_get_global_this();
     ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW) ? js_get_this() : ItemNull;
     ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
@@ -857,6 +847,27 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     js_function_capture_with_env(fn);
     js_function_finalize_capabilities(fn);
     return function_root.get();
+}
+
+bool js_function_promote_ast_body(JsFunction* fn, void* entry) {
+    if (!fn || !entry || !fn->code || !js_fn_ast_definition(fn)) {
+        return false;
+    }
+    // The definition code record is the single body authority for every
+    // closure of this AST site. A sibling created before publication refreshes
+    // its entry from that record; the caller retains the MIR context first.
+    if (js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST) {
+        fn->code->func_ptr = entry;
+        fn->code->runtime_context = (Context*)context;
+        fn->code->body_kind = JS_FUNCTION_BODY_CODE;
+    } else if (js_fn_body_kind(fn) != JS_FUNCTION_BODY_CODE ||
+            fn->code->func_ptr != entry ||
+            fn->code->runtime_context != (Context*)context) {
+        return false;
+    }
+    fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
+    js_function_finalize_capabilities(fn);
+    return fn->body == (JsBodyEntry)entry;
 }
 
 static void js_function_source_skip_trivia(const char** text, uint32_t* length) {
@@ -1635,7 +1646,6 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
     js_function_finalize_capabilities(fn);
 }
 
-extern "C" void js_set_class_name(Item cls_item, Item name_item);
 static Item js_private_display_name_item(Item name_item);
 
 // Set the name of a JsFunction (called from transpiler after js_new_function/js_new_closure)

@@ -21,7 +21,6 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item obj);
 #include <string.h>
 #include <stdio.h>
 
-extern __thread EvalContext* context;
 
 String* heap_create_name(const char* name, size_t len);
 

@@ -118,6 +118,13 @@ JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
     return (JsMirMainFunc)find_func(ctx, (char*)"js_main");
 }
 
+void* js_mir_link_function(MIR_context_t ctx, const char* function_name,
+        void (*gen_interface)(MIR_context_t, MIR_item_t)) {
+    if (!ctx || !function_name) return NULL;
+    MIR_link(ctx, gen_interface, import_resolver);
+    return find_func(ctx, (char*)function_name);
+}
+
 static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
     // D5.4.1: callbacks remain part of the active evaluator turn; marking this
     // boundary prevents synchronous layout from handing TLS to another realm.

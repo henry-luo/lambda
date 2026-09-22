@@ -26,17 +26,11 @@
 #include "../../lib/mem.h"
 #include <cstdio>
 
-extern __thread EvalContext* context;
-extern Item js_make_number(double value);
-extern "C" Item js_async_hooks_get_current_resource(void);
-extern "C" Item js_async_hooks_enter_resource(Item resource);
-extern "C" void js_async_hooks_restore_resource(Item previous);
 extern "C" Item js_async_hooks_create_resource(const char* type_chars, int type_len);
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource);
 extern "C" Item js_als_capture_context(void);
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
-extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" void js_promise_flush_unhandled_checks(void);
 extern "C" bool js_process_exit_requested(void);
 extern "C" Item js_domain_get_current(void);
@@ -76,11 +70,6 @@ extern "C" void js_event_loop_set_auto_close_settle_ms(double settle_ms) {
     if (!js_active_runtime_state) return;
     auto_close_settle_ms = settle_ms > 0.0 ? settle_ms : 0.0;
 }
-
-JS_FORWARD_EXPRESSION(bool, js_event_loop_auto_close_mode, (void),
-    js_active_runtime_state ? auto_close_mode : false)
-JS_FORWARD_EXPRESSION(bool, js_event_loop_is_shutting_down, (void),
-    js_active_runtime_state ? event_loop_shutting_down : false)
 
 static bool js_async_queue_push(RuntimeJobQueue* queue, Item cb,
                                 RuntimeJobKind kind) {
@@ -368,9 +357,6 @@ typedef struct JsTimerHandle {
 #define timer_negative_warning_emitted (js_runtime_state.event_loop->negative_warning_emitted)
 #define virtual_clock_enabled (js_runtime_state.event_loop->virtual_clock_enabled)
 #define virtual_clock_ms (js_runtime_state.event_loop->virtual_clock_ms)
-#define mock_scheduler_enabled (js_runtime_state.event_loop->mock_scheduler_enabled)
-#define mock_scheduler_now_ms (js_runtime_state.event_loop->mock_scheduler_now_ms)
-#define mock_scheduler_waits (js_runtime_state.event_loop->mock_waits)
 
 static void close_all_timer_handles(void);
 static void timer_close_native_handle(JsTimerHandle* th);
@@ -1147,148 +1133,6 @@ static Item check_timer_options(Item options, Item* reject_out, int* result_code
     return js_status_ok();
 }
 
-enum JsMockSchedulerWaitValue {
-    JS_MOCK_WAIT_PROMISE = 0,
-    JS_MOCK_WAIT_RESOLVE,
-    JS_MOCK_WAIT_REJECT,
-    JS_MOCK_WAIT_SIGNAL,
-    JS_MOCK_WAIT_VALUE_COUNT,
-};
-
-static Item mock_scheduler_wait_value(const JsMockSchedulerWait* wait,
-        int value_index) {
-    Item* value = wait ? root_vector_at((RootVector*)&wait->values, value_index) : NULL;
-    return value ? *value : ItemNull;
-}
-
-static void mock_scheduler_wait_destroy(JsMockSchedulerWait* wait) {
-    if (!wait) return;
-    root_vector_destroy(&wait->values);
-    mem_free(wait);
-}
-
-static void mock_scheduler_clear_state(JsEventLoopState* state) {
-    if (!state || !state->mock_waits) return;
-    for (int i = state->mock_waits->length - 1; i >= 0; i--) {
-        mock_scheduler_wait_destroy((JsMockSchedulerWait*)
-            state->mock_waits->data[i]);
-    }
-    arraylist_free(state->mock_waits);
-    state->mock_waits = NULL;
-}
-
-extern "C" void js_event_loop_state_destroy(JsEventLoopState* state) {
-    mock_scheduler_clear_state(state);
-}
-
-static void mock_scheduler_clear(void) {
-    mock_scheduler_clear_state(js_active_runtime_state
-        ? js_runtime_state.event_loop : NULL);
-}
-
-static void mock_scheduler_wait_remove(int index) {
-    if (!mock_scheduler_waits || index < 0 || index >= mock_scheduler_waits->length)
-        return;
-    mock_scheduler_wait_destroy((JsMockSchedulerWait*)
-        mock_scheduler_waits->data[index]);
-    arraylist_remove(mock_scheduler_waits, index);
-}
-
-static bool mock_scheduler_wait_append(Item promise, Item resolve, Item reject,
-        Item signal, int64_t due_ms) {
-    JsMockSchedulerWait* wait = (JsMockSchedulerWait*)mem_calloc(1,
-        sizeof(JsMockSchedulerWait), MEM_CAT_JS_RUNTIME);
-    if (!wait) return false;
-    root_vector_init(&wait->values, (Context*)context, "JS mock scheduler wait");
-    if (!root_vector_push(&wait->values, promise) ||
-            !root_vector_push(&wait->values, resolve) ||
-            !root_vector_push(&wait->values, reject) ||
-            !root_vector_push(&wait->values, signal)) {
-        mock_scheduler_wait_destroy(wait);
-        return false;
-    }
-    if (!mock_scheduler_waits) {
-        mock_scheduler_waits = arraylist_new(8);
-        if (!mock_scheduler_waits) {
-            mock_scheduler_wait_destroy(wait);
-            return false;
-        }
-    }
-    if (!arraylist_append(mock_scheduler_waits, wait)) {
-        mock_scheduler_wait_destroy(wait);
-        return false;
-    }
-    wait->due_ms = due_ms;
-    return true;
-}
-
-static void js_mock_scheduler_set_enabled(bool enabled) {
-    mock_scheduler_clear();
-    mock_scheduler_enabled = enabled;
-    mock_scheduler_now_ms = 0;
-}
-JS_FORWARD_VOID( js_mock_scheduler_enable, (void), js_mock_scheduler_set_enabled, (true))
-JS_FORWARD_VOID( js_mock_scheduler_reset, (void), js_mock_scheduler_set_enabled, (false))
-
-extern "C" void js_mock_scheduler_tick(Item delay) {
-    if (!mock_scheduler_enabled) return;
-    mock_scheduler_now_ms += (int64_t)normalize_timer_delay(delay);
-    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-
-    for (int i = mock_scheduler_waits ? mock_scheduler_waits->length - 1 : -1;
-            i >= 0; i--) {
-        JsMockSchedulerWait* wait = (JsMockSchedulerWait*)mock_scheduler_waits->data[i];
-        if (!wait || wait->due_ms > mock_scheduler_now_ms) continue;
-        Item signal = mock_scheduler_wait_value(wait, JS_MOCK_WAIT_SIGNAL);
-        if (get_type_id(signal) == LMD_TYPE_MAP) {
-            Item aborted = js_get_key_cstr(signal, "aborted");
-            if (get_type_id(aborted) == LMD_TYPE_BOOL && it2b(aborted)) {
-                Item err = make_abort_error(signal);
-                Item args[1] = { err };
-                js_call_function(mock_scheduler_wait_value(wait, JS_MOCK_WAIT_REJECT),
-                    ItemNull, args, 1);
-                mock_scheduler_wait_remove(i);
-                continue;
-            }
-        }
-        Item args[1] = { undef };
-        js_call_function(mock_scheduler_wait_value(wait, JS_MOCK_WAIT_RESOLVE),
-            ItemNull, args, 1);
-        mock_scheduler_wait_remove(i);
-    }
-    js_microtask_flush();
-}
-
-static Item js_mock_scheduler_wait(Item delay, Item options) {
-    Item reject_out = ItemNull;
-    int opt_rc = 0;
-    JS_ASSIGN_OR_RETURN(options_status, check_timer_options(options, &reject_out, &opt_rc));
-    if (opt_rc != 0) return reject_out;
-
-    Item resolvers = js_promise_with_resolvers();
-    Item promise = js_get_key_cstr(resolvers, "promise");
-    Item resolve_fn = js_get_key_cstr(resolvers, "resolve");
-    Item reject_fn = js_get_key_cstr(resolvers, "reject");
-    Item signal = get_type_id(options) == LMD_TYPE_MAP
-        ? js_get_key_cstr(options, "signal")
-        : (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-    JS_ROOTS(roots,
-        promise_root, promise,
-        resolve_root, resolve_fn,
-        reject_root, reject_fn,
-        signal_root, signal);
-
-    if (!mock_scheduler_wait_append(promise_root.get(), resolve_root.get(),
-            reject_root.get(), signal_root.get(), mock_scheduler_now_ms +
-            (int64_t)normalize_timer_delay(delay))) {
-        return js_promise_reject(js_new_error(js_name_item(
-            "Mock scheduler wait allocation failed", 35)));
-    }
-    // Mock scheduler waits must not allocate real uv timers; otherwise
-    // official fake-timer tests sleep for the virtual delay before passing.
-    return promise_root.get();
-}
-
 static Item js_set_promise_timer(Item delay, Item value, Item options,
         const char* timer_name, int timer_name_len, uint64_t start_delay) {
 
@@ -1392,7 +1236,6 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
 
 // scheduler.wait(delay, options) → setTimeout promise with undefined value
 extern "C" Item js_scheduler_wait(Item delay, Item options) {
-    if (mock_scheduler_enabled) return js_mock_scheduler_wait(delay, options);
     Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
     return js_setTimeout_promise(delay, undef, options);
 }
@@ -1498,8 +1341,6 @@ extern "C" void js_event_loop_init(void) {
     next_timer_id = 1;
     timer_nan_warning_emitted = false;
     timer_negative_warning_emitted = false;
-
-    mock_scheduler_clear();
 
     // initialize libuv loop
     lambda_uv_init();

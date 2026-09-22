@@ -63,7 +63,6 @@ Item js_property_key_from_lane(JsPropertyLane lane);
 Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
 const char* js_property_index_chars(int64_t index, int* out_len);
-bool js_descriptor_is_enumerable(Item descriptor);
 
 // Tune5 §4.3: final semantic operation ABI.  The legacy runtime entry points
 // may delegate to these shells while migration is staged, but new semantic
@@ -235,22 +234,6 @@ bool js_ordinary_has_property(Item object, const char* name, int name_len);
 
 // Ordinary Map delete. The full ABI handles arrays, functions, and proxies.
 bool js_ordinary_delete(Item object, const char* name, int name_len);
-
-// Result of shape-iteration value resolution.
-typedef enum {
-    JS_RESOLVE_DELETED = 0,  // slot held the deleted sentinel; caller should
-                             // skip this entry
-    JS_RESOLVE_VALUE   = 1,  // *out_value populated (data slot or getter
-                             // return); caller proceeds normally
-    JS_RESOLVE_THREW   = 2,  // accessor getter threw; caller MUST propagate
-                             // the returned Item lane and bail
-} JsResolveFieldStatus;
-
-// Resolve a shaped slot for spread/assign, including accessor dispatch.
-JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
-                                                      Map* m,
-                                                      Item receiver,
-                                                      Item* out_value);
 
 // ES §6.2.5 descriptor represented by presence flags and Item fields.
 

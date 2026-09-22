@@ -4,7 +4,6 @@
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/str.h"
 
-extern __thread EvalContext* context;
 
 extern "C" void* jube_host_identity(Item item);
 JS_FORWARD_EXPRESSION(Item, js_undefined, (void), ((Item){.item = ITEM_JS_UNDEFINED}))
@@ -30,7 +29,6 @@ extern "C" Item js_make_string_len(const char* str, int len) {
 JS_FORWARD_EXPRESSION(Item, js_make_string, (const char* str),
     str ? js_make_string_len(str, (int)strlen(str)) : ItemNull)
 JS_FORWARD_RETURN(bool, js_is_callable, (Item value), js_has_call_capability, (value))
-JS_FORWARD_RETURN(bool, is_callable, (Item value), js_is_callable, (value))
 
 JS_FORWARD_LOCAL_RETURN(Item, make_string_item, (const char* str, int len),
     js_make_string_len, (str, len))
@@ -861,23 +859,6 @@ extern "C" int64_t js_is_nullish(Item value) {
     return (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) ? 1 : 0;
 }
 
-extern "C" bool js_get_constructor_name(Item value, char* out, int out_size) {
-    if (!out || out_size <= 0 || get_type_id(value) != LMD_TYPE_MAP) return false;
-    out[0] = '\0';
-    Item ctor = js_get_key_cstr(value, "constructor");
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) {
-        Item proto = js_get_prototype_of(value);
-        if (get_type_id(proto) == LMD_TYPE_MAP) ctor = js_get_key_cstr(proto, "constructor");
-    }
-    if (get_type_id(ctor) != LMD_TYPE_FUNC && get_type_id(ctor) != LMD_TYPE_MAP) return false;
-    Item name = js_get_key_cstr(ctor, "name");
-    String* ns = get_type_id(name) == LMD_TYPE_STRING ? it2s(name) : NULL;
-    if (!ns || ns->len == 0) return false;
-    int len = (int)(ns->len < (size_t)out_size - 1 ? ns->len : (size_t)out_size - 1);
-    str_copy(out, out_size, ns->chars, len);
-    return true;
-}
-
 // =============================================================================
 // v23 Performance Facades — compound operations returning raw int64_t
 // =============================================================================
@@ -1289,7 +1270,6 @@ static inline Item js_op_to_primitive(Item value, int hint) {
     return js_to_primitive(value, h);
 }
 
-extern "C" uint64_t js_get_heap_epoch();
 
 // These are context-local TLS-backed fields so a tight concatenation loop
 // remains direct loads/stores while never retaining another runtime's strings.

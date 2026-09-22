@@ -322,6 +322,7 @@
         "LAMBDA_NODE_CORE_DYNAMIC_MODULE"
       ],
       "source_files": [
+        "lambda/module/node_core/node_buffer.cpp",
         "lambda/module/node_core/node_constants.cpp",
         "lambda/module/node_core/node_core_module.cpp",
         "lambda/module/node_core/node_os.cpp",
@@ -334,6 +335,7 @@
         "lambda/module/node_core/node_timers.cpp",
         "lambda/module/node_core/node_trace_events.cpp",
         "lambda/module/node_core/node_tty.cpp",
+        "lambda/module/node_core/node_util.cpp",
         "lambda/module/node_core/node_v8.cpp",
         "lambda/module/node_core/node_workers.cpp"
       ]
@@ -2041,6 +2043,19 @@
             ],
             "binary": "test_rdb_query_gtest.exe",
             "icon": "\ud83d\udd0d"
+          },
+          {
+            "source": "test_radiant_agent_state_gtest.cpp",
+            "name": "Radiant Agent State Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_radiant_agent_state_gtest.exe",
+            "icon": "\ud83e\udde0"
           },
           {
             "source": "lib/test_str_gtest.cpp",
@@ -4517,6 +4532,9 @@
           {
             "source": "test_input_script_cache_gtest.cpp",
             "name": "Input Script Cache Tests",
+            "additional_sources": [
+              "lambda/runtime/module_ast_prebuild.cpp"
+            ],
             "dependencies": [
               "lambda-data"
             ],

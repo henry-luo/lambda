@@ -1703,10 +1703,6 @@ static bool check_declaration_static_boundary(Transpiler* tp, AstDeclaratorNode*
     return false;
 }
 
-// Forward declaration for closure capture analysis
-void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
-                                 NameScope* global_scope, FnCapture** captures);
-
 // Check if a name entry is defined in a scope or any of its descendant scopes (local to function)
 // This includes variables declared in while blocks, if blocks, for loops, etc.
 bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
@@ -1947,246 +1943,91 @@ void mark_capture_mutable(FnCapture** captures, String* name) {
     }
 }
 
-// Recursively collect captures from an AST node
-void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope,
-                                 NameScope* global_scope, FnCapture** captures) {
-    if (!node) return;
+typedef struct CaptureWalk {
+    Transpiler* tp;
+    NameScope* fn_scope;
+    NameScope* global_scope;
+    FnCapture** captures;
+} CaptureWalk;
 
+// Records `entry` when it binds in an enclosing function: not local to this
+// function, not global, not an import.
+static void capture_outer_binding(CaptureWalk* walk, String* name, NameEntry* entry,
+                                  bool is_mutable) {
+    if (!entry || entry->import || is_local_to_scope(entry, walk->fn_scope) ||
+            is_global_entry(entry, walk->global_scope)) return;
+    add_capture(walk->tp, walk->captures, name, entry);
+    if (is_mutable) mark_capture_mutable(walk->captures, name);
+}
+
+// Child edges come from walk_lambda_ast, the shared Lambda traversal, so every
+// node kind it knows is covered; the hand-written per-kind walk this replaced
+// skipped named arguments, parameter defaults, pipes, for-clauses, match
+// patterns and other kinds, dropping captures used only there.
+static bool capture_visit(AstNode* node, void* data) {
+    CaptureWalk* walk = (CaptureWalk*)data;
     switch (node->node_type) {
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
-        if (ident->entry && ident->entry->node) {
-            // Object fields in method scope are implicit receiver slots, not
-            // closure captures; method write-back owns their mutation rules.
-            if (is_object_field_entry(ident->entry)) break;
-            // Check if this identifier refers to a variable from an enclosing scope
-            // (not local to fn_scope, not global, not an import)
-            if (!ident->entry->import &&
-                !is_local_to_scope(ident->entry, fn_scope) &&
-                !is_global_entry(ident->entry, global_scope)) {
-                add_capture(tp, captures, ident->name, ident->entry);
-            }
+        // Object fields in method scope are implicit receiver slots, not
+        // closure captures; method write-back owns their mutation rules.
+        if (ident->entry && ident->entry->node && !is_object_field_entry(ident->entry)) {
+            capture_outer_binding(walk, ident->name, ident->entry, false);
         }
-        break;
-    }
-    case AST_NODE_PRIMARY: {
-        AstPrimaryNode* pri = (AstPrimaryNode*)node;
-        collect_captures_from_node(tp, pri->expr, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_UNARY:
-    case AST_NODE_SPREAD: {
-        AstUnaryNode* un = (AstUnaryNode*)node;
-        collect_captures_from_node(tp, un->operand, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_BINARY: {
-        AstBinaryNode* bin = (AstBinaryNode*)node;
-        collect_captures_from_node(tp, bin->left, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, bin->right, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_IF_EXPR: {
-        AstIfNode* if_node = (AstIfNode*)node;
-        collect_captures_from_node(tp, if_node->cond, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, if_node->then, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, if_node->otherwise, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_MATCH_EXPR: {
-        AstMatchNode* match_node = (AstMatchNode*)node;
-        collect_captures_from_node(tp, match_node->scrutinee, fn_scope, global_scope, captures);
-        AstMatchArm* arm = match_node->first_arm;
-        while (arm) {
-            collect_captures_from_node(tp, arm->body, fn_scope, global_scope, captures);
-            arm = (AstMatchArm*)arm->next;
-        }
-        break;
-    }
-    case AST_NODE_FOR_EXPR: {
-        AstForNode* for_node = (AstForNode*)node;
-        // Note: loop variable is local, handled by fn_scope extension
-        AstNode* loop = for_node->loop;
-        while (loop) {
-            if (loop->node_type == AST_NODE_FOR_CLAUSE) {
-                // Must cast to AstLoopNode (not AstNamedNode) — AstLoopNode has
-                // an extra index_name field before 'as', so the offset differs.
-                AstLoopNode* loop_var = (AstLoopNode*)loop;
-                collect_captures_from_node(tp, loop_var->as, fn_scope, global_scope, captures);
-            }
-            loop = loop->next;
-        }
-        collect_captures_from_node(tp, for_node->then, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* while_node = (AstLoopControlNode*)node;
-        collect_captures_from_node(tp, while_node->cond, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, while_node->body, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
-        collect_captures_from_node(tp, call->function, fn_scope, global_scope, captures);
-        AstNode* arg = call->argument;
-        while (arg) {
-            collect_captures_from_node(tp, arg, fn_scope, global_scope, captures);
-            arg = arg->next;
-        }
-        break;
-    }
-    case AST_NODE_HANDLER_EXPR:
-    case AST_NODE_HANDLER_STAM: {
-        AstHandlerNode* handler = (AstHandlerNode*)node;
-        collect_captures_from_node(tp, handler->operand, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, handler->body, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, handler->value_body, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_START: {
-        AstStartNode* start = (AstStartNode*)node;
-        collect_captures_from_node(tp, (AstNode*)start->call, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_INDEX_EXPR:
-    case AST_NODE_MEMBER_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
-        collect_captures_from_node(tp, field->object, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, field->field, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_PATH_INDEX_EXPR: {
-        // `\.a[n]` inside a closure reads `n`; missing it left `n` undefined
-        AstPathIndexNode* path = (AstPathIndexNode*)node;
-        collect_captures_from_node(tp, path->base_path, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, path->segment_expr, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_LIST:
-    case AST_NODE_CONTENT:
-    case AST_NODE_ARRAY: {
-        AstListNode* list = (AstListNode*)node;
-        AstNode* item = list->item;
-        while (item) {
-            collect_captures_from_node(tp, item, fn_scope, global_scope, captures);
-            item = item->next;
-        }
-        break;
-    }
-    case AST_NODE_MAP: {
-        AstMapNode* map = (AstMapNode*)node;
-        AstNode* item = map->item;
-        while (item) {
-            collect_captures_from_node(tp, item, fn_scope, global_scope, captures);
-            item = item->next;
-        }
-        break;
-    }
-    case AST_NODE_VARIABLE_DECLARATOR:
-        collect_captures_from_node(tp, ((AstDeclaratorNode*)node)->init,
-            fn_scope, global_scope, captures);
-        break;
-    case AST_NODE_KEY_EXPR: {
-        AstNamedNode* named = (AstNamedNode*)node;
-        collect_captures_from_node(tp, named->key, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_FOR_CLAUSE: {
-        AstLoopNode* loop = (AstLoopNode*)node;
-        collect_captures_from_node(tp, loop->as, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, loop->on, fn_scope, global_scope, captures);
-        for (AstJoinKey* key = loop->join_keys; key; key = (AstJoinKey*)key->next) {
-            collect_captures_from_node(tp, key->prior_expr, fn_scope, global_scope, captures);
-            collect_captures_from_node(tp, key->new_expr, fn_scope, global_scope, captures);
-        }
-        break;
+        return false;
     }
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
-        // check if the assignment target is a captured variable from an enclosing scope
-        if (is_object_field_entry(assign->target_entry)) {
-            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
-            break;
+        if (!is_object_field_entry(assign->target_entry)) {
+            capture_outer_binding(walk, assign->target, assign->target_entry, true);
         }
-        if (assign->target_entry && !assign->target_entry->import &&
-            !is_local_to_scope(assign->target_entry, fn_scope) &&
-            !is_global_entry(assign->target_entry, global_scope)) {
-            add_capture(tp, captures, assign->target, assign->target_entry);
-            mark_capture_mutable(captures, assign->target);
-        }
-        // also collect captures from the value expression
-        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
-        break;
+        return true;
     }
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM: {
-        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
-        AstIdentNode* root = compound_root_ident(assign->object);
-        if (root && is_object_field_entry(root->entry)) {
-            collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
-            collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
-            break;
+        // A write through a captured container root mutates the capture.
+        AstIdentNode* root = compound_root_ident(((AstCompoundAssignNode*)node)->object);
+        if (root && !is_object_field_entry(root->entry)) {
+            capture_outer_binding(walk, root->name, root->entry, true);
         }
-        if (root && root->entry && !root->entry->import &&
-            !is_local_to_scope(root->entry, fn_scope) &&
-            !is_global_entry(root->entry, global_scope)) {
-            add_capture(tp, captures, root->name, root->entry);
-            mark_capture_mutable(captures, root->name);
-        }
-        collect_captures_from_node(tp, assign->object, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, assign->key, fn_scope, global_scope, captures);
-        collect_captures_from_node(tp, assign->value, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_RETURN_STAM: {
-        AstReturnNode* ret = (AstReturnNode*)node;
-        collect_captures_from_node(tp, ret->value, fn_scope, global_scope, captures);
-        break;
-    }
-    case AST_NODE_LET_STAM:
-    case AST_NODE_VAR_STAM: {
-        AstLetNode* let = (AstLetNode*)node;
-        AstNode* decl = let->declare;
-        while (decl) {
-            collect_captures_from_node(tp, decl, fn_scope, global_scope, captures);
-            decl = decl->next;
-        }
-        break;
+        return true;
     }
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
     case AST_NODE_PROC: {
-        // Nested functions: we need to propagate any captures that the nested function
-        // has which come from scopes ABOVE the current function's scope.
-        // This ensures that intermediate functions capture variables needed by their
-        // nested functions for closure environment construction.
-        AstFuncNode* nested_fn = (AstFuncNode*)node;
-        if (nested_fn->captures) {
-            FnCapture* cap = nested_fn->captures;
-            while (cap) {
-                // Check if this captured variable is NOT local to the current function's scope
-                // and NOT global. If so, the current function also needs to capture it.
-                if (cap->entry && !cap->entry->import &&
-                    !is_local_to_scope(cap->entry, fn_scope) &&
-                    !is_global_entry(cap->entry, global_scope)) {
-                    add_capture(tp, captures, cap->lambda_name, cap->entry);
-                }
-                cap = cap->next;
+        // A nested function's captures from scopes above this function must
+        // also be captured here, so this closure can build the nested
+        // function's environment. Its body is analyzed separately.
+        for (FnCapture* cap = ((AstFuncNode*)node)->captures; cap; cap = cap->next) {
+            capture_outer_binding(walk, cap->lambda_name, cap->entry, false);
+        }
+        return false;
+    }
+    case AST_NODE_FOR_EXPR:
+        // join keys are the only for-clause edges walk_lambda_ast omits.
+        for (AstNode* clause = ((AstForNode*)node)->loop; clause; clause = clause->next) {
+            if (clause->node_type != AST_NODE_FOR_CLAUSE) continue;
+            for (AstJoinKey* key = ((AstLoopNode*)clause)->join_keys; key;
+                    key = (AstJoinKey*)key->next) {
+                walk_lambda_ast(key->prior_expr, capture_visit, walk, false);
+                walk_lambda_ast(key->new_expr, capture_visit, walk, false);
             }
         }
-        break;
-    }
+        return true;
     default:
-        // Other node types don't need capture analysis
-        break;
+        return true;
     }
 }
 
 // Analyze captures for a function node
 void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_scope) {
     fn_node->captures = nullptr;
-    collect_captures_from_node(tp, fn_node->body, fn_node->vars, global_scope, &fn_node->captures);
+    CaptureWalk walk = {tp, fn_node->vars, global_scope, &fn_node->captures};
+    // Parameter defaults are evaluated in this function and can read outer bindings.
+    for (AstNode* param = (AstNode*)fn_node->param; param; param = param->next) {
+        walk_lambda_ast(param, capture_visit, &walk, false);
+    }
+    walk_lambda_ast(fn_node->body, capture_visit, &walk, false);
     if (!fn_node->analysis) {
         fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
     }

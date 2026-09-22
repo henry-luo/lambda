@@ -219,7 +219,7 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Aren
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
     int viewport_width, int viewport_height,
-    const DocumentJsHostConfig* js_host_config);
+    const DocumentJsHostConfig* js_host_config, CookieJar* top_level_cookie_jar);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -1087,11 +1087,20 @@ static char* resolve_http_href(const char* href, const char* base_path) {
     return resolved;
 }
 
-static void append_external_resource_url(char* url, char*** out_urls,
+typedef struct ExternalPrefetchUrl {
+    char* url;
+    ResourcePriority priority;
+} ExternalPrefetchUrl;
+
+static void append_external_resource_url(char* url, ResourcePriority priority,
+                                         ExternalPrefetchUrl** out_urls,
                                          int* out_count, int* out_capacity) {
     if (!url || !out_urls || !out_count || !out_capacity) return;
     for (int i = 0; i < *out_count; i++) {
-        if (strcmp((*out_urls)[i], url) == 0) {
+        if (strcmp((*out_urls)[i].url, url) == 0) {
+            if (priority < (*out_urls)[i].priority) {
+                (*out_urls)[i].priority = priority;
+            }
             mem_free(url);
             return;
         }
@@ -1105,7 +1114,9 @@ static void append_external_resource_url(char* url, char*** out_urls,
             return;
         }
     }
-    (*out_urls)[(*out_count)++] = url;
+    (*out_urls)[*out_count].url = url;
+    (*out_urls)[*out_count].priority = priority;
+    (*out_count)++;
 }
 
 typedef enum {
@@ -1113,10 +1124,24 @@ typedef enum {
     EXTERNAL_PREFETCH_SCRIPT,
 } ExternalPrefetchKind;
 
+static ResourcePriority external_prefetch_priority(Element* elem,
+                                                   ExternalPrefetchKind kind) {
+    if (kind != EXTERNAL_PREFETCH_SCRIPT) return PRIORITY_HIGH;
+    const char* type = extract_element_attribute(elem, "type", nullptr);
+    const char* async = extract_element_attribute(elem, "async", nullptr);
+    const char* defer = extract_element_attribute(elem, "defer", nullptr);
+    if (async || defer ||
+        (type && str_ieq_cstr(type, "module"))) {
+        return PRIORITY_NORMAL;
+    }
+    return PRIORITY_HIGH;
+}
+
 // Collect one resource class per pass so stylesheet requests cannot wait on
 // unrelated script transfers before CSS parsing starts.
 static void collect_external_resource_urls(Element* elem, const char* base_path,
-                                            char*** out_urls, int* out_count, int* out_capacity,
+                                            ExternalPrefetchUrl** out_urls,
+                                            int* out_count, int* out_capacity,
                                             ExternalPrefetchKind kind, int depth) {
     if (!elem || depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
     TypeElmt* type = (TypeElmt*)elem->type;
@@ -1127,13 +1152,15 @@ static void collect_external_resource_urls(Element* elem, const char* base_path,
         const char* href = extract_element_attribute(elem, "href", nullptr);
         if (rel && href && str_ieq_cstr(rel, "stylesheet")) {
             char* abs = resolve_http_href(href, base_path);
-            append_external_resource_url(abs, out_urls, out_count, out_capacity);
+            append_external_resource_url(abs, external_prefetch_priority(elem, kind),
+                                         out_urls, out_count, out_capacity);
         }
     } else if (kind == EXTERNAL_PREFETCH_SCRIPT && str_ieq_cstr(type->name.str, "script")) {
         const char* src = extract_element_attribute(elem, "src", nullptr);
         if (src) {
             char* abs = resolve_http_href(src, base_path);
-            append_external_resource_url(abs, out_urls, out_count, out_capacity);
+            append_external_resource_url(abs, external_prefetch_priority(elem, kind),
+                                         out_urls, out_count, out_capacity);
         }
     }
 
@@ -1156,10 +1183,10 @@ static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
     if (!doc || !doc->resource_manager || !html_root || !base_path) return 0;
     if (strncmp(base_path, "http://", 7) != 0 && strncmp(base_path, "https://", 8) != 0) return 0;
 
-    char** stylesheet_urls = nullptr;
+    ExternalPrefetchUrl* stylesheet_urls = nullptr;
     int stylesheet_count = 0;
     int stylesheet_capacity = 0;
-    char** script_urls = nullptr;
+    ExternalPrefetchUrl* script_urls = nullptr;
     int script_count = 0;
     int script_capacity = 0;
     collect_external_resource_urls(html_root, base_path, &stylesheet_urls, &stylesheet_count,
@@ -1172,11 +1199,13 @@ static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
         int loaded = 0;
         log_info("[PREFETCH] queuing %d render-blocking stylesheets", stylesheet_count);
         for (int i = 0; i < stylesheet_count; i++) {
-            resource_manager_prefetch(doc->resource_manager, stylesheet_urls[i], PRIORITY_HIGH);
+            resource_manager_prefetch(doc->resource_manager, stylesheet_urls[i].url,
+                                      stylesheet_urls[i].priority);
         }
         for (int i = 0; i < stylesheet_count; i++) {
             NetworkResource* res = resource_manager_prefetch(
-                doc->resource_manager, stylesheet_urls[i], PRIORITY_HIGH);
+                doc->resource_manager, stylesheet_urls[i].url,
+                stylesheet_urls[i].priority);
             if (resource_manager_wait_for_resource(doc->resource_manager, res)) loaded++;
         }
         log_info("[PREFETCH] stylesheet requests %d/%d ready in %.1fms wall",
@@ -1189,7 +1218,8 @@ static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
         if (script_prefetch_start_ns_out) *script_prefetch_start_ns_out = time_now_ns();
         int queued = 0;
         for (int i = 0; i < script_count; i++) {
-            if (resource_manager_prefetch(doc->resource_manager, script_urls[i], PRIORITY_NORMAL)) {
+            if (resource_manager_prefetch(doc->resource_manager, script_urls[i].url,
+                                          script_urls[i].priority)) {
                 queued++;
             }
         }
@@ -1197,8 +1227,8 @@ static int prefetch_document_subresources(DomDocument* doc, Element* html_root,
         (void)queued; // retained for the debug scheduler admission diagnostic.
     }
 
-    for (int i = 0; i < stylesheet_count; i++) mem_free(stylesheet_urls[i]);
-    for (int i = 0; i < script_count; i++) mem_free(script_urls[i]);
+    for (int i = 0; i < stylesheet_count; i++) mem_free(stylesheet_urls[i].url);
+    for (int i = 0; i < script_count; i++) mem_free(script_urls[i].url);
     mem_free(stylesheet_urls);
     mem_free(script_urls);
     return script_count;
@@ -1759,6 +1789,24 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
     }
 }
 
+static bool load_script_mutations_need_full_recascade(const DomDocument* dom_doc) {
+    if (!dom_doc || dom_doc->js.mutation_record_overflow ||
+        dom_doc->js.mutation_record_count <= 0) {
+        return true;
+    }
+
+    for (int i = 0; i < dom_doc->js.mutation_record_count; i++) {
+        DomJsMutationKind kind = dom_doc->js.mutation_records[i].kind;
+        if (kind != DOM_JS_MUTATION_INLINE_STYLE &&
+            kind != DOM_JS_MUTATION_STYLE_REPAINT) {
+            return true;
+        }
+    }
+    // Inline declarations have already been merged into the specified-style
+    // tree; rebuilding selector declarations cannot change their precedence.
+    return false;
+}
+
 // check for a UTF-8 BOM.
 static bool has_utf8_bom(const char* html, size_t len) {
     return len >= 3 &&
@@ -2020,6 +2068,13 @@ struct HtmlLoadPhaseTiming {
     double initial_cascade_ms;
     double script_exec_ms;
     double post_script_ms;
+    double post_script_recascade_ms;
+    double post_script_handler_install_ms;
+    uint64_t post_script_mutation_count;
+    uint64_t post_script_mutation_kind_mask;
+    bool post_script_mutation_overflow;
+    bool post_script_full_recascade;
+    bool post_script_incremental_recascade;
     double final_cascade_ms;
     double finalize_ms;
 };
@@ -2028,7 +2083,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     bool css_at_head_end,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
-    DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config) {
+    DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config,
+    CookieJar* top_level_cookie_jar) {
     auto t_start = time_now_ns();
 
     log_mem_stage("load_html: enter");
@@ -2053,7 +2109,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         const char* url_str = url_get_href(html_url);
         size_t content_size = 0;
         char* eff_url = nullptr;
-        html_content = download_http_content(url_str, &content_size, nullptr, &eff_url);
+        html_content = download_http_content_with_cookie_jar(url_str, &content_size,
+            top_level_cookie_jar, &eff_url);
         // Update document URL if redirected (e.g. google.com → www.google.com)
         if (eff_url) {
             Url* redirected_url = url_parse(eff_url);
@@ -2249,6 +2306,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (radiant_url_is_http(url_get_href(html_url)) &&
         radiant_init_network_support(dom_doc, NULL, NULL) == 0) {
         resource_manager_set_css_engine(dom_doc->resource_manager, css_engine);
+        // Dependency discovery starts immediately below, so attach the
+        // profile jar before CSS, scripts, and fonts schedule their requests.
+        resource_manager_set_cookie_jar(dom_doc->resource_manager, top_level_cookie_jar);
         // The manager is now ready before CSS discovery; retain the view
         // lifecycle marker at this earlier ownership boundary.
         log_notice("view: network support initialized for HTTP document");
@@ -2348,6 +2408,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         // the post-script cascade can obscure script allocation attribution.
         dump_post_script_memory_snapshot();
         auto t_script_exec = timing ? time_now_ns() : t_initial_cascade;
+        auto t_recascade_start = t_script_exec;
 
         if (dom_doc->root != dom_root) {
             // DOM scripts may replace documentElement; use the committed DOM
@@ -2367,7 +2428,34 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         }
 
         bool force_profile_recascade = css_cascade_memory_force_recascade();
-        if (dom_doc->js.mutation_count > 0 || force_profile_recascade) {
+        bool full_recascade = force_profile_recascade ||
+            load_script_mutations_need_full_recascade(dom_doc);
+        bool incremental_recascade = false;
+        bool cssom_synced = false;
+        const char* recascade_reason = nullptr;
+        if (full_recascade && dom_doc->js.mutation_count > 0 &&
+            !force_profile_recascade) {
+            dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
+            cssom_synced = true;
+            incremental_recascade = radiant_apply_load_mutation_cascade(
+                dom_doc, &recascade_reason);
+            if (incremental_recascade) {
+                full_recascade = false;
+                log_info("load_html: used mutation-subtree post-script CSS recascade for %d mutations",
+                         dom_doc->js.mutation_count);
+            } else {
+                log_debug("load_html: post-script CSS recascade fallback=%s",
+                          recascade_reason ? recascade_reason : "unknown");
+            }
+        }
+        if (timing) {
+            timing->post_script_mutation_count = dom_doc->js.mutation_count;
+            timing->post_script_mutation_kind_mask = dom_doc->js.mutation_kind_mask;
+            timing->post_script_mutation_overflow = dom_doc->js.mutation_record_overflow;
+            timing->post_script_full_recascade = full_recascade;
+            timing->post_script_incremental_recascade = incremental_recascade;
+        }
+        if (full_recascade && (dom_doc->js.mutation_count > 0 || force_profile_recascade)) {
             log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
                      dom_doc->js.mutation_count);
 
@@ -2377,12 +2465,20 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                 log_notice("[CSS_CASCADE_MEMORY] forcing clean recascade for profile");
             }
 
-            dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
+            if (!cssom_synced) {
+                dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
+            }
             view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
                                         clear_load_stylesheet_cascade_visitor, nullptr);
             apply_load_css_cascade(dom_doc, dom_root, css_engine, pool, "recascade");
             log_mem_stage("load_html: post_script_cascade_done");
+        } else if (dom_doc->js.mutation_count > 0) {
+            if (!incremental_recascade) {
+                log_info("load_html: skipped post-script CSS recascade for %d inline/paint-only mutations",
+                         dom_doc->js.mutation_count);
+            }
         }
+        auto t_recascade_end = timing ? time_now_ns() : t_recascade_start;
 
         // Step 2e: Install inline event handler attributes into EventTarget slots.
         // Must happen after execute_document_scripts so function definitions are available.
@@ -2392,6 +2488,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         if (timing) {
             timing->script_exec_ms += time_elapsed_ms_f(t_initial_cascade, t_script_exec);
             timing->post_script_ms += time_elapsed_ms_f(t_script_exec, t_post_script);
+            timing->post_script_recascade_ms += time_elapsed_ms_f(
+                t_recascade_start, t_recascade_end);
+            timing->post_script_handler_install_ms += time_elapsed_ms_f(
+                t_recascade_end, t_post_script);
         }
     }
 
@@ -2456,16 +2556,17 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr, nullptr);
+                                         nullptr, nullptr, nullptr, nullptr);
 }
 
 static DomDocument* load_lambda_html_doc_with_host_config(
     Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
-    Pool* pool, const DocumentJsHostConfig* js_host_config) {
+    Pool* pool, const DocumentJsHostConfig* js_host_config,
+    CookieJar* top_level_cookie_jar) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, nullptr, false, true, nullptr, nullptr,
-                                         js_host_config);
+                                         js_host_config, top_level_cookie_jar);
 }
 
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
@@ -2584,7 +2685,8 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
 
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
                                               int viewport_height,
-                                              const DocumentJsHostConfig* js_host_config) {
+                                              const DocumentJsHostConfig* js_host_config,
+                                              CookieJar* top_level_cookie_jar) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -2601,14 +2703,14 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-                                                    viewport_height, pool, js_host_config);
+            viewport_height, pool, js_host_config, top_level_cookie_jar);
     } else {
     bool handled = false;
     doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
                                    pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-                                                    viewport_height, pool, js_host_config);
+            viewport_height, pool, js_host_config, top_level_cookie_jar);
     }
     }
 
@@ -2625,7 +2727,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
 }
 
 DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height,
-                           const DocumentJsHostConfig* js_host_config) {
+                           const DocumentJsHostConfig* js_host_config,
+                           CookieJar* top_level_cookie_jar) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -2633,7 +2736,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
-            viewport_width, viewport_height, js_host_config);
+            viewport_width, viewport_height, js_host_config, top_level_cookie_jar);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;
@@ -4523,6 +4626,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
 
 struct LayoutPhaseTiming {
     double total_ms;
+    double first_render_ms;
     double load_ms;
     double document_parse_ms;
     double load_setup_ms;
@@ -4535,9 +4639,19 @@ struct LayoutPhaseTiming {
     double load_initial_cascade_ms;
     double load_script_exec_ms;
     double load_post_script_ms;
+    double load_post_script_recascade_ms;
+    double load_post_script_handler_install_ms;
+    uint64_t load_post_script_mutation_count;
+    uint64_t load_post_script_mutation_kind_mask;
+    bool load_post_script_mutation_overflow;
+    bool load_post_script_full_recascade;
+    bool load_post_script_incremental_recascade;
     double load_final_cascade_ms;
     double load_finalize_ms;
     double script_collect_ms;
+    double script_source_prefetch_ms;
+    double script_source_wait_ms;
+    double script_source_read_ms;
     double script_runtime_setup_ms;
     double script_postdom_total_ms;
     double script_preamble_wall_ms;
@@ -4553,6 +4667,8 @@ struct LayoutPhaseTiming {
     double script_event_loop_ms;
     double script_runtime_cleanup_ms;
     double script_source_cleanup_ms;
+    uint64_t script_source_prefetch_tasks;
+    uint64_t script_source_loaded_tasks;
     uint64_t script_cache_lookups;
     uint64_t script_cache_hits;
     uint64_t script_cache_misses;
@@ -4568,6 +4684,15 @@ struct LayoutPhaseTiming {
     double js_preamble_ms;
     double layout_ms;
     double output_ms;
+    double cleanup_ms;
+    double cleanup_network_ms;
+    double cleanup_state_ms;
+    double cleanup_script_ms;
+    double cleanup_view_ms;
+    double cleanup_document_ms;
+    double cleanup_runtime_ms;
+    uint64_t document_context_live_bytes;
+    uint64_t document_context_reserved_bytes;
 };
 
 static double script_phase_us_to_ms(uint64_t us) {
@@ -4578,6 +4703,9 @@ static void set_detailed_script_timing(LayoutPhaseTiming* timing,
                                        const DocumentScriptPhaseTiming* script_timing) {
     if (!timing || !script_timing) return;
     timing->script_collect_ms = script_phase_us_to_ms(script_timing->collect_us);
+    timing->script_source_prefetch_ms = script_phase_us_to_ms(script_timing->source_prefetch_us);
+    timing->script_source_wait_ms = script_phase_us_to_ms(script_timing->source_wait_us);
+    timing->script_source_read_ms = script_phase_us_to_ms(script_timing->source_read_us);
     timing->script_runtime_setup_ms = script_phase_us_to_ms(script_timing->runtime_setup_us);
     timing->script_postdom_total_ms = script_phase_us_to_ms(script_timing->postdom_total_us);
     timing->script_preamble_wall_ms = script_phase_us_to_ms(script_timing->preamble_us);
@@ -4593,6 +4721,8 @@ static void set_detailed_script_timing(LayoutPhaseTiming* timing,
     timing->script_event_loop_ms = script_phase_us_to_ms(script_timing->event_loop_us);
     timing->script_runtime_cleanup_ms = script_phase_us_to_ms(script_timing->runtime_cleanup_us);
     timing->script_source_cleanup_ms = script_phase_us_to_ms(script_timing->source_cleanup_us);
+    timing->script_source_prefetch_tasks = script_timing->source_prefetch_tasks;
+    timing->script_source_loaded_tasks = script_timing->source_loaded_tasks;
     timing->script_cache_lookups = script_timing->cache_lookups;
     timing->script_cache_hits = script_timing->cache_hits;
     timing->script_cache_misses = script_timing->cache_misses;
@@ -4614,6 +4744,13 @@ static void set_detailed_load_timing(LayoutPhaseTiming* timing,
     timing->load_initial_cascade_ms = html_timing->initial_cascade_ms;
     timing->load_script_exec_ms = html_timing->script_exec_ms;
     timing->load_post_script_ms = html_timing->post_script_ms;
+    timing->load_post_script_recascade_ms = html_timing->post_script_recascade_ms;
+    timing->load_post_script_handler_install_ms = html_timing->post_script_handler_install_ms;
+    timing->load_post_script_mutation_count = html_timing->post_script_mutation_count;
+    timing->load_post_script_mutation_kind_mask = html_timing->post_script_mutation_kind_mask;
+    timing->load_post_script_mutation_overflow = html_timing->post_script_mutation_overflow;
+    timing->load_post_script_full_recascade = html_timing->post_script_full_recascade;
+    timing->load_post_script_incremental_recascade = html_timing->post_script_incremental_recascade;
     timing->load_final_cascade_ms = html_timing->final_cascade_ms;
     timing->load_finalize_ms = html_timing->finalize_ms;
 }
@@ -4649,6 +4786,18 @@ static void layout_phase_timing_set_load(LayoutPhaseTiming* timing,
     if (timing->document_parse_ms < 0.0) timing->document_parse_ms = 0.0;
 }
 
+static void layout_phase_timing_capture_document_memory(LayoutPhaseTiming* timing,
+                                                        DomDocument* doc) {
+    if (!timing || !doc || !doc->services.mem_ctx) return;
+    // The document context owns all page-local descendants while process-root
+    // caches remain outside this snapshot.
+    MemSnapshot* snapshot = mem_snapshot_capture((MemContext*)doc->services.mem_ctx);
+    if (!snapshot) return;
+    timing->document_context_live_bytes = snapshot->physical_total_in_use;
+    timing->document_context_reserved_bytes = snapshot->physical_total_reserved;
+    mem_snapshot_free(snapshot);
+}
+
 static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
                                       bool success, const LayoutPhaseTiming* timing) {
     if (!timing_file || !timing) return;
@@ -4668,6 +4817,7 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_str(&w, "file", input_file ? input_file : "");
         jw_kv_bool(&w, "success", success);
         jw_kv_double(&w, "total_ms", timing->total_ms);
+        jw_kv_double(&w, "first_render_ms", timing->first_render_ms);
         jw_kv_double(&w, "load_ms", timing->load_ms);
         jw_kv_double(&w, "document_parse_ms", timing->document_parse_ms);
         jw_kv_double(&w, "load_setup_ms", timing->load_setup_ms);
@@ -4680,9 +4830,19 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_double(&w, "load_initial_cascade_ms", timing->load_initial_cascade_ms);
         jw_kv_double(&w, "load_script_exec_ms", timing->load_script_exec_ms);
         jw_kv_double(&w, "load_post_script_ms", timing->load_post_script_ms);
+        jw_kv_double(&w, "load_post_script_recascade_ms", timing->load_post_script_recascade_ms);
+        jw_kv_double(&w, "load_post_script_handler_install_ms", timing->load_post_script_handler_install_ms);
+        jw_kv_uint(&w, "load_post_script_mutation_count", timing->load_post_script_mutation_count);
+        jw_kv_uint(&w, "load_post_script_mutation_kind_mask", timing->load_post_script_mutation_kind_mask);
+        jw_kv_bool(&w, "load_post_script_mutation_overflow", timing->load_post_script_mutation_overflow);
+        jw_kv_bool(&w, "load_post_script_full_recascade", timing->load_post_script_full_recascade);
+        jw_kv_bool(&w, "load_post_script_incremental_recascade", timing->load_post_script_incremental_recascade);
         jw_kv_double(&w, "load_final_cascade_ms", timing->load_final_cascade_ms);
         jw_kv_double(&w, "load_finalize_ms", timing->load_finalize_ms);
         jw_kv_double(&w, "script_collect_ms", timing->script_collect_ms);
+        jw_kv_double(&w, "script_source_prefetch_ms", timing->script_source_prefetch_ms);
+        jw_kv_double(&w, "script_source_wait_ms", timing->script_source_wait_ms);
+        jw_kv_double(&w, "script_source_read_ms", timing->script_source_read_ms);
         jw_kv_double(&w, "script_runtime_setup_ms", timing->script_runtime_setup_ms);
         jw_kv_double(&w, "script_postdom_total_ms", timing->script_postdom_total_ms);
         jw_kv_double(&w, "script_preamble_wall_ms", timing->script_preamble_wall_ms);
@@ -4698,6 +4858,8 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_double(&w, "script_event_loop_ms", timing->script_event_loop_ms);
         jw_kv_double(&w, "script_runtime_cleanup_ms", timing->script_runtime_cleanup_ms);
         jw_kv_double(&w, "script_source_cleanup_ms", timing->script_source_cleanup_ms);
+        jw_kv_uint(&w, "script_source_prefetch_tasks", timing->script_source_prefetch_tasks);
+        jw_kv_uint(&w, "script_source_loaded_tasks", timing->script_source_loaded_tasks);
         jw_kv_uint(&w, "script_cache_lookups", timing->script_cache_lookups);
         jw_kv_uint(&w, "script_cache_hits", timing->script_cache_hits);
         jw_kv_uint(&w, "script_cache_misses", timing->script_cache_misses);
@@ -4715,6 +4877,15 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_double(&w, "js_preamble_ms", timing->js_preamble_ms);
         jw_kv_double(&w, "layout_ms", timing->layout_ms);
         jw_kv_double(&w, "output_ms", timing->output_ms);
+        jw_kv_double(&w, "cleanup_ms", timing->cleanup_ms);
+        jw_kv_double(&w, "cleanup_network_ms", timing->cleanup_network_ms);
+        jw_kv_double(&w, "cleanup_state_ms", timing->cleanup_state_ms);
+        jw_kv_double(&w, "cleanup_script_ms", timing->cleanup_script_ms);
+        jw_kv_double(&w, "cleanup_view_ms", timing->cleanup_view_ms);
+        jw_kv_double(&w, "cleanup_document_ms", timing->cleanup_document_ms);
+        jw_kv_double(&w, "cleanup_runtime_ms", timing->cleanup_runtime_ms);
+        jw_kv_uint(&w, "document_context_live_bytes", timing->document_context_live_bytes);
+        jw_kv_uint(&w, "document_context_reserved_bytes", timing->document_context_reserved_bytes);
     jw_obj_end(&w);
 
     const char* json = jw_finish(&w);
@@ -4855,7 +5026,7 @@ static bool layout_single_file(
                                                 track_source_lines, true,
                                                 timing_file ? &html_load_timing : nullptr,
                                                 timing_file ? &document_script_timing : nullptr,
-                                                &js_host_config);
+                                                &js_host_config, nullptr);
             if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
                 break;
             }
@@ -5000,22 +5171,10 @@ static bool layout_single_file(
         }
     }
 
-    {
-        auto total_end = time_now_ns();
-        LayoutPhaseTiming timing = {};
-        layout_phase_timing_set_load(
-            &timing,
-            time_elapsed_ms_f(total_start, total_end),
-            time_elapsed_ms_f(load_start, load_end),
-            &html_load_timing, &document_script_timing, &document_js_timing);
-        timing.layout_ms = layout_phase_ran
-            ? time_elapsed_ms_f(layout_start, layout_end)
-            : 0.0;
-        timing.output_ms = output_phase_ran
-            ? time_elapsed_ms_f(output_start, output_end)
-            : 0.0;
-        write_layout_phase_timing(timing_file, input_file, success, &timing);
-    }
+    LayoutPhaseTiming phase_timing = {};
+    auto first_render_end = time_now_ns();
+    phase_timing.first_render_ms = time_elapsed_ms_f(total_start, first_render_end);
+    layout_phase_timing_capture_document_memory(&phase_timing, doc);
 
     if (event_log || state_dump) {
         state_end_event_cascade(
@@ -5028,9 +5187,13 @@ static bool layout_single_file(
         event_state_log_document(event_log, "unload_start");
     }
 
+    auto cleanup_start = time_now_ns();
     if (doc) {
         if (doc->resource_manager) {
+            auto cleanup_phase_start = time_now_ns();
             radiant_cleanup_network_support(doc);
+            phase_timing.cleanup_network_ms += time_elapsed_ms_f(
+                cleanup_phase_start, time_now_ns());
         }
         Runtime* render_runtime = dom_document_script_runtime(doc);
         if (render_runtime &&
@@ -5038,16 +5201,26 @@ static bool layout_single_file(
             log_error("[Layout] document cleanup reached a foreign eval thread");
         }
         source_pos_bridge_reset();
+        auto cleanup_phase_start = time_now_ns();
         radiant_document_destroy_state(doc);
+        phase_timing.cleanup_state_ms += time_elapsed_ms_f(cleanup_phase_start, time_now_ns());
         render_map_destroy();
+        cleanup_phase_start = time_now_ns();
         script_runner_cleanup_js_state(doc);
+        phase_timing.cleanup_script_ms += time_elapsed_ms_f(cleanup_phase_start, time_now_ns());
 
         if (doc->view_tree) {
+            cleanup_phase_start = time_now_ns();
             view_pool_destroy(doc->view_tree);
             mem_free(doc->view_tree);
             doc->view_tree = nullptr;
+            phase_timing.cleanup_view_ms += time_elapsed_ms_f(
+                cleanup_phase_start, time_now_ns());
         }
+        cleanup_phase_start = time_now_ns();
         dom_document_destroy(doc);
+        phase_timing.cleanup_document_ms += time_elapsed_ms_f(
+            cleanup_phase_start, time_now_ns());
         if (ui_context->document == doc) {
             ui_context->document = nullptr;
         }
@@ -5062,6 +5235,7 @@ static bool layout_single_file(
         state_dump = nullptr;
     }
 
+    auto cleanup_runtime_start = time_now_ns();
     if (input_url) {
         InputManager::detach_url(input_url);
         url_destroy(input_url);
@@ -5088,6 +5262,20 @@ static bool layout_single_file(
     fontface_cleanup(ui_context);
     font_context_reset_document_fonts(ui_context->font_ctx);
     font_context_reset_glyph_caches(ui_context->font_ctx);
+    phase_timing.cleanup_runtime_ms = time_elapsed_ms_f(cleanup_runtime_start, time_now_ns());
+    phase_timing.cleanup_ms = time_elapsed_ms_f(cleanup_start, time_now_ns());
+    layout_phase_timing_set_load(
+        &phase_timing,
+        time_elapsed_ms_f(total_start, time_now_ns()),
+        time_elapsed_ms_f(load_start, load_end),
+        &html_load_timing, &document_script_timing, &document_js_timing);
+    phase_timing.layout_ms = layout_phase_ran
+        ? time_elapsed_ms_f(layout_start, layout_end)
+        : 0.0;
+    phase_timing.output_ms = output_phase_ran
+        ? time_elapsed_ms_f(output_start, output_end)
+        : 0.0;
+    write_layout_phase_timing(timing_file, input_file, success, &phase_timing);
 
     {
 #ifdef __APPLE__

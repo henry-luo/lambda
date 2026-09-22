@@ -10134,7 +10134,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     fc = dom_elem->first_child;
                     while (fc) {
                         if (fc->is_element()) {
-                            ViewBlock* cb = lam::view_require_block(static_cast<View*>(fc->as_element()));
+                            // Inline siblings may precede an abs-pos flex child.
+                            ViewBlock* cb = lam::view_as_block(static_cast<View*>(fc->as_element()));
                             if (layout_block_is_out_of_flow_positioned(cb)) {
                                 if (!cb->positionp()->has_left && !cb->positionp()->has_right) {
                                     cb->x += container_to_cb_x;

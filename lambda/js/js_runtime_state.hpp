@@ -28,12 +28,9 @@ struct AstNode;
 struct DomDocument;
 struct DomElement;
 struct UiContext;
-struct TlsClientTicketState;
-struct JsTlsSecureContextOwner;
 struct JsAtomicsRuntimeState;
 struct JsPrototypeSnapshotState;
 struct JsMirCompileRecoveryState;
-struct JsNetRuntimeState;
 
 // Namespace selection is the JS profile's counterpart to the shared module
 // slab scope.  Keep restoration identical for AST and MIR module entries.
@@ -83,13 +80,6 @@ struct JsAstLiteralCache {
     RootVector values = {};
 };
 
-struct JsMockSchedulerWait {
-    // One scheduled wait owns its four async edges; a dynamic collection of
-    // these records replaces the former capped parallel-root array.
-    RootVector values = {};
-    int64_t due_ms = 0;
-};
-
 struct JsEventLoopState {
     // Each queue owns a GC Array of one RuntimeJob shape. Queue order stays
     // policy-specific while storage and captured context are shared (JSCU30).
@@ -116,10 +106,6 @@ struct JsEventLoopState {
     bool negative_warning_emitted = false;
     bool virtual_clock_enabled = false;
     double virtual_clock_ms = 0.0;
-
-    bool mock_scheduler_enabled = false;
-    int64_t mock_scheduler_now_ms = 0;
-    ArrayList* mock_waits = NULL;
 };
 struct JsRegexpLastMatch {
     // Slots 0/1 are input and full match; remaining slots are capture groups.
@@ -296,100 +282,11 @@ JsCompiledArtifact* js_code_store_artifact_at(JsCodeStore* store, int index);
 void js_code_store_clear_rows(JsCodeStore* store);
 void js_code_store_destroy(JsCodeStore* store);
 
-struct JsReadlineState {
-    RootVector input_values = {}; // consecutive input/interface pairs
-    bool create_promises_mode = false;
-};
-
-struct JsTlsNativeState {
-    TlsClientTicketState* client_ticket_states = NULL;
-    JsTlsSecureContextOwner* secure_context_owners = NULL;
-};
-
-struct JsStreamState : RootVector {
-    Item namespace_object = {};
-    Item key_on = {}; Item key_emit = {}; Item key_push = {}; Item key_write = {};
-    Item key_end = {}; Item key_pipe = {}; Item key_read = {}; Item key_destroy = {};
-    Item key_readable = {}; Item key_writable = {}; Item key_flowing = {}; Item key_ended = {};
-    Item key_finished = {}; Item key_destroyed = {}; Item key_listeners = {}; Item key_buffer = {};
-    Item key_readable_state = {}; Item key_writable_state = {}; Item key_end_pending = {};
-    Item key_end_emitted = {}; Item key_reading = {}; Item key_reading_sync = {}; Item key_paused = {};
-    Item key_finish_emitted = {}; Item key_close_emitted = {}; Item key_closed = {};
-    Item key_capture_rejections = {}; Item key_auto_destroy = {}; Item key_readable_side_enabled = {};
-    Item key_writable_side_enabled = {}; Item key_destroy_pending = {}; Item key_listener_fn = {};
-    Item key_listener_context = {};
-    Item readable_prototype = {}; Item writable_prototype = {}; Item duplex_prototype = {};
-    Item transform_prototype = {}; Item passthrough_prototype = {}; Item internal_state_namespace = {};
-    Item internal_end_of_stream_namespace = {}; Item iterator_namespace = {}; Item web_namespace = {};
-    Item promises_namespace = {};
-    // was a function-local `static Item`, which a precise collector never scans
-    Item internal_add_abort_signal_namespace = {};
-    bool keys_initialized = false;
-    int64_t default_byte_hwm = 16 * 1024;
-    int64_t default_object_hwm = 16;
-};
-
-struct JsAssertMockSlot {
-    int64_t root_slot = -1;
-    int call_count = 0;
-    bool in_use = false;
-};
-
-// A mock wrapper identifies one stable native row through its payload. The
-// registry owns the rows and their calls/original Item pair precisely.
-struct JsAssertMockRegistry {
-    ArrayList* slots = NULL;
-    RootVector values = {};
-};
-
-void js_assert_mock_registry_clear(JsAssertMockRegistry* registry);
-void js_assert_mock_registry_destroy(JsAssertMockRegistry* registry);
-
-// node:test scopes require ordered hook lifetimes. The two phase lanes share
-// one rooted ledger; a describe/run mark shrinks the corresponding lane.
-struct JsNodeTestHookLedger {
-    RootVector before_each = {};
-    RootVector after_each = {};
-};
-
-// assert and node:test retain namespace identity, hook closures, and mock
-// call records. They are realm values, so this fixed context slab keeps their
-// repeated test-runner access direct and isolated.
-struct JsAssertState : RootVector {
-    Item namespace_object = {};
-    Item internal_errors_namespace = {};
-    Item internal_myers_diff_namespace = {};
-    Item options_key = {};
-    Item diff_key = {};
-    // Assertion instances outlive the creating call and share one dynamic
-    // root collection instead of a capped side registry.
-    RootVector instances = {};
-    // Node test namespace and its transient event queue share exact dynamic
-    // roots instead of two unregistered Item fields plus an epoch sidecar.
-    RootVector node_test_values = {};
-    JsNodeTestHookLedger node_test_hooks = {};
-    JsAssertMockRegistry mocks = {};
-    int node_test_total_count = 0;
-    int node_test_pass_count = 0;
-    int node_test_fail_count = 0;
-    int64_t node_test_next_id = 1;
-};
-
-JsAssertState* js_assert_state_ensure(JsRuntimeState* state);
-
-struct JsNetNativeState {
-    // Native network defaults and BlockList objects are realm-local. The
-    // capsule stays lazy so contexts that never load net pay no allocation.
-    JsNetRuntimeState* native_state = NULL;
-};
-
 // Optional Node-leaf callbacks are semantic to one realm. Keep their function
 // pointers beside that realm rather than letting the last initialized module
 // overwrite a process-wide callback for every context.
 struct JsHostHooksState {
     void (*shutdown_participant)(void) = NULL;
-    Item (*ipc_accept_hook)(void*) = NULL;
-    void (*cluster_online_hook)(Item) = NULL;
     Item (*console_format_hook)(Item) = NULL;
     bool redirect_stdout_to_stderr = false;
 };
@@ -405,6 +302,7 @@ struct JsClipboardState : RootVector {
     Item file_list_prototype = {};
     Item drag_data_transfer = {};
     int64_t generation = 1;
+    int64_t next_object_url_id = 1;
 };
 
 // DOM singleton wrappers are per browsing context. The native document itself
@@ -414,7 +312,6 @@ struct JsDomState : RootVector {
     Item default_view = {};
     Item title = {};
     Item fonts = {};
-    Item cookie = {};
     bool design_mode = false;
     DomElement* active_element = NULL;
     DomDocument* current_document = NULL;
@@ -444,6 +341,8 @@ struct JsDomMediaQueryState {
 struct JsDomPlatformState {
     JsDomStorageState local_storage = {};
     JsDomStorageState session_storage = {};
+    char* storage_origin = NULL;  // current document origin for the two realm caches
+    void* storage_document = NULL;  // preserves opaque-origin storage across host-loop rebinds
     ArrayList* media_queries = NULL;
     RootVector media_query_objects = {};
     bool media_query_roots_initialized = false;
@@ -591,21 +490,10 @@ struct JsProcessState : RootVector {
     Item exec_argv = {};
     Item object = {};
     Item listener_map = {};
-    Item ipc_pending_messages = {};
     int exit_code = 0;
     bool exit_requested = false;
     bool exiting = false;
     int total_listener_count = 0;
-    int ipc_liveness_listener_count = 0;
-    bool ipc_active = false;
-    bool ipc_closing = false;
-    bool ipc_disconnect_emitted = false;
-    bool ipc_force_ref = false;
-    // Every outstanding libuv IPC write refers to this one exact callback
-    // store; request structs retain only a POD slot index (JSCU31).
-    RuntimeCallbackSlots ipc_write_callbacks = {};
-    uint32_t ipc_resource_id = 0;
-    LineFramer ipc_lines = {};
 };
 
 JsProcessState* js_process_state_ensure(JsRuntimeState* state);
@@ -681,11 +569,10 @@ struct JsPromise : VMap {
 
 struct JsPromiseRuntimeState : RootVector {
     RuntimeJobQueue unhandled_queue = {};
-    // Keep the three GC-visible owner slots contiguous; the deque control
+    // Keep the two GC-visible owner slots contiguous; the deque control
     // record is native metadata and must never be scanned as an Item range.
     Item unhandled_storage = {};
     Item domain_current = {};
-    Item domain_namespace = {};
     int pending_count = 0;
     int live_count = 0;
     int peak_live_count = 0;
@@ -696,19 +583,7 @@ struct JsPromiseRuntimeState : RootVector {
 
 enum JsModuleRuntimeSlot : int {
     JS_MODULE_RUNTIME_ACTIVE_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_ASYNC_HOOKS_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_ASYNC_CONTEXT_FRAME_NAMESPACE,
-    JS_MODULE_RUNTIME_ASYNC_HOOKS_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_CRYPTO_UTIL_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_UTIL_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_UTIL_INSPECT_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_REPL_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_TEST_BINDING_NAMESPACE,
     JS_MODULE_RUNTIME_NODE_MODULE_NAMESPACE,
-    JS_MODULE_RUNTIME_CLUSTER_NAMESPACE,
-    JS_MODULE_RUNTIME_REPL_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_CARES_WRAP_NAMESPACE,
-    JS_MODULE_RUNTIME_INTERNAL_STREAM_WRAP_NAMESPACE,
     JS_MODULE_RUNTIME_SLOT_COUNT,
 };
 
@@ -722,18 +597,6 @@ struct JsModuleRuntimeState {
     int async_eval_order_counter = 0;
     int draining_depth = 0;
     int vm_source_text_identifier_counter = 0;
-    bool internal_test_binding_warning_scheduled = false;
-};
-
-struct JsClusterState : RootVector {
-    Item primary_options = {};
-    int64_t next_worker_id = 1;
-    bool namespace_is_worker = false;
-};
-
-struct JsAsyncLocalStorageState {
-    // Instances survive callbacks and therefore need stable, growable roots.
-    RootVector instances = {};
 };
 
 struct JsPerformanceState {
@@ -829,9 +692,6 @@ extern "C" JsWithFrame* js_with_activation_enter(Item* captured, int depth, JsWi
 extern "C" void js_with_activation_leave(JsWithFrame* saved_head);
 
 bool js_root_vector_ensure_registered(RootVector* roots);
-void js_readline_state_destroy(JsReadlineState* state);
-JsReadlineState* js_readline_state_ensure(JsRuntimeState* state);
-JsAsyncLocalStorageState* js_async_local_storage_state_ensure(JsRuntimeState* state);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
 JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
 
@@ -972,12 +832,7 @@ struct JsAsyncAwaitState : RootVector {
 struct JsArrayRuntimeItemsHeader;
 
 struct JsRuntimeState {
-    JsReadlineState* readline = NULL;
     JsRealmSlots realm_slots = {};
-    JsTlsNativeState tls_native = {};
-    JsStreamState stream = {};
-    JsAssertState* assert = NULL;
-    JsNetNativeState net_native = {};
     JsHostHooksState host_hooks = {};
     JsClipboardState clipboard = {};
     JsDomState dom = {};
@@ -997,8 +852,6 @@ struct JsRuntimeState {
     JsAsyncHooksState* async_hooks = NULL;   // JSCU16: allocated with the realm, not embedded
     JsPromiseRuntimeState promises = {};
     JsModuleRuntimeState modules = {};
-    JsClusterState cluster = {};
-    JsAsyncLocalStorageState* async_local_storage = NULL;
     JsPerformanceState performance = {};
     // Native dense-array buffers form a realm-local intrusive ownership list;
     // tagged-template identity uses its own registry below.
@@ -1019,6 +872,9 @@ struct JsRuntimeState {
     JsWithFrame* with_head = NULL;
     bool with_memo_valid = false;
     JsCodeStore code_store = {};
+    // P2 satellite code remains callable after the source turn ends, unlike
+    // ordinary deferred module artifacts.
+    JsCodeStore p2_code_store = {};
     // Definition-level MIR code records are shared by closures and method
     // wrappers while their functions remain live. The table is weak storage;
     // each code record releases itself when its last GC function dies.

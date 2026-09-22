@@ -3,6 +3,8 @@
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
 #include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/font/font.h"
 
 class FontConfigTest : public ::testing::Test {
 protected:
@@ -96,3 +98,14 @@ TEST_F(FontConfigTest, UtilityFunctions) {
     EXPECT_EQ(font_style_from_string("normal"), FONT_STYLE_NORMAL);
     EXPECT_EQ(font_style_from_string("unknown"), FONT_STYLE_NORMAL);
 }
+
+#ifdef __APPLE__
+TEST_F(FontConfigTest, PlatformFallbackRejectsUndownloadedSystemAsset) {
+    int face_index = -1;
+    // This private system asset is advertised by CoreText but is not locally
+    // usable on a stock system; matching it must not initiate a download.
+    char* path = font_platform_find_fallback(".PingFangUITextSC-Default", &face_index);
+    EXPECT_EQ(path, nullptr);
+    if (path) mem_free(path);
+}
+#endif

@@ -558,6 +558,220 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function squareSum(limit) { "
+        "  var total = 0; "
+        "  for (var index = 0; index < limit; index = index + 1) { "
+        "    total = total + index * index; "
+        "  } "
+        "  return total; "
+        "} "
+        "squareSum(3); squareSum(4); squareSum;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-satellite.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    ASSERT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+    ASSERT_NE(js_function_get_ptr(function_item), nullptr);
+
+    Item limit = flt2it(5.0);
+    Item result = js_call_function(function_item, make_js_undefined(), &limit, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function advance(delta) { \"use strict\"; "
+        "this.count = this.count + delta; return this.count; } "
+        "var receiver = { count: 1, advance: advance }; "
+        "receiver.advance(2); receiver.advance(3); advance;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-this-property.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item receiver = js_get_key_default(js_get_global_this(),
+        js_make_string("receiver"));
+    ASSERT_EQ(get_type_id(receiver), LMD_TYPE_MAP);
+    EXPECT_EQ(js_get_key_default(receiver, js_make_string("count")).item,
+        flt2it(6.0).item);
+
+    Item delta = flt2it(4.0);
+    Item result = js_call_function(function_item, receiver, &delta, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(10.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "var multiply = function(value) { "
+        "var result = value * 3; return result; }; "
+        "multiply(2); multiply(3); multiply;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-function-expression.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item value = flt2it(7.0);
+    Item result = js_call_function(function_item, make_js_undefined(), &value, 1);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(21.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function grow(seed, delta) { "
+        "var state = { nested: { count: seed } }; "
+        "state.nested.count = state.nested.count + delta; "
+        "return state.nested.count; } "
+        "grow(1, 2); grow(3, 4); grow;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-local-object-property-chain.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {flt2it(8.0), flt2it(6.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(14.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function pair(left, right) { return [left, right]; } "
+        "pair(1, 2); pair(3, 4); pair;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-array-literal.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {flt2it(8.0), flt2it(6.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, flt2it(8.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 1).item, flt2it(6.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function read(object, key) { return object[key]; } "
+        "var values = { count: 9 }; "
+        "read(values, 'count'); read(values, 'count'); read;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-computed-property-pinned.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item values = js_get_key_default(js_get_global_this(),
+        js_make_string("values"));
+    Item args[] = {values, js_make_string("count")};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(9.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+
+    const char source[] =
+        "function materialize(key, value) { "
+        "return { [key = key + value]: value = value + 1 }; } "
+        "materialize('count', 1); materialize('count', 2); materialize;";
+    Item function_item = transpile_js_to_mir(&runtime, source,
+        "p2-computed-object-literal.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
+    JsFunction* function = (JsFunction*)function_item.function;
+    ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
+    EXPECT_EQ(function->code->p2_promotion.state, FN_PROMOTION_COMPILED);
+
+    Item args[] = {js_make_string("count"), flt2it(5.0)};
+    Item result = js_call_function(function_item, make_js_undefined(), args, 2);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_get_key_default(result, js_make_string("count5")).item,
+        flt2it(6.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);
@@ -1655,6 +1869,46 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, PreservesShadowedFactoryParametersOverNamespaceImports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { result } from './rspack-entry.mjs'; export { result };";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/rspack-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item result = js_get_key_default(namespace_obj, js_make_string("result"));
+    ASSERT_FALSE(item_is_error(result));
+    Item then = js_get_name_key(result, "then", 4);
+    EXPECT_TRUE(js_is_callable(then));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, KeepsAliasedExportsSeparateFromLoopShadowBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { helper } from './alias-export-helper.mjs'; "
+        "helper({}, [['render', 0]]); "
+        "export const result = helper({}, [['render', 42]]).render;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/alias-export-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item result = js_get_key_default(namespace_obj, js_make_string("result"));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, SupportsModuleMetadataAndInlineDynamicImports) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1926,6 +2180,24 @@ TEST(JsInterpreter, ModuleDynamicImportsResolveFromDocumentReference) {
     EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
     ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
         nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, MirDynamicImportsResolveFromInlineDocumentReference) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    runtime.js_document_base_url = "test/js/interp_esm/document.html";
+
+    const char source[] =
+        "import('./dynamic-tla-dependency.mjs').then(function(ns) { "
+        "globalThis.__inline_dynamic_first = ns.first; });";
+    Item result = transpile_js_to_mir(&runtime, source, "<inline-script-0>", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item first = js_get_key_default(js_get_global_this(),
+        js_make_string("__inline_dynamic_first"));
+    EXPECT_EQ(js_strict_equal(first, flt2it(1.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -3958,6 +4230,48 @@ TEST(JsInterpreter, ResumesSuspendedExpressionsWithoutRepeatingEffects) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, DoesNotReplayCommaSequenceBeforeAwait) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class Editor { constructor(config) { this.starts = 0; this.afterStart = 0; let resolve; this.isReady = "
+        "new Promise((ready) => { resolve = ready; }); Promise.resolve().then(async () => { "
+        "this.config = config, this.init(), await this.start(), this.afterStart += 1, "
+        "await this.render(), resolve(this.starts + this.afterStart + this.config.value); }); } "
+        "init() { this.starts += 1; } "
+        "async start() { await [1, 2, 3].reduce((chain) => chain.then(async () => { "
+        "await Promise.resolve(); }), Promise.resolve()); } "
+        "render() { return Promise.resolve(); } } "
+        "let editor = new Editor({ value: 10 }); editor.isReady;";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "async-promise-callback-replay.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(12.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResumesNestedAwaitAtItsInnerOperand) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let effects = 0; async function run() { return await (await Promise.resolve(++effects)); } run();";
+    Item promise = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "nested-await-replay.js", NULL);
+
+    ASSERT_FALSE(item_is_error(promise));
+    Item result = js_await_sync_incremental(promise);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(1.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ClosesForAwaitIteratorAfterValueAwaitRejection) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -4635,6 +4949,23 @@ TEST(JsInterpreter, PublishesNavigatorServiceWorkerRegistrations) {
         "worker.getRegistrations() instanceof Promise;";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "navigator-service-worker.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RegistersNavigatorServiceWorkerWithoutPersistence) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var worker = navigator.serviceWorker; "
+        "typeof worker.register === 'function' && "
+        "worker.register('/service-worker.js') instanceof Promise;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "navigator-service-worker-register.js", NULL);
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));

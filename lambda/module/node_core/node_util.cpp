@@ -1,8 +1,9 @@
-// js_util_service.cpp -- host-owned util.promisify primitive for node-core.
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_class.h"
-#include "js_host_hooks.h"
+// node_util.cpp -- node-core's util namespace (promisify, format, inspect).
+#include "node_util.hpp"
+#include "../../js/js_runtime.h"
+#include "../../js/js_runtime_state.hpp"
+#include "../../js/js_class.h"
+#include "../../js/js_host_hooks.h"
 
 static int js_util_service_append(char* buffer, int length, int capacity,
                                   const char* text, int text_length) {
@@ -270,7 +271,7 @@ static Item js_util_service_promisify(Item function) {
     return wrapper_root.get();
 }
 
-extern "C" Item js_get_util_namespace(void) {
+Item node_util_namespace(void) {
     Item* namespace_slot = js_active_runtime_state ? js_realm_slot(
         &js_runtime_state.realm_slots, JS_REALM_SLOT_UTIL_NAMESPACE) : NULL;
     if (!namespace_slot) return ItemError;

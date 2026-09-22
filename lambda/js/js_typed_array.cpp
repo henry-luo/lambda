@@ -34,14 +34,8 @@ typedef struct JsDataViewMapCarrier {
     JsDataView payload;
 } JsDataViewMapCarrier;
 
-extern __thread EvalContext* context;
-extern Item js_make_number(double d);
 extern double js_get_number(Item value);
 
-extern "C" bool js_is_generator(Item obj);
-extern "C" Item js_bigint_constructor(Item value);
-extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
-extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern "C" int js_262_agent_current_slot_for_atomics(void);
 
 static bool js_dataview_is_bigint(Item value) {
@@ -164,11 +158,6 @@ const JsTypedArraySpec* js_typed_array_spec(JsTypedArrayType type) {
 
 extern "C" int js_typed_array_element_size(JsTypedArrayType type) {
     return js_typed_array_spec(type)->byte_size;
-}
-
-extern "C" const char* js_typed_array_type_name_from_type(JsTypedArrayType type) {
-    const JsTypedArraySpec* spec = js_typed_array_spec(type);
-    return spec->name ? spec->name : "Uint8Array";
 }
 
 extern "C" bool js_typed_array_is_integer_type(JsTypedArrayType type) {
@@ -2308,8 +2297,6 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
     // Per ES spec §22.2.3.5.4 IntegerIndexedElementSet: BigInt typed arrays use ToBigInt
     // which throws TypeError for Numbers; only BigInt, String (parseable), and Boolean coerce.
     if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) {
-        extern Item js_bigint_constructor(Item value);
-        extern int64_t bigint_to_int64(Item bi);
         // Inline BigInt detection (avoids exposing js_is_bigint as static)
         TypeId vt = get_type_id(value);
         bool is_bi = false;

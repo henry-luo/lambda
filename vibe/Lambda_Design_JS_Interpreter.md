@@ -4,7 +4,7 @@
 
 **Status:** PROPOSED — architecture and staged implementation plan; no implementation is claimed by this document.
 
-**Execution-policy revision (USER, 2026-09-16; revised 2026-09-19):** **D8.1.3v12 / JSI16v2**
+**Execution-policy revision (USER, 2026-09-16; revised 2026-09-22):** **D8.1.3v18 / JSI16v2**
 requires native execution whenever LambdaJS selects MIR. MIR interpretation is
 retired for JS, including diagnostic and size-based selection. This decision is
 ratified; removal of the existing runtime paths is planned in
@@ -19,13 +19,16 @@ discovers static imports with the direct parser, publishes only AST templates
 to `InputScriptCache` from isolated worker runtimes, and canonicalizes the
 runtime import lookup before reuse. Interpreter-supported modules execute from
 those templates; unsupported units retain whole-module MIR. Unset remains MIR
-and forced `ast` remains fail-closed. JS function-level P2 promotion is still
-unimplemented; whole-module MIR fallback is not a promotion. This is governed
-by **D8.1.3v12** and **D8.5.1v4**.
+and forced `ast` remains fail-closed. AUTO now promotes an admitted closed,
+synchronous classic top-level function at `JS_JIT_THRESHOLD` calls (default
+five) to a boxed MIR satellite; its local-data slice admits non-spread arrays,
+data objects with static or local computed keys, and static or local-key
+computed member chains. Whole-module MIR fallback is not a promotion. This is
+governed by **D8.1.3v18** and **D8.5.1v4**.
 
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v18**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_DOM_State.md`](Lambda_Design_DOM_State.md) (ES10–ES13, EO1–EO6), [`Lambda_Design_Runtime_Globals.md`](Lambda_Design_Runtime_Globals.md) (RG0–RG14), [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -61,7 +64,7 @@ source
 The AST walker is the JavaScript interpreter. Selecting MIR means executing
 generated native code, whether eagerly generated or reached through an admitted
 native lazy-generation entry. There is no LambdaJS MIR-interpreter execution
-mode, including for diagnostics or large/cold modules (**D8.1.3v12**).
+mode, including for diagnostics or large/cold modules (**D8.1.3v18**).
 
 ### 1.1 Why this is a separate walker
 
@@ -241,7 +244,7 @@ Until heapified interpreter continuations land, generator/async/top-level-await 
 
 ### JSI16v2 — Selected LambdaJS MIR executes native code
 
-Under **D8.1.3v12** (USER, 2026-09-16; revised 2026-09-19), the AST walker is LambdaJS's interpreter;
+Under **D8.1.3v18** (USER, 2026-09-16; revised 2026-09-22), the AST walker is LambdaJS's interpreter;
 selected MIR units execute generated native code. Source/module size, document
 context, optimization level, diagnostic switches, and inherited global state
 cannot select MIR interpretation or silently reroute a selected MIR unit to AST.
@@ -1043,20 +1046,39 @@ promotion_count
 The support scan examines semantic facts, not only node kinds. A syntactically ordinary function may still be rejected for direct eval, an unsupported class dependency, module/suspension behavior, or a missing binding plan.
 
 In explicit AUTO, rejected scripts enter eager native MIR before declaration
-instantiation. The shipped AUTO scope is static module AST reuse only; its
-per-function promotion design remains unimplemented under **D8.1.3v12**.
-Forced AST interpretation reports a deterministic unsupported-tier error rather
-than silently compiling; differential tests select each backend explicitly.
+instantiation. The shipped AUTO scope includes a restricted P2 bridge: an
+admitted closed classic definition starts in T0 and may publish its own native
+entry, while every unsupported definition remains T0. Forced AST interpretation
+reports a deterministic unsupported-tier error rather than silently compiling;
+differential tests select each backend explicitly (**D8.1.3v18**).
 
 ### 9.3 Promotion point
 
-Promotion occurs at a function-entry boundary only. The call count belongs to the static AST definition. A threshold of five is the initial parity default with Lambda **D8.1.1v5**, but the JS profitability threshold remains tunable only through measured release data.
+Promotion occurs at a function-entry boundary only. The call count belongs to the static AST definition (`JsCallableCode`), and `JS_JIT_THRESHOLD` defaults to five for Lambda **D8.1.1v5** parity. The threshold-crossing call has not started its body, so it may enter the published native satellite; no active AST frame is transferred.
 
 No active interpreter locals or arbitrary PC are transferred. A hot loop marks its definition for the next entry; it does not OSR. Direct validated self-tail handoff may be considered only after the ordinary entry satellite is correct and separately gated.
 
 ### 9.4 Satellite contents
 
-A JavaScript satellite contains the selected boxed function body and required public wrapper/metadata references. It consumes `JsScript`-owned:
+The landed bridge emits only the selected checked boxed wrapper and body; it
+does not emit `js_main`. Until JS MIR analysis facts are persistent beyond a
+lowering session, it rebuilds an isolated parser/binder clone of the retained
+source and identifies the selected body by the stable `FunctionId`. Admission
+therefore accepts only a synchronous classic top-level declaration or function
+expression with no captures or module/global binding reads, calls, nested
+callable, class, `arguments`, `new.target`, `eval`, or `with`. The landed
+local-data slice admits arrays with no spread, data objects whose static or
+computed keys and values satisfy the local scan, static named-member chains
+rooted in `this`, parameters, or function-local values, and computed member
+paths whose receiver and key both satisfy that scan. The object/Reference paths
+preserve source receiver/key or key/value order, exactly-once `ToPropertyKey`,
+and ordinary property-kernel behavior; the satellite appends its clone-local
+static property-key image to the definition's active module slab at its
+encoded base before publication. Spread, methods, accessors, and any nonlocal
+receiver/key/value remain ineligible. The satellite context is retained in the
+owning `EvalContext` until teardown. Every other definition is pinned to T0.
+
+The full JavaScript satellite design consumes `JsScript`-owned:
 
 - stable function/binding/class IDs;
 - environment layout;
@@ -1065,7 +1087,11 @@ A JavaScript satellite contains the selected boxed function body and required pu
 - strict/effect/direct-eval facts;
 - source/debug identity.
 
-It does not rerun whole-script semantic discovery. Dependencies that cannot be referenced through stable runtime helpers or existing satellites make the definition ineligible and pin it to T0 or trigger a pre-execution whole-unit policy decision.
+The full design does not rerun whole-script semantic discovery. The isolated
+clone is a temporary implementation bridge for the restricted closed slice;
+dependencies that cannot be referenced through stable runtime helpers or
+existing satellites make the definition ineligible and pin it to T0 or trigger
+a pre-execution whole-unit policy decision.
 
 Compiled artifacts remain immutable under **D8.4.1v2**. Publication writes the definition's promotion cell/body entry, not generated instructions.
 
@@ -1076,7 +1102,8 @@ True T0↔T1 closure interoperability starts only after MIR capture lowering rea
 1. introduce environment records for T0 and test their JS semantics;
 2. adapt MIR capturable bindings to the same records while leaving noncaptured locals in registers;
 3. remove copied-env/read-back as an authority;
-4. enable mixed-tier function promotion;
+4. expand the landed closed-function promotion to mixed-tier captures only
+   after the shared environment ABI is complete;
 5. retain old helpers only as audited compatibility adapters until no caller remains.
 
 Promoting first and copying cells into the existing dense env ABI is rejected: direct eval, sibling mutation, per-iteration identity, and errors during callbacks make correct write-back a deoptimization system, not a small adapter.
@@ -1349,11 +1376,12 @@ Add:
 
 1. Convert MIR captured/eval-visible bindings to shared environment cells.
 2. Validate every T0/T1/native call and construct crossing over the shared environment ABI.
-3. Implement per-definition boxed satellites and promotion publication.
+3. Expand the landed closed-definition boxed satellites and promotion
+   publication to shared environments.
 4. Add AUTO counters and hot-function tests.
 5. Preserve the native-only MIR contract across promotion and retained artifacts;
    size-based and diagnostic MIR interpretation are removed by JS Tune13 rather
-   than deferred to this promotion phase (**D8.1.3v11**).
+   than deferred to this promotion phase (**D8.1.3v18**).
 
 **Gate:** full JS T0/T1/native and Lambda↔JS call matrix passes under forced GC; closure mutation, per-iteration cells, direct eval, class constructors, bound/proxy calls, and error identity remain exact across tier and language crossings.
 
@@ -1622,9 +1650,9 @@ These questions do not reopen the decisions above:
 | **JSI13** | Suspension remains compiled until heapified interpreter continuations land | proposed |
 | **JSI14** | `func_ptr == NULL` never selects AST semantics; function body kind is explicit | proposed |
 | **JSI15** | `jit_init()` and MIR lowering occur only inside the selected T1 path | proposed |
-| **JSI16v2** | Selected LambdaJS MIR executes native code; AST is the interpreter | ratified USER 2026-09-16 / D8.1.3v11; implementation pending JS Tune13 |
+| **JSI16v2** | Selected LambdaJS MIR executes native code; AST is the interpreter | ratified USER 2026-09-16 / D8.1.3v18; implementation pending JS Tune13 |
 | **JSI17** | T0 support is semantic-fact-aware and decided before declaration instantiation | proposed |
-| **JSI18** | Promotion happens only at function entry; no general OSR | proposed / D8.1.1v5 alignment |
+| **JSI18** | Promotion happens only at function entry; no general OSR | implemented for the closed local-data P2 slice / D8.1.3v18 |
 | **JSI19** | Static property names are discovered and sealed from `JsScript` plans before realm work | proposed |
 | **JSI20** | Runtime-catalog/module ownership retains old `JsScript` generations while callbacks can execute them | proposed |
 | **JSI21** | Differential, tier/language-crossing, page-coexistence, forced-GC, Test262, and release-performance gates are mandatory | proposed |

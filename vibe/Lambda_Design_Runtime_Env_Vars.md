@@ -106,10 +106,6 @@ present in every build because `lambda/main.cpp` reads it with an ungated
 | `NODE_DEBUG_NATIVE` | Include `COMPILE_CACHE` to report compile-cache activity to stderr. | ✓ | ✓ | ✓ |
 | `NODE_DEBUG` | Controls Node-compatible `util.debuglog()` namespaces. | ✓ | ✓ | ✓ |
 | `NODE_EXTRA_CA_CERTS` | File containing additional TLS CA certificates. | ✓ | ✓ | ✓ |
-| `NODE_UNIQUE_ID` | Marks a cluster worker and supplies its worker id. | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IPC` | Internal child-process IPC marker; normally set/cleared by the runtime. | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IPC_FD` | Internal child-process IPC file descriptor. | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IPC_REF` | Internal IPC reference state for cluster/child processes. | ✓ | ✓ | ✓ |
 | `PATH` | Used for Node/Bash command lookup and temporary `node_modules/.bin` augmentation. | ✓ | ✓ | ✓ |
 
 ## Jube and hosted-language runtime
@@ -245,7 +241,7 @@ cross-process protocol that implements public behavior:
 | Group | Variables |
 |---|---|
 | Lambda configuration and logging (3) | `LAMBDA_HOME`, `LAMBDA_LOG_LEVEL`, `LAMBDA_LOG_FILE` |
-| Node-compatible runtime and IPC (9) | `NODE_COMPILE_CACHE`, `NODE_DISABLE_COMPILE_CACHE`, `NODE_DEBUG`, `NODE_EXTRA_CA_CERTS`, `NODE_UNIQUE_ID`, `LAMBDA_JS_IPC`, `LAMBDA_JS_IPC_FD`, `LAMBDA_JS_IPC_REF`, `PATH` |
+| Node-compatible runtime (5) | `NODE_COMPILE_CACHE`, `NODE_DISABLE_COMPILE_CACHE`, `NODE_DEBUG`, `NODE_EXTRA_CA_CERTS`, `PATH` |
 | Hosted runtimes and module lookup (8) | `JUBE_MODULE_PATH`, `LAMBDA_PYTHON`, `LAMBDA_SHELL`, `HOME`, `XDG_DATA_HOME`, `PWD`, `OLDPWD`, `BASH_COMMAND` |
 | Document/runtime controls (2) | `LAMBDA_JS_EXEC_TIMEOUT_SECONDS`, `RADIANT_RENDER_THREADS` |
 | OS compatibility (8) | `TMPDIR`, `TMP`, `TEMP`, `USERPROFILE`, `HOMEDRIVE`, `USERNAME`, `LANG`, `LC_ALL` |
@@ -256,10 +252,9 @@ documented in user-facing CLI/runtime documentation. If they are not intended
 as supported configuration, replace them with CLI/config-file options or fixed
 policy and remove their environment reads from release too.
 
-`NODE_UNIQUE_ID` and the three `LAMBDA_JS_IPC*` names are not user knobs. They
-remain because parent/child process and Node cluster behavior requires the
-environment as a transport. They should be described as reserved internal
-protocol variables.
+`NODE_UNIQUE_ID` and the three `LAMBDA_JS_IPC*` markers were removed on
+2026-09-22 (JS LOC reduction JLS-15/JLS-17): their only readers and setters
+were the deleted `child_process` and `cluster` implementations.
 
 ### Debug/test-only set (28)
 

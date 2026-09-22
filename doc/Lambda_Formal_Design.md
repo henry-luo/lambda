@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 10.0.0 (2026-09-21)
+**Spec version:** 11.2.0 (2026-09-22)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -335,19 +335,22 @@ language-visible counterparts are the semantics spec's SI ledger.
   `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
   no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
   under D2.5.2v3. [SF15]
-- **D2.6.5v2** **The append API selects content normalization.** Two runtime
-  appends exist and they are not interchangeable. `list_push()` is the
-  **content** constructor: it applies S2.6's normalization — a `null` or `""`
-  is dropped, a pushed content list is spliced in, and a pushed string or
-  binary is concatenated onto a preceding item of the same kind — and is
-  correct **only** when building element content or script top-level
-  content; content writes after construction must preserve the same
-  normalization (S2.6.5). `array_push()` is the
-  **collection** constructor: it stores the item verbatim, preserving `null`
-  as an element and keeping adjacent strings separate. Every other
-  collection — array and vector results, argument and rest lists, split
-  segments, zipped pairs — is built with `array_push()`, because for those
-  the element count *is* the contract and normalization silently destroys it.
+- **D2.6.5v3** **The append discipline follows the destination: content,
+  sequence, or slot.** Three runtime appends exist and they are not
+  interchangeable. The **content** append (`list_push()`) applies S2.6's
+  normalization — a `null` or `""` is dropped, a list is spliced in, a string
+  or binary is concatenated onto a preceding item of the same kind — and is
+  correct only for element content and script top-level content; content
+  writes after construction preserve it (S2.6.5). The **sequence** append
+  builds lists and array literals: it splices a list (S2.5.1v2) and stores
+  every other value verbatim, `null` included, adjacent strings apart. The
+  **verbatim** append stores the item as one value whatever it is — argument
+  and rest lists, `zip` pairs, and every single-value slot (a map field, an
+  attribute, an object field), where a list is first turned into its array
+  image (S2.5.6). Which append a site uses is decided by what it builds,
+  never by a per-format switch, and a list's spreading is decided by the
+  value's kind at run time, never by the syntax around it (S1.6): the one
+  list flag is the kind bit.
   The split is **content versus collection**, never per format: every input
   parser must yield normalized element content (S2.6.1). MarkBuilder appends
   with `array_append` and never normalizes, which is why LaTeX holds
@@ -519,7 +522,7 @@ that carries them.
   particular, `T[]` retains its immediate element, leaf element, rank, and
   leaf carrier in that graph; no array path may recover those facts from an
   erased array tag.
-  [S11.1.1v2, Lane §1, lambda-data.hpp]
+  [S11.1.1v3, Lane §1, lambda-data.hpp]
 - **D3.1.2** Types compose as values (`|` union, `?`, `[]`, constraints)
   and compare **representationally** — normalized forms, not semantic
   equivalence (undecidable with constraints); union normalization uses a
@@ -589,7 +592,7 @@ that carries them.
   publishing (S11.4.1v3). A reader that holds the carrier's proof therefore
   accesses the element or field by offset with no per-access shape-identity
   compare and no certificate re-check; the proof lasts as long as the
-  carrier's verification does (D3.2.6). [S11.1.1v2, Tune19 §11.5, Tune20
+  carrier's verification does (D3.2.6). [S11.1.1v3, Tune19 §11.5, Tune20
   §T20-6a, OB16; v4 2026-09-17, user]
 - **D3.2.5v2** The surface spelling for the shared subtype relation is the
   binary `<:` operator. It accepts two type values and returns `bool`; it is
@@ -1439,7 +1442,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v10*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v13*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1499,7 +1502,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   rebind through the home, a raw argument would not be reloaded. P2 still
   fails closed for such rebinding bodies, nested definitions, indirect Lambda
   calls, object-field identifiers, and match expressions. *(v9, 2026-09-07)*
-  A satellite image is a **cluster**, not a single definition: the promoted
+  A synchronous satellite image is a **cluster**, not a single definition: the promoted
   target together with every module-level definition reachable from it
   through direct calls that is itself promotable and not yet compiled or
   pinned (bounded, 64 definitions), defined in module order. Calls among
@@ -1516,22 +1519,47 @@ loosely across the corpus — context disambiguates, and we live with it.
   admission exposed: a satellite that interns literals into its module's const
   list must rebind the module state's static image afterwards, and a
   dynamic-call argument list is built by verbatim positional append, never by
-  content-splicing push.
+  content-splicing push. *(v12, 2026-09-22)* A hot AUTO definition queues a
+  single snapshot-safe target definition instead of synchronously compiling on
+  the execution thread. The triggering call and every call before publication
+  stay T0. The process-wide bounded compiler pool deduplicates that target for
+  one Script execution generation. A worker compiles from frozen AST/source
+  facts in a private MIR context and returns a sealed image; it may not mutate
+  the Script MIR context, module slab, constant/type/property-key images,
+  shared import resolver, AST analysis facts, or Function entries. Only a
+  later ordinary execution safe point verifies the generation and publishes the
+  target boxed entry. A failed, stale, or unsupported image is discarded and
+  pins that execution-local definition to T0. This is asynchronous code
+  generation, not OSR: no active interpreter frame is replaced. The first
+  parallel implementation excludes async closures, cross-language imports,
+  pattern prepasses, and constant-list growth; those cases do not revert to
+  synchronous compilation. Private direct-callee cluster images remain future
+  work. [D1.8, D5.4.3, D8.4.1v2, D8.5.1v6]
   `LAMBDA_TIER=interp` pins the run to T0, while `LAMBDA_TIER=jit` explicitly
   selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
-  (**T1**). *(v10, 2026-09-19)* File-backed static import closures may be
-  discovered serially by the owning first-party parser, then built leaf-to-root
-  in parallel through one language-neutral scheduler. A worker owns a temporary
-  `Runtime` and may publish only a retained AST template through
-  `InputScriptCache`; it neither instantiates a module nor lowers MIR. The
-  receiving runtime clones that template, plans T0, and the ordinary AUTO P2
-  counters decide whether a hot Lambda definition later receives its MIR
-  satellite. An AST shape outside T0's supported surface falls back only on
-  that receiving runtime's established whole-MIR path. Cache identity is
-  canonical file identity plus exact bytes and the language/parser profile;
-  cache single-flight makes concurrent closure walks share one template. The
+  (**T1**). *(v13, 2026-09-22)* Static import prebuild is a process-global,
+  language-neutral keyed-future service. It owns one bounded work pool and
+  retains one task per canonical module path plus language/profile; the
+  `InputScriptCache` separately remains authoritative for exact source bytes,
+  source generation, parser ABI, and artifact admission. Root discovery
+  submits work and returns without a closure-wide wait. Parse-accurate
+  discovery immediately canonicalizes and requests every static child. A
+  duplicate request receives the same future, while a completed child releases
+  only its direct parents. Thus for `A -> B -> C` and `A -> D -> C`, discovering
+  `B` and `D` requests one shared `C`; `C` completion releases both parents.
+  A task never waits for a child task while occupying a pool worker; only a
+  node whose direct dependencies completed may queue its AST build. The
+  ordinary Lambda/JS importer waits only for the future of its direct module
+  before consuming it, and never from the prebuild-worker path. Cycle failure
+  is a prebuild miss; ordinary loading keeps its established diagnostics and
+  cycle handling. A worker owns a temporary `Runtime` and may publish only a
+  retained AST template through `InputScriptCache`; it neither instantiates a
+  module nor lowers MIR. The receiving runtime clones that template, plans T0,
+  and the ordinary AUTO P2 counters decide whether a hot Lambda definition
+  later receives its MIR satellite. An AST shape outside T0's supported surface
+  falls back only on that receiving runtime's established whole-MIR path. The
   scheduler is common infrastructure, not a shared language parser or
-  evaluator. [D8.5.1v4] The REPL and legacy inspection tools
+  evaluator. [D8.5.1v7] The REPL and legacy inspection tools
   may still use the reference Tree-sitter path until their fragment/source-span
   migration is complete. *(Historical: v1 ruled the opposite — "no
   AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
@@ -1548,7 +1576,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   Generated `parser.c` remains a reference artifact regenerated from
   `grammar.js` (never hand-edit `parser.c`). Build config generates the build
   files (never hand-edit the Lua). [CGP5v2, rules 5, 7]
-- **D8.1.3v12*** LambdaJS uses its first-party C lexer and hybrid
+- **D8.1.3v18*** LambdaJS uses its first-party C lexer and hybrid
   recursive-descent/Pratt parser for normal JavaScript and TypeScript
   source admission. It reduces directly into the retained `JsAstNode` graph;
   the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
@@ -1591,12 +1619,47 @@ loosely across the corpus — context disambiguates, and we live with it.
   of the enclosing script. `JS_EXECUTION_BACKEND=ast` forces this backend.
   *(v12, 2026-09-19)* `JS_EXECUTION_BACKEND=auto` is an explicit AST-first
   policy: an interpreter-supported JS unit consumes the same static-import AST
-  closure prebuilt under D8.1.1v10/D8.5.1v4, while an unsupported unit keeps
+  closure prebuilt under D8.1.1v13/D8.5.1v7, while an unsupported unit keeps
   the established whole-module MIR path. The unset JS selector remains MIR,
-  and forced `ast` remains fail-closed. LambdaJS has not yet gained Lambda's
-  P2 per-function MIR satellite boundary: an AST-selected JS function remains
-  AST-executed, so no worker or AUTO fallback may misrepresent whole-module
-  MIR as hot-function promotion.
+  and forced `ast` remains fail-closed. *(v13, 2026-09-22)* AUTO also has a
+  definition-site P2 MIR-satellite boundary. `JS_JIT_THRESHOLD` has a default
+  of five calls. At an ordinary call entry that reaches the threshold, a
+  supported function can publish a boxed native entry before its body begins;
+  no active AST frame or interpreter program counter transfers to MIR.
+  The initial admission is intentionally closed: only a synchronous classic
+  top-level function declaration or function expression with local-only
+  bindings is eligible. Any capture, module/global binding, call boundary,
+  nested callable, class,
+  compound literal/pattern, `arguments`, `new.target`, `eval`, or `with` pins
+  that definition to AST. *(v14, 2026-09-22)* A promoted definition may read
+  or write a direct non-computed named property of its ordinary `this`
+  receiver. The existing call kernel installs that receiver; P2 appends its
+  sealed property-key image to the definition's active module slab at the
+  encoded key-table base, so the temporary clone never leaks name indices into
+  the retained body. Other property forms, including computed and nested
+  accesses, remain AST-pinned. The satellite context is owned by the current
+  `EvalContext` until final realm teardown. *(v15, 2026-09-22)* Classic
+  function expressions use the same definition-owned `JsCallableCode` and
+  `FunctionId` path as declarations, so a non-capturing expression with no
+  enclosing `FunctionId` reaches the same P2 boundary. Thus an unsupported
+  definition remains AST-executed; whole-module MIR is never represented as
+  promotion. *(v16, 2026-09-22)* P2 also admits arrays without spread and
+  plain data object literals with non-computed identifier or literal keys.
+  Static non-computed named-member chains rooted in `this`, a parameter, or a
+  function-local value use the existing property kernels; every static name
+  from the temporary clone is appended to the owner slab before publication.
+  Computed or indexed access, spread, accessors, methods, and dynamic keys
+  remain AST-pinned. *(v17, 2026-09-22)* A computed member read or write is
+  also admitted when both its receiver and key independently satisfy the
+  local-only P2 scan. The existing MIR Reference path evaluates the receiver
+  before the key, applies `ToPropertyKey` once, and invokes the ordinary
+  property kernel. Computed object-literal keys, spread, accessors, methods,
+  and any nonlocal receiver or key remain AST-pinned. *(v18, 2026-09-22)* A
+  data object literal may use a computed key when that key and its value each
+  satisfy the local-only scan. The existing object lowering evaluates and
+  canonicalizes the key before its value, then calls the same data-property
+  kernel. Spread, accessors, methods, and nonlocal key/value expressions
+  remain AST-pinned.
   A synchronous CommonJS `require()` resolves literal targets against the
   owning `JsScript`, then enters the existing CJS resolver, cache, and runtime
   module registry. Its synthetic wrapper executes in a private module slab
@@ -1622,8 +1685,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   walkers and activation records. Top-level await, async module evaluation,
   generators/async functions, ambiguous star-export resolution, shared T0/T1
   environments, and continuations remain excluded. The unset backend remains
-  MIR; explicit AUTO is limited to the supported retained-AST slice and does
-  not yet provide JS P2 promotion. LambdaJS's interpreter is the AST backend;
+  MIR; explicit AUTO provides the restricted P2 boundary above only for its
+  admitted closed functions. LambdaJS's interpreter is the AST backend;
   selecting MIR always
   executes generated native code, through eager or admitted native lazy
   generation. No source/module-size threshold, document context, optimization
@@ -1780,7 +1843,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.5 MIR module cache
 
-- **D8.5.1v4*** **L1** is a persistent in-process `InputScriptCache` for
+- **D8.5.1v7*** **L1** is a persistent in-process `InputScriptCache` for
   executable script sources, including main scripts, imports, harnesses, and
   document/hosted-language scripts. Source identity uses exact bytes plus
   canonical identity, source kind, language/parser profile, and resolution
@@ -1794,12 +1857,26 @@ loosely across the corpus — context disambiguates, and we live with it.
   than losing an artifact it still references.
   If recovery closes a scope that owns an unfinished AST/MIR build claim, the
   common service wakes waiters and poisons that key until source invalidation.
-  Static module closure prebuild is an AST-only cache producer: dependency
-  discovery is serial and parse-accurate, while independent imported files may
-  publish templates concurrently; module initialization, execution state, and
-  MIR compilation remain with the receiving runtime. Canonical file paths are
-  used at both prebuild and runtime import boundaries, so a relative spelling
-  cannot bypass the retained AST image. [D8.1.1v10, D8.1.3v12]
+  Static module closure prebuild is an AST-only cache producer backed by a
+  process-global keyed-future registry and one bounded pool. Root discovery
+  submits its static-import requests without waiting for the closure. A request
+  for an existing canonical path plus language/profile receives the existing
+  task future; child completion continues only direct parents, and a parent
+  queues its AST build only after its direct child futures succeed. No
+  dependency-depth batch barrier, whole-closure wait, or worker-side wait on a
+  nested import is permitted. The ordinary Lambda and JS loaders wait only on
+  the future for the direct module they are about to consume. Task identity is
+  a scheduling key only: cache admission still checks exact source identity
+  and parser/resolution profile before reuse. Cycle failure leaves ordinary
+  loader diagnostics authoritative. Module initialization, execution state,
+  and MIR compilation remain with the receiving runtime. Canonical file paths are used
+  at both prebuild and runtime import boundaries, so a relative spelling
+  cannot bypass the retained AST image. AUTO satellite compilation is a second
+  process-wide, bounded compiler-work class. Its initial task key is Script
+  execution generation plus target definition, and its output is a private,
+  immutable MIR image that waits for execution-safe publication; no cache
+  template or receiving-runtime state crosses that boundary. A later private
+  cluster-image extension must preserve this boundary. [D8.1.1v12, D8.1.3v18]
   The cache remains source-distributed and in-process; disk/code-image caching
   stays D8.5.2–D8.5.3. L2 lazy codegen remains an approved experiment. [MC1,
   MC2]
@@ -2087,7 +2164,7 @@ slice; no formal semantic ruling or document semver changes.
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
-| D2.6.5v2 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S2.6.4 should not run — yet on 2026-09-21 `<e "a" "b">` merged at run time on both tiers, so this footnote needs re-verification. Not yet implemented at all: dropping a lone `""`, merging adjacent binaries, and normalizing content writes (S2.6.2, S2.6.4, S2.6.5); LaTeX's verbatim content is the transitional deviation named in the ruling. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
+| D2.6.5v3 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S2.6.4 should not run — yet on 2026-09-21 `<e "a" "b">` merged at run time on both tiers, so this footnote needs re-verification. v3 (2026-09-22) is not implemented: the runtime has two list flags (`is_content`, `is_spreadable`), `array_push` splices only `is_content` lists while `array_push_spread_all` splices every array, array literals decide spreading syntactically, and fields store lists unconverted — see the S2.5.6/S2.5.7 row of the semantics Appendix A and [LR05-10](../vibe/Lambda_Issue_Ledger.md). Not yet implemented at all: dropping a lone `""`, merging adjacent binaries, and normalizing content writes (S2.6.2, S2.6.4, S2.6.5); LaTeX's verbatim content is the transitional deviation named in the ruling. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |
@@ -2144,8 +2221,11 @@ slice; no formal semantic ruling or document semver changes.
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.1.1v10 | Revised 2026-09-14 (v10): every publishable `var` position -- untyped, typed container, typed scalar or record, optional or not -- consumes its CW33 home in the generated prologue and publishes its final boxed value in the epilogue (encoded through the declared contract lane, so a null `float?`/`bool?`/`string?` publishes `null`); the `_b` adapter forwards the cell it consumed to the raw body and stores the reloaded binding back; a typed scalar/record argument whose binding is a lane local is homed from its boxed argument slot and decoded back into its lane after the call. The v8 fail-closed pin on bodies that rebind a typed `var` parameter (and their direct satellite callers) is therefore lifted: such a body promotes like any other and the rebind reaches the T0 caller through the same home (fixtures `test/lambda/proc/cow_var_typed_rebind.ls`, `interp_typed_var_rebind.ls`, three tiers byte-identical). Revised 2026-09-07 (v9): a satellite image co-compiles the target's direct-callee cluster in module order (direct native edges among members, module-wide call-site inference, every member's boxed entry published; compiled/pinned/unsupported callees stay dynamic) -- diviter 20 s → 349 ms, richards 786 → 620 ms, deltablue 464 → 348 ms auto e2e, each at eager parity; DO30 records splay. Revised 2026-09-07 (v8): typed `var` parameters are admitted to satellites -- every `var` position travels through the CW33 home cells on the boxed edges, the `_b` wrapper prepares, admits and stores the container back through the home, and a satellite's dynamic edge transports and reloads typed positions keeping their raw descriptor; a body that rebinds a typed `var` parameter, and every satellite that would call it directly, stays in T0 (navier_stokes, nbody2, json2 promote; DO29 records the eager tier's own rebind loss). Revised 2026-09-07 (v7): a loop-bodied procedure promotes at its first entry (once-called `main` loops: mandelbrot 5.5 s → 0.8 s, matmul 3.2 s → 56 ms auto e2e on the debug build); aggregate/structured value-parameter contracts are admitted to satellites (nbody2, pnpoly2, deriv2, ray2, array1); a satellite's read of an annotated `string[]` module binding takes the generic index path because the T0-initialized slab carries the boundary's native carrier (DO28). Revised 2026-09-06: satellite admission widened to plain `any` parameters, bodies with local `var`/rebinding statements and indexed/member stores, and untyped `var` parameters (write-back through the CW33 home transport on both tier edges, borrowed-call dispatch mode; aggregate contracts and typed `var` parameters stay pinned); satellites rebind the module's static const image after interning, and dynamic-call arguments append verbatim. Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for nested definitions, indirect Lambda calls, object-field identifiers, match expressions, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
+| D8.1.1v11 | Revised 2026-09-22 (v11): static file-backed import prebuild uses one bounded closure-wide task pool. Parse-accurate discovery immediately canonicalizes, deduplicates, and queues each static-import request; a completed child notifies and releases all direct parents, so a shared child is built once without dependency-depth batch barriers. Worker tasks publish only AST templates and never wait on child work; the cache retains its ordinary single-flight handling for separate closures. Initialization, execution, and MIR stay on the receiving runtime. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
+| D8.1.1v12 | Revised 2026-09-22: AUTO P2 promotion queues one deduplicated, snapshot-safe target definition to the bounded process-wide compiler service and continues the triggering call in T0. A worker produces only a private, immutable MIR image from frozen facts; it never mutates a live Script context, AST analysis fact, module image, or Function entry. A later ordinary safe point generation-checks and publishes the target boxed entry. Stale/failed/unsupported work pins that execution-local definition to T0. This adds no OSR or active-frame replacement; private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
+| D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
-| D8.1.3v11 | Revised 2026-09-16 (USER); implementation status updated 2026-09-17: selected LambdaJS MIR executes native code; the AST backend is its interpreter. Explicit, size/document-based, and inherited LambdaJS MIR-interpreter selection paths are removed; an incompatible JS `--mir-interp` request is rejected. Other language profiles are unchanged. Implementation tracking and remaining tuning gates: `vibe/jube/JS_Tune13.md` and `vibe/impl/JS_Tune13_Impl.md`. Existing parser/AST implementation status (2026-08-29): normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
+| D8.1.3v18 | Revised 2026-09-22: selected LambdaJS MIR executes native code; the AST backend is its interpreter. Explicit, size/document-based, and inherited LambdaJS MIR-interpreter selection paths are removed; an incompatible JS `--mir-interp` request is rejected. Other language profiles are unchanged. AUTO now adds a definition-site P2 satellite for a closed synchronous classic top-level function declaration or expression after `JS_JIT_THRESHOLD` calls (default five); the checked native entry is published only at an ordinary call boundary and its MIR context remains EvalContext-owned until realm teardown. The landed expansion admits arrays without spread; data object literals with static keys or computed keys whose key/value expressions pass the local-only scan; static non-computed named-member chains; and computed member reads/writes when their receiver and key independently meet that scan. Existing object/Reference lowering preserves source key/value or receiver/key order, exactly-once `ToPropertyKey`, and the ordinary property kernel. P2 appends its sealed clone name image to the owning script slab at its encoded base before publication, so clone-local property indices cannot affect execution. Captures, module/global bindings, calls, classes, nested callables, spread, accessors/methods, nonlocal key/value/receiver expressions, and activation-sensitive forms remain AST-pinned. Existing parser/AST implementation status (2026-08-29): normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, and continuations remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
 | D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v11**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The same closeout publishes the physical Lambda parse→build→bind graph and the full `MirValue` producer boundaries. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. **D8.2.5v2 (2026-09-11) is not implemented**: it reverses the fact-placement clause of D8.2.5, which had required per-node inferred/const facts in an ID-keyed side table. `AstNode.type` is confirmed as the effective-type authority and declared annotations already sit on the declaring node (`NameEntry`/param/declarator, ~164 readers), but `AstIndex::facts`/`AstNodeFacts` still exists. It is near-dead in practice — `declared_contract`, `inferred_type` and `representation` are initialized and never read; only const-fold `flags`/`folded_item` have a producer and a consumer. Retiring it, and rehoming folded values onto the node's own literal `TypeConst`, is the open work. Rationale and the superseded U30 text: `vibe/Lambda_Design_Unified_AST.md` §13; plan: `vibe/Lambda_Proposal_JS_Unify_P7.md` U-D. |
 | D8.3.1v2–D8.3.3, D8.3.4v2 | **Binder TG8 direct-edge procedure slice implemented 2026-09-16.** Eligible fixed-arity `fn` and task-free synchronous `pn` binder functions with immutable parameters and exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b`. `var` parameters, task-context procedures, and may-await procedures retain `_b`. Fixtures: `test/lambda/type_binder_raw_variants.ls`, `test/lambda/proc/type_binder_proc_raw.ls`. [S1.6, D8.3.1v2–D8.3.4v2] |
@@ -2157,6 +2237,9 @@ slice; no formal semantic ruling or document semver changes.
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
 | D8.5.1v2 | Partially implemented 2026-09-14: the common source registry is live, Lambda and JS CLI/Node-runner/test-batch/module source admission use it, hosted CLI file admission uses language/profile keys, and Radiant's preamble/external-classic JS MIR adapter stores opaque artifacts there. Closed-T0 Lambda AST templates now instantiate import cones and interpreter view registration through fresh Script overlays; cached Lambda MIR hits instantiate the complete JIT dependency cone and its dense per-runtime slabs, while P2 satellite imports derive their owner/slot without mutating the shared AST. P2 promotion counters and boxed satellite entries are also execution-local overlays, so a cached AST definition cannot expose a retired EvalContext's native entry (D8.1.1v2); an AST image that has entered P2 is conservatively excluded from later AST hits until lowering's remaining mutable facts have execution overlays. Lambda file-backed dependency changes and admitted cache-safe static-JS ESM dependency changes are refreshed before an artifact hit and retire the common importer cone; exact source comparison decides the retirement. Common AST/MIR build claims single-flight Lambda artifact construction across fresh runtimes, common JS AST claims single-flight parser-template construction, and the Radiant JS-MIR lease adapter plus synchronous static-JS-import module-MIR adapter claim their eligible artifacts; a minimal poison state is fail-closed until source invalidation, while eviction remains deferred. Eager JIT AST-miss reuse remains excluded because MIR lowering still mutates AST facts. The common JS AST adapter supports function, class, module, eval, and TypeScript parser templates through fresh execution overlays; those clones retain the source logical unit and bind a fresh dense slab. An ESM module whose transitive static-JS-import closure is synchronous and cache-safe can reuse an immutable MIR artifact after rebuilding every dependency namespace, its own namespace, and its module slab; TLA, dynamic/re-export, CommonJS, cycles, and cross-language module artifacts remain excluded. The legacy Runtime retention cache is retired to a local `loaded_script_index` registry, and the legacy Radiant cache façade is retired to a bounded lease/accounting session. Open work includes the excluded JS module families, remaining command pipelines, guest build-claim adoption, and cache lifecycle gates; L2 lazy codegen remains approved but `mir.c` is eager. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
 | D8.5.1v3 | Revised 2026-09-14 (v3): a source-level command-path audit closes the executable loader inventory: Lambda run/import/REPL/AST-dump/validator, JS CLI/require/interpreter/module/AST-dump/batch, Radiant local and URL scripts, Jube hosted sources, and direct Bash/Ruby guest loaders all reach `InputScriptCache`; ordinary document, JSON/package-metadata, filesystem, and transfer payload reads remain outside the executable-source contract. An owner scope that closes with an unfinished AST/MIR claim poisons the key and broadcasts its waiters, covering managed parse/compile recovery without inventing a broad crash cache. `LAMBDA_SCRIPT_CACHE_MAX_BYTES` provides an opt-in, inactive-only LRU byte limit; active leases retain their images and report pressure. This supersedes the v2 implementation status above; guest build-claim adoption, broader timeout/crash containment, dependency cones outside the admitted module families, and richer budget policy remain open. Working record: `vibe/Lambda_Design_Script_Cache.md`. |
+| D8.5.1v5 | Revised 2026-09-22 (v5): static closure prebuild is a bounded, dynamic task graph, not serial discovery followed by per-depth worker batches. Canonical profile/path requests deduplicate shared modules; completion continuation releases each direct dependent, and workers do not block on nested imports. The cache retains its process-wide artifact-key single-flight guarantee for separate closures, while module initialization, execution state, and MIR remain runtime-local. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
+| D8.5.1v6 | Revised 2026-09-22: P2 satellite work uses the same process-wide bounded-work principle but an initial Script-generation/target-definition key. Its artifact is a private immutable image until a receiving execution safe point adopts it; the artifact cache never holds a live EvalContext, module slab, Function pointer, or worker-owned compiler state. Private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
+| D8.5.1v7 | Revised 2026-09-22: static-module prebuild is a process-global future registry, not a closure-owned graph and `wait_all()` barrier. Canonical profile/path requests share one in-flight or completed future across all roots; direct dependency continuations schedule parent AST builds without worker-side waits. Ordinary Lambda/JS import consumption waits only for its direct module future. The `InputScriptCache` remains the exact-source/profile artifact authority, so task readiness never bypasses source invalidation or normal diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 

@@ -89,8 +89,8 @@ static const char* SKIP_SUBSTRINGS[] = {
     "dir-manual",
     // Require WPT testdriver synthetic input (mouse drag / button down-up /
     // keyboard dispatch via test_driver.Actions()) that Lambda's headless
-    // `js` runtime does not yet expose. Tracked under Phase 8F; see
-    // vibe/radiant/Radiant_Design_Selection2.md.
+    // `js` runtime does not yet expose. See the selection design's
+    // browser-compatibility gaps.
     "drag-selection-extend-to-user-select-none",
     "onselectstart-on-key-in-contenteditable",
 };

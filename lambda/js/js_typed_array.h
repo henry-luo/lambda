@@ -47,7 +47,6 @@ typedef struct JsTypedArraySpec {
 const JsTypedArraySpec* js_typed_array_spec(JsTypedArrayType type);
 
 int js_typed_array_element_size(JsTypedArrayType type);
-const char* js_typed_array_type_name_from_type(JsTypedArrayType type);
 bool js_typed_array_is_integer_type(JsTypedArrayType type);
 
 // ArrayBuffer identity stays stable while this shared handle replaces storage

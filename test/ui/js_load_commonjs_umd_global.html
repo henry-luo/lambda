@@ -1,0 +1,12 @@
+<!doctype html>
+<html><body>
+<p id="result"></p>
+<script>
+document.getElementById("result").setAttribute(
+    "data-before", typeof exports + ":" + typeof module + ":" + typeof define);
+</script>
+<script src="js_load_commonjs_umd_global.js"></script>
+<script>
+document.getElementById("result").setAttribute("data-result", typeof Popper + ":" + Popper.ready);
+</script>
+</body></html>

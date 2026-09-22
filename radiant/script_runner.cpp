@@ -86,6 +86,7 @@ static sigjmp_buf js_exec_jmpbuf;
 static volatile sig_atomic_t js_exec_guarded = 0;
 static struct sigaction js_exec_old_segv, js_exec_old_bus;
 static volatile sig_atomic_t js_exec_timed_out = 0;
+static volatile sig_atomic_t js_exec_watchdog_started = 0;
 static size_t js_exec_watchdog_source_len = 0;
 static int js_exec_watchdog_budget_seconds = 0;
 
@@ -154,6 +155,7 @@ static void js_exec_watchdog_add_module_source(size_t source_length) {
     } else {
         js_exec_watchdog_source_len += source_length;
     }
+    if (!js_exec_watchdog_started) return;
     int expanded_budget = radiant_script_exec_timeout_seconds(
         js_exec_watchdog_source_len);
     if (expanded_budget <= js_exec_watchdog_budget_seconds) return;
@@ -165,6 +167,11 @@ static void js_exec_watchdog_add_module_source(size_t source_length) {
     js_exec_watchdog_budget_seconds = expanded_budget;
     log_info("script_runner_timeout: module graph %zu bytes gets %ds watchdog",
         js_exec_watchdog_source_len, expanded_budget);
+}
+
+static void js_exec_watchdog_begin_user_code(void) {
+    js_exec_watchdog_started = 1;
+    js_exec_watchdog_arm(js_exec_watchdog_budget_seconds);
 }
 #endif  // !_WIN32
 
@@ -215,6 +222,7 @@ typedef enum JsScriptCompilePolicy {
 typedef enum JsScriptTaskStatus {
     JS_SCRIPT_TASK_READY,
     JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE,
+    JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE,
     JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED,
     JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED,
     JS_SCRIPT_TASK_SKIPPED_NOMODULE,
@@ -233,6 +241,7 @@ typedef struct JsScriptTask {
     char* src_attr;
     char* resolved_url;
     char* source;
+    NetworkResource* network_resource;
     size_t source_len;
     bool external;
     bool parser_inserted;
@@ -498,6 +507,13 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
     return resolved;
 }
 
+static bool script_source_is_html_document(const char* source) {
+    if (!source) return false;
+    while (*source && str_char_is_ascii_space(*source)) source++;
+    return strncasecmp(source, "<!doctype html", 14) == 0 ||
+           strncasecmp(source, "<html", 5) == 0;
+}
+
 /**
  * Load external script content from a resolved path or URL.
  *
@@ -508,7 +524,8 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
  */
 static char* load_script_content(const char* resolved_path, bool is_http,
                                  bool module_mode, NetworkResourceManager* resource_manager,
-                                 ResourcePriority priority) {
+                                 NetworkResource* network_resource,
+                                 DocumentScriptPhaseTiming* timing) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
         // Layout snapshots avoid the full harness, but must run synchronous
@@ -580,8 +597,23 @@ static char* load_script_content(const char* resolved_path, bool is_http,
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
     if (is_http && resource_manager) {
-        content = resource_manager_copy_resource_content(resource_manager, resolved_path,
-                                                         priority, NULL);
+        NetworkResource* resource = network_resource;
+        if (!resource) {
+            // Dynamic callers retain the batched admission contract when the
+            // document scanner could not see this script source.
+            resource = resource_manager_prefetch(resource_manager, resolved_path, PRIORITY_NORMAL);
+        }
+        uint64_t wait_start_us = timing ? time_now_us() : 0;
+        bool ready = resource_manager_wait_for_resource(resource_manager, resource);
+        if (timing) timing->source_wait_us += time_now_us() - wait_start_us;
+        if (!ready) return nullptr;
+
+        uint64_t read_start_us = timing ? time_now_us() : 0;
+        content = resource_manager_copy_ready_resource_content(resource_manager, resolved_path, NULL);
+        if (timing) {
+            timing->source_read_us += time_now_us() - read_start_us;
+            if (content) timing->source_loaded_tasks++;
+        }
         if (content) {
             log_debug("script_runner: loaded external URL from document resource manager: %s",
                       resolved_path);
@@ -605,13 +637,14 @@ static char* load_script_content(const char* resolved_path, bool is_http,
 static char* load_script_content_profiled(const char* resolved_path, bool is_http,
                                           bool module_mode,
                                           NetworkResourceManager* resource_manager,
-                                          ResourcePriority priority) {
+                                          NetworkResource* network_resource,
+                                          DocumentScriptPhaseTiming* timing) {
 #ifndef NDEBUG
     bool timing_enabled = script_task_timing_enabled();
     long load_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
     char* content = load_script_content(resolved_path, is_http, module_mode,
-                                        resource_manager, priority);
+                                        resource_manager, network_resource, timing);
 #ifndef NDEBUG
     if (timing_enabled) {
         log_notice("script_runner_timing: phase=source-load kind=%s status=%s wall_us=%ld bytes=%zu src=%s",
@@ -659,6 +692,7 @@ static const char* script_task_status_name(JsScriptTaskStatus status) {
     switch (status) {
         case JS_SCRIPT_TASK_READY: return "ready";
         case JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE: return "skipped-unsupported-type";
+        case JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE: return "skipped-non-script-response";
         case JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED: return "skipped-external-disabled";
         case JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED: return "skipped-module-unsupported";
         case JS_SCRIPT_TASK_SKIPPED_NOMODULE: return "skipped-nomodule";
@@ -680,8 +714,10 @@ static bool script_task_timing_enabled() {
 }
 #endif
 
-static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 16u * 1024u * 1024u;
-static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 128u * 1024u * 1024u;
+// LambdaJS expands production bundles substantially while building their AST
+// and browser realm. Keep headless rendering below the memory envelope.
+static const size_t JS_EXTERNAL_SCRIPT_BUDGET_BYTES = 5u * 1024u * 1024u;
+static const size_t JS_TOTAL_SCRIPT_BUDGET_BYTES = 20u * 1024u * 1024u;
 // Deferred and async scripts are not render-blocking in a browser. Bound their
 // pre-layout work so a large application bundle cannot delay the first window.
 static const size_t JS_PRELAYOUT_DEFER_BUDGET_BYTES = 128u * 1024u;
@@ -705,15 +741,15 @@ static size_t script_prelayout_defer_limit_bytes() {
 }
 
 static size_t script_external_compile_limit_bytes() {
-    // browsers do not enforce small source-byte caps; this guard only protects
-    // Radiant from pathological fixture input while allowing real libraries.
+    // This is a renderer admission budget, not a browser language restriction.
+    // Users may raise it explicitly when investigating a particular library.
     return script_byte_limit_from_env(
         "RADIANT_JS_EXTERNAL_SCRIPT_BYTES", JS_EXTERNAL_SCRIPT_BUDGET_BYTES);
 }
 
 static size_t script_total_compile_limit_bytes() {
-    // page script graphs can include many files, so total budget must be much
-    // larger than the per-file guard to stay browser-compatible.
+    // Several individually acceptable bundles can exhaust the same document
+    // realm, so bound their aggregate before runtime initialization.
     return script_byte_limit_from_env(
         "RADIANT_JS_TOTAL_SCRIPT_BYTES", JS_TOTAL_SCRIPT_BUDGET_BYTES);
 }
@@ -784,6 +820,14 @@ static JsScriptTask* script_task_new(JsScriptTaskKind kind, int document_order) 
     task->parser_inserted = true;
     task->document_order = document_order;
     return task;
+}
+
+static ResourcePriority script_task_resource_priority(const JsScriptTask* task) {
+    if (task && (task->async_attr || task->defer_attr ||
+                 task->kind == JS_SCRIPT_TASK_MODULE)) {
+        return PRIORITY_NORMAL;
+    }
+    return PRIORITY_HIGH;
 }
 
 static void script_task_free(JsScriptTask* task) {
@@ -1078,18 +1122,8 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         // the legacy Navigator API must still be callable for feature probes.
         "navigator.javaEnabled = navigator.javaEnabled || function(){ return false; };\n"
         "window.navigator = navigator;\n"
-        // Older widget bundles still publish AMD modules. Retain their module
-        // records until a page-provided loader consumes them instead of
-        // throwing before the document can finish loading.
-        "window.__lambda_amd_modules = window.__lambda_amd_modules || {};\n"
-        "window.define = window.define || function(name, deps, factory) {\n"
-        "  if (typeof name !== 'string') { factory = deps; deps = name; name = null; }\n"
-        "  if (typeof deps === 'function') { factory = deps; deps = []; }\n"
-        "  if (typeof factory !== 'function') return;\n"
-        "  var module = { deps: deps || [], factory: factory };\n"
-        "  if (name) window.__lambda_amd_modules[name] = module;\n"
-        "};\n"
-        "window.define.amd = window.define.amd || {};\n"
+        // Do not manufacture an AMD loader. UMD bundles select that branch
+        // when `define.amd` exists, then await a loader the page never chose.
         "window.document = document;\n"
         "document.hidden = false;\n"
         "document.prerendering = false;\n"
@@ -1122,6 +1156,16 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
+        // An idle task is a cooperative timer in the headless event loop.  It
+        // keeps browser feature probes and deferred page initialization on the
+        // same callback queue as other document tasks.
+        "function requestIdleCallback(callback, options) {\n"
+        "  if (typeof callback !== 'function') throw new TypeError('requestIdleCallback callback must be a function');\n"
+        "  return setTimeout(function(){ callback({ didTimeout: false, timeRemaining: function(){ return 0; } }); }, 0);\n"
+        "}\n"
+        "function cancelIdleCallback(handle) { clearTimeout(handle); }\n"
+        "window.requestIdleCallback = requestIdleCallback;\n"
+        "window.cancelIdleCallback = cancelIdleCallback;\n"
     );
     // Bootstrap screen metrics come from the host viewport, not a CSSOM read
     // that would synchronously lay out an otherwise uncommitted document.
@@ -1267,11 +1311,12 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
 }
 
 /**
- * Recursively walk the Element* tree, collecting <script> source text
- * (both inline and external) and the body onload handler in document order.
+ * Recursively walk the Element* tree, collecting <script> metadata and inline
+ * source in document order. External source admission follows the complete
+ * walk so independent requests can overlap before ordered consumption.
  */
 static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url,
-                                      NetworkResourceManager* resource_manager, int depth) {
+                                      int depth) {
     if (!elem) return;
 
     // guard against stack overflow from deeply nested DOM (fuzzer-found): this
@@ -1378,21 +1423,6 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
             if (strcmp(task->resolved_url, "builtin:wpt-testharness.js") == 0) {
                 collection->testharness_seen = true;
             }
-            ResourcePriority priority = (task->async_attr || task->defer_attr ||
-                task->kind == JS_SCRIPT_TASK_MODULE) ? PRIORITY_NORMAL : PRIORITY_HIGH;
-            char* content = load_script_content_profiled(
-                task->resolved_url, is_http, task->kind == JS_SCRIPT_TASK_MODULE,
-                resource_manager, priority);
-            if (content) {
-                task->source = content;
-                task->source_len = strlen(content);
-                collection->external_source_bytes += task->source_len;
-                script_task_mark_ready(collection, task);
-                loaded_external_scripts++;
-            } else {
-                task->status = JS_SCRIPT_TASK_LOAD_FAILED;
-                failed_external_scripts++;
-            }
             script_task_list_append(collection->scripts, task);
             return;
         }
@@ -1420,8 +1450,62 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
         Item child = elem->items[i];
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_ELEMENT) {
-            collect_scripts_recursive(child.element, collection, base_url,
-                                      resource_manager, depth + 1);
+            collect_scripts_recursive(child.element, collection, base_url, depth + 1);
+        }
+    }
+}
+
+static void prefetch_external_script_sources(JsScriptTaskCollection* collection,
+                                             NetworkResourceManager* resource_manager,
+                                             DocumentScriptPhaseTiming* timing) {
+    if (!collection || !resource_manager) return;
+    uint64_t prefetch_start_us = timing ? time_now_us() : 0;
+    for (int i = 0; i < collection->scripts->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
+        if (!task || !task->external || task->status != JS_SCRIPT_TASK_READY ||
+            !task->resolved_url || !radiant_url_is_http(task->resolved_url)) {
+            continue;
+        }
+        task->network_resource = resource_manager_prefetch(
+            resource_manager, task->resolved_url, script_task_resource_priority(task));
+        if (task->network_resource && timing) timing->source_prefetch_tasks++;
+    }
+    if (timing) timing->source_prefetch_us += time_now_us() - prefetch_start_us;
+}
+
+static void load_external_script_sources(JsScriptTaskCollection* collection,
+                                         NetworkResourceManager* resource_manager,
+                                         DocumentScriptPhaseTiming* timing) {
+    if (!collection) return;
+    for (int i = 0; i < collection->scripts->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
+        if (!task || !task->external || task->status != JS_SCRIPT_TASK_READY ||
+            !task->resolved_url) {
+            continue;
+        }
+        bool is_http = radiant_url_is_http(task->resolved_url);
+        char* content = load_script_content_profiled(
+            task->resolved_url, is_http, task->kind == JS_SCRIPT_TASK_MODULE,
+            resource_manager, task->network_resource, timing);
+        if (content) {
+            if (script_source_is_html_document(content)) {
+                // A changed or redirected script endpoint can return an HTML
+                // document with a successful status; never feed it to LambdaJS.
+                log_info("script_runner: skipping HTML response for external script: %s",
+                         task->resolved_url);
+                mem_free(content);
+                task->status = JS_SCRIPT_TASK_SKIPPED_NON_SCRIPT_RESPONSE;
+                collection->skipped_scripts++;
+                continue;
+            }
+            task->source = content;
+            task->source_len = strlen(content);
+            collection->external_source_bytes += task->source_len;
+            script_task_mark_ready(collection, task);
+            loaded_external_scripts++;
+        } else {
+            task->status = JS_SCRIPT_TASK_LOAD_FAILED;
+            failed_external_scripts++;
         }
     }
 }
@@ -2044,6 +2128,13 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         return ItemError;
     }
 
+#ifndef _WIN32
+    // The preamble and its Lambda-owned module graph are trusted realm setup.
+    // Arm only before page-controlled source can parse or execute: SIGPROF is
+    // process-scoped while preamble preparation can use helper threads.
+    js_exec_watchdog_begin_user_code();
+#endif
+
     bool any_error = false;
     phase_start_us = timing ? time_now_us() : 0;
     JsScriptSchedulerQueues queues;
@@ -2164,8 +2255,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_error("execute_document_scripts: failed to initialize script task collection");
         return;
     }
-    collect_scripts_recursive(html_root, &script_tasks, base_url,
-                              dom_doc->resource_manager, 0);
+    collect_scripts_recursive(html_root, &script_tasks, base_url, 0);
+    prefetch_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
+    load_external_script_sources(&script_tasks, dom_doc->resource_manager, timing);
     log_script_task_diagnostics(&script_tasks);
     if (timing) timing->collect_us += time_now_us() - phase_start_us;
 
@@ -2289,6 +2381,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     sigaction(SIGBUS, &sa, &js_exec_old_bus);
 
     js_exec_timed_out = 0;
+    js_exec_watchdog_started = 0;
     js_exec_guarded = 1;
     int timeout_seconds = radiant_script_exec_timeout_seconds(watchdog_source_len);
     js_exec_watchdog_source_len = watchdog_source_len;
@@ -2300,7 +2393,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     }
     // Parse/transpile/JIT are synchronous CPU work. A wall-clock alarm made
     // valid parallel fixtures time out while descheduled under CPU contention.
-    js_exec_watchdog_arm(timeout_seconds);
 #endif
 
     Item result = ItemNull;
@@ -2328,6 +2420,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
         js_exec_guarded = 0;
+        js_exec_watchdog_started = 0;
         js_exec_watchdog_disarm();
 
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
@@ -2342,6 +2435,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
+	        js_exec_watchdog_started = 0;
 	        js_exec_watchdog_disarm();
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
@@ -2366,6 +2460,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
+	        js_exec_watchdog_started = 0;
 	        js_exec_watchdog_disarm();
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
@@ -2494,7 +2589,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
     phase_start_us = timing ? time_now_us() : 0;
     script_task_collection_free(&script_tasks);
-    js_batch_cleanup_unsafe = 0;
+    // A recovery jump may have interrupted allocator or JIT ownership.  Keep
+    // this sticky until the outer document teardown has declined batch reset.
+    // Clearing it here made view teardown re-enter a contaminated JS batch.
     if (timing) timing->source_cleanup_us += time_now_us() - phase_start_us;
 }
 

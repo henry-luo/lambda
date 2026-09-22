@@ -75,6 +75,7 @@ JS_FORWARD_STATIC_VOID( js_clipboard_set_method, (Item object, const char* name,
 #define g_file_list_proto (js_runtime_state.clipboard.file_list_prototype)
 #define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
 #define g_clipboard_generation (js_runtime_state.clipboard.generation)
+#define g_next_object_url_id (js_runtime_state.clipboard.next_object_url_id)
 JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard)))
 
 static void attach_known_prototype(Item obj, Item proto) {
@@ -237,6 +238,26 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
     return obj;
 }
 JS_FORWARD_ITEM(js_blob_new, (Item parts, Item options), js_blob_new_with_class, (parts, options, JS_CLASS_BLOB))
+
+extern "C" Item js_dom_url_create_object_url(Item object) {
+    JsClass class_id = js_class_id(object);
+    if (class_id != JS_CLASS_BLOB && class_id != JS_CLASS_FILE) {
+        return dom_realm_throw_type_error("URL.createObjectURL requires a Blob");
+    }
+    // Headless Worker does not consume blob bytes, but callers still require a
+    // stable, revocable origin-scoped URL identity for feature detection.
+    StrBuf* url = strbuf_new();
+    strbuf_append_format(url, "blob:lambda/%lld", (long long)g_next_object_url_id++);
+    Item result = make_str_n(url->str, url->length);
+    strbuf_free(url);
+    return result;
+}
+
+extern "C" Item js_dom_url_revoke_object_url(Item /*url*/) {
+    // Object URLs only back headless feature probes; their Blob lifetime is
+    // already owned by the caller and the per-document heap.
+    return make_js_undefined();
+}
 
 extern "C" Item js_blob_text(void) {
     Item self = dom_realm_receiver();
@@ -1513,11 +1534,21 @@ extern "C" Item js_permissions_query(Item desc) {
 }
 
 // Headless Radiant does not persist service-worker registrations, but the
-// Navigator API remains observable and feature probes expect a promise.
+// Navigator API remains observable and feature probes expect promises.
 static Item js_service_worker_get_registrations() {
     RootFrame roots(1);
     Rooted<Item> registrations_root(roots, js_array_new(0));
     return dom_realm_promise_resolve(registrations_root.get());
+}
+
+static Item js_service_worker_register(Item script_url, Item options) {
+    (void)script_url;
+    (void)options;
+    RootFrame roots(1);
+    // Keep registration side effects disabled in headless mode while giving
+    // browser feature-detection scripts the specified asynchronous result.
+    Rooted<Item> registration_root(roots, js_new_object());
+    return dom_realm_promise_resolve(registration_root.get());
 }
 
 // =============================================================================
@@ -1716,6 +1747,17 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     JS_CLIPBOARD_BLOB_METHODS(JS_CLIPBOARD_INSTALL_BLOB_METHOD)
 #undef JS_CLIPBOARD_INSTALL_BLOB_METHOD
 
+    {
+        RootFrame url_roots(1);
+        Rooted<Item> url_ctor_root(url_roots, dom_realm_get_cstr(global_root.get(), "URL"));
+        if (get_type_id(url_ctor_root.get()) == LMD_TYPE_FUNC) {
+            js_clipboard_set_method(url_ctor_root.get(), "createObjectURL",
+                js_dom_url_create_object_url);
+            js_clipboard_set_method(url_ctor_root.get(), "revokeObjectURL",
+                js_dom_url_revoke_object_url);
+        }
+    }
+
     // ---- File -------------------------------------------------------------
     js_clipboard_install_interface(global_root.get(), "File", js_file_new, &g_file_proto);
     if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) {
@@ -1824,6 +1866,8 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         service_worker_root.set(js_new_object());
         js_clipboard_set_method(service_worker_root.get(), "getRegistrations",
             js_service_worker_get_registrations);
+        js_clipboard_set_method(service_worker_root.get(), "register",
+            js_service_worker_register);
 
         navigator_root.set(js_new_object());
         dom_realm_set_cstr(navigator_root.get(), "clipboard", clipboard_root.get());

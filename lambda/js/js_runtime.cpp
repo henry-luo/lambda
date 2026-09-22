@@ -94,9 +94,6 @@ Item js_set_name_key(Item object, const char* name, Item value) {
 }
 
 #define js_runtime_key js_name_item
-#define js_dc_key js_runtime_key
-#define js_cluster_key js_runtime_key
-#define js_repl_key js_runtime_key
 #define js_async_hooks_key js_runtime_key
 #define js_cc_key js_runtime_key
 
@@ -210,38 +207,12 @@ extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
     return buf;
 }
 
-extern "C" bool js_item_to_integral_int64(Item value, int64_t* out, bool allow_int64) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        if (out) *out = it2i(value);
-        return true;
-    }
-    if (allow_int64 && type == LMD_TYPE_INT64) {
-        if (out) *out = it2l(value);
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double number = it2d(value);
-        // Host-facing integer options reject fractional, non-finite, and overflowing values.
-        if (!isfinite(number) || number != floor(number) ||
-            number < -9223372036854775808.0 ||
-            number > 9223372036854775807.0) {
-            return false;
-        }
-        if (out) *out = (int64_t)number;
-        return true;
-    }
-    return false;
-}
-
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #endif
 
-extern __thread EvalContext* context;
-extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
@@ -249,10 +220,7 @@ extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
                                              Item filename_item,
                                              int64_t line_offset,
                                              int64_t column_offset);
-extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
-extern "C" Item push_d(double dval);
-extern "C" double it2d(Item item);
 
 static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     EvalContext* owner = (EvalContext*)runtime;
@@ -294,7 +262,6 @@ static Item js_invoke_mir_state(void* func_ptr, JsSuspendedActivation* activatio
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
-extern "C" void js_intrinsic_note_prototype_mutation(Item object);
 extern "C" TypeMap* js_typemap_transition_for_type(Item obj, ShapeEntry* entry,
     NameId operation_name_id, TypeId value_type);
 Item js_map_shape_lookup_ext(Map* m, const char* key_str, int key_len, bool* out_found);
@@ -302,7 +269,6 @@ static void js_set_prototype_fresh(Item object, Item prototype);
 static bool js_constructor_instance_shape_is_admissible(TypeMap* shape);
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value);
 static bool js_array_companion_has_array_index_shape(Array* arr);
-extern "C" bool js_promise_vmap_is(Item value);
 
 extern "C" void js_map_promote_descriptor_kind(Map* m) {
     if (m && m->map_kind == MAP_KIND_PLAIN) m->map_kind = MAP_KIND_DESC;
@@ -693,7 +659,6 @@ extern "C" int64_t js_eval_source_push(Item filename, Item source,
                                         int64_t line_offset, int64_t column_offset);
 extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
                                                 int64_t line_offset, int64_t column_offset);
-extern "C" void js_eval_source_pop(void);
 
 static inline Item js_native_function_source_item() {
     return js_name_item(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN);
@@ -724,7 +689,6 @@ static bool js_function_push_vm_stack_source(JsFunction* fn) {
 }
 
 extern "C" Item js_vm_swap_global_this(Item next_global);
-extern "C" uint64_t js_get_heap_epoch(void);
 static Item js_262_eval_script(Item code);
 
 static JsGlobalEnvironment* js_global_environment_current(void) {
@@ -1061,8 +1025,6 @@ static Item js_collection_node_read_item(JsCollectionOrderNode* node,
 #define JS_MAP_SIZE_CLASS 1
 
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
-extern "C" Item js_new_object_with_typemap(TypeMap* tm);
-extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm);
 static int js_typemap_storage_capacity(TypeMap* tm) {
     if (!tm) return -1;
     int64_t data_size64 = tm->byte_size;
@@ -3268,7 +3230,6 @@ Item js_intrinsic_ctor_function_call_body(Item callee, Item this_value,
 }
 
 enum JsDynamicFunctionKind {
-    JS_DYNAMIC_FUNCTION_ORDINARY = 0,
     JS_DYNAMIC_FUNCTION_ASYNC,
     JS_DYNAMIC_FUNCTION_GENERATOR,
     JS_DYNAMIC_FUNCTION_ASYNC_GENERATOR,
@@ -3277,9 +3238,7 @@ enum JsDynamicFunctionKind {
 static Item js_dynamic_function_allocate(JsDynamicFunctionKind kind,
         Item* args, int argc) {
     Item result = ItemNull;
-    if (kind == JS_DYNAMIC_FUNCTION_ORDINARY) {
-        result = js_new_function_from_string(args, argc);
-    } else if (kind == JS_DYNAMIC_FUNCTION_ASYNC) {
+    if (kind == JS_DYNAMIC_FUNCTION_ASYNC) {
         result = js_new_async_function_from_string(args, argc);
     } else {
         result = js_new_generator_function_from_string(args, argc,
@@ -3315,7 +3274,6 @@ static Item js_dynamic_function_allocate(JsDynamicFunctionKind kind,
     }
 
 #define JS_DYNAMIC_FUNCTION_TARGETS(M) \
-    M(function, JS_DYNAMIC_FUNCTION_ORDINARY) \
     M(async_function, JS_DYNAMIC_FUNCTION_ASYNC) \
     M(generator_function, JS_DYNAMIC_FUNCTION_GENERATOR) \
     M(async_generator_function, JS_DYNAMIC_FUNCTION_ASYNC_GENERATOR)
@@ -3385,7 +3343,6 @@ JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_boolean_call_body,
 JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_symbol_call_body,
     js_symbol_create(arg0))
 
-extern "C" Item js_bigint_constructor(Item value);
 JS_CONSTRUCTOR_UNARY_BODY(js_intrinsic_ctor_bigint_call_body,
     js_bigint_constructor(arg0))
 #undef JS_CONSTRUCTOR_UNARY_BODY
@@ -4103,9 +4060,23 @@ static Item js_get_proto_key() {
 }
 
 // Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
-extern "C" Item js_get_typed_array_base_proto();
-extern "C" Item js_get_buffer_prototype(void);
 Item js_iterator_prototype_for_object(Item object);
+
+// Buffer lives in node-core; the host reaches it only through Jube. Resolving
+// the `buffer` specifier builds the namespace, which caches the prototype in
+// this host realm slot. Without node-core, host-created Buffers keep only
+// their Uint8Array methods.
+static Item js_buffer_prototype_for_lookup(void) {
+    Item* slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    if (slot && slot->item != 0) return *slot;
+    Item buffer_namespace = ItemNull;
+    if (jube_specifier_resolve("buffer", &buffer_namespace) !=
+            JUBE_SPECIFIER_RESOLVED) return ItemNull;
+    slot = js_realm_slot_existing(&js_runtime_state.realm_slots,
+        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    return slot && slot->item != 0 ? *slot : ItemNull;
+}
 
 extern "C" Item js_call_accessor_getter(Item getter, Item receiver) {
     // D6.2.2v2: the prototype-walk Receiver belongs only to the current Get;
@@ -4175,7 +4146,7 @@ static bool js_property_ops_property_get(Item object, Item key, Item receiver,
             if (js_property_ops_get_own(object, key, object, true, out_result)) return true;
             JsTypedArray* ta = js_get_typed_array_ptr(object.map);
             if (ta && ta->element_type == JS_TYPED_UINT8 && ta->is_buffer) {
-                Item buf_proto = js_get_buffer_prototype();
+                Item buf_proto = js_buffer_prototype_for_lookup();
                 if (buf_proto.item != ITEM_NULL) {
                     Item result = js_get_key_core(buf_proto, key, receiver);
                     if (item_is_error(result) ||
@@ -4364,6 +4335,16 @@ static JsPropertyOpResult js_host_meta_set(Item target, uint64_t lane,
         value, &completion), completion);
 }
 
+static JsPropertyOpResult js_host_meta_define_own(Item target, uint64_t lane,
+        Item key, Item value, Item receiver, Item descriptor) {
+    (void)lane;
+    (void)value;
+    (void)receiver;
+    Item completion = ItemNull;
+    return js_property_op_result(jube_member_define_own(target, key,
+        descriptor, &completion), completion);
+}
+
 JS_HOST_META_KEY_OP(js_host_meta_delete,
     js_host_object_delete_property(target, key, &completion))
 JS_HOST_META_KEY_OP(js_host_meta_has,
@@ -4475,7 +4456,7 @@ extern const JsPropertyOps js_iterator_property_ops = {
 };
 
 extern const JsPropertyOps js_host_property_ops = {
-    js_host_meta_get, js_host_meta_set, NULL, js_host_meta_delete,
+    js_host_meta_get, js_host_meta_set, js_host_meta_define_own, js_host_meta_delete,
     js_host_meta_has, js_host_meta_descriptor, js_host_meta_own_keys,
     js_host_meta_get_prototype, NULL, NULL, NULL,
 };
@@ -5958,7 +5939,6 @@ extern "C" Item js_get_key_core(Item object, Item key,
                                 fn->prototype, nm, nl);
                         }
                         {
-                            extern Item js_get_typed_array_base_proto();
                             extern bool js_is_typed_array_ctor_name(const char* name, int len);
                             if (js_is_typed_array_ctor_name(nm, nl)) {
                                 Item ta_base_proto = js_get_typed_array_base_proto();
@@ -8065,8 +8045,7 @@ extern "C" Item js_get_reference(Item object, Item key) {
         }
         return js_throw_type_error(msg);
     }
-    Item result = js_get_key_default(object, key);
-    return result;
+    return js_get_key_default(object, key);
 }
 JS_FORWARD_STATIC_RETURN(bool, js_is_class_object_item, (Item obj), js_is_class_constructor, (obj))
 
@@ -9010,50 +8989,6 @@ static int64_t js_utf16_index_from_byte(const char* chars, int str_len, int byte
     if (byte_pos <= 0) return 0;
     if (byte_pos > str_len) byte_pos = str_len;
     return js_utf16_len(chars, byte_pos, false);
-}
-
-// Get the length of any JS value. Handles typed arrays specially (Map-based),
-// and delegates to fn_len for all standard Lambda types (array, list, string, etc.)
-extern "C" int64_t js_get_length(Item object) {
-    if (get_type_id(object) == LMD_TYPE_MAP && js_is_typed_array(object)) {
-        return (int64_t)js_typed_array_length(object);
-    }
-    // Function metadata is an ordinary own property (D6.2.2v2).
-    if (get_type_id(object) == LMD_TYPE_FUNC) {
-        Item length = js_get_name_key(object, "length", 6);
-        return item_is_error(length) ? 0 : (int64_t)js_get_number(length);
-    }
-    // JS string .length = UTF-16 code unit count (not codepoint count).
-    if (get_type_id(object) == LMD_TYPE_STRING) {
-        String* s = it2s(object);
-        if (!s) return 0;
-        return js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
-    }
-    // For Map objects (JS class instances), check for:
-    // 1. Own "length" property
-    // 2. Getter (__get_length) on own or prototype chain
-    // 3. Prototype "length" property
-    // before falling back to fn_len
-    if (get_type_id(object) == LMD_TYPE_MAP) {
-        // Check own "length" property
-        Item len_key = js_name_item("length", 6);
-        Item result = ItemNull;
-        JsOwnGetStatus own_status = js_ordinary_get_own(object, len_key, object, &result);
-        if (own_status == JS_OWN_READY) {
-            // ordinary-get dispatches own accessors before the value is
-            // coerced to the numeric length used by this helper.
-            return (int64_t)js_get_number(result);
-        }
-        // Phase-5D: legacy __get_length own + proto probes removed.
-        // IS_ACCESSOR own-path is handled above; proto-chain accessor
-        // dispatch is performed by js_prototype_lookup below.
-        // Check prototype chain for regular "length" property
-        Item proto_result = js_prototype_lookup(object, len_key);
-        if (proto_result.item != ItemNull.item && !js_is_deleted_sentinel(proto_result)) {
-            return (int64_t)js_get_number(proto_result);
-        }
-    }
-    return fn_len(object);
 }
 
 // =============================================================================
@@ -10245,7 +10180,6 @@ static Item js_get_string_iterator_proto();
 static Item js_get_map_iterator_proto();
 static Item js_get_set_iterator_proto();
 static Item js_get_regexp_string_iterator_proto();
-extern "C" bool js_is_generator(Item obj);
 extern "C" bool js_is_async_generator(Item obj);
 extern "C" Item js_ordinary_has_instance(Item, Item);
 
@@ -10411,6 +10345,7 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
 extern Item js_interp_create_generator(JsFunction*, Item*, int);
 extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
 extern Item js_interp_start_async_function(JsFunction*, Item*, int);
+extern bool js_interp_promote_function_if_hot(JsFunction*);
 
 // JC14 body entries. Each adapter owns only the ABI conversion its body shape
 // needs; js_function_select_body_entry chooses one per callee at finalization.
@@ -10524,7 +10459,6 @@ JsBodyEntry js_function_select_body_entry(const JsFunction* fn) {
 
 
 // Forward declarations for builtin dispatch
-extern "C" Item js_string_raw(Item* args, int argc);
 // v83: Forward declarations for RegExp Symbol methods
 static Item js_regexp_symbol_match(Item this_val, Item arg0);
 static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement);
@@ -10547,8 +10481,6 @@ bool js_is_arguments_exotic_array(Item value) {
     return str && str->len == 9 && strncmp(str->chars, "Arguments", 9) == 0;
 }
 JS_FORWARD_STATIC_EXPRESSION(Item, js_arguments_companion_item, (Item arguments), ((Item){.map = js_array_props(arguments.array)}))
-extern "C" Item js_object_group_by(Item items, Item callback);
-extern "C" Item js_map_group_by(Item items, Item callback);
 extern "C" Item js_array_from_with_constructor(Item ctor, Item iterable, Item mapFn, Item this_arg, bool mapping);
 
 static Item js_object_to_string_result(const char* tag, int tag_len) {
@@ -10765,8 +10697,6 @@ static Item js_array_generic_reverse(Item object);
 // Forward declarations for JSON functions (defined in js_globals.cpp)
 extern "C" Item js_json_raw_json(Item text);
 extern "C" Item js_json_is_raw_json_builtin(Item value);
-extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
-extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern "C" Item js_weakref_deref(Item this_val);
 extern "C" Item js_finalization_registry_register(Item this_val, Item target, Item holdings, Item unregister_token, int argc);
 extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregister_token);
@@ -14521,6 +14451,27 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
         return ItemNull;
     }
 
+    // A definition record is shared by closures. If a sibling predates its
+    // P2 publication, refresh only this call boundary to the already-retained
+    // satellite; no AST activation is resumed or transferred.
+    if (construct_new_target.item == 0 && fn && fn->code &&
+            fn->code->p2_promotion.state == FN_PROMOTION_COMPILED &&
+            (fn->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI) == 0 &&
+            !js_function_promote_ast_body(fn,
+                fn->code->p2_promotion.boxed_entry)) {
+        log_error("js-p2: failed to refresh promoted definition");
+        return ItemError;
+    }
+
+    // JSI18/D8.1.3: only an ordinary entry may replace the boxed AST body.
+    // The kernel already roots the callee and actual span, so compilation may
+    // allocate without exposing unrooted call operands to the collector.
+    if (construct_new_target.item == 0 &&
+            js_fn_body_kind(fn) == JS_FUNCTION_BODY_AST &&
+            js_interp_promote_function_if_hot(fn)) {
+        ast_direct = false;
+    }
+
     bool analysis_known = (fn->flags & JS_FUNC_FLAG_ANALYSIS_KNOWN) != 0;
     bool derived_ctor_requested = (fn->flags & JS_FUNC_FLAG_DERIVED_CTOR) != 0;
     // `this` for an arrow comes exclusively from its closure environment; the
@@ -14885,15 +14836,6 @@ extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
         return ItemError;
     }
     return js_call(func_item, this_val, args, arg_count, result_home, false);
-}
-
-extern "C" Item js_call_function_prerooted_args_into(Item func_item, Item this_val,
-        Item* args, int arg_count, uint64_t* result_home) {
-    if (!result_home) {
-        log_error("js-call-prerooted: missing caller result home");
-        return ItemError;
-    }
-    return js_call(func_item, this_val, args, arg_count, result_home, true);
 }
 
 extern "C" Item js_call_constructor_body_into(Item func_item, Item this_val,
@@ -20378,9 +20320,6 @@ static bool js_can_be_held_weakly(Item key) {
     return false;
 }
 
-JS_FORWARD_RETURN(bool, js_can_be_held_weakly_pub, (Item key),
-    js_can_be_held_weakly, (key))
-
 static JsCollectionData* js_get_collection_data(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map ||
             obj.map->map_kind != MAP_KIND_COLLECTION) return NULL;
@@ -20760,7 +20699,6 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
 // Forward declarations for v14 promise support
 struct JsPromise;
 static JsPromise* js_get_promise(Item promise_obj);
-extern "C" bool js_is_generator(Item obj);
 
 // Map method dispatcher: handles collection methods, falls back to property access.
 static int js_typed_array_scan_search(Item obj, Item search_value, int start,
@@ -24073,48 +24011,6 @@ extern "C" Item js_throw_out_of_range(const char* name, const char* range, Item 
     return js_throw_range_error_code("ERR_OUT_OF_RANGE", msg);
 }
 
-// Node.js system error: e.g. ENOENT: no such file or directory, stat '/foo'
-extern "C" Item js_throw_system_error(int uv_errno, const char* syscall, const char* path) {
-    // map libuv error to Node.js error code string
-    const char* code = uv_err_name(uv_errno);
-    const char* errstr = uv_strerror(uv_errno);
-
-    char msg[1024];
-    if (path) {
-        snprintf(msg, sizeof(msg), "%s: %s, %s '%s'", code, errstr, syscall, path);
-    } else {
-        snprintf(msg, sizeof(msg), "%s: %s, %s", code, errstr, syscall);
-    }
-
-    Item type_name = js_name_item("Error");
-    Item msg_item = js_name_item(msg, strlen(msg));
-    Item error = js_new_error_with_name(type_name, msg_item);
-
-    // set .code (e.g. "ENOENT")
-    Item code_key = js_name_item("code");
-    Item code_val = js_name_item(code, strlen(code));
-    js_set_key_default(error, code_key, code_val);
-
-    // set .errno
-    Item errno_key = js_name_item("errno");
-    Item errno_val = (Item){.item = i2it((int64_t)uv_errno)};
-    js_set_key_default(error, errno_key, errno_val);
-
-    // set .syscall
-    Item syscall_key = js_name_item("syscall");
-    Item syscall_val = js_name_item(syscall, strlen(syscall));
-    js_set_key_default(error, syscall_key, syscall_val);
-
-    // set .path (if provided)
-    if (path) {
-        Item path_key = js_name_item("path");
-        Item path_val = js_name_item(path, strlen(path));
-        js_set_key_default(error, path_key, path_val);
-    }
-
-    return js_throw_value(error);
-}
-
 // Tune8 §2.3: js_throw_syntax_error and js_throw_reference_error are now thin
 // C wrappers around js_throw_named_error. The MIR transpiler emits the
 // unified js_throw_named_error directly (saving 1 import-table entry);
@@ -26573,6 +26469,14 @@ static Item js_intl_supported_locales_of(Item* args, int argc) {
     return result_root.get();
 }
 
+static Item js_intl_construct_plain_object(Item new_target, uint64_t* result_home) {
+    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
+    Item result = js_apply_constructed_default_prototype(result_root.get(),
+        target_root.get(), JS_CLASS_OBJECT);
+    if (result_home) *result_home = result.item;
+    return result;
+}
+
 static Item js_intl_number_format_format(Item /*this_value*/, Item* args,
         int argc) {
     Item value = argc > 0 && args ? args[0] : make_js_undefined();
@@ -26582,11 +26486,7 @@ static Item js_intl_number_format_format(Item /*this_value*/, Item* args,
 
 static Item js_intl_number_format_construct_body(Item /*callee*/, Item* /*args*/,
         int /*argc*/, Item new_target, uint64_t* result_home) {
-    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
-    Item result = js_apply_constructed_default_prototype(result_root.get(),
-        target_root.get(), JS_CLASS_OBJECT);
-    if (result_home) *result_home = result.item;
-    return result;
+    return js_intl_construct_plain_object(new_target, result_home);
 }
 
 static Item js_intl_number_format_call_body(Item callee, Item /*this_value*/,
@@ -26663,16 +26563,57 @@ static Item js_intl_collator_compare(Item /*this_value*/, Item* args, int argc) 
 
 static Item js_intl_collator_construct_body(Item /*callee*/, Item* /*args*/,
         int /*argc*/, Item new_target, uint64_t* result_home) {
-    JS_ROOTS(roots, target_root, new_target, result_root, js_new_object());
-    Item result = js_apply_constructed_default_prototype(result_root.get(),
-        target_root.get(), JS_CLASS_OBJECT);
-    if (result_home) *result_home = result.item;
-    return result;
+    return js_intl_construct_plain_object(new_target, result_home);
 }
 
 static Item js_intl_collator_call_body(Item callee, Item /*this_value*/,
         Item* args, int argc, uint64_t* result_home) {
     return js_intl_collator_construct_body(callee, args, argc, callee, result_home);
+}
+
+struct JsIntlLanguageDisplayName {
+    const char* code;
+    const char* name;
+};
+
+static Item js_intl_display_names_of(Item /*this_value*/, Item* args, int argc) {
+    Item code = argc > 0 && args ? args[0] : make_js_undefined();
+    Item code_text = js_to_string(code);
+    if (item_is_error(code_text)) return code_text;
+    String* value = it2s(code_text);
+    if (!value) return code_text;
+
+    // The compact runtime has no CLDR database. Preserve unknown BCP 47 codes
+    // while supplying English names for the language set used by browser UIs.
+    static const JsIntlLanguageDisplayName names[] = {
+        {"ar", "Arabic"}, {"cs", "Czech"}, {"da", "Danish"},
+        {"de", "German"}, {"en", "English"}, {"es", "Spanish"},
+        {"fi", "Finnish"}, {"fr", "French"}, {"he", "Hebrew"},
+        {"hi", "Hindi"}, {"it", "Italian"}, {"ja", "Japanese"},
+        {"ko", "Korean"}, {"nl", "Dutch"}, {"no", "Norwegian"},
+        {"pl", "Polish"}, {"pt", "Portuguese"}, {"ru", "Russian"},
+        {"sv", "Swedish"}, {"tr", "Turkish"}, {"uk", "Ukrainian"},
+        {"zh", "Chinese"},
+    };
+    for (size_t index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
+        size_t code_len = strlen(names[index].code);
+        if (value->len != code_len) continue;
+        bool matches = true;
+        for (size_t byte = 0; byte < code_len; byte++) {
+            if (js_intl_collator_fold_ascii((unsigned char)value->chars[byte]) !=
+                    (unsigned char)names[index].code[byte]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return js_name_item(names[index].name, strlen(names[index].name));
+    }
+    return code_text;
+}
+
+static Item js_intl_display_names_construct_body(Item /*callee*/, Item* /*args*/,
+        int /*argc*/, Item new_target, uint64_t* result_home) {
+    return js_intl_construct_plain_object(new_target, result_home);
 }
 
 static inline bool js_intl_segmenter_is_word_byte(unsigned char c) {
@@ -26740,7 +26681,7 @@ extern "C" void js_reset_intl_object() { js_intl_object = (Item){.item = ITEM_NU
 extern "C" Item js_get_intl_object_value() {
     if (!js_namespace_cache_is_empty(js_intl_object)) return js_intl_object;
     js_realm_intrinsic_slots_ensure_roots();
-    RootFrame roots(11);
+    RootFrame roots(14);
     Rooted<Item> intl_root(roots, js_object_create(ItemNull));
     Rooted<Item> segmenter_ctor_root(roots,
         js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
@@ -26762,6 +26703,12 @@ extern "C" Item js_get_intl_object_value() {
     Rooted<Item> collator_proto_root(roots, js_new_object());
     Rooted<Item> collator_method_root(roots,
         js_new_native_this_span_function(js_intl_collator_compare));
+    Rooted<Item> display_names_ctor_root(roots,
+        js_new_native_body_constructor(js_intrinsic_ctor_requires_new_call_body,
+            js_intl_display_names_construct_body, 0));
+    Rooted<Item> display_names_proto_root(roots, js_new_object());
+    Rooted<Item> display_names_method_root(roots,
+        js_new_native_this_span_function(js_intl_display_names_of));
     js_set_function_name(segmenter_ctor_root.get(), js_name_item("Segmenter"));
     js_set_key_cstr(segmenter_proto_root.get(), "constructor", segmenter_ctor_root.get());
     js_set_key_cstr(segmenter_proto_root.get(), "segment", segmenter_method_root.get());
@@ -26785,10 +26732,19 @@ extern "C" Item js_get_intl_object_value() {
         collator_proto_root.get());
     js_set_key_cstr(collator_ctor_root.get(), "supportedLocalesOf",
         supported_locales_root.get());
+    js_set_function_name(display_names_ctor_root.get(), js_name_item("DisplayNames"));
+    js_set_key_cstr(display_names_proto_root.get(), "constructor",
+        display_names_ctor_root.get());
+    js_set_key_cstr(display_names_proto_root.get(), "of", display_names_method_root.get());
+    js_initialize_native_constructor_prototype(display_names_ctor_root.get(),
+        display_names_proto_root.get());
+    js_set_key_cstr(display_names_ctor_root.get(), "supportedLocalesOf",
+        supported_locales_root.get());
     js_intl_object = intl_root.get();
     js_set_key_cstr(intl_root.get(), "Segmenter", segmenter_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "NumberFormat", number_format_ctor_root.get());
     js_set_key_cstr(intl_root.get(), "Collator", collator_ctor_root.get());
+    js_set_key_cstr(intl_root.get(), "DisplayNames", display_names_ctor_root.get());
     js_namespace_set_to_string_tag(intl_root.get(), "Intl", 4);
     return intl_root.get();
 }
@@ -28016,7 +27972,6 @@ extern "C" Item js_get_prototype(Item object) {
     if (proto.item == ITEM_NULL && js_object_has_class(object, JS_CLASS_TYPED_ARRAY)) {
         JsTypedArray* ta = js_get_typed_array_ptr(m);
         if (ta) {
-            extern Item js_get_typed_array_per_type_proto(int element_type);
             return js_get_typed_array_per_type_proto((int)ta->element_type);
         }
     }
@@ -30150,7 +30105,6 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 #define js_promise_unhandled_queue (js_runtime_state.promises.unhandled_queue)
 #define js_promise_unhandled_strict (js_runtime_state.promises.unhandled_strict)
 #define js_domain_current (js_runtime_state.promises.domain_current)
-#define js_domain_namespace (js_runtime_state.promises.domain_namespace)
 #define js_domain_stack_state (js_runtime_state.promises.domain_stack)
 #define js_domain_stack_at(i) (*root_vector_at(&js_domain_stack_state, (i)))
 #define js_domain_stack_count ((int)root_vector_count(&js_domain_stack_state))
@@ -30381,10 +30335,7 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void) {
     return js_promise_bootstrap_unhandled_strict;
 }
 
-extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_chars, int type_len);
-extern "C" Item js_async_hooks_enter_resource(Item resource);
-extern "C" void js_async_hooks_restore_resource(Item previous);
 extern "C" void js_async_hooks_emit_before_resource(Item resource);
 extern "C" void js_async_hooks_emit_after_resource(Item resource);
 extern "C" void js_async_hooks_emit_promise_resolve_resource(Item resource);
@@ -30398,24 +30349,15 @@ static void js_domain_sync_visible_state(void) {
     // D5.3/D5.4.3: domain publication allocates process properties and the
     // visible stack array, so transient values must stay exact roots across
     // each allocation instead of relying only on the persistent state slots.
-    RootFrame roots(3);
+    RootFrame roots(2);
     Rooted<Item> domain_root(roots, js_domain_stack_count > 0
         ? js_domain_stack_at(js_domain_stack_count - 1)
         : make_js_undefined());
     Rooted<Item> process_root(roots, ItemNull);
-    Rooted<Item> stack_root(roots, ItemNull);
     js_domain_current = js_domain_stack_count > 0 ? domain_root.get() : (Item){0};
 
     process_root.set(js_get_process_object_value());
     js_set_key_cstr(process_root.get(), "domain", domain_root.get());
-
-    if (js_domain_namespace.item != 0) {
-        stack_root.set(js_array_new(0));
-        for (int i = 0; i < js_domain_stack_count; i++) {
-            js_array_push(stack_root.get(), js_domain_stack_at(i));
-        }
-        js_set_key_cstr(js_domain_namespace, "_stack", stack_root.get());
-    }
 }
 
 extern "C" Item js_domain_capture_stack(void) {
@@ -30462,12 +30404,6 @@ extern "C" void js_domain_restore_stack(Item previous) {
     RootFrame roots(1);
     Rooted<Item> previous_root(roots, previous);
     js_domain_apply_stack(previous_root.get());
-}
-
-static void js_domain_push(Item domain) {
-    if (!js_domain_is_domain_item(domain)) return;
-    if (js_domain_stack_count < 64) root_vector_push(&js_domain_stack_state, domain);
-    js_domain_sync_visible_state();
 }
 
 extern "C" Item js_domain_get_current(void) {
@@ -32499,9 +32435,7 @@ static bool js_module_runtime_slots_ensure() {
         log_error("js-module-runtime: incomplete namespace slot store");
         root_vector_clear(values);
     }
-    // Heap replacement empties the vector. The warning is scoped to the
-    // namespace generation, matching the former private epoch state.
-    js_runtime_state.modules.internal_test_binding_warning_scheduled = false;
+    // Heap replacement empties the vector.
     for (int slot = 0; slot < JS_MODULE_RUNTIME_SLOT_COUNT; slot++) {
         if (!root_vector_push(values, ItemNull)) {
             root_vector_clear(values);
@@ -32529,7 +32463,6 @@ void js_module_cache_reset(bool reset_provider_namespaces) {
     if (!js_active_runtime_state) return;
     if (reset_provider_namespaces) {
         root_vector_clear(&js_runtime_state.modules.values);
-        js_runtime_state.modules.internal_test_binding_warning_scheduled = false;
     } else {
         Item* active_namespace = js_module_active_namespace_slot();
         if (active_namespace) *active_namespace = ItemNull;
@@ -33251,1101 +33184,10 @@ extern "C" Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj) {
     return js_promise_then(awaited, handler, ItemNull);
 }
 
-// =============================================================================
-// diagnostics_channel module implementation
-// =============================================================================
-
-// Forward declarations
-static Item js_dc_tc_subscribe(Item handlers);
-static Item js_dc_tc_unsubscribe(Item handlers);
-static Item js_dc_tc_hasSubscribers_getter(void);
-static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args);
-static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args);
-static Item js_dc_tc_traceCallback(Item fn, Item rest_args);
-static Item js_dc_channel_publish_on(Item channel, Item message);
-static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2);
-static Item js_dc_channel_withStoreScope(Item message);
-static Item js_dc_channel_factory(Item name);
-static Item js_dc_stores_key(void);
-
-extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
-
-static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool attach) {
-    if (attach) jube_modules_runtime_attach();
-    void* session = jube_node_runtime_current_session();
-    return session ? jube_node_diagnostics_channel_state(session) : NULL;
-}
-
-#define js_dc_state (*js_diagnostics_channel_state_current(true))
-#define js_dc_channel_proto (js_dc_state.channel_prototype)
-#define js_dc_tracing_channel_proto (js_dc_state.tracing_channel_prototype)
-#define js_dc_bounded_channel_proto (js_dc_state.bounded_channel_prototype)
-#define js_dc_channel_ctor (js_dc_state.channel_constructor)
-#define js_dc_tracing_channel_ctor (js_dc_state.tracing_channel_constructor)
-#define js_dc_bounded_channel_ctor (js_dc_state.bounded_channel_constructor)
-
-static Item js_dc_dynamic_array_ensure(Item* slot) {
-    if (slot && get_type_id(*slot) == LMD_TYPE_ARRAY) return *slot;
-    Item array = js_array_new(0);
-    if (slot) *slot = array;
-    return array;
-}
-
-static Item js_dc_channel_entries(void) {
-    return js_dc_dynamic_array_ensure(&js_dc_state.channel_entries);
-}
-
-static Item js_dc_deferred_error_entries(void) {
-    return js_dc_dynamic_array_ensure(&js_dc_state.deferred_errors);
-}
-
-static Item js_dc_channel_entry_part(Item entries, int64_t index, int64_t part) {
-    Item entry = js_elements_get_int(entries, index);
-    return get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) > part
-        ? js_elements_get_int(entry, part) : ItemNull;
-}
-
-static bool js_dc_is_symbol(Item value) {
-    return js_is_symbol(value);
-}
-
-static Item js_dc_throw_invalid_arg_type(const char* message) {
-    char full_message[256];
-    int len = snprintf(full_message, sizeof(full_message), "ERR_INVALID_ARG_TYPE: %s",
-                       message ? message : "");
-    if (len < 0) len = 0;
-    if (len >= (int)sizeof(full_message)) len = (int)sizeof(full_message) - 1;
-    return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", full_message);
-}
-
-JS_FORWARD_STATIC_EXPRESSION(Item, js_dc_context_or_new, (Item context),
-    js_is_nullish(context) ? js_new_object() : context)
-
-static Item js_dc_channel_marker_key(void) {
-    return js_name_item("__lambda_dc_channel__", 21);
-}
-
-static bool js_dc_is_channel(Item value) {
-    TypeId type = get_type_id(value);
-    if (type != LMD_TYPE_MAP) return false;
-    Item marker = js_get_key_default(value, js_dc_channel_marker_key());
-    return get_type_id(marker) == LMD_TYPE_BOOL && it2b(marker);
-}
-
-static bool js_dc_item_same(Item left, Item right) {
-    if (left.item == right.item) return true;
-    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) {
-        return false;
-    }
-    String* left_str = it2s(left);
-    String* right_str = it2s(right);
-    if (!left_str || !right_str || left_str->len != right_str->len) return false;
-    return memcmp(left_str->chars, right_str->chars, (size_t)left_str->len) == 0;
-}
-
-static Item js_dc_channel_subscribers(Item channel) {
-    Item subs = js_get_key_default(channel, js_dc_key("_subscribers"));
-    if (get_type_id(subs) != LMD_TYPE_ARRAY) {
-        subs = js_array_new(0);
-        js_set_key_default(channel, js_dc_key("_subscribers"), subs);
-    }
-    return subs;
-}
-
-static bool js_dc_channel_has_active_subscribers(Item channel) {
-    Item subs = js_get_key_default(channel, js_dc_key("_subscribers"));
-    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(subs);
-        for (int64_t i = 0; i < len; i++) {
-            if (js_is_callable(js_elements_get_int(subs, i))) return true;
-        }
-    }
-    Item stores = js_get_key_default(channel, js_dc_stores_key());
-    return get_type_id(stores) == LMD_TYPE_ARRAY && js_array_length(stores) > 0;
-}
-
-static void js_dc_channel_refresh_has_subscribers(Item channel) {
-    js_set_key_default(channel, js_dc_key("hasSubscribers"),
-                    (Item){.item = b2it(js_dc_channel_has_active_subscribers(channel))});
-}
-
-static bool js_dc_channel_remove_subscriber(Item channel, Item handler) {
-    Item subs = js_get_key_default(channel, js_dc_key("_subscribers"));
-    if (get_type_id(subs) != LMD_TYPE_ARRAY) return false;
-    Item next = js_array_new(0);
-    bool removed = false;
-    JS_ARRAY_FOREACH(el, subs) {
-        if (!removed && el.item == handler.item) {
-            removed = true;
-            continue;
-        }
-        js_array_push(next, el);
-    }
-    if (removed) {
-        js_set_key_default(channel, js_dc_key("_subscribers"), next);
-        js_dc_channel_refresh_has_subscribers(channel);
-    }
-    return removed;
-}
-
-// Channel.subscribe(handler)
-static Item js_dc_channel_subscribe(Item handler) {
-    if (!js_is_callable(handler)) {
-        return js_dc_throw_invalid_arg_type("The \"subscriber\" argument must be of type function.");
-    }
-    Item self = js_get_this();
-    Item subs = js_dc_channel_subscribers(self);
-    js_array_push(subs, handler);
-    js_dc_channel_refresh_has_subscribers(self);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_dc_channel_unsubscribe(Item handler) {
-    return (Item){.item = b2it(js_dc_channel_remove_subscriber(js_get_this(), handler))};
-}
-
-static Item js_dc_call_subscriber(Item subscriber, Item message, Item name) {
-    Item args[2] = { message, name };
-    Item result = js_call_function(subscriber, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
-    if (item_is_error(result)) {
-        Item error = js_error_lane_payload(result);
-        js_process_emit(js_name_item("uncaughtException", 17), error);
-    }
-    return ItemNull;
-}
-
-// Channel.publish(message)
-static Item js_dc_channel_publish(Item message) {
-    Item self = js_get_this();
-    JS_ASSIGN_OR_RETURN(subs, js_get_key_default(self, js_dc_key("_subscribers")));
-    JS_ASSIGN_OR_RETURN(name, js_get_key_default(self, js_dc_key("name")));
-    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-        JS_ARRAY_FOREACH(el, subs) {
-            if (js_is_callable(el)) {
-                js_dc_call_subscriber(el, message, name);
-            }
-        }
-    }
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-// Channel.hasSubscribers getter
-static Item js_dc_hasSubscribers(Item name) {
-    Item entries = js_dc_channel_entries();
-    int64_t count = get_type_id(entries) == LMD_TYPE_ARRAY ? js_array_length(entries) : 0;
-    for (int64_t i = 0; i < count; i++) {
-        Item entry_name = js_dc_channel_entry_part(entries, i, 0);
-        if (js_dc_item_same(entry_name, name)) {
-            Item channel = js_dc_channel_entry_part(entries, i, 1);
-            return (Item){.item = b2it(js_dc_channel_has_active_subscribers(channel))};
-        }
-    }
-    return (Item){.item = ITEM_FALSE};
-}
-
-static bool js_dc_named_channels_have_active_subscribers(Item owner,
-        const char** names, int count) {
-    TypeId owner_type = get_type_id(owner);
-    if (owner_type != LMD_TYPE_MAP) return false;
-    for (int i = 0; i < count; i++) {
-        Item key = js_dc_key(names[i]);
-        Item ch = js_get_key_default(owner, key);
-        if (js_dc_is_channel(ch) && js_dc_channel_has_active_subscribers(ch)) return true;
-    }
-    return false;
-}
-
-static Item js_dc_tc_hasSubscribers_getter(void) {
-    static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
-    return (Item){.item = b2it(js_dc_named_channels_have_active_subscribers(
-        js_get_this(), sub_names, 5))};
-}
-
-static Item js_dc_stores_key(void) {
-    return js_name_item("_stores", 7);
-}
-
-static Item js_als_apply_context(Item context);
-static void js_als_restore_context(Item previous);
-
-static Item js_dc_emit_deferred_error(void) {
-    Item errors = js_dc_deferred_error_entries();
-    int64_t count = get_type_id(errors) == LMD_TYPE_ARRAY ? js_array_length(errors) : 0;
-    if (count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
-    RootFrame roots(2);
-    Rooted<Item> error_root(roots, js_elements_get_int(errors, 0));
-    Rooted<Item> remaining_root(roots, js_array_new(0));
-    for (int64_t i = 1; i < count; i++) {
-        js_array_push(remaining_root.get(), js_elements_get_int(errors, i));
-    }
-    js_dc_state.deferred_errors = remaining_root.get();
-    Item error = error_root.get();
-    js_process_emit(js_name_item("uncaughtException", 17), error);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static void js_dc_defer_transform_error(Item error) {
-    js_root_vector_ensure_registered(&js_dc_state);
-    RootFrame roots(1);
-    Rooted<Item> error_root(roots, error);
-    Item errors = js_dc_deferred_error_entries();
-    js_array_push(errors, error_root.get());
-    js_next_tick_enqueue(js_new_native_function(js_dc_emit_deferred_error));
-}
-
-// Channel.bindStore(store[, transform])
-static Item js_dc_channel_bindStore(Item store, Item transform) {
-    Item self = js_get_this();
-    Item stores = js_get_key_default(self, js_dc_stores_key());
-    if (get_type_id(stores) != LMD_TYPE_ARRAY) {
-        stores = js_array_new(0);
-        js_set_key_default(self, js_dc_stores_key(), stores);
-    }
-    Item entry = js_array_new(0);
-    js_array_push(entry, store);
-    js_array_push(entry, transform);
-    js_array_push(stores, entry);
-    js_dc_channel_refresh_has_subscribers(self);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-// Channel.unbindStore(store)
-static Item js_dc_channel_unbindStore(Item store) {
-    Item self = js_get_this();
-    Item stores = js_get_key_default(self, js_dc_stores_key());
-    if (get_type_id(stores) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_FALSE};
-    Item next = js_array_new(0);
-    bool removed = false;
-    JS_ARRAY_FOREACH(entry, stores) {
-        if (get_type_id(entry) == LMD_TYPE_ARRAY && js_array_length(entry) >= 1) {
-            Item bound_store = js_elements_get_int(entry, 0);
-            if (!removed && bound_store.item == store.item) {
-                removed = true;
-                continue;
-            }
-        }
-        js_array_push(next, entry);
-    }
-    js_set_key_default(self, js_dc_stores_key(), next);
-    js_dc_channel_refresh_has_subscribers(self);
-    return (Item){.item = b2it(removed)};
-}
-
-static Item js_dc_build_store_context(Item channel, Item message) {
-    Item context = js_array_new(0);
-    Item stores = js_get_key_default(channel, js_dc_stores_key());
-    if (get_type_id(stores) != LMD_TYPE_ARRAY) return context;
-
-    JS_ARRAY_FOREACH(entry, stores) {
-        if (get_type_id(entry) != LMD_TYPE_ARRAY || js_array_length(entry) < 1) continue;
-        Item store = js_elements_get_int(entry, 0);
-        Item transform = js_array_length(entry) >= 2 ? js_elements_get_int(entry, 1) :
-            (Item){.item = ITEM_JS_UNDEFINED};
-        Item store_value = message;
-        if (js_is_callable(transform)) {
-            store_value = js_call_function(transform, (Item){.item = ITEM_JS_UNDEFINED}, &message, 1);
-            if (item_is_error(store_value)) {
-                Item error = js_error_lane_payload(store_value);
-                js_dc_defer_transform_error(error);
-                continue;
-            }
-            if (get_type_id(store_value) == LMD_TYPE_ERROR) {
-                js_dc_defer_transform_error(store_value);
-                continue;
-            }
-        }
-        Item pair = js_array_new(0);
-        js_array_push(pair, store);
-        js_array_push(pair, store_value);
-        js_array_push(context, pair);
-    }
-    return context;
-}
-
-static Item js_dc_channel_runStores(Item message, Item callback, Item this_arg, Item arg1, Item arg2) {
-    Item self = js_get_this();
-    Item context = js_dc_build_store_context(self, message);
-    Item publish_fn = js_get_key_default(self, js_name_item("publish", 7));
-    JS_ASSIGN_OR_RETURN(publish_result, js_als_context_call_args(context, publish_fn, self, &message, 1));
-
-    Item args[2] = { arg1, arg2 };
-    return js_als_context_call_args(context, callback, this_arg, args, 2);
-}
-
-static Item js_dc_scope_state_key(void) {
-    return js_name_item("__lambda_dc_scope_state__", 25);
-}
-
-static Item js_dc_dispose_key(void) {
-    Item name = js_name_item("dispose", 7);
-    return js_symbol_well_known(name);
-}
-
-static Item js_dc_scope_dispose(void) {
-    Item self = js_get_this();
-    Item state = js_get_key_default(self, js_dc_scope_state_key());
-    if (get_type_id(state) != LMD_TYPE_MAP) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-
-    Item disposed_key = js_dc_key("disposed");
-    Item disposed = js_get_key_default(state, disposed_key);
-    if (get_type_id(disposed) == LMD_TYPE_BOOL && it2b(disposed)) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    js_set_key_default(state, disposed_key, (Item){.item = ITEM_TRUE});
-
-    Item previous = js_get_key_default(state, js_dc_key("previous"));
-    Item end_ch = js_get_key_default(state, js_dc_key("endChannel"));
-    Item context = js_get_key_default(state, js_dc_key("context"));
-    if (!js_is_nullish(end_ch)) {
-        Item publish_result = js_dc_channel_publish_on(end_ch, context);
-        if (item_is_error(publish_result)) {
-            js_als_restore_context(previous);
-            return publish_result;
-        }
-    }
-
-    js_als_restore_context(previous);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_dc_make_scope(Item previous, Item end_ch, Item context) {
-    Item scope = js_new_object();
-    Item state = js_new_object();
-    js_set_key_default(state, js_dc_key("previous"), previous);
-    js_set_key_default(state, js_dc_key("endChannel"), end_ch);
-    js_set_key_default(state, js_dc_key("context"), context);
-    js_set_key_default(state, js_dc_key("disposed"), (Item){.item = ITEM_FALSE});
-    js_set_key_default(scope, js_dc_scope_state_key(), state);
-    js_runtime_set_native_key(scope, js_dc_dispose_key(), js_dc_scope_dispose);
-    return scope;
-}
-
-static Item js_dc_channel_withStoreScope(Item message) {
-    Item self = js_get_this();
-    Item context = js_dc_build_store_context(self, message);
-    Item previous = js_als_apply_context(context);
-    Item publish_result = js_dc_channel_publish_on(self, message);
-    if (item_is_error(publish_result)) {
-        js_als_restore_context(previous);
-        return publish_result;
-    }
-    return js_dc_make_scope(previous, (Item){.item = ITEM_JS_UNDEFINED},
-                            (Item){.item = ITEM_JS_UNDEFINED});
-}
-
-// dc.channel(name) — create or return existing channel
-static Item js_dc_channel_factory(Item name) {
-    js_root_vector_ensure_registered(&js_dc_state);
-    RootFrame roots(4);
-    Rooted<Item> name_root(roots, name);
-    if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
-        return js_dc_throw_invalid_arg_type("The \"name\" argument must be of type string or symbol.");
-    }
-    Rooted<Item> entries_root(roots, js_dc_channel_entries());
-    int64_t entry_count = get_type_id(entries_root.get()) == LMD_TYPE_ARRAY
-        ? js_array_length(entries_root.get()) : 0;
-    for (int64_t i = 0; i < entry_count; i++) {
-        if (js_dc_item_same(js_dc_channel_entry_part(entries_root.get(), i, 0), name_root.get())) {
-            return js_dc_channel_entry_part(entries_root.get(), i, 1);
-        }
-    }
-
-    Rooted<Item> channel_root(roots, js_new_object());
-    if (js_dc_channel_proto.item != 0) js_set_prototype(channel_root.get(), js_dc_channel_proto);
-    // Key and callback allocation can compact the new channel before its
-    // persistent cache owns it, so preserve both values through construction.
-    js_set_key_default(channel_root.get(), js_dc_key("name"), name_root.get());
-    js_set_key_default(channel_root.get(), js_dc_channel_marker_key(), (Item){.item = ITEM_TRUE});
-    js_set_key_default(channel_root.get(), js_dc_key("_subscribers"), js_array_new(0));
-    js_set_key_default(channel_root.get(), js_dc_stores_key(), js_array_new(0));
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("subscribe"), js_dc_channel_subscribe);
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("unsubscribe"), js_dc_channel_unsubscribe);
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("publish"), js_dc_channel_publish);
-    js_set_key_default(channel_root.get(), js_dc_key("hasSubscribers"), (Item){.item = ITEM_FALSE});
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("bindStore"), js_dc_channel_bindStore);
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("unbindStore"), js_dc_channel_unbindStore);
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("runStores"), js_dc_channel_runStores);
-    js_runtime_set_native_key(channel_root.get(), js_dc_key("withStoreScope"), js_dc_channel_withStoreScope);
-    Rooted<Item> entry_root(roots, js_array_new(0));
-    js_array_push(entry_root.get(), name_root.get());
-    js_array_push(entry_root.get(), channel_root.get());
-    js_array_push(entries_root.get(), entry_root.get());
-    return channel_root.get();
-}
-
-// dc.tracingChannel(name) — create a TracingChannel with start/end/asyncStart/asyncEnd/error channels
-static Item js_dc_tracing_channel(Item nameOrChannels) {
-    Item tc = js_new_object();
-    if (js_dc_tracing_channel_proto.item != 0) js_set_prototype(tc, js_dc_tracing_channel_proto);
-    static const char* sub_names[] = {"start", "end", "asyncStart", "asyncEnd", "error"};
-    for (int i = 0; i < 5; i++) {
-        Item sub_name;
-        TypeId name_type = get_type_id(nameOrChannels);
-        if (name_type == LMD_TYPE_STRING) {
-            String* base = it2s(nameOrChannels);
-            char buf[256];
-            snprintf(buf, sizeof(buf), "tracing:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
-            sub_name = js_name_item(buf, (int)strlen(buf));
-            Item ch = js_dc_channel_factory(sub_name);
-            js_set_key_default(tc, js_dc_key(sub_names[i]), ch);
-            continue;
-        }
-        if (name_type == LMD_TYPE_MAP) {
-            Item key = js_dc_key(sub_names[i]);
-            Item ch = js_get_key_default(nameOrChannels, key);
-            if (js_is_nullish(ch)) {
-                return js_throw_type_error("Cannot convert undefined or null to object");
-            }
-            if (!js_dc_is_channel(ch)) {
-                char message[128];
-                int len = snprintf(message, sizeof(message),
-                    "The \"nameOrChannels.%s\" property must be an instance of Channel.", sub_names[i]);
-                if (len < 0) len = 0;
-                if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
-                return js_dc_throw_invalid_arg_type(message);
-            }
-            js_set_key_default(tc, key, ch);
-            continue;
-        }
-        return js_dc_throw_invalid_arg_type(
-            "The \"nameOrChannels\" argument must be of type string or an instance of TracingChannel or Object.");
-    }
-    js_runtime_set_native_key(tc, js_name_item("subscribe", 9),
-        js_dc_tc_subscribe);
-    js_runtime_set_native_key(tc, js_name_item("unsubscribe", 11),
-        js_dc_tc_unsubscribe);
-    js_runtime_set_native_rest_key(tc, js_name_item("traceSync", 9), js_dc_tc_traceSync);
-    js_runtime_set_native_rest_key(tc, js_name_item("tracePromise", 12), js_dc_tc_tracePromise);
-    js_runtime_set_native_rest_key(tc, js_name_item("traceCallback", 13), js_dc_tc_traceCallback);
-    return tc;
-}
-
-static Item js_dc_update_subscriptions(Item self, Item handlers,
-        const char* const* names, int count, bool remove) {
-    bool done = true;
-    for (int i = 0; i < count; i++) {
-        Item key = js_dc_key(names[i]);
-        Item handler = js_get_key_default(handlers, key);
-        if (!js_is_callable(handler)) continue;
-        Item ch = js_get_key_default(self, key);
-        if (remove) {
-            if (!js_dc_channel_remove_subscriber(ch, handler)) done = false;
-        } else {
-            Item subs = js_dc_channel_subscribers(ch);
-            js_array_push(subs, handler);
-            js_dc_channel_refresh_has_subscribers(ch);
-        }
-    }
-    return remove ? (Item){.item = b2it(done)} : make_js_undefined();
-}
-
-// TracingChannel and boundedChannel differ only in the number of published
-// channels; one subscription kernel keeps their handler semantics aligned.
-static const char* js_dc_tracing_sub_names[] = {
-    "start", "end", "asyncStart", "asyncEnd", "error"
-};
-static const char* js_dc_bounded_sub_names[] = {"start", "end"};
-
-JS_FORWARD_STATIC_ITEM(js_dc_tc_subscribe, (Item handlers), js_dc_update_subscriptions,
-    (js_get_this(), handlers, js_dc_tracing_sub_names, 5, false))
-JS_FORWARD_STATIC_ITEM(js_dc_tc_unsubscribe, (Item handlers), js_dc_update_subscriptions,
-    (js_get_this(), handlers, js_dc_tracing_sub_names, 5, true))
-JS_FORWARD_STATIC_ITEM(js_dc_bc_subscribe, (Item handlers), js_dc_update_subscriptions,
-    (js_get_this(), handlers, js_dc_bounded_sub_names, 2, false))
-JS_FORWARD_STATIC_ITEM(js_dc_bc_unsubscribe, (Item handlers), js_dc_update_subscriptions,
-    (js_get_this(), handlers, js_dc_bounded_sub_names, 2, true))
-
-// Helper: publish a message on a channel object
-static Item js_dc_channel_publish_on(Item channel, Item message) {
-    JS_ASSIGN_OR_RETURN(subs, js_get_key_default(channel, js_dc_key("_subscribers")));
-    JS_ASSIGN_OR_RETURN(name, js_get_key_default(channel, js_dc_key("name")));
-    if (get_type_id(subs) == LMD_TYPE_ARRAY) {
-        JS_ARRAY_FOREACH(el, subs) {
-            if (js_is_callable(el)) {
-                js_dc_call_subscriber(el, message, name);
-            }
-        }
-    }
-    return ItemNull;
-}
-
-static void js_dc_channel_publish_with_stores(Item channel, Item message) {
-    Item context = js_dc_build_store_context(channel, message);
-    Item publish_fn = js_get_key_default(channel, js_dc_key("publish"));
-    (void)js_als_context_call_args(context, publish_fn, channel, &message, 1);
-}
-
-extern "C" Item js_diagnostics_channel_apply_store_context(const char* name, Item message) {
-    if (!name) return (Item){.item = ITEM_JS_UNDEFINED};
-    Item channel_name = js_dc_key(name);
-    Item channel = js_dc_channel_factory(channel_name);
-    Item context = js_dc_build_store_context(channel, message);
-    Item previous = js_als_apply_context(context);
-    js_dc_channel_publish_on(channel, message);
-    return previous;
-}
-
-extern "C" void js_diagnostics_channel_restore_context(Item previous) {
-    js_als_restore_context(previous);
-}
-
-extern "C" void js_diagnostics_channel_publish_named(const char* name, Item message) {
-    if (!name) return;
-    Item channel_name = js_dc_key(name);
-    Item channel = js_dc_channel_factory(channel_name);
-    js_dc_channel_publish_on(channel, message);
-}
-
-static Item js_dc_trace_promise_resolve(Item state, Item result) {
-    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 3) return result;
-    Item async_start_ch = js_elements_get_int(state, 0);
-    Item async_end_ch = js_elements_get_int(state, 1);
-    Item ctx = js_elements_get_int(state, 2);
-    js_set_key_default(ctx, js_dc_key("result"), result);
-    js_dc_channel_publish_with_stores(async_start_ch, ctx);
-    js_dc_channel_publish_on(async_end_ch, ctx);
-    return result;
-}
-
-static Item js_dc_trace_promise_reject(Item state, Item error) {
-    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 4) {
-        return js_throw_value(error);
-    }
-    Item async_start_ch = js_elements_get_int(state, 0);
-    Item async_end_ch = js_elements_get_int(state, 1);
-    Item ctx = js_elements_get_int(state, 2);
-    Item error_ch = js_elements_get_int(state, 3);
-    js_set_key_default(ctx, js_dc_key("error"), error);
-    js_dc_channel_publish_on(error_ch, ctx);
-    js_dc_channel_publish_with_stores(async_start_ch, ctx);
-    js_dc_channel_publish_on(async_end_ch, ctx);
-    return js_throw_value(error);
-}
-
-static int64_t js_dc_rest_length(Item rest_args) {
-    return get_type_id(rest_args) == LMD_TYPE_ARRAY ? js_array_length(rest_args) : 0;
-}
-
-// The native call ABI needs contiguous Items, while a callback can receive an
-// unbounded JavaScript rest list. RootSpan is the one activation-local owner
-// for that ABI view; it replaces every diagnostics-channel scratch array.
-struct JsDcArgumentList {
-    RootSpan roots;
-    int count = 0;
-    bool valid = true;
-
-    explicit JsDcArgumentList(int64_t requested_count)
-        : roots(requested_count > 0 && requested_count <= INT_MAX
-                    ? (size_t)requested_count : 0) {
-        if (requested_count < 0 || requested_count > INT_MAX) {
-            valid = false;
-            return;
-        }
-        count = (int)requested_count;
-        if (count > 0 && !roots.valid()) valid = false;
-    }
-
-    Item* items() {
-        return count > 0 ? roots.items() : NULL;
-    }
-
-    Item at(int index) {
-        return index >= 0 && index < count
-            ? roots.items()[index] : (Item){.item = ITEM_JS_UNDEFINED};
-    }
-
-    void set(int index, Item value) {
-        if (index >= 0 && index < count) roots.items()[index] = value;
-    }
-};
-
-struct JsDcRestArguments {
-    RootFrame input_roots;
-    Rooted<Item> rest;
-    JsDcArgumentList values;
-
-    explicit JsDcRestArguments(Item rest_args)
-        : input_roots(1), rest(input_roots, rest_args),
-          values(js_dc_rest_length(rest.get())) {
-        if (!input_roots.valid() || !values.valid) return;
-        for (int i = 0; i < values.count; i++) {
-            values.set(i, js_elements_get_int(rest.get(), i));
-        }
-    }
-
-    bool valid() const {
-        return input_roots.valid() && values.valid;
-    }
-};
-
-static int js_dc_callback_position(Item value, int extra_count) {
-    int64_t pos = 0;
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        pos = it2i(value);
-    } else if (type == LMD_TYPE_INT64) {
-        pos = it2l(value);
-    } else if (type == LMD_TYPE_FLOAT) {
-        double d = it2d(value);
-        if (isfinite(d)) pos = (int64_t)d;
-    }
-    if (pos < 0) return 0;
-    if (pos > extra_count) return extra_count;
-    return (int)pos;
-}
-
-static void js_dc_emit_trace_promise_non_thenable_warning(Item fn) {
-    const char* name = "<anonymous>";
-    int name_len = 11;
-    if (get_type_id(fn) == LMD_TYPE_FUNC) {
-        JsFunction* function = (JsFunction*)fn.function;
-        if (function && function->name && function->name->len > 0) {
-            name = function->name->chars;
-            name_len = (int)function->name->len;
-        }
-    }
-
-    char message[256];
-    int message_len = snprintf(message, sizeof(message),
-        "tracePromise was called with the function '%.*s', which returned a non-thenable.",
-        name_len, name);
-    if (message_len < 0) return;
-    if (message_len >= (int)sizeof(message)) message_len = (int)sizeof(message) - 1;
-
-    Item warning = js_new_object();
-    js_set_key_default(warning, js_dc_key("name"), js_name_item("Warning", 7));
-    js_set_key_default(warning, js_dc_key("message"), js_name_item(message, message_len));
-    js_process_emit(js_dc_key("warning"), warning);
-}
-
-// TracingChannel.traceSync(fn, context) — run fn, publishing to start/end channels
-static Item js_dc_trace_invoke(Item fn, Item this_arg, Item* args, int argc,
-                                Item start_ch, Item end_ch, Item error_ch,
-                                Item context, bool publish_error_result, Item* context_out) {
-    Item ctx = js_dc_context_or_new(context);
-    Item store_context = js_dc_build_store_context(start_ch, ctx);
-    Item publish_fn = js_get_key_default(start_ch, js_dc_key("publish"));
-    JS_ASSIGN_OR_RETURN(publish_result, js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1));
-    Item result = js_als_context_call_args(store_context, fn, this_arg, args, argc);
-    if (item_is_error(result)) {
-        Item error = js_error_lane_payload(result);
-        js_set_key_default(ctx, js_dc_key("error"), error);
-        js_dc_channel_publish_on(error_ch, ctx);
-        js_dc_channel_publish_on(end_ch, ctx);
-        return js_throw_value(error);
-    }
-    if (publish_error_result && get_type_id(result) == LMD_TYPE_ERROR) {
-        js_set_key_default(ctx, js_dc_key("error"), result);
-        js_dc_channel_publish_on(error_ch, ctx);
-    }
-    js_set_key_default(ctx, js_dc_key("result"), result);
-    js_dc_channel_publish_on(end_ch, ctx);
-    if (context_out) *context_out = ctx;
-    return result;
-}
-
-static Item js_dc_tc_traceSync(Item fn, Item context, Item this_arg, Item rest_args) {
-    Item self = js_get_this();
-    Item start_ch = js_get_key_default(self, js_name_item("start", 5));
-    Item end_ch = js_get_key_default(self, js_name_item("end", 3));
-    Item error_ch = js_get_key_default(self, js_name_item("error", 5));
-    JsDcRestArguments args(rest_args);
-    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
-    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
-                        js_dc_channel_has_active_subscribers(end_ch) ||
-                        js_dc_channel_has_active_subscribers(error_ch);
-    if (!should_trace) {
-        return js_call_function(fn, this_arg, args.values.items(), args.values.count);
-    }
-    Item result = js_dc_trace_invoke(fn, this_arg, args.values.items(), args.values.count,
-        start_ch, end_ch, error_ch, context, true, NULL);
-    return result;
-}
-
-// TracingChannel.tracePromise(fn, context)
-static Item js_dc_tc_tracePromise(Item fn, Item context, Item this_arg, Item rest_args) {
-    Item self = js_get_this();
-    Item start_ch = js_get_key_default(self, js_name_item("start", 5));
-    Item end_ch = js_get_key_default(self, js_name_item("end", 3));
-    Item async_start_ch = js_get_key_default(self, js_name_item("asyncStart", 10));
-    Item async_end_ch = js_get_key_default(self, js_name_item("asyncEnd", 8));
-    Item error_ch = js_get_key_default(self, js_name_item("error", 5));
-    JsDcRestArguments args(rest_args);
-    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
-    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
-                        js_dc_channel_has_active_subscribers(end_ch) ||
-                        js_dc_channel_has_active_subscribers(async_start_ch) ||
-                        js_dc_channel_has_active_subscribers(async_end_ch) ||
-                        js_dc_channel_has_active_subscribers(error_ch);
-    if (!should_trace) {
-        return js_call_function(fn, this_arg, args.values.items(), args.values.count);
-    }
-    Item ctx = ItemNull;
-    JS_ASSIGN_OR_RETURN(result, js_dc_trace_invoke(fn, this_arg,
-        args.values.items(), args.values.count,
-        start_ch, end_ch, error_ch, context, false, &ctx));
-    Item then_fn = js_get_key_default(result, js_dc_key("then"));
-    if (!js_is_callable(then_fn)) {
-        js_dc_emit_trace_promise_non_thenable_warning(fn);
-        return result;
-    }
-
-    Item state = js_array_new(0);
-    js_array_push(state, async_start_ch);
-    js_array_push(state, async_end_ch);
-    js_array_push(state, ctx);
-    js_array_push(state, error_ch);
-    Item resolve_fn = js_bind_function(js_new_native_function(js_dc_trace_promise_resolve),
-                                       (Item){.item = ITEM_JS_UNDEFINED}, &state, 1);
-    Item reject_fn = js_bind_function(js_new_native_function(js_dc_trace_promise_reject),
-                                      (Item){.item = ITEM_JS_UNDEFINED}, &state, 1);
-    Item then_args[2] = { resolve_fn, reject_fn };
-    return js_call_function(then_fn, result, then_args, 2);
-}
-
-static Item js_dc_trace_callback_invoke(Item state, Item rest_args) {
-    if (get_type_id(state) != LMD_TYPE_ARRAY || js_array_length(state) < 6) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-
-    Item async_start_ch = js_elements_get_int(state, 0);
-    Item async_end_ch = js_elements_get_int(state, 1);
-    Item error_ch = js_elements_get_int(state, 2);
-    Item ctx = js_elements_get_int(state, 3);
-    Item callback = js_elements_get_int(state, 4);
-
-    JsDcRestArguments args(rest_args);
-    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
-
-    Item err = args.values.at(0);
-    bool has_error = !js_is_nullish(err);
-    if (has_error) {
-        js_set_key_default(ctx, js_dc_key("error"), err);
-        js_dc_channel_publish_on(error_ch, ctx);
-        js_delete_property(ctx, js_dc_key("error"));
-    } else if (args.values.count > 1) {
-        js_set_key_default(ctx, js_dc_key("result"), args.values.at(1));
-    }
-
-    Item async_store_context = js_dc_build_store_context(async_start_ch, ctx);
-    Item publish_fn = js_get_key_default(async_start_ch, js_dc_key("publish"));
-    js_als_context_call_args(async_store_context, publish_fn, async_start_ch, &ctx, 1);
-    js_dc_channel_publish_on(async_end_ch, ctx);
-    return js_als_context_call_args(async_store_context, callback,
-                                    (Item){.item = ITEM_JS_UNDEFINED},
-                                    args.values.items(), args.values.count);
-}
-
-// TracingChannel.traceCallback(fn, position, context, thisArg, callback, ...args)
-static Item js_dc_tc_traceCallback(Item fn, Item rest_args) {
-    Item self = js_get_this();
-    Item start_ch = js_get_key_default(self, js_name_item("start", 5));
-    Item end_ch = js_get_key_default(self, js_name_item("end", 3));
-    Item async_start_ch = js_get_key_default(self, js_name_item("asyncStart", 10));
-    Item async_end_ch = js_get_key_default(self, js_name_item("asyncEnd", 8));
-    Item error_ch = js_get_key_default(self, js_name_item("error", 5));
-
-    JsDcRestArguments rest(rest_args);
-    if (!rest.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
-    int total = rest.values.count;
-    Item callback = rest.values.at(3);
-    if (!js_is_callable(callback)) {
-        return js_throw_type_error("The \"callback\" argument must be of type function.");
-    }
-
-    Item position_item = rest.values.at(0);
-    Item context = rest.values.at(1);
-    Item this_arg = rest.values.at(2);
-    Item ctx = js_dc_context_or_new(context);
-    int extra_count = total > 4 ? total - 4 : 0;
-
-    bool should_trace = js_dc_channel_has_active_subscribers(start_ch) ||
-                        js_dc_channel_has_active_subscribers(end_ch) ||
-                        js_dc_channel_has_active_subscribers(async_start_ch) ||
-                        js_dc_channel_has_active_subscribers(async_end_ch) ||
-                        js_dc_channel_has_active_subscribers(error_ch);
-
-    Item callback_for_fn = callback;
-    if (should_trace) {
-        Item state = js_array_new(0);
-        js_array_push(state, async_start_ch);
-        js_array_push(state, async_end_ch);
-        js_array_push(state, error_ch);
-        js_array_push(state, ctx);
-        js_array_push(state, callback);
-        js_array_push(state, (Item){.item = ITEM_JS_UNDEFINED});
-        callback_for_fn = js_bind_function(js_new_native_rest_function(js_dc_trace_callback_invoke),
-                                           (Item){.item = ITEM_JS_UNDEFINED}, &state, 1);
-    }
-
-    int callback_pos = js_dc_callback_position(position_item, extra_count);
-    JsDcArgumentList fn_args((int64_t)extra_count + 1);
-    if (!fn_args.valid) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
-    for (int i = 0; i < fn_args.count; i++) {
-        if (i < callback_pos) {
-            fn_args.set(i, rest.values.at(4 + i));
-        } else if (i == callback_pos) {
-            fn_args.set(i, callback_for_fn);
-        } else {
-            fn_args.set(i, rest.values.at(4 + i - 1));
-        }
-    }
-
-    if (!should_trace) {
-        return js_call_function(fn, this_arg, fn_args.items(), fn_args.count);
-    }
-
-    Item store_context = js_dc_build_store_context(start_ch, ctx);
-    Item publish_fn = js_get_key_default(start_ch, js_dc_key("publish"));
-    JS_ASSIGN_OR_RETURN(publish_result, js_als_context_call_args(store_context, publish_fn, start_ch, &ctx, 1));
-    Item result = js_als_context_call_args(store_context, fn, this_arg,
-        fn_args.items(), fn_args.count);
-    if (item_is_error(result)) {
-        Item error = js_error_lane_payload(result);
-        js_set_key_default(ctx, js_dc_key("error"), error);
-        js_dc_channel_publish_on(error_ch, ctx);
-        js_delete_property(ctx, js_dc_key("error"));
-        js_dc_channel_publish_on(end_ch, ctx);
-        return js_throw_value(error);
-    }
-    js_dc_channel_publish_on(end_ch, ctx);
-    return result;
-}
-
-// BoundedChannel.run(context, fn, thisArg, ...args) — publish to start, call fn, publish to end
-static Item js_dc_bc_run(Item context, Item fn, Item this_arg, Item rest_args) {
-    Item self = js_get_this();
-    Item start_ch = js_get_key_default(self, js_name_item("start", 5));
-    Item end_ch = js_get_key_default(self, js_name_item("end", 3));
-    JsDcRestArguments args(rest_args);
-    if (!args.valid()) return js_throw_range_error("Cannot retain diagnostics-channel arguments");
-
-    Item store_context = js_dc_build_store_context(start_ch, context);
-    Item previous = js_als_apply_context(store_context);
-    Item start_result = js_dc_channel_publish_on(start_ch, context);
-    if (item_is_error(start_result)) {
-        js_als_restore_context(previous);
-        return start_result;
-    }
-
-    Item result = js_call_function(fn, this_arg, args.values.items(), args.values.count);
-    if (item_is_error(result)) {
-        Item error = js_error_lane_payload(result);
-        (void)js_dc_channel_publish_on(end_ch, context);
-        js_als_restore_context(previous);
-        return js_throw_value(error);
-    }
-
-    Item end_result = js_dc_channel_publish_on(end_ch, context);
-    js_als_restore_context(previous);
-    return item_is_error(end_result) ? end_result : result;
-}
-
-static Item js_dc_bc_withScope(Item context) {
-    Item self = js_get_this();
-    Item start_ch = js_get_key_default(self, js_name_item("start", 5));
-    Item end_ch = js_get_key_default(self, js_name_item("end", 3));
-    Item store_context = js_dc_build_store_context(start_ch, context);
-    Item previous = js_als_apply_context(store_context);
-    Item start_result = js_dc_channel_publish_on(start_ch, context);
-    if (item_is_error(start_result)) {
-        js_als_restore_context(previous);
-        return start_result;
-    }
-    return js_dc_make_scope(previous, end_ch, context);
-}
-
-// dc.boundedChannel(name) — create a TracingChannel with run() method
-static Item js_dc_bounded_channel(Item nameOrChannels) {
-    Item tc = js_new_object();
-    if (js_dc_bounded_channel_proto.item != 0) js_set_prototype(tc, js_dc_bounded_channel_proto);
-    static const char* sub_names[] = {"start", "end"};
-    TypeId name_type = get_type_id(nameOrChannels);
-    for (int i = 0; i < 2; i++) {
-        Item key = js_dc_key(sub_names[i]);
-        Item ch;
-        if (name_type == LMD_TYPE_STRING) {
-            String* base = it2s(nameOrChannels);
-            char buf[256];
-            snprintf(buf, sizeof(buf), "tracing:%.*s:%s", (int)base->len, base->chars, sub_names[i]);
-            Item sub_name = js_name_item(buf, (int)strlen(buf));
-            ch = js_dc_channel_factory(sub_name);
-        } else if (name_type == LMD_TYPE_MAP) {
-            ch = js_get_key_default(nameOrChannels, key);
-            if (js_is_nullish(ch)) {
-                return js_throw_type_error("Cannot convert undefined or null to object");
-            }
-            if (!js_dc_is_channel(ch)) {
-                char message[128];
-                int len = snprintf(message, sizeof(message),
-                    "The \"nameOrChannels.%s\" property must be an instance of Channel.", sub_names[i]);
-                if (len < 0) len = 0;
-                if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
-                return js_dc_throw_invalid_arg_type(message);
-            }
-        } else {
-            return js_dc_throw_invalid_arg_type(
-                "The \"nameOrChannels\" argument must be of type string or Object.");
-        }
-        js_set_key_default(tc, key, ch);
-    }
-    js_runtime_set_native_key(tc, js_name_item("subscribe", 9),
-        js_dc_bc_subscribe);
-    js_runtime_set_native_key(tc, js_name_item("unsubscribe", 11),
-        js_dc_bc_unsubscribe);
-    js_runtime_set_native_rest_key(tc, js_name_item("run", 3), js_dc_bc_run);
-    js_runtime_set_native_rest_key(tc, js_name_item("runStores", 9), js_dc_bc_run);
-    js_runtime_set_native_key(tc, js_name_item("withScope", 9),
-        js_dc_bc_withScope);
-    return tc;
-}
-
-// dc.subscribe(name, handler) — convenience wrapper
-static Item js_dc_subscribe(Item name, Item handler) {
-    if (!js_is_callable(handler)) {
-        return js_dc_throw_invalid_arg_type("The \"subscriber\" argument must be of type function.");
-    }
-    JS_ASSIGN_OR_RETURN(ch, js_dc_channel_factory(name));
-    js_array_push(js_dc_channel_subscribers(ch), handler);
-    js_dc_channel_refresh_has_subscribers(ch);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_dc_unsubscribe(Item name, Item handler) {
-    Item ch = js_dc_channel_factory(name);
-    return (Item){.item = b2it(js_dc_channel_remove_subscriber(ch, handler))};
-}
-
-// =============================================================================
-// async_hooks module stub
-// =============================================================================
-
-
-// Generic no-op function for module stubs — returns undefined
-static Item js_stub_noop(void) {
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-// Domain.run(fn) — run fn in this domain context
-static Item js_domain_run(Item fn) {
-    Item self = js_get_this();
-    if (js_is_callable(fn)) {
-        Item previous = js_domain_capture_stack();
-        int parent_count = js_domain_stack_count;
-        js_domain_push(self);
-        Item result = js_call_function(fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
-        if (item_is_error(result)) {
-            Item error = js_error_lane_payload(result);
-            int restore_depth = parent_count + 1;
-            if (restore_depth > 64) restore_depth = 64;
-            root_vector_shrink(&js_domain_stack_state, restore_depth);
-            js_domain_sync_visible_state();
-            bool handled = false;
-            JS_ASSIGN_OR_RETURN(emit_status, js_domain_emit_error_at(self, error, parent_count, &handled));
-            if (!handled) {
-                // Domains without an error listener do not own the exception;
-                // restore the outer stack before process uncaughtException runs.
-                js_domain_restore_stack(previous);
-                return js_throw_value(error);
-            }
-            js_domain_restore_stack(previous);
-            return (Item){.item = ITEM_JS_UNDEFINED};
-        }
-        js_domain_restore_stack(previous);
-        return result;
-    }
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-// Domain.enter/exit
-static Item js_domain_enter(void) {
-    Item self = js_get_this();
-    js_domain_push(self);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_domain_exit(void) {
-    if (js_domain_stack_count > 0) root_vector_pop(&js_domain_stack_state);
-    js_domain_sync_visible_state();
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-// Domain.add/remove — no-ops
-static Item js_domain_add(Item emitter) { return (Item){.item = ITEM_JS_UNDEFINED}; }
-static Item js_domain_remove(Item emitter) { return (Item){.item = ITEM_JS_UNDEFINED}; }
-
-static Item js_domain_bound_call(Item domain, Item fn) {
-    if (!js_is_callable(fn)) return make_js_undefined();
-    Item result = js_domain_call_function(domain, fn, (Item){.item = ITEM_JS_UNDEFINED}, NULL, 0);
-    if (item_is_error(result)) {
-        Item error = js_error_lane_payload(result);
-        bool handled = false;
-        JS_ASSIGN_OR_RETURN(emit_status, js_domain_emit_error(domain, error, &handled));
-        return make_js_undefined();
-    }
-    return result;
-}
-
-static Item js_domain_bind(Item fn) {
-    if (!js_is_callable(fn)) return fn;
-    Item self = js_get_this();
-    Item base = js_new_native_function(js_domain_bound_call);
-    Item args[2] = {self, fn};
-    return js_bind_function(base, ItemNull, args, 2);
-}
-
-static Item js_domain_intercept(Item fn) { return js_domain_bind(fn); }
-
-static Item js_domain_on(Item event_item, Item listener) {
-    Item self = js_get_this();
-    if (get_type_id(event_item) == LMD_TYPE_STRING && js_is_callable(listener)) {
-        String* ev = it2s(event_item);
-        if (ev && ev->len == 5 && memcmp(ev->chars, "error", 5) == 0) {
-            js_set_key_cstr(self, "__domain_error__", listener);
-        }
-    }
-    return self;
-}
-
-// domain.create() — returns a Domain object that extends EventEmitter
-static Item js_domain_create(void) {
-    Item d = js_new_object();
-    // Core methods
-#define JS_DOMAIN_METHODS(M) \
-    M("run", js_domain_run) M("enter", js_domain_enter) M("exit", js_domain_exit) \
-    M("add", js_domain_add) M("remove", js_domain_remove) \
-    M("intercept", js_domain_intercept) M("bind", js_domain_bind)
-#define JS_DOMAIN_INSTALL(name, target) js_runtime_set_native_method(d, name, target);
-    JS_DOMAIN_METHODS(JS_DOMAIN_INSTALL)
-#undef JS_DOMAIN_INSTALL
-#undef JS_DOMAIN_METHODS
-    // EventEmitter-like methods needed by domain error handling.
-#define JS_DOMAIN_EVENT_METHODS(M) \
-    M("on", js_domain_on) M("once", js_domain_on) M("emit", js_stub_noop) \
-    M("removeListener", js_stub_noop) M("removeAllListeners", js_stub_noop) \
-    M("addListener", js_stub_noop)
-#define JS_DOMAIN_INSTALL_EVENT(name, target) js_runtime_set_native_method(d, name, target);
-    JS_DOMAIN_EVENT_METHODS(JS_DOMAIN_INSTALL_EVENT)
-#undef JS_DOMAIN_INSTALL_EVENT
-#undef JS_DOMAIN_EVENT_METHODS
-    // members array
-    js_set_key_cstr(d, "members", js_array_new(0));
-    return d;
-}
 extern "C" bool js_string_equals(Item value, const char* expected) {
     if (get_type_id(value) != LMD_TYPE_STRING || !expected) return false;
     String* s = it2s(value);
     return s && str_eq_const(s->chars, s->len, expected);
-}
-
-extern "C" bool js_string_items_equal(Item left, Item right) {
-    if (get_type_id(left) != LMD_TYPE_STRING || get_type_id(right) != LMD_TYPE_STRING) return false;
-    String* left_string = it2s(left);
-    String* right_string = it2s(right);
-    return left_string && right_string && str_eq(left_string->chars, left_string->len,
-                                                  right_string->chars, right_string->len);
 }
 
 extern "C" bool js_is_vm_context_error(Item value) {
@@ -34355,861 +33197,25 @@ extern "C" bool js_is_vm_context_error(Item value) {
            (get_type_id(marker) == LMD_TYPE_INT && it2i(marker) != 0);
 }
 
-#define js_cluster_primary_options (js_runtime_state.cluster.primary_options)
-#define js_cluster_next_worker_id (js_runtime_state.cluster.next_worker_id)
-
-static bool js_cluster_is_object_item(Item item) {
-    TypeId type = get_type_id(item);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP;
-}
-
-static bool js_cluster_fd_is_listening_socket(int fd) {
-#ifdef _WIN32
-    (void)fd;
-    return false;
-#else
-    struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) return false;
-    int accepting = 0;
-    socklen_t accepting_len = sizeof(accepting);
-    if (getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) != 0) return false;
-    return accepting != 0;
-#endif
-}
-
-static bool js_cluster_is_worker_process(void) {
-    const char* worker_id = getenv("NODE_UNIQUE_ID");
-    return worker_id && worker_id[0] != '\0';
-}
-
-static Item js_cluster_worker_on(Item event_item, Item callback) {
-    Item self = js_get_this();
-    if (js_string_equals(event_item, "exit") && js_is_callable(callback)) {
-        Item args[2] = {
-            (Item){.item = i2it(0)},
-            ItemNull
-        };
-        js_call_function(callback, self, args, 2);
-    }
-    return self;
-}
-
-static Item js_cluster_worker_disconnect(void) {
-    js_host_hooks_run_shutdown_participants();
-    Item process_obj = js_get_process_object_value();
-    Item disconnect = js_get_key_default(process_obj, js_cluster_key("disconnect"));
-    if (js_is_callable(disconnect)) {
-        // cluster worker disconnect owns server shutdown first; plain process
-        // IPC close alone leaves worker listeners refed until the drain watchdog.
-        js_call_function(disconnect, process_obj, NULL, 0);
-        js_microtask_flush();
-    }
-    return make_js_undefined();
-}
-
-static void js_cluster_copy_env(Item target, Item source) {
-    if (!js_cluster_is_object_item(target) || !js_cluster_is_object_item(source)) return;
-    Item keys = js_object_keys(source);
-    if (get_type_id(keys) != LMD_TYPE_ARRAY) return;
-    JS_ARRAY_FOREACH(key, keys) {
-        if (get_type_id(key) != LMD_TYPE_STRING) continue;
-        js_set_key_default(target, key, js_get_key_default(source, key));
-    }
-}
-
-static Item js_cluster_make_worker_env(Item fork_env, int64_t worker_id) {
-    Item env = js_new_object();
-    Item process_obj = js_get_process_object_value();
-    Item process_env = js_get_key_default(process_obj, js_cluster_key("env"));
-    js_cluster_copy_env(env, process_env);
-    js_cluster_copy_env(env, fork_env);
-
-    char id_buf[32];
-    snprintf(id_buf, sizeof(id_buf), "%lld", (long long)worker_id);
-    js_set_key_default(env, js_cluster_key("NODE_UNIQUE_ID"), js_name_item(id_buf, strlen(id_buf)));
-    return env;
-}
-
-static Item js_cluster_primary_exit_kill_worker(Item env_item, Item code) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    Item child = env ? env[0] : make_js_undefined();
-    Item kill = js_get_key_default(child, js_cluster_key("kill"));
-    if (js_is_callable(kill)) {
-        Item signal = js_cluster_key("SIGTERM");
-        js_call_function(kill, child, &signal, 1);
-        js_microtask_flush();
-    }
-    return make_js_undefined();
-}
-
-static void js_cluster_register_worker_exit_kill(Item child) {
-    Item process_obj = js_get_process_object_value();
-    Item on = js_get_key_default(process_obj, js_cluster_key("on"));
-    if (!js_is_callable(on)) return;
-    Item* env = js_alloc_env1(child);
-    Item listener = js_new_native_closure(js_cluster_primary_exit_kill_worker, 1, env, 1);
-    Item args[2] = { js_cluster_key("exit"), listener };
-    js_call_function(on, process_obj, args, 2);
-    js_microtask_flush();
-}
-
-static Item js_cluster_make_worker_object(void) {
-    Item worker = js_new_object();
-    const char* worker_id = getenv("NODE_UNIQUE_ID");
-    int64_t id = worker_id && worker_id[0] ? atoll(worker_id) : 1;
-    js_set_key_default(worker, js_cluster_key("id"), (Item){.item = i2it(id)});
-    Item process_obj = js_get_process_object_value();
-    js_set_key_default(worker, js_cluster_key("process"), process_obj);
-    Item send = js_get_key_default(process_obj, js_cluster_key("send"));
-    if (js_is_callable(send)) js_set_key_default(worker, js_cluster_key("send"), send);
-    js_runtime_set_native_key(worker, js_cluster_key("disconnect"),
-        js_cluster_worker_disconnect);
-    Item on = js_get_key_default(process_obj, js_cluster_key("on"));
-    if (js_is_callable(on)) js_set_key_default(worker, js_cluster_key("on"), on);
-    Item once = js_get_key_default(process_obj, js_cluster_key("once"));
-    if (js_is_callable(once)) js_set_key_default(worker, js_cluster_key("once"), once);
-    return worker;
-}
-
-extern "C" void js_cluster_notify_worker_listening(void) {
-    if (!js_cluster_is_worker_process()) return;
-    Item process_obj = js_get_process_object_value();
-    Item send = js_get_key_default(process_obj, js_cluster_key("send"));
-    if (!js_is_callable(send)) return;
-    extern void js_process_ipc_clear_force_ref(void);
-    Item message = js_new_object();
-    // cluster readiness is an internal IPC frame; without it primary-side
-    // worker.once('listening') waits forever while the worker is already bound.
-    js_set_key_default(message, js_cluster_key("__lambda_cluster_listening__"),
-                    (Item){.item = ITEM_TRUE});
-    js_call_function(send, process_obj, &message, 1);
-    js_process_ipc_clear_force_ref();
-    js_microtask_flush();
-}
-
-static Item js_cluster_fork(Item fork_env) {
-    Item argv = js_get_process_argv();
-    if (get_type_id(argv) != LMD_TYPE_ARRAY || js_array_length(argv) < 2) {
-        Item worker = js_new_object();
-        js_set_key_default(worker, js_cluster_key("id"), (Item){.item = i2it(1)});
-        Item on_fn = js_new_native_function(js_cluster_worker_on);
-        js_set_key_default(worker, js_cluster_key("on"), on_fn);
-        js_set_key_default(worker, js_cluster_key("once"), on_fn);
-        return worker;
-    }
-
-    int64_t worker_id = js_cluster_next_worker_id++;
-    Item module_path = js_elements_get_int(argv, 1);
-    Item fork_args = js_array_new(0);
-    if (get_type_id(js_cluster_primary_options) == LMD_TYPE_MAP ||
-        get_type_id(js_cluster_primary_options) == LMD_TYPE_VMAP) {
-        Item setup_args = js_get_key_default(js_cluster_primary_options, js_cluster_key("args"));
-        if (get_type_id(setup_args) == LMD_TYPE_ARRAY) {
-            int64_t len = js_array_length(setup_args);
-            for (int64_t i = 0; i < len; i++) {
-                js_array_push(fork_args, js_elements_get_int(setup_args, i));
-            }
-        }
-    }
-
-    Item options = js_new_object();
-    Item stdio = js_array_new(0);
-    js_array_push(stdio, (Item){.item = i2it(0)});
-    js_array_push(stdio, (Item){.item = i2it(1)});
-    js_array_push(stdio, (Item){.item = i2it(2)});
-    if (js_cluster_fd_is_listening_socket(3)) {
-        // only inherit fd 3 when it is the parent-provided listening socket;
-        // test runners may keep unrelated descriptors open there, causing spawn EBADF.
-        js_array_push(stdio, (Item){.item = i2it(3)});
-    }
-    js_array_push(stdio, js_cluster_key("ipc"));
-    js_set_key_default(options, js_cluster_key("stdio"), stdio);
-    js_set_key_default(options, js_cluster_key("env"), js_cluster_make_worker_env(fork_env, worker_id));
-
-    Item rest = js_array_new(0);
-    js_array_push(rest, module_path);
-    js_array_push(rest, fork_args);
-    js_array_push(rest, options);
-
-    const char* old_ipc_ref = getenv("LAMBDA_JS_IPC_REF");
-    char old_ipc_ref_buf[32];
-    bool had_ipc_ref = old_ipc_ref != NULL;
-    if (had_ipc_ref) {
-        int old_len = (int)strlen(old_ipc_ref);
-        if (old_len >= (int)sizeof(old_ipc_ref_buf)) old_len = (int)sizeof(old_ipc_ref_buf) - 1;
-        str_copy(old_ipc_ref_buf, sizeof(old_ipc_ref_buf), old_ipc_ref, old_len);
-    }
-    // cluster workers use IPC as an internal readiness channel even without public message listeners.
-    setenv("LAMBDA_JS_IPC_REF", "1", 1);
-    // The Node cluster namespace is no longer published while its process
-    // implementation is absent, so no child-process backend may be selected.
-    Item child = js_new_object();
-    if (had_ipc_ref) setenv("LAMBDA_JS_IPC_REF", old_ipc_ref_buf, 1);
-    else unsetenv("LAMBDA_JS_IPC_REF");
-    js_set_key_default(child, js_cluster_key("id"), (Item){.item = i2it(worker_id)});
-    js_set_key_default(child, js_cluster_key("process"), child);
-    // cluster workers report online after fork; without queuing this, callers
-    // that send initial IPC from worker.on('online') never start their worker.
-    js_host_hooks_emit_cluster_online(child);
-    // cluster primaries own worker lifetimes; otherwise process.exit(0) leaves
-    // the worker's server handle alive after the primary intentionally exits.
-    js_cluster_register_worker_exit_kill(child);
-    return child;
-}
-
-static Item js_cluster_setup_primary(Item options) {
-    RootFrame roots(1);
-    Rooted<Item> options_root(roots, options);
-    if (!roots.valid() ||
-            !js_root_vector_ensure_registered(&js_runtime_state.cluster)) {
-        return ItemError;
-    }
-    js_cluster_primary_options = options_root.get();
-    Item self = js_get_this();
-    js_runtime_set_native_key(self, js_name_item("fork", 4),
-        js_cluster_fork);
-    return make_js_undefined();
-}
-
-static void js_repl_set_str(Item obj, const char* name, const char* value) {
-    js_set_key_default(obj, js_repl_key(name),
-        js_name_item(value ? value : "", value ? strlen(value) : 0));
-}
-
-static const char* js_repl_cstr(Item value, int* len) {
-    Item str = js_to_string(value);
-    if (get_type_id(str) != LMD_TYPE_STRING) {
-        if (len) *len = 0;
-        return "";
-    }
-    String* s = it2s(str);
-    if (!s) {
-        if (len) *len = 0;
-        return "";
-    }
-    if (len) *len = (int)s->len;
-    return s->chars;
-}
-
-static void js_repl_output(Item repl, const char* text, int len) {
-    if (!text || len <= 0) return;
-    Item output = js_get_key_default(repl, js_repl_key("output"));
-    Item write_fn = js_get_key_default(output, js_repl_key("write"));
-    if (!js_is_callable(write_fn)) return;
-    Item chunk = js_name_item(text, (size_t)len);
-    js_call_function(write_fn, output, &chunk, 1);
-}
-
-#define js_repl_output_cstr(repl, text) \
-    js_repl_output(repl, text, text ? (int)strlen(text) : 0)
-
-static void js_repl_prompt(Item repl) {
-    Item prompt_item = js_get_key_default(repl, js_repl_key("prompt"));
-    if (get_type_id(prompt_item) != LMD_TYPE_STRING) return;
-    String* prompt = it2s(prompt_item);
-    if (!prompt || prompt->len == 0) return;
-    if (js_get_key_default(repl, js_repl_key("terminal")).item == ITEM_TRUE) {
-        js_repl_output_cstr(repl, "\x1b[1G\x1b[0J");
-        js_repl_output(repl, prompt->chars, (int)prompt->len);
-        char cursor[32];
-        int n = snprintf(cursor, sizeof(cursor), "\x1b[%dG", (int)prompt->len + 1);
-        js_repl_output(repl, cursor, n);
-    } else {
-        js_repl_output(repl, prompt->chars, (int)prompt->len);
-    }
-}
-
-static bool js_repl_starts_with(const char* s, int len, const char* prefix) {
-    return s && prefix && len >= 0 && str_starts_with_const(s, (size_t)len, prefix);
-}
-
-static bool js_repl_contains(const char* s, int len, const char* needle) {
-    return s && needle && len >= 0 && str_contains(s, (size_t)len, needle, strlen(needle));
-}
-
-static Item js_repl_eval_callback(Item repl, Item err, Item result);
-static Item js_repl_close_repl(Item repl);
-
-static void js_repl_eval_line(Item repl, const char* line, int len) {
-    if (!line) return;
-    Item custom_eval = js_get_key_default(repl, js_repl_key("__eval_fn__"));
-    if (js_is_callable(custom_eval) &&
-        !(len > 0 && line[0] == '.')) {
-        Item bound_args[1] = { repl };
-        Item cb = js_bind_function(js_new_native_function(js_repl_eval_callback),
-            (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
-        Item args[4] = {
-            js_name_item(line, (size_t)len),
-            js_get_key_default(repl, js_repl_key("context")), js_name_item("repl", 4),
-            cb
-        };
-        js_call_function(custom_eval, repl, args, 4);
-        return;
-    }
-    if (len == 7 && memcmp(line, ".editor", 7) == 0) {
-        js_repl_output_cstr(repl, ".editor\n// Entering editor mode (Ctrl+D to finish, Ctrl+C to cancel)\n");
-        js_set_key_default(repl, js_repl_key("__editor__"), (Item){.item = ITEM_TRUE});
-        js_repl_set_str(repl, "__editor_buffer__", "");
-        js_repl_set_str(repl, "line", "");
-        js_set_key_default(repl, js_repl_key("cursor"), (Item){.item = i2it(0)});
-        return;
-    }
-    if (js_repl_starts_with(line, len, ".load ")) {
-        js_repl_output(repl, line, len);
-        js_repl_output_cstr(repl, "\n");
-        const char* path = line + 6;
-        int path_len = len - 6;
-        char path_buf[1024];
-        if (path_len >= (int)sizeof(path_buf)) path_len = (int)sizeof(path_buf) - 1;
-        str_copy(path_buf, sizeof(path_buf), path, path_len);
-        FILE* fp = fopen(path_buf, "rb");
-        if (fp) {
-            fseek(fp, 0, SEEK_END);
-            long size = ftell(fp);
-            fseek(fp, 0, SEEK_SET);
-            if (size > 0) {
-                char* buf = (char*)mem_alloc((size_t)size, MEM_CAT_JS_RUNTIME);
-                size_t got = fread(buf, 1, (size_t)size, fp);
-                if (got > 0) js_repl_output(repl, buf, (int)got);
-                js_repl_output_cstr(repl, "\n");
-                mem_free(buf);
-            }
-            fclose(fp);
-        }
-        js_repl_output_cstr(repl, "undefined\n");
-        return;
-    }
-    if (len == 6 && memcmp(line, ".clear", 6) == 0) {
-        return;
-    }
-    if (len == 5 && memcmp(line, ".exit", 5) == 0) {
-        js_repl_close_repl(repl);
-        return;
-    }
-
-    Item strict_item = js_get_key_default(repl, js_repl_key("replMode"));
-    bool strict = false;
-    if (get_type_id(strict_item) == LMD_TYPE_STRING) {
-        String* mode = it2s(strict_item);
-        strict = mode && mode->len == 6 && memcmp(mode->chars, "strict", 6) == 0;
-    }
-    if (len > 0 &&
-        js_repl_contains(line, len, "require(\"domain\").create()") &&
-        js_repl_contains(line, len, ".on(\"error\"") &&
-        js_repl_contains(line, len, "throw new Error")) {
-        js_repl_output_cstr(repl, "OK\n");
-        return;
-    } else if (len == 22 && memcmp(line, "util.inspect(\"string\")", 22) == 0) {
-        js_repl_output_cstr(repl, "\"'string'\"\n");
-    } else if (len == 14 && memcmp(line, "require(\"baz\")", 14) == 0) {
-        js_repl_output_cstr(repl, "'eye catcher'\n");
-    } else if (len == 16 && memcmp(line, "require(\"./baz\")", 16) == 0) {
-        js_repl_output_cstr(repl, "'perhaps I work'\n");
-    } else if (len == 16 && memcmp(line, "require(\"./bar\")", 16) == 0) {
-        js_repl_output_cstr(repl,
-            "Uncaught Error: Cannot find module './bar'\n"
-            "  code: 'MODULE_NOT_FOUND'\n"
-            "  requireStack: [ '<repl>' ]\n");
-    } else if (js_repl_contains(line, len, "bad_syntax")) {
-        js_repl_output_cstr(repl, "SyntaxError: Expected ;\n");
-    } else if (len == 5 && memcmp(line, "x = 3", 5) == 0) {
-        if (strict) js_repl_output_cstr(repl, "ReferenceError: x is not defined\n");
-        else js_repl_output_cstr(repl, "3\n");
-    } else if (len == 9 && memcmp(line, "let y = 3", 9) == 0) {
-        js_repl_output_cstr(repl, "undefined\n");
-    } else if (len > 0) {
-        js_repl_output_cstr(repl, "undefined\n");
-    }
-    js_repl_prompt(repl);
-}
-
-static bool js_runtime_is_object_like(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP || type == LMD_TYPE_ELEMENT;
-}
-
-static void js_repl_editor_finish(Item repl, Item event) {
-    Item buf_item = js_get_key_default(repl, js_repl_key("__editor_buffer__"));
-    int len = 0;
-    js_repl_cstr(buf_item, &len);
-    bool ctrl_c = js_runtime_is_object_like(event) && len == 0, ctrl_d = false;
-    if (js_runtime_is_object_like(event)) {
-        Item name = js_get_key_default(event, js_repl_key("name"));
-        if (get_type_id(name) == LMD_TYPE_STRING) {
-            String* ns = it2s(name);
-            ctrl_d = ns && ns->len == 1 && ns->chars[0] == 'd' &&
-                     js_get_key_default(event, js_repl_key("ctrl")).item == ITEM_TRUE;
-            if (ctrl_d) ctrl_c = false;
-        }
-    }
-    if (ctrl_c && len == 0) {
-        js_repl_output_cstr(repl, "\n(To exit, press Ctrl+C again or Ctrl+D or type .exit)");
-    } else if (ctrl_d && len > 0) {
-        js_repl_output_cstr(repl, "\n4");
-    }
-    js_repl_output_cstr(repl, "\n");
-    js_repl_prompt(repl);
-    js_set_key_default(repl, js_repl_key("__editor__"), (Item){.item = ITEM_FALSE});
-    Item history = js_get_key_default(repl, js_repl_key("history"));
-    if (get_type_id(history) == LMD_TYPE_ARRAY && len > 0) {
-        js_array_push(history, buf_item);
-    }
-}
-
-static Item js_repl_close(void);
-
-static bool js_repl_event_is_ctrl_key(Item event, char key_char) {
-    if (!js_runtime_is_object_like(event)) return false;
-    if (js_get_key_default(event, js_repl_key("ctrl")).item != ITEM_TRUE) return false;
-    Item name = js_get_key_default(event, js_repl_key("name"));
-    if (get_type_id(name) != LMD_TYPE_STRING) return false;
-    String* ns = it2s(name);
-    return ns && ns->len == 1 && ns->chars[0] == key_char;
-}
-
-static void js_repl_editor_data(Item repl, const char* data, int len) {
-    js_repl_output(repl, data, len);
-    Item old_item = js_get_key_default(repl, js_repl_key("__editor_buffer__"));
-    int old_len = 0;
-    const char* old = js_repl_cstr(old_item, &old_len);
-    char* combined = mem_join2(old, (size_t)old_len, data, (size_t)len,
-                               MEM_CAT_JS_RUNTIME);
-    int total = old_len + len;
-    js_repl_set_str(repl, "__editor_buffer__", combined);
-    if (total > 0 && combined[total - 1] == '\n') {
-        int prev_end = total - 1;
-        int prev_start = prev_end;
-        while (prev_start > 0 && combined[prev_start - 1] != '\n') prev_start--;
-        int indent = 0;
-        while (prev_start + indent < prev_end && combined[prev_start + indent] == ' ') indent++;
-        int last = prev_end - 1;
-        while (last >= prev_start && combined[last] == ' ') last--;
-        if (indent > 0 && last >= prev_start && combined[last] != ';' &&
-            combined[last] != '{' && combined[last] != '}') {
-            indent++;
-        }
-        char* spaces = (char*)mem_alloc((size_t)indent + 1, MEM_CAT_JS_RUNTIME);
-        for (int i = 0; i < indent; i++) spaces[i] = ' ';
-        spaces[indent] = '\0';
-        js_repl_set_str(repl, "line", spaces);
-        js_set_key_default(repl, js_repl_key("cursor"), (Item){.item = i2it(indent)});
-        mem_free(spaces);
-    } else {
-        int line_start = total;
-        while (line_start > 0 && combined[line_start - 1] != '\n') line_start--;
-        int cursor = 0;
-        while (line_start + cursor < total && combined[line_start + cursor] == ' ') cursor++;
-        js_repl_set_str(repl, "line", combined + line_start);
-        js_set_key_default(repl, js_repl_key("cursor"), (Item){.item = i2it(cursor)});
-    }
-    mem_free(combined);
-}
-
-static Item js_repl_write(Item data_item, Item event_item) {
-    Item repl = js_get_this();
-    int len = 0;
-    const char* data = js_repl_cstr(data_item, &len);
-    if (js_get_key_default(repl, js_repl_key("__editor__")).item == ITEM_TRUE) {
-        if (len > 0) js_repl_editor_data(repl, data, len);
-        else if (get_type_id(event_item) == LMD_TYPE_UNDEFINED) return (Item){.item = ITEM_JS_UNDEFINED};
-        else js_repl_editor_finish(repl, event_item);
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    if (len == 0 && js_repl_event_is_ctrl_key(event_item, 'd')) {
-        return js_repl_close();
-    }
-    int start = 0;
-    for (int i = 0; i < len; i++) {
-        if (data[i] == '\n') {
-            js_repl_eval_line(repl, data + start, i - start);
-            start = i + 1;
-        }
-    }
-    if (start < len) {
-        if (len - start == 4 && memcmp(data + start, "xyz ", 4) == 0) {
-            js_repl_output_cstr(repl, "\n// ReferenceError: xyz is not defined");
-        } else {
-            js_repl_set_str(repl, "line", data + start);
-            js_set_key_default(repl, js_repl_key("cursor"), (Item){.item = i2it(len - start)});
-        }
-    }
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_repl_input_data(Item repl, Item data_item) {
-    int len = 0;
-    const char* data = js_repl_cstr(data_item, &len);
-    if (len == 1 && data[0] == '\x04') {
-        return js_call_function(js_get_key_default(repl, js_repl_key("close")), repl, NULL, 0);
-    }
-    return js_call_function(js_get_key_default(repl, js_repl_key("write")), repl, &data_item, 1);
-}
-
-JS_FORWARD_STATIC_ITEM(js_repl_input_end, (Item repl), js_call_function,
-    (js_get_key_default(repl, js_repl_key("close")), repl, NULL, 0))
-
-static Item js_repl_input_keypress(Item repl, Item ch, Item key) {
-    Item args[2] = { ItemEmptyString, key };
-    return js_call_function(js_get_key_default(repl, js_repl_key("write")), repl, args, 2);
-}
-
-static Item js_repl_close_repl(Item repl) {
-    Item exit_cb = js_get_key_default(repl, js_repl_key("__exit_cb__"));
-    if (js_is_callable(exit_cb)) js_call_function(exit_cb, repl, NULL, 0);
-    Item cb = js_get_key_default(repl, js_repl_key("__close_cb__"));
-    if (js_is_callable(cb)) js_call_function(cb, repl, NULL, 0);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-JS_FORWARD_STATIC_ITEM(js_repl_close, (void), js_repl_close_repl, (js_get_this()))
-
-static Item js_repl_once(Item event_item, Item cb) {
-    Item repl = js_get_this();
-    if (get_type_id(event_item) == LMD_TYPE_STRING) {
-        String* ev = it2s(event_item);
-        if (ev && ev->len == 5 && memcmp(ev->chars, "close", 5) == 0) {
-            js_set_key_default(repl, js_repl_key("__close_cb__"), cb);
-        } else if (ev && ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
-            js_set_key_default(repl, js_repl_key("__exit_cb__"), cb);
-        }
-    }
-    return repl;
-}
-
-static Item js_repl_eval_callback(Item repl, Item err, Item result) {
-    bool has_err = err.item != ITEM_NULL && err.item != ITEM_JS_UNDEFINED;
-    if (has_err) {
-        Item recoverable = js_get_key_default(err, js_repl_key("__repl_recoverable__"));
-        if (recoverable.item == ITEM_TRUE) {
-            js_repl_output_cstr(repl, "| ");
-            return (Item){.item = ITEM_JS_UNDEFINED};
-        }
-        js_repl_output_cstr(repl, "Error\n");
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    Item out = js_to_string(result);
-    if (get_type_id(out) == LMD_TYPE_STRING) {
-        String* s = it2s(out);
-        if (s) {
-            char* line = mem_join2(s->chars, s->len, "\n", 1, MEM_CAT_JS_RUNTIME);
-            if (!line) return (Item){.item = ITEM_JS_UNDEFINED};
-            // Custom eval callbacks observe each rendered result as one write.
-            js_repl_output(repl, line, (int)s->len + 1);
-            mem_free(line);
-        }
-    }
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_repl_recoverable_ctor(void) {
-    Item obj = js_new_object();
-    js_set_key_default(obj, js_repl_key("__repl_recoverable__"), (Item){.item = ITEM_TRUE});
-    return obj;
-}
-
-static Item js_repl_create_context(Item opts, bool old_signature) {
-    Item global = js_get_global_this();
-    Item use_global = old_signature ? make_js_undefined() : js_get_key_default(opts, js_repl_key("useGlobal"));
-    if (use_global.item == ITEM_TRUE) return global;
-
-    Item repl_context = js_new_object();
-    Item names = js_object_get_own_property_names(global);
-    if (get_type_id(names) == LMD_TYPE_ARRAY) {
-        JS_ARRAY_FOREACH(key, names) {
-            if (js_string_equals(key, "globalThis") ||
-                js_string_equals(key, "global") ||
-                js_string_equals(key, "self") ||
-                js_string_equals(key, "window")) {
-                continue;
-            }
-            js_set_key_default(repl_context, key, js_get_key_default(global, key));
-        }
-    }
-    // isolated REPL contexts inherit globals at construction time only; later
-    // globalThis writes must not appear in that context.
-    js_set_key_default(repl_context, js_repl_key("globalThis"), repl_context);
-    js_set_key_default(repl_context, js_repl_key("global"), repl_context);
-    js_set_key_default(repl_context, js_repl_key("self"), repl_context);
-    js_set_key_default(repl_context, js_repl_key("window"), repl_context);
-    return repl_context;
-}
-
-static Item js_repl_start(Item opts, Item old_stream, Item old_eval) {
-    Item this_item = js_get_this();
-    Item this_start = js_runtime_is_object_like(this_item) ?
-        js_get_key_default(this_item, js_repl_key("start")) : ItemNull;
-    Item global = js_get_global_this();
-    // destructured repl.start() is called with globalThis; only constructor
-    // receivers may be reused as the REPL instance.
-    Item repl = (this_item.item != global.item &&
-        js_runtime_is_object_like(this_item) && !js_is_callable(this_start)) ?
-        this_item : js_new_object();
-    bool old_signature = !js_runtime_is_object_like(opts);
-    Item input = old_signature ? old_stream : js_get_key_default(opts, js_repl_key("input"));
-    Item output = old_signature ? old_stream : js_get_key_default(opts, js_repl_key("output"));
-    Item prompt = old_signature ? opts : js_get_key_default(opts, js_repl_key("prompt"));
-    Item terminal = old_signature ? (Item){.item = ITEM_FALSE} : js_get_key_default(opts, js_repl_key("terminal"));
-    Item use_colors = old_signature ? (Item){.item = ITEM_FALSE} : js_get_key_default(opts, js_repl_key("useColors"));
-    Item custom_eval = old_signature ? old_eval : js_get_key_default(opts, js_repl_key("eval"));
-    js_set_key_default(repl, js_repl_key("input"), input);
-    js_set_key_default(repl, js_repl_key("output"), output);
-    js_set_key_default(repl, js_repl_key("prompt"), prompt);
-    bool terminal_bool = old_signature ? false : terminal.item != ITEM_FALSE;
-    bool color_bool = use_colors.item == ITEM_TRUE || (get_type_id(use_colors) == LMD_TYPE_UNDEFINED && terminal_bool);
-    js_set_key_default(repl, js_repl_key("terminal"), terminal_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
-    js_set_key_default(repl, js_repl_key("useColors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
-    js_set_key_default(repl, js_repl_key("replMode"), old_signature ? ItemNull : js_get_key_default(opts, js_repl_key("replMode")));
-    js_set_key_default(repl, js_repl_key("__eval_fn__"), custom_eval);
-    js_set_key_default(repl, js_repl_key("context"), js_repl_create_context(opts, old_signature));
-    Item writer = js_new_object();
-    Item writer_opts = js_new_object();
-    js_set_key_default(writer_opts, js_repl_key("colors"), color_bool ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE});
-    js_set_key_default(writer, js_repl_key("options"), writer_opts);
-    js_set_key_default(repl, js_repl_key("writer"), writer);
-    js_repl_set_str(repl, "line", "");
-    js_set_key_default(repl, js_repl_key("cursor"), (Item){.item = i2it(0)});
-    js_set_key_default(repl, js_repl_key("history"), js_array_new(0));
-    js_set_key_default(repl, js_repl_key("__editor__"), (Item){.item = ITEM_FALSE});
-    js_repl_set_str(repl, "__editor_buffer__", "");
-    js_runtime_set_native_key(repl, js_repl_key("write"), js_repl_write);
-    js_runtime_set_native_key(repl, js_repl_key("close"), js_repl_close);
-    js_runtime_set_native_key(repl, js_repl_key("once"), js_repl_once);
-    js_runtime_set_native_key(repl, js_repl_key("on"), js_repl_once);
-    if (js_runtime_is_object_like(input)) {
-        Item on_fn = js_get_key_default(input, js_repl_key("on"));
-        if (js_is_callable(on_fn)) {
-            Item data_args[2] = { repl, js_name_item("data", 4) };
-            (void)data_args;
-            Item bound_args[1] = { repl };
-            Item data_listener = js_bind_function(js_new_native_function(js_repl_input_data),
-                (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
-            Item on_args[2] = { js_name_item("data", 4), data_listener };
-            js_call_function(on_fn, input, on_args, 2);
-            Item key_listener = js_bind_function(js_new_native_function(js_repl_input_keypress),
-                (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
-            Item key_args[2] = { js_name_item("keypress", 8), key_listener };
-            js_call_function(on_fn, input, key_args, 2);
-            Item end_listener = js_bind_function(js_new_native_function(js_repl_input_end),
-                (Item){.item = ITEM_JS_UNDEFINED}, bound_args, 1);
-            Item end_args[2] = { js_name_item("end", 3), end_listener };
-            js_call_function(on_fn, input, end_args, 2);
-        }
-        Item resume_fn = js_get_key_default(input, js_repl_key("resume"));
-        if (js_is_callable(resume_fn)) {
-            // Readable REPL inputs do not flow until resumed, so constructor-fed
-            // fixtures can otherwise exit before their first line is evaluated.
-            js_call_function(resume_fn, input, NULL, 0);
-        }
-    }
-    js_repl_prompt(repl);
-    return repl;
-}
-
-static Item js_internal_repl_create(Item env, Item opts, Item cb) {
-    Item repl = js_repl_start(opts, (Item){.item = ITEM_JS_UNDEFINED}, (Item){.item = ITEM_JS_UNDEFINED});
-    if (js_is_callable(cb)) {
-        Item args[2] = { (Item){.item = ITEM_NULL}, repl };
-        js_call_function(cb, (Item){.item = ITEM_JS_UNDEFINED}, args, 2);
-    }
-    return repl;
-}
-
-static JsAsyncLocalStorageState* js_als_state_existing(void) {
-    return js_active_runtime_state ? js_runtime_state.async_local_storage : NULL;
-}
-
-static JsAsyncLocalStorageState* js_als_state_ensure(void) {
-    return js_active_runtime_state
-        ? js_async_local_storage_state_ensure(&js_runtime_state) : NULL;
-}
-
-static int64_t js_als_instance_count(void) {
-    JsAsyncLocalStorageState* state = js_als_state_existing();
-    return state ? root_vector_count(&state->instances) : 0;
-}
-
-static Item js_als_store_key(void) {
-    return js_name_item("_store", 6);
-}
-
-static Item js_als_instance_at(int64_t index) {
-    JsAsyncLocalStorageState* state = js_als_state_existing();
-    Item* instance = state ? root_vector_at(&state->instances, index) : NULL;
-    return instance ? *instance : ItemNull;
-}
-
-static void js_als_register_instance(Item instance) {
-    JsAsyncLocalStorageState* state = js_als_state_ensure();
-    if (!state) return;
-    for (int64_t i = 0; i < js_als_instance_count(); i++) {
-        if (js_als_instance_at(i).item == instance.item) return;
-    }
-    if (!root_vector_push(&state->instances, instance)) {
-        log_error("js-als: failed to retain AsyncLocalStorage instance");
-    }
-}
-
+// No AsyncLocalStorage instance can be created in this runtime, so a captured
+// context is always empty and a context call is a plain call. The empty-array
+// capture is kept because node-core stores it on listener records.
 extern "C" Item js_als_capture_context(void) {
-    Item context = js_array_new(0);
-    Item store_key = js_als_store_key();
-    for (int64_t i = 0; i < js_als_instance_count(); i++) {
-        Item instance = js_als_instance_at(i);
-        if (instance.item == 0) continue;
-        Item pair = js_array_new(0);
-        js_array_push(pair, instance);
-        js_array_push(pair, js_get_key_default(instance, store_key));
-        js_array_push(context, pair);
-    }
-    return context;
-}
-
-static Item js_als_apply_context(Item context) {
-    Item previous = js_array_new(0);
-    if (get_type_id(context) != LMD_TYPE_ARRAY) return previous;
-
-    Item store_key = js_als_store_key();
-    JS_ARRAY_FOREACH(pair, context) {
-        if (get_type_id(pair) != LMD_TYPE_ARRAY || js_array_length(pair) < 2) continue;
-        Item instance = js_elements_get_int(pair, 0);
-        Item store = js_elements_get_int(pair, 1);
-        Item saved = js_array_new(0);
-        js_array_push(saved, instance);
-        js_array_push(saved, js_get_key_default(instance, store_key));
-        js_array_push(previous, saved);
-        js_set_key_default(instance, store_key, store);
-    }
-    return previous;
-}
-
-static void js_als_restore_context(Item previous) {
-    if (get_type_id(previous) != LMD_TYPE_ARRAY) return;
-
-    Item store_key = js_als_store_key();
-    int64_t previous_len = js_array_length(previous);
-    for (int64_t i = previous_len - 1; i >= 0; i--) {
-        Item saved = js_elements_get_int(previous, i);
-        if (get_type_id(saved) != LMD_TYPE_ARRAY || js_array_length(saved) < 2) continue;
-        Item instance = js_elements_get_int(saved, 0);
-        Item store = js_elements_get_int(saved, 1);
-        js_set_key_default(instance, store_key, store);
-    }
+    return js_array_new(0);
 }
 
 extern "C" Item js_als_context_call(Item context, Item callback, Item this_val, Item arg1, int64_t has_arg) {
     if (!js_is_callable(callback)) return (Item){.item = ITEM_JS_UNDEFINED};
-    if (get_type_id(context) != LMD_TYPE_ARRAY) {
-        if (has_arg) {
-            Item args[1] = { arg1 };
-            return js_call_function(callback, this_val, args, 1);
-        }
-        return js_call_function(callback, this_val, nullptr, 0);
-    }
-
-    Item previous = js_als_apply_context(context);
-
-    Item result;
     if (has_arg) {
         Item args[1] = { arg1 };
-        result = js_call_function(callback, this_val, args, 1);
-    } else {
-        result = js_call_function(callback, this_val, nullptr, 0);
+        return js_call_function(callback, this_val, args, 1);
     }
-
-    js_als_restore_context(previous);
-    return result;
+    return js_call_function(callback, this_val, nullptr, 0);
 }
 
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc) {
     if (!js_is_callable(callback)) return (Item){.item = ITEM_JS_UNDEFINED};
-    if (get_type_id(context) != LMD_TYPE_ARRAY) {
-        return js_call_function(callback, this_val, args, argc);
-    }
-
-    Item previous = js_als_apply_context(context);
-    Item result = js_call_function(callback, this_val, args, argc);
-    js_als_restore_context(previous);
-    return result;
-}
-
-// AsyncLocalStorage: constructor creates an object with run/getStore/enterWith/disable
-static Item js_als_constructor(Item options) {
-    Item self = js_get_this();
-    // handle options: { defaultValue, name }
-    Item default_val = (Item){.item = ITEM_JS_UNDEFINED};
-    Item name_val = ItemEmptyString;
-    if (get_type_id(options) == LMD_TYPE_MAP) {
-        Item dv = js_get_key_default(options, js_name_item("defaultValue", 12));
-        if (get_type_id(dv) != LMD_TYPE_UNDEFINED) default_val = dv;
-        Item nv = js_get_key_default(options, js_name_item("name", 4));
-        if (get_type_id(nv) == LMD_TYPE_STRING) name_val = nv;
-    } else if ((get_type_id(options) != LMD_TYPE_NULL && get_type_id(options) != LMD_TYPE_UNDEFINED &&
-               options.item != ITEM_JS_UNDEFINED && options.item != 0) ||
-               get_type_id(options) == LMD_TYPE_NULL) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"options\" argument must be of type object.");
-    }
-    js_set_key_default(self, js_als_store_key(), default_val);
-    js_set_key_cstr(self, "_defaultValue", default_val);
-    js_set_key_cstr(self, "name", name_val);
-    js_als_register_instance(self);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_als_run(Item store, Item callback) {
-    Item self = js_get_this();
-    Item store_key = js_als_store_key();
-    Item old = js_get_key_default(self, store_key);
-    js_set_key_default(self, store_key, store);
-    Item result = js_call_function(callback, (Item){.item = ITEM_JS_UNDEFINED}, nullptr, 0);
-    js_set_key_default(self, store_key, old);
-    return result;
-}
-
-static Item js_als_getStore(void) {
-    Item self = js_get_this();
-    return js_get_key_default(self, js_als_store_key());
-}
-
-static Item js_als_enterWith(Item store) {
-    Item self = js_get_this();
-    js_set_key_default(self, js_als_store_key(), store);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_als_disable(void) {
-    Item self = js_get_this();
-    js_set_key_default(self, js_als_store_key(), (Item){.item = ITEM_JS_UNDEFINED});
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_als_scope_dispose(Item env_item) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    Item storage = env[0];
-    Item previous = env[1];
-    Item disposed_key = js_async_hooks_key("__lambda_als_scope_disposed__");
-    Item disposed = js_get_key_default(js_get_this(), disposed_key);
-    if (get_type_id(disposed) == LMD_TYPE_BOOL && it2b(disposed)) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    js_set_key_default(js_get_this(), disposed_key, (Item){.item = b2it(true)});
-    js_set_key_default(storage, js_als_store_key(), previous);
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_als_withScope(Item store) {
-    Item self = js_get_this();
-    Item previous = js_get_key_default(self, js_als_store_key());
-    js_set_key_default(self, js_als_store_key(), store);
-    Item scope = js_new_object();
-    Item* env = js_alloc_env2(self, previous);
-    Item dispose = js_new_native_closure(js_als_scope_dispose, 0, env, 2);
-    // Node's RunScope supports both `using` disposal and explicit .dispose().
-    Item dispose_key = js_symbol_well_known(js_name_item("dispose", 7));
-    js_set_key_default(scope, dispose_key, dispose);
-    js_set_key_cstr(scope, "dispose", dispose);
-    js_set_key_default(scope, js_async_hooks_key("__lambda_als_scope_disposed__"),
-                    (Item){.item = b2it(false)});
-    return scope;
+    return js_call_function(callback, this_val, args, argc);
 }
 
 #define js_async_hooks_state (js_async_hooks_state_ensure(&js_runtime_state))
@@ -35264,16 +33270,6 @@ extern "C" void js_async_hooks_restore_resource(Item previous) {
 static Item js_async_hook_at(int64_t index) {
     Item* value = root_vector_at(&js_async_hook_values, index);
     return value ? *value : ItemNull;
-}
-
-static bool js_async_hooks_add_hook(Item hook) {
-    RootFrame roots(1);
-    Rooted<Item> hook_root(roots, hook);
-    int64_t hook_count = root_vector_count(&js_async_hook_values);
-    for (int64_t i = 0; i < hook_count; i++) {
-        if (js_async_hook_at(i).item == hook_root.get().item) return true;
-    }
-    return root_vector_push(&js_async_hook_values, hook_root.get());
 }
 
 static bool js_async_hook_is_enabled(Item hook) {
@@ -35429,624 +33425,6 @@ JS_FORWARD_ITEM(js_async_hooks_create_resource, (const char* type_chars, int typ
 
 extern "C" void js_async_hooks_emit_destroy_resource(Item resource) {
     js_async_resource_emit_destroy(resource);
-}
-
-// AsyncResource
-JS_FORWARD_STATIC_ITEM(js_async_hooks_throw_invalid_async_id, (void), js_throw_range_error_code,
-    ("ERR_INVALID_ASYNC_ID", "triggerAsyncId must be an integer greater than or equal to -1"))
-
-static bool js_async_hooks_parse_async_id(Item value, int64_t* out_id) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_INT) {
-        int64_t id = it2i(value);
-        if (id < -1) return false;
-        *out_id = id;
-        return true;
-    }
-    if (type == LMD_TYPE_INT64) {
-        int64_t id = it2l(value);
-        if (id < -1) return false;
-        *out_id = id;
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double id = it2d(value);
-        if (!isfinite(id) || floor(id) != id || id < -1.0 ||
-            id < (double)INT64_MIN || id > (double)INT64_MAX) {
-            return false;
-        }
-        *out_id = (int64_t)id;
-        return true;
-    }
-    return false;
-}
-
-static Item js_ar_constructor(Item type, Item options) {
-    if (get_type_id(type) != LMD_TYPE_STRING) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"type\" argument must be of type string.");
-    }
-    String* type_str = it2s(type);
-    if (!type_str || type_str->len == 0) {
-        return js_throw_type_error_code("ERR_ASYNC_TYPE",
-            "The \"type\" argument must be a non-empty string.");
-    }
-
-    Item self = js_get_this();
-    int64_t trigger_id = js_async_resource_id(js_async_hooks_get_current_resource());
-    bool require_manual_destroy = false;
-
-    TypeId options_type = get_type_id(options);
-    if (options_type == LMD_TYPE_INT || options_type == LMD_TYPE_INT64 ||
-        options_type == LMD_TYPE_FLOAT) {
-        if (!js_async_hooks_parse_async_id(options, &trigger_id)) {
-            return js_async_hooks_throw_invalid_async_id();
-        }
-    } else if (options_type == LMD_TYPE_MAP) {
-        Item option_trigger_id = js_get_key_default(options, js_async_hooks_key("triggerAsyncId"));
-        if (!js_is_nullish(option_trigger_id) &&
-            !js_async_hooks_parse_async_id(option_trigger_id, &trigger_id)) {
-            return js_async_hooks_throw_invalid_async_id();
-        }
-        Item manual = js_get_key_default(options, js_async_hooks_key("requireManualDestroy"));
-        require_manual_destroy = js_is_truthy(manual);
-    } else if (!js_is_nullish(options)) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"options\" argument must be of type number or object.");
-    }
-
-    int64_t async_id = js_async_hooks_next_id++;
-    js_set_key_default(self, js_async_hooks_key("type"), type);
-    js_set_key_default(self, js_async_hooks_key("__lambda_async_id__"), (Item){.item = i2it(async_id)});
-    js_set_key_default(self, js_async_hooks_key("__lambda_trigger_async_id__"), (Item){.item = i2it(trigger_id)});
-    js_set_key_default(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
-    js_async_hooks_stamp_id_symbols(self, async_id, trigger_id);
-    js_async_hooks_emit_init(async_id, type, trigger_id, self);
-    node_trace_events_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
-    if (!require_manual_destroy && !js_async_hooks_is_gc_tracker(self)) {
-        js_async_hooks_queue_destroy(self);
-    }
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static Item js_ar_runInAsyncScope(Item fn, Item thisArg) {
-    Item self = js_get_this();
-    Item previous = js_async_hooks_enter_resource(self);
-    Item result = js_call_function(fn, thisArg, nullptr, 0);
-    js_async_hooks_restore_resource(previous);
-    return result;
-}
-
-static Item js_ar_emitDestroy(void) {
-    Item self = js_get_this();
-    js_async_resource_emit_destroy(self);
-    return self;
-}
-
-static Item js_ar_asyncId(void) {
-    return (Item){.item = i2it(js_async_resource_id(js_get_this()))};
-}
-
-static Item js_ar_triggerAsyncId_method(void) {
-    Item trigger_id = js_get_key_default(js_get_this(), js_async_hooks_key("__lambda_trigger_async_id__"));
-    if (get_type_id(trigger_id) == LMD_TYPE_INT) return trigger_id;
-    return (Item){.item = i2it(0)};
-}
-
-static Item js_ar_bound_call(Item env_item, Item rest_args) {
-    Item* env = (Item*)(uintptr_t)env_item.item;
-    Item resource = env[0];
-    Item fn = env[1];
-    Item bound_this = env[2];
-    Item call_this = bound_this.item == ITEM_JS_TDZ ? js_get_this() : bound_this;
-    if (bound_this.item == ITEM_JS_TDZ && js_is_global_this_object_value(call_this)) {
-        // Plain bound-function calls arrive with the runtime global receiver;
-        // Node's AsyncResource.bind forwards that case as an unbound call.
-        call_this = (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    Item* args = NULL;
-    int argc = 0;
-    if (get_type_id(rest_args) == LMD_TYPE_ARRAY) {
-        int64_t len = js_array_length(rest_args);
-        if (len > 64) len = 64;
-        if (len > 0) {
-            args = LAMBDA_ALLOCA((int)len, Item);
-            for (int64_t i = 0; i < len; i++) args[i] = js_elements_get_int(rest_args, i);
-            argc = (int)len;
-        }
-    }
-    Item previous = js_async_hooks_enter_resource(resource);
-    Item result = js_call_function(fn, call_this, args, argc);
-    js_async_hooks_restore_resource(previous);
-    return result;
-}
-
-static Item js_ar_make_bound(Item resource, Item fn, Item this_arg) {
-    if (!js_is_callable(fn)) {
-        return js_throw_invalid_arg_type("fn", "function", fn);
-    }
-    Item* env = js_alloc_env3(resource, fn, this_arg);
-    // AsyncResource.bind wraps the callback; returning the original callback
-    // skipped Node's type validation and async-scope restoration.
-    Item bound = js_new_native_closure(js_ar_bound_call, -1, env, 3);
-    JsFunction* bound_fn = (JsFunction*)bound.function;
-    if (bound_fn) {
-        js_set_formal_length(bound, (int)js_get_length(fn));
-        bound_fn->flags |= JS_FUNC_FLAG_STRICT;
-        js_function_finalize_capabilities(bound_fn);
-    }
-    return bound;
-}
-
-static Item js_ar_bind(Item rest_args) {
-    Item fn = js_elements_get_int(rest_args, 0);
-    Item this_arg = js_array_length(rest_args) > 1
-        ? js_elements_get_int(rest_args, 1)
-        : (Item){.item = ITEM_JS_TDZ};
-    return js_ar_make_bound(js_get_this(), fn, this_arg);
-}
-
-static Item js_ar_static_bind(Item rest_args) {
-    Item fn = js_elements_get_int(rest_args, 0);
-    Item type_or_this_arg = js_elements_get_int(rest_args, 1);
-    Item explicit_third = js_array_length(rest_args) > 2
-        ? js_elements_get_int(rest_args, 2)
-        : (Item){.item = ITEM_JS_TDZ};
-    Item resource_type = (get_type_id(type_or_this_arg) == LMD_TYPE_STRING)
-        ? type_or_this_arg
-        : js_name_item("AsyncResource.bind", 18);
-    Item bound_this;
-    if (get_type_id(type_or_this_arg) == LMD_TYPE_STRING) {
-        bound_this = explicit_third;
-    } else {
-        bound_this = js_array_length(rest_args) > 1
-            ? type_or_this_arg
-            : (Item){.item = ITEM_JS_TDZ};
-    }
-    String* type_str = get_type_id(resource_type) == LMD_TYPE_STRING ? it2s(resource_type) : NULL;
-    Item resource = js_async_hooks_create_resource(
-        type_str ? type_str->chars : "AsyncResource.bind",
-        type_str ? (int)type_str->len : 18);
-    return js_ar_make_bound(resource, fn, bound_this);
-}
-
-// createHook: returns object with enable/disable
-static Item js_ah_enable(void) {
-    Item self = js_get_this();
-    Item enabled_key = js_name_item("__lambda_async_hook_enabled__", 29);
-    Item enabled = js_get_key_default(self, enabled_key);
-    if (get_type_id(enabled) != LMD_TYPE_BOOL || !it2b(enabled)) {
-        js_set_key_default(self, enabled_key, (Item){.item = b2it(true)});
-    }
-    return self;
-}
-
-static Item js_ah_disable(void) {
-    Item self = js_get_this();
-    Item enabled_key = js_name_item("__lambda_async_hook_enabled__", 29);
-    Item enabled = js_get_key_default(self, enabled_key);
-    if (get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled)) {
-        js_set_key_default(self, enabled_key, (Item){.item = b2it(false)});
-    }
-    return self;
-}
-
-static Item js_ah_createHook(Item callbacks) {
-    TypeId callbacks_type = get_type_id(callbacks);
-    if (callbacks_type == LMD_TYPE_MAP ||
-        callbacks_type == LMD_TYPE_FUNC || callbacks_type == LMD_TYPE_ARRAY ||
-        callbacks_type == LMD_TYPE_ELEMENT || callbacks_type == LMD_TYPE_VMAP) {
-        static const char* names[] = {"init", "before", "after", "destroy", "promiseResolve"};
-        static const int lens[] = {4, 6, 5, 7, 14};
-        for (int i = 0; i < 5; i++) {
-            Item callback = js_get_name_key(callbacks, names[i], lens[i]);
-            if (get_type_id(callback) != LMD_TYPE_UNDEFINED &&
-                callback.item != ITEM_JS_UNDEFINED &&
-                callback.item != 0 &&
-                !js_is_callable(callback)) {
-                char message[64];
-                int len = snprintf(message, sizeof(message), "hook.%s must be a function", names[i]);
-                if (len < 0) len = 0;
-                if (len >= (int)sizeof(message)) len = (int)sizeof(message) - 1;
-                return js_throw_type_error_code("ERR_ASYNC_CALLBACK", message);
-            }
-        }
-    }
-    RootFrame roots(1);
-    Rooted<Item> hook_root(roots, js_new_object());
-    if (!js_async_hooks_add_hook(hook_root.get())) return ItemError;
-    js_set_key_default(hook_root.get(), js_async_hooks_key("__lambda_async_hook_callbacks__"), callbacks);
-    js_set_key_default(hook_root.get(), js_async_hooks_key("__lambda_async_hook_enabled__"), (Item){.item = b2it(false)});
-    js_runtime_set_native_key(hook_root.get(), js_name_item("enable", 6), js_ah_enable);
-    js_runtime_set_native_key(hook_root.get(), js_name_item("disable", 7), js_ah_disable);
-    return hook_root.get();
-}
-
-static Item js_ah_executionAsyncId(void) {
-    return (Item){.item = i2it(js_async_resource_id(js_async_hooks_get_current_resource()))};
-}
-
-static Item js_ah_triggerAsyncId(void) {
-    Item trigger_id = js_get_key_default(js_async_hooks_get_current_resource(),
-                                      js_async_hooks_key("__lambda_trigger_async_id__"));
-    if (get_type_id(trigger_id) == LMD_TYPE_INT) return trigger_id;
-    return (Item){.item = i2it(0)};
-}
-
-static Item js_internal_async_enabledHooksExist(void) {
-    int64_t hook_count = root_vector_count(&js_async_hook_values);
-    for (int64_t i = 0; i < hook_count; i++) {
-        if (js_async_hook_is_enabled(js_async_hook_at(i))) {
-            return (Item){.item = ITEM_TRUE};
-        }
-    }
-    return (Item){.item = ITEM_FALSE};
-}
-
-static Item js_async_context_frame_current(void) {
-    return (Item){.item = ITEM_JS_UNDEFINED};
-}
-
-static int js_internal_inspect_codepoint_width(int cp) {
-    if (cp <= 0x1F || (cp >= 0x7F && cp <= 0x9F)) return 0;
-    if ((cp >= 0x0300 && cp <= 0x036F) || cp == 0x20DD ||
-        cp == 0x200D || cp == 0x200E || cp == 0x200F ||
-        (cp >= 0xFE00 && cp <= 0xFE0F)) {
-        return 0;
-    }
-    if ((cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) ||
-        (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0x1F000 && cp <= 0x1FAFF)) {
-        return 2;
-    }
-    return 1;
-}
-
-static bool js_internal_inspect_is_csi_final(char c) {
-    return c >= 0x40 && c <= 0x7E;
-}
-
-extern "C" Item js_internal_util_inspect_strip_vt(Item value) {
-    Item str_item = js_to_string(value);
-    if (get_type_id(str_item) != LMD_TYPE_STRING) return str_item;
-    String* s = it2s(str_item);
-    char* out = (char*)heap_alloc(s->len + 1, LMD_TYPE_STRING);
-    int pos = 0;
-    for (int i = 0; i < (int)s->len; i++) {
-        if (s->chars[i] == '\x1b' && i + 1 < (int)s->len && s->chars[i + 1] == '[') {
-            i += 2;
-            while (i < (int)s->len && !js_internal_inspect_is_csi_final(s->chars[i])) i++;
-            continue;
-        }
-        out[pos++] = s->chars[i];
-    }
-    String* result = heap_create_name(out, pos);
-    return (Item){.item = s2it(result)};
-}
-
-extern "C" Item js_internal_util_inspect_get_string_width(Item value) {
-    Item stripped = js_internal_util_inspect_strip_vt(value);
-    if (get_type_id(stripped) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
-    String* s = it2s(stripped);
-    int width = 0;
-    int i = 0;
-    while (i < (int)s->len) {
-        int cp = js_utf8_next_codepoint(s->chars, (int)s->len, &i);
-        width += js_internal_inspect_codepoint_width(cp);
-    }
-    return (Item){.item = i2it(width)};
-}
-
-extern "C" Item js_get_internal_async_hooks_namespace(void) {
-    Item* namespace_item = js_module_runtime_slot(
-        JS_MODULE_RUNTIME_INTERNAL_ASYNC_HOOKS_NAMESPACE);
-    if (!namespace_item) return ItemError;
-    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
-        *namespace_item = js_new_object();
-        js_set_native_key(*namespace_item, js_name_item("enabledHooksExist", 17),
-            js_internal_async_enabledHooksExist);
-        RootFrame roots(1);
-        Rooted<Item> symbols_root(roots, js_new_object());
-        if (!roots.valid()) return ItemError;
-        // The public internal namespace must export the same symbol keys used
-        // when resources are stamped, otherwise destructuring .symbols fails.
-        js_set_key_cstr(symbols_root.get(), "async_id_symbol",
-            js_async_hooks_symbol_key("nodejs.async_id_symbol", 22));
-        js_set_key_cstr(symbols_root.get(), "trigger_async_id_symbol",
-            js_async_hooks_symbol_key("nodejs.trigger_async_id_symbol", 30));
-        js_set_key_cstr(*namespace_item, "symbols", symbols_root.get());
-        js_set_key_cstr(*namespace_item, "default", *namespace_item);
-    }
-    return *namespace_item;
-}
-
-extern "C" Item js_get_internal_async_context_frame_namespace(void) {
-    Item* namespace_item = js_module_runtime_slot(
-        JS_MODULE_RUNTIME_INTERNAL_ASYNC_CONTEXT_FRAME_NAMESPACE);
-    if (!namespace_item) return ItemError;
-    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
-        *namespace_item = js_new_object();
-        js_set_key_cstr(*namespace_item, "enabled", (Item){.item = b2it(true)});
-        js_set_native_key(*namespace_item, js_name_item("current", 7),
-            js_async_context_frame_current);
-        js_set_key_cstr(*namespace_item, "default", *namespace_item);
-    }
-    return *namespace_item;
-}
-
-extern "C" Item js_get_async_hooks_namespace(void) {
-    Item* namespace_item = js_module_runtime_slot(
-        JS_MODULE_RUNTIME_ASYNC_HOOKS_NAMESPACE);
-    if (!namespace_item) return ItemError;
-    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
-        *namespace_item = js_new_object();
-        RootFrame roots(6);
-        if (!roots.valid()) return ItemError;
-
-        // AsyncLocalStorage class
-        Rooted<Item> als_class_root(roots, js_new_native_constructor(js_als_constructor));
-        Rooted<Item> als_proto_root(roots, js_new_object());
-#define JS_ALS_METHODS(M) \
-        M("run", js_als_run) M("getStore", js_als_getStore) \
-        M("enterWith", js_als_enterWith) M("disable", js_als_disable) \
-        M("withScope", js_als_withScope)
-#define JS_ALS_INSTALL(name, target) js_runtime_set_native_method(als_proto_root.get(), name, target);
-        JS_ALS_METHODS(JS_ALS_INSTALL)
-#undef JS_ALS_INSTALL
-#undef JS_ALS_METHODS
-        js_set_key_cstr(als_class_root.get(), "prototype", als_proto_root.get());
-        js_function_set_prototype(als_class_root.get(), als_proto_root.get());
-
-        // AsyncResource class
-        Rooted<Item> ar_class_root(roots, js_new_native_constructor(js_ar_constructor));
-        Rooted<Item> ar_proto_root(roots, js_new_object());
-#define JS_ASYNC_RESOURCE_METHODS(M) \
-        M("runInAsyncScope", js_ar_runInAsyncScope) M("emitDestroy", js_ar_emitDestroy) \
-        M("asyncId", js_ar_asyncId) M("triggerAsyncId", js_ar_triggerAsyncId_method)
-#define JS_ASYNC_RESOURCE_INSTALL(name, target) js_runtime_set_native_method(ar_proto_root.get(), name, target);
-        JS_ASYNC_RESOURCE_METHODS(JS_ASYNC_RESOURCE_INSTALL)
-#undef JS_ASYNC_RESOURCE_INSTALL
-#undef JS_ASYNC_RESOURCE_METHODS
-        js_runtime_set_native_rest_key(ar_proto_root.get(), js_name_item("bind", 4), js_ar_bind);
-        js_set_key_cstr(ar_class_root.get(), "prototype", ar_proto_root.get());
-        js_runtime_set_native_rest_key(ar_class_root.get(), js_name_item("bind", 4), js_ar_static_bind);
-        js_function_set_prototype(ar_class_root.get(), ar_proto_root.get());
-
-        // Module exports
-        // Constructor graphs must stay rooted until the namespace publishes
-        // them; property-key creation can collect between their setup calls.
-        js_set_key_cstr(*namespace_item, "AsyncLocalStorage", als_class_root.get());
-        js_set_key_cstr(*namespace_item, "AsyncResource", ar_class_root.get());
-#define JS_ASYNC_HOOK_METHODS(M) \
-        M("createHook", js_ah_createHook) M("executionAsyncId", js_ah_executionAsyncId) \
-        M("triggerAsyncId", js_ah_triggerAsyncId) \
-        M("executionAsyncResource", js_async_hooks_get_current_resource)
-#define JS_ASYNC_HOOK_INSTALL(name, target) js_runtime_set_native_method(*namespace_item, name, target);
-        JS_ASYNC_HOOK_METHODS(JS_ASYNC_HOOK_INSTALL)
-#undef JS_ASYNC_HOOK_INSTALL
-#undef JS_ASYNC_HOOK_METHODS
-        js_set_key_cstr(*namespace_item, "default", *namespace_item);
-    }
-    return *namespace_item;
-}
-
-static Item js_cares_getaddrinfo_default(Item hostname, Item family, Item hints, Item all) {
-    (void)family;
-    (void)hints;
-    (void)all;
-    return (Item){.item = i2it(0)};
-}
-
-static Item js_node_binding_key(const char* name, int len) {
-    return js_name_item(name, len);
-}
-
-JS_FORWARD_STATIC_ITEM(js_node_binding_key, (const char* name), js_node_binding_key,
-    (name, (int)strlen(name)))
-
-static bool js_node_binding_is_missing(Item value) {
-    TypeId type = get_type_id(value);
-    return type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED;
-}
-
-static void js_node_binding_set(Item object, const char* name, Item value) {
-    js_set_key_default(object, js_node_binding_key(name), value);
-}
-
-static void js_node_binding_set_readonly(Item object, const char* name, Item value) {
-    Item key = js_node_binding_key(name);
-    js_set_key_default(object, key, value);
-    js_mark_non_writable(object, key);
-    js_mark_non_configurable(object, key);
-}
-
-static const char* const js_node_errno_constant_names[] = {
-    "E2BIG", "EACCES", "EADDRINUSE", "EADDRNOTAVAIL", "EAGAIN",
-    "EALREADY", "EBADF", "EBUSY", "ECANCELED", "ECHILD",
-    "ECONNABORTED", "ECONNREFUSED", "ECONNRESET", "EDEADLK",
-    "EDESTADDRREQ", "EDOM", "EEXIST", "EFAULT", "EFBIG",
-    "EHOSTUNREACH", "EINPROGRESS", "EINTR", "EINVAL", "EIO",
-    "EISCONN", "EISDIR", "ELOOP", "EMFILE", "EMLINK", "EMSGSIZE",
-    "ENAMETOOLONG", "ENETDOWN", "ENETUNREACH", "ENFILE", "ENOBUFS",
-    "ENODEV", "ENOENT", "ENOMEM", "ENOPROTOOPT", "ENOSPC",
-    "ENOSYS", "ENOTCONN", "ENOTDIR", "ENOTEMPTY", "ENOTSOCK",
-    "ENOTSUP", "EPERM", "EPIPE", "EPROTONOSUPPORT", "EPROTOTYPE",
-    "ERANGE", "EROFS", "ESPIPE", "ESRCH", "ETIMEDOUT", "ETXTBSY",
-    "EWOULDBLOCK", "EXDEV", NULL
-};
-
-static const char* const js_node_priority_constant_names[] = {
-    "PRIORITY_LOW", "PRIORITY_BELOW_NORMAL", "PRIORITY_NORMAL",
-    "PRIORITY_ABOVE_NORMAL", "PRIORITY_HIGH", "PRIORITY_HIGHEST", NULL
-};
-
-static const char* const js_node_signal_constant_names[] = {
-    "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT",
-    "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2",
-    "SIGPIPE", "SIGALRM", "SIGTERM", "SIGCHLD", "SIGCONT", "SIGSTOP",
-    "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ",
-    "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGSYS", NULL
-};
-
-static void js_node_binding_copy_constants(Item dst, Item src, const char* const* names) {
-    TypeId src_type = get_type_id(src);
-    if (src_type != LMD_TYPE_MAP && src_type != LMD_TYPE_ARRAY && src_type != LMD_TYPE_FUNC) return;
-    for (int i = 0; names[i]; i++) {
-        Item key = js_node_binding_key(names[i]);
-        Item value = js_get_key_default(src, key);
-        if (!js_node_binding_is_missing(value)) js_set_key_default(dst, key, value);
-    }
-}
-
-static Item js_node_binding_clone_constants(Item src, const char* const* names) {
-    Item dst = js_object_create(ItemNull);
-    js_node_binding_copy_constants(dst, src, names);
-    js_object_freeze(dst);
-    return dst;
-}
-
-static Item js_node_binding_os_constants(void) {
-    Item os_ns = ItemNull;
-    if (jube_specifier_resolve("os", &os_ns) != JUBE_SPECIFIER_RESOLVED) return ItemNull;
-    Item os_constants = js_get_key_default(os_ns, js_node_binding_key("constants"));
-    Item errno_src = js_get_key_default(os_constants, js_node_binding_key("errno"));
-    Item priority_src = js_get_key_default(os_constants, js_node_binding_key("priority"));
-    Item signals_src = js_get_key_default(os_constants, js_node_binding_key("signals"));
-
-    Item os = js_object_create(ItemNull);
-    js_node_binding_set_readonly(os, "UV_UDP_REUSEADDR", (Item){.item = i2it(UV_UDP_REUSEADDR)});
-    js_node_binding_set(os, "dlopen", js_object_create(ItemNull));
-    js_node_binding_set(os, "errno", js_node_binding_clone_constants(errno_src, js_node_errno_constant_names));
-    js_node_binding_set(os, "priority", js_node_binding_clone_constants(priority_src, js_node_priority_constant_names));
-    js_node_binding_set(os, "signals", js_node_binding_clone_constants(signals_src, js_node_signal_constant_names));
-    js_object_freeze(js_get_key_default(os, js_node_binding_key("dlopen")));
-    js_object_freeze(os);
-    return os;
-}
-
-static Item js_node_binding_constants(void) {
-    Item fs_constants = js_object_create(ItemNull);
-
-    Item constants = js_object_create(ItemNull);
-    js_node_binding_set(constants, "crypto", js_object_create(ItemNull));
-    js_node_binding_set(constants, "fs", fs_constants);
-    js_node_binding_set(constants, "internal", js_object_create(ItemNull));
-    js_node_binding_set(constants, "os", js_node_binding_os_constants());
-    js_node_binding_set(constants, "trace", js_object_create(ItemNull));
-    js_node_binding_set(constants, "zlib", js_object_create(ItemNull));
-    js_object_freeze(js_get_key_default(constants, js_node_binding_key("crypto")));
-    js_object_freeze(js_get_key_default(constants, js_node_binding_key("internal")));
-    js_object_freeze(js_get_key_default(constants, js_node_binding_key("trace")));
-    js_object_freeze(js_get_key_default(constants, js_node_binding_key("zlib")));
-    js_object_freeze(constants);
-    return constants;
-}
-
-static Item js_emit_internal_test_binding_warning(void) {
-    Item warning = js_new_object();
-    js_set_key_cstr(warning, "name", js_name_item("internal/test/binding", 21));
-    js_set_key_cstr(warning, "message", js_name_item("These APIs are for internal testing only. Do not use them.", 58));
-    (void)js_process_emit(js_name_item("warning", 7), warning);
-    return make_js_undefined();
-}
-
-// internalBinding() — provides internal bindings for Node.js official tests
-extern "C" Item js_internal_binding(Item name) {
-    if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
-    String* s = it2s(name);
-
-    // internalBinding('uv') — UV error code constants
-    if (s->len == 2 && memcmp(s->chars, "uv", 2) == 0) {
-        Item uv_obj = js_new_object();
-        // Common UV error codes
-        struct { const char* name; int value; } uv_codes[] = {
-            {"UV_ENOENT", UV_ENOENT}, {"UV_EACCES", UV_EACCES}, {"UV_EBADF", UV_EBADF},
-            {"UV_EINVAL", UV_EINVAL}, {"UV_EEXIST", UV_EEXIST}, {"UV_ENOTEMPTY", UV_ENOTEMPTY},
-            {"UV_ENOSYS", UV_ENOSYS}, {"UV_EPERM", UV_EPERM}, {"UV_EISDIR", UV_EISDIR},
-            {"UV_ENOTDIR", UV_ENOTDIR}, {"UV_EBUSY", UV_EBUSY}, {"UV_ENOMEM", UV_ENOMEM},
-            {"UV_EADDRINUSE", UV_EADDRINUSE}, {"UV_EADDRNOTAVAIL", UV_EADDRNOTAVAIL},
-            {"UV_ECONNREFUSED", UV_ECONNREFUSED}, {"UV_ECONNRESET", UV_ECONNRESET},
-            {"UV_ECONNABORTED", UV_ECONNABORTED}, {"UV_ETIMEDOUT", UV_ETIMEDOUT},
-            {"UV_ENETUNREACH", UV_ENETUNREACH}, {"UV_EHOSTUNREACH", UV_EHOSTUNREACH},
-            {"UV_EPIPE", UV_EPIPE}, {"UV_EOF", UV_EOF},
-            {"UV_EMFILE", UV_EMFILE}, {"UV_ENFILE", UV_ENFILE},
-            {"UV_ESRCH", UV_ESRCH}, {"UV_EAGAIN", UV_EAGAIN},
-            {"UV_ERANGE", UV_ERANGE}, {"UV_ENOTSOCK", UV_ENOTSOCK},
-            {"UV_UNKNOWN", UV_UNKNOWN},
-            {NULL, 0}
-        };
-        for (int i = 0; uv_codes[i].name; i++) {
-            js_node_binding_set_readonly(uv_obj, uv_codes[i].name,
-                (Item){.item = i2it(uv_codes[i].value)});
-        }
-        // errname(code) — return the error name for a UV error code
-        extern Item js_uv_errname(Item code);
-        js_set_native_key(uv_obj, js_name_item("errname", 7), js_uv_errname);
-        return uv_obj;
-    }
-
-    if (s->len == 9 && memcmp(s->chars, "constants", 9) == 0) {
-        return js_node_binding_constants();
-    }
-
-    if (s->len == 10 && memcmp(s->chars, "cares_wrap", 10) == 0) {
-        Item* namespace_item = js_module_runtime_slot(
-            JS_MODULE_RUNTIME_INTERNAL_CARES_WRAP_NAMESPACE);
-        if (!namespace_item) return ItemError;
-        if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
-            *namespace_item = js_new_object();
-            js_set_native_key(*namespace_item, js_name_item("getaddrinfo", 11),
-                js_cares_getaddrinfo_default);
-        }
-        return *namespace_item;
-    }
-
-    if (s->len == 11 && memcmp(s->chars, "stream_wrap", 11) == 0) {
-        Item* namespace_item = js_module_runtime_slot(
-            JS_MODULE_RUNTIME_INTERNAL_STREAM_WRAP_NAMESPACE);
-        if (!namespace_item) return ItemError;
-        if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
-            *namespace_item = js_new_object();
-            RootFrame roots(1);
-            Rooted<Item> stream_base_state_root(roots, js_new_object());
-            if (!roots.valid()) return ItemError;
-            js_set_key_cstr(*namespace_item, "streamBaseState",
-                stream_base_state_root.get());
-            js_set_key_cstr(*namespace_item, "kReadBytesOrError", (Item){.item = i2it(0)});
-            js_set_key_cstr(*namespace_item, "kArrayBufferOffset", (Item){.item = i2it(1)});
-            js_set_native_key(*namespace_item, js_name_item("ShutdownWrap", 12),
-                js_new_object);
-        }
-        return *namespace_item;
-    }
-
-    if (s->len == 12 && memcmp(s->chars, "trace_events", 12) == 0) {
-        return node_trace_events_internal_binding();
-    }
-
-    // internalBinding('config')
-    if (s->len == 6 && memcmp(s->chars, "config", 6) == 0) {
-        Item cfg = js_new_object();
-        js_set_key_cstr(cfg, "hasOpenSSL", (Item){.item = ITEM_TRUE});
-        js_set_key_cstr(cfg, "hasCrypto", (Item){.item = ITEM_TRUE});
-        js_set_key_cstr(cfg, "fipsMode", (Item){.item = ITEM_FALSE});
-        return cfg;
-    }
-
-    // default: return empty object
-    return js_new_object();
-}
-
-// uv.errname(code) — return the UV error name for a numeric code
-extern "C" Item js_uv_errname(Item code) {
-    if (get_type_id(code) != LMD_TYPE_INT) return ItemNull;
-    int c = (int)it2i(code);
-    const char* name = uv_err_name(c);
-    if (!name) return ItemNull;
-    return js_name_item(name, strlen(name));
-}
-
-static Item js_internal_crypto_getOpenSSLSecLevel(void) {
-    return (Item){.item = i2it(0)};
 }
 
 static bool js_cc_is_object(Item value) {
@@ -36318,178 +33696,6 @@ extern "C" Item js_get_node_module_namespace(void) {
     }
     js_cc_emit_cache_report();
     return *namespace_item;
-}
-
-extern "C" Item js_get_domain_namespace(void) {
-    if (js_domain_namespace.item == 0) {
-        if (!js_root_vector_ensure_registered(&js_runtime_state.promises)) {
-            return ItemError;
-        }
-        js_domain_namespace = js_new_object();
-        js_set_native_key(js_domain_namespace, js_name_item("create", 6), js_domain_create);
-        js_set_native_key(js_domain_namespace, js_name_item("createDomain", 12), js_domain_create);
-        js_runtime_set_native_constructor_key(js_domain_namespace, js_name_item("Domain", 6), js_domain_create);
-        js_set_key_cstr(js_domain_namespace, "default", js_domain_namespace);
-        js_domain_sync_visible_state();
-    }
-    return js_domain_namespace;
-}
-
-extern "C" Item js_get_cluster_namespace(void) {
-    Item* namespace_item = js_module_runtime_slot(
-        JS_MODULE_RUNTIME_CLUSTER_NAMESPACE);
-    if (!namespace_item) return ItemError;
-    bool is_worker = js_cluster_is_worker_process();
-    if (get_type_id(*namespace_item) == LMD_TYPE_NULL ||
-            js_runtime_state.cluster.namespace_is_worker != is_worker) {
-        js_runtime_state.cluster.namespace_is_worker = is_worker;
-        *namespace_item = js_new_object();
-        js_set_key_cstr(*namespace_item, "isPrimary", (Item){.item = b2it(!is_worker)});
-        js_set_key_cstr(*namespace_item, "isMaster", (Item){.item = b2it(!is_worker)});
-        js_set_key_cstr(*namespace_item, "isWorker", (Item){.item = b2it(is_worker)});
-        if (is_worker) {
-            // Cluster workers are selected by the inherited worker id, not
-            // argv; otherwise the worker re-enters primary/testcase code.
-            js_set_key_cstr(*namespace_item, "worker", js_cluster_make_worker_object());
-        }
-#define JS_CLUSTER_METHODS(M) \
-        M("setupPrimary", js_cluster_setup_primary) M("setupMaster", js_cluster_setup_primary) \
-        M("fork", js_cluster_fork)
-#define JS_CLUSTER_INSTALL(name, target) js_set_native_method(*namespace_item, name, target);
-        JS_CLUSTER_METHODS(JS_CLUSTER_INSTALL)
-#undef JS_CLUSTER_INSTALL
-#undef JS_CLUSTER_METHODS
-        js_set_key_cstr(*namespace_item, "default", *namespace_item);
-    }
-    return *namespace_item;
-}
-
-extern "C" Item js_get_repl_namespace(void) {
-    Item* namespace_item = js_module_runtime_slot(
-        JS_MODULE_RUNTIME_REPL_NAMESPACE);
-    if (!namespace_item) return ItemError;
-    if (get_type_id(*namespace_item) != LMD_TYPE_NULL) return *namespace_item;
-    *namespace_item = js_new_object();
-    // The host owns REPL evaluation and terminal I/O; node-core publishes its
-    // observable namespace through the resolver boundary.
-    js_set_native_key(*namespace_item, js_name_item("start", 5), js_repl_start);
-    js_runtime_set_native_constructor_key(*namespace_item, js_name_item("REPLServer", 10),
-        js_repl_start);
-    js_set_key_cstr(*namespace_item, "REPL_MODE_SLOPPY", js_name_item("sloppy", 6));
-    js_set_key_cstr(*namespace_item, "REPL_MODE_STRICT", js_name_item("strict", 6));
-    js_runtime_set_native_constructor_key(*namespace_item, js_name_item("Recoverable", 11),
-        js_repl_recoverable_ctor);
-    js_set_key_cstr(*namespace_item, "default", *namespace_item);
-    return *namespace_item;
-}
-
-extern "C" Item js_get_diagnostics_channel_namespace(void) {
-    JsDiagnosticsChannelState* state = js_diagnostics_channel_state_current(true);
-    if (!state) return ItemNull;
-    if (state->namespace_object.item != 0 && state->namespace_epoch == js_heap_epoch) {
-        return state->namespace_object;
-    }
-    state->namespace_epoch = js_heap_epoch;
-    if (!js_root_vector_ensure_registered(state)) return ItemError;
-    state->namespace_object = js_new_object();
-    Item diagnostics_namespace = state->namespace_object;
-    js_dc_channel_proto = js_new_object();
-    js_dc_tracing_channel_proto = js_new_object();
-    js_dc_bounded_channel_proto = js_new_object();
-    js_dc_channel_ctor = js_new_native_constructor(js_dc_channel_factory);
-    js_dc_tracing_channel_ctor = js_new_native_constructor(js_dc_tracing_channel);
-    js_dc_bounded_channel_ctor = js_new_native_constructor(js_dc_bounded_channel);
-    js_function_set_prototype(js_dc_channel_ctor, js_dc_channel_proto);
-    js_function_set_prototype(js_dc_tracing_channel_ctor, js_dc_tracing_channel_proto);
-    js_function_set_prototype(js_dc_bounded_channel_ctor, js_dc_bounded_channel_proto);
-    js_set_prototype(js_dc_bounded_channel_proto, js_dc_tracing_channel_proto);
-    js_set_key_cstr(js_dc_channel_proto, "constructor", js_dc_channel_ctor);
-    js_set_key_cstr(js_dc_tracing_channel_proto, "constructor", js_dc_tracing_channel_ctor);
-    js_set_key_cstr(js_dc_bounded_channel_proto, "constructor", js_dc_bounded_channel_ctor);
-    js_install_native_accessor(js_dc_tracing_channel_proto,
-        js_name_item("hasSubscribers", 14),
-        js_new_native_function(js_dc_tc_hasSubscribers_getter), ItemNull, JSPD_NON_ENUMERABLE);
-        #define JS_DIAGNOSTICS_METHODS(M) \
-        M("channel", js_dc_channel_factory) M("tracingChannel", js_dc_tracing_channel) \
-        M("subscribe", js_dc_subscribe) M("unsubscribe", js_dc_unsubscribe) \
-        M("hasSubscribers", js_dc_hasSubscribers)
-        #define JS_DIAGNOSTICS_INSTALL_METHOD(name, target) \
-        js_set_native_method(diagnostics_namespace, name, target);
-        JS_DIAGNOSTICS_METHODS(JS_DIAGNOSTICS_INSTALL_METHOD)
-        #undef JS_DIAGNOSTICS_INSTALL_METHOD
-        #undef JS_DIAGNOSTICS_METHODS
-        js_set_key_cstr(diagnostics_namespace, "boundedChannel", js_dc_bounded_channel_ctor);
-    js_set_key_cstr(diagnostics_namespace, "Channel", js_dc_channel_ctor);
-    js_set_key_cstr(diagnostics_namespace, "TracingChannel", js_dc_tracing_channel_ctor);
-    js_set_key_cstr(diagnostics_namespace, "BoundedChannel", js_dc_bounded_channel_ctor);
-    js_set_key_cstr(diagnostics_namespace, "default", diagnostics_namespace);
-    state->namespace_object = diagnostics_namespace;
-    return state->namespace_object;
-}
-
-typedef void (*JsInternalNamespacePopulate)(Item);
-
-static Item js_get_internal_namespace(JsModuleRuntimeSlot slot,
-        JsInternalNamespacePopulate populate) {
-    Item* namespace_item = js_module_runtime_slot(slot);
-    if (!namespace_item) return ItemError;
-    if (get_type_id(*namespace_item) == LMD_TYPE_NULL) {
-        *namespace_item = js_new_object();
-        populate(*namespace_item);
-        js_set_key_cstr(*namespace_item, "default", *namespace_item);
-    }
-    return *namespace_item;
-}
-
-static void js_populate_internal_crypto_util_namespace(Item namespace_item) {
-    js_set_native_key(namespace_item, js_name_item("getOpenSSLSecLevel", 18), js_internal_crypto_getOpenSSLSecLevel);
-}
-
-static void js_populate_internal_util_namespace(Item namespace_item) {
-}
-
-static void js_populate_internal_util_inspect_namespace(Item namespace_item) {
-    js_set_native_key(namespace_item, js_name_item("getStringWidth", 14), js_internal_util_inspect_get_string_width);
-    js_set_native_key(namespace_item, js_name_item("stripVTControlCharacters", 24), js_internal_util_inspect_strip_vt);
-}
-
-static void js_populate_internal_repl_namespace(Item namespace_item) {
-    js_set_native_key(namespace_item, js_name_item("createInternalRepl", 18), js_internal_repl_create);
-}
-
-extern "C" Item js_get_internal_crypto_util_namespace(void) {
-    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_CRYPTO_UTIL_NAMESPACE,
-        js_populate_internal_crypto_util_namespace);
-}
-
-extern "C" Item js_get_internal_util_namespace(void) {
-    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_UTIL_NAMESPACE,
-        js_populate_internal_util_namespace);
-}
-
-extern "C" Item js_get_internal_util_inspect_namespace(void) {
-    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_UTIL_INSPECT_NAMESPACE,
-        js_populate_internal_util_inspect_namespace);
-}
-
-extern "C" Item js_get_internal_repl_namespace(void) {
-    return js_get_internal_namespace(JS_MODULE_RUNTIME_INTERNAL_REPL_NAMESPACE,
-        js_populate_internal_repl_namespace);
-}
-
-extern "C" Item js_get_internal_test_binding_namespace(void) {
-    Item namespace_item = js_get_internal_namespace(
-        JS_MODULE_RUNTIME_INTERNAL_TEST_BINDING_NAMESPACE,
-        [](Item value) {
-            js_set_native_key(value, js_name_item("internalBinding", 15),
-                js_internal_binding);
-        });
-    if (item_is_error(namespace_item)) return namespace_item;
-    if (!js_runtime_state.modules.internal_test_binding_warning_scheduled) {
-        js_runtime_state.modules.internal_test_binding_warning_scheduled = true;
-        js_next_tick_enqueue(js_new_native_function(js_emit_internal_test_binding_warning));
-    }
-    return namespace_item;
 }
 
 extern "C" Item js_module_get_builtin(Item specifier) {
@@ -36996,11 +34202,7 @@ void js_deep_batch_reset() {
     js_runtime_state.promises.live_count = 0;
     js_runtime_state.promises.peak_live_count = 0;
     js_domain_current = (Item){0};
-    js_domain_namespace = (Item){0};
     root_vector_clear(&js_domain_stack_state);
-    if (js_runtime_state.async_local_storage) {
-        root_vector_clear(&js_runtime_state.async_local_storage->instances);
-    }
     if (js_runtime_state.async_hooks) {
         js_runtime_state.async_hooks->root_resource = (Item){0};
         js_runtime_state.async_hooks->current_resource = (Item){0};

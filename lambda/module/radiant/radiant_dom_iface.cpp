@@ -376,6 +376,7 @@ const char radiant_dom_interface_decl[] =
     "    item: fn(index: int) any, add: fn(token: string) any,\n"
     "    remove: fn(token: string) any, toggle: fn(token: string, force: any) any,\n"
     "    contains: fn(token: string) bool, replace: fn(old: string, next: string) bool,\n"
+    "    supports: fn(token: string) bool,\n"
     "    to_string: fn() string\n"
     "}\n";
 
@@ -1697,6 +1698,7 @@ RADIANT_TOKEN_LIST_METHOD(radiant_token_list_toggle, JUBE_DOM_TOKEN_LIST_TOGGLE)
 RADIANT_TOKEN_LIST_METHOD(radiant_token_list_contains, JUBE_DOM_TOKEN_LIST_CONTAINS)
 RADIANT_TOKEN_LIST_METHOD(radiant_token_list_replace, JUBE_DOM_TOKEN_LIST_REPLACE)
 RADIANT_TOKEN_LIST_METHOD(radiant_token_list_to_string, JUBE_DOM_TOKEN_LIST_TO_STRING)
+RADIANT_TOKEN_LIST_METHOD(radiant_token_list_supports, JUBE_DOM_TOKEN_LIST_SUPPORTS)
 
 static int radiant_token_list_value_get(Item receiver, Item* out) {
     return radiant_token_list_to_string(receiver, NULL, 0, out);
@@ -1766,6 +1768,7 @@ static const JubeMemberBind radiant_dom_token_list_members[] = {
     BIND_CALL("toggle", radiant_token_list_toggle),
     BIND_CALL("contains", radiant_token_list_contains),
     BIND_CALL("replace", radiant_token_list_replace),
+    BIND_CALL("supports", radiant_token_list_supports),
     {"to_string", "toString", NULL, NULL, radiant_token_list_to_string, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
 };

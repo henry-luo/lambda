@@ -143,6 +143,34 @@ TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
     enhanced_cache_destroy(cache);
 }
 
+TEST(NetworkResourceManager, PreservesParserBlockingPriorityAcrossConsumers) {
+    const char* cache_dir = "./temp/test_cache_manager_priority";
+    const char* url = "https://example.com/assets/parser-blocking.js";
+    const char* content = "window.parserBlocking = true;";
+
+    ASSERT_TRUE(create_dir(cache_dir));
+    EnhancedFileCache* cache = enhanced_cache_create(cache_dir, 1024 * 1024, 100);
+    ASSERT_NE(cache, nullptr);
+    char* stored_path = enhanced_cache_store(cache, url, content, strlen(content), NULL);
+    ASSERT_NE(stored_path, nullptr);
+    mem_free(stored_path);
+
+    DomDocument document;
+    NetworkResourceManager* manager = resource_manager_create(&document, NULL, cache);
+    ASSERT_NE(manager, nullptr);
+
+    NetworkResource* parser_blocking = resource_manager_prefetch(
+        manager, url, PRIORITY_HIGH);
+    ASSERT_NE(parser_blocking, nullptr);
+    NetworkResource* later_defer_consumer = resource_manager_prefetch(
+        manager, url, PRIORITY_NORMAL);
+    EXPECT_EQ(later_defer_consumer, parser_blocking);
+    EXPECT_EQ(parser_blocking->priority, PRIORITY_HIGH);
+
+    resource_manager_destroy(manager);
+    enhanced_cache_destroy(cache);
+}
+
 TEST(NetworkSchedulerCurlMulti, FileUrlCompletesAndWritesLocalResource) {
     mkdir("./temp", 0755);
 

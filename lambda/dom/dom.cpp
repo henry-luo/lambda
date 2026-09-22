@@ -63,9 +63,11 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../network/cookie_jar.h"
+#include "../network/network_resource_manager.h"
 #include "../network/public_suffix.h"
 #include "../io/input-allocation-context.h"
 #include "../../radiant/view.hpp"
+#include "../../radiant/radiant.hpp"
 #include "../../radiant/event.hpp"
 #include "../../radiant/layout.hpp"
 #include "../../radiant/render.hpp"
@@ -231,7 +233,6 @@ struct JsWebAnimationHost {
 #define js_document_default_view (js_runtime_state.dom.default_view)
 #define js_document_title_value (js_runtime_state.dom.title)
 #define js_document_fonts_value (js_runtime_state.dom.fonts)
-#define js_document_cookie_value (js_runtime_state.dom.cookie)
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.dom)))
 
 #define js_document_design_mode (js_runtime_state.dom.design_mode)
@@ -272,19 +273,11 @@ JS_FORWARD_EXPRESSION(bool, dom_is_host_driven_loop, (void), (_js_host_driven_lo
 // as _js_current_document.
 #define _js_main_document (js_runtime_state.dom.main_document)
 
-static Item js_font_face_set_ready_then(Item callback) {
-    if (dom_realm_is_callable(callback)) {
-        dom_realm_call(callback, make_js_undefined(), NULL, 0);
-    }
-    return get_type_id(js_document_fonts_value) == LMD_TYPE_MAP
-        ? js_document_fonts_value : make_js_undefined();
-}
-
 static Item js_create_document_fonts_object(void) {
     Item fonts = js_new_object();
-    Item ready = js_new_object();
-    Item then_fn = dom_realm_new_function(js_font_face_set_ready_then);
-    dom_realm_set_cstr(ready, "then", then_fn);
+    // Font loading is complete before scripts execute, so expose the settled
+    // promise rather than a then-only object that breaks chained handlers.
+    Item ready = dom_realm_promise_resolve(make_js_undefined());
     dom_realm_set_cstr(fonts, "ready", ready);
     return fonts;
 }
@@ -335,7 +328,7 @@ static inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id)
         case CSS_PROPERTY_VISIBILITY:
             return DOM_JS_MUTATION_STYLE_REPAINT;
         default:
-            return DOM_JS_MUTATION_STYLE;
+            return DOM_JS_MUTATION_INLINE_STYLE;
     }
 }
 
@@ -1116,7 +1109,6 @@ extern "C" void dom_batch_reset() {
     js_document_design_mode = false;
     js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
-    js_document_cookie_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     dom_events_reset();
     js_xhr_reset();
@@ -1756,6 +1748,7 @@ extern "C" void dom_set_document(void* dom_doc) {
         dom_install_option_constructor();
         dom_install_dom_parser_global();
         dom_install_xml_serializer_global();
+        dom_storage_bind_document();
         js_history_install_globals();
         dom_install_testdriver_globals();
     }
@@ -1781,6 +1774,7 @@ extern "C" void dom_set_ui_context(void* ui_context) {
     if (!js_active_runtime_state) return;
     _js_current_ui_context = (UiContext*)ui_context;
     radiant_set_cssom_used_value_sync(ui_context ? dom_ensure_geometry_snapshot : nullptr);
+    dom_storage_bind_document();
 }
 
 JS_FORWARD_EXPRESSION(void*, dom_get_ui_context, (void),
@@ -1895,6 +1889,7 @@ struct JsDomHtmlInterfaceEntry {
 
 static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"a", "HTMLAnchorElement"},
+    {"audio", "HTMLAudioElement"},
     {"button", "HTMLButtonElement"},
     {"canvas", "HTMLCanvasElement"},
     {"form", "HTMLFormElement"},
@@ -1903,7 +1898,9 @@ static const JsDomHtmlInterfaceEntry s_dom_html_interfaces[] = {
     {"link", "HTMLLinkElement"},
     {"option", "HTMLOptionElement"},
     {"select", "HTMLSelectElement"},
+    {"script", "HTMLScriptElement"},
     {"textarea", "HTMLTextAreaElement"},
+    {"video", "HTMLVideoElement"},
 };
 
 extern "C" int dom_html_interface_count(void) {
@@ -2054,6 +2051,7 @@ typedef enum DomCollectionVArrayKind {
     DOM_VARRAY_TABLE_ROW_CELLS,
     DOM_VARRAY_ATTRIBUTES,
     DOM_VARRAY_CLASS_LIST,
+    DOM_VARRAY_REL_LIST,
 } DomCollectionVArrayKind;
 
 typedef struct DomCollectionVArray {
@@ -2068,6 +2066,49 @@ static DomElement* dom_collection_varray_owner(void* data) {
     if (!collection) return nullptr;
     DomNode* node = (DomNode*)dom_unwrap_element(collection->owner);
     return node && node->is_element() ? node->as_element() : nullptr;
+}
+
+static const char* dom_token_list_attribute_name(const DomCollectionVArray* collection) {
+    if (!collection) return nullptr;
+    if (collection->kind == DOM_VARRAY_CLASS_LIST) return "class";
+    if (collection->kind == DOM_VARRAY_REL_LIST) return "rel";
+    return nullptr;
+}
+
+static bool dom_token_list_is_ascii_whitespace(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool dom_token_list_token_at(const DomCollectionVArray* collection,
+                                    int64_t target, const char** token_start,
+                                    size_t* token_len) {
+    if (!collection || target < 0 || !token_start || !token_len) return false;
+    DomElement* owner = dom_collection_varray_owner((void*)collection);
+    const char* attr_name = dom_token_list_attribute_name(collection);
+    const char* value = owner && attr_name ? owner->get_attribute(attr_name) : nullptr;
+    if (!value) return false;
+    int64_t index = 0;
+    const char* cursor = value;
+    while (*cursor) {
+        while (*cursor && dom_token_list_is_ascii_whitespace(*cursor)) cursor++;
+        const char* start = cursor;
+        while (*cursor && !dom_token_list_is_ascii_whitespace(*cursor)) cursor++;
+        if (start == cursor) break;
+        if (index++ == target) {
+            *token_start = start;
+            *token_len = (size_t)(cursor - start);
+            return true;
+        }
+    }
+    return false;
+}
+
+static int64_t dom_token_list_count(const DomCollectionVArray* collection) {
+    int64_t count = 0;
+    const char* token_start = nullptr;
+    size_t token_len = 0;
+    while (dom_token_list_token_at(collection, count, &token_start, &token_len)) count++;
+    return count;
 }
 
 static bool dom_collection_varray_matches(DomElement* elem,
@@ -2286,9 +2327,9 @@ static int64_t dom_collection_varray_count(void* data) {
     if (collection && collection->kind == DOM_VARRAY_ATTRIBUTES) {
         return dom_collection_attribute_count(dom_collection_varray_owner(data));
     }
-    if (collection && collection->kind == DOM_VARRAY_CLASS_LIST) {
-        DomElement* owner = dom_collection_varray_owner(data);
-        return owner ? owner->class_count : 0;
+    if (collection && (collection->kind == DOM_VARRAY_CLASS_LIST ||
+                       collection->kind == DOM_VARRAY_REL_LIST)) {
+        return dom_token_list_count(collection);
     }
     int64_t count = 0;
     (void)dom_collection_varray_walk(data, -1, &count);
@@ -2307,12 +2348,14 @@ static VirtualOpStatus dom_collection_varray_get(void* data, int64_t index,
         return get_type_id(*out) == LMD_TYPE_MAP
             ? VIRTUAL_OP_OK : VIRTUAL_OP_ERROR;
     }
-    if (collection && collection->kind == DOM_VARRAY_CLASS_LIST) {
-        DomElement* owner = dom_collection_varray_owner(data);
-        if (!owner || index < 0 || index >= owner->class_count) {
+    if (collection && (collection->kind == DOM_VARRAY_CLASS_LIST ||
+                       collection->kind == DOM_VARRAY_REL_LIST)) {
+        const char* token_start = nullptr;
+        size_t token_len = 0;
+        if (!dom_token_list_token_at(collection, index, &token_start, &token_len)) {
             return VIRTUAL_OP_MISSING;
         }
-        *out = js_name_item(owner->class_names[index]);
+        *out = js_name_item(token_start, (int)token_len);
         return VIRTUAL_OP_OK;
     }
     DomNode* node = index < 0 ? nullptr
@@ -2559,10 +2602,11 @@ extern "C" Item dom_attribute_collection_bridge(void* elem_ptr) {
         ItemNull, false, radiant_dom_named_node_map_host_type());
 }
 
-static Item dom_token_list_collection_bridge(DomElement* elem) {
+static Item dom_token_list_collection_bridge(DomElement* elem,
+                                             DomCollectionVArrayKind kind) {
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element(elem);
-    return dom_collection_varray_new(owner, DOM_VARRAY_CLASS_LIST,
+    return dom_collection_varray_new(owner, kind,
         ItemNull, false, radiant_dom_token_list_host_type());
 }
 
@@ -2710,6 +2754,26 @@ static Item dom_document_set_domain(DomDocument* document, Item value) {
     return value;
 }
 
+static CookieJar* dom_document_cookie_jar(DomDocument* document) {
+    if (_js_current_ui_context && _js_current_ui_context->browsing_session) {
+        CookieJar* jar = session_cookie_jar(_js_current_ui_context->browsing_session);
+        if (jar) return jar;
+    }
+    return document && document->resource_manager
+        ? document->resource_manager->cookie_jar : nullptr;
+}
+
+static Item dom_document_cookie_value(DomDocument* document) {
+    CookieJar* jar = dom_document_cookie_jar(document);
+    const char* href = document && document->url ? url_get_href(document->url) : nullptr;
+    if (!jar || !href) return js_name_item("");
+    char* value = cookie_jar_build_document_cookie(jar, href);
+    if (!value) return js_name_item("");
+    Item result = js_name_item(value);
+    mem_free(value);
+    return result;
+}
+
 // Dispatch property set on the document proxy object.
 // NOTE: Must use map_put directly instead of dom_realm_set to avoid
 // infinite recursion (dom_realm_set dispatches back here for DOM resources).
@@ -2741,7 +2805,15 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
         if (strcmp(prop, "cookie") == 0) {
             Item cookie_value = js_to_string(value);
             if (item_is_error(cookie_value)) return cookie_value;
-            js_document_cookie_value = cookie_value;
+            DomDocument* document = _js_current_document
+                ? _js_current_document : _js_main_document;
+            CookieJar* jar = dom_document_cookie_jar(document);
+            const char* href = document && document->url ? url_get_href(document->url) : nullptr;
+            if (!jar || !href) {
+                return js_throw_named_error_text("SecurityError",
+                    "document.cookie requires an active browsing session");
+            }
+            cookie_jar_store(jar, href, fn_to_cstr(cookie_value));
             return value;
         }
         if (strcmp(prop, "domain") == 0) {
@@ -3898,9 +3970,6 @@ static Item js_classlist_value_item(DomElement* elem) {
     return result;
 }
 
-static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation operation,
-                                   Item* args, int argc);
-
 static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     if (!elem) return ItemNull;
     RootFrame roots(4);
@@ -3914,7 +3983,25 @@ static Item dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
             ? dom_realm_get(expando_root.get(), cache_key_root.get())
             : ItemNull);
     if (get_type_id(wrapper_root.get()) != LMD_TYPE_VARRAY) {
-        wrapper_root.set(dom_token_list_collection_bridge(elem));
+        wrapper_root.set(dom_token_list_collection_bridge(elem, DOM_VARRAY_CLASS_LIST));
+        if (expando_root.get().item != ITEM_NULL) {
+            dom_realm_set(expando_root.get(), cache_key_root.get(), wrapper_root.get());
+        }
+    }
+    return wrapper_root.get();
+}
+
+static Item dom_get_rellist_wrapper(DomElement* elem) {
+    if (!elem) return ItemNull;
+    RootFrame roots(3);
+    Rooted<Item> expando_root(roots, expando_get_or_create_map((DomNode*)elem));
+    Rooted<Item> cache_key_root(roots, js_name_item("__relListWrapper"));
+    Rooted<Item> wrapper_root(roots,
+        expando_root.get().item != ITEM_NULL
+            ? dom_realm_get(expando_root.get(), cache_key_root.get())
+            : ItemNull);
+    if (get_type_id(wrapper_root.get()) != LMD_TYPE_VARRAY) {
+        wrapper_root.set(dom_token_list_collection_bridge(elem, DOM_VARRAY_REL_LIST));
         if (expando_root.get().item != ITEM_NULL) {
             dom_realm_set(expando_root.get(), cache_key_root.get(), wrapper_root.get());
         }
@@ -6381,6 +6468,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(READONLY,                  "readonly") \
     X(READY_STATE,               "readyState") \
     X(REFERRER,                  "referrer") \
+    X(REL_LIST,                  "relList") \
     X(REQUIRED,                  "required") \
     X(ROWS,                      "rows") \
     X(SCRIPTS,                   "scripts") \
@@ -6601,8 +6689,7 @@ static Item dom_document_get_property_for(DomDocument* doc_arg, Item prop_name) 
 
     // Document.cookie is scoped to this browsing context's session state.
     if (strcmp(prop, "cookie") == 0) {
-        return get_type_id(js_document_cookie_value) == LMD_TYPE_STRING
-            ? js_document_cookie_value : js_name_item("");
+        return dom_document_cookie_value(doc);
     }
 
     if (strcmp(prop, "domain") == 0) {
@@ -9567,9 +9654,19 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return dom_get_classlist_wrapper(elem, elem_item);
     }
 
+    if (prop_id == JS_DOM_PROP_REL_LIST &&
+            (_is_tag(elem, "link") || _is_tag(elem, "a") || _is_tag(elem, "area"))) {
+        return dom_get_rellist_wrapper(elem);
+    }
+
     // style — live CSSStyleDeclaration-like wrapper for inline style.
     if (prop_id == JS_DOM_PROP_STYLE) {
         return dom_get_inline_style_wrapper(elem);
+    }
+
+    // HTMLScriptElement.text reflects its inline source, including inert data scripts.
+    if (prop_id == JS_DOM_PROP_TEXT && _is_tag(elem, "script")) {
+        return dom_fp_text_content(elem_item);
     }
 
     // textContent / innerText (recursive text extraction)
@@ -10523,7 +10620,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         const char* style_text = dom_to_attr_cstr(value);
         elem->set_attribute("style", style_text);
         elem->set_styles_resolved(false);
-        dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
         log_debug("dom_set_property: set style='%.50s' on <%s>",
                   style_text, elem->tag_name ? elem->tag_name : "?");
         return value;
@@ -10799,8 +10896,9 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         return value;
     }
 
-    // textContent
-    if (prop_id == JS_DOM_PROP_TEXT_CONTENT) {
+    // HTMLScriptElement.text shares textContent's child replacement semantics.
+    if (prop_id == JS_DOM_PROP_TEXT_CONTENT ||
+            (prop_id == JS_DOM_PROP_TEXT && _is_tag(elem, "script"))) {
         // Node.textContent performs DOMString conversion; reactive libraries
         // routinely assign numbers directly from their data model.
         const char* text_str = value.item == ITEM_NULL
@@ -11145,7 +11243,7 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
     // handle cssText special case: replace entire inline style
     if (strcmp(css_prop, "cssText") == 0) {
         elem->set_attribute("style", val_str);
-        dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
+        dom_mutation_notify(DOM_JS_MUTATION_INLINE_STYLE, (DomNode*)elem, elem->parent);
         log_debug("dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
         return value;
@@ -16011,111 +16109,173 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
 }
 
 // ============================================================================
-// classList API (v12)
+// DOMTokenList API (v12)
 // ============================================================================
 
-static Item js_classlist_operation(Item elem_item, JubeDomTokenListOperation operation,
-                                   Item* args, int argc) {
-    DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
-    if (!elem) {
-        log_error("js-classlist-operation: not a DOM element");
+static bool dom_token_list_token_matches(const DomCollectionVArray* collection,
+                                         const char* token_start, size_t token_len,
+                                         const char* candidate) {
+    if (!collection || !token_start || !candidate) return false;
+    size_t candidate_len = strlen(candidate);
+    if (collection->kind == DOM_VARRAY_REL_LIST) {
+        return str_icmp(token_start, token_len, candidate, candidate_len) == 0;
+    }
+    return str_eq(token_start, token_len, candidate, candidate_len);
+}
+
+static bool dom_token_list_contains_token(const DomCollectionVArray* collection,
+                                          const char* candidate) {
+    const char* token_start = nullptr;
+    size_t token_len = 0;
+    for (int64_t index = 0;
+         dom_token_list_token_at(collection, index, &token_start, &token_len); index++) {
+        if (dom_token_list_token_matches(collection, token_start, token_len, candidate)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_token_list_rewrite(DomCollectionVArray* collection,
+                                   const char* remove_token, const char* append_token,
+                                   bool* removed) {
+    if (removed) *removed = false;
+    DomElement* elem = collection ? dom_collection_varray_owner(collection) : nullptr;
+    const char* attr_name = dom_token_list_attribute_name(collection);
+    if (!elem || !attr_name) return false;
+    const char* source = elem->get_attribute(attr_name);
+    StrBuf* normalized = strbuf_new_cap((source ? strlen(source) : 0) +
+                                        (append_token ? strlen(append_token) : 0) + 2);
+    if (!normalized) return false;
+    const char* token_start = nullptr;
+    size_t token_len = 0;
+    for (int64_t index = 0;
+         dom_token_list_token_at(collection, index, &token_start, &token_len); index++) {
+        if (remove_token &&
+                dom_token_list_token_matches(collection, token_start, token_len, remove_token)) {
+            if (removed) *removed = true;
+            continue;
+        }
+        if (normalized->length > 0) strbuf_append_char(normalized, ' ');
+        strbuf_append_str_n(normalized, token_start, token_len);
+    }
+    if (append_token && append_token[0]) {
+        if (normalized->length > 0) strbuf_append_char(normalized, ' ');
+        strbuf_append_str(normalized, append_token);
+    }
+    elem->set_attribute(attr_name, normalized->str ? normalized->str : "");
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent, attr_name);
+    strbuf_free(normalized);
+    return true;
+}
+
+static bool dom_link_rel_is_supported(const char* token) {
+    static const char* supported[] = {
+        "alternate", "author", "canonical", "dns-prefetch", "external", "help",
+        "icon", "license", "manifest", "modulepreload", "next", "nofollow",
+        "noopener", "noreferrer", "opener", "pingback", "preconnect", "prefetch",
+        "preload", "prerender", "prev", "search", "stylesheet", "tag",
+    };
+    if (!token || !token[0]) return false;
+    for (size_t index = 0; index < sizeof(supported) / sizeof(supported[0]); index++) {
+        if (str_icmp(token, strlen(token), supported[index], strlen(supported[index])) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static Item js_token_list_operation(DomCollectionVArray* collection,
+                                    JubeDomTokenListOperation operation,
+                                    Item* args, int argc) {
+    if (!collection || (collection->kind != DOM_VARRAY_CLASS_LIST &&
+                        collection->kind != DOM_VARRAY_REL_LIST)) {
         return ItemNull;
     }
 
-    // add(className, ...)
     if (operation == JUBE_DOM_TOKEN_LIST_ADD) {
-        for (int i = 0; i < argc; i++) {
-            const char* cls = fn_to_cstr(args[i]);
-            if (cls) elem->add_class(cls);
-        }
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                            "class");
-        return ItemNull;
-    }
-
-    // remove(className, ...)
-    if (operation == JUBE_DOM_TOKEN_LIST_REMOVE) {
-        for (int i = 0; i < argc; i++) {
-            const char* cls = fn_to_cstr(args[i]);
-            if (cls) elem->remove_class(cls);
-        }
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                            "class");
-        return ItemNull;
-    }
-
-    // toggle(className [, force]) → boolean
-    if (operation == JUBE_DOM_TOKEN_LIST_TOGGLE) {
-        if (argc < 1) return (Item){.item = ITEM_FALSE};
-        const char* cls = fn_to_cstr(args[0]);
-        if (!cls) return (Item){.item = ITEM_FALSE};
-
-        if (argc >= 2) {
-            // force parameter: add if truthy, remove if falsy
-            bool force = js_is_truthy(args[1]);
-            if (force) {
-                elem->add_class(cls);
-                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                                    "class");
-                return (Item){.item = ITEM_TRUE};
-            } else {
-                elem->remove_class(cls);
-                dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                                    "class");
-                return (Item){.item = ITEM_FALSE};
+        for (int index = 0; index < argc; index++) {
+            const char* token = fn_to_cstr(args[index]);
+            if (token && token[0] && !dom_token_list_contains_token(collection, token)) {
+                dom_token_list_rewrite(collection, nullptr, token, nullptr);
             }
         }
-        // no force: toggle
-        bool result = elem->toggle_class(cls);
-        dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
-                            "class");
-        return (Item){.item = b2it(result ? 1 : 0)};
+        return ItemNull;
     }
 
-    // contains(className) → boolean
-    if (operation == JUBE_DOM_TOKEN_LIST_CONTAINS) {
+    if (operation == JUBE_DOM_TOKEN_LIST_REMOVE) {
+        for (int index = 0; index < argc; index++) {
+            const char* token = fn_to_cstr(args[index]);
+            if (token && token[0]) dom_token_list_rewrite(collection, token, nullptr, nullptr);
+        }
+        return ItemNull;
+    }
+
+    if (operation == JUBE_DOM_TOKEN_LIST_TOGGLE) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        const char* cls = fn_to_cstr(args[0]);
-        if (!cls) return (Item){.item = ITEM_FALSE};
-        bool has = elem->has_class(cls);
-        return (Item){.item = b2it(has ? 1 : 0)};
+        const char* token = fn_to_cstr(args[0]);
+        if (!token || !token[0]) return (Item){.item = ITEM_FALSE};
+        bool present = dom_token_list_contains_token(collection, token);
+        bool add_token = argc >= 2 ? js_is_truthy(args[1]) : !present;
+        if (add_token && !present) dom_token_list_rewrite(collection, nullptr, token, nullptr);
+        if (!add_token && present) dom_token_list_rewrite(collection, token, nullptr, nullptr);
+        return (Item){.item = b2it(add_token ? 1 : 0)};
     }
 
-    // item(index) → string or null
+    if (operation == JUBE_DOM_TOKEN_LIST_CONTAINS) {
+        const char* token = argc > 0 ? fn_to_cstr(args[0]) : nullptr;
+        return (Item){.item = b2it(token && dom_token_list_contains_token(collection, token))};
+    }
+
     if (operation == JUBE_DOM_TOKEN_LIST_ITEM) {
         if (argc < 1) return ItemNull;
-        int64_t idx = it2i(args[0]);
-        if (idx < 0 || idx >= elem->class_count) return ItemNull;
-        return js_name_item(elem->class_names[idx]);
+        const char* token_start = nullptr;
+        size_t token_len = 0;
+        if (!dom_token_list_token_at(collection, it2i(args[0]), &token_start, &token_len)) {
+            return ItemNull;
+        }
+        return js_name_item(token_start, (int)token_len);
     }
 
-    // replace(oldClass, newClass) → boolean
     if (operation == JUBE_DOM_TOKEN_LIST_REPLACE) {
-        if (argc < 2) return (Item){.item = ITEM_FALSE};
-        const char* old_cls = fn_to_cstr(args[0]);
-        const char* new_cls = fn_to_cstr(args[1]);
-        if (!old_cls || !new_cls) return (Item){.item = ITEM_FALSE};
-        if (!elem->has_class(old_cls)) return (Item){.item = ITEM_FALSE};
-        elem->remove_class(old_cls);
-        elem->add_class(new_cls);
-        dom_mutation_notify();
+        const char* old_token = argc > 0 ? fn_to_cstr(args[0]) : nullptr;
+        const char* new_token = argc > 1 ? fn_to_cstr(args[1]) : nullptr;
+        if (!old_token || !old_token[0] || !new_token || !new_token[0] ||
+                !dom_token_list_contains_token(collection, old_token)) {
+            return (Item){.item = ITEM_FALSE};
+        }
+        if (!dom_token_list_token_matches(collection, old_token, strlen(old_token), new_token)) {
+            dom_token_list_rewrite(collection, old_token,
+                dom_token_list_contains_token(collection, new_token) ? nullptr : new_token, nullptr);
+        }
         return (Item){.item = ITEM_TRUE};
     }
 
-    // toString() → space-separated class string
     if (operation == JUBE_DOM_TOKEN_LIST_TO_STRING) {
-        return js_classlist_value_item(elem);
+        DomElement* elem = dom_collection_varray_owner(collection);
+        const char* attr_name = dom_token_list_attribute_name(collection);
+        const char* value = elem && attr_name ? elem->get_attribute(attr_name) : nullptr;
+        return js_name_item(value ? value : "");
     }
 
     if (operation == JUBE_DOM_TOKEN_LIST_ITERATOR) {
         Item values = js_array_new(0);
-        for (int i = 0; i < elem->class_count; i++) {
-            js_array_push(values, js_name_item(elem->class_names[i]));
+        const char* token_start = nullptr;
+        size_t token_len = 0;
+        for (int64_t index = 0;
+             dom_token_list_token_at(collection, index, &token_start, &token_len); index++) {
+            js_array_push(values, js_name_item(token_start, (int)token_len));
         }
         return js_get_iterator(values);
     }
 
-    log_error("js-classlist-operation: invalid operation %d", (int)operation);
+    if (operation == JUBE_DOM_TOKEN_LIST_SUPPORTS) {
+        const char* token = argc > 0 ? fn_to_cstr(args[0]) : nullptr;
+        return (Item){.item = b2it(collection->kind == DOM_VARRAY_REL_LIST &&
+            dom_link_rel_is_supported(token))};
+    }
+
+    log_error("js-token-list-operation: invalid operation %d", (int)operation);
     return ItemNull;
 }
 
@@ -16125,9 +16285,8 @@ extern "C" Item dom_token_list_operation(Item receiver, int operation,
         return ItemNull;
     }
     DomCollectionVArray* collection = (DomCollectionVArray*)receiver.varray->data;
-    if (!collection || collection->kind != DOM_VARRAY_CLASS_LIST) return ItemNull;
-    return js_classlist_operation(collection->owner,
-        (JubeDomTokenListOperation)operation, args, argc);
+    return js_token_list_operation(collection, (JubeDomTokenListOperation)operation,
+        args, argc);
 }
 
 extern "C" Item dom_classlist_get_property(Item elem_item, Item prop_name) {

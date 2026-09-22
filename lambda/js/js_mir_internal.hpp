@@ -24,6 +24,14 @@ static inline bool js_path_is_http_url(const char* path) {
 }
 
 bool jm_float_const_is_inline(double value);
+// Iterate the collected functions whose lexical parent is `parent_id`;
+// `continue` and `break` behave as in a plain loop over func_entries.
+#define JM_FOR_EACH_CHILD_FUNC(mt, idx, child, parent_id) \
+    for (int idx = 0; idx < (mt)->func_count; idx++) \
+        if (JsFuncCollected* child = &(mt)->func_entries[idx]; \
+                jm_parent_function_id((mt), child) != (parent_id)) {} else
+FnCapture* jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* entry,
+    bool is_nfe_binding, bool force_env_capture);
 MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 
 extern JsModuleConstEntry* g_eval_preamble_entries;
@@ -197,6 +205,8 @@ JsMirTranspiler* js_mir_open_compile_unit(
     const char* log_prefix, bool install_error_handler, MIR_context_t* out_ctx);
 typedef Item (*JsMirMainFunc)(Context*);
 JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
+        void (*gen_interface)(MIR_context_t, MIR_item_t));
+void* js_mir_link_function(MIR_context_t ctx, const char* function_name,
         void (*gen_interface)(MIR_context_t, MIR_item_t));
 Item js_mir_execute_compiled_entry(void* entry_func);
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
@@ -787,6 +797,8 @@ void jm_clear_active_js_transpile(JsTranspiler* tp, JsMirTranspiler* mt, char* o
 void jm_cleanup_active_mir(void);
 void jm_abandon_active_mir_after_signal(void);
 void jm_defer_mir_cleanup(MIR_context_t ctx);
+bool jm_retain_p2_mir_context(MIR_context_t ctx);
+void jm_destroy_p2_mir_contexts(JsRuntimeState* runtime_state);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
 // Resolve an inline document script through the page URL rather than its
@@ -808,6 +820,8 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body);
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);
 void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool transpile_js_mir_ast(JsMirTranspiler* mt);
+bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
+    AstFunctionId function_id, void** out_entry);
 bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
@@ -824,6 +838,7 @@ bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
     bool record_cache_dependencies);
 bool js_module_ast_prebuild_imports(const char* filename, const char* source,
     size_t source_length);
+bool js_module_ast_prebuild_await_import(const char* path);
 extern "C" Item js_new_function_from_string(Item* args, int argc);
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_normalize_path_separators(char* path);

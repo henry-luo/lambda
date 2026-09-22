@@ -14,10 +14,7 @@
 #include "../runtime/lambda-root-frame.hpp"
 #include <math.h>
 
-extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern String* heap_create_name(const char* name, size_t len);
-extern Item js_make_number(double d);
-extern __thread EvalContext* context;
 extern "C" NameId js_symbol_name_id(Item sym);
 
 // js_runtime.cpp internals we need. Public header counterparts:
@@ -47,13 +44,6 @@ static inline Item js_props_undefined() {
 JS_FORWARD_STATIC_EXPRESSION(bool, js_props_key_is_symbol, (Item key),
     get_type_id(key) == LMD_TYPE_SYMBOL && key.get_safe_symbol() &&
         key.get_safe_symbol()->kind != SYMBOL_LAMBDA_NAME)
-
-extern "C" bool js_descriptor_is_enumerable(Item desc) {
-    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    bool found = false;
-    Item enumerable = js_map_shape_lookup_ext(desc.map, "enumerable", 10, &found);
-    return found && js_is_truthy(enumerable);
-}
 
 extern "C" bool js_property_name_to_array_index(const char* name,
                                                    int name_len,
@@ -155,7 +145,6 @@ extern "C" const char* js_property_index_chars(int64_t index, int* out_len) {
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
-extern Item fn_map_set(Item map_item, Item key, Item value);
 
 // Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG
@@ -517,31 +506,6 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
     if (!js_props_query_configurable(m, se, name, name_len)) return false;
 
     return js_shape_mark_deleted_own(object, name, name_len, /*create_if_missing=*/false);
-}
-
-extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
-                                                                  Map* m,
-                                                                  Item receiver,
-                                                                  Item* out_value) {
-    if (jspd_is_deleted(e)) return JS_RESOLVE_DELETED;
-    if (jspd_is_accessor(e)) {
-        JsAccessorPair* pair = js_shape_entry_accessor_pair(e);
-        if (pair && pair->getter.item != ItemNull.item) {
-            Item v = js_call_accessor_getter(pair->getter, receiver);
-            if (item_is_error(v)) return JS_RESOLVE_THREW;
-            if (out_value) *out_value = v;
-            return JS_RESOLVE_VALUE;
-        }
-        // Setter-only or empty pair: per ES CopyDataProperties / Object.assign,
-        // resolves to undefined and is copied as a data property.
-        if (out_value) *out_value = js_props_undefined();
-        return JS_RESOLVE_VALUE;
-    }
-    if (map_ctor_offset_is_reserved(m, e->byte_offset)) return JS_RESOLVE_DELETED;
-    Item slot = _map_read_field(e, m->data);
-    if (js_props_is_deleted_sentinel(slot)) return JS_RESOLVE_DELETED;
-    if (out_value) *out_value = slot;
-    return JS_RESOLVE_VALUE;
 }
 
 // Synthesize descriptor from (obj, storage_map). `obj` is used for shape

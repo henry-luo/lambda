@@ -262,6 +262,9 @@ struct MirTranspiler {
     // (its direct-callee closure); calls among them are direct native edges.
     AstFuncNode* const* satellite_cluster;
     int satellite_cluster_count;
+    // Worker snapshots must not publish inferred parameter metadata into the
+    // shared retained AST while the evaluator is reading it.
+    bool satellite_snapshot;
     bool whole_script_poc;
     uint32_t satellite_module_state_id;
 
@@ -1140,9 +1143,14 @@ static TypeId mir_param_array_element_type(AstFuncNode* fn_node, int index,
 }
 
 static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn);
+static bool mir_satellite_defines(MirTranspiler* mt, AstNode* entry_node);
 static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
         const TypeId* resolved_types, int param_count) {
     if (!mt || !fn_node || param_count < 0 || param_count > LAMBDA_MAX_FUNCTION_ARGS) return;
+    // A worker owns cloned metadata for its selected satellite definitions.
+    // Preserve their inferred lanes locally; suppressing this write bound the
+    // raw double formal as an Item and leaked that double into Item-only calls.
+    if (mt->satellite_snapshot && !mir_satellite_defines(mt, (AstNode*)fn_node)) return;
     if (!fn_node->analysis) {
         fn_node->analysis = (FnAnalysis*)pool_calloc(mt->script_pool,
             sizeof(FnAnalysis));
@@ -7143,6 +7151,41 @@ static MIR_reg_t emit_optional_argument_value(MirTranspiler* mt, MIR_reg_t value
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, value)));
     emit_label(mt, done);
     return result;
+}
+
+// Binds each capture of `fn_node` from its flat Item environment into the
+// current scope. The body also records env offsets so mutations write back;
+// the public wrapper only reads captures while resolving omitted defaults.
+static void emit_load_closure_captures(MirTranspiler* mt, AstFuncNode* fn_node,
+        MIR_reg_t env_ptr_reg, bool track_write_back) {
+    int cap_count = 0;
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next) cap_count++;
+    int cap_index = 0;
+    for (FnCapture* cap = fn_node->captures; cap; cap = cap->next, cap_index++) {
+        char cap_name[128];
+        snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
+        MIR_reg_t cap_val = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, env_ptr_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        // Store as local variable (already boxed as Item)
+        set_var(mt, cap_name, cap_val, MIR_T_I64, LMD_TYPE_ANY);
+        publish_var_binding(mt, cap_name, cap->entry);
+        if (!track_write_back) continue;
+        MirVarEntry* cap_var = mir_var_for_binding(mt, cap->entry);
+        if (cap_var) cap_var->env_offset = cap_index * 8;
+        log_debug("mir: closure - loaded capture '%s' at env offset %d",
+            cap_name, cap_index * 8);
+    }
+}
+
+static bool fn_has_parameter_default(AstFuncNode* fn_node) {
+    for (AstNamedNode* param = fn_node->param; param; param = (AstNamedNode*)param->next) {
+        TypeParam* parameter = (TypeParam*)param->type;
+        if (parameter && parameter->default_value) return true;
+    }
+    return false;
 }
 
 static void async_store_var(MirTranspiler* mt, MirVarEntry* var) {
@@ -37022,6 +37065,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         MIR_reg_t env = MIR_reg(mt->ctx, "_env_ptr", wrapper_func);
         call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, env);
         call_vars[call_arg_count++] = {MIR_T_P, "env", 0};
+        // An omitted default is resolved here, before the body's prologue, and
+        // may read a captured binding (`fn inner(x = n)`); bind the captures so
+        // it does not compile as an undefined variable.
+        if (fn_has_parameter_default(fn_node)) {
+            emit_load_closure_captures(mt, fn_node, env, false);
+        }
     } else if (is_method) {
         MIR_reg_t self = MIR_reg(mt->ctx, "_self", wrapper_func);
         call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, self);
@@ -37987,41 +38036,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         // Get the _env_ptr parameter register
         MIR_reg_t env_ptr_reg = MIR_reg(mt->ctx, "_env_ptr", func);
         mt->env_reg = env_ptr_reg;
-
-        // Load captured variables from env into local scope
-        // env is a flat array of Items (8 bytes each)
-        int cap_count = 0;
-        for (FnCapture* count_cap = fn_node->captures; count_cap; count_cap = count_cap->next) {
-            cap_count++;
-        }
-        int cap_index = 0;
-        FnCapture* cap = fn_node->captures;
-        while (cap) {
-            char cap_name[128];
-            snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
-
-            MIR_reg_t cap_val = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, env_ptr_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-
-            // Store as local variable (already boxed as Item)
-            set_var(mt, cap_name, cap_val, MIR_T_I64, LMD_TYPE_ANY);
-            publish_var_binding(mt, cap_name, cap->entry);
-
-            // Mark as captured variable with env offset for write-back on mutation
-            MirVarEntry* cap_var = mir_var_for_binding(mt, cap->entry);
-            if (cap_var) {
-                cap_var->env_offset = cap_index * 8;
-            }
-
-            log_debug("mir: closure '%s' - loaded capture '%s' at env offset %d",
-                name_buf->str, cap_name, cap_index * 8);
-
-            cap_index++;
-            cap = cap->next;
-        }
+        emit_load_closure_captures(mt, fn_node, env_ptr_reg, true);
     }
 
     // Method body setup: load object fields from _self into local scope.
@@ -41016,6 +41031,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
                                     AstFuncNode* satellite_target,
                                     AstFuncNode* const* satellite_cluster,
                                     int satellite_cluster_count,
+                                    bool satellite_snapshot,
                                     bool whole_script_poc,
                                     const AstIndex* ast_index) {
     log_notice("transpile AST to MIR (direct)");
@@ -41049,6 +41065,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     // member's native call facts from the same call-site table the bodies use
     mt.satellite_cluster = satellite_cluster;
     mt.satellite_cluster_count = satellite_cluster_count;
+    mt.satellite_snapshot = satellite_snapshot;
     mt.whole_script_poc = whole_script_poc;
     mt.satellite_module_state_id = interp_module_owner
         ? script_module_layout_id(interp_module_owner) : 0;
@@ -41077,7 +41094,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.module = MIR_new_module(ctx, names->module);
 
     // Pre-pass: compile string/symbol patterns
-    prepass_compile_patterns(&mt, script->child);
+    if (!mt.satellite_snapshot) prepass_compile_patterns(&mt, script->child);
 
     // A satellite reconstructs the existing interpreter slab mapping. Eager
     // lowering keeps its dedicated BSS references and numbering unchanged.
@@ -41386,7 +41403,7 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
         pass->property_keys, NULL,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
-        NULL, NULL, 0, pass->tp->whole_script_poc, &pass->tp->ast_index);
+        NULL, NULL, 0, false, pass->tp->whole_script_poc, &pass->tp->ast_index);
     return 1;
 }
 
@@ -41414,9 +41431,9 @@ static int lambda_mir_finalize_compiler_pass(void* opaque) {
 // the eager module's `_mod_*` names would bind a later function to the first
 // satellite's image after a relink. Stable names make every satellite retain
 // its own immutable layout while all of them address the same EvalContext slab.
-static bool make_satellite_module_names(Script* script, uint32_t sequence,
+static bool make_satellite_module_names(NamePool* name_pool, uint32_t sequence,
         MirModuleNames* out) {
-    if (!script || !script->name_pool || !out) return false;
+    if (!name_pool || !out) return false;
     char module[96];
     char consts[96];
     char layout[96];
@@ -41427,11 +41444,11 @@ static bool make_satellite_module_names(Script* script, uint32_t sequence,
     snprintf(layout, sizeof(layout), "_sat_%u_layout", sequence);
     snprintf(types, sizeof(types), "_sat_%u_type_list", sequence);
     snprintf(keys, sizeof(keys), "_sat_%u_property_specs", sequence);
-    String* module_name = name_pool_create_len(script->name_pool, module, strlen(module));
-    String* consts_name = name_pool_create_len(script->name_pool, consts, strlen(consts));
-    String* layout_name = name_pool_create_len(script->name_pool, layout, strlen(layout));
-    String* types_name = name_pool_create_len(script->name_pool, types, strlen(types));
-    String* keys_name = name_pool_create_len(script->name_pool, keys, strlen(keys));
+    String* module_name = name_pool_create_len(name_pool, module, strlen(module));
+    String* consts_name = name_pool_create_len(name_pool, consts, strlen(consts));
+    String* layout_name = name_pool_create_len(name_pool, layout, strlen(layout));
+    String* types_name = name_pool_create_len(name_pool, types, strlen(types));
+    String* keys_name = name_pool_create_len(name_pool, keys, strlen(keys));
     if (!module_name || !consts_name || !layout_name || !types_name || !keys_name) return false;
     out->module = module_name->chars;
     out->consts_bss = consts_name->chars;
@@ -41479,8 +41496,6 @@ static bool build_property_key_image(ArrayList* property_keys,
 // pinned definitions keep their own entries (calls to them stay dynamic), as
 // do unsupported bodies and anything that is not a module-level function of
 // this script (imports, nested definitions, methods).
-enum { MIR_SATELLITE_CLUSTER_CAP = 64 };
-
 typedef struct MirSatelliteClusterScan {
     AstScript* root;
     Script* script;
@@ -41580,33 +41595,79 @@ static int mir_satellite_collect_cluster(Script* script, AstScript* root, AstFun
 static bool finalize_module_property_key_specs(MIR_item_t property_specs_bss,
         LambdaModuleLayout* layout, ArrayList* property_keys);
 
-bool compile_ast_function_satellite(Runtime* runtime, Script* script,
-        const AstFuncNode* fn, void** out_boxed_entry) {
-    if (out_boxed_entry) *out_boxed_entry = NULL;
-    if (!runtime || !script || !fn || !fn->analysis || !out_boxed_entry ||
+static bool compile_ast_function_satellite_image(Runtime* runtime, Script* script,
+        const AstFuncNode* fn, uint32_t sequence, bool snapshot,
+        InterpSatelliteImage** out_image) {
+    if (out_image) *out_image = NULL;
+    if (!runtime || !script || !fn || !fn->analysis || !out_image ||
             !interp_satellite_supported(fn)) {
         return false;
     }
     // `--mir-interp` runs MIR's own interpreter: jit_init skips MIR_gen_init,
     // so this context has no generator to link against or to finish.
     bool satellite_interp = g_mir_interp_mode != 0;
-    if (!script->jit_context) {
-        script->jit_context = jit_init(runtime->optimize_level);
+    MIR_context_t satellite_context = script->jit_context;
+    bool context_owned = false;
+    Pool* compile_pool = script->pool;
+    NamePool* compile_name_pool = script->name_pool;
+    ArrayList* compile_const_list = script->const_list;
+    Pool* snapshot_pool = NULL;
+    NamePool* snapshot_name_pool = NULL;
+    ArrayList* snapshot_const_list = NULL;
+    int source_const_count = script->const_list ? script->const_list->length : 0;
+    MirModuleNames names = {};
+    AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP] = {};
+    AstFuncNode* compiled_members[INTERP_SATELLITE_CLUSTER_CAP] = {};
+    int member_count = 0;
+    AstFuncNode* copies = NULL;
+    AstFuncNode* compiled_target = NULL;
+    AstFuncNode* lowering_target = NULL;
+    AstFuncNode* const* lowering_members = NULL;
+    AstScript satellite_root = {};
+    MirModuleArtifacts artifacts = {};
+    ArrayList* property_keys = NULL;
+    MirModuleBuild build = {};
+    InterpSatelliteImage* image = NULL;
+    void* entry = NULL;
+    struct timespec image_t0 = {};
+    struct timespec image_t1 = {};
+    AstScript* source_root = NULL;
+    StrBuf* entry_name = NULL;
+    double image_ms = 0.0;
+    LambdaModuleLayout* layout = NULL;
+    if (snapshot) {
+        // Worker images never extend the Script's compiler-owned pools. A
+        // rejected fallback allocation leaves the hot function in T0.
+        if (script->cache_cross_lang_tainted) return false;
+        snapshot_pool = mem_pool_create(NULL, MEM_ROLE_CODE, "interp.satellite.snapshot");
+        snapshot_name_pool = snapshot_pool
+            ? name_pool_create(snapshot_pool, script->name_pool) : NULL;
+        snapshot_const_list = arraylist_new(source_const_count > 0 ? source_const_count : 1);
+        if (!snapshot_pool || !snapshot_name_pool || !snapshot_const_list) goto fail;
+        for (int index = 0; index < source_const_count; index++) {
+            if (!arraylist_append(snapshot_const_list, script->const_list->data[index])) goto fail;
+        }
+        compile_pool = snapshot_pool;
+        compile_name_pool = snapshot_name_pool;
+        compile_const_list = snapshot_const_list;
+        satellite_context = jit_init(runtime->optimize_level);
+        context_owned = true;
+    }
+    if (!satellite_context) {
+        satellite_context = jit_init(runtime->optimize_level);
         // Must mirror jit_init's own branch. Claiming a generator that was
         // never initialized made teardown call MIR_gen_finish on a garbage
         // gen_ctx and segfault in finish_data_flow.
-        script->mir_gen_initialized = !satellite_interp;
-        if (!script->jit_context) {
+        context_owned = true;
+        if (!satellite_context) {
             log_error("interp-tier: could not create satellite MIR context");
-            return false;
+            goto fail;
         }
     }
 
-    MirModuleNames names = {};
-    if (!make_satellite_module_names(script, ++script->interp_satellite_count,
-            &names)) {
+    if (!make_satellite_module_names(compile_name_pool, sequence, &names)) {
         log_error("interp-tier: could not allocate satellite symbol names");
-        return false;
+        goto fail;
     }
 
     // `AstFuncNode::next` is the module declaration chain. The temporary root
@@ -41617,18 +41678,44 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     // edges with the eager tier's call-site inference instead of boxed
     // dynamic dispatch through every callee's wrapper (richards/deltablue
     // 1.2-1.4x, diviter 66x on the auto tier).
-    AstScript* source_root = (AstScript*)script->ast_root;
-    AstFuncNode* members[MIR_SATELLITE_CLUSTER_CAP];
-    int member_count = mir_satellite_collect_cluster(script, source_root, (AstFuncNode*)fn,
-        members, MIR_SATELLITE_CLUSTER_CAP);
-    AstFuncNode* copies = (AstFuncNode*)mem_calloc((size_t)member_count,
+    source_root = (AstScript*)script->ast_root;
+    // A worker image starts with one definition. Collecting a cluster reads
+    // other promotion cells, which belong to the evaluator-owned overlay for
+    // cached ASTs; retaining that graph expansion for the publication phase
+    // keeps the worker snapshot completely read-only.
+    if (snapshot) {
+        members[0] = (AstFuncNode*)fn;
+        member_count = 1;
+    } else {
+        member_count = mir_satellite_collect_cluster(script, source_root, (AstFuncNode*)fn,
+            members, INTERP_SATELLITE_CLUSTER_CAP);
+    }
+    copies = (AstFuncNode*)mem_calloc((size_t)member_count,
         sizeof(AstFuncNode), MEM_CAT_EVAL);
-    if (!copies) return false;
+    if (!copies) goto fail;
     for (int i = 0; i < member_count; i++) {
         copies[i] = *members[i];
         copies[i].next = i + 1 < member_count ? (AstNode*)&copies[i + 1] : NULL;
+        compiled_members[i] = &copies[i];
+        if (members[i] == fn) compiled_target = &copies[i];
+        if (snapshot && members[i]->analysis) {
+            // MIR variants are compiler output. Clone the record and its
+            // mutable parameter metadata before worker lowering begins.
+            FnAnalysis* analysis = (FnAnalysis*)pool_calloc(compile_pool,
+                sizeof(FnAnalysis));
+            if (!analysis) goto fail;
+            *analysis = *members[i]->analysis;
+            if (analysis->param_types && analysis->param_count > 0) {
+                analysis->param_types = (FnParamTypeInfo*)pool_calloc(compile_pool,
+                    sizeof(FnParamTypeInfo) * (size_t)analysis->param_count);
+                if (!analysis->param_types) goto fail;
+                memcpy(analysis->param_types, members[i]->analysis->param_types,
+                    sizeof(FnParamTypeInfo) * (size_t)analysis->param_count);
+            }
+            copies[i].analysis = analysis;
+        }
     }
-    AstScript satellite_root = {};
+    if (!compiled_target) goto fail;
     satellite_root.node_type = AST_SCRIPT;
     satellite_root.child = (AstNode*)&copies[0];
     satellite_root.global_vars = source_root ? source_root->global_vars : NULL;
@@ -41640,83 +41727,56 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
             child; child = child->next) {
         if (child->node_type != AST_NODE_IMPORT) continue;
         AstImportNode* imp = (AstImportNode*)child;
-        if (imp->is_cross_lang && import_is_js(imp)) {
+        if (!snapshot && imp->is_cross_lang && import_is_js(imp)) {
             register_cross_lang_pub_fns(runtime, imp);
         }
     }
 
-    MirModuleArtifacts artifacts = {};
-    ArrayList* property_keys = NULL;
-    MirModuleBuild build = {};
-    struct timespec image_t0;
     clock_gettime(CLOCK_MONOTONIC, &image_t0);
-    transpile_mir_ast_begin(&build, script->jit_context, &satellite_root, script->source,
-        script->type_list, script->const_list, script->pool, script->name_pool,
-        &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
-        members, member_count, false, &script->ast_index);
+    lowering_target = snapshot ? compiled_target : (AstFuncNode*)fn;
+    lowering_members = snapshot ? compiled_members : members;
+    transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
+        script->type_list, compile_const_list, compile_pool, compile_name_pool,
+        &names, &property_keys, &artifacts, script, lowering_target,
+        lowering_members, member_count, snapshot, false, &script->ast_index);
     transpile_mir_ast_lower(&build);
     mem_free(copies);
+    copies = NULL;
     transpile_mir_ast_finalize(&build, &property_keys, &artifacts);
     // Follow the same mode branch the module compiler uses so a satellite
     // matches the interface its context actually carries.
-    MIR_link(script->jit_context, satellite_interp ? MIR_set_interp_interface :
+    MIR_link(satellite_context, satellite_interp ? MIR_set_interp_interface :
         MIR_set_gen_interface, import_resolver);
-    StrBuf* entry_name = strbuf_new_cap(96);
+    entry_name = strbuf_new_cap(96);
     write_fn_name_ex(entry_name, (AstFuncNode*)fn, NULL, "_b");
-    void* entry = !entry_name ? NULL
-        : (satellite_interp ? find_func(script->jit_context, entry_name->str)
-                            : jit_gen_func(script->jit_context, entry_name->str));
+    entry = !entry_name ? NULL
+        : (satellite_interp ? find_func(satellite_context, entry_name->str)
+                            : jit_gen_func(satellite_context, entry_name->str));
     if (entry_name) strbuf_free(entry_name);
     if (!entry || !artifacts.consts_bss || !artifacts.consts_bss->addr ||
             !artifacts.type_list_bss || !artifacts.type_list_bss->addr ||
             !artifacts.layout_bss || !artifacts.layout_bss->addr) {
         log_error("interp-tier: satellite link did not publish its immutable BSS");
-        return false;
+        goto fail;
     }
-    // publish every cluster member's boxed entry to its T0 Function; a member
-    // whose entry cannot be found simply stays interpreted (its cell is
-    // untouched), the image itself is still valid for the target. The link
-    // above already generated every function (gen interface), so the entry
-    // is the item's address: jit_gen_func re-walks, reloads and RE-LINKS the
-    // whole context per call, which at 47 members cost more than the
-    // compile itself (deltablue's auto run spent 180 ms there).
-    for (int i = 0; i < member_count; i++) {
-        if (members[i] == (AstFuncNode*)fn) continue;   // the target: published by the caller
-        StrBuf* member_name = strbuf_new_cap(96);
-        if (!member_name) break;
-        write_fn_name_ex(member_name, members[i], NULL, "_b");
-        void* member_entry = find_func(script->jit_context, member_name->str);
-        bool published = member_entry &&
-            interp_publish_satellite_member(script, members[i], member_entry);
-        log_debug("interp-tier: satellite cluster member function='%s' published=%d",
-            members[i]->name ? members[i]->name->chars : "<anonymous>", (int)published);
-        strbuf_free(member_name);
-    }
-    struct timespec image_t1;
     clock_gettime(CLOCK_MONOTONIC, &image_t1);
-    double image_ms = (double)(image_t1.tv_sec - image_t0.tv_sec) * 1000.0 +
+    image_ms = (double)(image_t1.tv_sec - image_t0.tv_sec) * 1000.0 +
         (double)(image_t1.tv_nsec - image_t0.tv_nsec) / 1e6;
     log_notice("interp-tier: satellite image function='%s' members=%d compile_ms=%.1f",
         fn->name ? fn->name->chars : "<anonymous>", member_count, image_ms);
 
+    // Snapshot lowering may allocate fallback constants only in its private
+    // list. Such an image would address slots the live module cannot see, so
+    // fail closed instead of merging worker-owned values into Script state.
+    if (snapshot && compile_const_list->length != source_const_count) {
+        log_notice("interp-tier: snapshot rejected function='%s' reason=const-growth",
+            fn->name ? fn->name->chars : "<anonymous>");
+        goto fail;
+    }
     *(void**)artifacts.consts_bss->addr = script->const_list
         ? script->const_list->data : NULL;
     *(void**)artifacts.type_list_bss->addr = script->type_list;
-    // A satellite resolves its literals through the T0 module STATE
-    // (lambda_module_const_at_state), whose const image was bound at module
-    // init to the list's buffer of that moment. T0 reads AST pools and never
-    // interns literals, so this lowering is what appends them -- and an
-    // append can reallocate the list, leaving the state pointing at the old
-    // buffer. Rebind after every satellite so the state and the image agree;
-    // an imported module's first promoted function (pdf path.ls apply_op)
-    // otherwise compared against garbage string pointers (D5.2, D7.2.1).
-    if (!lambda_module_state_bind_static(script->module_state_id,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list)) {
-        log_error("interp-tier: satellite could not rebind the module's static image");
-        return false;
-    }
-    LambdaModuleLayout* layout = (LambdaModuleLayout*)artifacts.layout_bss->addr;
+    layout = (LambdaModuleLayout*)artifacts.layout_bss->addr;
     memset(layout, 0, sizeof(*layout));
     layout->module_id = script_module_layout_id(script);
     // Satellites observe the exact T0 slab, including function-value slots.
@@ -41724,17 +41784,118 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
     layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS |
         build.mt.satellite_property_key_base;
     if (!finalize_module_property_key_specs(artifacts.property_specs_bss,
-            layout, property_keys) || !lambda_module_state_prepare_layout(layout)) {
+            layout, property_keys)) {
         log_error("interp-tier: satellite property key image could not link");
-        if (property_keys) arraylist_free(property_keys);
-        return false;
+        goto fail;
     }
     if (property_keys) arraylist_free(property_keys);
+    property_keys = NULL;
 
-    *out_boxed_entry = entry;
+    image = (InterpSatelliteImage*)mem_calloc(1, sizeof(InterpSatelliteImage),
+        MEM_CAT_EVAL);
+    if (!image) goto fail;
+    image->context = satellite_context;
+    image->mir_gen_initialized = !satellite_interp;
+    image->compiler_pool = snapshot_pool;
+    image->compiler_name_pool = snapshot_name_pool;
+    image->compiler_const_list = snapshot_const_list;
+    image->target = fn;
+    image->target_entry = entry;
+    image->member_count = (uint32_t)member_count;
+    for (int index = 0; index < member_count; index++) {
+        image->members[index] = members[index];
+        StrBuf* member_name = strbuf_new_cap(96);
+        if (member_name) {
+            write_fn_name_ex(member_name, members[index], NULL, "_b");
+            image->member_entries[index] = find_func(satellite_context, member_name->str);
+            strbuf_free(member_name);
+        }
+    }
+    *out_image = image;
+    return true;
+
+fail:
+    if (property_keys) arraylist_free(property_keys);
+    if (copies) mem_free(copies);
+    if (context_owned && satellite_context) {
+        jit_cleanup_mode(satellite_context, satellite_interp ? 0 : 1);
+    }
+    if (snapshot_const_list) arraylist_free(snapshot_const_list);
+    if (snapshot_name_pool) name_pool_release(snapshot_name_pool);
+    if (snapshot_pool) pool_destroy(snapshot_pool);
+    return false;
+}
+
+void interp_satellite_image_destroy(InterpSatelliteImage* image) {
+    if (!image) return;
+    if (image->context) {
+        jit_cleanup_mode(image->context, image->mir_gen_initialized ? 1 : 0);
+        image->context = NULL;
+    }
+    if (image->compiler_const_list) arraylist_free(image->compiler_const_list);
+    if (image->compiler_name_pool) name_pool_release(image->compiler_name_pool);
+    if (image->compiler_pool) pool_destroy(image->compiler_pool);
+    mem_free(image);
+}
+
+bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
+        const AstFuncNode* fn, uint32_t sequence, InterpSatelliteImage** out_image) {
+    return compile_ast_function_satellite_image(runtime, script, fn, sequence,
+        true, out_image);
+}
+
+bool compile_ast_function_satellite(Runtime* runtime, Script* script,
+        const AstFuncNode* fn, void** out_boxed_entry) {
+    if (out_boxed_entry) *out_boxed_entry = NULL;
+    if (!runtime || !script || !fn || !out_boxed_entry) return false;
+
+    InterpSatelliteImage* image = NULL;
+    uint32_t sequence = ++script->interp_satellite_count;
+    if (!compile_ast_function_satellite_image(runtime, script, fn, sequence,
+            false, &image) || !image) {
+        return false;
+    }
+    bool installed_context = false;
+    if (!script->jit_context) {
+        script->jit_context = image->context;
+        script->mir_gen_initialized = image->mir_gen_initialized;
+        installed_context = true;
+    }
+    // A satellite resolves literals through the current module-state image.
+    // Bind and seal it only on the evaluator thread, where its TLS owner is
+    // valid and the Function entries can be updated atomically as one step.
+    bool prepared = lambda_module_state_bind_static(script->module_state_id,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list) && prepare_context_module_state(image->context,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list);
+    if (!prepared) {
+        log_error("interp-tier: synchronous satellite module-state publish failed");
+        if (installed_context) {
+            script->jit_context = NULL;
+            script->mir_gen_initialized = false;
+        } else {
+            // The Script already owned this context before this image. Keep
+            // that ownership stable; the failed satellite stays unpublished.
+            image->context = NULL;
+        }
+        interp_satellite_image_destroy(image);
+        return false;
+    }
+    for (uint32_t index = 0; index < image->member_count; index++) {
+        if (image->members[index] == fn) continue;
+        if (image->member_entries[index]) {
+            (void)interp_publish_satellite_member(script,
+                (AstFuncNode*)image->members[index], image->member_entries[index]);
+        }
+    }
+    *out_boxed_entry = image->target_entry;
+    // The Script owns the shared legacy context. The wrapper owns only the
+    // image record in this path, unlike a private worker image.
+    image->context = NULL;
+    interp_satellite_image_destroy(image);
     log_notice("interp-tier: satellite compiled function='%s' image=%u",
-        fn->name ? fn->name->chars : "<anonymous>",
-        (unsigned)script->interp_satellite_count);
+        fn->name ? fn->name->chars : "<anonymous>", (unsigned)sequence);
     return true;
 }
 

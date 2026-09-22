@@ -153,6 +153,10 @@ void resource_manager_set_ui_context(NetworkResourceManager* mgr, void* uicon);
 void resource_manager_set_wake_callback(NetworkResourceManager* mgr,
                                         NetworkWakeCallback callback,
                                         void* user_data);
+// The browsing session owns the jar. A document manager borrows it so every
+// top-level navigation observes one cookie state.
+void resource_manager_set_cookie_jar(NetworkResourceManager* mgr,
+                                     struct CookieJar* cookie_jar);
 
 // Resource loading
 NetworkResource* resource_manager_load(NetworkResourceManager* mgr,

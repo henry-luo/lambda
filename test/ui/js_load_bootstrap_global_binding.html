@@ -1,0 +1,13 @@
+<!doctype html>
+<html><body>
+<p id="result"></p>
+<script src="../js/popper_src_min.js"></script>
+<script>
+document.getElementById("result").setAttribute("data-popper", typeof Popper);
+</script>
+<script src="../js/bootstrap.min.js"></script>
+<script>
+document.getElementById("result").setAttribute(
+    "data-result", typeof bootstrap + ":" + typeof window.bootstrap);
+</script>
+</body></html>

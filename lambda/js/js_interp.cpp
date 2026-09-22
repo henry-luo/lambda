@@ -21,13 +21,9 @@
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 
-extern __thread EvalContext* context;
-extern int js_dynamic_import_suppress_module_drain;
 // Static imports execute nested module sources synchronously. Their queued
 // jobs belong to the importing module's host turn, not to the nested load.
 static __thread int js_interp_static_import_depth = 0;
-extern Item js_make_number(double value);
-extern "C" Item bigint_from_string(const char* value, int length);
 bool js_activate_runtime_name_pool(void);
 
 enum JsInterpCompletionKind : uint8_t {
@@ -286,6 +282,18 @@ static void js_interp_expression_replay_discard_pending(
     js_interp_expression_replay_clear_list(&activation->ast_expression_replay);
 }
 
+static void js_interp_expression_replay_discard_through(
+        JsSuspendedActivation* activation, JsAstNode* node) {
+    if (!activation || !node) return;
+    while (activation->ast_expression_replay) {
+        JsInterpExpressionReplay* discarded = activation->ast_expression_replay;
+        activation->ast_expression_replay = discarded->next;
+        bool found = discarded->node == node;
+        mem_free(discarded);
+        if (found) return;
+    }
+}
+
 static void js_interp_expression_replay_discard_recorded(
         JsSuspendedActivation* activation) {
     if (!activation) return;
@@ -305,7 +313,17 @@ static bool js_interp_expression_replay_take(JsInterpFrame* frame,
     JsSuspendedActivation* activation = frame ? frame->suspended_activation : NULL;
     if (!activation || !activation->ast_expression_replay || !node || !value) return false;
     JsInterpExpressionReplay* entry = activation->ast_expression_replay;
-    if (entry->node != node) return false;
+    while (entry && entry->node != node) entry = entry->next;
+    if (!entry) return false;
+    // nested evaluations record before their completed parent. A comma
+    // sequence resumes at that parent, so discard its already-accounted-for
+    // children and return the parent's saved completion without re-running
+    // its observable work.
+    while (activation->ast_expression_replay != entry) {
+        JsInterpExpressionReplay* discarded = activation->ast_expression_replay;
+        activation->ast_expression_replay = discarded->next;
+        mem_free(discarded);
+    }
     activation->ast_expression_replay = entry->next;
     *value = entry->value;
     mem_free(entry);
@@ -867,7 +885,12 @@ static JsInterpModuleBinding* js_interp_import_binding(JsScript* script,
         NameEntry* entry, String* local_name) {
     for (JsInterpModuleBinding* binding = script ? script->interp_imports : NULL;
             binding; binding = binding->next) {
-        if (entry && binding->entry == entry) return binding;
+        if (entry) {
+            if (binding->entry == entry) return binding;
+            continue;
+        }
+        // Parser recovery can leave an unbound identifier. Only that case can
+        // resolve an import by spelling; a local shadow must keep its binding.
         if (js_interp_name_matches(binding->local_name, local_name)) return binding;
     }
     return NULL;
@@ -1006,15 +1029,15 @@ static Item js_interp_read_import_binding(JsScript* script,
 }
 
 static void js_interp_publish_export_bindings(JsInterpFrame* frame,
-        String* local_name, Item value) {
-    if (!frame || !frame->script || !frame->script->is_es_module || !local_name) return;
+        NameEntry* entry, Item value) {
+    if (!frame || !frame->script || !frame->script->is_es_module || !entry) return;
     ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
         frame->script->reference);
     if (!module) return;
     Item namespace_obj = module->namespace_obj;
     for (JsInterpModuleBinding* binding = frame->script->interp_exports;
             binding; binding = binding->next) {
-        if (!binding->source && js_interp_name_matches(binding->local_name, local_name)) {
+        if (!binding->source && binding->entry == entry) {
             js_set_key_default(namespace_obj, js_interp_name_key(binding->export_name), value);
             js_interp_propagate_reexports(context ? context->runtime : NULL,
                 frame->script->reference, binding->export_name, value, 0);
@@ -1602,7 +1625,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         Item stored = js_interp_env_set_eval_binding(eval_env, key, value);
         if (item_is_error(stored)) return stored;
         if (js_eval_local_has_var_binding(key)) js_eval_local_export_var(key, value);
-        js_interp_publish_export_bindings(frame, name, value);
+        js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
     // `var`/parameter bindings may have been supplied by a previous direct
@@ -1611,7 +1634,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     if (!initialize && allow_eval_bindings && (!entry || !entry->is_const) &&
             js_eval_local_has_var_binding(key)) {
         js_eval_local_export_var(key, value);
-        js_interp_publish_export_bindings(frame, name, value);
+        js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
     if (!entry) {
@@ -1673,7 +1696,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
                 if (item_is_error(set_result)) return set_result;
             }
         }
-        js_interp_publish_export_bindings(frame, entry->name, value);
+        js_interp_publish_export_bindings(frame, entry, value);
         return value;
     }
     JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
@@ -1696,7 +1719,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     js_interp_env_slot_store(env, entry->slot, value);
     Item written = js_interp_write_arguments_param(frame, entry, value);
     if (item_is_error(written)) return written;
-    js_interp_publish_export_bindings(frame, entry->name, value);
+    js_interp_publish_export_bindings(frame, entry, value);
     return value;
 }
 
@@ -3682,10 +3705,42 @@ static bool js_interp_expression_may_suspend(JsAstNode* node) {
     return search.found;
 }
 
+static bool js_interp_argument_has_suspend_kind(JsAstNode* node,
+        int suspension_node_type) {
+    if (!node) return false;
+    if (node->node_type == suspension_node_type) return true;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_ARROW_FUNC) {
+        // Creating a nested callable does not execute its body.
+        return false;
+    }
+    struct JsInterpSuspendKindSearch {
+        int suspension_node_type;
+        bool found;
+    } search = {suspension_node_type, false};
+    js_ast_visit_children(node, [](JsAstNode* child, void* opaque) {
+        JsInterpSuspendKindSearch* search = (JsInterpSuspendKindSearch*)opaque;
+        if (search && !search->found) {
+            search->found = js_interp_argument_has_suspend_kind(child,
+                search->suspension_node_type);
+        }
+    }, &search);
+    return search.found;
+}
+
+static bool js_interp_await_argument_can_suspend(JsAstNode* node) {
+    return js_interp_argument_has_suspend_kind(node, AST_NODE_AWAIT);
+}
+
+static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
+    return js_interp_argument_has_suspend_kind(node, AST_NODE_YIELD);
+}
+
 static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) {
     if (!node) return js_interp_normal(make_js_undefined());
     Item replay_value = ItemNull;
-    if (js_interp_expression_replay_take(frame, node, &replay_value)) {
+    if (node->node_type != AST_NODE_AWAIT &&
+            js_interp_expression_replay_take(frame, node, &replay_value)) {
         // A later suspension in this same statement must replay this child
         // again, so carry the consumed value into the next replay segment.
         if (!js_interp_expression_replay_record(frame, node, replay_value)) {
@@ -3990,8 +4045,24 @@ static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* no
     case AST_NODE_AWAIT: {
         JsAwaitNode* awaited = (JsAwaitNode*)node;
         if (frame && frame->async_await_seen &&
-                *frame->async_await_seen < frame->async_await_skip) {
-            return js_interp_await_value(frame, make_js_undefined());
+                *frame->async_await_seen < frame->async_await_skip &&
+                !js_interp_await_argument_can_suspend(
+                    (JsAstNode*)awaited->argument)) {
+            // A nested await owns the prior ledger entry and must replay first.
+            // the await's marker follows its operand's recorded children.
+            // remove exactly that completed operand before injecting the
+            // fulfilled value, retaining any later comma-sequence operands.
+            js_interp_expression_replay_discard_through(frame->suspended_activation,
+                node);
+            JsInterpCompletion resumed = js_interp_await_value(frame,
+                make_js_undefined());
+            // a later await can suspend after this one, requiring the next
+            // replay pass to reach this already-completed await again.
+            if (resumed.kind == JS_INTERP_NORMAL &&
+                    !js_interp_expression_replay_record(frame, node, ItemNull)) {
+                return js_interp_throw(ItemError);
+            }
+            return resumed;
         }
         RootFrame roots(1);
         Rooted<Item> target_root(roots, make_js_undefined());
@@ -4001,7 +4072,12 @@ static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* no
             if (target.kind != JS_INTERP_NORMAL) return target;
             target_root.set(target.value);
         }
-        return js_interp_await_value(frame, target_root.get());
+        JsInterpCompletion result = js_interp_await_value(frame, target_root.get());
+        if (result.kind == JS_INTERP_AWAIT &&
+                !js_interp_expression_replay_record(frame, node, ItemNull)) {
+            return js_interp_throw(ItemError);
+        }
+        return result;
     }
     case AST_NODE_YIELD: {
         JsYieldNode* yielded = (JsYieldNode*)node;
@@ -4337,26 +4413,6 @@ static JsInterpCompletion js_interp_bind_named_function_expression_self(
             : js_interp_normal(make_js_undefined());
     }
     return js_interp_normal(make_js_undefined());
-}
-
-static bool js_interp_yield_argument_can_suspend(JsAstNode* node) {
-    if (!node) return false;
-    if (node->node_type == AST_NODE_YIELD) return true;
-    if (node->node_type == AST_NODE_FUNC ||
-            node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_ARROW_FUNC) {
-        // Creating a nested function does not execute its body.
-        return false;
-    }
-    struct NestedYieldState {
-        bool found;
-    } state = {false};
-    js_ast_visit_children(node, [](JsAstNode* child, void* opaque) {
-        NestedYieldState* state = (NestedYieldState*)opaque;
-        if (!state || state->found) return;
-        state->found = js_interp_yield_argument_can_suspend(child);
-    }, &state);
-    return state.found;
 }
 
 static bool js_interp_terminal_yield_expr(JsAstNode* node) {
@@ -5755,6 +5811,246 @@ bool js_interp_script_is_supported(JsScript* script) {
     bool supported = true;
     js_interp_check_node((JsAstNode*)script->ast_root, &supported);
     return supported;
+}
+
+struct JsP2AdmissionScan {
+    JsScript* script;
+    AstFunctionId function_id;
+    const char* reject_reason;
+};
+
+static void js_interp_p2_reject(JsP2AdmissionScan* scan,
+        const char* reason) {
+    if (scan && !scan->reject_reason) scan->reject_reason = reason;
+}
+
+static void js_interp_p2_scan_node(JsAstNode* node,
+        JsP2AdmissionScan* scan);
+
+static void js_interp_p2_scan_child(JsAstNode* child, void* opaque) {
+    js_interp_p2_scan_node(child, (JsP2AdmissionScan*)opaque);
+}
+
+static bool js_interp_p2_is_this_identifier(JsAstNode* node) {
+    return js_ast_identifier_named(node, "this", 4);
+}
+
+// A static member name is an immutable key, not a lexical reference. A
+// computed member instead evaluates its receiver then local key through the
+// shared Reference path, which owns ToPropertyKey and abrupt completion.
+static bool js_interp_p2_member_is_supported(JsMemberNode* member) {
+    return member && member->object && member->property &&
+        (member->computed || member->property->node_type == AST_NODE_IDENT);
+}
+
+// Object-literal data keys are static or independently local expressions.
+// Accessors, methods, and spreads can create callable dependencies and stay T0.
+static bool js_interp_p2_is_data_object_property(JsPropertyNode* property) {
+    return property && !property->method &&
+        !property->is_getter && !property->is_setter && property->key &&
+        property->value && (property->computed ||
+            property->key->node_type == AST_NODE_IDENT ||
+            property->key->node_type == AST_NODE_LITERAL);
+}
+
+// P2 has no shared closure or module-value ABI. Static member names are sealed
+// into the definition's module slab, while their receivers remain local values.
+static void js_interp_p2_scan_node(JsAstNode* node,
+        JsP2AdmissionScan* scan) {
+    if (!node || !scan || scan->reject_reason) return;
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        if (js_interp_p2_is_this_identifier(node)) break;
+        JsIdentifierNode* identifier = (JsIdentifierNode*)node;
+        NameEntry* entry = identifier->entry;
+        if (!entry) {
+            if (!js_ast_identifier_named(node, "undefined", 9)) {
+                js_interp_p2_reject(scan, "unresolved global name");
+            }
+            break;
+        }
+        AstNodeId binding_id = entry->node
+            ? ast_index_find(&scan->script->ast_index, entry->node)
+            : AST_NODE_ID_INVALID;
+        if (binding_id == AST_NODE_ID_INVALID ||
+                binding_id >= scan->script->ast_index.count ||
+                scan->script->ast_index.owner_functions[binding_id] !=
+                    scan->function_id) {
+            js_interp_p2_reject(scan, "captured or module binding");
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR:
+    case AST_NODE_NEW_EXPR:
+        js_interp_p2_reject(scan, "call boundary");
+        break;
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR: {
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (!js_interp_p2_member_is_supported(member)) {
+            js_interp_p2_reject(scan, "property access");
+            return;
+        }
+        js_interp_p2_scan_node(member->object, scan);
+        // A static key names a property; a computed key is executable source.
+        if (member->computed) js_interp_p2_scan_node(member->property, scan);
+        return;
+    }
+    case AST_NODE_PROPERTY:
+        js_interp_p2_reject(scan, "property access");
+        break;
+    case AST_NODE_MAP: {
+        JsObjectNode* object = (JsObjectNode*)node;
+        for (JsAstNode* property = (JsAstNode*)object->properties; property &&
+                !scan->reject_reason; property = (JsAstNode*)property->next) {
+            if (property->node_type != AST_NODE_PROPERTY ||
+                    !js_interp_p2_is_data_object_property(
+                        (JsPropertyNode*)property)) {
+                js_interp_p2_reject(scan, "object literal feature");
+                break;
+            }
+            JsPropertyNode* pair = (JsPropertyNode*)property;
+            // Match object construction order: a computed key runs before value.
+            if (pair->computed) js_interp_p2_scan_node(pair->key, scan);
+            js_interp_p2_scan_node(pair->value, scan);
+        }
+        return;
+    }
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_ARROW_FUNC:
+    case AST_NODE_METHOD:
+        js_interp_p2_reject(scan, "nested callable");
+        break;
+    case AST_NODE_CLASS:
+    case AST_NODE_CLASS_EXPR:
+    case AST_NODE_FIELD:
+        js_interp_p2_reject(scan, "class boundary");
+        break;
+    case AST_NODE_ARRAY:
+        break;
+    case AST_NODE_ARRAY_PATTERN:
+    case AST_NODE_MAP_PATTERN:
+    case AST_NODE_ASSIGN_PATTERN:
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
+    case AST_NODE_SPREAD:
+        js_interp_p2_reject(scan, "compound value or pattern");
+        break;
+    case AST_NODE_BLOCK:
+    case AST_NODE_EXPR_STMT:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_VARIABLE_DECLARATOR:
+    case AST_NODE_PARAM:
+    case AST_NODE_LITERAL:
+    case AST_NODE_NULL:
+    case AST_NODE_UNARY:
+    case AST_NODE_BINARY:
+    case AST_NODE_ASSIGN:
+    case AST_NODE_CONDITIONAL_EXPR:
+    case AST_NODE_SEQ:
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_LOOP:
+    case AST_NODE_RETURN_STAM:
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+    case AST_NODE_TRY_STAM:
+    case AST_NODE_CATCH_CLAUSE:
+        break;
+    default:
+        js_interp_p2_reject(scan, "unplanned syntax");
+        break;
+    }
+    if (!scan->reject_reason) {
+        js_ast_visit_children(node, js_interp_p2_scan_child, scan);
+    }
+}
+
+static int js_interp_p2_threshold(void) {
+    const char* text = getenv("JS_JIT_THRESHOLD");
+    if (!text || !text[0]) return 5;
+    char* end = NULL;
+    long threshold = strtol(text, &end, 10);
+    return end && !*end && threshold > 0 && threshold <= INT_MAX
+        ? (int)threshold : 5;
+}
+
+static const char* js_interp_p2_admission_reason(JsFunction* function,
+        AstFunctionId* out_function_id) {
+    if (out_function_id) *out_function_id = AST_FUNCTION_ID_INVALID;
+    JsScript* script = js_fn_ast_script(function);
+    AstFuncNode* definition = js_fn_ast_function(function);
+    if (!script || !definition || !script->source || script->is_module ||
+            script->is_eval_script ||
+            (definition->node_type != AST_NODE_FUNC &&
+             definition->node_type != AST_NODE_FUNC_EXPR) ||
+            definition->is_async || definition->is_generator) {
+        return "definition shape";
+    }
+    AstNodeId node_id = ast_index_find(&script->ast_index, (AstNode*)definition);
+    AstFunctionId function_id = node_id != AST_NODE_ID_INVALID
+        ? script->ast_index.owner_functions[node_id] : AST_FUNCTION_ID_INVALID;
+    if (function_id == AST_FUNCTION_ID_INVALID ||
+            ast_index_function_parent(&script->ast_index, function_id) !=
+                AST_FUNCTION_ID_INVALID ||
+            ast_function_capture_count(definition) != 0) {
+        return "closure capture";
+    }
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(
+        (JsAstNode*)definition->params, (JsAstNode*)definition->body);
+    if ((facts.observations & ~JS_AST_OBSERVES_THIS) || facts.has_direct_eval || facts.has_with ||
+            facts.has_direct_super_call || facts.has_lexical_super_call) {
+        return "activation-sensitive function";
+    }
+    JsP2AdmissionScan scan = {script, function_id, NULL};
+    for (JsAstNode* parameter = (JsAstNode*)definition->params; parameter &&
+            !scan.reject_reason; parameter = (JsAstNode*)parameter->next) {
+        js_interp_p2_scan_node(parameter, &scan);
+    }
+    js_interp_p2_scan_node((JsAstNode*)definition->body, &scan);
+    if (scan.reject_reason) return scan.reject_reason;
+    if (out_function_id) *out_function_id = function_id;
+    return NULL;
+}
+
+bool js_interp_promote_function_if_hot(JsFunction* function) {
+    if (!function || !js_execution_auto_requested() ||
+            js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
+            !function->code) {
+        return false;
+    }
+    JsCallableCode* code = function->code;
+    FnPromotionCell* promotion = &code->p2_promotion;
+    if (promotion->state == FN_PROMOTION_COMPILED ||
+            promotion->state == FN_PROMOTION_PINNED_INTERP ||
+            promotion->state == FN_PROMOTION_COMPILING) {
+        return false;
+    }
+    if (promotion->call_count != UINT32_MAX) promotion->call_count++;
+    if (promotion->call_count < (uint32_t)js_interp_p2_threshold()) return false;
+
+    AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
+    const char* reason = js_interp_p2_admission_reason(function, &function_id);
+    if (reason) {
+        promotion->state = FN_PROMOTION_PINNED_INTERP;
+        log_debug("js-p2: pinned definition reason=%s", reason);
+        return false;
+    }
+    promotion->state = FN_PROMOTION_COMPILING;
+    void* entry = NULL;
+    JsScript* script = js_fn_ast_script(function);
+    if (!js_mir_compile_function_satellite(context ? context->runtime : NULL,
+            script, function_id, &entry) ||
+            !js_function_promote_ast_body(function, entry)) {
+        promotion->state = FN_PROMOTION_PINNED_INTERP;
+        log_error("js-p2: satellite compilation failed");
+        return false;
+    }
+    promotion->boxed_entry = entry;
+    promotion->state = FN_PROMOTION_COMPILED;
+    log_info("js-p2: promoted definition calls=%u", promotion->call_count);
+    return true;
 }
 
 static Item js_interp_configure_function_metadata(Item function_item) {

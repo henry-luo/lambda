@@ -46,9 +46,15 @@ extern __thread Context* input_context;
 extern UiContext ui_context;
 
 static void window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
+                                        EnhancedFileCache* file_cache,
                                         bool reset_virtual_clock) {
     if (pool) pool_destroy(pool);
     url_destroy(cwd);
+    if (uicon && uicon->browsing_session) {
+        session_destroy(uicon->browsing_session);
+        uicon->browsing_session = nullptr;
+    }
+    if (file_cache) enhanced_cache_destroy(file_cache);
     dom_set_ui_context(nullptr);
     dom_set_host_driven_loop(false);
     if (reset_virtual_clock) js_event_loop_set_virtual_clock(false, 0.0);
@@ -275,16 +281,19 @@ static DocFormat detect_doc_format(const char* filename) {
 
 // Load document based on detected format
 static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height,
-                                       Pool* pool, const DocumentJsHostConfig* js_host_config) {
+                                       Pool* pool, const DocumentJsHostConfig* js_host_config,
+                                       CookieJar* top_level_cookie_jar) {
     // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
     if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
         log_debug("Loading as remote HTML document (HTTP/HTTPS)");
-        return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+        return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                             top_level_cookie_jar);
     }
 
     if (graph_path_is_graph(filename)) {
         log_debug("Loading as graph document");
-        return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+        return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                             top_level_cookie_jar);
     }
 
     DocFormat format = detect_doc_format(filename);
@@ -292,7 +301,8 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
     switch (format) {
         case DOC_FORMAT_HTML:
             log_debug("Loading as HTML document");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
 
         case DOC_FORMAT_MARKDOWN: {
             log_debug("Loading as Markdown document");
@@ -309,12 +319,14 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             log_debug("Loading as LaTeX document");
             // Use HTML conversion pipeline (LaTeX→HTML)
             log_info("Using LaTeX→HTML pipeline for LaTeX");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
         }
 
         case DOC_FORMAT_XML:
             log_debug("Loading as XML document with CSS stylesheet");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
 
         case DOC_FORMAT_RST:
             log_warn("RST format not yet implemented");
@@ -323,7 +335,8 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         case DOC_FORMAT_LAMBDA_SCRIPT:
             log_debug("Loading as Lambda script document");
             // load_html_doc will detect .ls extension and route to load_lambda_script_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
 
         case DOC_FORMAT_WIKI: {
             log_debug("Loading as Wiki document");
@@ -339,22 +352,26 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         case DOC_FORMAT_PDF:
             log_debug("Loading as PDF document");
             // load_html_doc will detect .pdf extension and route to load_pdf_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
 
         case DOC_FORMAT_SVG:
             log_debug("Loading as SVG document");
             // load_html_doc will detect .svg extension and route to load_svg_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
 
         case DOC_FORMAT_IMAGE:
             log_debug("Loading as image document");
             // load_html_doc will detect image extensions and route to load_image_doc
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
 
         case DOC_FORMAT_TEXT:
             log_debug("Loading as text document (source view)");
             // load_html_doc will detect text extensions and route to load_text_doc
-            return load_html_doc(base_url, (char*)filename, width, height);
+            return load_html_doc(base_url, (char*)filename, width, height, nullptr,
+                                 top_level_cookie_jar);
 
         default:
             log_error("Unsupported document format for file: %s", filename);
@@ -436,7 +453,10 @@ void update_window_title(const char* title) {
 
 DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height) {
     log_debug("Showing HTML document %s", doc_url);
-    DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height);
+    CookieJar* cookie_jar = ui_context.browsing_session
+        ? session_cookie_jar(ui_context.browsing_session) : nullptr;
+    DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height,
+                                     nullptr, cookie_jar);
     if (!doc) return nullptr;
 
     doc->viewport.output_scale = 1.0f;
@@ -1120,13 +1140,21 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         Pool* pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "window");
         if (!pool) {
             log_error("Failed to create memory pool for document");
-            window_cleanup_load_failure(nullptr, cwd, &ui_context, false);
+            window_cleanup_load_failure(nullptr, cwd, &ui_context, nullptr, false);
             return -1;
         }
 
         // CSS media queries should use CSS pixels (logical pixels), not physical pixels
         int css_width = (int)ui_context.viewport_width;
         int css_height = (int)ui_context.viewport_height;
+
+        // The state owner must exist before top-level loading so page scripts,
+        // document cookies, and the first HTTP request share one profile jar.
+        file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+        ui_context.browsing_session = session_create(thread_pool, file_cache);
+        if (!ui_context.browsing_session) {
+            log_error("view: failed to create browsing session");
+        }
 
         // Static headless smoke renders do not need retained JS event state after
         // load-time scripts have mutated the DOM. Interactive windows and event
@@ -1172,7 +1200,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
         } else {
             doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
-                                     &js_host_config);
+                &js_host_config, session_cookie_jar(ui_context.browsing_session));
         }
         // The document's evaluator is created on demand, at the post-render
         // behavior-attach drain, and only for a document that owns a control
@@ -1180,7 +1208,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         // for a page that never needs it denies it to a Lambda-script iframe.
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
-            window_cleanup_load_failure(pool, cwd, &ui_context, true);
+            window_cleanup_load_failure(pool, cwd, &ui_context, file_cache, true);
             return -1;
         }
         log_mem_stage("after-load");
@@ -1203,7 +1231,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (doc->html_root && doc_url_is_http) {
             network_downloader_init_shared();
             if (!doc->resource_manager) {
-                file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+                if (!file_cache) {
+                    file_cache = enhanced_cache_create("./temp/cache", 100 * 1024 * 1024, 10000);
+                }
                 radiant_init_network_support(doc, NULL, file_cache);
                 if (doc->resource_manager) {
                     // Keep the lifecycle marker when this late fallback owns setup.
@@ -1220,11 +1250,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
         }
 
-        // Create browsing session for navigation history and session state
-        EnhancedFileCache* session_cache = doc->resource_manager
-            ? resource_manager_get_file_cache(doc->resource_manager) : file_cache;
-        ui_context.browsing_session = session_create(thread_pool, session_cache);
+        // The session was opened before document loading. Its manager binding
+        // now makes subresource requests borrow that same profile jar.
         if (ui_context.browsing_session) {
+            // The session owns cookies and durable history; every document
+            // manager only borrows that state for its lifetime.
+            session_attach_document(ui_context.browsing_session, doc);
+            session_seed_document(ui_context.browsing_session, doc);
             log_info("view: browsing session created");
         }
 

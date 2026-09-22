@@ -8,6 +8,7 @@
  */
 
 #include "dom_xhr.h"
+#include "dom.h"
 #include "realm/dom_realm.h"
 #include "../js/js_event_loop.h"
 #include "../js/js_runtime.h"
@@ -15,6 +16,8 @@
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../input/input.hpp"
+#include "../network/cookie_jar.h"
+#include "../../radiant/radiant.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_grow.hpp"
@@ -27,6 +30,12 @@
 
 #define make_js_undef make_js_undefined
 JS_FORWARD_STATIC_ITEM(js_xhr_noop, (void), make_js_undef, ())
+
+static CookieJar* xhr_profile_cookie_jar(void) {
+    UiContext* uicon = (UiContext*)dom_get_ui_context();
+    return uicon && uicon->browsing_session
+        ? session_cookie_jar(uicon->browsing_session) : nullptr;
+}
 
 // ============================================================================
 // Per-XHR state
@@ -631,6 +640,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     config.max_redirects = 5;
     config.verify_ssl = false;
     config.enable_compression = true;
+    config.cookie_jar = xhr_profile_cookie_jar();
     config.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0";
 
     // body
