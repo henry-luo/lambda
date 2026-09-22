@@ -1502,6 +1502,9 @@ typedef struct FnVariantAnalysis {
 // entry once it is published (D8.1.1v2 §5.1).
 typedef enum FnPromotionState {
     FN_PROMOTION_INTERP,
+    // The hot definition keeps executing T0 while its immutable satellite
+    // image is built by the process-wide compiler pool (D8.1.1v12).
+    FN_PROMOTION_QUEUED,
     FN_PROMOTION_COMPILING,
     FN_PROMOTION_COMPILED,
     FN_PROMOTION_PINNED_INTERP,

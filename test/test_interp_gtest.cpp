@@ -757,7 +757,7 @@ TEST(InterpFramePlan, RecursionDepthBudgetFaultsCleanly) {
         << "] stderr=[" << interp.stderr_text << "]";
 }
 
-TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
+TEST(InterpPromotion, TailIterationsQueueAtDefaultThreshold) {
     // four self-tail edges leave a definition one edge short of the default
     // threshold. This guards against accidentally using call_count (which
     // also includes the outer entry) as the handoff budget (D8.1.1v5).
@@ -776,8 +776,9 @@ TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
     EXPECT_EQ(trim_trailing(below.stdout_text), "4");
     EXPECT_EQ(below.stderr_text.find("satellite compiled function='loop'"), (size_t)-1);
 
-    // the fifth direct self-tail boundary compiles and transfers the same
-    // activation into T1; the remaining fifteen iterations must stay correct.
+    // The fifth direct self-tail boundary queues a private image. The active
+    // frame remains T0 (there is no loop-entry OSR), and later call boundaries
+    // publish the completed image (D8.1.1v12).
     const char* handoff_path = "temp/interp_case_tail_handoff.ls";
     write_script(handoff_path,
         "pn loop(n: int, acc: int) int {\n"
@@ -791,8 +792,8 @@ TEST(InterpPromotion, TailIterationsHandoffAtDefaultThreshold) {
     RunResult handoff = run_script(handoff_path, "auto", /*procedural=*/true);
     EXPECT_EQ(handoff.exit_code, 0);
     EXPECT_EQ(trim_trailing(handoff.stdout_text), "20");
-    EXPECT_NE(handoff.stderr_text.find("satellite compiled function='loop'"), (size_t)-1)
-        << "the fifth self-tail edge did not hand off the active activation";
+    EXPECT_NE(handoff.stderr_text.find("queued satellite function='loop'"), (size_t)-1)
+        << "the fifth self-tail edge did not queue its satellite image";
 }
 
 //==============================================================================

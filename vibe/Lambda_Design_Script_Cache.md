@@ -7,10 +7,11 @@ single-flight artifact builds, broad JS AST templates with execution
 overlays, synchronous static-JS-import module MIR artifacts with
 source-generation cones, the Radiant JS-MIR lease session, command-path
 inventory, managed abandoned-build recovery, and opt-in inactive-entry byte
-retention are landed; eager-JIT AST-miss reuse and the remaining Phase 2–5
-gates remain open
-(2026-09-14)  
-**Date:** 2026-09-13 (updated 2026-09-14)  
+retention, and the initial private-image parallel P2 satellite path are
+landed; eager-JIT AST-miss reuse and the remaining Phase 2–5 gates remain open
+(2026-09-22)
+
+**Date:** 2026-09-13 (updated 2026-09-22)
 **Scope:** A single in-process script-cache service for every Lambda, LambdaJS,
 and future hosted-language command pipeline. `InputManager` is the persistent
 central store across disposable script runtimes. Each cached script has a
@@ -24,8 +25,9 @@ allocator has a named context owner), D7.1.2 (I/O versus derived-artifact
 layering), D7.2.2–D7.2.3 (transactional module initialization and in-process
 import caching), D8.1.3v10 (retained LambdaJS AST and explicit AST tier),
 D8.4.1v2 (immutable generated code), D7.1.2v2 (I/O and opaque-artifact
-layering), and D8.5.1v5 (the persistent executable-script cache and static
-module-prebuild scheduler).
+layering), D8.5.1v5 (the persistent executable-script cache and static
+module-prebuild scheduler), and D8.1.1v12/D8.5.1v6 (parallel satellite
+publication).
 This proposal records the 2026-09-13 policy decisions in §15; formal rulings
 are kept synchronized as implementation lands.
 
@@ -516,6 +518,73 @@ loader remains responsible for module instantiation, execution, MIR, and
 diagnostics. Cache build claims still provide single-flight sharing when another
 closure requests the same artifact. [D8.1.1v11,
 D8.5.1v5]
+
+#### Parallel P2 satellite compilation (initial implementation landed)
+
+AUTO-tier P2 satellite compilation is a distinct work class from static AST
+prebuild. A hot call must not synchronously lower, link, and generate native
+code on the document/UI execution thread merely because the definition crossed
+its promotion threshold. The initial parallel implementation compiles one
+snapshot-safe target definition per image. Co-compiling its direct-callee
+cluster remains the synchronous legacy path and a future parallel extension;
+it cannot be made worker-safe by sharing the live Script compiler state.
+
+```text
+T0 hot call
+  -> promotion cell: INTERP -> QUEUED
+  -> submit {Script generation, target definition} to the process-wide bounded pool
+  -> continue through the ordinary T0 entry
+
+worker
+  -> acquire immutable Script/AST snapshot
+  -> build and link in a private MIR context
+  -> return a sealed SatelliteImage; do not write Function::ptr or module state
+
+execution safe point
+  -> verify Script generation and target definition
+  -> publish the image's target boxed entry
+  -> QUEUED/COMPILING -> COMPILED, or PINNED_INTERP on a rejected image
+```
+
+The pool is process-wide, with four workers by default and an explicit
+`LAMBDA_SATELLITE_THREADS` bound of 1--32; it is not one pool per module,
+promotion, or document. It is intentionally separate from static-import
+prebuild while their private compiler-context adapters differ. Its default
+budget leaves CPU for layout/render. `{Script execution generation, target
+definition}` has exactly one in-flight or ready image: the promotion cell is
+the deduplication gate and later calls keep executing T0 while it is `QUEUED`.
+
+Each worker owns a private `MIR_context_t`, compiler pool/name pool, and a
+shallow frozen constant-list view. It may read only frozen AST/source facts. In
+particular it must not append to the Script's constant/type/property-key lists,
+run pattern prepasses that record AST facts, resolve cross-language imports,
+mutate `Script::jit_context`, or publish a function pointer. Constant-list
+growth rejects the image, because its code could otherwise address a slot not
+present in the receiving module. Those are current single-threaded
+implementation details, not permissible shared-worker state. The receiving
+execution retains the private context through its Script overlay and binds its
+module state only at a safe point.
+
+Until publication, the current call and every concurrent call execute T0.
+Publication is an optimization only: a failed, cancelled, stale, or unsupported
+worker image is discarded and pins that execution-local definition to T0, with
+no program-visible error. A Script teardown retires the queue generation and
+waits for in-flight jobs before releasing its snapshot; a cache-template clone
+never transfers an image or entry pointer to a different execution. This
+preserves D1.8, D5.4.3, D8.4.1v2, and the fresh-execution guarantee of D8.5.1.
+
+This is not general OSR. A currently active interpreted frame is never
+replaced. A later ordinary call observes a published boxed entry. Loop-header
+OSR remains a separate design problem under D8.1.1's active-frame rule.
+
+**Initial delivery boundary.** The first implementation provides the
+process-wide queue, target-definition deduplication, state machine, generation
+retirement, and safe-point-only publication. It admits only one-definition,
+snapshot-safe satellites; async closures, cross-language imports, pattern
+prepasses, and constant-list growth remain excluded. Unsupported work pins to
+T0 rather than falling back to synchronous compilation. A later extension may
+replace the per-definition image with a private cluster image only after it
+supplies immutable import, metadata, and multi-entry publication adapters.
 
 ### 12.2 Memory and eviction
 
