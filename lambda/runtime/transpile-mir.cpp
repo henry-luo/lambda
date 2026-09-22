@@ -1143,10 +1143,14 @@ static TypeId mir_param_array_element_type(AstFuncNode* fn_node, int index,
 }
 
 static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn);
+static bool mir_satellite_defines(MirTranspiler* mt, AstNode* entry_node);
 static void mir_store_param_types(MirTranspiler* mt, AstFuncNode* fn_node,
         const TypeId* resolved_types, int param_count) {
     if (!mt || !fn_node || param_count < 0 || param_count > LAMBDA_MAX_FUNCTION_ARGS) return;
-    if (mt->satellite_snapshot) return;
+    // A worker owns cloned metadata for its selected satellite definitions.
+    // Preserve their inferred lanes locally; suppressing this write bound the
+    // raw double formal as an Item and leaked that double into Item-only calls.
+    if (mt->satellite_snapshot && !mir_satellite_defines(mt, (AstNode*)fn_node)) return;
     if (!fn_node->analysis) {
         fn_node->analysis = (FnAnalysis*)pool_calloc(mt->script_pool,
             sizeof(FnAnalysis));
