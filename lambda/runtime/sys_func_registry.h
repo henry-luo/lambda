@@ -374,6 +374,7 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     case SYSFUNC_DATE: case SYSFUNC_DATE0: case SYSFUNC_DATE3:
     case SYSFUNC_TIME: case SYSFUNC_TIME0: case SYSFUNC_TIME3:
     case SYSFUNC_JUSTNOW:
+    case SYSPROC_NOW: case SYSPROC_TODAY:
         return LMD_TYPE_DTIME;
     // C functions returning double
     case SYSPROC_CLOCK:

@@ -3273,6 +3273,8 @@ extern "C" {
     Item fn_varg1(Item index);        // varg(n) - get nth variadic arg
 
     // procedural functions
+    DateTime pn_now();          // now() - current datetime in UTC
+    DateTime pn_today();        // today() - current date in UTC
     Item pn_print(Item item);
     double pn_clock();        // clock() - high-resolution monotonic time in seconds
     Item pn_cmd1(Item cmd);
