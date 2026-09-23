@@ -1458,7 +1458,10 @@ static void dom_compile_event_attr_to_expando(DomElement* elem,
 }
 
 static void dom_initialize_event_attrs(DomElement* elem) {
-    if (!elem) return;
+    // D5.3.3: compiling an inline handler allocates a function and expando in
+    // the current JS realm. A realm retained after script recovery may have no
+    // live Input, so wrapper construction must defer this JS-only work.
+    if (!elem || !dom_realm_active()) return;
     int attr_count = 0;
     const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {

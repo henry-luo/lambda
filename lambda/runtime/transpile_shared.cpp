@@ -72,10 +72,11 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node) {
     return true;
 }
 
-void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix) {
-    if (import) {
+void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
+        const Script* import_script, const char* suffix) {
+    if (import_script) {
         strbuf_append_format(strbuf, "m%u.",
-            script_compilation_unit_id(import->script));
+            script_compilation_unit_id(import_script));
     }
     strbuf_append_char(strbuf, '_');
     if (fn_node->name) {
@@ -90,6 +91,12 @@ void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* impor
     // _ + char offset ensures the fn name is unique across the script
     strbuf_append_char(strbuf, '_');
     strbuf_append_int(strbuf, fn_node->source_span.start_byte);
+}
+
+void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node,
+        AstImportNode* import, const char* suffix) {
+    write_fn_name_for_script_ex(strbuf, fn_node,
+        import ? import->script : NULL, suffix);
 }
 
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {

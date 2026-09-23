@@ -16,6 +16,7 @@
 // and dispatches one package plan for keyboard, IME, clipboard, and drag input.
 import dom
 import commands: lambda.dom.commands
+import result: lambda.dom.edit_result
 
 pub pn apply_fn(host, evt) {
     let target = if (evt.edit_token == null or evt.edit_token == 0) null
@@ -23,5 +24,5 @@ pub pn apply_fn(host, evt) {
     let edit_result = if (target == null)
         { claimed: false }
     else commands.execute(target, evt, evt.input_type, evt.data);
-    commands.verdict(edit_result)
+    result.verdict(edit_result)
 }

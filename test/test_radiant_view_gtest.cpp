@@ -259,8 +259,9 @@ static bool test_radiant_view_profile_has_intrinsic_measurement(const char* path
 
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
-                                                         const ShellEnvEntry* env) {
-    const char* args[7] = {};
+                                                         const ShellEnvEntry* env,
+                                                         const char* optimization = nullptr) {
+    const char* args[8] = {};
     int arg_count = 0;
     args[arg_count++] = "./lambda.exe";
     args[arg_count++] = "view";
@@ -270,6 +271,7 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
         args[arg_count++] = event_path;
     }
     args[arg_count++] = "--headless";
+    if (optimization) args[arg_count++] = optimization;
     args[arg_count] = NULL;
     ShellOptions options = {0};
     options.env = env;
@@ -583,6 +585,58 @@ TEST(RadiantViewTest, RestoresDocumentRealmAfterScriptException) {
     EXPECT_FALSE(test_radiant_view_file_contains(view_log,
         "dom_set_document: could not restore the active JS Input"));
     remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, RestoresDocumentRealmBeforeAutofocusBehavior) {
+    const char* page = "test/ui/js_autofocus_realm_recovery.html";
+    const char* view_log = "./temp/test_radiant_view_autofocus_realm.log";
+    test_radiant_view_ensure_temp_dir();
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "no js_input context"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "mir cache: import"));
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, KeepsNativeExportsForAutomaticInterpreterPolicy) {
+    const char* page = "test/ui/ce/editable-dom-blocks.html";
+    const char* events = "test/ui/test_editing_contenteditable_blocks.json";
+    const char* view_log = "./temp/test_radiant_view_native_imports.log";
+    test_radiant_view_ensure_temp_dir();
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    // Exercise the automatic large-source branch without treating it as an
+    // explicit interpreter request: imported package exports remain native.
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"LAMBDA_JS_LARGE_INTERP_BYTES", "1"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, env, "--optimize=0");
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "failed to resolve native fn/pn"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "import of undefined item"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "mir: undefined variable"));
     remove(view_log);
 }
 

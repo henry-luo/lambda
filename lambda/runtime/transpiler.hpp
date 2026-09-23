@@ -175,6 +175,10 @@ char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<r
 
 void* alloc_const(Transpiler* tp, size_t size);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
+// Cached AST imports describe syntax only.  MIR callers name their symbols
+// with the current execution graph's dependency identity (D8.5.1v7).
+void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
+    const Script* import_script, const char* suffix);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
 void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
@@ -331,6 +335,11 @@ bool compile_ast_function_satellite_snapshot(Runtime* runtime, Script* script,
         InterpSatelliteCancelProbe cancel_probe, void* cancel_context,
         InterpSatelliteImage** out_image);
 void interp_satellite_image_destroy(InterpSatelliteImage* image);
+
+// Detaches a Transpiler from a direct-import list. The Script-owned list stays
+// available until a replacement is adopted, so cache overlays resolve against
+// the current Runtime graph (D8.5.1v7).
+void transpiler_clear_direct_imports(Transpiler* tp, const Script* script);
 
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
 // Shared by the MIR Direct handoff and the T0 plan-only load path.

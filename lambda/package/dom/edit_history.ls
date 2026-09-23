@@ -22,7 +22,7 @@ fn codepoint_from_utf16(text, target, index, units) {
                                units + utf16_width(slice(text, index, index + 1)))
 }
 
-fn utf16_from_codepoint(text, target, index, units) {
+pub fn utf16_from_codepoint(text, target, index, units) {
     if (index >= len(text) or index >= target) units
     else utf16_from_codepoint(text, target, index + 1,
                               units + utf16_width(slice(text, index, index + 1)))

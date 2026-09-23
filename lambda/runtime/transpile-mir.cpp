@@ -293,6 +293,9 @@ struct MirTranspiler {
     const AstIndex* ast_index;
     const char* source;
     Runtime* runtime;
+    // The retained AST may be a cache template. This shell owns its current
+    // import graph and therefore the valid generated import namespaces.
+    Script* owner_script;
     bool is_main;
     int script_index;
     // P2 satellite lowering uses the T0 Script's already planned module slab
@@ -659,6 +662,29 @@ struct MirTranspiler {
     // Name pool for interning template_ref strings (shared with Transpiler/Input)
     NamePool* name_pool;
 };
+
+static Script* mir_import_script(MirTranspiler* mt, AstImportNode* import) {
+    if (!import) return NULL;
+    if (!mt || !mt->owner_script || import->is_cross_lang) {
+        return import->script;
+    }
+    return lambda_ast_overlay_import_script(mt->owner_script, import);
+}
+
+static void mir_write_fn_name_ex(MirTranspiler* mt, StrBuf* strbuf,
+        AstFuncNode* fn_node, AstImportNode* import, const char* suffix) {
+    if (!import) {
+        write_fn_name_ex(strbuf, fn_node, NULL, suffix);
+        return;
+    }
+    write_fn_name_for_script_ex(strbuf, fn_node,
+        mir_import_script(mt, import), suffix);
+}
+
+static void mir_write_fn_name(MirTranspiler* mt, StrBuf* strbuf,
+        AstFuncNode* fn_node, AstImportNode* import) {
+    mir_write_fn_name_ex(mt, strbuf, fn_node, import, NULL);
+}
 
 enum MirFlowFactKind { MIR_FLOW_SEMANTIC, MIR_FLOW_ADMITTED, MIR_FLOW_LAYOUT };
 
@@ -9746,9 +9772,11 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
                 bool needs_context_abi = import_requires_context_abi(
                     ident->entry->import);
                 if (use_wrapper) {
-                    write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
+                    mir_write_fn_name_ex(mt, fn_import_name, fn_node,
+                        ident->entry->import, "_b");
                 } else {
-                    write_fn_name(fn_import_name, fn_node, ident->entry->import);
+                    mir_write_fn_name(mt, fn_import_name, fn_node,
+                        ident->entry->import);
                 }
                 log_debug("mir: imported function reference '%s'", fn_import_name->str);
 
@@ -9772,11 +9800,12 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
 
             // Look up the MIR function item
             StrBuf* nm_buf = strbuf_new_cap(64);
-            write_fn_name(nm_buf, fn_node, ident->entry->import);
+            mir_write_fn_name(mt, nm_buf, fn_node, ident->entry->import);
             MIR_item_t func_item = find_local_func(mt, nm_buf->str);
 
             StrBuf* wrapper_buf = strbuf_new_cap(64);
-            write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
+            mir_write_fn_name_ex(mt, wrapper_buf, fn_node,
+                ident->entry->import, "_b");
             MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
             bool uses_wrapper = wrapper_item != NULL;
             if (wrapper_item) {
@@ -27013,7 +27042,7 @@ static AstFuncNode* mir_inline_call_target(MirTranspiler* mt, AstCallNode* call,
     // an identifier bound to a local holds a function value: a dynamic target
     if (!fn || !ident || !ident->entry || mir_var_for_ident(mt, ident)) return NULL;
     StrBuf* name_buf = strbuf_new_cap(64);
-    write_fn_name(name_buf, fn, ident->entry->import);
+    mir_write_fn_name(mt, name_buf, fn, ident->entry->import);
     NativeFuncInfo* info = find_local_func(mt, name_buf->str)
         ? find_native_func_info(mt, name_buf->str) : NULL;
     strbuf_free(name_buf);
@@ -28151,9 +28180,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 ident->entry->import);
             bool use_js_export_bridge = import_is_js(ident->entry->import);
             if (use_wrapper) {
-                write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
+                mir_write_fn_name_ex(mt, fn_import_name, fn_node,
+                    ident->entry->import, "_b");
             } else {
-                write_fn_name(fn_import_name, fn_node, ident->entry->import);
+                mir_write_fn_name(mt, fn_import_name, fn_node,
+                    ident->entry->import);
             }
             log_debug("mir: imported function call '%s' (wrapper=%d)", fn_import_name->str, use_wrapper);
 
@@ -28344,7 +28375,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             entry_node->node_type == AST_NODE_PROC)) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
             name_buf = strbuf_new_cap(64);
-            write_fn_name(name_buf, fn_node, ident->entry->import);
+            mir_write_fn_name(mt, name_buf, fn_node, ident->entry->import);
             fn_mangled = name_buf->str;
             local_func = find_local_func(mt, fn_mangled);
         }
@@ -28687,7 +28718,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // the same prepass, so source order cannot select the generic
                 // body and accidentally bypass an admitted TG8 variant.
                 entry_name_buf = strbuf_new_cap(64);
-                write_fn_name_ex(entry_name_buf, fn_def,
+                mir_write_fn_name_ex(mt, entry_name_buf, fn_def,
                     ident->entry ? ident->entry->import : NULL, "_b");
                 MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
                 if (boxed_entry) {
@@ -28723,7 +28754,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     (native_call && call_nfi->record_result &&
                      mt->record_call_target != call_node)) {
                 entry_name_buf = strbuf_new_cap(64);
-                write_fn_name_ex(entry_name_buf, fn_def,
+                mir_write_fn_name_ex(mt, entry_name_buf, fn_def,
                     ident->entry ? ident->entry->import : NULL, "_b");
                 MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
                 if (boxed_entry) {
@@ -28856,7 +28887,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 }
                 if (routed_to_boxed_entry) {
                     entry_name_buf = strbuf_new_cap(64);
-                    write_fn_name_ex(entry_name_buf, fn_def,
+                    mir_write_fn_name_ex(mt, entry_name_buf, fn_def,
                         ident->entry ? ident->entry->import : NULL, "_b");
                     MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
                     if (boxed_entry) {
@@ -41535,6 +41566,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
                                     const MirModuleNames* module_names,
                                     ArrayList** out_property_keys,
                                     MirModuleArtifacts* out_artifacts,
+                                    Script* owner_script,
                                     Script* interp_module_owner,
                                     AstFuncNode* satellite_target,
                                     AstFuncNode* const* satellite_cluster,
@@ -41567,6 +41599,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.em.lookup_import_metadata = lambda_lookup_import_metadata;
     mt.script = script;
     mt.ast_index = ast_index;
+    mt.owner_script = owner_script;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
     // set before any prepass: the forward-declare pass pre-registers each
@@ -41918,7 +41951,7 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
     transpile_mir_ast_begin(&pass->build, pass->ctx, (AstScript*)pass->tp->ast_root,
         pass->tp->source, pass->tp->type_list, pass->tp->const_list,
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
-        pass->property_keys, NULL,
+        pass->property_keys, NULL, pass->script,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
         NULL, NULL, 0, false, pass->tp->whole_script_poc, &pass->tp->ast_index);
     return 1;
@@ -42286,7 +42319,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     lowering_members = snapshot ? compiled_members : members;
     transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
         compile_type_list, compile_const_list, compile_pool, compile_name_pool,
-        &names, &property_keys, &artifacts, script, lowering_target,
+        &names, &property_keys, &artifacts, script, script, lowering_target,
         lowering_members, member_count, snapshot, false, &script->ast_index);
     transpile_mir_ast_lower(&build);
     mem_free(copies);
@@ -42478,18 +42511,25 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
 // Registers all pub functions and pub variable BSS addresses from imp's already-compiled
 // jit_context into the global dynamic_import_table so import_resolver can resolve them
 // when MIR_link() is called for the module that imports this one.
-static void register_module_pub_fns(AstImportNode* imp) {
-    if (!imp->script || !imp->script->jit_context) {
-        log_error("mir cache: import '%.*s' has no compiled dependency context",
-                  (int)imp->module.length, imp->module.str);
+static void register_module_pub_fns(AstImportNode* imp, Script* dependency) {
+    if (!dependency) dependency = imp ? imp->script : NULL;
+    if (!imp || !dependency || !dependency->jit_context) {
+        log_error("mir cache: import '%.*s' has no compiled dependency context "
+                  "dependency=%p jit=%p cache-template=%p imports=%d",
+                  imp ? (int)imp->module.length : 0,
+                  imp ? imp->module.str : "", dependency,
+                  dependency ? dependency->jit_context : NULL,
+                  dependency ? dependency->cache_template : NULL,
+                  dependency && dependency->direct_imports
+                      ? dependency->direct_imports->length : -1);
         assert(false && "MIR Direct import dependency must be compiled before importer");
         return;
     }
-    AstNode* mod_node = imp->script->ast_root;
+    AstNode* mod_node = dependency->ast_root;
     if (!mod_node || mod_node->node_type != AST_SCRIPT) return;
 
     log_info("mir: registering pub symbols from module '%.*s' (index=%d)",
-        (int)imp->module.length, imp->module.str, imp->script->index);
+        (int)imp->module.length, imp->module.str, dependency->index);
 
     AstNode* mod_child = ((AstScript*)mod_node)->child;
     while (mod_child) {
@@ -42512,10 +42552,10 @@ static void register_module_pub_fns(AstImportNode* imp) {
                 // style.ls both have pub fn render at byte 574 → _render_574).
                 StrBuf* fn_name = strbuf_new_cap(64);
                 write_fn_name_ex(fn_name, fn_node, NULL, "_b");
-                void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
+                void* fn_ptr = find_func(dependency->jit_context, fn_name->str);
                 if (fn_ptr) {
                     StrBuf* reg_name = strbuf_new_cap(64);
-                    write_fn_name_ex(reg_name, fn_node, imp, "_b");
+                    write_fn_name_for_script_ex(reg_name, fn_node, dependency, "_b");
                     register_dynamic_import(raw_strdup(reg_name->str), fn_ptr); // RAWALLOC_OK: MIR manages param name lifetime
                     log_debug("mir: registered import wrapper fn: %s -> %p", reg_name->str, fn_ptr);
                     strbuf_free(reg_name);
@@ -42537,9 +42577,9 @@ static void register_module_pub_fns(AstImportNode* imp) {
                     // MIR Direct BSS name: "_gvar_<rawname>"
                     char gvar[200];
                     snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);
-                    MIR_item_t bss_item = find_import(imp->script->jit_context, gvar);
+                    MIR_item_t bss_item = find_import(dependency->jit_context, gvar);
                     if (!bss_item || !bss_item->addr) {
-                        bss_item = find_import(imp->script->jit_context, import_key->str);
+                        bss_item = find_import(dependency->jit_context, import_key->str);
                     }
                     if (bss_item && bss_item->addr) {
                         register_dynamic_import(raw_strdup(import_key->str), bss_item->addr); // RAWALLOC_OK: MIR manages param name lifetime
@@ -42702,7 +42742,8 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
     if (!pass || !pass->ctx || !pass->tp) return 0;
     unsigned int opt_level = pass->tp->runtime ? pass->tp->runtime->optimize_level : 2;
     bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
-    bool auto_interp = !explicit_interp && opt_level == 0 &&
+    bool auto_interp = !pass->tp->requires_native_mir_exports &&
+        !explicit_interp && opt_level == 0 &&
         mir_large_interp_enabled() && pass->tp->source &&
         strlen(pass->tp->source) >= mir_large_source_interp_threshold();
     bool use_interp = explicit_interp || auto_interp;
@@ -42711,7 +42752,8 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
         pass->mir_instruction_count, pass->mir_largest_function_instruction_count,
         document_context || g_js_force_document_interp, opt_level,
         lambda_mir_lazy_enabled());
-    if (!use_interp && selection.interface_kind == MIR_LINK_INTERP) {
+    if (!use_interp && !pass->tp->requires_native_mir_exports &&
+            selection.interface_kind == MIR_LINK_INTERP) {
         use_interp = true;
         log_info("lambda-mir: policy selected interpreter for %llu instructions%s",
             (unsigned long long)pass->mir_instruction_count,
@@ -42764,10 +42806,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     clear_dynamic_imports();
 
     AstScript* ast_root = (AstScript*)tp->ast_root;
-    if (tp->direct_imports) {
-        arraylist_free(tp->direct_imports);
-        tp->direct_imports = NULL;
-    }
+    transpiler_clear_direct_imports(tp, script);
     tp->cache_cross_lang_tainted = false;
     AstNode* child = ast_root->child;
     while (child) {
@@ -42777,14 +42816,18 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                 tp->cache_cross_lang_tainted = true;
                 register_cross_lang_pub_fns(tp->runtime, imp);
             } else {
+                // D8.5.1v7: parser-owned import ASTs belong to the immutable
+                // cache template, while this compilation must link the current
+                // Runtime's cloned dependency and its module-state slab.
+                Script* dependency = lambda_ast_overlay_import_script(script, imp);
                 if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
-                if (imp->script) {
-                    arraylist_append(tp->direct_imports, imp->script);
-                    if (imp->script->cache_cross_lang_tainted) {
+                if (dependency) {
+                    arraylist_append(tp->direct_imports, dependency);
+                    if (dependency->cache_cross_lang_tainted) {
                         tp->cache_cross_lang_tainted = true;
                     }
                 }
-                register_module_pub_fns(imp);
+                register_module_pub_fns(imp, dependency);
             }
         }
         child = child->next;
@@ -42804,7 +42847,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     // that early decision while retaining the explicit --mir-interp/env mode.
     unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
     bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
-    bool auto_interp_for_large_source = !explicit_interp && opt_level == 0 &&
+    bool auto_interp_for_large_source = !tp->requires_native_mir_exports &&
+        !explicit_interp && opt_level == 0 &&
         mir_large_interp_enabled() && tp->source &&
         strlen(tp->source) >= mir_large_source_interp_threshold();
     bool force_interp_init = !g_mir_interp_mode &&
@@ -42834,6 +42878,9 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         &link_context.mir_largest_function_instruction_count;
     // Direct MIR resumes parser work; retained ASTs begin a fresh unit.
     CompilerPassManager* pass_manager = &tp->pass_manager;
+    // D8.5.1v7: an AST-cache shell borrows the template's index. MIR fallback
+    // may use the facts but cannot destroy them when it adopts its own image.
+    if (script->cache_template) tp->preserve_ast_index = true;
     if (pass_manager->pass_count == 0) {
         compiler_pass_manager_init(pass_manager, COMPILER_FACT_FRONTEND |
             (tp->ast_index.graph_published ? COMPILER_FACT_INDEXED : 0));
