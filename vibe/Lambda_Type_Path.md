@@ -17,11 +17,10 @@
 > (root access). This record contains the full design and implementation
 > consequences; the formal semantics is authoritative when the two disagree.
 
-This record supersedes the surface syntax plus root/parent-navigation portions of
-[`Lambda_Expr_Path.md`](Lambda_Expr_Path.md) and
-[`Lambda_Expr_Path_Impl.md`](Lambda_Expr_Path_Impl.md). Those files remain
-useful implementation/history records, but their `/a`, `..a`, and `value ..`
-examples are no longer design authority.
+This record is the full path-design authority. The concise
+[`Lambda_Expr_Path.md`](Lambda_Expr_Path.md) companion covers current mapping,
+forcing, and implementation boundaries; the detailed implementation audit is
+[`Lambda_Impl_Path (done).md`](impl/Lambda_Impl_Path%20(done).md).
 
 ## 1. Decision
 
