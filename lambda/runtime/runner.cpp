@@ -517,6 +517,27 @@ static void profile_record_phase(const PhaseProfile* profile) {
 #endif
 }
 
+void lambda_profile_record_js_compilation(const char* script_path,
+        const JsMirPhaseTiming* timing) {
+    if (!timing || !is_profile_enabled()) return;
+    PhaseProfile profile = {};
+    profile_set_script_path(&profile, script_path);
+    // Preserve the established TSV columns while keeping each JS compiler
+    // stage visible in the same lifecycle as the Lambda front end.
+    profile.parse_ms = (double)timing->parse_build_us / 1000.0;
+    profile.ast_ms = (double)(timing->bind_us + timing->validate_us +
+        timing->index_us) / 1000.0;
+    profile.inline_analysis_ms = (double)(timing->collect_us +
+        timing->captures_us + timing->env_layout_us + timing->infer_us +
+        timing->forward_declare_us) / 1000.0;
+    profile.transpile_ms = (double)timing->mir_lower_us / 1000.0;
+    profile.jit_init_ms = (double)timing->finalize_us / 1000.0;
+    profile.mir_gen_ms = (double)(timing->prelink_us + timing->link_us) / 1000.0;
+    profile.worker_thread = 0;
+    profile.thread_id = profile_current_thread_id();
+    profile_record_phase(&profile);
+}
+
 void profile_dump_to_file() {
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");

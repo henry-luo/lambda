@@ -237,7 +237,8 @@ void clear_dynamic_imports(void);
 // structural and excluded from the executable-instruction total.
 void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
                              uint64_t* out_function_count,
-                             uint64_t* out_instruction_count);
+                             uint64_t* out_instruction_count,
+                             uint64_t* out_largest_function_instruction_count);
 
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,

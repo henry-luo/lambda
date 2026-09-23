@@ -2073,8 +2073,8 @@ AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
     ast_node->node_type = node_type;
     ast_node->source_span = span;
     if (!ast_index_note_allocation(&tp->ast_index, ast_node)) {
-        // A partially indexed unit must not reach the pass manager: the index
-        // is an allocation-time compiler fact under D8.2.4.
+        // Reserve index capacity while building; binding publishes preorder
+        // identities once this bottom-up reduction has a structural graph.
         tp->build_allocation_failed = true;
         return NULL;
     }
@@ -2128,104 +2128,9 @@ static bool ast_node_declares_binding(AstNode* node) {
     return node && node->node_type != AST_NODE_KEY_EXPR;
 }
 
-// lookup a name in the current scope only (not in parent scopes)
-// returns the existing entry if found, NULL otherwise
-static uint32_t name_scope_pointer_hash(const String* name) {
-    uintptr_t value = (uintptr_t)name;
-    value ^= value >> 33;
-    value *= UINT64_C(0xff51afd7ed558ccd);
-    value ^= value >> 33;
-    return (uint32_t)value;
-}
-
-static NameEntry* name_scope_lookup(const NameScope* scope,
-        const String* name) {
-    if (!scope || !name) return NULL;
-    if (scope->name_index && scope->name_index_capacity) {
-        uint32_t slot = name_scope_pointer_hash(name) &
-            (scope->name_index_capacity - 1);
-        for (;;) {
-            NameEntry* entry = scope->name_index[slot];
-            if (!entry) return NULL;
-            if (entry->name == name) return entry;
-            slot = (slot + 1) & (scope->name_index_capacity - 1);
-        }
-    }
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (entry->name == name) return entry;
-    }
-    return NULL;
-}
-
-static bool name_scope_index_insert(NameScope* scope, NameEntry* entry) {
-    if (!scope || !entry || !entry->name || !scope->name_index ||
-            !scope->name_index_capacity) return true;
-    uint32_t slot = name_scope_pointer_hash(entry->name) &
-        (scope->name_index_capacity - 1);
-    for (;;) {
-        NameEntry* current = scope->name_index[slot];
-        if (!current) {
-            scope->name_index[slot] = entry;
-            scope->name_index_count++;
-            return true;
-        }
-        // Duplicate declarations still remain in source order for diagnostic
-        // recovery; name resolution has always selected the first declaration.
-        if (current->name == entry->name) return true;
-        slot = (slot + 1) & (scope->name_index_capacity - 1);
-    }
-}
-
-static bool name_scope_index_prepare(Transpiler* tp, NameScope* scope,
-        uint32_t capacity) {
-    if (!tp || !tp->pool || !scope || capacity < 16 ||
-            (capacity & (capacity - 1))) return false;
-    NameEntry** index = (NameEntry**)pool_calloc(tp->pool,
-        (size_t)capacity * sizeof(NameEntry*));
-    if (!index) return false;
-    scope->name_index = index;
-    scope->name_index_capacity = capacity;
-    scope->name_index_count = 0;
-    return true;
-}
-
-static uint32_t name_scope_index_capacity_for_entries(uint32_t entry_count) {
-    uint32_t capacity = 16;
-    while (entry_count * 4 >= capacity * 3) capacity *= 2;
-    return capacity;
-}
-
-static bool name_scope_index_rebuild(Transpiler* tp, NameScope* scope,
-        uint32_t capacity) {
-    if (!name_scope_index_prepare(tp, scope, capacity)) return false;
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (!name_scope_index_insert(scope, entry)) return false;
-    }
-    return true;
-}
-
-static void name_scope_index_note_entry(Transpiler* tp, NameScope* scope,
-        NameEntry* entry) {
-    if (!scope || !entry) return;
-    scope->entry_count++;
-    if (!scope->name_index && scope->entry_count > 8) {
-        // Keep small parameter and block scopes list-only; wide module scopes
-        // build one fixed table and grow before the load factor reaches 0.75.
-        if (!name_scope_index_rebuild(tp, scope,
-                name_scope_index_capacity_for_entries(scope->entry_count))) return;
-    }
-    if (scope->name_index &&
-            (scope->name_index_count + 1) * 4 >=
-                scope->name_index_capacity * 3) {
-        if (!name_scope_index_rebuild(tp, scope,
-                scope->name_index_capacity * 2)) return;
-    }
-    (void)name_scope_index_insert(scope, entry);
-}
-
 NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
     if (!tp || !tp->current_scope || !name) return NULL;
-    return name_scope_lookup(tp->current_scope, name);
+    return name_scope_lookup_name(tp->current_scope, name);
 }
 
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
@@ -2321,7 +2226,7 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
-    name_scope_index_note_entry(tp, tp->current_scope, entry);
+    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
     // An import publishes a local view of a declaration owned by another
     // script. The source AST is shared with that provider, so never rewrite
     // its declaration edge: doing so would redirect both its closure identity
@@ -3084,7 +2989,7 @@ NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     if (!name) return NULL;
     NameScope* scope = tp->current_scope;
     FIND_VAR_NAME:
-    NameEntry* entry = name_scope_lookup(scope, name);
+    NameEntry* entry = name_scope_lookup_name(scope, name);
     if (!entry) {
         if (scope->parent) {
             // Defensive check: prevent infinite loop if parent pointer is circular
@@ -6463,7 +6368,7 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
-    name_scope_index_note_entry(tp, tp->current_scope, entry);
+    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
 }
 
 static void register_imported_object_type(Transpiler* tp, AstObjectTypeNode* obj_node) {
@@ -6900,11 +6805,6 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
     rebound->name_index_capacity = 0;
     rebound->name_index_count = 0;
     rebound->entry_count = 0;
-    if (source->entry_count > 8 && !name_scope_index_prepare(bind->tp,
-            rebound, name_scope_index_capacity_for_entries(source->entry_count))) {
-        bind->failed = true;
-        return NULL;
-    }
     DirectBindScopeMap map = {.source = source, .rebound = rebound};
     hashmap_set(bind->scopes, &map);
     if (hashmap_oom(bind->scopes)) {
@@ -6933,7 +6833,10 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
         if (rebound->last) rebound->last->next = copy;
         else rebound->first = copy;
         rebound->last = copy;
-        name_scope_index_note_entry(bind->tp, rebound, copy);
+        if (!name_scope_index_add(bind->tp->pool, rebound, copy)) {
+            bind->failed = true;
+            return NULL;
+        }
     }
     return rebound;
 }
@@ -7241,6 +7144,26 @@ static bool direct_bind_collect_function(AstNode* node, void* opaque) {
     return true;
 }
 
+static ArrayList* lambda_ast_indexed_functions(const AstIndex* index) {
+    if (!index || !index->graph_published) return NULL;
+    ArrayList* functions = arraylist_new((int)index->function_count);
+    if (!functions) return NULL;
+    for (AstFunctionId function_id = 0;
+            function_id < index->function_count; function_id++) {
+        AstNode* node = index->functions[function_id].node;
+        if (!node || (node->node_type != AST_NODE_FUNC &&
+                node->node_type != AST_NODE_FUNC_EXPR &&
+                node->node_type != AST_NODE_PROC)) {
+            continue;
+        }
+        if (!arraylist_append(functions, node)) {
+            arraylist_free(functions);
+            return NULL;
+        }
+    }
+    return functions;
+}
+
 bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
         AstScript* script, ArrayList** functions_out) {
     if (functions_out) *functions_out = NULL;
@@ -7260,8 +7183,15 @@ bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
     if (!tp->defer_ast_index_columns) ast_index_mark_published(&tp->ast_index);
     tp->current_scope = script->global_vars;
     if (functions_out) {
-        *functions_out = bind.functions;
-        bind.functions = NULL;
+        ArrayList* indexed = lambda_ast_indexed_functions(&tp->ast_index);
+        // AST-tier rebinding defers index publication, so it retains the
+        // construction list until its own retained-unit index pass runs.
+        if (indexed) {
+            *functions_out = indexed;
+        } else {
+            *functions_out = bind.functions;
+            bind.functions = NULL;
+        }
     }
     direct_bind_destroy(&bind);
     return true;
@@ -9140,7 +9070,7 @@ static void direct_append_binder_name(Transpiler* tp, NameEntry* entry) {
     if (!tp->current_scope->first) tp->current_scope->first = entry;
     else tp->current_scope->last->next = entry;
     tp->current_scope->last = entry;
-    name_scope_index_note_entry(tp, tp->current_scope, entry);
+    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
 }
 
 typedef struct DirectBinderForwardRef {

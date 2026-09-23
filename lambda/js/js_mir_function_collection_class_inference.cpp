@@ -634,6 +634,12 @@ void jm_collect_indexed_functions(JsMirTranspiler* mt) {
     }
     jm_collect_indexed_class_aliases(mt);
     jm_assign_indexed_class_facts(mt);
+    // Field initializer callables reparent source children after their AST
+    // append. Refresh derived FunctionId tables before planning (D8.2.4).
+    if (!ast_index_rebuild_queries(&mt->tp->ast_index)) {
+        log_error("js-mir: failed to refresh indexed function child facts");
+        mt->collection_failed = true;
+    }
 }
 
 // ============================================================================
@@ -1068,11 +1074,28 @@ static void jm_infer_indexed(JsMirTranspiler* mt, JsFunctionNode* fn,
     AstFunctionId owner = fn_id == AST_NODE_ID_INVALID
         ? AST_FUNCTION_ID_INVALID : index->owner_functions[fn_id];
     if (owner == AST_FUNCTION_ID_INVALID) return;
-    for (uint32_t i = 0; i < index->count; i++) {
+    AstNodeId fn_end = ast_index_subtree_end(index, fn_id);
+    if (fn_end == AST_NODE_ID_INVALID) return;
+    for (uint32_t i = fn_id; i < fn_end; i++) {
         if (index->owner_functions[i] == owner)
             jm_infer_indexed_node(mt, (JsAstNode*)index->nodes[i], bindings,
                 evidence, binding_count, param_count, self_name);
     }
+}
+
+static bool jm_collected_function_range(const JsMirTranspiler* mt,
+        const JsFuncCollected* function, AstNodeId* first, AstNodeId* end) {
+    if (first) *first = AST_NODE_ID_INVALID;
+    if (end) *end = AST_NODE_ID_INVALID;
+    if (!mt || !mt->tp || !function ||
+            function->function_id >= mt->tp->ast_index.function_count) return false;
+    const AstFunctionIndexEntry* entry = &mt->tp->ast_index.functions[
+        function->function_id];
+    if (entry->first_node == AST_NODE_ID_INVALID ||
+            entry->end_node == AST_NODE_ID_INVALID) return false;
+    if (first) *first = entry->first_node;
+    if (end) *end = entry->end_node;
+    return true;
 }
 
 // Infer parameter types for a collected function from body usage patterns.
@@ -1359,12 +1382,11 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int count = 0;
     if (mt && mt->tp) {
         AstIndex* index = &mt->tp->ast_index;
-        AstNodeId function_node_id = ast_index_find(index, (AstNode*)fn);
-        AstFunctionId function_id = function_node_id == AST_NODE_ID_INVALID
-            ? AST_FUNCTION_ID_INVALID : index->owner_functions[function_node_id];
-        for (uint32_t index_id = 0; index_id < index->count && count < 32;
-                index_id++) {
-            if (index->owner_functions[index_id] != function_id) continue;
+        AstNodeId first = AST_NODE_ID_INVALID;
+        AstNodeId end = AST_NODE_ID_INVALID;
+        if (!jm_collected_function_range(mt, fc, &first, &end)) return;
+        for (AstNodeId index_id = first; index_id < end && count < 32; index_id++) {
+            if (index->owner_functions[index_id] != fc->function_id) continue;
             jm_collect_return_contract(mt, index->nodes[index_id], fc, collected,
                 &count, 32);
         }
@@ -1570,7 +1592,13 @@ static JmNumericReturnFact jm_numeric_return_binding_fact(
     }
     // Every direct write must preserve Number. This is the conservative join
     // across branches and loop backedges; a non-Number write widens the fact.
-    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+    AstNodeId first = AST_NODE_ID_INVALID;
+    AstNodeId end = AST_NODE_ID_INVALID;
+    if (!jm_collected_function_range(context->mt, context->fc, &first, &end)) {
+        context->active_count--;
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    for (AstNodeId node_id = first; node_id < end; node_id++) {
         if (index->owner_functions[node_id] != context->fc->function_id) continue;
         JsAstNode* node = (JsAstNode*)index->nodes[node_id];
         if (!node) continue;
@@ -1717,7 +1745,13 @@ static void jm_numeric_return_collect_candidate(JmNumericReturnContext* context)
     }
     AstIndex* index = &context->mt->tp->ast_index;
     bool has_return = false;
-    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+    AstNodeId first = AST_NODE_ID_INVALID;
+    AstNodeId end = AST_NODE_ID_INVALID;
+    if (!jm_collected_function_range(context->mt, context->fc, &first, &end)) {
+        candidate->valid = false;
+        return;
+    }
+    for (AstNodeId node_id = first; node_id < end; node_id++) {
         if (index->owner_functions[node_id] != context->fc->function_id ||
                 index->nodes[node_id]->node_type != AST_NODE_RETURN_STAM) continue;
         has_return = true;
@@ -1735,7 +1769,10 @@ static bool jm_function_has_numeric_local_facts(JsMirTranspiler* mt,
         JsFuncCollected* fc) {
     if (!mt || !fc || !mt->tp) return false;
     AstIndex* index = &mt->tp->ast_index;
-    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+    AstNodeId first = AST_NODE_ID_INVALID;
+    AstNodeId end = AST_NODE_ID_INVALID;
+    if (!jm_collected_function_range(mt, fc, &first, &end)) return false;
+    for (AstNodeId node_id = first; node_id < end; node_id++) {
         if (index->owner_functions[node_id] != fc->function_id ||
                 !index->nodes[node_id] || index->nodes[node_id]->node_type !=
                 AST_NODE_VARIABLE_DECLARATOR) {
@@ -1851,8 +1888,11 @@ static void jm_populate_numeric_binding_facts_impl(JsMirTranspiler* mt,
     // JavaScript's complete value domain and cannot reuse those F64 facts.
     if (!mt || !fc || !body) return;
     AstIndex* index = &mt->tp->ast_index;
+    AstNodeId first = AST_NODE_ID_INVALID;
+    AstNodeId end = AST_NODE_ID_INVALID;
+    if (!jm_collected_function_range(mt, fc, &first, &end)) return;
     int capacity = 0;
-    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+    for (AstNodeId node_id = first; node_id < end; node_id++) {
         if (index->owner_functions[node_id] == fc->function_id &&
                 index->nodes[node_id] &&
                 index->nodes[node_id]->node_type == AST_NODE_VARIABLE_DECLARATOR) {
@@ -1867,7 +1907,7 @@ static void jm_populate_numeric_binding_facts_impl(JsMirTranspiler* mt,
             fc->name);
         return;
     }
-    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+    for (AstNodeId node_id = first; node_id < end; node_id++) {
         if (index->owner_functions[node_id] != fc->function_id ||
                 !index->nodes[node_id] || index->nodes[node_id]->node_type !=
                 AST_NODE_VARIABLE_DECLARATOR) {
@@ -1997,12 +2037,13 @@ ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
     AstNodeId fn_id = ast_index_find(index, (AstNode*)fc->node);
     if (fn_id == AST_NODE_ID_INVALID) return SCALAR_RETURN_DYNAMIC;
     AstFunctionId owner = index->owner_functions[fn_id];
+    AstNodeId fn_end = ast_index_subtree_end(index, fn_id);
+    if (fn_end == AST_NODE_ID_INVALID) return SCALAR_RETURN_DYNAMIC;
     bool needs_home = false;
-    for (uint32_t i = 0; i < index->count; i++) {
+    for (uint32_t i = fn_id; i < fn_end; i++) {
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
-                node->node_type != AST_NODE_RETURN_STAM ||
-                !ast_index_node_descends(index, i, fn_id)) continue;
+                node->node_type != AST_NODE_RETURN_STAM) continue;
         if (jm_return_expr_needs_scalar_home(((JsReturnNode*)node)->argument)) {
             needs_home = true;
             break;
@@ -2071,7 +2112,9 @@ static bool jm_prescan_expression_has_float_hint(JsMirTranspiler* mt,
         AST_NODE_ID_INVALID;
     if (!index || root_id == AST_NODE_ID_INVALID) return false;
     AstFunctionId owner = index->owner_functions[root_id];
-    for (uint32_t i = 0; i < index->count; i++) {
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return false;
+    for (uint32_t i = root_id; i < root_end; i++) {
         if (jm_prescan_node_has_float_hint((JsAstNode*)index->nodes[i]) &&
                 jm_prescan_expression_path_is_numeric(index, i, root_id, owner)) {
             return true;
@@ -2087,7 +2130,9 @@ static bool jm_prescan_expression_has_float_array_access(JsMirTranspiler* mt,
         AST_NODE_ID_INVALID;
     if (!index || root_id == AST_NODE_ID_INVALID) return false;
     AstFunctionId owner = index->owner_functions[root_id];
-    for (uint32_t i = 0; i < index->count; i++) {
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return false;
+    for (uint32_t i = root_id; i < root_end; i++) {
         JsAstNode* node = (JsAstNode*)index->nodes[i];
         if (!node || node->node_type != AST_NODE_MEMBER_EXPR ||
                 !jm_prescan_expression_path_is_numeric(index, i, root_id, owner)) continue;
@@ -2157,6 +2202,8 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body) {
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index, (AstNode*)body);
     if (root_id == AST_NODE_ID_INVALID) return;
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return;
     AstFunctionId owner = index->owner_functions[root_id];
 
     // Step 1: Find all Float32Array/Float64Array variable names
@@ -2167,7 +2214,7 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body) {
     // This intentionally remains a direct-body declaration scan. The old
     // pass did not infer aliases or nested declarations, so indexed migration
     // must not broaden the native specialization policy.
-    for (uint32_t i = 0; i < index->count; i++) {
+    for (uint32_t i = root_id; i < root_end; i++) {
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
                 ast_index_parent_id(index, i) != root_id ||
@@ -2190,7 +2237,7 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body) {
             jm_name_hash, jm_name_cmp, NULL, NULL);
     }
     if (mt->widen_to_float) {
-        for (uint32_t i = 0; i < index->count; i++) {
+        for (uint32_t i = root_id; i < root_end; i++) {
             JsAstNode* node = (JsAstNode*)index->nodes[i];
             if (!node || !jm_prescan_body_path_is_reachable(index, i, root_id, owner)) continue;
             if (node->node_type == AST_NODE_ASSIGN) {

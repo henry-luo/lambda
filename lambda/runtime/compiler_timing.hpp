@@ -41,9 +41,19 @@ typedef enum CompilerFactBits {
     COMPILER_FACT_FINALIZED = 1u << 8,
     COMPILER_FACT_PRELINKED = 1u << 9,
     COMPILER_FACT_LINKED = 1u << 10,
+    // Analysis stages are facts in their own right. Keeping their established
+    // aggregate facts above preserves the Lambda pipeline while letting a
+    // profile publish its work at the shared schedule's full granularity.
+    COMPILER_FACT_COLLECTED = 1u << 11,
+    COMPILER_FACT_CAPTURES = 1u << 12,
+    COMPILER_FACT_ENV_LAYOUT = 1u << 13,
+    COMPILER_FACT_INFERRED = 1u << 14,
+    COMPILER_FACT_FORWARD_DECLARED = 1u << 15,
 } CompilerFactBits;
 
 typedef int (*CompilerPassRun)(void* context);
+typedef void (*CompilerPassObserver)(const char* name, uint64_t elapsed_us,
+    void* context);
 typedef struct CompilerPassSpec {
     const char* name;
     uint32_t required_facts;
@@ -57,6 +67,8 @@ typedef struct CompilerPassManager {
     CompilerPassSpec passes[16];
     uint32_t pass_count;
     uint32_t next_pass; // first pass whose facts are not yet published
+    CompilerPassObserver observer;
+    void* observer_context;
 } CompilerPassManager;
 
 #ifdef __cplusplus
@@ -71,6 +83,12 @@ int lambda_compiler_timing_collecting(void);
 void lambda_compiler_timing_add_inline_analysis_us(uint64_t elapsed_us);
 void compiler_pass_manager_init(CompilerPassManager* manager, uint32_t initial_facts);
 int compiler_pass_manager_add(CompilerPassManager* manager, const CompilerPassSpec* pass);
+void compiler_pass_manager_set_observer(CompilerPassManager* manager,
+    CompilerPassObserver observer, void* context);
+// A composite front-end stage may report bounded subpasses without creating a
+// second manager or losing the one timing stream shared by both languages.
+void compiler_pass_manager_note(CompilerPassManager* manager, const char* name,
+    uint64_t elapsed_us);
 int compiler_pass_manager_run(CompilerPassManager* manager, void* context);
 #ifdef __cplusplus
 }

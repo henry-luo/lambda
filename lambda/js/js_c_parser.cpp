@@ -7,6 +7,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include <stdlib.h>
 #include <string.h>
 
 // This sink is intentionally small until every reduction carries the child
@@ -2068,6 +2069,36 @@ static int js_index_compiler_pass(void* opaque) {
     return ast_index_compiler_pass(&index_context);
 }
 
+static bool js_compiler_pass_timing_requested(void) {
+    const char* js_timing = getenv("JS_TRANSPILE_TIMING");
+    const char* compiler_timing = getenv("LAMBDA_COMPILER_TIMING");
+    const char* profile_timing = getenv("LAMBDA_PROFILE");
+    return (js_timing && js_timing[0] && strcmp(js_timing, "0") != 0) ||
+        (compiler_timing && compiler_timing[0] && strcmp(compiler_timing, "0") != 0) ||
+        (profile_timing && profile_timing[0] && strcmp(profile_timing, "0") != 0);
+}
+
+static void js_compiler_pass_timing_observer(const char* name,
+        uint64_t elapsed_us, void* opaque) {
+    JsTranspiler* tp = (JsTranspiler*)opaque;
+    if (!tp || !tp->pass_timing.enabled || !name) return;
+    if (strcmp(name, "parse-build") == 0) tp->pass_timing.parse_build_us += elapsed_us;
+    else if (strcmp(name, "bind") == 0) tp->pass_timing.bind_us += elapsed_us;
+    else if (strcmp(name, "validate") == 0) tp->pass_timing.validate_us += elapsed_us;
+    else if (strcmp(name, "index") == 0) tp->pass_timing.index_us += elapsed_us;
+    else if (strcmp(name, "collect") == 0) tp->pass_timing.collect_us += elapsed_us;
+    else if (strcmp(name, "captures") == 0) tp->pass_timing.captures_us += elapsed_us;
+    else if (strcmp(name, "env-layout") == 0) tp->pass_timing.env_layout_us += elapsed_us;
+    else if (strcmp(name, "infer") == 0) tp->pass_timing.infer_us += elapsed_us;
+    else if (strcmp(name, "forward-declare") == 0) {
+        tp->pass_timing.forward_declare_us += elapsed_us;
+    }
+    else if (strcmp(name, "mir-lower") == 0) tp->pass_timing.mir_lower_us += elapsed_us;
+    else if (strcmp(name, "mir-finalize-load") == 0) tp->pass_timing.finalize_us += elapsed_us;
+    else if (strcmp(name, "prelink") == 0) tp->pass_timing.prelink_us += elapsed_us;
+    else if (strcmp(name, "runtime-link") == 0) tp->pass_timing.link_us += elapsed_us;
+}
+
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         JsParseMode mode) {
     if (!tp || !source || length > UINT32_MAX) return false;
@@ -2077,8 +2108,14 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
             (mode | JS_PARSE_MODULE);
     }
     JsCCompilePassContext pass_context = {tp, source, length, mode, NULL, -1};
+    memset(&tp->pass_timing, 0, sizeof(tp->pass_timing));
+    tp->pass_timing.enabled = js_compiler_pass_timing_requested();
     CompilerPassManager* pass_manager = &tp->pass_manager;
     compiler_pass_manager_init(pass_manager, COMPILER_FACT_NONE);
+    if (tp->pass_timing.enabled) {
+        compiler_pass_manager_set_observer(pass_manager,
+            js_compiler_pass_timing_observer, tp);
+    }
     CompilerPassSpec passes[] = {
         {"parse-build", COMPILER_FACT_NONE, COMPILER_FACT_AST, js_parse_build_compiler_pass, &pass_context},
         {"bind", COMPILER_FACT_AST, COMPILER_FACT_BOUND, js_bind_compiler_pass, &pass_context},

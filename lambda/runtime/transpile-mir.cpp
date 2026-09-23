@@ -41815,9 +41815,11 @@ typedef struct LambdaMirPipelinePassContext {
     Script* script;
     ArrayList** property_keys;
     uint64_t* link_instruction_count;
+    uint64_t* link_largest_function_instruction_count;
     uint64_t mir_module_count;
     uint64_t mir_function_count;
     uint64_t mir_instruction_count;
+    uint64_t mir_largest_function_instruction_count;
     MirModuleBuild build;
 } LambdaMirPipelinePassContext;
 
@@ -41845,9 +41847,14 @@ static int lambda_mir_finalize_compiler_pass(void* opaque) {
     if (!pass || !pass->build.mt.module) return 0;
     transpile_mir_ast_finalize(&pass->build, pass->property_keys, NULL);
     mir_count_module_volume(pass->ctx, &pass->mir_module_count,
-        &pass->mir_function_count, &pass->mir_instruction_count);
+        &pass->mir_function_count, &pass->mir_instruction_count,
+        &pass->mir_largest_function_instruction_count);
     if (pass->link_instruction_count) {
         *pass->link_instruction_count = pass->mir_instruction_count;
+    }
+    if (pass->link_largest_function_instruction_count) {
+        *pass->link_largest_function_instruction_count =
+            pass->mir_largest_function_instruction_count;
     }
     return 1;
 }
@@ -42596,6 +42603,7 @@ typedef struct LambdaMirLinkPassContext {
     MIR_context_t ctx;
     Transpiler* tp;
     uint64_t mir_instruction_count;
+    uint64_t mir_largest_function_instruction_count;
     bool use_mir_interp_for_script;
     main_func_t main_func;
 } LambdaMirLinkPassContext;
@@ -42609,28 +42617,25 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
         mir_large_interp_enabled() && pass->tp->source &&
         strlen(pass->tp->source) >= mir_large_source_interp_threshold();
     bool use_interp = explicit_interp || auto_interp;
-    bool large_interp_enabled = mir_large_interp_enabled();
     bool document_context = pass->tp->runtime && pass->tp->runtime->dom_doc != nullptr;
-    if (!use_interp && large_interp_enabled &&
-            (pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD ||
-             (document_context && (g_js_force_document_interp ||
-                 pass->mir_instruction_count > MIR_RADIANT_INTERP_INSN_THRESHOLD)))) {
+    MirLinkSelection selection = mir_select_link_interface(
+        pass->mir_instruction_count, pass->mir_largest_function_instruction_count,
+        document_context || g_js_force_document_interp, opt_level,
+        lambda_mir_lazy_enabled());
+    if (!use_interp && selection.interface_kind == MIR_LINK_INTERP) {
         use_interp = true;
-        log_info("lambda-mir: %s module (%llu insns)%s -> MIR interpreter (skip JIT codegen)",
-            pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD
-                ? "large" : "cold-document",
+        log_info("lambda-mir: policy selected interpreter for %llu instructions%s",
             (unsigned long long)pass->mir_instruction_count,
             document_context ? " [document]" : "");
     }
-    if (!use_interp && !large_interp_enabled && opt_level >= 2 &&
-            pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD) {
-        log_info("lambda-mir: large module (%llu insns) -> opt=0 (was %u)",
-            (unsigned long long)pass->mir_instruction_count, opt_level);
-        MIR_gen_set_optimize_level(pass->ctx, 0);
+    if (!use_interp && selection.optimize_level != opt_level) {
+        log_info("lambda-mir: policy selected opt=%u for large function (was %u)",
+            selection.optimize_level, opt_level);
+        MIR_gen_set_optimize_level(pass->ctx, selection.optimize_level);
     }
     MIR_link(pass->ctx, use_interp ? MIR_set_interp_interface :
-        (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface :
-            MIR_set_gen_interface), import_resolver);
+        (selection.interface_kind == MIR_LINK_LAZY_NATIVE
+            ? MIR_set_lazy_gen_interface : MIR_set_gen_interface), import_resolver);
     pass->use_mir_interp_for_script = use_interp;
     pass->main_func = (main_func_t)(use_interp ? find_func(pass->ctx, "main")
         : jit_gen_func(pass->ctx, "main"));
@@ -42729,13 +42734,15 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 #endif
 
     ArrayList* property_keys = NULL;
-    LambdaMirLinkPassContext link_context = {ctx, tp, 0, false, NULL};
+    LambdaMirLinkPassContext link_context = {ctx, tp, 0, 0, false, NULL};
     LambdaMirPipelinePassContext mir_context = {};
     mir_context.ctx = ctx;
     mir_context.tp = tp;
     mir_context.script = script;
     mir_context.property_keys = &property_keys;
     mir_context.link_instruction_count = &link_context.mir_instruction_count;
+    mir_context.link_largest_function_instruction_count =
+        &link_context.mir_largest_function_instruction_count;
     // Direct MIR resumes parser work; retained ASTs begin a fresh unit.
     CompilerPassManager* pass_manager = &tp->pass_manager;
     if (pass_manager->pass_count == 0) {

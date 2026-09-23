@@ -13,6 +13,7 @@ typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
 typedef struct TypeBinder TypeBinder;
 typedef struct LangProfile LangProfile;
+typedef struct Pool Pool;
 struct hashmap;
 typedef struct _ArrayList ArrayList;
 
@@ -539,12 +540,18 @@ typedef bool (*AstBindingChildPredicate)(AstNode* child, void* ctx);
 typedef struct AstFunctionIndexEntry {
     AstNode* node;
     AstFunctionId parent;
+    // The shared index is published in structural pre-order. These bounds
+    // make a function body a dense query range instead of a whole-index scan.
+    AstNodeId first_node;
+    AstNodeId end_node;
 } AstFunctionIndexEntry;
 
 typedef struct AstIndex {
     AstNode** nodes;
     AstNode** parents;
     AstFunctionId* owner_functions;
+    // Exclusive structural subtree boundary for each dense node ID.
+    AstNodeId* subtree_end;
     // Each indexed node carries the binding edge resolved by the builder;
     // invalid means the node is not a name use or declaration.
     AstBindingId* node_bindings;
@@ -556,6 +563,21 @@ typedef struct AstIndex {
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
     AstFunctionIndexEntry* functions;
+    // Reverse query tables are immutable facts of one indexed unit (D8.2.4).
+    // Offsets have count + 1 entries; each slice is [offset[id], offset[id+1]).
+    uint32_t* binding_use_offsets;
+    AstNodeId* binding_uses;
+    uint32_t* callee_call_offsets;
+    AstNodeId* callee_calls;
+    uint32_t* object_member_offsets;
+    AstNodeId* object_member_uses;
+    uint32_t* function_child_offsets;
+    AstFunctionId* function_children;
+    // Shared source fragments can be logically owned by a synthetic function
+    // while retaining their original structural position. This CSR table keeps
+    // those non-contiguous function nodes explicit without weakening ranges.
+    uint32_t* function_overlay_offsets;
+    AstNodeId* function_overlay_nodes;
     uint32_t count;
     uint32_t capacity;
     uint32_t function_count;
@@ -591,9 +613,9 @@ void ast_visit_binding_pattern_children(AstNode* node, AstChildVisitor visitor,
 bool ast_any_binding_pattern_child(AstNode* node,
     AstBindingChildPredicate predicate, void* ctx);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
-// Direct reduction reserves the stable node ID as soon as a node is born.
-// Binding later fills graph-sensitive columns after provisional scopes have
-// been remapped (D8.2.4/D8.2.5v2).
+// Direct reduction reserves index storage as a node is born. Binding assigns
+// its stable ID in structural preorder after provisional scopes are remapped,
+// preserving the range invariant (D8.2.4v2/D8.2.5v3).
 bool ast_index_note_allocation(AstIndex* index, AstNode* node);
 bool ast_index_prepare_binding(AstIndex* index);
 bool ast_index_bind_node(AstIndex* index, AstNode* node, AstNode* parent,
@@ -613,14 +635,33 @@ AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
 AstNodeId ast_index_parent_id(const AstIndex* index, AstNodeId node_id);
 bool ast_index_visit_subtree(const AstIndex* index, AstNodeId root_id,
                              AstIndexSubtreeVisitor visitor, void* context);
+AstNodeId ast_index_subtree_end(const AstIndex* index, AstNodeId root_id);
 bool ast_index_node_descends(const AstIndex* index, AstNodeId node_id,
                              AstNodeId ancestor_id);
+const AstNodeId* ast_index_binding_uses(const AstIndex* index,
+    AstBindingId binding_id, uint32_t* count);
+const AstNodeId* ast_index_callee_calls(const AstIndex* index,
+    AstBindingId binding_id, uint32_t* count);
+const AstNodeId* ast_index_object_member_uses(const AstIndex* index,
+    AstNodeId object_id, uint32_t* count);
+const AstFunctionId* ast_index_function_children(const AstIndex* index,
+    AstFunctionId function_id, uint32_t* count);
+const AstNodeId* ast_index_function_overlay_nodes(const AstIndex* index,
+    AstFunctionId function_id, uint32_t* count);
+// Rebuild derived range and reverse-query tables after a sanctioned AST
+// extension adjusts lexical function parents.
+bool ast_index_rebuild_queries(AstIndex* index);
 AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
                                    bool include_node);
 bool ast_index_node_is_function(const AstNode* node);
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
+// NameScope owns the shared pointer-identity lookup table. Both front ends
+// retain declaration order in first/last/next while wide scopes probe here.
+NameEntry* name_scope_lookup_name(const NameScope* scope, const String* name);
+bool name_scope_index_add(Pool* pool, NameScope* scope, NameEntry* entry);
+bool name_scope_plan_binding_slots(NameScope* scope);
 #ifdef __cplusplus
 }
 #endif

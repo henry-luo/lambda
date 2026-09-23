@@ -217,15 +217,16 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index, (AstNode*)root);
     if (root_id == AST_NODE_ID_INVALID) return 0;
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return 0;
     AstFunctionId owner = index->owner_functions[root_id];
     int count = 0;
     int async_for_await_count = 0;
     int abrupt_completion_count = 0;
-    for (uint32_t i = 0; i < index->count; i++) {
+    for (uint32_t i = root_id; i < root_end; i++) {
         AstNode* node = index->nodes[i];
         if (!node) continue;
-        bool owned_here = index->owner_functions[i] == owner &&
-            ast_index_node_descends(index, i, root_id);
+        bool owned_here = index->owner_functions[i] == owner;
         if (!owned_here && !jm_suspension_is_lowered_here(index, i, root_id)) continue;
         bool is_suspension =
             (kind == JS_SUSPENSION_YIELD &&
@@ -440,11 +441,12 @@ void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* root,
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index, (AstNode*)root);
     if (root_id == AST_NODE_ID_INVALID) return;
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return;
     AstFunctionId owner = index->owner_functions[root_id];
-    for (uint32_t i = 0; i < index->count; i++) {
+    for (uint32_t i = root_id; i < root_end; i++) {
         AstNode* node = index->nodes[i];
-        if (!node || index->owner_functions[i] != owner ||
-                !ast_index_node_descends(index, i, root_id)) continue;
+        if (!node || index->owner_functions[i] != owner) continue;
         bool in_with = false;
         AstNodeId parent_id = i;
         while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
@@ -813,6 +815,36 @@ static bool jm_index_identifier_is_property_key(AstNode* parent, AstNode* node) 
     return false;
 }
 
+static void jm_collect_indexed_body_ref_node(JsMirTranspiler* mt,
+        JsFunctionNode* fn, struct hashmap* refs, AstFunctionId owner,
+        AstNodeId node_id, uint32_t body_start, uint32_t body_end) {
+    AstIndex* index = &mt->tp->ast_index;
+    AstNode* node = index->nodes[node_id];
+    if (!node || index->owner_functions[node_id] != owner ||
+            node->node_type != AST_NODE_IDENT) return;
+    if (fn->source_span.end_byte > fn->source_span.start_byte &&
+            (node->source_span.start_byte < fn->source_span.start_byte ||
+             node->source_span.end_byte > fn->source_span.end_byte)) {
+        // The index can retain an owner label from a shared list edge;
+        // source containment keeps a sibling's reference out of this closure.
+        return;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)node;
+    bool is_binding = jm_index_identifier_is_binding(index, node_id, id);
+    AstNodeId parent_id = ast_index_parent_id(index, node_id);
+    AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
+    bool is_property_key = jm_index_identifier_is_property_key(parent, node);
+    if (!id->name || is_binding || is_property_key) return;
+    if (parent && parent->node_type == AST_NODE_MEMBER_EXPR &&
+            ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
+            memcmp(id->name->chars, "super", 5) == 0) return;
+    if (parent && (parent->node_type == AST_NODE_CALL_EXPR ||
+            parent->node_type == AST_NODE_NEW_EXPR) &&
+            ((JsCallNode*)parent)->callee == node && id->name->len == 5 &&
+            memcmp(id->name->chars, "super", 5) == 0) return;
+    jm_name_set_add_ref(refs, jm_var_name(id->name), id, body_start, body_end);
+}
+
 void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
         struct hashmap* refs) {
     if (!mt || !fn || !refs || !mt->tp) return;
@@ -821,33 +853,19 @@ void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
     AstFunctionId owner = fn_node_id == AST_NODE_ID_INVALID ?
         AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
     if (owner == AST_FUNCTION_ID_INVALID) return;
+    AstNodeId fn_end = ast_index_subtree_end(index, fn_node_id);
+    if (fn_end == AST_NODE_ID_INVALID) return;
     uint32_t body_start = fn->body ? fn->body->source_span.start_byte : 0;
     uint32_t body_end = fn->body ? fn->body->source_span.end_byte : 0;
-    for (uint32_t i = 0; i < index->count; i++) {
-        AstNode* node = index->nodes[i];
-        if (!node || index->owner_functions[i] != owner ||
-                node->node_type != AST_NODE_IDENT) continue;
-        if (fn->source_span.end_byte > fn->source_span.start_byte &&
-                (node->source_span.start_byte < fn->source_span.start_byte ||
-                 node->source_span.end_byte > fn->source_span.end_byte)) {
-            // The index can retain an owner label from a shared list edge;
-            // source containment keeps a sibling's reference out of this closure.
-            continue;
-        }
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        bool is_binding = jm_index_identifier_is_binding(index, i, id);
-        AstNodeId parent_id = ast_index_parent_id(index, i);
-        AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
-        bool is_property_key = jm_index_identifier_is_property_key(parent, node);
-        if (!id->name || is_binding || is_property_key) continue;
-        if (parent && parent->node_type == AST_NODE_MEMBER_EXPR &&
-                ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
-                memcmp(id->name->chars, "super", 5) == 0) continue;
-        if (parent && (parent->node_type == AST_NODE_CALL_EXPR ||
-                parent->node_type == AST_NODE_NEW_EXPR) &&
-                ((JsCallNode*)parent)->callee == node && id->name->len == 5 &&
-                memcmp(id->name->chars, "super", 5) == 0) continue;
-        jm_name_set_add_ref(refs, jm_var_name(id->name), id, body_start, body_end);
+    for (uint32_t i = fn_node_id; i < fn_end; i++) {
+        jm_collect_indexed_body_ref_node(mt, fn, refs, owner, i, body_start, body_end);
+    }
+    uint32_t overlay_count = 0;
+    const AstNodeId* overlay_nodes = ast_index_function_overlay_nodes(index,
+        owner, &overlay_count);
+    for (uint32_t i = 0; overlay_nodes && i < overlay_count; i++) {
+        jm_collect_indexed_body_ref_node(mt, fn, refs, owner, overlay_nodes[i],
+            body_start, body_end);
     }
 }
 
