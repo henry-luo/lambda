@@ -129,7 +129,7 @@ static const RadiantOnlineViewCase g_online_view_cases[] = {
     {"iana_numbers", "https://www.iana.org/numbers", false},
     {"openstd_c", "https://www.open-std.org/jtc1/sc22/wg14/", false},
     {"openstd_cpp", "https://www.open-std.org/jtc1/sc22/wg21/", false},
-    {"tcl_lang", "https://www.tcl-lang.org/", true},
+    {"tcl_lang", "https://tcl.apache.org/", true}, // legacy Tcl Developer Xchange endpoints time out
     {"cpan", "https://www.cpan.org/", true},
     {"pcre", "https://www.pcre.org/", false},
     {"sqlite_capi_intro", "https://www.sqlite.org/c3ref/intro.html", true},

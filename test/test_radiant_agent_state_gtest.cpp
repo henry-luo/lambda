@@ -211,6 +211,24 @@ TEST(RadiantAgentState, FlushesClearedSessionCookieAsDelete) {
     mem_free(cache_dir);
 }
 
+TEST(RadiantAgentState, ClosingSessionRejectsDeferredCookieWriter) {
+    CookieJar* jar = cookie_jar_create(nullptr);
+    ASSERT_NE(jar, nullptr);
+    ASSERT_TRUE(cookie_jar_retain(jar));
+
+    // A completed fetch must release its transfer reference before session close.
+    cookie_jar_release(jar);
+    EXPECT_EQ(jar->reference_count, 1);
+
+    ASSERT_TRUE(cookie_jar_retain(jar));
+    // A fetch worker can finish after its browsing session releases ownership.
+    cookie_jar_destroy(jar);
+    cookie_jar_store(jar, "https://example.test/", "late=value; Path=/");
+    EXPECT_EQ(cookie_jar_count(jar), 0);
+
+    cookie_jar_release(jar);
+}
+
 TEST(RadiantAgentState, FailsClosedWithoutReplacingCorruptDatabase) {
     char* cache_dir = dir_temp_create("radiant_agent_state_corrupt");
     ASSERT_NE(cache_dir, nullptr);
