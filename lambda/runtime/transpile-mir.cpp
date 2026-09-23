@@ -41421,10 +41421,11 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         }
     }
 
-    // transpile handler body (procedural)
+    // handlers are procedural bodies: preserve their terminal value so
+    // `on` follows S12.1.2's implicit-return rule.
+    MIR_reg_t handler_result = emit_null_item_reg(mt);
     if (handler->body) {
-        (void)em_apply_value_demand(&mt->em,
-            transpile_expr_value(mt, handler->body), MIR_VALUE_DISCARD);
+        handler_result = transpile_box_item(mt, handler->body);
     }
 
     // Phase 4: auto-commit after edit handler body completes
@@ -41435,13 +41436,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         log_debug("mir: edit handler auto-commit for '%s'", handler_name);
     }
 
-    // emit return ItemNull (handlers are void-like)
-    MIR_reg_t null_r = new_reg(mt, "null_ret", MIR_T_I64);
-    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, null_r),
-        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-    emit_function_return(mt, MIR_new_reg_op(mt->ctx, null_r));
+    emit_function_return(mt, MIR_new_reg_op(mt->ctx, handler_result));
     finish_function_epilogue(mt);
     finalize_gc_root_publication(mt, handler_name);
     finalize_side_root_frame(mt);
