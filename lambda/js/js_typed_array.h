@@ -171,6 +171,8 @@ bool js_typed_array_raw_copy_same_type(Item dst, Item src);
 
 // ArrayBuffer operations
 Item js_arraybuffer_new(int byte_length);
+// Copies host bytes into a newly allocated ordinary ArrayBuffer.
+Item js_arraybuffer_from_bytes(const void* data, int byte_length);
 Item js_arraybuffer_construct(Item length_arg);
 Item js_arraybuffer_construct_resizable(Item length_arg, Item options_arg);
 Item js_arraybuffer_construct_resizable_target(Item length_arg,

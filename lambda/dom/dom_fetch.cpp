@@ -11,8 +11,10 @@
 #include "realm/dom_realm.h"
 #include "../input/css/dom_element.hpp"
 #include "../network/cookie_jar.h"
+#include "../network/http_client.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
+#include "../js/js_typed_array.h"
 #include "../jube/jube_node_permission.h"
 #include "../lambda-data.hpp"
 #include "../runtime/async.h"
@@ -289,6 +291,7 @@ static void fetch_work_cb(uv_work_t* req) {
     curl_easy_setopt(fw->easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(fw->easy, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(fw->easy, CURLOPT_NOSIGNAL, 1L);  // thread-safe
+    curl_easy_setopt(fw->easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     if (fw->cookie_jar) cookie_jar_import_curl(fw->cookie_jar, fw->easy);
 
     if (fw->method) {
@@ -372,6 +375,26 @@ static Item js_response_json() {
     Item body_str = make_string_item(response_bodies[idx], response_body_lens[idx]);
     Item parsed = js_json_parse(body_str);
     return dom_realm_promise_resolve(parsed);
+}
+
+static Item js_response_array_buffer() {
+    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
+    Item this_resp = dom_realm_receiver();
+    String* key = heap_create_name("__body_idx", 10);
+    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
+
+    int idx = (int)it2i(idx_item);
+    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
+        return dom_realm_promise_resolve(ItemNull);
+
+    // Fetch exposes its retained bytes as a fresh ArrayBuffer, never a String.
+    Item body = js_arraybuffer_from_bytes(response_bodies[idx], response_body_lens[idx]);
+    if (item_is_error(body)) {
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item(
+            "fetch: could not allocate response ArrayBuffer")));
+    }
+    return dom_realm_promise_resolve(body);
 }
 
 // Synthesise a Blob-shaped JS object whose `text()` / `arrayBuffer()` / `slice()`
@@ -485,6 +508,11 @@ static Item build_response_object(JsFetchWork* fw) {
     Item json_key = make_string_item("json");
     Item json_fn = dom_realm_new_function(js_response_json);
     dom_realm_set(resp, json_key, json_fn);
+
+    // `arrayBuffer()` preserves binary response bodies for WASM and media loaders.
+    Item array_buffer_key = make_string_item("arrayBuffer");
+    Item array_buffer_fn = dom_realm_new_function(js_response_array_buffer);
+    dom_realm_set(resp, array_buffer_key, array_buffer_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
     dom_realm_set_native(resp, make_string_item("blob"), js_response_blob);

@@ -1260,9 +1260,9 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
     strbuf_append_str(script_buf,
         "window.screen = screen;\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
-        "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
         "window.WebSocket = WebSocket;\n"
-        "window.Worker = Worker;\n"
+        // Workers are unsupported. Do not publish an inert constructor: feature
+        // detection must select a page's main-thread fallback instead of waiting.
         "// Keep native window EventTarget methods: aliasing them to document splits listener storage from native window dispatch.\n"
         "// getComputedStyle is installed natively; wrapping it here recurses through global lookup.\n"
         "window.scrollTo = function(x, y) {\n"

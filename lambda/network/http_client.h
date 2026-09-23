@@ -15,5 +15,14 @@
     "Accept: text/html,application/xhtml+xml,application/xml;q=0.9," \
     "image/avif,image/webp,image/apng,*/*;q=0.8"
 #define RADIANT_HTTP_DOCUMENT_LANGUAGE_HEADER "Accept-Language: en-US,en;q=0.9"
+#define RADIANT_HTTP_DOCUMENT_FETCH_DEST_HEADER "Sec-Fetch-Dest: document"
+#define RADIANT_HTTP_DOCUMENT_FETCH_MODE_HEADER "Sec-Fetch-Mode: navigate"
+#define RADIANT_HTTP_DOCUMENT_FETCH_SITE_HEADER "Sec-Fetch-Site: none"
+#define RADIANT_HTTP_DOCUMENT_FETCH_USER_HEADER "Sec-Fetch-User: ?1"
+#define RADIANT_HTTP_DOCUMENT_UPGRADE_HEADER "Upgrade-Insecure-Requests: 1"
+
+// An empty CURLOPT_ACCEPT_ENCODING value tells libcurl to advertise and decode
+// every codec compiled into this build, keeping the HTTP profile coherent.
+#define RADIANT_HTTP_ACCEPT_ENCODING ""
 
 #endif

@@ -138,6 +138,11 @@ TEST_F(HttpInputTest, SendsBrowserNavigationHeadersForDocumentDownloads) {
     EXPECT_NE(nullptr, strstr(request, "User-Agent: " RADIANT_HTTP_CLIENT_USER_AGENT));
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_ACCEPT_HEADER));
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_LANGUAGE_HEADER));
+    EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_FETCH_DEST_HEADER));
+    EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_FETCH_MODE_HEADER));
+    EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_FETCH_SITE_HEADER));
+    EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_FETCH_USER_HEADER));
+    EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_UPGRADE_HEADER));
     EXPECT_EQ(nullptr, strstr(request, "Radiant/1.0"));
     mem_free(content);
 }

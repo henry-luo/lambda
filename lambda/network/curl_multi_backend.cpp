@@ -286,7 +286,7 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
     }
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     curl_easy_setopt(easy, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(easy, CURLOPT_MAXCONNECTS, 6L);
     curl_easy_setopt(easy, CURLOPT_PRIVATE, transfer);

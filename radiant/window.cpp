@@ -1334,7 +1334,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         DocumentJsHostConfig js_host_config = {
             &ui_context,
             host_driven_loop,
-            false,
+            // A static headless view is a first-render snapshot. It has no
+            // later host turn, so close post-load background handles here.
+            headless && sim_ctx == nullptr,
             headless && sim_ctx != nullptr,
             0.0,
             0.0,

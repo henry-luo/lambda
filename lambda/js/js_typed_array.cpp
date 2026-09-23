@@ -1339,6 +1339,17 @@ extern "C" Item js_arraybuffer_new(int byte_length) {
     return result;
 }
 
+extern "C" Item js_arraybuffer_from_bytes(const void* data, int byte_length) {
+    if (byte_length < 0 || (byte_length > 0 && !data)) return ItemError;
+    Item result = js_arraybuffer_new(byte_length);
+    if (item_is_error(result) || byte_length == 0) return result;
+    JsArrayBuffer* buffer = js_get_arraybuffer_ptr_item(result);
+    uint8_t* destination = js_arraybuffer_prepare_write(buffer);
+    if (!destination) return ItemError;
+    memcpy(destination, data, (size_t)byte_length);
+    return result;
+}
+
 // ArrayBuffer constructor from JS: new ArrayBuffer(length)
 // Performs ToIndex validation per spec: non-negative integer, throws RangeError for invalid.
 // Practical allocation limit: 1 GB (matches typical engine limits).

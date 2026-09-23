@@ -229,7 +229,7 @@ running in light DOM are in scope.
 ### 3.2 No WebSocket, no Worker
 
 - **`WebSocket`** — not supported (empty stub remains for feature detection). Live-socket apps are out of scope for the embedded browsing/rendering use case.
-- **`Worker`** — not supported as a Web API. Concurrency in Radiant follows the Lambda v3 model — pages as isolates, `start` tasks, mailboxes (`Radiant_Design_Concurrency.md` RC1–RC8) — not the Worker/postMessage-with-structured-clone model. A page needing background compute uses the Lambda surface, not `new Worker()`. *Open:* §2.7 may need a scoped exemption for `OffscreenCanvas.transferControlToOffscreen`, since worker-rendered canvas is common in the canvas-editor class — settle it before that track's phase 1.
+- **`Worker`** — not supported as a Web API and is absent from `window`, so feature detection selects a library's main-thread fallback rather than waiting on an inert pseudo-worker. Concurrency in Radiant follows the Lambda v3 model — pages as isolates, `start` tasks, mailboxes (`Radiant_Design_Concurrency.md` RC1–RC8) — not the Worker/postMessage-with-structured-clone model. A page needing background compute uses the Lambda surface, not `new Worker()`. *Open:* §2.7 may need a scoped exemption for `OffscreenCanvas.transferControlToOffscreen`, since worker-rendered canvas is common in the canvas-editor class — settle it before that track's phase 1.
 
 ### 3.3 IndexedDB — KIV
 
