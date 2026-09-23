@@ -184,17 +184,17 @@ Target* item_to_target(uint64_t item, Url* cwd) {
 
         // Parse URL with optional base (cwd)
         Url* url;
+        bool native_absolute_path = url_str[0] == '/';
 #ifdef _WIN32
-        // Detect Windows absolute path with drive letter (e.g., C:/... or D:\...)
-        // Convert to file:// URL to prevent the drive letter being parsed as a URL scheme
-        if (isalpha((unsigned char)url_str[0]) && url_str[1] == ':' &&
-            (url_str[2] == '/' || url_str[2] == '\\')) {
+        native_absolute_path = isalpha((unsigned char)url_str[0]) && url_str[1] == ':' &&
+            (url_str[2] == '/' || url_str[2] == '\\');
+#endif
+        if (native_absolute_path) {
+            // Native absolute paths are independent of the document URL base.
             char* file_url_buf = url_from_local_path(url_str);
             url = url_parse(file_url_buf ? file_url_buf : url_str);
             if (file_url_buf) mem_free(file_url_buf);
-        } else
-#endif
-        if (cwd) {
+        } else if (cwd) {
             url = url_parse_with_base(url_str, cwd);
         } else {
             // Check if relative path - need to resolve against cwd

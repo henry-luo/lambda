@@ -40,14 +40,34 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 #ifdef _WIN32
 #include <malloc.h>  // alloca on Windows
 #include <windows.h> // QueryPerformanceCounter for MIR timing
 #else
 #include <alloca.h>
-#include <pthread.h>
 #endif
 #include <time.h>
+
+// MIR's native generator initializes mutable process-global target patterns.
+// Keep private satellite contexts isolated, but serialize their native passes.
+static pthread_mutex_t g_mir_native_codegen_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+class MirNativeCodegenLock {
+    bool locked_;
+
+public:
+    explicit MirNativeCodegenLock(bool native_codegen) : locked_(native_codegen) {
+        if (locked_) pthread_mutex_lock(&g_mir_native_codegen_mutex);
+    }
+
+    ~MirNativeCodegenLock() {
+        if (locked_) pthread_mutex_unlock(&g_mir_native_codegen_mutex);
+    }
+
+    MirNativeCodegenLock(const MirNativeCodegenLock&) = delete;
+    MirNativeCodegenLock& operator=(const MirNativeCodegenLock&) = delete;
+};
 
 extern Type TYPE_ANY, TYPE_INT;
 
@@ -42015,6 +42035,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     // `--mir-interp` runs MIR's own interpreter: jit_init skips MIR_gen_init,
     // so this context has no generator to link against or to finish.
     bool satellite_interp = g_mir_interp_mode != 0;
+    MirNativeCodegenLock codegen_lock(!satellite_interp);
     // An evaluator-built satellite owns a separate executable image just as a
     // worker image does.  That ownership is independent from snapshotting:
     // only a worker needs cloned compiler state and a one-definition image.
@@ -42696,6 +42717,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         (lambda_mir_interp_env_enabled() || auto_interp_for_large_source);
     int saved_mir_interp_mode = g_mir_interp_mode;
     bool mir_gen_initialized = saved_mir_interp_mode == 0 && !force_interp_init;
+    MirNativeCodegenLock codegen_lock(mir_gen_initialized);
     if (force_interp_init) g_mir_interp_mode = 1;
     MIR_context_t ctx = jit_init(opt_level);
     if (force_interp_init) g_mir_interp_mode = saved_mir_interp_mode;

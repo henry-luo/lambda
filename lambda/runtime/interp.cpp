@@ -7153,11 +7153,22 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     Script* script = fn->def_module;
     if (!st || !st->runtime || !def || !script || !def->analysis) return false;
 
+    FnPromotionCell* cell = interp_promotion_cell(script, def);
+    if (!cell) return false;
+    if (st->runtime->ui_mode) {
+        // UI output can retain result-arena DOM nodes while nested calls run;
+        // keep their ownership on T0 rather than handing it to a satellite.
+        if (cell->state != FN_PROMOTION_PINNED_INTERP) {
+            cell->state = FN_PROMOTION_PINNED_INTERP;
+            log_notice("interp-tier: pinned UI function='%s' reason=arena-output",
+                def->name ? def->name->chars : "<anonymous>");
+        }
+        return false;
+    }
+
     // A completed worker image is published only between interpreter calls;
     // the current activation keeps its T0 frame and never performs OSR.
     interp_satellite_publish_ready(script);
-    FnPromotionCell* cell = interp_promotion_cell(script, def);
-    if (!cell) return false;
     if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
         interp_upgrade_function_entry(fn, def, cell->boxed_entry);
         return true;

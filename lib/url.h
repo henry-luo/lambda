@@ -87,6 +87,7 @@ String* url_serialize_path(const Url* url);
 bool url_is_valid(const Url* url);
 bool url_equals(const Url* a, const Url* b);
 Url* url_clone(const Url* url);
+bool url_has_authority(const Url* url);
 
 // Component setters (return URL_OK on success)
 UrlError url_set_href(Url* url, const char* href);
