@@ -20071,19 +20071,43 @@ static bool js_split_index_is_trailing_surrogate(String* s, int index) {
 }
 
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
+    // @@split creates its splitter and result before its first RegExpExec.
+    // Keep every cross-safepoint value rooted so a collection cannot finalize
+    // the split matcher while this native frame still borrows it (D5.3.3).
+    RootFrame roots(11);
+    Rooted<Item> receiver_root(roots, this_val);
+    Rooted<Item> string_root(roots, str);
+    Rooted<Item> constructor_root(roots, make_js_undefined());
+    Rooted<Item> flags_root(roots, make_js_undefined());
+    Rooted<Item> new_flags_root(roots, make_js_undefined());
+    Rooted<Item> splitter_root(roots, make_js_undefined());
+    Rooted<Item> result_root(roots, make_js_undefined());
+    Rooted<Item> match_root(roots, ItemNull);
+    Rooted<Item> last_match_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, make_js_undefined());
+    Rooted<Item> limit_root(roots, limit);
+    if (!roots.valid()) return ItemError;
+
     // Step 2: Type(rx) must be Object
-    if (!js_is_object_value(this_val)) {
+    if (!js_is_object_value(receiver_root.get())) {
         return js_throw_type_error("RegExp.prototype[@@split] called on incompatible receiver");
     }
     // Step 3: S = ToString(string)
-    if (get_type_id(str) != LMD_TYPE_STRING) str = js_to_string(str);
+    if (get_type_id(string_root.get()) != LMD_TYPE_STRING) {
+        str = js_to_string(string_root.get());
+        string_root.set(str);
+    } else {
+        str = string_root.get();
+    }
     if (item_is_error(str)) return str;
     String* s_str = it2s(str);
     int byte_size = s_str ? (int)s_str->len : 0;
 
     // Step 4: C = SpeciesConstructor(rx, %RegExp%)
-    JS_ASSIGN_OR_RETURN(C, js_get_name_key(this_val, "constructor", 11));
-    Item default_regexp = js_get_constructor(js_name_item("RegExp", 6));
+    JS_ASSIGN_OR_RETURN(C, js_get_name_key(receiver_root.get(), "constructor", 11));
+    constructor_root.set(C);
+    value_root.set(js_get_constructor(js_name_item("RegExp", 6)));
+    Item default_regexp = value_root.get();
     if (get_type_id(C) == LMD_TYPE_UNDEFINED) {
         C = default_regexp;
     } else {
@@ -20102,10 +20126,14 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
             C = S;
         }
     }
+    constructor_root.set(C);
 
     // Step 5-6: flags = ToString(Get(rx, "flags")); unicodeMatching = (flags includes 'u')
-    JS_ASSIGN_OR_RETURN(flags_val, js_get_name_key(this_val, "flags", 5));
-    JS_ASSIGN_OR_RETURN(flags_str_item, (get_type_id(flags_val) == LMD_TYPE_STRING) ? flags_val : js_to_string(flags_val));
+    JS_ASSIGN_OR_RETURN(flags_val, js_get_name_key(receiver_root.get(), "flags", 5));
+    value_root.set(flags_val);
+    JS_ASSIGN_OR_RETURN(flags_str_item, (get_type_id(value_root.get()) == LMD_TYPE_STRING)
+        ? value_root.get() : js_to_string(value_root.get()));
+    flags_root.set(flags_str_item);
     String* flags_str = (get_type_id(flags_str_item) == LMD_TYPE_STRING) ? it2s(flags_str_item) : NULL;
     const char* fl = flags_str ? flags_str->chars : "";
     int fl_len = flags_str ? (int)flags_str->len : 0;
@@ -20130,7 +20158,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 7: newFlags = has_y ? flags : flags + "y"
     Item new_flags_item;
     if (has_y) {
-        new_flags_item = flags_str_item;
+        new_flags_item = flags_root.get();
     } else {
         char* nf = (char*)pool_calloc(js_input->pool, fl_len + 2);
         memcpy(nf, fl, fl_len);
@@ -20138,22 +20166,26 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         nf[fl_len + 1] = '\0';
         new_flags_item = js_name_item(nf, fl_len + 1);
     }
+    new_flags_root.set(new_flags_item);
 
     // Step 8: splitter = Construct(C, « rx, newFlags »)
-    Item ctor_args[2] = { this_val, new_flags_item };
-    JS_ASSIGN_OR_RETURN(splitter, js_construct_value(C, ctor_args, 2, C, NULL,
+    Item ctor_args[2] = { receiver_root.get(), new_flags_root.get() };
+    JS_ASSIGN_OR_RETURN(splitter, js_construct_value(constructor_root.get(), ctor_args, 2,
+        constructor_root.get(), NULL,
         false));
+    splitter_root.set(splitter);
 
     // Step 9-10: A = ArrayCreate(0); lengthA = 0
     Item A = js_array_new(0);
+    result_root.set(A);
     int lengthA = 0;
 
     // Step 11: lim = (limit undefined) ? 2^32-1 : ToUint32(limit)
     uint32_t lim;
-    if (get_type_id(limit) == LMD_TYPE_UNDEFINED) {
+    if (get_type_id(limit_root.get()) == LMD_TYPE_UNDEFINED) {
         lim = 0xFFFFFFFFu;
     } else {
-        JS_ASSIGN_OR_RETURN(ln, js_to_number(limit));
+        JS_ASSIGN_OR_RETURN(ln, js_to_number(limit_root.get()));
         double dl = js_get_number(ln);
         if (isnan(dl) || dl == 0.0) lim = 0;
         else if (isinf(dl)) lim = 0xFFFFFFFFu;
@@ -20164,17 +20196,19 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         }
     }
     // Step 12: If lim == 0, return A.
-    if (lim == 0) return A;
+    if (lim == 0) return result_root.get();
 
     // Step 13: If size == 0:
     if (size == 0) {
         // a. z = ? RegExpExec(splitter, S)
-        JS_ASSIGN_OR_RETURN(z, js_regexp_exec_dispatch(splitter, str));
+        JS_ASSIGN_OR_RETURN(z, js_regexp_exec_dispatch(splitter_root.get(), string_root.get()));
+        match_root.set(z);
         // b. If z is not null, return A
-        if (get_type_id(z) != LMD_TYPE_NULL && z.item != ItemNull.item) return A;
+        if (get_type_id(match_root.get()) != LMD_TYPE_NULL &&
+                match_root.get().item != ItemNull.item) return result_root.get();
         // c. Append S to A; return A
-        js_array_push(A, str);
-        return A;
+        js_array_push(result_root.get(), string_root.get());
+        return result_root.get();
     }
 
     // Step 14-onwards: q = p = 0; loop
@@ -20187,16 +20221,16 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // consuming input cannot start inside a character. So carry the splitter's
     // zero-width answer from the last position we *could* seat it and apply it
     // to the one we cannot, instead of asking exec for an impossible offset.
-    JsRegexData* split_rd = js_get_regex_data(splitter);
+    JsRegexData* split_rd = js_get_regex_data(splitter_root.get());
     bool subject_is_utf8 = !unicode_matching &&
         (!split_rd || !split_rd->needs_utf16_subject);
     bool zero_width_at_last_seat = false;
     // The last successful match object, replayed for its captures when the
     // synthesized branch below stands in for an unseatable position.
-    Item last_z = ItemNull;
     Item li_key = js_name_item("lastIndex", 9);
     while (q < size) {
         Item z = ItemNull;
+        match_root.set(z);
         bool synthesized = subject_is_utf8 &&
             js_split_index_is_trailing_surrogate(s_str, q);
         if (synthesized) {
@@ -20206,15 +20240,20 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
             }
             // Stand in for exec: a zero-width match at q, carrying the last
             // match object so the capture replay below stays identical.
-            z = last_z;
+            z = last_match_root.get();
+            match_root.set(z);
         } else {
             // a. ? Set(splitter, "lastIndex", q, true)
-            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(splitter, li_key, q));
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(
+                splitter_root.get(), li_key, q));
             // b. z = ? RegExpExec(splitter, S)
-            JS_ASSIGN_OR_RETURN_INTO(z, js_regexp_exec_dispatch(splitter, str));
+            JS_ASSIGN_OR_RETURN_INTO(z, js_regexp_exec_dispatch(
+                splitter_root.get(), string_root.get()));
+            match_root.set(z);
         }
         // c. If z is null, q = AdvanceStringIndex(S, q, unicode)
-        if (get_type_id(z) == LMD_TYPE_NULL || z.item == ItemNull.item) {
+        if (get_type_id(match_root.get()) == LMD_TYPE_NULL ||
+                match_root.get().item == ItemNull.item) {
             zero_width_at_last_seat = false;
             q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
         } else {
@@ -20223,7 +20262,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
             if (synthesized) {
                 e_int = q;  // zero-width by construction; lastIndex is stale here
             } else {
-                JS_ASSIGN_OR_RETURN(li_val, js_get_key_default(splitter, li_key));
+                JS_ASSIGN_OR_RETURN(li_val, js_get_key_default(splitter_root.get(), li_key));
                 JS_ASSIGN_OR_RETURN_INTO(li_val, js_to_number(li_val));
                 double dle = js_get_number(li_val);
                 if (isnan(dle) || dle <= 0) e_int = 0;
@@ -20236,7 +20275,7 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
                 // the splitter is sticky, so a match begins at q; e == q means
                 // it matched zero-width right here.
                 zero_width_at_last_seat = (e == q);
-                last_z = z;
+                last_match_root.set(match_root.get());
             }
             // f. If e == p, q = AdvanceStringIndex(S, q, unicode)
             if (e == p) {
@@ -20244,15 +20283,16 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
             } else {
                 // i. T = substring(S, p, q)
                 int t_len = q - p;
-                Item T = (t_len > 0) ? js_str_substring_utf16(str, p, q)
+                Item T = (t_len > 0) ? js_str_substring_utf16(string_root.get(), p, q)
                                      : ItemEmptyString;
+                value_root.set(T);
                 // ii. Append T to A; lengthA++; if lengthA == lim, return A
-                js_array_push(A, T); lengthA++;
-                if ((uint32_t)lengthA == lim) return A;
+                js_array_push(result_root.get(), value_root.get()); lengthA++;
+                if ((uint32_t)lengthA == lim) return result_root.get();
                 // iii. p = e
                 p = e;
                 // iv. nCaptures = max(LengthOfArrayLike(z) - 1, 0)
-                JS_ASSIGN_OR_RETURN(zl_val, js_get_name_key(z, "length", 6));
+                JS_ASSIGN_OR_RETURN(zl_val, js_get_name_key(match_root.get(), "length", 6));
                 JS_ASSIGN_OR_RETURN(zl_num, js_to_number(zl_val));
                 double zlen_d = js_get_number(zl_num);
                 int64_t zlen_i;
@@ -20264,9 +20304,10 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
                 for (int ci = 1; ci <= nCaptures; ci++) {
                     char idx_buf[16];
                     int ilen = snprintf(idx_buf, sizeof(idx_buf), "%d", ci);
-                    JS_ASSIGN_OR_RETURN(nextCap, js_get_name_key(z, idx_buf, ilen));
-                    js_array_push(A, nextCap); lengthA++;
-                    if ((uint32_t)lengthA == lim) return A;
+                    JS_ASSIGN_OR_RETURN(nextCap, js_get_name_key(match_root.get(), idx_buf, ilen));
+                    value_root.set(nextCap);
+                    js_array_push(result_root.get(), value_root.get()); lengthA++;
+                    if ((uint32_t)lengthA == lim) return result_root.get();
                 }
                 // vi. q = p
                 q = p;
@@ -20275,10 +20316,11 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     }
     // Step 17-18: T = substring(S, p, size); append T
     int t_len = size - p;
-    Item T = (t_len > 0) ? js_str_substring_utf16(str, p, size)
+    Item T = (t_len > 0) ? js_str_substring_utf16(string_root.get(), p, size)
                          : ItemEmptyString;
-    js_array_push(A, T);
-    return A;
+    value_root.set(T);
+    js_array_push(result_root.get(), value_root.get());
+    return result_root.get();
 }
 
 // =============================================================================

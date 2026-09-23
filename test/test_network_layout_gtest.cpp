@@ -18,6 +18,7 @@
 
 extern "C" {
 #include "../lib/shell.h"
+#include "../lib/time_util.h"
 }
 
 #ifdef _WIN32
@@ -81,15 +82,12 @@ protected:
             freopen("/dev/null", "w", stdout);
             freopen("/dev/null", "w", stderr);
             
-            // change to test page directory
-            if (chdir("./test/layout/data/page") != 0) {
-                _exit(1);
-            }
-
-            // exec python http server
+            // The shared fixture server serves static pages and one delayed
+            // endpoint that verifies async XHR does not block host timers.
             char port_str[16];
             snprintf(port_str, sizeof(port_str), "%d", server_port);
-            execlp("python3", "python3", "-m", "http.server", port_str, NULL);
+            execlp("python3", "python3", "test/network_fixture_server.py", port_str,
+                   "./test/layout/data/page", NULL);
             
             // if execlp fails, exit
             _exit(1);
@@ -260,6 +258,44 @@ TEST_F(NetworkLayoutTest, ViewXhrCallbackCanReopenRequest) {
     ShellResult result = headless_view_with_memtrack("xhr_response_headers.html");
     const char* output = result.stdout_buf ? result.stdout_buf : "";
 
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr)
+        << output;
+    shell_result_free(&result);
+}
+
+TEST_F(NetworkLayoutTest, ViewAsyncXhrDoesNotBlockEventLoop) {
+    ShellResult result = headless_view_with_memtrack("xhr_async_transport.html");
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(strstr(output, "XHR_ASYNC_TIMER=1"), nullptr) << output;
+    EXPECT_NE(strstr(output, "XHR_ASYNC_DONE=200:libuv"), nullptr) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr)
+        << output;
+    shell_result_free(&result);
+}
+
+TEST_F(NetworkLayoutTest, ViewCancelsInflightXhrWhenScriptWatchdogTearsDownRuntime) {
+    uint64_t start_ns = time_now_ns();
+    ShellResult result = headless_view_with_memtrack("xhr_async_cancel.html");
+    double elapsed_ms = time_elapsed_ms_f(start_ns, time_now_ns());
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+
+    EXPECT_EQ(0, result.exit_code) << output;
+    // The page watchdog expires after the request starts. Teardown must abort
+    // curl in its libuv worker instead of waiting for the 15-second response.
+    EXPECT_LT(elapsed_ms, 12000.0) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr)
+        << output;
+    shell_result_free(&result);
+}
+
+TEST_F(NetworkLayoutTest, ViewTeardownCancelsCssTransitionWithoutDeadDocumentEvent) {
+    ShellResult result = headless_view_with_memtrack("css_transition_teardown.html");
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+
+    // Teardown must discard CSS lifecycle delivery after DOM wrappers retire.
     EXPECT_EQ(0, result.exit_code) << output;
     EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr)
         << output;

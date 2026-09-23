@@ -83,6 +83,10 @@ extern void jm_abandon_active_mir_after_signal(void);
 // Keep the teardown flag platform-wide because the public cleanup query and
 // reset path run on Windows even though the POSIX signal watchdog does not.
 static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
+// A watchdog interrupts JIT execution, not libuv queue mutation. Preserve the
+// shared loop for its scheduler and fetch-work teardown; only a recovered
+// memory fault must abandon native handles without closing them.
+static volatile sig_atomic_t js_event_loop_cleanup_unsafe = 0;
 
 #ifndef _WIN32
 static sigjmp_buf js_exec_jmpbuf;
@@ -2329,6 +2333,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         return;
     }
     js_batch_cleanup_unsafe = 0;
+    js_event_loop_cleanup_unsafe = 0;
 
     // reset counters
     loaded_external_scripts = 0;
@@ -2552,6 +2557,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // recovered JS crashes can leave timer/runtime state inconsistent; let
 	        // document teardown abandon handles instead of re-entering them later.
 	        js_batch_cleanup_unsafe = 1;
+	        js_event_loop_cleanup_unsafe = 1;
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
@@ -2676,7 +2682,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         // A failed preamble never becomes document state.  Tear down the
         // complete owner so no context fragment survives the failed batch.
         dom_doc->js.runtime = runtime;
-        if (script_runner_js_batch_cleanup_unsafe()) {
+        if (js_event_loop_cleanup_unsafe) {
             js_event_loop_abandon_all_timers();
         } else {
             js_event_loop_shutdown();

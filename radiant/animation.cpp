@@ -178,6 +178,9 @@ void animation_scheduler_destroy(AnimationScheduler* scheduler) {
         AnimationInstance* next = anim->next;
         // Media players keep decoded frames outside the document pool; cancel
         // them before their scheduler entry disappears at document teardown.
+        // CSS event targets are being torn down, so their cancel callbacks
+        // must release state without dispatching into the dead document.
+        anim->suppress_cancel_event = true;
         if (anim->on_cancel) anim->on_cancel(anim);
         pool_free(scheduler->pool, anim);
         anim = next;

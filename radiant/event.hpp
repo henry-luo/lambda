@@ -76,7 +76,18 @@ void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
 // still inits its controls, while `lambda.exe layout` stops before the phase
 // and so keeps batch output free of handler side effects. Self-gating on
 // DomDocument::behavior_init_pending, so calling it on a quiet document is free.
-void radiant_run_behavior_init(struct DomDocument* doc);
+typedef struct BehaviorInitPhaseTiming {
+    double queue_sort_ms;
+    double evaluator_ms;
+    double handler_dispatch_ms;
+    double pseudo_state_begin_ms;
+    double pseudo_state_end_ms;
+    uint64_t candidate_control_count;
+    uint64_t initialized_control_count;
+} BehaviorInitPhaseTiming;
+
+void radiant_run_behavior_init(struct DomDocument* doc,
+                               BehaviorInitPhaseTiming* timing = nullptr);
 void radiant_queue_behavior_init_control(struct DomDocument* doc, View* view);
 #endif
 

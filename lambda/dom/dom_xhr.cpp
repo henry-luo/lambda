@@ -1,7 +1,8 @@
 /**
  * js_xhr.cpp — XMLHttpRequest for Radiant browser context
  *
- * Synchronous HTTP via http_fetch() from input_http.cpp.
+ * Async HTTP reuses fetch()'s libuv transport; explicit synchronous XHR uses
+ * http_fetch() because the web API requires send() to block in that mode.
  * Each XHR instance stores its C-level state (method, url, headers,
  * response data) in a flat array indexed by an ID property on the
  * JS object. Methods use dom_realm_receiver() to resolve the current XHR.
@@ -55,7 +56,6 @@ struct XhrState {
     char*   url;            // request URL
     bool    async_flag;
     bool    send_pending;
-    bool    async_dispatching;
     uint32_t request_token;
     char*   request_body;
     // JSCUO5: grown on demand. The fixed 64-header table was 1,024 B of the
@@ -69,7 +69,7 @@ struct XhrState {
     char*   override_mime_type;
     char*   response_text;
     size_t  response_size;
-    char**  resp_headers;       // raw header strings from http_fetch
+    char**  resp_headers;       // raw header strings from the shared transport
     int     resp_header_count;
     Item    js_object;      // back-reference to the JS XHR object
 };
@@ -132,6 +132,14 @@ static void xhr_clear_response(XhrState* xhr) {
     xhr_clear_response_headers(xhr);
 }
 
+static void xhr_take_response_headers(XhrState* xhr, char** headers,
+                                      int header_count) {
+    if (!xhr) return;
+    xhr_clear_response_headers(xhr);
+    xhr->resp_headers = headers;
+    xhr->resp_header_count = header_count;
+}
+
 static void xhr_copy_response_headers(XhrState* xhr,
                                       const FetchResponse* response) {
     if (!xhr || !response || response->response_header_count <= 0 ||
@@ -139,7 +147,7 @@ static void xhr_copy_response_headers(XhrState* xhr,
 
     int header_count = response->response_header_count;
     char** copied = (char**)mem_calloc(header_count, sizeof(char*),
-                                        MEM_CAT_JS_RUNTIME);
+                                       MEM_CAT_JS_RUNTIME);
     if (!copied) {
         log_error("xhr: unable to allocate response headers");
         return;
@@ -152,8 +160,50 @@ static void xhr_copy_response_headers(XhrState* xhr,
         log_error("xhr: unable to copy response header");
         return;
     }
-    xhr->resp_headers = copied;
-    xhr->resp_header_count = header_count;
+    xhr_take_response_headers(xhr, copied, header_count);
+}
+
+static void xhr_copy_fetch_response_headers(XhrState* xhr, Item response) {
+    Item headers_item = dom_realm_get_cstr(response, "__xhr_response_headers");
+    if (!xhr || get_type_id(headers_item) != LMD_TYPE_STRING) return;
+
+    String* headers_text = it2s(headers_item);
+    if (!headers_text || headers_text->len == 0) return;
+    int header_count = 0;
+    for (size_t start = 0; start < headers_text->len;) {
+        size_t end = start;
+        while (end < headers_text->len && headers_text->chars[end] != '\n') end++;
+        if (end > start) header_count++;
+        start = end + 1;
+    }
+    if (header_count == 0) return;
+
+    char** copied = (char**)mem_calloc(header_count, sizeof(char*),
+                                       MEM_CAT_JS_RUNTIME);
+    if (!copied) {
+        log_error("xhr: unable to allocate fetch response headers");
+        return;
+    }
+    int copied_count = 0;
+    for (size_t start = 0; start < headers_text->len;) {
+        size_t end = start;
+        while (end < headers_text->len && headers_text->chars[end] != '\n') end++;
+        size_t line_len = end - start;
+        if (line_len > 0 && headers_text->chars[start + line_len - 1] == '\r') line_len--;
+        if (line_len > 0) {
+            copied[copied_count] = mem_dup_n(headers_text->chars + start, line_len,
+                                              MEM_CAT_JS_RUNTIME);
+            if (!copied[copied_count]) {
+                for (int i = 0; i < copied_count; i++) mem_free(copied[i]);
+                mem_free(copied);
+                log_error("xhr: unable to copy fetch response header");
+                return;
+            }
+            copied_count++;
+        }
+        start = end + 1;
+    }
+    xhr_take_response_headers(xhr, copied, copied_count);
 }
 
 // ============================================================================
@@ -371,6 +421,154 @@ static void xhr_complete_response(XhrState* xhr, long status,
     }
 }
 
+static void xhr_complete_network_error(XhrState* xhr) {
+    if (!xhr) return;
+    xhr_clear_response(xhr);
+    xhr->status = 0;
+    xhr->status_text = mem_strdup("", MEM_CAT_JS_RUNTIME);
+    xhr->ready_state = 4;
+    xhr_set_int(xhr->js_object, "readyState", 4);
+    xhr_set_int(xhr->js_object, "status", 0);
+    xhr_set_str(xhr->js_object, "statusText", "");
+    xhr_set_str(xhr->js_object, "responseText", "");
+    xhr_set_str(xhr->js_object, "response", "");
+    xhr_fire_readystatechange(xhr);
+
+    Item onerror = xhr_get_prop(xhr->js_object, "onerror");
+    if (dom_realm_is_callable(onerror)) {
+        dom_realm_call(onerror, xhr->js_object, nullptr, 0);
+    }
+    Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
+    if (dom_realm_is_callable(onloadend)) {
+        dom_realm_call(onloadend, xhr->js_object, nullptr, 0);
+    }
+}
+
+static bool xhr_async_request_is_current(XhrState* xhr, uint32_t token) {
+    return xhr && xhr->in_use && xhr->send_pending &&
+        xhr->request_token == token && xhr->ready_state == 1;
+}
+
+static Item js_xhr_async_fetch_failed(Item token_arg, Item reason_arg) {
+    (void)reason_arg;
+    XhrState* xhr = xhr_state_from_this();
+    if (get_type_id(token_arg) != LMD_TYPE_INT || !xhr) return make_js_undef();
+    uint32_t token = (uint32_t)it2i(token_arg);
+    if (!xhr_async_request_is_current(xhr, token)) return make_js_undef();
+
+    xhr->send_pending = false;
+    xhr_complete_network_error(xhr);
+    log_error("xhr: async network error for %s %s", xhr->method, xhr->url);
+    return make_js_undef();
+}
+
+static Item js_xhr_async_fetch_body(Item token_arg, Item status_arg, Item body_arg) {
+    XhrState* xhr = xhr_state_from_this();
+    if (get_type_id(token_arg) != LMD_TYPE_INT ||
+        get_type_id(status_arg) != LMD_TYPE_INT || !xhr) return make_js_undef();
+    uint32_t token = (uint32_t)it2i(token_arg);
+    if (!xhr_async_request_is_current(xhr, token)) return make_js_undef();
+
+    String* body = get_type_id(body_arg) == LMD_TYPE_STRING ? it2s(body_arg) : nullptr;
+    xhr->send_pending = false;
+    xhr_complete_response(xhr, (long)it2i(status_arg),
+                          body ? body->chars : nullptr, body ? body->len : 0);
+    log_debug("xhr: async done status=%ld, %zu bytes", xhr->status, xhr->response_size);
+    return make_js_undef();
+}
+
+static Item js_xhr_async_fetch_response(Item token_arg, Item response_arg) {
+    XhrState* xhr = xhr_state_from_this();
+    if (get_type_id(token_arg) != LMD_TYPE_INT || !xhr) return make_js_undef();
+    uint32_t token = (uint32_t)it2i(token_arg);
+    if (!xhr_async_request_is_current(xhr, token)) return make_js_undef();
+
+    Item status = dom_realm_get_cstr(response_arg, "status");
+    Item text = dom_realm_get_cstr(response_arg, "text");
+    if (get_type_id(status) != LMD_TYPE_INT || !dom_realm_is_callable(text)) {
+        xhr->send_pending = false;
+        xhr_complete_network_error(xhr);
+        return make_js_undef();
+    }
+    xhr_copy_fetch_response_headers(xhr, response_arg);
+
+    RootFrame roots(6);
+    Rooted<Item> response_root(roots, response_arg);
+    Rooted<Item> text_root(roots, text);
+    Rooted<Item> body_promise_root(roots, dom_realm_call(text_root.get(),
+        response_root.get(), nullptr, 0));
+    Rooted<Item> body_handler_root(roots, ItemNull);
+    Rooted<Item> error_handler_root(roots, ItemNull);
+    Rooted<Item> continuation_root(roots, ItemNull);
+    if (item_is_error(body_promise_root.get())) {
+        xhr->send_pending = false;
+        xhr_complete_network_error(xhr);
+        return make_js_undef();
+    }
+    Item args[2] = {token_arg, status};
+    body_handler_root.set(js_bind_function(dom_realm_new_function(js_xhr_async_fetch_body),
+        xhr->js_object, args, 2));
+    Item error_args[1] = {token_arg};
+    error_handler_root.set(js_bind_function(dom_realm_new_function(js_xhr_async_fetch_failed),
+        xhr->js_object, error_args, 1));
+    if (!dom_realm_is_callable(body_handler_root.get()) ||
+        !dom_realm_is_callable(error_handler_root.get())) {
+        xhr->send_pending = false;
+        xhr_complete_network_error(xhr);
+        return make_js_undef();
+    }
+    continuation_root.set(dom_realm_promise_then(body_promise_root.get(),
+        body_handler_root.get(), error_handler_root.get()));
+    if (item_is_error(continuation_root.get())) {
+        xhr->send_pending = false;
+        xhr_complete_network_error(xhr);
+    }
+    return make_js_undef();
+}
+
+static Item xhr_build_fetch_options(XhrState* xhr) {
+    RootFrame roots(2);
+    Rooted<Item> options_root(roots, js_new_object());
+    Rooted<Item> headers_root(roots, js_new_object());
+    if (!xhr || !options_root.get().item || !headers_root.get().item) return ItemNull;
+
+    dom_realm_set_cstr(options_root.get(), "method",
+                       make_string_item(xhr->method ? xhr->method : "GET"));
+    if (xhr->request_body) {
+        dom_realm_set_cstr(options_root.get(), "body", make_string_item(xhr->request_body));
+    }
+    for (int i = 0; i < xhr->req_header_count; i++) {
+        dom_realm_set(headers_root.get(), make_string_item(xhr->req_headers[i].name),
+                      make_string_item(xhr->req_headers[i].value));
+    }
+    dom_realm_set_cstr(options_root.get(), "headers", headers_root.get());
+    return options_root.get();
+}
+
+static bool xhr_start_async_fetch(XhrState* xhr) {
+    if (!xhr || !xhr->url) return false;
+    RootFrame roots(7);
+    Rooted<Item> url_root(roots, make_string_item(xhr->url));
+    Rooted<Item> options_root(roots, xhr_build_fetch_options(xhr));
+    Rooted<Item> promise_root(roots, js_fetch(url_root.get(), options_root.get()));
+    Rooted<Item> success_root(roots, ItemNull);
+    Rooted<Item> failure_root(roots, ItemNull);
+    Rooted<Item> continuation_root(roots, ItemNull);
+    Rooted<Item> unused_root(roots, ItemNull);
+    if (item_is_error(promise_root.get())) return false;
+
+    Item token = {.item = i2it((int64_t)xhr->request_token)};
+    success_root.set(js_bind_function(dom_realm_new_function(js_xhr_async_fetch_response),
+        xhr->js_object, &token, 1));
+    failure_root.set(js_bind_function(dom_realm_new_function(js_xhr_async_fetch_failed),
+        xhr->js_object, &token, 1));
+    if (!dom_realm_is_callable(success_root.get()) ||
+        !dom_realm_is_callable(failure_root.get())) return false;
+    continuation_root.set(dom_realm_promise_then(promise_root.get(), success_root.get(),
+                                                  failure_root.get()));
+    return !item_is_error(continuation_root.get()) && continuation_root.get().item;
+}
+
 // ============================================================================
 // Constructor
 // ============================================================================
@@ -503,7 +701,6 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     // the script's next statement and broke XMLHttpRequest turn ordering.
     xhr->async_flag = async_argument_omitted || it2b(js_to_boolean(async_arg));
     xhr->send_pending = false;
-    xhr->async_dispatching = false;
     xhr->request_token++;
     xhr->status = 0;
     xhr->response_size = 0;
@@ -554,46 +751,6 @@ extern "C" Item js_xhr_override_mime_type(Item mime_arg) {
     return make_js_undef();
 }
 
-static Item js_xhr_async_send_task(Item id_arg, Item token_arg) {
-    if (!js_xhr_runtime_state_get()) return make_js_undef();
-    if (get_type_id(id_arg) != LMD_TYPE_INT ||
-        get_type_id(token_arg) != LMD_TYPE_INT) {
-        return make_js_undef();
-    }
-    int id = (int)it2i(id_arg);
-    uint32_t token = (uint32_t)it2i(token_arg);
-    if (id < 0 || id >= _xhr_count) return make_js_undef();
-    XhrState* xhr = &_xhr_pool[id];
-    if (!xhr->in_use || !xhr->send_pending || xhr->request_token != token ||
-        xhr->ready_state != 1) {
-        return make_js_undef();
-    }
-
-    // A queued XMLHttpRequest must not start after open() or abort() replaced
-    // its request state. The monotonic token makes that lifecycle boundary
-    // explicit even when the pool slot is reused by the same JS object.
-    xhr->async_dispatching = true;
-    Item result = js_xhr_send(ItemNull);
-    xhr->async_dispatching = false;
-    return result;
-}
-
-static bool xhr_schedule_async_send(XhrState* xhr) {
-    if (!xhr) return false;
-    int id = (int)(xhr - _xhr_pool);
-    Item args[2] = {
-        (Item){.item = i2it(id)},
-        (Item){.item = i2it((int64_t)xhr->request_token)},
-    };
-    Item task = js_bind_function(
-        dom_realm_new_function(js_xhr_async_send_task), xhr->js_object,
-        args, 2);
-    if (!dom_realm_is_callable(task)) return false;
-    Item delay = {.item = i2it(0)};
-    Item timer = js_setTimeout(task, delay);
-    return get_type_id(timer) != LMD_TYPE_NULL;
-}
-
 extern "C" Item js_xhr_send(Item body_arg) {
     XhrState* xhr = xhr_state_from_this();
     if (!xhr) return make_js_undef();
@@ -603,33 +760,32 @@ extern "C" Item js_xhr_send(Item body_arg) {
         return make_js_undef();
     }
 
-    if (!xhr->async_dispatching) {
-        if (xhr->request_body) {
-            mem_free(xhr->request_body);
-            xhr->request_body = nullptr;
-        }
-        TypeId body_type = get_type_id(body_arg);
-        if (body_type != LMD_TYPE_NULL && body_type != LMD_TYPE_UNDEFINED) {
-            const char* body = fn_to_cstr(body_arg);
-            if (body) xhr->request_body = mem_strdup(body, MEM_CAT_JS_RUNTIME);
-        }
-        xhr->send_pending = true;
-        xhr->request_token++;
+    if (xhr->request_body) {
+        mem_free(xhr->request_body);
+        xhr->request_body = nullptr;
+    }
+    TypeId body_type = get_type_id(body_arg);
+    if (body_type != LMD_TYPE_NULL && body_type != LMD_TYPE_UNDEFINED) {
+        const char* body = fn_to_cstr(body_arg);
+        if (body) xhr->request_body = mem_strdup(body, MEM_CAT_JS_RUNTIME);
+    }
+    xhr->send_pending = true;
+    xhr->request_token++;
 
-        Item loadstart_cb = xhr_get_prop(xhr->js_object, "onloadstart");
-        if (dom_realm_is_callable(loadstart_cb)) {
-            dom_realm_call(loadstart_cb, xhr->js_object, nullptr, 0);
+    Item loadstart_cb = xhr_get_prop(xhr->js_object, "onloadstart");
+    if (dom_realm_is_callable(loadstart_cb)) {
+        dom_realm_call(loadstart_cb, xhr->js_object, nullptr, 0);
+    }
+    if (xhr->ready_state != 1 || !xhr->send_pending) {
+        return make_js_undef();
+    }
+    if (xhr->async_flag) {
+        if (!xhr_start_async_fetch(xhr)) {
+            xhr->send_pending = false;
+            xhr_complete_network_error(xhr);
+            log_error("xhr: unable to start async request");
         }
-        if (xhr->ready_state != 1 || !xhr->send_pending) {
-            return make_js_undef();
-        }
-        if (xhr->async_flag) {
-            if (!xhr_schedule_async_send(xhr)) {
-                xhr->send_pending = false;
-                log_error("xhr: unable to schedule asynchronous request");
-            }
-            return make_js_undef();
-        }
+        return make_js_undef();
     }
     xhr->send_pending = false;
 
@@ -714,26 +870,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
 
         log_debug("xhr: done status=%ld, %zu bytes", xhr->status, xhr->response_size);
     } else {
-        // Network error
-        xhr->status = 0;
-        xhr->status_text = mem_strdup("", MEM_CAT_JS_RUNTIME);
-        xhr->ready_state = 4;
-        xhr_set_int(xhr->js_object, "readyState", 4);
-        xhr_set_int(xhr->js_object, "status", 0);
-        xhr_set_str(xhr->js_object, "statusText", "");
-        xhr_set_str(xhr->js_object, "responseText", "");
-        xhr_set_str(xhr->js_object, "response", "");
-        xhr_fire_readystatechange(xhr);
-
-        Item onerror = xhr_get_prop(xhr->js_object, "onerror");
-        if (dom_realm_is_callable(onerror)) {
-            dom_realm_call(onerror, xhr->js_object, nullptr, 0);
-        }
-        Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-        if (dom_realm_is_callable(onloadend)) {
-            dom_realm_call(onloadend, xhr->js_object, nullptr, 0);
-        }
-
+        xhr_complete_network_error(xhr);
         log_error("xhr: network error for %s %s", xhr->method, xhr->url);
     }
 
