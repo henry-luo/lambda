@@ -214,6 +214,9 @@ bool network_download_resource(NetworkResource* res) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, RADIANT_HTTP_CLIENT_USER_AGENT);
+    if (res->referrer_url && res->referrer_url[0]) {
+        curl_easy_setopt(curl, CURLOPT_REFERER, res->referrer_url);
+    }
     
     // SSL verification (always enabled for production)
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);

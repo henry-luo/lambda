@@ -65,7 +65,7 @@ typedef struct JsFetchWork {
     char*              body;     // owned, NULL → no body
     size_t             body_len;
     struct curl_slist* req_headers; // owned
-    CookieJar*          cookie_jar; // borrowed from the owning browsing session
+    CookieJar*          cookie_jar; // retained until the async transfer finishes
 
     // response data (filled by worker thread)
     ByteBuilder response;
@@ -201,6 +201,7 @@ static CookieJar* fetch_profile_cookie_jar(void) {
 
 static void fetch_work_destroy(JsFetchWork* fw) {
     if (!fw) return;
+    cookie_jar_release(fw->cookie_jar);
     if (fw->method) mem_free(fw->method);
     if (fw->body) mem_free(fw->body);
     if (fw->req_headers) curl_slist_free_all(fw->req_headers);
@@ -705,6 +706,9 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 
     snprintf(fw->url, sizeof(fw->url), "%s", url);
     fw->cookie_jar = fetch_profile_cookie_jar();
+    if (fw->cookie_jar && !cookie_jar_retain(fw->cookie_jar)) {
+        fw->cookie_jar = NULL;
+    }
     fw->work.data = fw;
 
     // parse options (method, headers, body)

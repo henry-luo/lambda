@@ -7,6 +7,7 @@
 // The watchdog starts after trusted browser-preamble preparation. Give small
 // page-owned scripts a bounded CPU window before source-size scaling applies.
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS 10
+#define RADIANT_SCRIPT_EXEC_TIMEOUT_PER_16K_SECONDS 16
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS 120
 #define RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
 
@@ -20,16 +21,21 @@ static inline int radiant_script_exec_timeout_override_seconds() {
         ? RADIANT_SCRIPT_EXEC_TIMEOUT_ENV_MAX_SECONDS : (int)parsed;
 }
 
-static inline int radiant_script_exec_timeout_seconds(size_t source_len) {
-    int override_seconds = radiant_script_exec_timeout_override_seconds();
-    if (override_seconds > 0) return override_seconds;
+static inline int radiant_script_exec_timeout_source_seconds(size_t source_len) {
     int seconds = RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS;
     if (source_len > 8192) {
+        // minified production bundles can have far more AST nodes per byte.
         seconds += (int)((source_len + 16383) / 16384) *
-            RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS;
+            RADIANT_SCRIPT_EXEC_TIMEOUT_PER_16K_SECONDS;
     }
     return seconds > RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS
         ? RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS : seconds;
+}
+
+static inline int radiant_script_exec_timeout_seconds(size_t source_len) {
+    int override_seconds = radiant_script_exec_timeout_override_seconds();
+    return override_seconds > 0 ? override_seconds :
+        radiant_script_exec_timeout_source_seconds(source_len);
 }
 
 static inline int radiant_script_exec_timeout_ceiling_seconds() {

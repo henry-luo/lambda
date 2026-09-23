@@ -91,6 +91,7 @@ void free_network_resource(NetworkResource* res) {
     }
     
     mem_free(res->url);
+    mem_free(res->referrer_url);
     mem_free(res->local_path);
     mem_free(res->error_message);
     mem_free(res);
@@ -251,6 +252,13 @@ static void configure_resource_timeout_and_retry(NetworkResourceManager* mgr, Ne
         // fallbacks; retrying each timeout can block page layout for minutes.
         res->max_retries = 0;
     }
+}
+
+static void set_resource_document_referrer(NetworkResourceManager* mgr,
+                                           NetworkResource* res) {
+    if (!mgr || !res || !mgr->document || !mgr->document->url) return;
+    const char* href = url_get_href(mgr->document->url);
+    if (href && href[0]) res->referrer_url = mem_strdup(href, MEM_CAT_NETWORK);
 }
 
 static void process_failed_resource_on_main(NetworkResourceManager* mgr, NetworkResource* res) {
@@ -600,6 +608,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
                 res->local_path = cached_path;
                 res->manager = mgr;
                 res->cache = mgr->file_cache;
+                set_resource_document_referrer(mgr, res);
                 res->document_id = mgr->document_id;
                 res->navigation_id = mgr->navigation_id;
                 atomic_store(&res->cancel_requested, false);
@@ -634,6 +643,7 @@ NetworkResource* resource_manager_load(NetworkResourceManager* mgr,
     // set manager reference and cache
     res->manager = mgr;
     res->cache = mgr->file_cache;
+    set_resource_document_referrer(mgr, res);
     configure_resource_timeout_and_retry(mgr, res);
     res->document_id = mgr->document_id;
     res->navigation_id = mgr->navigation_id;

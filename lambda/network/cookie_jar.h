@@ -42,6 +42,8 @@ typedef struct CookieJar {
     int capacity;
     pthread_mutex_t lock;
     struct RadiantStateStore* state_store;  // borrowed profile-owned SQLite store
+    int reference_count;                    // protected by lock; async transfers retain the jar
+    bool closing;                           // rejects writes after its browsing session ends
 } CookieJar;
 
 // RFC 6265 §5.1.3 domain-match, shared by cookie and legacy document-domain
@@ -51,6 +53,8 @@ bool cookie_domain_matches(const char* request_host, const char* cookie_domain);
 // Lifecycle
 CookieJar*  cookie_jar_create(struct RadiantStateStore* state_store);
 void        cookie_jar_destroy(CookieJar* jar);
+bool        cookie_jar_retain(CookieJar* jar);
+void        cookie_jar_release(CookieJar* jar);
 
 // Store cookies from one or more Set-Cookie response headers.
 // request_url is the URL that returned the Set-Cookie headers.

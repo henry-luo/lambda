@@ -5,6 +5,8 @@
 #include <cstring>
 #include <cstddef>
 
+#include "../radiant/script_timeout.hpp"
+
 extern "C" {
 #include "../lib/shell.h"
 }
@@ -1188,6 +1190,14 @@ TEST(RadiantViewTest, ContinuesLayoutBatchAfterTimedOutLoadScript) {
     EXPECT_EQ(0, shell_result.exit_code)
         << "the watchdog must not terminate the batch before its next document";
     shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, ScalesWatchdogForDenseProductionBundles) {
+    EXPECT_EQ(RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS,
+              radiant_script_exec_timeout_source_seconds(8192));
+    EXPECT_EQ(58, radiant_script_exec_timeout_source_seconds(49152));
+    EXPECT_EQ(RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS,
+              radiant_script_exec_timeout_source_seconds(114688));
 }
 
 TEST(RadiantViewTest, SkipsDefaultCumulativeBrowserScriptBudget) {
