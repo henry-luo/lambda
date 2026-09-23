@@ -742,7 +742,11 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
         }
     } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
+        // First-layout geometry is renderer work required for the initial
+        // paint; a page's CSSOM read must not consume its JS CPU budget.
+        script_runner_suspend_js_watchdog();
         layout_html_doc(uicon, doc, false);
+        script_runner_resume_js_watchdog();
     }
 
     dom_geometry_flush_in_progress = false;

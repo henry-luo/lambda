@@ -534,6 +534,43 @@ TEST(RadiantViewTest, CullsLargeOffscreenRegistryTableWithoutRepeatedBoundsWalks
     remove(view_log);
 }
 
+TEST(RadiantViewTest, InitialGeometryFlushDoesNotConsumeScriptCpuBudget) {
+    const char* page = "./temp/test_radiant_view_initial_geometry_flush.html";
+    const char* view_log = "./temp/test_radiant_view_initial_geometry_flush.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    bool page_written = test_radiant_view_write_large_registry_table(page_file, 5000);
+    const char* geometry_read =
+        "<script>document.addEventListener('DOMContentLoaded',function(){"
+        "if(document.body.offsetTop<0)throw Error('invalid geometry');});</script>";
+    ASSERT_EQ(strlen(geometry_read), fwrite(geometry_read, 1, strlen(geometry_read), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+    ASSERT_TRUE(page_written);
+
+    const char* args[] = {"./lambda.exe", "view", page, "--headless", NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "6"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.merge_stderr = true;
+    options.timeout_ms = 60000;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(shell_result.timed_out);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: JS execution timed out"));
+    shell_result_free(&shell_result);
+    remove(page);
+    remove(view_log);
+}
+
 TEST(RadiantViewTest, LaysOutInlineFlexWithInlineSiblingAndAbsoluteChild) {
     const char* page = "./temp/test_radiant_view_inline_flex_absolute.html";
     test_radiant_view_ensure_temp_dir();
@@ -584,6 +621,42 @@ TEST(RadiantViewTest, RestoresDocumentRealmAfterScriptException) {
         "no js_input context"));
     EXPECT_FALSE(test_radiant_view_file_contains(view_log,
         "dom_set_document: could not restore the active JS Input"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, WindowScrollOnlyEmitsForPositionChanges) {
+    const char* page = "./temp/test_radiant_view_window_scroll_events.html";
+    const char* view_log = "./temp/test_radiant_view_window_scroll_events.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "var scroll_events = 0;"
+        "window.addEventListener('scroll', function(){ scroll_events++; });"
+        "window.scrollTo(0, 0);"
+        "if (scroll_events !== 0) throw Error('no-op scroll dispatched an event');"
+        "window.scrollTo({left: 0, top: 12});"
+        "if (scroll_events !== 1) throw Error('position-changing scroll event count');"
+        "window.scroll(0, 12);"
+        "if (scroll_events !== 1) throw Error('aliased no-op scroll dispatched an event');"
+        "</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
     remove(page);
     remove(view_log);
 }

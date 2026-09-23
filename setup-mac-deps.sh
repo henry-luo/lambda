@@ -533,6 +533,39 @@ build_brotli_for_mac() {
     return 1
 }
 
+# Stage Brotli under one prefix because curl's configure expects lib/ and include/.
+stage_brotli_for_curl() {
+    local brotli_prefix="$SCRIPT_DIR/mac-deps/brotli/install"
+
+    if [ -f "$brotli_prefix/lib/libbrotlidec.a" ] && \
+       [ -f "$brotli_prefix/lib/libbrotlicommon.a" ] && \
+       [ -f "$brotli_prefix/include/brotli/decode.h" ]; then
+        return 0
+    fi
+
+    echo "Staging Brotli for libcurl..."
+    if ! cmake --install "$SCRIPT_DIR/mac-deps/brotli/out" --prefix "$brotli_prefix"; then
+        echo "❌ Could not stage Brotli for libcurl"
+        return 1
+    fi
+
+    if [ ! -f "$brotli_prefix/lib/libbrotlidec.a" ] || \
+       [ ! -f "$brotli_prefix/lib/libbrotlicommon.a" ] || \
+       [ ! -f "$brotli_prefix/include/brotli/decode.h" ]; then
+        echo "❌ Staged Brotli is incomplete"
+        return 1
+    fi
+}
+
+curl_supports_brotli() {
+    local curl_config="mac-deps/curl-8.10.1/lib/curl_config.h"
+    [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && \
+        [ -f "$curl_config" ] && \
+        grep -q '^#define HAVE_BROTLI 1$' "$curl_config" && \
+        nm "mac-deps/curl-8.10.1/lib/libcurl.a" 2>/dev/null | \
+            grep -q 'BrotliDecoderDecompress'
+}
+
 # Function to build WOFF2 for Mac
 build_woff2_for_mac() {
     echo "Building WOFF2 for Mac..."
@@ -796,10 +829,19 @@ build_curl_with_http2_for_mac() {
     echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
     cd "$SCRIPT_DIR"
 
-    # Check if already built
-    if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
-        echo "libcurl with HTTP/2 already built"
+    # Rebuild legacy archives so content decoding matches modern web servers.
+    if curl_supports_brotli; then
+        echo "libcurl with HTTP/2 and Brotli already built"
         return 0
+    fi
+
+    if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
+        echo "Existing libcurl lacks Brotli support, rebuilding..."
+    fi
+
+    if ! build_brotli_for_mac || ! stage_brotli_for_curl; then
+        echo "❌ Brotli is required before building libcurl"
+        return 1
     fi
 
     # Create mac-deps directory if it doesn't exist
@@ -837,6 +879,9 @@ build_curl_with_http2_for_mac() {
     
     # Set PKG_CONFIG_PATH for mbedTLS discovery
     export PKG_CONFIG_PATH="$MBEDTLS_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
+    # libbrotlidec's static objects depend on libbrotlicommon.
+    export LIBS="-lbrotlicommon${LIBS:+ $LIBS}"
+    export LDFLAGS="-L$SCRIPT_DIR/mac-deps/brotli/install/lib${LDFLAGS:+ $LDFLAGS}"
     
     if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
         --enable-static --disable-shared \
@@ -852,15 +897,17 @@ build_curl_with_http2_for_mac() {
         --disable-http-auth --disable-doh --disable-mime \
         --disable-dateparse --disable-netrc --disable-progress-meter \
         --disable-alt-svc --disable-headers-api --disable-hsts \
-        --without-brotli --without-zstd --without-librtmp \
+        --with-brotli="$SCRIPT_DIR/mac-deps/brotli/install" \
+        --without-zstd --without-librtmp \
         --without-libssh2 --without-libpsl --without-ngtcp2 \
         --without-nghttp3 --without-libidn2 --without-libgsasl \
         --without-quiche; then
 
         echo "Building libcurl..."
         if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing libcurl..."
-            if make install; then
+            # Headers already reside under the source-tree prefix; install only libcurl.a.
+            echo "Installing libcurl static archive..."
+            if make -C lib install-exec; then
                 echo "✅ libcurl with HTTP/2 and mbedTLS built successfully"
 
                 # Verify mbedTLS linkage
@@ -1019,19 +1066,6 @@ else
     fi
 fi
 
-# Build libcurl with HTTP/2 support for Mac (Lambda dependency)
-echo "Setting up libcurl with HTTP/2 support..."
-if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
-    echo "libcurl with HTTP/2 already available"
-else
-    if ! build_curl_with_http2_for_mac; then
-        echo "Warning: libcurl with HTTP/2 build failed"
-        exit 1
-    else
-        echo "libcurl with HTTP/2 built successfully"
-    fi
-fi
-
 # Build Brotli for Mac (required by WOFF2)
 echo "Setting up Brotli..."
 if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && \
@@ -1045,6 +1079,19 @@ else
         exit 1
     else
         echo "✅ Brotli built successfully"
+    fi
+fi
+
+# Build libcurl with HTTP/2 and Brotli support for Mac (Lambda dependency)
+echo "Setting up libcurl with HTTP/2 and Brotli support..."
+if curl_supports_brotli; then
+    echo "libcurl with HTTP/2 and Brotli already available"
+else
+    if ! build_curl_with_http2_for_mac; then
+        echo "Warning: libcurl with HTTP/2 and Brotli build failed"
+        exit 1
+    else
+        echo "libcurl with HTTP/2 and Brotli built successfully"
     fi
 fi
 

@@ -20,7 +20,9 @@ typedef struct HttpHeaderCaptureServer {
 } HttpHeaderCaptureServer;
 
 static bool http_header_capture_server_start(HttpHeaderCaptureServer* server,
-                                             unsigned int response_delay_seconds = 0) {
+                                             unsigned int response_delay_seconds = 0,
+                                             const char* response_override = NULL,
+                                             size_t response_override_size = 0) {
     if (!server) return false;
     memset(server, 0, sizeof(*server));
     server->request_fd = -1;
@@ -72,10 +74,12 @@ static bool http_header_capture_server_start(HttpHeaderCaptureServer* server,
             if (strstr(request, "\r\n\r\n")) break;
         }
         if (request_size > 0) write(pipe_fds[1], request, request_size);
-        const char response[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+        const char default_response[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+        const char* response = response_override ? response_override : default_response;
+        size_t response_size = response_override ? response_override_size : sizeof(default_response) - 1;
         if (client >= 0) {
             if (response_delay_seconds > 0) sleep(response_delay_seconds);
-            send(client, response, sizeof(response) - 1, 0);
+            send(client, response, response_size, 0);
             close(client);
         }
         close(pipe_fds[1]);
@@ -144,6 +148,42 @@ TEST_F(HttpInputTest, SendsBrowserNavigationHeadersForDocumentDownloads) {
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_FETCH_USER_HEADER));
     EXPECT_NE(nullptr, strstr(request, RADIANT_HTTP_DOCUMENT_UPGRADE_HEADER));
     EXPECT_EQ(nullptr, strstr(request, "Radiant/1.0"));
+    mem_free(content);
+}
+
+TEST_F(HttpInputTest, DecodesBrotliDocumentResponses) {
+    static const char response[] =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Encoding: br\r\n"
+        "Content-Length: 25\r\n"
+        "\r\n"
+        "\x21\x4c\x00\x04\x62\x72\x6f\x74\x6c\x69\x2d\x72"
+        "\x65\x73\x70\x6f\x6e\x73\x65\x2d\x62\x6f\x64\x79\x03";
+    HttpHeaderCaptureServer server;
+    ASSERT_TRUE(http_header_capture_server_start(&server, 0, response, sizeof(response) - 1));
+
+    char url[128];
+    int url_size = snprintf(url, sizeof(url), "http://127.0.0.1:%d/document", server.port);
+    ASSERT_GT(url_size, 0);
+    ASSERT_LT(url_size, (int)sizeof(url));
+
+    size_t content_size = 0;
+    char* content = download_http_content(url, &content_size, NULL);
+
+    char request[8192] = {};
+    ssize_t request_size = read(server.request_fd, request, sizeof(request) - 1);
+    close(server.request_fd);
+    int status = 0;
+    ASSERT_EQ(server.pid, waitpid(server.pid, &status, 0));
+
+    ASSERT_NE(nullptr, content);
+    EXPECT_EQ(strlen("brotli-response-body"), content_size);
+    EXPECT_STREQ("brotli-response-body", content);
+    EXPECT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(0, WEXITSTATUS(status));
+    ASSERT_GT(request_size, 0);
+    EXPECT_NE(nullptr, strstr(request, "Accept-Encoding:"));
+    EXPECT_NE(nullptr, strstr(request, "br"));
     mem_free(content);
 }
 

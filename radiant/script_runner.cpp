@@ -250,6 +250,21 @@ static void js_exec_watchdog_begin_user_code(void) {
 }
 #endif  // !_WIN32
 
+extern "C" void script_runner_suspend_js_watchdog(void) {
+#ifndef _WIN32
+    if (!js_exec_guarded || !js_exec_watchdog_started) return;
+    js_exec_watchdog_started = 0;
+    js_exec_watchdog_disarm();
+#endif
+}
+
+extern "C" void script_runner_resume_js_watchdog(void) {
+#ifndef _WIN32
+    if (!js_exec_guarded || js_exec_timed_out || js_exec_watchdog_started) return;
+    js_exec_watchdog_begin_user_code();
+#endif
+}
+
 static JsMirLeaseSession* s_js_mir_lease_session = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
@@ -1265,7 +1280,11 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         // detection must select a page's main-thread fallback instead of waiting.
         "// Keep native window EventTarget methods: aliasing them to document splits listener storage from native window dispatch.\n"
         "// getComputedStyle is installed natively; wrapping it here recurses through global lookup.\n"
+        "var radiant_window_scroll_x = 0;\n"
+        "var radiant_window_scroll_y = 0;\n"
         "window.scrollTo = function(x, y) {\n"
+        "  var oldX = radiant_window_scroll_x;\n"
+        "  var oldY = radiant_window_scroll_y;\n"
         "  if (typeof x === 'object' && x !== null) {\n"
         "    y = x.top;\n"
         "    x = x.left;\n"
@@ -1274,6 +1293,8 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "  if (typeof y !== 'number' || y !== y) y = 0;\n"
         "  if (x < 0) x = 0;\n"
         "  if (y < 0) y = 0;\n"
+        "  radiant_window_scroll_x = x;\n"
+        "  radiant_window_scroll_y = y;\n"
         "  window.pageXOffset = x;\n"
         "  window.pageYOffset = y;\n"
         "  window.scrollX = x;\n"
@@ -1286,7 +1307,8 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "    document.body.scrollLeft = x;\n"
         "    document.body.scrollTop = y;\n"
         "  }\n"
-        "  window.dispatchEvent(new Event('scroll'));\n"
+        "  // A no-op scroll must not turn page initialization into a scroll event.\n"
+        "  if (oldX !== x || oldY !== y) window.dispatchEvent(new Event('scroll'));\n"
         "};\n"
         "// browser pages use window.scroll as an alias for scrollTo; keep the\n"
         "// global callable present so unsupported timing only queues scroll state.\n"
@@ -1299,7 +1321,7 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "  }\n"
         "  if (typeof x !== 'number' || x !== x) x = 0;\n"
         "  if (typeof y !== 'number' || y !== y) y = 0;\n"
-        "  window.scrollTo(window.pageXOffset + x, window.pageYOffset + y);\n"
+        "  window.scrollTo(radiant_window_scroll_x + x, radiant_window_scroll_y + y);\n"
         "};\n"
         "window.innerWidth = undefined;\n"
         "window.innerHeight = undefined;\n"
