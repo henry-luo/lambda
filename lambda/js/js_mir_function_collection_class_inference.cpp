@@ -1604,9 +1604,9 @@ static JmNumericReturnFact jm_numeric_return_binding_fact(
         if (!node) continue;
         if (node->node_type == AST_NODE_ASSIGN) {
             JsAssignmentNode* assignment = (JsAssignmentNode*)node;
-            if (!assignment->left || assignment->left->node_type != AST_NODE_IDENT ||
-                    ((JsIdentifierNode*)assignment->left)->entry != binding) continue;
-            if (binding->is_const) {
+            if (!jm_assignment_targets_binding(assignment->left, binding)) continue;
+            // a destructuring write stores whatever the source yields
+            if (binding->is_const || assignment->left->node_type != AST_NODE_IDENT) {
                 fact = JM_NUMERIC_RETURN_INVALID;
                 break;
             }
@@ -1621,6 +1621,12 @@ static JmNumericReturnFact jm_numeric_return_binding_fact(
             } else {
                 fact = JM_NUMERIC_RETURN_INVALID;
             }
+        } else if ((node->node_type == AST_NODE_FOR_OF_STAM ||
+                node->node_type == AST_NODE_FOR_IN_STAM) &&
+                !((JsForOfNode*)node)->declares_binding &&
+                jm_assignment_targets_binding(((JsForOfNode*)node)->left, binding)) {
+            // `for (x of ...)` / `for (x in ...)` assign each iterated value
+            fact = JM_NUMERIC_RETURN_INVALID;
         } else if (node->node_type == AST_NODE_UNARY) {
             JsUnaryNode* unary = (JsUnaryNode*)node;
             if (!unary->operand || unary->operand->node_type != AST_NODE_IDENT ||

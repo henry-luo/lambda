@@ -220,6 +220,20 @@ JsErrorLaneTrack jm_error_lane_merge(JsErrorLaneTrack a, JsErrorLaneTrack b) {
     return JS_ERROR_LANE_UNKNOWN;
 }
 
+void jm_emit_value_join(JsMirTranspiler* mt, MIR_label_t label, MIR_reg_t result,
+        JsErrorLaneTrack state) {
+    if (!mt) return;
+    jm_emit_label_with_state(mt, label, state);
+    // D8.4.3: every arm stored the expression value in `result`, so it is the
+    // only register an ERROR-lane test after the join may read. An arm-local
+    // helper result is undefined when another arm ran, and its root slot then
+    // reloads a stale Item left by an earlier frame at the same depth.
+    bool item_result = result &&
+        MIR_reg_type(mt->ctx, result, mt->func_em->em.func) == MIR_T_I64;
+    mt->func_em->last_call_result = item_result
+        ? em_value_for_rep(result, LMD_TYPE_ANY, VALUE_REP_ITEM) : MirValue{};
+}
+
 void jm_error_lane_note_call(JsMirTranspiler* mt, JitExceptionEffect effect) {
     if (!mt || mt->error_lane_track == JS_ERROR_LANE_UNREACHABLE) return;
     switch (effect) {

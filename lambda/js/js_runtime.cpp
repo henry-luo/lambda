@@ -29522,8 +29522,9 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
             if (item_is_error(close_result)) {
                 return js_generator_resume_after_delegate_error(generator, gen, close_result);
             }
-            gen->delegate_resume = -1;
-            gen->delegate_idx = 0;
+            // resume_after_delegate_error restores state from delegate_resume
+            // and then clears it; clearing it first resumed a MIR generator at
+            // state -1 (done), so the TypeError was never thrown into the body
             Item error = js_new_error_with_name(
                         js_name_item("TypeError", 9),
                         js_name_item("The iterator does not provide a 'throw' method", 46));

@@ -823,7 +823,10 @@ void js_realm_slots_clear_transient(JsRealmSlots* slots) {
     // Partial batch resets retain catalog-backed callable identity when the
     // preamble snapshot is live; namespace/prototype slots are reset by their
     // owning subsystem and are the only prefix that needs clearing here.
-    int count = JS_REALM_SLOT_BUILTIN_FUNCTION_BASE;
+    // The %TypedArray% span is restored from that snapshot earlier in the same
+    // reset; clearing it minted a second %TypedArray%.prototype while restored
+    // Int8Array.prototype etc. still inherited from the snapshotted one.
+    int count = JS_REALM_SLOT_TYPED_ARRAY_BASE;
     int64_t available = root_vector_count(&slots->values);
     if (count > available) count = (int)available;
     for (int i = 0; i < count; i++) {

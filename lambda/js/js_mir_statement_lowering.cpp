@@ -238,14 +238,12 @@ struct JmAssignmentTargetFind {
     NameEntry* binding;
 };
 
-static bool jm_assignment_targets_binding(JsAstNode* left, NameEntry* binding);
-
 static bool jm_assignment_target_child(JsAstNode* child, void* opaque) {
     return jm_assignment_targets_binding(child,
         ((JmAssignmentTargetFind*)opaque)->binding);
 }
 
-static bool jm_assignment_targets_binding(JsAstNode* left, NameEntry* binding) {
+bool jm_assignment_targets_binding(JsAstNode* left, NameEntry* binding) {
     if (!left || !binding) return false;
     if (left->node_type == AST_NODE_IDENT) {
         return ((JsIdentifierNode*)left)->entry == binding;
@@ -356,6 +354,14 @@ static bool jm_scan_native_mutation(const AstIndex* index, AstNodeId node_id,
     if (scan->needs_boxing || index->owner_functions[node_id] != scan->owner ||
             !jm_native_mutation_is_relevant(index, node_id, scan)) return true;
     JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+    if (node && (node->node_type == AST_NODE_FOR_OF_STAM ||
+            node->node_type == AST_NODE_FOR_IN_STAM)) {
+        // a non-declaring loop head assigns each iterated value to the binding
+        JsForOfNode* loop = (JsForOfNode*)node;
+        scan->needs_boxing = !loop->declares_binding &&
+            jm_assignment_targets_binding(loop->left, scan->binding);
+        return !scan->needs_boxing;
+    }
     if (!node || node->node_type != AST_NODE_ASSIGN) return true;
     JsAssignmentNode* assignment = (JsAssignmentNode*)node;
     if (!jm_assignment_targets_binding(assignment->left, scan->binding)) return true;
@@ -1713,6 +1719,10 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
                 ctor_super_val = super_ctor;
             } else {
                 MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
+                // ClassDefinitionEvaluation step 8.e: a runtime binding may hold
+                // a non-constructor such as a generator function
+                jm_callr_1(mt, "js_check_class_heritage_constructor", MIR_T_I64, super_val);
+                jm_emit_error_lane_propagate_check(mt);
                 jm_link_class_super_prototype(mt, cls_obj, proto_obj, super_val);
                 ctor_super_val = super_val;
             }

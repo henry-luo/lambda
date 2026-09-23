@@ -2045,7 +2045,7 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     jm_emit_jmp(mt, done);
                     jm_emit_label(mt, use_existing);
                     jm_emit_mov(mt, result, mv);
-                    jm_emit_label(mt, done);
+                    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
                     // Cached function declarations skip the fresh closure-env
                     // allocation path, so the branch-local env register must not
                     // become the later capture readback target after the merge.
@@ -2557,7 +2557,7 @@ static MIR_reg_t jm_emit_array_length_read(JsMirTranspiler* mt,
     MIR_reg_t name_id = jm_emit_reference_name_id(mt, ref);
     jm_emit_mov(mt, result, jm_callr_2(mt, "js_get_name_id", MIR_T_I64,
         ref->base_reg, name_id));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_ARRAY_LENGTH_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -2801,7 +2801,7 @@ static MIR_reg_t jm_emit_existing_array_store(JsMirTranspiler* mt,
     jm_emit_label(mt, miss);
     jm_emit_mov(mt, result, jm_emit_indexed_assignment_fallback(mt, ref,
         value));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -2842,7 +2842,7 @@ static MIR_reg_t jm_emit_fixed_typed_array_store(JsMirTranspiler* mt,
     jm_emit_label(mt, miss);
     jm_emit_mov(mt, result, jm_emit_indexed_assignment_fallback(mt, ref,
         value));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     return result;
 }
 
@@ -2879,7 +2879,7 @@ static MIR_reg_t jm_emit_fixed_typed_array_number_store(JsMirTranspiler* mt,
     jm_emit_label(mt, miss);
     jm_emit_mov(mt, result, jm_emit_indexed_assignment_fallback(mt, ref,
         value));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -2922,7 +2922,7 @@ static MIR_reg_t jm_emit_existing_array_number_store(JsMirTranspiler* mt,
     jm_emit_label(mt, miss);
     jm_emit_mov(mt, result, jm_emit_indexed_assignment_fallback(mt, ref,
         value));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -3016,7 +3016,7 @@ static bool jm_try_emit_packed_number_self_update(JsMirTranspiler* mt,
     MIR_reg_t generic_value = jm_transpile_box_item(mt, assignment->right);
     jm_emit_error_lane_propagate_check(mt);
     jm_emit_mov(mt, result, jm_emit_put_value(mt, ref, generic_value));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     *out_result = result;
@@ -4345,7 +4345,7 @@ static MIR_reg_t jm_emit_predicted_literal_field_read(JsMirTranspiler* mt,
         receiver, name_id);
     jm_emit_error_lane_propagate_check(mt);
     jm_emit_mov(mt, result, fallback);
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_LITERAL_FIELD_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -4414,7 +4414,7 @@ static MIR_reg_t jm_emit_predicted_literal_field_store(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
         MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
     jm_emit_mov(mt, result, fallback);
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_LITERAL_FIELD_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -4545,7 +4545,7 @@ static MIR_reg_t jm_emit_fixed_typed_array_read_impl(JsMirTranspiler* mt,
     } else {
         jm_emit_mov(mt, result, fallback);
     }
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -4810,7 +4810,7 @@ static MIR_reg_t jm_emit_packed_array_read_impl(JsMirTranspiler* mt,
             jm_emit_mov(mt, result, fallback);
         }
     }
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -4876,7 +4876,7 @@ static MIR_reg_t jm_emit_packed_array_read_boxed_number_key(
         receiver, key);
     jm_emit_error_lane_propagate_check(mt);
     jm_emit_mov(mt, result, fallback);
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     return result;
@@ -5030,7 +5030,7 @@ static bool jm_try_emit_typed_array_number_binary(JsMirTranspiler* mt,
     jm_emit_label(mt, miss);
     jm_emit_mov(mt, result, jm_emit_typed_array_number_binary_slow(mt,
         fallback_fn, member_is_left, &ref, peer, peer_native));
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_NUMBER_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     *out_result = result;
@@ -5145,7 +5145,7 @@ static bool jm_try_emit_packed_array_strict_equal(JsMirTranspiler* mt,
             MIR_new_int_op(mt->ctx, 1));
     }
     jm_emit_mov(mt, result, right_generic);
-    jm_emit_label(mt, done);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     jm_emit_compile_profile(mt, JS_OPT_MIR_DENSE_INDEX_ADMITTED,
         JS_OPT_OUTCOME_TAKEN);
     js_opt_trace_record(JS_OPT_MIR_PACKED_STRICT_EQUAL,
@@ -5289,13 +5289,9 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         jm_emit_mov(mt, result, right_val);
         JsErrorLaneTrack right_exit = jm_error_lane_state(mt);
 
-        jm_emit_label_with_state(mt, l_end,
+        // D8.4.3: the carrier is the value defined by both short-circuit arms.
+        jm_emit_value_join(mt, l_end, result,
             jm_error_lane_merge(short_circuit_exit, right_exit));
-        // D8.4.3: the ERROR-lane carrier must be the value defined by both
-        // short-circuit arms. Keeping the RHS helper register here reads an
-        // uninitialized path-local value when the RHS is skipped.
-        mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
-            VALUE_REP_ITEM);
         return publish(result, VALUE_REP_ITEM);
     }
 
@@ -5781,6 +5777,14 @@ static MirValue jm_emit_unary_expression(JsMirTranspiler* mt,
             if (del_name) {
                 bool del_is_declared = del_id->entry != NULL &&
                     jm_find_var_by_binding(mt, del_id->entry) != NULL;
+                // the implicit arguments binding is created non-deletable
+                // (FunctionDeclarationInstantiation step 22.f); reads resolve
+                // it through the same synthetic var
+                if (!del_is_declared && del_id->name->len == 9 &&
+                        strncmp(del_name, "arguments", 9) == 0 &&
+                        jm_find_var(mt, "_js_arguments")) {
+                    del_is_declared = true;
+                }
                 if (!del_is_declared && mt->module_consts) {
                     if (jm_find_module_const_by_binding(mt, del_id->entry)) {
                         del_is_declared = true;
@@ -6181,7 +6185,7 @@ MIR_reg_t jm_emit_destructure_default(JsMirTranspiler* mt, MIR_reg_t val, JsAstN
     jm_emit_jmp(mt, l_done);
     jm_emit_label(mt, l_has);
     jm_emit_mov(mt, result, val);
-    jm_emit_label(mt, l_done);
+    jm_emit_value_join(mt, l_done, result, JS_ERROR_LANE_UNKNOWN);
     return result;
 }
 
@@ -6659,7 +6663,7 @@ static bool jm_expression_can_suspend(JsMirTranspiler* mt, JsAstNode* expr) {
 }
 
 static void jm_spill_reference_for_suspending_rhs(JsMirTranspiler* mt,
-                                                   const JsMirReference* ref,
+                                                   JsMirReference* ref,
                                                    JsAstNode* rhs,
                                                    int* out_base_slot,
                                                    int* out_key_slot) {
@@ -6667,9 +6671,15 @@ static void jm_spill_reference_for_suspending_rhs(JsMirTranspiler* mt,
     *out_key_slot = -1;
     if (!jm_expression_can_suspend(mt, rhs) || !ref) return;
     if (ref->base_reg) *out_base_slot = jm_gen_spill_save(mt, ref->base_reg);
-    if (ref->native_key_reg) *out_key_slot = jm_gen_spill_save(mt,
-        ref->native_key_reg);
-    else if (ref->key_reg) *out_key_slot = jm_gen_spill_save(mt, ref->key_reg);
+    if (ref->native_key_reg) {
+        // spill slots hold boxed Items; a native F64 key cannot be stored with
+        // an integer move, so the reference continues on the boxed-key path
+        ref->key_reg = jm_box_native(mt, ref->native_key_reg,
+            ref->native_key_type);
+        ref->native_key_reg = 0;
+        ref->native_key_type = LMD_TYPE_ANY;
+    }
+    if (ref->key_reg) *out_key_slot = jm_gen_spill_save(mt, ref->key_reg);
 }
 
 static void jm_restore_suspended_reference(JsMirTranspiler* mt,
@@ -7834,7 +7844,7 @@ static MIR_reg_t jm_emit_member_call_from_function(JsMirTranspiler* mt,
             MIR_new_int_op(mt->ctx, arg_count));
         jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
         jm_emit_mov(mt, result, fallback);
-        jm_emit_label(mt, done);
+        jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
         return result;
     }
     bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
@@ -9636,11 +9646,8 @@ static MirValue jm_emit_conditional_value(JsMirTranspiler* mt,
     jm_emit_mov(mt, result, alt);
     JsErrorLaneTrack alt_exit = jm_error_lane_state(mt);
 
-    jm_emit_label_with_state(mt, l_end, jm_error_lane_merge(cons_exit, alt_exit));
-    // Both arms define the boxed ternary value, making it the only valid
-    // carrier for an ERROR-lane test emitted after the join (D8.4.3).
-    mt->func_em->last_call_result = em_value_for_rep(result, LMD_TYPE_ANY,
-        VALUE_REP_ITEM);
+    // Both arms define the boxed ternary value (D8.4.3).
+    jm_emit_value_join(mt, l_end, result, jm_error_lane_merge(cons_exit, alt_exit));
     return jm_expression_value(mt, (JsAstNode*)cond, result,
         jm_get_effective_type(mt, (JsAstNode*)cond), VALUE_REP_ITEM);
 }
