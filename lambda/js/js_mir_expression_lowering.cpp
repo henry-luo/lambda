@@ -3023,9 +3023,8 @@ static bool jm_try_emit_packed_number_self_update(JsMirTranspiler* mt,
     return true;
 }
 
-static JsObjectNode* jm_direct_call_literal_return(JsMirTranspiler* mt,
-        JsCallNode* call) {
-    JsFunctionNode* function = jm_resolve_direct_call_function(mt, call, true);
+static JsObjectNode* jm_function_single_literal_return(JsMirTranspiler* mt,
+        JsFunctionNode* function) {
     if (!mt || !mt->tp || !function || function->is_async ||
             function->is_generator) {
         return NULL;
@@ -3058,6 +3057,12 @@ static JsObjectNode* jm_direct_call_literal_return(JsMirTranspiler* mt,
         return_count++;
     }
     return return_count == 1 ? literal : NULL;
+}
+
+static JsObjectNode* jm_direct_call_literal_return(JsMirTranspiler* mt,
+        JsCallNode* call) {
+    return jm_function_single_literal_return(mt,
+        jm_resolve_direct_call_function(mt, call, true));
 }
 
 static JsFunctionNode* jm_function_for_parameter(JsMirTranspiler* mt,
@@ -3261,6 +3266,57 @@ static int jm_literal_shape_count_static_field_uses(JsMirTranspiler* mt,
     return static_field_uses;
 }
 
+static int jm_literal_shape_count_binding_static_field_uses(
+        JsMirTranspiler* mt, JsObjectNode* object, AstBindingId binding_id) {
+    if (!mt || !mt->tp || !object) return -1;
+    AstIndex* index = &mt->tp->ast_index;
+    uint32_t use_count = 0;
+    const AstNodeId* use_ids = ast_index_binding_uses(index, binding_id,
+        &use_count);
+    int static_field_uses = 0;
+    for (uint32_t use_index = 0; use_index < use_count; use_index++) {
+        uint32_t member_count = 0;
+        const AstNodeId* member_ids = ast_index_object_member_uses(index,
+            use_ids[use_index], &member_count);
+        int binding_uses = jm_literal_shape_count_static_field_uses(mt, object,
+            member_ids, member_count);
+        if (binding_uses < 0) return -1;
+        static_field_uses += binding_uses;
+    }
+    return static_field_uses;
+}
+
+static int jm_literal_shape_count_direct_argument_static_field_uses(
+        JsMirTranspiler* mt, JsObjectNode* object) {
+    if (!mt || !mt->tp || !object) return -1;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId object_id = ast_index_find(index, (AstNode*)object);
+    AstNodeId parent_id = ast_index_parent_id(index, object_id);
+    JsAstNode* parent = parent_id < index->count
+        ? (JsAstNode*)index->nodes[parent_id] : NULL;
+    if (!parent || parent->node_type != AST_NODE_CALL_EXPR) return 0;
+    JsCallNode* call = (JsCallNode*)parent;
+    JsFunctionNode* function = jm_resolve_direct_call_function(mt, call, true);
+    if (!function) return 0;
+
+    int argument_index = 0;
+    for (JsAstNode* argument = call->arguments; argument;
+            argument = argument->next, argument_index++) {
+        if ((JsAstNode*)ast_unwrap_primary((AstNode*)argument) != object) continue;
+        JsAstNode* parameter = function->params;
+        for (int parameter_index = 0; parameter &&
+                parameter_index < argument_index; parameter_index++) {
+            parameter = parameter->next;
+        }
+        // Only an identifier parameter aliases the argument object itself.
+        if (!parameter || parameter->node_type != AST_NODE_IDENT) return 0;
+        AstBindingId binding_id = ast_index_binding_id(index, (AstNode*)parameter);
+        return jm_literal_shape_count_binding_static_field_uses(mt, object,
+            binding_id);
+    }
+    return 0;
+}
+
 static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
         JsObjectNode* object) {
     if (!mt || !mt->tp || !object) return false;
@@ -3272,6 +3328,13 @@ static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
     int static_field_uses = jm_literal_shape_count_static_field_uses(mt, object,
         member_ids, member_count);
     if (static_field_uses < 0) return false;
+
+    // A direct call transfers this exact literal to the matched parameter,
+    // whose field reads are indexed by its binding instead of the map node.
+    int argument_uses = jm_literal_shape_count_direct_argument_static_field_uses(
+        mt, object);
+    if (argument_uses < 0) return false;
+    static_field_uses += argument_uses;
 
     // The reverse member table is exact-node keyed. Also follow the literal's
     // declaration binding so `const point = {...}; point.x` publishes its
@@ -3285,49 +3348,47 @@ static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
     JsAstNode* declaration_id = ((JsVariableDeclaratorNode*)parent)->id;
     AstBindingId binding_id = ast_index_binding_id(index,
         (AstNode*)declaration_id);
-    uint32_t use_count = 0;
-    const AstNodeId* use_ids = ast_index_binding_uses(index, binding_id,
-        &use_count);
-    for (uint32_t use_index = 0; use_index < use_count; use_index++) {
-        uint32_t binding_member_count = 0;
-        const AstNodeId* binding_member_ids = ast_index_object_member_uses(index,
-            use_ids[use_index], &binding_member_count);
-        int binding_uses = jm_literal_shape_count_static_field_uses(mt, object,
-            binding_member_ids, binding_member_count);
-        if (binding_uses < 0) return false;
-        static_field_uses += binding_uses;
-    }
+    int binding_uses = jm_literal_shape_count_binding_static_field_uses(mt,
+        object, binding_id);
+    if (binding_uses < 0) return false;
+    static_field_uses += binding_uses;
     // A physical guard is intentionally not emitted for a one-off field
     // lookup: its code cost exceeds the one generic NameId lookup it replaces.
     return static_field_uses >= 2;
 }
 
-static TypeMap* jm_literal_shape_build(JsMirTranspiler* mt,
-        JsObjectNode* object) {
-    if (!mt || !object) return NULL;
-
-    // Constructor-slot reservation is the runtime's existing way to keep a
-    // predeclared property absent until its source-order initializer publishes.
-    // Keep the recipe within that fixed, pointer-width prefix.
-    JsMirStaticShapeField fields[16] = {};
+static int jm_literal_shape_collect_fields(JsMirTranspiler* mt,
+        JsObjectNode* object, JsMirStaticShapeField* fields) {
+    if (!mt || !object || !fields) return -1;
     int field_count = 0;
     for (JsAstNode* node = object->properties; node; node = node->next) {
-        if (node->node_type != AST_NODE_PROPERTY || field_count == 16) return NULL;
+        if (node->node_type != AST_NODE_PROPERTY || field_count == 16) return -1;
         JsPropertyNode* property = (JsPropertyNode*)node;
         String* name = NULL;
         TypeId type_id = LMD_TYPE_ANY;
         if (!jm_literal_shape_property_supported(mt, property, &name, &type_id)) {
-            return NULL;
+            return -1;
         }
         for (int prior = 0; prior < field_count; prior++) {
             if (fields[prior].name->len == name->len &&
                     memcmp(fields[prior].name->chars, name->chars,
                         name->len) == 0) {
-                return NULL;
+                return -1;
             }
         }
         fields[field_count++] = {name, type_id};
     }
+    return field_count;
+}
+
+static TypeMap* jm_literal_shape_build(JsMirTranspiler* mt,
+        JsObjectNode* object) {
+    // Constructor-slot reservation is the runtime's existing way to keep a
+    // predeclared property absent until its source-order initializer publishes.
+    // Keep the recipe within that fixed, pointer-width prefix.
+    JsMirStaticShapeField fields[16] = {};
+    int field_count = jm_literal_shape_collect_fields(mt, object, fields);
+    if (field_count <= 0) return NULL;
     return jm_build_static_shape(mt, fields, field_count);
 }
 
@@ -3491,6 +3552,29 @@ static int jm_recursive_literal_static_field_uses(JsMirTranspiler* mt,
     return uses;
 }
 
+static int jm_literal_shape_count_return_static_field_uses(
+        JsMirTranspiler* mt, JsObjectNode* object) {
+    if (!mt || !mt->tp || !object) return -1;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId object_id = ast_index_find(index, (AstNode*)object);
+    if (object_id == AST_NODE_ID_INVALID) return -1;
+    AstFunctionId function_id = index->owner_functions[object_id];
+    if (function_id == AST_FUNCTION_ID_INVALID ||
+            function_id >= index->function_count) {
+        return 0;
+    }
+    JsFunctionNode* function = (JsFunctionNode*)index->functions[function_id].node;
+    if (!function || jm_function_single_literal_return(mt, function) != object) {
+        return 0;
+    }
+
+    JsMirStaticShapeField fields[16] = {};
+    int field_count = jm_literal_shape_collect_fields(mt, object, fields);
+    if (field_count <= 0) return 0;
+    return jm_recursive_literal_static_field_uses(mt, function, fields,
+        field_count);
+}
+
 static bool jm_append_recursive_literal_shape_plan(JsMirTranspiler* mt,
         JsObjectNode* object, JsFunctionNode* function, TypeMap* shape) {
     if (!mt || !mt->literal_shape_plans || !object || !function || !shape) {
@@ -3578,8 +3662,15 @@ void jm_plan_literal_field_shapes(JsMirTranspiler* mt) {
         AstNode* node = index->nodes[node_id];
         if (!node || node->node_type != AST_NODE_MAP) continue;
         JsObjectNode* object = (JsObjectNode*)node;
-        if (jm_literal_shape_lookup(mt, object) ||
-                !jm_literal_shape_has_static_field_use(mt, object)) continue;
+        if (jm_literal_shape_lookup(mt, object)) continue;
+        bool has_static_field_use = jm_literal_shape_has_static_field_use(mt,
+            object);
+        if (!has_static_field_use) {
+            int return_uses = jm_literal_shape_count_return_static_field_uses(
+                mt, object);
+            has_static_field_use = return_uses >= 2;
+        }
+        if (!has_static_field_use) continue;
         TypeMap* shape = jm_literal_shape_build(mt, object);
         if (!shape || !jm_literal_shape_publish(mt, object, shape)) {
             log_error("js-mir: literal shape analysis could not publish a recipe");

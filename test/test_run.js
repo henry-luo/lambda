@@ -96,6 +96,19 @@ const SCRIPT_TESTS = [
         args: ['--strict'],
         exclusive: true,
     },
+    {
+        baseName: 'run_js_parity',
+        script: 'test/run_js_parity.mjs',
+        // test_js_gtest + Test262 baseline under pinned MIR and full AST; the
+        // runners fan out their own workers and Test262 holds a run lock.
+        suite: 'lambda',
+        category: 'extended',
+        displayName: 'JS Execution-Tier Parity',
+        icon: '⚖️',
+        runner: 'node',
+        args: [],
+        exclusive: true,
+    },
 ];
 
 // Idle timeout: if a test produces no output for this long, it's stuck.

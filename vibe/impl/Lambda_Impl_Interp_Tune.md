@@ -848,17 +848,17 @@ After building the corresponding test runners in release configuration:
 
 ```sh
 env LAMBDA_TIER=interp ./test/test_lambda_gtest.exe --gtest_brief=1
-env JS_GTEST_MODE=mir JS_EXECUTION_BACKEND=ast \
-  ./test/test_js_gtest.exe --gtest_brief=1
+./test/test_js_gtest.exe --full-ast --gtest_brief=1
 ./test/test_interp_gtest.exe
 ./test/test_name_pool_gtest.exe
 make test-lambda-baseline
 ```
 
-The counterintuitive `JS_GTEST_MODE=mir` setting disables the harness's mixed
-AST/MIR fixture-list overrides; `JS_EXECUTION_BACKEND=ast` chooses the actual
-backend. Recheck `parse_js_gtest_options` and child environment handling before
-use. Some standalone GTests deliberately select other tiers: these are
+`--full-ast` (or `JS_GTEST_MODE=ast`) overrides the harness's mixed AST/MIR
+fixture list and runs every fixture with `JS_EXECUTION_BACKEND=ast`;
+`--full-mir` (or `JS_GTEST_MODE=mir`) pins every fixture to whole-module MIR.
+`make test-js-parity` runs both modes for `test_js_gtest` and the Test262
+baseline (`--ast-only` / `--mir-only`) and reports cross-tier divergence. Some standalone GTests deliberately select other tiers: these are
 correctness coverage, not strict-AST timing evidence.
 
 Run relevant Test262 baseline partitions whenever JS semantic/property/call

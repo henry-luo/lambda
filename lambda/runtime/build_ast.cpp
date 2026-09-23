@@ -7949,6 +7949,16 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         validate_top_level_enforcing_calls(tp, item);
         validate_top_level_cross_frame_binding_reads(tp, item);
     }
+    for (AstFunctionId function_id = 0; function_id < tp->ast_index.function_count;
+            function_id++) {
+        AstNode* function_node = tp->ast_index.functions[function_id].node;
+        if (!function_node || (function_node->node_type != AST_NODE_FUNC &&
+                function_node->node_type != AST_NODE_FUNC_EXPR &&
+                function_node->node_type != AST_NODE_PROC)) continue;
+        // E231 is flow-sensitive within a callable body, not only at module scope.
+        validate_cross_frame_binding_reads(tp, (AstFuncNode*)function_node);
+    }
+    if (tp->error_count != 0) return false;
     // both parser front ends share this final pass. Direct AST construction
     // used to skip it, leaving suspend-capable procedures without their
     // resumable task state machine (D6.1.2).
