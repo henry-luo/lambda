@@ -56,6 +56,18 @@ TEST_F(UrlTest, FileUrlHasOpaqueOrigin) {
     url_destroy(url);
 }
 
+TEST_F(UrlTest, FileUrlPreservesEmptyAuthorityInHref) {
+    Url* url = url_parse("file:///workspace/page.html");
+    ASSERT_NE(url, nullptr);
+    EXPECT_STREQ(url_get_href(url), "file:///workspace/page.html");
+
+    String* serialized = url_construct_href(url);
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_STREQ(serialized->chars, "file:///workspace/page.html");
+    url_free_string(serialized);
+    url_destroy(url);
+}
+
 TEST_F(UrlTest, UrlWithoutPath) {
     // Test URL without explicit path
     Url* url = url_parse("https://example.com");

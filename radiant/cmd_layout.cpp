@@ -3700,7 +3700,9 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     render_map_init();
     render_map_set_path_recorder(&render_map_record_path);
 
-    const char* document_target = url_get_href(script_url);
+    // Transforms enter Lambda's local-input boundary after URL resolution, so
+    // retain the decoded path instead of passing a navigation URL as a filename.
+    const char* document_target = transform ? script_filepath : url_get_href(script_url);
     Input* script_output = transform
         ? run_lambda_document_transform_with_options(runtime, document_target, transform,
             options, option_count)
