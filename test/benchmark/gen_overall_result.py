@@ -43,7 +43,7 @@ ENGINE_LABELS = {
     "mir_typed_auto_e2e": "MIR (typed, auto)",
     "c2mir_e2e": "C2MIR",
     "go_e2e": "Go",
-    "lambdajs_e2e": "LambdaJS",
+    "lambdajs_e2e": "LambdaJS (auto)",
     "quickjs_e2e": "QuickJS",
     "nodejs_e2e": "Node.js",
     "c2mir": "C2MIR",
@@ -629,8 +629,9 @@ def write_report(args, data):
         w()
         w("Each engine's own `__TIMING__` figure: the timed workload only, with "
           "startup and compilation outside the measured region. This is the "
-          "historical series, comparable back through Result18, and the MIR "
-          "columns pin `LAMBDA_TIER=jit`.")
+          "historical series, comparable back through Result18, the MIR "
+          "columns pin `LAMBDA_TIER=jit`, and LambdaJS pins "
+          "`JS_EXECUTION_BACKEND=mir`.")
         w()
 
     w("## Summary" if not e2e_engines else "### Summary")
@@ -687,9 +688,10 @@ def write_report(args, data):
         w("## Part 2 — End-to-end time (wall clock, auto tier)")
         w()
         w("Wall clock from process invocation to exit, so **every engine pays its "
-          "own startup and compilation inside the number**. The MIR columns use "
-          "the shipped auto tier -- no `LAMBDA_TIER` override -- which is what "
-          "`lambda.exe run script.ls` actually does.")
+          "own startup and compilation inside the number**. The MIR and LambdaJS "
+          "columns use the shipped auto tier -- no `LAMBDA_TIER` or "
+          "`JS_EXECUTION_BACKEND` override -- which is what `lambda.exe run "
+          "script.ls` and `lambda.exe js script.js` actually do.")
         w()
         w("This set exists because the two questions are different. Part 1 asks "
           "how fast the compiled workload runs; part 2 asks how long it takes to "
@@ -700,8 +702,9 @@ def write_report(args, data):
         w()
         w("Same processes, where possible: the reference engines report their wall "
           "and `__TIMING__` figures from the *same* run, so parts 1 and 2 are two "
-          "readings of one launch. Only the MIR columns are re-run, because part 1 "
-          "pins the JIT and part 2 must use the auto tier.")
+          "readings of one launch. The MIR and LambdaJS columns are re-run, "
+          "because part 1 pins the compiled lane and part 2 must use the auto "
+          "tier.")
         w()
         w("⚠ Short workloads are dominated by fixed process startup here, so a row "
           "whose part-1 time is a fraction of a millisecond says more about "

@@ -592,9 +592,9 @@ def record_status(results, suite, name, engine, status, detail=None):
 # compare two different things.
 #
 # time_run_once returns wall AND exec from the SAME run, so for the reference
-# engines both sets come from one launch. Only the MIR columns need a second
-# pass, because set 1 pins LAMBDA_TIER=jit while set 2 must use the shipped
-# auto tier.
+# engines both sets come from one launch. The MIR and LambdaJS columns need a
+# second pass, because set 1 pins the compiled lane (LAMBDA_TIER=jit,
+# JS_EXECUTION_BACKEND=mir) while set 2 must use the shipped auto tier.
 def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, status,
                        detail=None, e2e_engine=None):
     val = exec_ms if ok and exec_ms is not None else (wall_ms if ok else None)
@@ -617,6 +617,28 @@ def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, 
 def lambda_run_cmd(script_path, tier):
     prefix = f"LAMBDA_TIER={tier} " if tier else ""
     return f"{prefix}{LAMBDA_EXE} run {script_path}"
+
+
+# LambdaJS follows the same two-set split as MIR. D8.1.3v19 made an unset
+# JS_EXECUTION_BACKEND select AST-first AUTO, so set 1 pins the whole-module MIR
+# lane (the historical LambdaJS series) and set 2 times the shipped AUTO default.
+def lambdajs_run_cmd(script_path, backend):
+    prefix = f"JS_EXECUTION_BACKEND={backend} " if backend else ""
+    return f"{prefix}{LAMBDA_EXE} js {script_path}"
+
+
+def time_lambdajs(results, row, suite, name, script_path, num_runs, timeout_s):
+    print(f"  LambdaJS ", end="", flush=True)
+    w, e, ok, status, detail = time_run_benchmark(
+        lambdajs_run_cmd(script_path, "mir"), num_runs, timeout_s)
+    record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail)
+    print(f" {fmt_ms(e if e is not None else w)}")
+    print(f"  LJS auto ", end="", flush=True)
+    aw, ae, aok, astatus, adetail = time_run_benchmark(
+        lambdajs_run_cmd(script_path, None), num_runs, timeout_s)
+    record_time_result(results, row, suite, name, "lambdajs_e2e",
+                       aw, None, aok, astatus, adetail)
+    print(f" {fmt_ms(aw)}")
 
 
 def mvpjs_run_cmd(script_path):
@@ -1193,11 +1215,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
         # --- LambdaJS ---
         if "lambdajs" in engines:
             if standalone_js and os.path.exists(standalone_js):
-                print(f"  LambdaJS ", end="", flush=True)
-                w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} js {standalone_js}", num_runs, timeout_s)
-                record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail,
-                                   e2e_engine="lambdajs_e2e")
-                print(f" {fmt_ms(e if e is not None else w)}")
+                time_lambdajs(results, row, suite, name, standalone_js, num_runs, timeout_s)
             else:
                 results[suite][name]["lambdajs"] = None
                 row["lambdajs"] = None
@@ -1274,11 +1292,7 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
             if ljs_js and os.path.exists(ljs_js):
                 wrapper = make_jetstream_ljs_wrapper(name, ljs_js)
                 if wrapper:
-                    print(f"  LambdaJS ", end="", flush=True)
-                    w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} js {wrapper}", num_runs, timeout_s)
-                    record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail,
-                                   e2e_engine="lambdajs_e2e")
-                    print(f" {fmt_ms(e if e is not None else w)}")
+                    time_lambdajs(results, row, suite, name, wrapper, num_runs, timeout_s)
                 else:
                     results[suite][name]["lambdajs"] = None
                     row["lambdajs"] = None
@@ -1550,7 +1564,7 @@ def mem_run_single(b, engines, num_runs, timeout_s, results, include_typed=False
         if "lambdajs" in engines:
             if standalone_js and os.path.exists(standalone_js):
                 print(f"  LambdaJS ", end="", flush=True)
-                peak, ok = mem_measure_n(f"{LAMBDA_EXE} js {standalone_js}", num_runs, timeout_s)
+                peak, ok = mem_measure_n(lambdajs_run_cmd(standalone_js, "mir"), num_runs, timeout_s)
                 results[suite][name]["lambdajs"] = peak
                 row["lambdajs"] = peak
                 print(f" peak={fmt_mem(peak)}" if ok else " failed")
