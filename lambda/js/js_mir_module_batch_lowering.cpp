@@ -1526,8 +1526,8 @@ static int js_mir_analyze_and_plan(JsMirTranspiler* mt,
             if (!fn || !fn->name || !fn->body) continue;
             bool binding_written = false;
             AstIndex* index = &mt->tp->ast_index;
-            AstBindingId binding_id = fn->entry && fn->entry->node
-                ? ast_index_binding_id(index, fn->entry->node) : AST_BINDING_ID_INVALID;
+            AstBindingId binding_id = ast_index_find_binding_entry(index,
+                fn->entry);
             uint32_t use_count = 0;
             const AstNodeId* use_ids = ast_index_binding_uses(index, binding_id,
                 &use_count);

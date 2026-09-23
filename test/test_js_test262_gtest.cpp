@@ -38,6 +38,7 @@
 //   - Phase 1:  Parse metadata, partition tests into backend groups:
 //       (a) AST      — synchronous tests not listed in mir_list.txt (600/process)
 //       (b) MIR      — mir_list.txt entries plus async/module/raw tests
+//     --ast-only / --mir-only collapse this to one backend for parity runs.
 //       (c) PREVIOUS PARTIAL — tests listed in t262_partial.txt from the
 //                       previous run. They are included in CLEAN every run so
 //                       the partial list can be rebuilt from fresh results.
@@ -1541,6 +1542,7 @@ static bool g_no_hot_reload = false;
 static bool g_persistent_workers = false; // --persistent-workers: one lambda worker handles many manifests
 static bool g_mir_interp = false;
 static bool g_ast_only = false;
+static bool g_mir_only = false;   // --mir-only: pin every selected job to whole-module MIR
 static bool g_no_stripped = false;  // --no-stripped: force original test files
 static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
 static bool g_verbose = false;       // --verbose: dump per-batch-timing + memory-growth detail (else summary-only)
@@ -1552,6 +1554,18 @@ static std::string g_async_list_file; // --async-list=<path>: newline-separated 
 static std::unordered_set<std::string> g_async_allowlist;
 static std::unordered_set<std::string> g_mir_allowlist;
 static bool g_hybrid_backend_routing = false;
+
+// Single-backend parity runs (--ast-only / --mir-only) measure one tier against
+// the hybrid baseline; they must not rewrite the hybrid runner's partial list.
+static bool test262_single_backend(void) {
+    return g_ast_only || g_mir_only;
+}
+
+static const char* test262_partial_output_path(void) {
+    if (g_ast_only) return "temp/_t262_partial_ast.txt";
+    if (g_mir_only) return "temp/_t262_partial_mir.txt";
+    return "test/js262/t262_partial.txt";
+}
 static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
 
 static void configure_test262_source_paths() {
@@ -1575,6 +1589,7 @@ static long slow_threshold_for_test(const std::string& test_name) {
 }
 
 static bool test262_should_use_ast_backend(const Test262Prepared& prepared) {
+    if (g_mir_only) return false;
     if (g_ast_only) return true;
     // Raw, async, and module jobs retain the established MIR path; exact test
     // names and metadata feature tags can also force a synchronous test to MIR.
@@ -1773,12 +1788,13 @@ static bool async_test_is_enabled(const std::string& test_name) {
     return g_run_async && g_async_allowlist.find(test_name) != g_async_allowlist.end();
 }
 
-// AST-only validation must execute every supported runner mode. The hybrid
-// runner retains its curated admissions while the interpreter is completed.
+// Single-backend validation must execute every supported runner mode, so both
+// parity tiers see the same job set. The hybrid runner retains its curated
+// admissions while the interpreter is completed.
 static const char* test262_execution_mode_skip_message(const std::string& test_name,
                                                         const std::string& test_path,
                                                         const Test262Metadata& meta) {
-    if (g_ast_only) return NULL;
+    if (test262_single_backend()) return NULL;
     if (meta.is_module && !(g_run_async && is_es2021_module_test(test_path, meta))) {
         return "module flag";
     }
@@ -3868,7 +3884,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // never preserved by themselves; every line must be justified by this run.
     auto partial_start = std::chrono::steady_clock::now();
     {
-        FILE* partial_log = fopen("test/js262/t262_partial.txt", "w");
+        const char* partial_path = test262_partial_output_path();
+        FILE* partial_log = fopen(partial_path, "w");
         if (partial_log) {
             size_t still_lost = 0;
             size_t crash_exit = 0;
@@ -3969,8 +3986,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
             fclose(partial_log);
             if (still_lost + crash_exit + slow_count + batch_kill_count > 0) {
-                fprintf(stderr, "[test262] Non-fully-passing: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → test/js262/t262_partial.txt\n",
-                        still_lost, crash_exit, slow_count, batch_kill_count);
+                fprintf(stderr, "[test262] Non-fully-passing: %zu missing + %zu crash-exit + %zu slow (>3s) + %zu batch-kill → %s\n",
+                        still_lost, crash_exit, slow_count, batch_kill_count, partial_path);
             }
             // Expose crash-exit count for --update-baseline gate
             g_phase_crash_exit = crash_exit + still_lost;
@@ -4681,6 +4698,9 @@ static void print_test262_help(const char* program) {
     printf("                            assigned to each test262 worker (POC timing mode).\n");
     printf("  --mir-interp              Run Lambda through MIR interpreter mode.\n");
     printf("  --ast-only                Run every selected job through the AST interpreter.\n");
+    printf("  --mir-only                Run every selected job through pinned whole-module MIR.\n");
+    printf("                            Single-backend runs write their partial list under temp/\n");
+    printf("                            and reject --update-baseline.\n");
     printf("  --no-stripped             Use canonical test files instead of stripped files.\n");
     printf("  --help, -h                Print this help and exit without running tests.\n");
     printf("\n");
@@ -4783,6 +4803,11 @@ int main(int argc, char** argv) {
             // The normal runner deliberately routes unsupported AST job types
             // to MIR. Parity runs must retain those jobs and expose defects.
             g_ast_only = true;
+        }
+        if (strcmp(argv[i], "--mir-only") == 0) {
+            // Pinned whole-module MIR (JS_EXECUTION_BACKEND=mir) for every
+            // selected job, including the sync tests hybrid routes to AST.
+            g_mir_only = true;
         }
         if (strcmp(argv[i], "--no-stripped") == 0) {
             g_no_stripped = true;  // explicit disable
@@ -4910,14 +4935,25 @@ int main(int argc, char** argv) {
                 g_metadata_cache.size(), METADATA_CACHE_FILE);
     }
 
+    if (g_ast_only && g_mir_only) {
+        fprintf(stderr, "[test262] Error: --ast-only and --mir-only are mutually exclusive\n");
+        return 1;
+    }
+    if (test262_single_backend() && g_update_baseline) {
+        // the baseline records the hybrid runner's passing set
+        fprintf(stderr, "[test262] Error: --update-baseline is not allowed with --ast-only/--mir-only\n");
+        return 1;
+    }
     if (!load_test_name_allowlist(MIR_LIST_FILE, g_mir_allowlist)) {
         fprintf(stderr, "[test262] Error: cannot open MIR allowlist: %s\n", MIR_LIST_FILE);
         return 1;
     }
-    g_hybrid_backend_routing = !g_ast_only;
+    g_hybrid_backend_routing = !test262_single_backend();
     if (g_ast_only) {
         fprintf(stderr, "[test262] AST-only mode: all selected jobs use AST batches of %zu\n",
                 T262_AST_BATCH_CHUNK_SIZE);
+    } else if (g_mir_only) {
+        fprintf(stderr, "[test262] MIR-only mode: all selected jobs use pinned MIR batches\n");
     } else {
         fprintf(stderr, "[test262] Loaded MIR allowlist: %zu tests from %s; sync remainder uses AST batches of %zu\n",
                 g_mir_allowlist.size(), MIR_LIST_FILE, T262_AST_BATCH_CHUNK_SIZE);

@@ -992,6 +992,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         log_info("js-auto: MIR fallback script=%s", filename ? filename : "<string>");
     }
 
+    // AUTO opened an AST build claim before it discovered this script requires
+    // the MIR tier. Release that claim now; leaving its scope live retains the
+    // cache lease until process exit even though no AST artifact was published.
+    js_common_ast_cache_complete_build(&ast_cache_build, false, false);
+
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
     EvalContext* js_context = NULL;

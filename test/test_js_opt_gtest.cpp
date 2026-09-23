@@ -378,7 +378,10 @@ static bool run_fixture_mode_backend(const char* name, const char* source,
     const char* args[] = {executable, "js", script_path, NULL};
     ShellEnvEntry env[5] = {};
     int env_count = 0;
-    if (backend) env[env_count++] = {"JS_EXECUTION_BACKEND", backend};
+    // This suite contracts the finalized MIR lowering. AUTO now selects the
+    // AST executor for supported programs, so choose MIR unless a test is
+    // explicitly exercising another backend.
+    env[env_count++] = {"JS_EXECUTION_BACKEND", backend ? backend : "mir"};
     // Keep the compilation profile mode identical in both runs. The
     // differential toggles only contract tracing; changing the profiler
     // mode would legitimately enable/disable unrelated MIR probes.

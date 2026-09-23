@@ -898,6 +898,11 @@ inline CompileResult compile_and_dump(const std::string& script_path,
         // The auto tier may select T0 and emit no MIR artifact; emission tests
         // must exercise the ordinary JIT execution path that produces it.
         spec.extra_args.insert(spec.extra_args.begin(), "--tier=jit");
+    } else {
+        // A JS emission fixture must compile through whole-module MIR rather
+        // than inherit the host's auto/AST backend selection.
+        spec.env.push_back(std::make_pair(std::string("JS_EXECUTION_BACKEND"),
+            std::string("mir")));
     }
     spec.env.push_back(std::make_pair(std::string("LAMBDA_MIR_DUMP_PATH"), result.dump_path));
     // a module-cache hit skips emission entirely, which would leave the caller

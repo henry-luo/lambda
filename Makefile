@@ -570,7 +570,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
-	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
+	    ensure-test262-gtest test-js262-prelim test-js-parity test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    coverage-tools coverage-build-config coverage-build-config-native coverage-build-config-js coverage-build-all coverage-build-js test-coverage test-js-coverage \
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
@@ -661,6 +661,7 @@ help:
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-js262-prelim - Run the bounded Test262 runner preflight"
 	@echo "  test-js-opt   - Run JS optimization contract tests with the debug host"
+	@echo "  test-js-parity - Run test_js_gtest + test262 baseline under pinned MIR and full AST; report tier divergence"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
@@ -1778,6 +1779,15 @@ test262-baseline: test-js-exception-catalog ensure-test262-gtest
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
 	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt $(if $(VERBOSE),--verbose)
+
+# JS execution-tier parity: test_js_gtest (--baseline) and the test262 baseline,
+# each under pinned whole-module MIR (JS_EXECUTION_BACKEND=mir) and the full AST
+# interpreter, then a report of per-tier results and cross-tier divergence.
+# Narrow with SUITE=js|test262 and/or MODE=mir|ast; VERBOSE=1 streams child output.
+test-js-parity: build-test
+	@echo "Ensuring release lambda.exe for js262 runtime performance..."
+	@$(MAKE) build-release-compile
+	@node test/run_js_parity.mjs $(if $(SUITE),--suite=$(SUITE)) $(if $(MODE),--mode=$(MODE)) $(if $(VERBOSE),--verbose)
 
 # test262 full: run all discovered test262 tests (slow, ~5min)
 test262-full: ensure-test262-gtest
