@@ -1650,6 +1650,48 @@ static Item js_array_generic_with(Item object, Item* args, int argc);
 static Item js_array_generic_sort(Item object, Item* args, int argc);
 static Item js_throw_not_callable(const char* method_name);
 
+// A contiguous temporary Item buffer that the collector scans precisely.
+// Native algorithms keep their working copy here: once write-back begins, or
+// a callback mutates the source, an element can be referenced only from this
+// buffer, and every comparison or callback may allocate. A mem_alloc'd buffer
+// is invisible to the collector, so such elements were freed mid-algorithm.
+struct JsRootedItems {
+    RootVector roots = {};
+    Item* items = NULL;
+    int64_t count = 0;
+    int64_t capacity = 0;
+
+    JsRootedItems() = default;
+    JsRootedItems(const JsRootedItems&) = delete;
+    JsRootedItems& operator=(const JsRootedItems&) = delete;
+    ~JsRootedItems() {
+        root_vector_unbind_external(&roots);
+        if (items) mem_free(items);
+    }
+
+    bool reserve(int64_t wanted) {
+        if (wanted <= capacity) return true;
+        Item* grown = (Item*)mem_calloc((size_t)wanted, sizeof(Item), MEM_CAT_JS_RUNTIME);
+        if (!grown) return false;
+        // Register the new range before copying into it: registration clears
+        // the slots. Nothing between the old range's release and the copy can
+        // allocate on the GC heap.
+        root_vector_bind_external(&roots, NULL, grown, wanted, "js temporary items");
+        root_vector_ensure_external(&roots);
+        if (count > 0) memcpy(grown, items, (size_t)count * sizeof(Item));
+        if (items) mem_free(items);
+        items = grown;
+        capacity = wanted;
+        return true;
+    }
+
+    bool push(Item value) {
+        if (count >= capacity && !reserve(capacity > 0 ? capacity * 2 : 16)) return false;
+        items[count++] = value;
+        return true;
+    }
+};
+
 static Item js_typed_array_sort_default_compare(Item x, Item y) {
     if (js_is_bigint(x) || js_is_bigint(y)) {
         JS_ASSIGN_OR_RETURN(lt, js_less_than(x, y));
@@ -12812,18 +12854,21 @@ static Item js_intrinsic_collection_iterator_create(int collection_type,
         collection->type != collection_type) {
         return js_throw_type_error("Method called on incompatible receiver");
     }
-    Item iterator = js_new_object();
-    js_set_prototype(iterator, collection_type == JS_COLLECTION_SET
+    // The fresh iterator is reachable only from this frame while its
+    // prototype and internal slots are installed, and each step can collect.
+    // (The collection record itself is pool-owned and does not move.)
+    JS_ROOTS(roots, receiver_root, this_value, iterator_root, js_new_object());
+    js_set_prototype(iterator_root.get(), collection_type == JS_COLLECTION_SET
         ? js_get_set_iterator_proto() : js_get_map_iterator_proto());
-    js_set_key_cstr(iterator, "__node_ptr__",
+    js_set_key_cstr(iterator_root.get(), "__node_ptr__",
         (Item){.item = i2it((int64_t)(uintptr_t)collection->order_head)});
-    js_set_key_cstr(iterator, "__coll_ptr__",
+    js_set_key_cstr(iterator_root.get(), "__coll_ptr__",
         (Item){.item = i2it((int64_t)(uintptr_t)collection)});
-    js_set_key_cstr(iterator, "__last_node__", (Item){.item = i2it(0)});
-    js_set_key_cstr(iterator, "__iter_done__", (Item){.item = b2it(false)});
-    js_set_key_cstr(iterator, "__iter_mode__", (Item){.item = i2it(mode)});
-    js_set_key_cstr(iterator, "__coll_type__", (Item){.item = i2it(collection_type)});
-    return iterator;
+    js_set_key_cstr(iterator_root.get(), "__last_node__", (Item){.item = i2it(0)});
+    js_set_key_cstr(iterator_root.get(), "__iter_done__", (Item){.item = b2it(false)});
+    js_set_key_cstr(iterator_root.get(), "__iter_mode__", (Item){.item = i2it(mode)});
+    js_set_key_cstr(iterator_root.get(), "__coll_type__", (Item){.item = i2it(collection_type)});
+    return iterator_root.get();
 }
 
 #define JS_COLLECTION_ITERATOR_BODY(body_name, collection_type, mode) \
@@ -21445,26 +21490,27 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                         "Cannot perform %TypedArray%.prototype.filter on an out-of-bounds ArrayBuffer",
                         &callback, &this_arg));
                 int len = js_typed_array_length(obj);
-                // collect matching elements first
-                Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                int count = 0;
+                // collect matching elements first; a BigInt element stays
+                // rooted across its callback and the species constructor
+                JsRootedItems kept;
+                JS_ROOTS(roots, elem_root, ItemNull, result_root, ItemNull);
                 for (int i = 0; i < len; i++) {
                     if (array_semantics && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (elem.item == ITEM_NULL) elem = make_js_undefined();
+                    elem_root.set(js_typed_array_get(obj, (Item){.item = i2it(i)}));
+                    if (elem_root.get().item == ITEM_NULL) elem_root.set(make_js_undefined());
                     Item idx_item = {.item = i2it(i)};
-                    Item fn_args[3] = {elem, idx_item, obj};
-                    Item result = js_call_function(callback, this_arg, fn_args, 3);
-                    if (item_is_error(result)) { mem_free(temp); return result; }
-                    if (js_is_truthy(result)) temp[count++] = elem;
+                    Item fn_args[3] = {elem_root.get(), idx_item, obj};
+                    JS_ASSIGN_OR_RETURN(selected, js_call_function(callback, this_arg, fn_args, 3));
+                    if (js_is_truthy(selected) && !kept.push(elem_root.get())) {
+                        return js_throw_type_error("TypedArray.prototype.filter allocation failed");
+                    }
                 }
-                Item result = js_typed_array_species_create(obj, count);
-                if (item_is_error(result)) { mem_free(temp); return result; }
-                for (int i = 0; i < count; i++) {
-                    js_typed_array_set(result, (Item){.item = i2it(i)}, temp[i]);
+                JS_ASSIGN_OR_RETURN(created, js_typed_array_species_create(obj, (int)kept.count));
+                result_root.set(created);
+                for (int i = 0; i < kept.count; i++) {
+                    js_typed_array_set(result_root.get(), (Item){.item = i2it(i)}, kept.items[i]);
                 }
-                mem_free(temp);
-                return result;
+                return result_root.get();
             }
             if (operation == JS_ARRAY_INTRINSIC_REVERSE) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
@@ -21648,39 +21694,23 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 }
                 int len = js_typed_array_length(obj);
                 if (len <= 1) return obj;
-                Item* values = (Item*)mem_alloc((size_t)len * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                Item* scratch = (Item*)mem_alloc((size_t)len * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                if (!values || !scratch) {
-                    if (values) mem_free(values);
-                    if (scratch) mem_free(scratch);
+                // BigInt elements are fresh heap values held only by these
+                // buffers while a comparator runs.
+                JsRootedItems values;
+                JsRootedItems scratch;
+                if (!values.reserve(len) || !scratch.reserve(len)) {
                     return js_throw_type_error("TypedArray.prototype.sort allocation failed");
                 }
                 for (int i = 0; i < len; i++) {
-                    values[i] = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (item_is_error(values[i])) {
-                        mem_free(values);
-                        mem_free(scratch);
-                        return values[i];
-                    }
+                    JS_ASSIGN_OR_RETURN(value, js_typed_array_get(obj, (Item){.item = i2it(i)}));
+                    values.push(value);
                 }
-                Item sort_result = js_typed_array_sort_merge_sort(values, scratch, 0, len,
-                    comparefn, has_comparefn);
-                if (item_is_error(sort_result)) {
-                    mem_free(values);
-                    mem_free(scratch);
-                    return sort_result;
-                }
+                JS_ASSIGN_OR_RETURN(sort_result, js_typed_array_sort_merge_sort(values.items,
+                    scratch.items, 0, len, comparefn, has_comparefn));
                 for (int i = 0; i < len; i++) {
-                    Item set_result = js_typed_array_set(obj,
-                        (Item){.item = i2it(i)}, values[i]);
-                    if (item_is_error(set_result)) {
-                        mem_free(values);
-                        mem_free(scratch);
-                        return set_result;
-                    }
+                    JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(obj,
+                        (Item){.item = i2it(i)}, values.items[i]));
                 }
-                mem_free(values);
-                mem_free(scratch);
                 return obj;
             }
             // ES2023: TypedArray.prototype.with(index, value) — returns new copy with one element replaced
@@ -25502,9 +25532,13 @@ static Item js_array_sort_compare(Item x, Item y, Item comparefn, bool has_compa
         return ItemNull;
     }
 
+    // ToString(y) can allocate, so a fresh ToString(x) result must stay
+    // rooted until both strings are compared.
+    JS_ROOTS(roots, x_str_root, ItemNull);
     JS_ASSIGN_OR_RETURN(x_str_item, js_to_string(x));
+    x_str_root.set(x_str_item);
     JS_ASSIGN_OR_RETURN(y_str_item, js_to_string(y));
-    String* x_str = get_type_id(x_str_item) == LMD_TYPE_STRING ? it2s(x_str_item) : NULL;
+    String* x_str = get_type_id(x_str_root.get()) == LMD_TYPE_STRING ? it2s(x_str_root.get()) : NULL;
     String* y_str = get_type_id(y_str_item) == LMD_TYPE_STRING ? it2s(y_str_item) : NULL;
     if (!x_str || !y_str) return ItemNull;
     int min_len = x_str->len < y_str->len ? x_str->len : y_str->len;
@@ -25527,67 +25561,47 @@ static Item js_array_generic_sort(Item object, Item* args, int argc) {
     JS_ASSIGN_OR_RETURN(length_status, js_array_to_length_status(js_get_key_default(object, len_key), &len));
     if (len <= 0) return object;
 
-    int64_t capacity = len < 16 ? len : 16;
-    Item* items = capacity > 0 ? (Item*)mem_alloc((size_t)capacity * sizeof(Item), MEM_CAT_JS_RUNTIME) : NULL;
-    if (capacity > 0 && !items) return js_throw_type_error("Array.prototype.sort allocation failed");
-    int64_t item_count = 0;
+    // The working copy is the only reference to an element once write-back
+    // overwrites its original index or a comparator mutates the array.
+    JsRootedItems items;
+    if (!items.reserve(len < 16 ? len : 16)) {
+        return js_throw_type_error("Array.prototype.sort allocation failed");
+    }
 
     for (int64_t k = 0; k < len; k++) {
         Item key = js_array_method_property_key(k);
-        Item has = js_array_method_has_property_status(object, key);
-        if (item_is_error(has)) {
-            if (items) mem_free(items);
-            return has;
-        }
+        JS_ASSIGN_OR_RETURN(has, js_array_method_has_property_status(object, key));
         if (js_is_truthy(has)) {
-            if (item_count >= capacity) {
-                int64_t new_capacity = capacity <= 0 ? 16 : capacity * 2;
-                if (new_capacity < item_count + 1) new_capacity = item_count + 1;
-                Item* new_items = (Item*)mem_alloc((size_t)new_capacity * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                if (!new_items) {
-                    if (items) mem_free(items);
-                    return js_throw_type_error("Array.prototype.sort allocation failed");
-                }
-                if (items && item_count > 0) memcpy(new_items, items, (size_t)item_count * sizeof(Item));
-                if (items) mem_free(items);
-                items = new_items;
-                capacity = new_capacity;
-            }
-            items[item_count++] = js_get_key_default(object, key);
-            if (item_is_error(items[item_count - 1])) {
-                if (items) mem_free(items);
-                return items[item_count - 1];
+            JS_ASSIGN_OR_RETURN(value, js_get_key_default(object, key));
+            if (!items.push(value)) {
+                return js_throw_type_error("Array.prototype.sort allocation failed");
             }
         }
     }
+    int64_t item_count = items.count;
 
     bool has_comparefn = argc >= 1 && js_is_callable(args[0]) &&
         args[0].item != ITEM_JS_UNDEFINED;
     Item comparefn = has_comparefn ? args[0] : ItemNull;
+    // the insertion key is out of the buffer while later slots shift over it
+    JS_ROOTS(roots, key_root, ItemNull);
     for (int64_t i = 1; i < item_count; i++) {
-        Item key_item = items[i];
+        key_root.set(items.items[i]);
         int64_t j = i - 1;
         while (j >= 0) {
             int cmp = 0;
-            Item compare_status = js_array_sort_compare(items[j], key_item, comparefn,
-                has_comparefn, &cmp);
-            if (item_is_error(compare_status)) {
-                if (items) mem_free(items);
-                return compare_status;
-            }
+            JS_ASSIGN_OR_RETURN(compare_status, js_array_sort_compare(items.items[j],
+                key_root.get(), comparefn, has_comparefn, &cmp));
             if (cmp <= 0) break;
-            items[j + 1] = items[j];
+            items.items[j + 1] = items.items[j];
             j--;
         }
-        items[j + 1] = key_item;
+        items.items[j + 1] = key_root.get();
     }
 
     for (int64_t j = 0; j < item_count; j++) {
-        Item set_result = js_set_key_strict_policy(object, js_array_method_property_key(j), items[j]);
-        if (item_is_error(set_result)) {
-            if (items) mem_free(items);
-            return set_result;
-        }
+        JS_ASSIGN_OR_RETURN(set_result, js_set_key_strict_policy(object,
+            js_array_method_property_key(j), items.items[j]));
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
             (js_array_has_props(object.array) || len > js_array_dense_capacity(object.array))) {
@@ -25605,15 +25619,10 @@ static Item js_array_generic_sort(Item object, Item* args, int argc) {
         }
     } else {
         for (int64_t j = item_count; j < len; j++) {
-            Item delete_result = js_delete_property_or_throw_status(object, js_array_method_property_key(j));
-            if (item_is_error(delete_result)) {
-                if (items) mem_free(items);
-                return delete_result;
-            }
+            JS_ASSIGN_OR_RETURN(delete_result, js_delete_property_or_throw_status(object,
+                js_array_method_property_key(j)));
         }
     }
-
-    if (items) mem_free(items);
     return object;
 }
 
@@ -25848,15 +25857,21 @@ static Item js_array_generic_to_sorted(Item object, Item* args, int argc) {
     int64_t len = 0;
     Item len_key;
     JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len));
-    JS_ASSIGN_OR_RETURN(result, js_array_create_change_by_copy_result(len));
+    // the fresh copy (and each value being copied) is reachable only from
+    // this frame while property writes allocate
+    JS_ROOTS(roots, result_root, ItemNull, value_root, ItemNull);
+    JS_ASSIGN_OR_RETURN(created, js_array_create_change_by_copy_result(len));
+    result_root.set(created);
 
     for (int64_t k = 0; k < len; k++) {
         Item key = js_array_method_property_key(k);
         JS_ASSIGN_OR_RETURN(value, js_get_key_default(object, key));
-        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, k, value));
+        value_root.set(value);
+        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result_root.get(),
+            k, value_root.get()));
     }
     Item sort_args[1] = { argc >= 1 ? args[0] : make_js_undefined() };
-    return js_array_intrinsic_algorithm(result, result,
+    return js_array_intrinsic_algorithm(result_root.get(), result_root.get(),
         JS_ARRAY_INTRINSIC_SORT, sort_args, argc >= 1 ? 1 : 0);
 }
 
@@ -31703,46 +31718,68 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
 // `Promise.all([...]).then(f)` ran f a full tick behind Node's ordering.
 static Item js_promise_combinator_iterable_with_constructor(
     Item constructor, Item iterable, int kind, Item promise, Item resolve, Item reject) {
-    JS_ROOTS(roots, iterable_root, iterable);
-    const bool custom_constructor = !js_promise_is_builtin_promise_constructor(constructor);
+    // Every value below crosses an allocating call: property writes, element
+    // handler creation, and the user-visible `resolve`/`then` invocations.
+    // The counter, an iterator, each next promise and bound element handler
+    // are otherwise reachable only from these C locals, so a collection freed
+    // them while the combinator was still wiring reactions to them.
+    JS_ROOTS(roots,
+        constructor_root, constructor,
+        iterable_root, iterable,
+        promise_root, promise,
+        resolve_root, resolve,
+        reject_root, reject,
+        resolve_method_root, ItemNull,
+        iterator_root, ItemNull,
+        counter_root, ItemNull,
+        values_root, ItemNull,
+        called_root, ItemNull);
+    JS_ROOTS(step_roots,
+        elem_root, ItemNull,
+        next_root, ItemNull,
+        fulfill_root, ItemNull,
+        reject_fn_root, ItemNull,
+        error_root, ItemNull,
+        final_root, ItemNull);
+    const bool custom_constructor = !js_promise_is_builtin_promise_constructor(constructor_root.get());
     const bool array_input = get_type_id(iterable_root.get()) == LMD_TYPE_ARRAY;
-    Item resolve_method = js_get_key_cstr(constructor, "resolve");
-    if (item_is_error(resolve_method)) {
-        Item error = js_error_lane_payload(resolve_method);
-        js_promise_call_capability_reject(reject, error);
-        return promise;
+    resolve_method_root.set(js_get_key_cstr(constructor_root.get(), "resolve"));
+    if (item_is_error(resolve_method_root.get())) {
+        error_root.set(js_error_lane_payload(resolve_method_root.get()));
+        js_promise_call_capability_reject(reject_root.get(), error_root.get());
+        return promise_root.get();
     }
-    if (!js_is_callable(resolve_method)) {
-        Item error = js_promise_make_type_error("Promise resolve is not callable", 31);
-        js_promise_call_capability_reject(reject, error);
-        return promise;
+    if (!js_is_callable(resolve_method_root.get())) {
+        error_root.set(js_promise_make_type_error("Promise resolve is not callable", 31));
+        js_promise_call_capability_reject(reject_root.get(), error_root.get());
+        return promise_root.get();
     }
 
-    Item iterator = ItemNull;
     if (!array_input) {
-        iterator = js_get_iterator(iterable_root.get());
-        if (item_is_error(iterator)) {
-            Item error = js_error_lane_payload(iterator);
-            js_promise_call_capability_reject(reject, error);
-            return promise;
+        iterator_root.set(js_get_iterator(iterable_root.get()));
+        if (item_is_error(iterator_root.get())) {
+            error_root.set(js_error_lane_payload(iterator_root.get()));
+            js_promise_call_capability_reject(reject_root.get(), error_root.get());
+            return promise_root.get();
         }
     }
 
-    Item counter = ItemNull;
-    Item values_arr = ItemNull;
-    Item called_arr = ItemNull;
     if (kind != 3) {
         const char* values_name = (kind == 2) ? "errors" : "results";
         int values_len = (kind == 2) ? 6 : 7;
-        counter = js_promise_make_combinator_counter(1, values_name, values_len, 0,
-            &values_arr, &called_arr);
-        js_set_key_cstr(counter, "__cap_resolve", resolve);
-        js_set_key_cstr(counter, "__cap_reject", reject);
+        Item values_arr = ItemNull;
+        Item called_arr = ItemNull;
+        counter_root.set(js_promise_make_combinator_counter(1, values_name, values_len, 0,
+            &values_arr, &called_arr));
+        values_root.set(values_arr);
+        called_root.set(called_arr);
+        js_set_key_cstr(counter_root.get(), "__cap_resolve", resolve_root.get());
+        js_set_key_cstr(counter_root.get(), "__cap_reject", reject_root.get());
         if (custom_constructor) {
-            js_set_key_default(counter,
+            js_set_key_default(counter_root.get(),
                 js_name_item("__in_iteration", 15),
                 (Item){.item = ITEM_FALSE});
-            js_set_key_default(counter,
+            js_set_key_default(counter_root.get(),
                 js_name_item("__cap_settled", 14),
                 (Item){.item = ITEM_FALSE});
         }
@@ -31750,40 +31787,42 @@ static Item js_promise_combinator_iterable_with_constructor(
 
     int index = 0;
     while (true) {
-        Item elem;
         if (array_input) {
             Array* array = iterable_root.get().array;
             if (index >= array->length) break;
-            elem = array->items[index];
+            elem_root.set(array->items[index]);
         } else {
-            elem = js_iterator_step(iterator);
-            if (item_is_error(elem)) {
-                Item error = js_error_lane_payload(elem);
-                js_promise_call_capability_reject(reject, error);
-                return promise;
+            elem_root.set(js_iterator_step(iterator_root.get()));
+            if (item_is_error(elem_root.get())) {
+                error_root.set(js_error_lane_payload(elem_root.get()));
+                js_promise_call_capability_reject(reject_root.get(), error_root.get());
+                return promise_root.get();
             }
-            if (elem.item == JS_ITER_DONE_SENTINEL) break;
+            if (elem_root.get().item == JS_ITER_DONE_SENTINEL) break;
         }
 
-        Item args[1] = {elem};
-        Item next_promise = js_call_function(resolve_method, constructor, args, 1);
-        if (item_is_error(next_promise)) {
-            Item error = js_error_lane_payload(next_promise);
+        Item args[1] = {elem_root.get()};
+        next_root.set(js_call_function(resolve_method_root.get(), constructor_root.get(),
+            args, 1));
+        if (item_is_error(next_root.get())) {
+            error_root.set(js_error_lane_payload(next_root.get()));
             if (!array_input) {
-                Item close_result = js_iterator_close(iterator);
-                if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
+                Item close_result = js_iterator_close(iterator_root.get());
+                if (item_is_error(close_result)) error_root.set(js_error_lane_payload(close_result));
             }
-            js_promise_call_capability_reject(reject, error);
-            return promise;
+            js_promise_call_capability_reject(reject_root.get(), error_root.get());
+            return promise_root.get();
         }
 
         if (kind == 3) {
             Item error = ItemNull;
-            if (!js_invoke_promise_then(next_promise, resolve, reject, &error)) {
-                Item close_result = js_iterator_close(iterator);
-                if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
-                js_promise_call_capability_reject(reject, error);
-                return promise;
+            if (!js_invoke_promise_then(next_root.get(), resolve_root.get(),
+                    reject_root.get(), &error)) {
+                error_root.set(error);
+                Item close_result = js_iterator_close(iterator_root.get());
+                if (item_is_error(close_result)) error_root.set(js_error_lane_payload(close_result));
+                js_promise_call_capability_reject(reject_root.get(), error_root.get());
+                return promise_root.get();
             }
             // direct array iteration has no iterator step to advance the index;
             // omitting this increment leaves Promise.race in an endless loop.
@@ -31791,10 +31830,10 @@ static Item js_promise_combinator_iterable_with_constructor(
             continue;
         }
 
-        js_array_push_item_direct(values_arr.array, make_js_undefined());
-        js_array_push_item_direct(called_arr.array, (Item){.item = ITEM_FALSE});
-        int remaining = (int)it2i(js_get_key_cstr(counter, "remaining"));
-        js_set_key_cstr(counter, "remaining", (Item){.item = i2it(remaining + 1)});
+        js_array_push_item_direct(values_root.get().array, make_js_undefined());
+        js_array_push_item_direct(called_root.get().array, (Item){.item = ITEM_FALSE});
+        int remaining = (int)it2i(js_get_key_cstr(counter_root.get(), "remaining"));
+        js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining + 1)});
 
         JsNativeP4 fulfill_handler = kind == 0 ? js_all_resolve_element :
             (kind == 1 ? js_settled_fulfill_element : js_any_fulfill_element);
@@ -31802,36 +31841,38 @@ static Item js_promise_combinator_iterable_with_constructor(
             (kind == 1 ? js_settled_reject_element : js_any_reject_element);
         // A custom constructor settles through its own capability functions; a
         // null result routes the element handler to the stored capability.
-        Item result_item = custom_constructor ? ItemNull : promise;
-        Item fulfill_fn = js_promise_make_bound_element_handler(fulfill_handler,
-            counter, index, result_item);
-        Item reject_fn = (kind == 0 && custom_constructor) ? reject :
+        Item result_item = custom_constructor ? ItemNull : promise_root.get();
+        fulfill_root.set(js_promise_make_bound_element_handler(fulfill_handler,
+            counter_root.get(), index, result_item));
+        reject_fn_root.set((kind == 0 && custom_constructor) ? reject_root.get() :
             js_promise_make_bound_element_handler(reject_handler,
-                counter, index, result_item);
+                counter_root.get(), index, result_item));
         // D7.2.2: Promise.all exposes the capability reject directly; wrapping
         // it changes observable callback identity for custom constructors.
 
         Item error = ItemNull;
         if (custom_constructor) {
-            js_set_key_default(counter,
+            js_set_key_default(counter_root.get(),
                 js_name_item("__in_iteration", 15),
                 (Item){.item = ITEM_TRUE});
         }
-        if (!js_invoke_promise_then(next_promise, fulfill_fn, reject_fn, &error)) {
+        if (!js_invoke_promise_then(next_root.get(), fulfill_root.get(),
+                reject_fn_root.get(), &error)) {
+            error_root.set(error);
             if (custom_constructor) {
-                js_set_key_default(counter,
+                js_set_key_default(counter_root.get(),
                     js_name_item("__in_iteration", 15),
                     (Item){.item = ITEM_FALSE});
             }
             if (!array_input) {
-                Item close_result = js_iterator_close(iterator);
-                if (item_is_error(close_result)) error = js_error_lane_payload(close_result);
+                Item close_result = js_iterator_close(iterator_root.get());
+                if (item_is_error(close_result)) error_root.set(js_error_lane_payload(close_result));
             }
-            js_promise_call_capability_reject(reject, error);
-            return promise;
+            js_promise_call_capability_reject(reject_root.get(), error_root.get());
+            return promise_root.get();
         }
         if (custom_constructor) {
-            js_set_key_default(counter,
+            js_set_key_default(counter_root.get(),
                 js_name_item("__in_iteration", 15),
                 (Item){.item = ITEM_FALSE});
         }
@@ -31839,31 +31880,33 @@ static Item js_promise_combinator_iterable_with_constructor(
     }
 
     if (kind != 3) {
-        int remaining = (int)it2i(js_get_key_default(counter, js_name_item("remaining", 9))) - 1;
-        js_set_key_cstr(counter, "remaining", (Item){.item = i2it(remaining)});
+        int remaining = (int)it2i(js_get_key_default(counter_root.get(),
+            js_name_item("remaining", 9))) - 1;
+        js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining)});
         bool capability_settled = custom_constructor &&
-            js_promise_custom_capability_settled(counter);
+            js_promise_custom_capability_settled(counter_root.get());
         if (remaining == 0 && !capability_settled) {
-            Item final_value = kind == 2 ? js_promise_make_aggregate_error(values_arr) : values_arr;
+            final_root.set(kind == 2 ? js_promise_make_aggregate_error(values_root.get())
+                : values_root.get());
             if (custom_constructor) {
                 Item cap_result;
-                cap_result = js_promise_call_stored_capability(counter,
+                cap_result = js_promise_call_stored_capability(counter_root.get(),
                     kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
-                    final_value);
-                js_promise_mark_custom_capability_settled(counter);
+                    final_root.get());
+                js_promise_mark_custom_capability_settled(counter_root.get());
                 if (item_is_error(cap_result)) {
-                    Item error = js_error_lane_payload(cap_result);
-                    js_promise_call_capability_reject(reject, error);
+                    error_root.set(js_error_lane_payload(cap_result));
+                    js_promise_call_capability_reject(reject_root.get(), error_root.get());
                 }
             } else {
-                (void)js_promise_settle_combinator_result(counter, promise,
+                (void)js_promise_settle_combinator_result(counter_root.get(), promise_root.get(),
                     kind == 2 ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
-                    final_value, false, false);
+                    final_root.get(), false, false);
             }
         }
     }
 
-    return promise;
+    return promise_root.get();
 }
 
 static Item js_promise_combinator_with_constructor(Item constructor, Item iterable, int kind) {
@@ -32546,13 +32589,15 @@ static Item js_promise_settle_combinator_result(Item counter_obj, Item result_it
 }
 
 static Item js_promise_make_aggregate_error(Item errors) {
+    // the fresh error is otherwise unreachable while its `errors` slot is added
+    JS_ROOTS(roots, errors_root, errors, err_root, ItemNull);
     Item msg = js_name_item("All promises were rejected", 26);
     // Promise combinators produce the same NativeError carrier as the public
     // AggregateError constructor; stamping the resting Map cannot change the
     // carrier's authoritative js_class_id used by instanceof.
-    Item err = js_new_error_with_name(js_name_item("AggregateError", 14), msg);
-    js_set_key_cstr(err, "errors", errors);
-    return err;
+    err_root.set(js_new_error_with_name(js_name_item("AggregateError", 14), msg));
+    js_set_key_cstr(err_root.get(), "errors", errors_root.get());
+    return err_root.get();
 }
 
 enum JsPromiseElementMode {
@@ -32566,6 +32611,16 @@ enum JsPromiseElementMode {
 
 static Item js_promise_handle_element(Item counter_obj, Item index_item, Item result_item,
                                        Item value, JsPromiseElementMode mode) {
+    // The settled record and the final result are fresh objects reachable only
+    // from these locals until the result promise stores them; keep the whole
+    // element state rooted across the allocating steps.
+    JS_ROOTS(roots,
+        counter_root, counter_obj,
+        result_root, result_item,
+        value_root, value,
+        values_root, ItemNull,
+        stored_root, ItemNull,
+        final_root, ItemNull);
     // Promise.any uses the shared result capability for fulfillment, while
     // its rejection element owns the per-element AlreadyCalled record.  The
     // other element handlers need the gate to ignore repeated thenable calls.
@@ -32573,18 +32628,18 @@ static Item js_promise_handle_element(Item counter_obj, Item index_item, Item re
     // thenable that rejects and then fulfills; custom constructors instead
     // expose their resolve callback and must observe every direct call.
     if ((mode != JS_PROMISE_ELEMENT_ANY_FULFILL ||
-            !js_promise_counter_has_custom_capability(counter_obj)) &&
-            !js_promise_element_mark_called(counter_obj, index_item)) {
+            !js_promise_counter_has_custom_capability(counter_root.get())) &&
+            !js_promise_element_mark_called(counter_root.get(), index_item)) {
         return make_js_undefined();
     }
-    bool custom_sync = js_promise_custom_element_is_sync(counter_obj);
+    bool custom_sync = js_promise_custom_element_is_sync(counter_root.get());
     if (mode == JS_PROMISE_ELEMENT_ALL_REJECT) {
-        return js_promise_settle_combinator_result(counter_obj, result_item,
-            JS_PROMISE_CAPABILITY_REJECT, value, false, custom_sync);
+        return js_promise_settle_combinator_result(counter_root.get(), result_root.get(),
+            JS_PROMISE_CAPABILITY_REJECT, value_root.get(), false, custom_sync);
     }
     if (mode == JS_PROMISE_ELEMENT_ANY_FULFILL) {
-        return js_promise_settle_combinator_result(counter_obj, result_item,
-            JS_PROMISE_CAPABILITY_RESOLVE, value, true, custom_sync);
+        return js_promise_settle_combinator_result(counter_root.get(), result_root.get(),
+            JS_PROMISE_CAPABILITY_RESOLVE, value_root.get(), true, custom_sync);
     }
 
     const bool any_reject = mode == JS_PROMISE_ELEMENT_ANY_REJECT;
@@ -32592,27 +32647,31 @@ static Item js_promise_handle_element(Item counter_obj, Item index_item, Item re
         mode == JS_PROMISE_ELEMENT_SETTLED_REJECT;
     const char* collection = any_reject ? "errors" : "results";
     String* collection_key = heap_create_name(collection, any_reject ? 6 : 7);
-    Item values = js_get_key_default(counter_obj, (Item){.item = s2it(collection_key)});
-    Item stored = value;
+    values_root.set(js_get_key_default(counter_root.get(),
+        (Item){.item = s2it(collection_key)}));
+    stored_root.set(value_root.get());
     if (settled) {
-        stored = js_new_object();
+        stored_root.set(js_new_object());
         bool fulfilled = mode == JS_PROMISE_ELEMENT_SETTLED_FULFILL;
-        js_set_key_cstr(stored, "status", js_name_item(fulfilled ? "fulfilled" : "rejected",
-                                                 fulfilled ? 9 : 8));
-        js_set_key_default(stored, js_name_item(fulfilled ? "value" : "reason",
-                                                                     fulfilled ? 5 : 6), value);
+        js_set_key_cstr(stored_root.get(), "status",
+            js_name_item(fulfilled ? "fulfilled" : "rejected", fulfilled ? 9 : 8));
+        js_set_key_default(stored_root.get(), js_name_item(fulfilled ? "value" : "reason",
+            fulfilled ? 5 : 6), value_root.get());
     }
     int idx = (int)it2i(index_item);
-    if (get_type_id(values) == LMD_TYPE_ARRAY && idx < values.array->length) {
-        js_array_store_owned(values.array, idx, stored);
+    if (get_type_id(values_root.get()) == LMD_TYPE_ARRAY &&
+            idx < values_root.get().array->length) {
+        js_array_store_owned(values_root.get().array, idx, stored_root.get());
     }
-    int remaining = (int)it2i(js_get_key_default(counter_obj, js_name_item("remaining", 9))) - 1;
-    js_set_key_cstr(counter_obj, "remaining", (Item){.item = i2it(remaining)});
+    int remaining = (int)it2i(js_get_key_default(counter_root.get(),
+        js_name_item("remaining", 9))) - 1;
+    js_set_key_cstr(counter_root.get(), "remaining", (Item){.item = i2it(remaining)});
     if (remaining == 0) {
-        Item final_value = any_reject ? js_promise_make_aggregate_error(values) : values;
-        return js_promise_settle_combinator_result(counter_obj, result_item,
+        final_root.set(any_reject ? js_promise_make_aggregate_error(values_root.get())
+            : values_root.get());
+        return js_promise_settle_combinator_result(counter_root.get(), result_root.get(),
             any_reject ? JS_PROMISE_CAPABILITY_REJECT : JS_PROMISE_CAPABILITY_RESOLVE,
-            final_value, false, custom_sync);
+            final_root.get(), false, custom_sync);
     }
     return make_js_undefined();
 }
