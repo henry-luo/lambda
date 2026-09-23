@@ -536,18 +536,21 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
     }
 }
 
-// D4.4.5 move-out binds (splay rotations): 83 map copies, down from 123, on
-// both tiers; every rotation in the 40-iteration loop borrows. LR12-11 adds 42
-// share marks, no copies: a rotation returns part of its `var` parameter, so
-// the call site marks the result (164 -> 206).
+// D4.4.5 move-out binds (splay rotations): every rotation in the 40-iteration
+// loop borrows (123 -> 83 map copies). LR12-11 adds 42 share marks, no copies:
+// a rotation returns part of its `var` parameter, so the call site marks the
+// result (164 -> 206). make()'s `N?` literal declarations now cross their
+// deferred boundary and reify there (S11.4.1v3, D3.2.4v4) instead of at the
+// rotation's `var` admission, leaving one fewer shared map per rotation
+// (83 -> 43 copies, 206 -> 166 marks).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
     static const char* const tiers[] = {"jit", "interp"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_move_out_bind", tiers[t],
             fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
         ASSERT_TRUE(run.ok) << tiers[t];
-        EXPECT_EQ(run.profile.get("map_shared_copies"), 83u) << tiers[t];
-        EXPECT_EQ(run.profile.get("map_share_marks"), 206u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_shared_copies"), 43u) << tiers[t];
+        EXPECT_EQ(run.profile.get("map_share_marks"), 166u) << tiers[t];
     }
 }
 

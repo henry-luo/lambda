@@ -1,8 +1,10 @@
 # Lambda Query: Type-Based Path Query Expressions
 
+> **Status (2026-09-23):** shipped — `?`, `.?` and `[T]` are in the C parser and both tiers, and the two breaking changes below landed long ago (`^` is propagation, `**` is power). The result kind was **ruled 2026-09-23 as S8.2.4**: a query is an accessor and yields the run `T*` — §4.1 records the decision and the argument.
+
 ## Overview
 
-This proposal adds a **type-based query operator `?`** to Lambda, enabling jQuery-style descendant search on elements, maps, and nested data structures. The query leverages Lambda's existing type system to express search criteria concisely.
+This document added a **type-based query operator `?`** to Lambda, enabling jQuery-style descendant search on elements, maps, and nested data structures. The query leverages Lambda's existing type system to express search criteria concisely.
 
 ```lambda
 html?<img>                        // find all <img> elements in html tree
@@ -19,6 +21,7 @@ This requires two **breaking syntax changes** to free the `?` operator for query
 ## Table of Contents
 
 1. [Motivation](#motivation)
+   - 1.1 [Prior Art: XPath/XQuery, CSS Selectors, jQuery](#11-prior-art-xpathxquery-css-selectors-jquery)
 2. [Breaking Changes](#breaking-changes)
 3. [Query Syntax](#query-syntax)
 4. [Semantics](#semantics)
@@ -53,6 +56,99 @@ Key use cases:
 - **JSON/data querying**: Extract values by type or shape from nested JSON — the jq/JSONPath use case
 - **Schema validation**: Find all nodes matching a type pattern
 - **Document transformation**: Select and transform matching subtrees
+
+### 1.1 Prior Art: XPath/XQuery, CSS Selectors, jQuery
+
+Three lineages shaped `?`, `[T]` and `.?`. Each is summarized by the four
+questions that matter for Lambda: *what is selected*, *along which axes*,
+*how are predicates written*, and *what comes back at zero, one, and many
+matches* — the last being the question §4.1 rules.
+
+**XPath / XQuery (W3C).** The reference model for tree querying, and the
+closest to Lambda's.
+
+- *Selected*: nodes of every kind — elements, attributes, text, comments —
+  and, from XPath 2.0, atomic values too. XQuery adds construction (FLWOR)
+  on top of the same path language.
+- *Axes*: explicit and complete — `child` (`/`), `descendant` (`//`, i.e.
+  `descendant-or-self::node()/`), `attribute` (`@`), `self`, `parent`
+  (`..`), `ancestor`, `following-sibling`, … Attributes are a **separate
+  axis**: `//div` never returns an attribute, `//@id` never an element.
+- *Predicates*: `[…]` after any step, either boolean (`//book[price > 30]`)
+  or positional (`//book[1]`), evaluated with the step's node as context.
+- *Result model*: XPath 1.0 returns a **node-set** — unordered, duplicate-free,
+  emitted in document order. XPath 2.0+/XQuery replace it with the
+  **sequence**: a flat, ordered list of items where **an item is identical
+  to a singleton sequence** and `()` is the empty sequence; sequences never
+  nest. So `//title` at one match *is* that title node, at none is `()`, and
+  `count()` measures the sequence while `string-length()` measures the item.
+  Selecting from a *set* is set-at-a-time: `//div//p` applies the second
+  step to every node of the first.
+
+**CSS Selectors (W3C Selectors 3/4) and the DOM Selectors API.** The
+element-selection language every web author knows.
+
+- *Selected*: **elements only**. A selector can test attributes
+  (`[href]`, `[id="x"]`, `[class~="a"]`) and structure (`:first-child`,
+  `:nth-of-type`, `:not(…)`, and in Selectors 4 `:has(…)` and `:is(…)`) but
+  never returns an attribute or a text node.
+- *Axes*: four combinators — descendant (` `), child (`>`), adjacent
+  sibling (`+`), general sibling (`~`) — plus the implicit descendant-or-self
+  scope of the element `querySelector` is called on. No parent or ancestor
+  axis (until `:has`, which reverses the direction inside a predicate).
+- *Predicates*: the selector *is* the predicate; there is no expression
+  language, only the fixed vocabulary of simple selectors and pseudo-classes.
+  Union is `,` (`h1, h2`).
+- *Result model*: the API splits on cardinality rather than the value.
+  `querySelector` → **the first match or `null`**; `querySelectorAll` → a
+  **static `NodeList`, always** (array-like, possibly empty, never `null`).
+  Two entry points, so the caller chooses the shape up front.
+
+**jQuery.** CSS selection with a set-oriented object model on top — the
+direct ancestor of Lambda's "pipe over a result set" idiom (`Lambda_Expr_Pipe.md`).
+
+- *Selected*: elements, via CSS selectors plus jQuery extensions
+  (`:visible`, `:has()`, `:contains()`, `:eq(n)` — several of which
+  Selectors 4 later standardized).
+- *Axes*: as methods on the set — `.find()` (descendants), `.children()`,
+  `.parent()`/`.closest()` (ancestors), `.siblings()`, `.next()`/`.prev()`;
+  `.filter(sel | fn)` and `.not()` narrow the set; `.end()` pops back.
+- *Predicates*: selector strings, or a callback `function(index, el)` —
+  the closest prior form of `~`/`~#`.
+- *Result model*: a **jQuery object, always** — an array-like wrapper with
+  `.length`, even at zero or one match; nothing ever unwraps. The whole API
+  is built on two conventions that follow: **implicit iteration** (a setter
+  or action such as `.addClass()`/`.hide()` applies to every element in the
+  set) and **first-element getters** (`.attr("src")`, `.text()`, `.val()`
+  read from the *first* element only). Getting one element is explicit:
+  `$("img")[0]`, `.first()`, `.eq(n)`.
+
+**What each contributed to Lambda's query, and the one place Lambda differs.**
+
+| | XPath / XQuery | CSS / DOM Selectors | jQuery | Lambda `?` / `[T]` / `.?` |
+|---|---|---|---|---|
+| selection key | node test + predicate | simple selectors | selectors + callbacks | a **type** (`?int`, `?<div id: "x">`, `?{a: int}`) — no separate query vocabulary (§3) |
+| descendant | `//` | ` ` (space) | `.find()` | `?` (§5.1) |
+| child | `/` | `>` | `.children()` | `[T]` (§6) |
+| self-or-descendant | `descendant-or-self::` | scope of the call | — | `.?` (§5.2) |
+| attributes | separate `@` axis | tested, never returned | tested, never returned | **searched and returned** alongside children (§4.3, S8.1.2v2) |
+| predicate language | full expression | fixed vocabulary | selector or callback | the type language itself; a constrained type `T that cond` for the rest (§10.5) |
+| union | `\|` | `,` | `,` | `?(A \| B)` — the type union (S10.1.1) |
+| iterate over result | set-at-a-time steps | caller loops | implicit iteration | the pipe: `html?<img> \|> ~.src` (§7.2) |
+| **0 / 1 / n matches** | `()` / the item / sequence — item ≡ singleton | `null` / element (`querySelector`), `NodeList` always (`querySelectorAll`) | jQuery object always; `.length` 0/1/n | **`null` / the match / a list** — the run `T*` (§4.1, S8.2.4) |
+| count | `count()` (not `string-length`) | `.length` | `.length` | `count()` (not `len`, S8.3.3v3) |
+
+The result model is where the lineages disagree, and Lambda sides with
+XPath 2.0+: a query is an **accessor** whose singleton case is the item
+itself, with `()`/`null` for absence — not the CSS/jQuery "always a
+collection" model, which needs an unwrapping step for the common single
+match and a spread to place results into content. §4.1 carries the
+argument; the tell that the XPath model fits is that `count()` versus `len`
+in Lambda is precisely XPath's `count()` versus `string-length()`.
+Attribute searching is Lambda's one deliberate departure from all three:
+an element's attribute values are in its key domain (S8.1.2v2), so `?string`
+finds `"photo.jpg"` in `src: "photo.jpg"` as readily as a text child — XPath
+would need `//@*[. = …] | //text()[…]`, CSS and jQuery cannot express it.
 
 ---
 
@@ -177,15 +273,47 @@ data?{score: (80 to 100)}     // maps where score is in 80..100
 
 ## 4. Semantics
 
-### 4.1 Return Value
+### 4.1 Return Value — a run, `T*` (RULED 2026-09-23, USER; S8.2.4)
 
-A query **always returns a list** of matching values (possibly empty):
+A query yields the **run** `T*` (S11.1.6v2): `null` when nothing matches, the
+match **itself** when exactly one does, and a list when two or more do
+(S2.5.5v2). It is a value, never an item-position producer.
 
 ```lambda
-let imgs = html?<img>          // list of matching <img> elements
-len(imgs)                       // count of results
-imgs[0]                         // first match (or null if none)
+let imgs = html?<img>          // null | <img …> | (<img …>, <img …>, …)
+count(imgs)                     // the match count: 0, 1, or n (S8.3.3v3)
+if (imgs) …                     // the absence check reads as a null check
+[*imgs, extra]                  // splice whatever there is
+(html?<img>)[0]                 // first of several; a lone match IS the value
 ```
+
+**Why a run and not an array.** `list` and `array` agree at two or more
+items; the whole question is what happens at zero and one. Two readings were
+on the table:
+
+*Option 1 — return an array.* `?` as a filter, the jQuery convention and that
+of most filter functions. Pros: one uniform result type (`[]` when empty), and
+`len(result)` counts directly. Cons: a single match needs unwrapping
+(`result[0]`), and placing matches into content needs a spread (`*result`).
+
+*Option 2 — return a run (chosen).* `?` as an **accessor**, an extension of
+`e.name`, `e[1]`, `e[-1]` to selection by type — the way `e[1]` may one day
+extend to `e[1, 2, 3]` or `e[5 to 8]`. `e[1]` yields the item, not `[item]`,
+and `e[-1]` yields `null`, not `[]`; so `e[T]` and `e?T` follow: the item for
+one match, `null` for none. The static result type is `T*`. Pros: matches
+auto-spread where they land (S2.5.1v2), and `if (e?T)` is the absence idiom
+instead of `if (len(e?T) > 0)`. Cons: `T*` is sometimes less convenient to
+work with than an array, and `len(result)` is not the count — `len` of a lone
+element match is that element's own length. The count is `count(result)`
+(S8.3.3v3), the size of the run; `len([*result])` looks equivalent but counts
+a lone *array* match by its contents.
+
+The accessor reading won because it is the one that makes the singleton case
+*expected* rather than surprising: nobody expects `e[1]` to come back wrapped.
+`|:` and `find` remain filters and keep returning arrays (S2.5.7v2,
+S10.1.6) — the line is accessor versus function-over-a-source, not a
+special case for `?`. (`that` in expression position is now the single-value
+proviso, S10.1.5v3: `(e?T) that cond` is the whole run or `null`.)
 
 ### 4.2 Match Rules
 
@@ -429,9 +557,9 @@ html?<table>[tr][td]           // all tables → direct rows → direct cells
 
 **No grammar changes required.** The `[T]` child-level query reuses the existing index syntax `expr[x]`. The runtime (`fn_member()`) already dispatches on the type of the index value. When `x` is a type value, it performs the child-level query instead of positional/named access. This makes the feature purely a runtime extension.
 
-**Return type is array.** Consistent with `?`, the child-level query always returns an array of matches (possibly empty). This enables uniform chaining: `expr[T1][T2]`, `expr[T] | transform`, etc.
+**Return type is the run `T*`, as for `?`** (S8.2.4, §4.1): `null`, the match, or a list. Chaining still works — `expr[T1][T2]` subscripts whatever came back, and a lone match is subscripted directly — and `expr[T] |> …` maps over the run.
 
-**Values only for maps.** When querying a map, only the values are tested and returned — not key-value pairs. This keeps the result type uniform (array of matched values) regardless of the container type.
+**Values only for maps.** When querying a map, only the values are tested and returned — not key-value pairs. This keeps the result uniform (a run of matched values) regardless of the container type.
 
 ---
 
@@ -460,8 +588,8 @@ html?<p> | ~[0]
 // Find links, filter by href pattern
 html?<a> | ~.href where ~ is string
 
-// Count elements by type
-len(html?<div>)
+// Count elements by type (S8.3.3v3)
+count(html?<div>)
 
 // Find and transform
 html?<img> | {tag: name(~), src: ~.src}
@@ -482,8 +610,8 @@ for (form in html?<form>)
 ### 7.4 Query in Conditions
 
 ```lambda
-// Check if any match exists
-if (len(html?<img>) > 0) "has images" else "no images"
+// Check if any match exists — no match is null, which is falsy (S8.2.4)
+if (html?<img>) "has images" else "no images"
 
 // First match or default
 let main = (html?<div id: "main">)[0]
@@ -492,6 +620,8 @@ let main = (html?<div id: "main">)[0]
 ---
 
 ## 8. Comparison with Existing Approaches
+
+Syntax-level correspondence; the data models behind each column are in §1.1.
 
 | Feature | jQuery / CSS | XPath | jq | Lambda Query |
 |---------|-------------|-------|-----|-------------|
@@ -621,12 +751,12 @@ html?<img> | ~.src         // query binds tighter than pipe ✓
 
 ### 10.1 `?` returns all matches
 
-`?` always returns a **list** of all matching values (possibly empty). Use `(expr?T)[0]` for first match:
+`?` yields the run `T*` of matching values (S8.2.4): `null`, the one match itself, or a list. `(expr?T)[0]` is the first of several; a lone match needs no subscript:
 
 ```lambda
-html?<img>         // list of all <img> elements
-(html?<img>)[0]    // first <img>, or null if none
-len(html?<img>)    // count of matches
+html?<img>         // null, the one <img>, or a list of them (S8.2.4)
+(html?<img>)[0]    // first of several; a lone match IS the <img>
+count(html?<img>)  // count of matches: 0, 1, or n (S8.3.3v3)
 ```
 
 ### 10.2 Attributes are searched
@@ -653,7 +783,7 @@ let found = data?int          // expr context: query for int values
 
 ### 10.5 Constrained queries via `that`
 
-The `that` keyword is used for constraints in the type system (`constrained_type`), but `that` is **also** the pipe filter operator in expression context. Since `?` takes `primary_type` (not `_type_expr`), a bare `that` after the query would be parsed as a pipe filter, creating ambiguity.
+The `that` keyword is used for constraints in the type system (`constrained_type`), but `that` is **also** an expression operator — the single-value proviso `x that cond` (S10.1.5v3; it was the sequence filter before 2026-09-23, now `|:`). Since `?` takes `primary_type` (not `_type_expr`), a bare `that` after the query would be parsed as the expression operator applied to the query's result, creating ambiguity.
 
 **Rules:**
 
@@ -662,7 +792,7 @@ The `that` keyword is used for constraints in the type system (`constrained_type
 | `expr?int` | ✅ | query for int |
 | `expr?(int that (~ > 5))` | ✅ | query with constraint (parenthesized) |
 | `type T = int that (~ > 5); expr?T` | ✅ | query via named constrained type |
-| `expr?int that ~ > 5` | ❌ | ambiguous — `that` parsed as pipe filter |
+| `expr?int that ~ > 5` | ❌ | ambiguous — `that` parsed as the proviso on the query result |
 
 ```lambda
 // Correct: declare constrained type first, then query
@@ -672,8 +802,8 @@ data?Positive
 // Correct: use parenthesized type expression
 data?(int that (~ > 0))
 
-// WRONG: that binds as pipe filter, not type constraint
-data?int that ~ > 0   // parsed as: (data?int) that (~ > 0)
+// WRONG: that binds as the expression proviso, not the type constraint
+data?int that ~ > 0   // parsed as: (data?int) that (~ > 0) — the whole run, or null
 ```
 
 ### 10.6 Performance considerations

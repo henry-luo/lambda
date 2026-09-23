@@ -297,7 +297,7 @@
       "description": "Picked corpus script (array-heavy), whole-module total only. v5 re-baseline: int array elements use the i64 lane and box only at an Item boundary; two uext8 instructions normalize C bool results used by is-null checks. Growth 2026-09-13 (+3): the const-fold pass now declines when `context->heap` is absent. The eager pipeline compiles before runner_setup_context()/heap_init(), so folding there evaluated with no GC heap and faulted in heap_calloc on an allocating fold (`type(42)`); RC14 requires a fold attempt to be inert, so the pass stands down and these three folded constants are emitted as ordinary computations. Restoring them means giving the compile pipeline an allocation-capable context, not re-enabling the unguarded pass. Re-baseline 2026-09-13 (+10 net, Tune27 T27-7/T27-9): float literals evaluate every member first, then allocate once and store directly into the packed buffer, removing all 47 `array_float_set` calls (and the post-call typed-array layout reload each one carried) for a few more plain instructions; the fused band branches recover part of that. Growth 2026-09-14 (+8, Tune27 \u00a710.11): a non-proven typed index read now tests that its receiver Item is a container pointer before the header probes; a read through a null or out-of-bounds record yields a null T[] link (S7.1.3v2), which the old guard dereferenced at address 0 (typed_path_store SIGSEGV on the JIT tier). Four such reads here, two instructions each. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal).",
       "budgets": {
         "default": {
-          "module_insns": 1960
+          "module_insns": 1957
         }
       }
     },
@@ -536,13 +536,13 @@
       "name": "lambda_tune30_libm_no_gc",
       "script": "test/mir/lambda/tune30_libm_no_gc.ls",
       "language": "lambda",
-      "description": "Tune30 R1: a float-only libm leaf (sqrt/fabs over a float[] row) is emitted with no GC safepoint and no root frame -- the call cannot allocate, so its arguments need no rooting and the body needs no root-frame enter/exit. Baselined 2026-09-18.",
+      "description": "Tune30 R1: a float-only libm leaf (sqrt/fabs over a float[] row) is emitted with no GC safepoint and no root frame -- the call cannot allocate, so its arguments need no rooting and the body needs no root-frame enter/exit. Baselined 2026-09-18. Re-baseline 2026-09-23 (+32 in `_tune30_norms_#`, all in the guard-miss loop; the dense fast loop is unchanged): S7.10.5v3 makes `math.sqrt(null)` null, so the out-of-range copy of the loop gives each libm call a null-argument arm, the sums test for null, and the `float` accumulator rejects it (it had been NaN, silently). The return is now a native double (the libm lane proof no longer refuses a nullable argument), so the callers box instead of resolving a pending Item.",
       "budgets": {
         "default": {
-          "module_insns": 401,
+          "module_insns": 455,
           "functions": {
             "_tune30_norms_#": {
-              "insns": 168
+              "insns": 200
             }
           }
         }
@@ -552,13 +552,13 @@
       "name": "lambda_corpus_cube3d",
       "script": "test/benchmark/jetstream/cube3d2.ls",
       "language": "lambda",
-      "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 14487->14499; deltablue2 -12%, prettier_ast2 -14%. Tune29 \u00a720 (2026-09-17): the MIR tier joins its may-be-shared binding facts at control-flow merges and loop entries (LR12-17), so run_cube's stores after branch-local detaches keep their share-bit checks -- module_insns 14499->14574, run_cube 9655->9730; cube3d2 time unchanged (7.78 vs 7.79 ms). Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
+      "description": "Tune27 G9 (M6): emission size of the widest typed benchmark body. run_cube went 36,161 (Result43) -> 20,499 (packed float literals, dead layout-reload pruning) -> 15,850 (contract proofs reused, literals admitted by construction, static array lengths) -> the recorded value (literal-bounded loops with a proven root take the finite plan). The 10,000 target of G9 is not met; this probe makes any regrowth visible. Re-baseline 2026-09-14 (-238 module / -154 run_cube): sys-call arguments request their ABI rep at production, so fill(4, 0.0)'s literal is the folded constant Item again (the r47 release count). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 14487->14499; deltablue2 -12%, prettier_ast2 -14%. Tune29 \u00a720 (2026-09-17): the MIR tier joins its may-be-shared binding facts at control-flow merges and loop entries (LR12-17), so run_cube's stores after branch-local detaches keep their share-bit checks -- module_insns 14499->14574, run_cube 9655->9730; cube3d2 time unchanged (7.78 vs 7.79 ms). Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Re-baseline 2026-09-23 (-100 module / -8 run_cube): the shared lane null test drops a zero-init and an OR per nullable sum, and calc_normal's `float` length gains a cold terminal E201 edge for a null libm result (S7.10.5v3). Reusing each sum's null flag downstream removed 62 more bit tests (-289) but was withdrawn: the longer-lived flags cost nbody2 +15% in MIR's allocator (cf. Tune27 \u00a710.15).",
       "budgets": {
         "default": {
-          "module_insns": 16089,
+          "module_insns": 15989,
           "functions": {
             "_run_cube_#": {
-              "insns": 9790
+              "insns": 9782
             }
           }
         }

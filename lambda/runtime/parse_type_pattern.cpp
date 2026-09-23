@@ -375,8 +375,10 @@ AstNode* parse_island_unary(Lexer* lx) {
         operand = (AstNode*)un;
     }
 
-    // occurrence suffix — no space before it, so `d+ w` stays two atoms
-    if (lx->p < lx->end && (*lx->p == '?' || *lx->p == '+' || *lx->p == '*' || *lx->p == '[')) {
+    // occurrence suffix — no space before it, so `d+ w` stays two atoms.
+    // S11.1.2v2/S16.8.6v3: an island counts with the regex spelling `{n,m}`,
+    // the same one the type families use; `[n]` there was retired with them.
+    if (lx->p < lx->end && (*lx->p == '?' || *lx->p == '+' || *lx->p == '*' || *lx->p == '{')) {
         AstUnaryNode* un = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
         un->operand = operand;
         const char* op_start = lx->p;
@@ -387,8 +389,8 @@ AstNode* parse_island_unary(Lexer* lx) {
         else {
             int depth = 0;
             while (lx->p < lx->end) {
-                if (*lx->p == '[') { depth++; }
-                else if (*lx->p == ']') { depth--; if (!depth) { lx->p++; break; } }
+                if (*lx->p == '{') { depth++; }
+                else if (*lx->p == '}') { depth--; if (!depth) { lx->p++; break; } }
                 lx->p++;
             }
             if (depth) { fail(lx, "unterminated occurrence count"); return NULL; }
@@ -918,14 +920,26 @@ AstNode* parse_primary(Lexer* lx) {
     return (AstNode*)ident;
 }
 
-// Apply one suffix: `?`, `+`, `*`, `[n]`, `[n, m]`, `[n+]`, or array `[]`.
-// Counted occurrences never chain (`int[3]*` still needs grouping), but the
-// value-array constructor does: `T[][]` denotes an array of arrays. `T?[]`
-// keeps its existing nullable-element binding (D3.1.1v2).
+// `{n,}` with nothing after the comma: regex's open count, which S16.8.6v3
+// spells `{n+}`. A comma followed by digits is the ordinary `{n,m}`.
+static bool occurrence_count_is_open_comma(StrView op) {
+    if (op.length < 3 || op.str[0] != '{') return false;
+    const char* p = op.str + op.length - 1;          // the closing brace
+    while (p > op.str && (p[-1] == ' ' || p[-1] == '\t')) p--;
+    return p > op.str && p[-1] == ',';
+}
+
+// Apply one suffix: `?`, `+`, `*`, `{n}` / `{n,m}` / `{n+}`, `[n]`, or `[]`.
+// S11.1.6v2 splits the two families by bracket: braces count a *run* (the
+// occurrence family), brackets build an *array*. Counted occurrences never
+// chain (`int{3}*` still needs grouping), but the array constructor does, and
+// rank composes left to right (S11.1.1v3): `T[][]` is an array of arrays and
+// `int[2][3]` is three arrays of two. `T?[]` keeps its existing
+// nullable-element binding (D3.1.1v2), while `T[]?` is the nullable array.
 AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     if (lx->p >= lx->end) { return operand; }
     char c = *lx->p;
-    if (c != '?' && c != '+' && c != '*' && c != '[') { return operand; }
+    if (c != '?' && c != '+' && c != '*' && c != '[' && c != '{') { return operand; }
 
     AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
     TypeUnary* type = (TypeUnary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
@@ -938,6 +952,28 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     if (c == '?')      { lx->p++; ast_node->op = OPERATOR_OPTIONAL;  type->min_count = 0; type->max_count = 1; }
     else if (c == '+') { lx->p++; ast_node->op = OPERATOR_ONE_MORE;  type->min_count = 1; type->max_count = -1; }
     else if (c == '*') { lx->p++; ast_node->op = OPERATOR_ZERO_MORE; type->min_count = 0; type->max_count = -1; }
+    else if (c == '{') {
+        // S16.8.6v3: the counted repetition is `{n}`, `{n,m}` and `{n+}`. A
+        // line-start `{` never arrives here -- the statement parser ends the
+        // type at the line break (S16.2.3), so it is a fresh statement.
+        int depth = 0;
+        while (lx->p < lx->end) {
+            if (*lx->p == '{') { depth++; }
+            else if (*lx->p == '}') { depth--; if (!depth) { lx->p++; break; } }
+            lx->p++;
+        }
+        if (depth) { fail(lx, "unterminated occurrence count"); return NULL; }
+        StrView op = {op_start, (size_t)(lx->p - op_start)};
+        // The open bound is `{n+}`, not regex's trailing comma: a habit that
+        // writes `{n,}` gets told, rather than parsing as an exact count.
+        if (occurrence_count_is_open_comma(op)) {
+            fail_code(lx, ERR_INVALID_LITERAL,
+                "`T{n,}` is not the open count: write `T{n+}` for a run of n or more");
+            return NULL;
+        }
+        ast_node->op = OPERATOR_REPEAT;
+        parse_occurrence_count(op, &type->min_count, &type->max_count);
+    }
     else {
         int depth = 0;
         while (lx->p < lx->end) {
@@ -945,13 +981,22 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
             else if (*lx->p == ']') { depth--; if (!depth) { lx->p++; break; } }
             lx->p++;
         }
-        if (depth) { fail(lx, "unterminated occurrence count"); return NULL; }
+        if (depth) { fail(lx, "unterminated array count"); return NULL; }
         StrView op = {op_start, (size_t)(lx->p - op_start)};
-        // Empty brackets are the first-class homogeneous-array constructor.
-        // Counted brackets remain validator occurrence patterns and must not
-        // silently acquire value-array membership semantics (D3.1.1v2).
-        ast_node->op = op.length == 2 ? OPERATOR_ARRAY : OPERATOR_REPEAT;
-        if (ast_node->op == OPERATOR_REPEAT) {
+        // S11.1.6v2: brackets are the array family. `T[]` is any length and
+        // `T[n]` is that length fixed; a count on a *run* is the occurrence
+        // family, so `T[n+]` and `T[n, m]` are retired and name their
+        // replacement instead of silently changing meaning.
+        ast_node->op = OPERATOR_ARRAY;
+        if (op.length > 2) {
+            if (memchr(op.str, '+', op.length) || memchr(op.str, ',', op.length)) {
+                // fail_code carries the teaching text into the diagnostic;
+                // plain fail() would report only "invalid type pattern"
+                fail_code(lx, ERR_INVALID_LITERAL,
+                    "`T[n+]` and `T[n, m]` are retired: write `T{n+}` or "
+                    "`T{n,m}` for a run of T, or `[T{n,m}]` for an array of one");
+                return NULL;
+            }
             parse_occurrence_count(op, &type->min_count, &type->max_count);
         }
     }
@@ -964,15 +1009,15 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     type->type_index = lx->tp->type_list->length - 1;
     ast_node->type = wrap_type(lx, (Type*)type);
 
-    // Array rank composes left-to-right: `T[][]` is Array(Array(T)). Only an
-    // immediately empty pair is eligible; `T[3][]` remains a validator
-    // occurrence followed by trailing input instead of changing its meaning.
-    if (ast_node->op == OPERATOR_ARRAY && lx->p + 1 < lx->end &&
-            lx->p[0] == '[' && lx->p[1] == ']') {
-        return apply_occurrence(lx, (AstNode*)ast_node);
-    }
-    // `int?[]` — the array count binds outside the nullable element.
-    if (ast_node->op == OPERATOR_OPTIONAL && lx->p < lx->end && *lx->p == '[') {
+    // The chains above. Any bracket suffix may follow an array suffix -- a
+    // retired `T[n+]` or `T[n, m]` still fails in the recursive call, and a
+    // count no longer stops the chain now that `T[n]` is an array, not an
+    // occurrence. A `?` after one binds outside the whole array: `int[]?` is
+    // `int[] | null`, as `type V = int[]; V?` spells it. In `int?[]` the
+    // array binds outside the nullable element.
+    if (lx->p < lx->end && ((ast_node->op == OPERATOR_ARRAY &&
+            (*lx->p == '[' || *lx->p == '?')) ||
+            (ast_node->op == OPERATOR_OPTIONAL && *lx->p == '['))) {
         return apply_occurrence(lx, (AstNode*)ast_node);
     }
     return (AstNode*)ast_node;

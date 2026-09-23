@@ -95,12 +95,13 @@ let sym_invalid = 'world';
 -sym_invalid
 
 "Unary Operations - Error Cases - Unsupported Types:"
-let bool_val = true
-let null_val = null;
+let bool_val = true;
 +bool_val;
--bool_val;
-+null_val;
--null_val
+-bool_val
+
+"Unary Operations - Null Propagates (S7.1.1v3):"
+let null_val = null;
+[+null_val, -null_val]
 
 "Unary Operations - Mixed Expressions:";
 +("42") + -("10");
@@ -120,15 +121,8 @@ true / false
 true div false
 true ** false
 
-"Null Arithmetic (errors):"
-null + 5
-5 + null
-null * 5
-5 * null
-null / 5
-5 / null
-null ** 5
-5 ** null
+"Null Arithmetic (null propagates, S7.1.1v3):";
+[null + 5, 5 + null, null * 5, 5 * null, null / 5, 5 / null, null ** 5, 5 ** null]
 
 "String with Numbers (errors):"
 5 + "hello"

@@ -83,6 +83,92 @@ static bool array_pattern_decimal_items_equal(Item item, Item pattern) {
     return decimal_cmp_items(item, pattern, &comparison) && comparison == 0;
 }
 
+// The occurrence slot of a sequence pattern: a run of the sequence's items
+// (S11.1.6v2). The array family is not a run -- `[1, int[], 2]` still wants one
+// array in the middle -- so only these four operators consume many items.
+static TypeUnary* array_pattern_slot_run(const TypeArray* array_type, int64_t slot) {
+    if (!array_type->item_is_type_pattern || !array_type->item_is_type_pattern[slot]) {
+        return NULL;
+    }
+    Type* pattern = unwrap_type(array_type->item_patterns[slot].type);
+    if (!pattern || pattern->type_id != LMD_TYPE_TYPE ||
+            pattern->kind != TYPE_KIND_UNARY) return NULL;
+    TypeUnary* unary = (TypeUnary*)pattern;
+    switch (unary->op) {
+    case OPERATOR_OPTIONAL: case OPERATOR_ONE_MORE:
+    case OPERATOR_ZERO_MORE: case OPERATOR_REPEAT:
+        return unary;
+    default:
+        return NULL;
+    }
+}
+
+static bool array_pattern_literal_matches(Item item, Item pattern);
+
+static bool array_pattern_slot_matches(SchemaValidator* validator,
+        Item child_item, const TypeArray* array_type, int64_t slot) {
+    if (array_type->item_is_type_pattern && array_type->item_is_type_pattern[slot]) {
+        bool handled = false;
+        bool matched = array_pattern_simple_type_matches(child_item,
+            array_type->item_patterns[slot].type, &handled);
+        if (handled) return matched;
+        ValidationResult* slot_result = validate_against_type(validator,
+            child_item.to_const(), array_type->item_patterns[slot].type);
+        return slot_result && slot_result->valid;
+    }
+    return array_pattern_literal_matches(child_item, array_type->item_patterns[slot]);
+}
+
+static bool array_pattern_has_run(const TypeArray* array_type) {
+    for (int64_t slot = 0; slot < array_type->length; slot++) {
+        if (array_pattern_slot_run(array_type, slot)) return true;
+    }
+    return false;
+}
+
+// One non-run slot against one item: the same two tests the exact-length loop
+// below makes, as a verdict.
+static bool array_pattern_slot_matches(SchemaValidator* validator,
+        Item child_item, const TypeArray* array_type, int64_t slot);
+
+// Match slots [slot..] against items [index..] (S11.1.6v2). A run consumes
+// between its bounds, so the matcher backtracks over the counts a run can
+// take; patterns are small and each item is tested at most once per count.
+static bool array_pattern_runs_match(SchemaValidator* validator,
+        ArrayReader& array, int64_t length, const TypeArray* array_type,
+        int64_t slot, int64_t index) {
+    if (slot >= array_type->length) return index == length;
+    TypeUnary* run = array_pattern_slot_run(array_type, slot);
+    if (!run) {
+        if (index >= length) return false;
+        if (!array_pattern_slot_matches(validator, array.get(index).item(),
+                array_type, slot)) return false;
+        return array_pattern_runs_match(validator, array, length, array_type,
+            slot + 1, index + 1);
+    }
+    CountConstraint bounds = get_count_constraint(run);
+    int64_t available = length - index;
+    int64_t most = bounds.max < 0 ? available : bounds.max;
+    if (most > available) most = available;
+    Type* operand = unwrap_type(run->operand);
+    TypeType wrapper;
+    wrapper.type_id = LMD_TYPE_TYPE;
+    wrapper.type = operand;
+    for (int64_t taken = 0; taken <= most; taken++) {
+        // Each item the run swallows is tested once, as `taken` grows past it;
+        // the first item that fails ends the run's reach.
+        if (taken > 0) {
+            Item last = array.get(index + taken - 1).item();
+            ValidationResult* elem = validate_against_base_type(validator,
+                last.to_const(), &wrapper);
+            if (!elem || !elem->valid) break;
+        }
+        if (taken >= bounds.min && array_pattern_runs_match(validator, array,
+                length, array_type, slot + 1, index + taken)) return true;
+    }
+    return false;
+}
+
 static bool array_pattern_literal_matches(Item item, Item pattern) {
     TypeId item_type = get_type_id(item);
     TypeId pattern_type = get_type_id(pattern);
@@ -389,6 +475,17 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
         return result;
     }
 
+    // An N-D typed array's reader walks slab cursors, and a cursor's item() is
+    // the whole base array, so the patterns below tested the matrix where
+    // they meant a row. Its elements are its leading-axis rows (S11.1.1v3):
+    // walk them as the Items they are, rooted, since a row view allocates.
+    RootFrame roots(1);
+    Rooted<Item> rows(roots, ItemNull);
+    if (item.type_id() == LMD_TYPE_ARRAY_NUM && array_num_rank(item.array_num) > 1) {
+        rows.set({.array = (Array*)ensure_typed_array({.item = item.item}, LMD_TYPE_ANY)});
+        if (rows.get().array) item_reader = ItemReader(rows.get().to_const());
+    }
+
     // Get ArrayReader for type-safe iteration
     ArrayReader array = item_reader.asArray();
     int64_t length = array.length();
@@ -396,17 +493,18 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     log_debug("Validating array with length: %ld", length);
 
     if (array_type->item_patterns) {
-        // A single occurrence item such as `[int+]` is represented in the
-        // tuple-pattern slots too; dispatch it as a container occurrence
-        // before the exact-length tuple check, or `*` rejects an empty list.
-        if (array_type->length == 1 && array_type->item_is_type_pattern &&
-                array_type->item_is_type_pattern[0]) {
-            Type* pattern = unwrap_type(array_type->item_patterns[0].type);
-            if (pattern && pattern->type_id == LMD_TYPE_TYPE &&
-                    pattern->kind == TYPE_KIND_UNARY) {
-                return validate_occurrence_type(validator, item,
-                    (TypeUnary*)pattern);
+        // S11.1.6v2: an occurrence in a sequence-pattern slot is a *run* of the
+        // sequence's items, and zero items is void -- `[1, int*, 2]` matches
+        // `[1, 2]` and `[1, 5, 6, 2]`. Every other slot consumes exactly one
+        // item, so a pattern with no run keeps the exact-length check below.
+        if (array_pattern_has_run(array_type)) {
+            result->valid = array_pattern_runs_match(validator, array, length,
+                array_type, 0, 0);
+            if (!result->valid) {
+                add_constraint_error(result, validator,
+                    "Array does not match the sequence pattern");
             }
+            return result;
         }
         if (length != array_type->length) {
             char error_msg[256];
@@ -575,7 +673,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
             ItemReader field_value = get_value(field_name);
             ConstItem field_item = field_value.item().to_const();
             if (check_null && field_item.type_id() == LMD_TYPE_NULL) {
-                if (!is_type_optional(shape_entry->type)) {
+                if (!type_admits_null_value(shape_entry->type)) {
                     add_null_value_error(result, validator, field_name);
                     result->valid = false;
                 }
@@ -602,7 +700,7 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
         ItemReader field_value = get_value(field_name);
         ConstItem field_item = field_value.item().to_const();
         if (check_null && field_item.type_id() == LMD_TYPE_NULL) {
-            if (!is_type_optional(shape_entry->type)) {
+            if (!type_admits_null_value(shape_entry->type)) {
                 add_null_value_error(result, validator, field_name);
                 result->valid = false;
             }
@@ -636,7 +734,7 @@ static bool shape_entries_match_fast(SchemaValidator* validator, ShapeEntry* sha
         ItemReader field_value = get_value(field_name);
         ConstItem field_item = field_value.item().to_const();
         if (check_null && field_item.type_id() == LMD_TYPE_NULL) {
-            if (!is_type_optional(shape_entry->type)) return false;
+            if (!type_admits_null_value(shape_entry->type)) return false;
             continue;
         }
         ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);

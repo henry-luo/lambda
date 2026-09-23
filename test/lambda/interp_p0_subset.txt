@@ -293,11 +293,13 @@ test/lambda/transpile_typed_closure.ls	direct
 test/lambda/trim.ls	direct
 test/lambda/type.ls	direct
 test/lambda/type2.ls	direct
+test/lambda/type_array_rank.ls	direct
 test/lambda/type_binder.ls	direct
 test/lambda/type_subtype_op.ls	direct
 test/lambda/type_contract_metadata.ls	direct
 test/lambda/type_contract_metadata_import.ls	direct
 test/lambda/type_contract_metadata_module.ls	direct
+test/lambda/type_counted_rank.ls	direct
 test/lambda/type_e228_acknowledgment.ls	direct
 test/lambda/type_enforce_dynamic_abi.ls	direct
 test/lambda/type_enforce_input_schema.ls	direct
@@ -307,6 +309,7 @@ test/lambda/type_implicit_param_match_lint.ls	direct
 test/lambda/type_infer_ip1.ls	direct
 test/lambda/type_infer_ip2.ls	direct
 test/lambda/type_negation.ls	direct
+test/lambda/type_nullable_array.ls	direct
 test/lambda/type_occurrence.ls	direct
 test/lambda/type_or_narrowing.ls	direct
 test/lambda/type_param_error_short_circuit.ls	direct
@@ -494,6 +497,7 @@ test/lambda/graph/structurizr/stage4d.ls	direct
 test/lambda/graph/structurizr/this_relationships.ls	direct
 test/lambda/proc/abstract_numeric_field.ls	run
 test/lambda/proc/bool_lane_and_chain.ls	run
+test/lambda/proc/boundary_deferred_checks.ls	run
 test/lambda/proc/clock.ls	run
 test/lambda/proc/cow_alias.ls	run
 test/lambda/proc/cow_arraynum_alias.ls	run
@@ -521,11 +525,15 @@ test/lambda/proc/interp_typed_var_rebind.ls	run
 test/lambda/proc/interp_var_writeback.ls	run
 test/lambda/proc/jit_tail_if_push_error.ls	run
 test/lambda/proc/let_finality.ls	run
+test/lambda/proc/map_contract_reordered_literal.ls	run
 test/lambda/proc/map_object_robustness.ls	run
 test/lambda/proc/match_stam.ls	run
 test/lambda/proc/module_array_lane.ls	run
+test/lambda/proc/native_lane_consumers.ls	run
 test/lambda/proc/native_math_type_preserving.ls	run
 test/lambda/proc/nested_int_index.ls	run
+test/lambda/proc/null_numeric_propagation.ls	run
+test/lambda/proc/nullable_float_lane_admission.ls	run
 test/lambda/proc/object_direct_access.ls	run
 test/lambda/proc/object_method_write.ls	run
 test/lambda/proc/object_mutation.ls	run

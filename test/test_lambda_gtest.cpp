@@ -326,6 +326,36 @@ static const TierParityFixture kTune27TierParity[] = {
     // interpreter returned an array. The divergence is only visible on a tier
     // that compiles, so this fixture is pinned to all three.
     {"test/lambda/spread_star.ls", "test/lambda/spread_star.txt"},
+    // S11.4.1v3 (J1/J2): the JIT alone skipped deferred boundary checks -- a
+    // literal read as `null`, and concrete values bound to `T[]?`, `T*`, `N?`
+    // and reassigned `var`s -- while T0 raised E201. Only a compiling tier
+    // can show it, so the fixture is pinned to all three.
+    {"test/lambda/proc/boundary_deferred_checks.ls",
+     "test/lambda/proc/boundary_deferred_checks.txt"},
+    // S11.1.1v3/S11.1.6v2: admitted `T?[]` native lanes read by every consumer,
+    // nullable element contracts, and rank. The JIT keeps its own lane reads
+    // and call-result unboxing, so these are pinned to all three tiers.
+    {"test/lambda/type_nullable_array.ls", "test/lambda/type_nullable_array.txt"},
+    {"test/lambda/type_array_rank.ls", "test/lambda/type_array_rank.txt"},
+    // S11.1.1v3: counted ranks (`int[2][3]`) parse and count each axis.
+    {"test/lambda/type_counted_rank.ls", "test/lambda/type_counted_rank.txt"},
+    {"test/lambda/proc/native_lane_consumers.ls",
+     "test/lambda/proc/native_lane_consumers.txt"},
+    // D3.2.4v4: a reordered literal reifies into its contract's layout by
+    // name. The JIT adopted the contract and filled it in source order, so
+    // both tiers misread it, and only a compiling tier shows the first half.
+    {"test/lambda/proc/map_contract_reordered_literal.ls",
+     "test/lambda/proc/map_contract_reordered_literal.txt"},
+    // S11.1.6v2 + S11.4.5: a `float?` / `float | null` contract admits an int
+    // as `float` does. The JIT failed MIR verification on `let x: float? = 5`
+    // and T0 kept the int, so only all three tiers together show both.
+    {"test/lambda/proc/nullable_float_lane_admission.ls",
+     "test/lambda/proc/nullable_float_lane_admission.txt"},
+    // S7.1.1v3/S7.10.5v3: null through the numeric functions and unary
+    // operators. The JIT's native libm, rounding and unary lanes computed on
+    // the null sentinel's bits, which only a compiling tier shows.
+    {"test/lambda/proc/null_numeric_propagation.ls",
+     "test/lambda/proc/null_numeric_propagation.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

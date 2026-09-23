@@ -229,5 +229,17 @@ run A "open closes: [ on next line"        'let d = temp("t")\nopen d { commit }
 run A "open is still a data name"          'let m = {open: true}\nm.open\n'
 run A "del is still a data name"           '<del "x">\n'
 
+echo "--- S11.1.1v3 / S11.1.6v2 type suffix chains ---"
+run A "counted ranks chain"                'type G = int[2][3]\n'
+run A "open rank over a counted rank"      'type G = int[][3]\n'
+run A "three ranks"                        'type G = int[2][1][1]\n'
+run A "nullable array"                     'type G = int[]?\n'
+run A "nullable array of nullables"        'type G = int?[]?\n'
+run A "array of nullable arrays"           'type G = int[]?[]\n'
+run A "rank chain in an annotation"        'let g: int[2][3] = [[1, 2], [3, 4], [5, 6]]\n'
+run R "two ? never meet"                   'type G = int??\n'
+run R "no ? after a nullable array"        'type G = int[]??\n'
+run R "no run count after an array"        'type G = int[]+\n'
+
 echo
 echo "pass=$pass fail=$fail"

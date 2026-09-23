@@ -1,7 +1,7 @@
 # Lambda Design: Type Patterns — Occurrence, String Islands, Constrained Types
 
 - **Date:** 2026-02-03 (occurrence proposal); refreshed 2026-08-18 (current doc conventions; added constrained-type hoisting §3)
-- **Status:** **§1.3 (2026-09-22) SUPERSEDES the §1.2 spellings and semantics** — ratified as S11.1.1v3 / S11.1.6 / S16.8.6v2 (semantics 29.0.0), not yet implemented. Earlier: §1 occurrence syntax and §2 string-pattern alignment LANDED (grammar `occurrence`/`occurrence_count`, pattern islands per S11.1.2); §3 constrained-type hoisting FULLY LANDED 2026-08-19 — grammar hoist, external scanner, and hand parser all ACTIVE in production (3808/3808 green; parser.c −17.4%, parser.o −21.2% vs pre-campaign; see the impl plan's metrics) (CT1v2 statement-level slots only; CT3v2 drops value-annotation `^`; CT8v2 nested map/element are pure patterns; CT9/CT10 resolved; none open)
+- **Status:** **§1.3 (2026-09-22) SUPERSEDES the §1.2 spellings and semantics** — ratified as S11.1.1v3 / S11.1.6v2 / S16.8.6v3 (semantics 29.0.0; the open count respelled `T{n+}` 2026-09-23, semantics 30.0.0) and **LANDED 2026-09-23** in P5 of [Lambda_List_Fixes](<impl/Lambda_List_Fixes (done).md>) §14 — two families split by bracket, run admission at boundaries and in sequence slots, `<:` across the families, the retired spellings rejected by name, and the corpus and user docs migrated. Two spelling restrictions the brace ambiguity forces: a count binds tight (`int{2}`) and a return type never takes one (the body wins; use a type alias). The open count is `T{n+}`; regex's `T{n,}` is rejected by name. Earlier: §1 occurrence syntax and §2 string-pattern alignment LANDED (grammar `occurrence`/`occurrence_count`, pattern islands per S11.1.2); §3 constrained-type hoisting FULLY LANDED 2026-08-19 — grammar hoist, external scanner, and hand parser all ACTIVE in production (3808/3808 green; parser.c −17.4%, parser.o −21.2% vs pre-campaign; see the impl plan's metrics) (CT1v2 statement-level slots only; CT3v2 drops value-annotation `^`; CT8v2 nested map/element are pure patterns; CT9/CT10 resolved; none open)
 - **Scope:** the type-pattern sub-language — occurrence quantifiers, string/symbol pattern islands, and where the `that` constraint clause sits in the grammar; parser-size consequences and the external-scanner direction for type patterns
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S11.1.1–S11.1.3 (bracket types, pattern islands, range types), S11.2.1 (match arms incl. constrained-arm spelling), S10.1.1 (`|` is union everywhere), S10.1.3 (`~` scoping innermost-wins), S10.3.1 (keyword operators), S7.4.5 (system fn failures are values, never `T^E`), S7.5.1 (`T^` must-engage receiving positions), SO9 (constrained-type predicate enforcement unowned)
 - **Related:** `vibe/Lambda_Grammar_Reduce4.md` (parser-size campaign; states × symbols levers), `vibe/Lambda_Type_String_Pattern.md` / `Lambda_Type_String_Pattern2.md` (island deliberations), `doc/Lambda_Type.md` §Constrained Types, `doc/Lambda_Expr_Stam.md` §Filter (`that`)
@@ -46,14 +46,14 @@ type RGB = (int[3])                // grouped; (T*)[2]-style grouping is the cha
 fn validate_range(values: int[2]) bool { values[0] <= values[1] }
 ```
 
-### 1.3 Respelled and split (decided 2026-09-22 — S11.1.1v3, S11.1.6, S16.8.6v2)
+### 1.3 Respelled and split (decided 2026-09-22 — S11.1.1v3, S11.1.6v2, S16.8.6v3)
 
 **Ruling (USER).** The one occurrence syntax of §1.2 is split into two
 families by *concept*, and the counted spelling moves to the regex form:
 
 | Family | Spellings | Describes |
 |---|---|---|
-| Occurrence | `T?` `T*` `T+` `T{n,m}` — `T{n}` exactly, `T{n,}` at least (standard regex; `{,m}` is not) | a **run** of `T`s — which is what a list is (S2.5) |
+| Occurrence | `T?` `T*` `T+` `T{n,m}` — `T{n}` exactly, `T{n+}` at least (`{n,}` and `{,m}` are not spellings) | a **run** of `T`s — which is what a list is (S2.5) |
 | Array | `T[]` `T[n]` `T[n][m]` | an **array**; `T[n]` is `T[]` with a fixed length |
 
 - In a sequence-pattern slot (`[…]`, `(…)`, `\(…)` islands) an occurrence
@@ -63,7 +63,7 @@ families by *concept*, and the counted spelling moves to the regex form:
 - As a boundary type (binding, parameter, return, field, `is`, `match`) an
   occurrence admits exactly what a run *is* once collapsed (S2.5.5v2):
   `null` (0), a bare `T` (1), a sequence of ≥ 2 `T` — a list or its stored
-  array image (S2.5.6). So `T?` ≡ `T | null`, `T*` ≡ `T{0,}`, `T+` ≡ `T{1,}`,
+  array image (S2.5.6). So `T?` ≡ `T | null`, `T*` ≡ `T{0+}`, `T+` ≡ `T{1+}`,
   and `{f: int*}` admits `{f: null}`, `{f: 5}`, `{f: [5, 6]}` but not
   `{f: [5]}` or `{f: []}` — those are arrays, `int[]`.
 - The families coincide at ≥ 2 items and differ only where no list exists:
@@ -86,16 +86,19 @@ that reason. Deliberation: `Lambda_Design_Syntax.md` §7.28.
 **Superseded (§1.2 table, kept for the record — not normative):**
 ~~`T[n]` exactly n · `T[min, max]` min..max inclusive · `T[n+]` at least n ·
 `T*` = `T[0+]`, `T+` = `T[1+]`, `T?` = `T[0, 1]`~~ → `T{n}` · `T{n,m}` ·
-`T{n,}` · `T*` = `T{0,}`, `T+` = `T{1,}`, `T?` = `T{0,1}` ≡ `T | null`;
+`T{n+}` · `T*` = `T{0+}`, `T+` = `T{1+}`, `T?` = `T{0,1}` ≡ `T | null`;
 `T[n]` is now an array of exactly n. The no-chaining rule (`int{3}*` needs
 grouping) and the `int?[]` special case (an array of nullable ints) stand.
 
-**Implementation.** Not started. Grammar `occurrence_count` (`grammar.js`)
-and the C parser's `apply_occurrence` (`parse_type_pattern.cpp`) still read
-`[n]`/`[n+]`/`[n, m]`; string islands spell `\(d[3])`; `null is int*` is
-false and `[] is int?` is true. Migration: every `[n]`/`[n+]`/`[n, m]`
-occurrence in the tree and `doc/Lambda_Type.md` §Type Occurrences. Tracked as
-[LR03-12](Lambda_Issue_Ledger.md).
+**Implementation.** Landed 2026-09-23 in P5 of
+[Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) §14, with the
+open count respelled `T{n+}` the same day (§16 there). `grammar.js`,
+`apply_occurrence` and the island parser read the brace counts; `T[n+]`,
+`T[n, m]` and regex's `T{n,}` are rejected by name; `null is int*` is true and
+`[] is int?` false. The corpus, the user docs (`Lambda_Type.md`,
+`Lambda_Reference.md`, `Lambda_Cheatsheet.md`, `Lambda_Validator_Guide.md`)
+and §2's island examples below are migrated. Closed
+[LR03-12](<Lambda_Issue_Ledger (fixed).md#lr03-12>).
 
 ## 2. String pattern alignment (decided, landed as islands)
 
@@ -104,16 +107,17 @@ The 2026-02 proposal applied the same occurrence forms to string patterns writte
 Inside an island: quoted literals are strings; `d` `w` `s` `a` `.` `...` are the reserved pattern atoms; whitespace is concatenation; and the ordinary union/grouping/occurrence/negation/`to` rules apply — so §1's occurrence forms carry over unchanged. The island tag is part of the type value: matching checks the value domain before content (a string never satisfies a symbol pattern). The island is self-delimiting, which matters for §3.5's scanner direction.
 
 ```lambda
-type Phone = \(d[3] "-" d[4])                  // 555-1234
-type Date = \(d[4] "-" d[2] "-" d[2])          // 2026-08-18
-type Lower = \(("a" to "z")[2, 8])             // 2..8 lowercase letters
+type Phone = \(d{3} "-" d{4})                  // 555-1234
+type Date = \(d{4} "-" d{2} "-" d{2})          // 2026-08-18
+type Lower = \(("a" to "z"){2,8})              // 2..8 lowercase letters
 ```
 
 | Regex | Lambda island | Meaning |
 |-------|---------------|---------|
-| `a{3}` | `\("a"[3])` | exactly 3 |
-| `a{2,5}` | `\("a"[2, 5])` | 2 to 5 |
-| `\d{4}` | `\(d[4])` | 4 digits |
+| `a{3}` | `\("a"{3})` | exactly 3 |
+| `a{2,5}` | `\("a"{2,5})` | 2 to 5 |
+| `a{2,}` | `\("a"{2+})` | 2 or more — the one spelling that differs (S16.8.6v3) |
+| `\d{4}` | `\(d{4})` | 4 digits |
 
 ## 3. Constrained types: hoisting `that` to the annotation top level (proposal, 2026-08-18)
 

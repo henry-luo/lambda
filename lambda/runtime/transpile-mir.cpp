@@ -5060,6 +5060,39 @@ static MIR_reg_t emit_float_null_lane(MirTranspiler* mt) {
     return lane;
 }
 
+// Is this int or float lane value null? Each lane spells absence in its own
+// register -- INT_LANE_NULL, or the float lane's reserved NaN payload -- and
+// the int sentinel does not survive widening (it reads as 0.0), so the test
+// runs on the lane the value lives in.
+static MIR_reg_t emit_scalar_lane_null_test(MirTranspiler* mt, MIR_reg_t lane,
+        TypeId tid) {
+    if (tid == LMD_TYPE_FLOAT) return emit_float_lane_null_test(mt, lane);
+    MIR_reg_t is_null = new_reg(mt, "ilnull", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+        MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, lane),
+        MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+    return is_null;
+}
+
+// One absent operand makes a scalar result absent (S7.1.1v3, S7.10.5v3): OR
+// the tests of the operands that may be null; 0 when none may be. The flag is
+// a fresh register, so a flag cached for one operand's value
+// (mir_note_float_null_flag) is never widened in place.
+static MIR_reg_t emit_scalar_lanes_null_flag(MirTranspiler* mt, int count,
+        const MIR_reg_t* lanes, const TypeId* tids, const bool* nullable) {
+    MIR_reg_t flag = 0;
+    for (int i = 0; i < count; i++) {
+        if (!nullable[i]) continue;
+        MIR_reg_t is_null = emit_scalar_lane_null_test(mt, lanes[i], tids[i]);
+        if (!flag) { flag = is_null; continue; }
+        MIR_reg_t joined = new_reg(mt, "lanes_null", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, joined),
+            MIR_new_reg_op(mt->ctx, flag), MIR_new_reg_op(mt->ctx, is_null)));
+        flag = joined;
+    }
+    return flag;
+}
+
 static MIR_reg_t emit_box_float_cold(void* owner, MIR_reg_t value) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     return emit_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
@@ -5902,6 +5935,14 @@ static MirValue lambda_convert_rep(void* owner, MirValue value,
             // reads 2 as BOOL_ERROR; the lane boxer restores ItemNull, which is
             // what the interpreter tier returns for the same read (D2.5.1).
             reg = emit_box_bool_lane(mt, value.reg);
+        } else if (conversion_type == LMD_TYPE_FLOAT &&
+                value.rep == VALUE_REP_F64 && source &&
+                mir_expr_may_be_null(mt, source)) {
+            // The same for the float lane's reserved null payload: arithmetic
+            // on a nullable read keeps only the payload type (`v[i] + 1.0` is
+            // `float`), so the plain boxer published its null as NaN
+            // (S7.1.1v3: `null + 1` is null).
+            reg = emit_box_float_lane(mt, value.reg);
         } else {
             // A widened source contract cannot describe a specialized raw
             // lane. Only a contract whose canonical carrier matches this
@@ -6171,7 +6212,13 @@ static MIR_reg_t emit_checked_boundary(MirTranspiler* mt, MIR_reg_t value,
         // (D2.4.1–D2.4.3).
         return emit_native_u32_boundary(mt, value, site);
     }
-    MIR_reg_t boxed = emit_box(mt, value, value_type);
+    // A float lane may hold the nullable lane's reserved null (a nullable
+    // read, or arithmetic or a math call on one); the plain boxer published
+    // it as NaN, which the check then admitted as a float (S11.4.1v3). No NaN
+    // computed from non-null values carries that payload, so the lane boxer
+    // is exact here.
+    MIR_reg_t boxed = value_type == LMD_TYPE_FLOAT
+        ? emit_box_float_lane(mt, value) : emit_box(mt, value, value_type);
     // Tune27 §6: the static census counts these calls per loop but cannot name
     // them; this line attributes each emitted check to its site and target.
     log_debug("mir-boundary: fn=%s site='%s' target=%d value=%d",
@@ -6418,6 +6465,18 @@ static bool mir_argument_may_return_item_error(MirTranspiler* mt,
 
 static bool mir_index_statically_in_bounds(MirTranspiler* mt, AstFieldNode* index);
 
+static inline bool mir_native_math_type_preserving(SysFunc fn,
+        bool* int_is_identity);
+
+// The numeric sys funcs whose native lowering keeps a null argument's result
+// in a native lane (S7.10.5v3): the libm family, the type-preserving rounding
+// family and the scalar min/max pair.
+static bool mir_sysfunc_lane_propagates_null(SysFunc fn) {
+    return sysfunc_native_math_always_float(fn) ||
+        mir_native_math_type_preserving(fn, NULL) ||
+        fn == SYSFUNC_MIN2 || fn == SYSFUNC_MAX2;
+}
+
 static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node) {
     if (!node) return false;
     // A dense typed-array guard proves every participating index is in-bounds;
@@ -6466,6 +6525,26 @@ static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node) {
         default:
             return false;
         }
+    }
+    if (base->node_type == AST_NODE_UNARY) {
+        // S7.1.1v3: -null and +null are null; the native unary lanes carry
+        // the operand's null through (emit_unary_value)
+        AstUnaryNode* unary = (AstUnaryNode*)base;
+        return (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) &&
+            mir_expr_may_be_null(mt, unary->operand);
+    }
+    if (base->node_type == AST_NODE_CALL_EXPR) {
+        // S7.10.5v3: a numeric sys func returns null for a null argument, and
+        // its native lowering keeps that null in the result's lane
+        AstCallNode* call = (AstCallNode*)base;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        SysFuncInfo* info = callee && callee->node_type == AST_NODE_SYS_FUNC
+            ? ((AstSysFuncNode*)callee)->fn_info : NULL;
+        if (!info || !mir_sysfunc_lane_propagates_null(info->fn)) return false;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (mir_expr_may_be_null(mt, arg)) return true;
+        }
+        return false;
     }
     if (base->node_type != AST_NODE_IDENT) return false;
     AstIdentNode* ident = (AstIdentNode*)base;
@@ -6972,14 +7051,18 @@ static bool mir_index_statically_in_bounds(MirTranspiler* mt, AstFieldNode* inde
         mir_int_literal_value(mt, index->field, &k) && k >= 0 && k < var->known_length;
 }
 
-// the `null` keyword is a PRIMARY without an expression (see the region
-// immediate-value test), so an unwrapped view of it is a NULL AstNode*
+// The `null` literal: a leaf PRIMARY (one that holds its value itself, see
+// ast_unwrap_primary_to_leaf) typed null, or an explicit AST_NODE_NULL. Every
+// literal is such a leaf -- `5` and `"s"` too -- so the null TYPE is the test.
+// Testing the leaf shape alone read every literal as `null`, and
+// mir_boundary_is_redundant then let `5` cross `int[] | null` unchecked on the
+// JIT while the interpreter rejected it (S11.4.1v3).
 static bool mir_is_null_literal(AstNode* node) {
-    if (node && node->node_type == AST_NODE_PRIMARY) {
-        return !((AstPrimaryNode*)node)->expr;
-    }
-    node = ast_unwrap_primary(node);
-    return !node || node->node_type == AST_NODE_NULL;
+    AstNode* leaf = ast_unwrap_primary_to_leaf(node);
+    if (!leaf) return false;
+    if (leaf->node_type == AST_NODE_NULL) return true;
+    return leaf->node_type == AST_NODE_PRIMARY && leaf->type &&
+        leaf->type->type_id == LMD_TYPE_NULL;
 }
 
 static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, Type* target) {
@@ -7085,6 +7168,36 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
 
     }
     return mir_boundary_is_lane_identity(mt, source_node, target);
+}
+
+// S11.4.1v3: a boundary is statically proven, statically rejected, or a
+// deferred runtime check -- never unchecked. The declaration, reassignment and
+// argument predicates each list carrier facts that force their check; the
+// checker's own verdict is the fact they share, so a crossing it left to the
+// runtime is checked here too, as boundary_numeric_admission_is_dynamic
+// already guarantees for numeric pairs. Without it a concrete scalar skipped
+// `int[]?`, `int*` and `N?` contracts (and every reassignment, which the
+// checker never decides), so the JIT alone bound `5` or `"s"` to them.
+// `carrier` is the value's physical lane; `parameter` names the formal when the
+// crossing is a call argument.
+static bool mir_boundary_statically_deferred(AstNode* source_node, Type* contract,
+        TypeId carrier, TypeParam* parameter = NULL) {
+    // a binder site is admitted by its binder (S11.4.8v2); the checker reads
+    // it as proven for the same reason
+    if (!source_node || !contract || (parameter && parameter->binder)) return false;
+    // A value already on the contract's own canonical lane (`float` into
+    // `float`) leaves the relation nothing to defer but absence, and absence is
+    // mir_expr_may_be_null's, which every caller asks. A nullable index read
+    // types `total + math.sqrt(v[i])` as possibly null, so without this each
+    // accumulator step paid a boxed check whose one possible failure, that
+    // null, the caller's native null test already rejects. Likewise a
+    // concrete lane cannot hold an error, the one thing the implicit
+    // `any \ error` of an untyped parameter rejects (S11.4.3).
+    if (carrier != LMD_TYPE_ANY && carrier != LMD_TYPE_ERROR &&
+            (contract == type_info[carrier].type ||
+             contract == &TYPE_ANY_NO_ERROR)) return false;
+    return lambda_static_boundary_relation(source_node->type, contract,
+        parameter != NULL) != STATIC_BOUNDARY_PROVEN;
 }
 
 // A native indexed load can be lane-proven while still carrying the reserved
@@ -7711,15 +7824,11 @@ static bool mir_is_nullable_container_type(TypeId type_id) {
     }
 }
 
+// The null literal, or any expression statically typed or carried as null.
 static bool mir_is_null_literal_node(MirTranspiler* mt, AstNode* node) {
-    if (node && node->node_type == AST_NODE_PRIMARY &&
-            !((AstPrimaryNode*)node)->expr && node->type &&
-            node->type->type_id == LMD_TYPE_NULL) {
-        return true;
-    }
+    if (mir_is_null_literal(node)) return true;
     node = ast_unwrap_primary(node);
-    return node && (node->node_type == AST_NODE_NULL ||
-        (node->type && node->type->type_id == LMD_TYPE_NULL) ||
+    return node && ((node->type && node->type->type_id == LMD_TYPE_NULL) ||
         mir_expr_carrier_type(mt, node) == LMD_TYPE_NULL);
 }
 
@@ -12708,21 +12817,11 @@ static MIR_reg_t mir_emit_int_lane_pair_in_band(MirTranspiler* mt,
 static MIR_reg_t emit_int_lane_pair_null_test(MirTranspiler* mt,
         AstBinaryNode* comparison, LaneReg left_lane, LaneReg right_lane) {
     if (!mt || !comparison) return 0;
-    AstNode* nodes[2] = {comparison->left, comparison->right};
-    LaneReg lanes[2] = {left_lane, right_lane};
-    MIR_reg_t has_null = 0;
-    for (int i = 0; i < 2; i++) {
-        if (!mir_expr_may_be_null(mt, nodes[i])) continue;
-        MIR_reg_t is_null = new_reg(mt, "icmp_null", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-            MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, lanes[i].r),
-            MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
-        if (!has_null) { has_null = is_null; continue; }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-            MIR_new_reg_op(mt->ctx, has_null), MIR_new_reg_op(mt->ctx, has_null),
-            MIR_new_reg_op(mt->ctx, is_null)));
-    }
-    return has_null;
+    MIR_reg_t lanes[2] = {left_lane.r, right_lane.r};
+    TypeId tids[2] = {LMD_TYPE_INT, LMD_TYPE_INT};
+    bool nullable[2] = {mir_expr_may_be_null(mt, comparison->left),
+        mir_expr_may_be_null(mt, comparison->right)};
+    return emit_scalar_lanes_null_flag(mt, 2, lanes, tids, nullable);
 }
 
 // The lane arms answer in signed order and fold the null sentinel into `false`
@@ -13310,46 +13409,22 @@ static MIR_reg_t emit_nullable_float_arith(MirTranspiler* mt, Operator op,
     right_value.rep = right_tid == LMD_TYPE_INT ? VALUE_REP_INT_LANE : VALUE_REP_F64;
     right_value.mir_type = em_mir_type_for_rep(right_value.rep);
     right_value.maybe_pending = false;
-    MIR_reg_t has_null = new_reg(mt, "fa_null", MIR_T_I64);
+    MIR_reg_t lanes[2] = {left, right};
+    TypeId tids[2] = {left_tid, right_tid};
+    bool nullable[2] = {left_nullable, right_nullable};
+    MIR_reg_t has_null = emit_scalar_lanes_null_flag(mt, 2, lanes, tids, nullable);
     MIR_reg_t result = new_reg(mt, "fa_res", MIR_T_D);
     MIR_label_t l_normal = new_label(mt);
     MIR_label_t l_done = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, has_null), MIR_new_int_op(mt->ctx, 0)));
-
-    if (left_nullable) {
-        MIR_reg_t left_null = new_reg(mt, "fa_lnull", MIR_T_I64);
-        if (left_tid == LMD_TYPE_FLOAT) {
-            left_null = emit_float_lane_null_test(mt, left);
-        } else {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                MIR_new_reg_op(mt->ctx, left_null), MIR_new_reg_op(mt->ctx, left),
-                MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-            MIR_new_reg_op(mt->ctx, has_null), MIR_new_reg_op(mt->ctx, has_null),
-            MIR_new_reg_op(mt->ctx, left_null)));
+    if (has_null) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_normal), MIR_new_reg_op(mt->ctx, has_null)));
+        MIR_reg_t null_lane = emit_float_null_lane(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, null_lane)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, l_done)));
     }
-    if (right_nullable) {
-        MIR_reg_t right_null = new_reg(mt, "fa_rnull", MIR_T_I64);
-        if (right_tid == LMD_TYPE_FLOAT) {
-            right_null = emit_float_lane_null_test(mt, right);
-        } else {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                MIR_new_reg_op(mt->ctx, right_null), MIR_new_reg_op(mt->ctx, right),
-                MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
-        }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-            MIR_new_reg_op(mt->ctx, has_null), MIR_new_reg_op(mt->ctx, has_null),
-            MIR_new_reg_op(mt->ctx, right_null)));
-    }
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, l_normal), MIR_new_reg_op(mt->ctx, has_null)));
-    MIR_reg_t null_lane = emit_float_null_lane(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, null_lane)));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, l_done)));
 
     emit_label(mt, l_normal);
     MIR_reg_t fl = emit_int_or_float_to_double(mt, left_value, left_tid);
@@ -14161,13 +14236,16 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
                 mt->typed_array_inbounds_guard), VALUE_REP_F64);
         }
 
-        if ((both_float || int_float) &&
+        if ((both_float || int_float ||
+                    (both_int && bi->op == OPERATOR_DIV)) &&
                 (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
                  bi->op == OPERATOR_MUL || bi->op == OPERATOR_DIV) &&
                 (left_nullable || right_nullable)) {
             // A nullable float lane has a reserved NaN payload. Test that
             // payload before hardware arithmetic, which would otherwise turn
             // absence into an ordinary NaN and lose the null on return.
+            // Two ints' true division also computes in the float lane, where
+            // an int null widened first would read as 0 (`a[i] / 2` gave 0).
             return publish(emit_nullable_float_arith(mt, bi->op, left_value, left_tid,
                 left_nullable, right_value, right_tid, right_nullable), VALUE_REP_F64);
         }
@@ -14202,24 +14280,15 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
             MirValue sides[2] = {left_value, right_value};
             TypeId tids[2] = {left_tid, right_tid};
             bool nullable[2] = {left_nullable, right_nullable};
-            MIR_reg_t widened[2] = {fl, fr};
+            MIR_reg_t lanes[2] = {fl, fr};
             for (int i = 0; i < 2; i++) {
-                if (!nullable[i]) continue;
-                MIR_reg_t is_null = new_reg(mt, "fcmp_null", MIR_T_I64);
-                if (tids[i] == LMD_TYPE_INT) {
-                    LaneReg lane = emit_int_native_lane_typed(mt, sides[i]);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                        MIR_new_reg_op(mt->ctx, is_null), MIR_new_reg_op(mt->ctx, lane.r),
-                        MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+                if (nullable[i] && tids[i] == LMD_TYPE_INT) {
+                    lanes[i] = emit_int_native_lane_typed(mt, sides[i]).r;
                 } else {
-                    is_null = emit_float_lane_null_test(mt, widened[i]);
+                    tids[i] = LMD_TYPE_FLOAT;
                 }
-                if (!fcmp_has_null) { fcmp_has_null = is_null; continue; }
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR,
-                    MIR_new_reg_op(mt->ctx, fcmp_has_null),
-                    MIR_new_reg_op(mt->ctx, fcmp_has_null),
-                    MIR_new_reg_op(mt->ctx, is_null)));
             }
+            fcmp_has_null = emit_scalar_lanes_null_flag(mt, 2, lanes, tids, nullable);
         }
         auto publish_fcmp = [&](MIR_reg_t bool_reg) -> MirValue {
             if (!fcmp_has_null) return publish(bool_reg, VALUE_REP_I64);
@@ -14718,12 +14787,27 @@ static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
         //   -(INT64_MIN+1) is INT64_MAX         -> -inf becomes +inf
         // and the band is symmetric, so every finite case closes too. The
         // classic two's-complement negation trap IS the mechanism here.
+        // The null sentinels are the exception (S7.1.1v3: -null is null).
+        // INT_LANE_NULL is ItemNull's word, an ordinary positive i64 that NEG
+        // takes out of band (-inf), and DNEG flips the sign of the float
+        // lane's null payload into a plain NaN; a nullable operand keeps its
+        // null past the instruction.
+        bool nullable = mir_expr_may_be_null(mt, un->operand);
         if (operand_tid == LMD_TYPE_INT) {
             MIR_reg_t operand = emit_int_native_lane_typed(mt,
                 transpile_expr_value(mt, un->operand)).r;
             MIR_reg_t r = new_reg(mt, "neg", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_NEG, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_reg_op(mt->ctx, operand)));
+            if (nullable) {
+                MIR_label_t l_done = new_label(mt);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, l_done), MIR_new_reg_op(mt->ctx, operand),
+                    MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, INT_LANE_NULL)));
+                emit_label(mt, l_done);
+            }
             return mir_unary_value(mt, un, r, VALUE_REP_INT_LANE);
         }
         if (operand_tid == LMD_TYPE_FLOAT) {
@@ -14732,6 +14816,15 @@ static MirValue emit_unary_value(MirTranspiler* mt, AstUnaryNode* un) {
             MIR_reg_t r = new_reg(mt, "neg", MIR_T_D);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DNEG, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_reg_op(mt->ctx, operand)));
+            if (nullable) {
+                MIR_reg_t is_null = emit_float_lane_null_test(mt, operand);
+                MIR_label_t l_done = new_label(mt);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, l_done), MIR_new_reg_op(mt->ctx, is_null)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_reg_op(mt->ctx, emit_float_null_lane(mt))));
+                emit_label(mt, l_done);
+            }
             return mir_unary_value(mt, un, r, VALUE_REP_F64);
         }
         MIR_reg_t boxed = transpile_box_item(mt, un->operand);
@@ -20036,7 +20129,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      // Every declared T[] crossing establishes a value-level
                      // certificate. A literal is not exempt: its raw carrier
                      // alone cannot prove nested rank or a named map layout.
-                     (declared_array_contract));
+                     (declared_array_contract) ||
+                     // what the checker only deferred (`let w: int[]? = 5`)
+                     mir_boundary_statically_deferred(asn->init,
+                         asn->declared_type, expr_tid));
                 // T-A1: the check itself can be dropped when the relation is
                 // redundant, but the boundary is also where a boxed initializer
                 // acquires this binding's declared carrier. Dropping both wrote
@@ -20248,10 +20344,6 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     val = emit_coerce_value_to_declared(mt, val, expr_tid, declared_value_type);
                     var_tid = LMD_TYPE_UINT64;
                     expr_tid = LMD_TYPE_UINT64;
-                } else if (var_tid == LMD_TYPE_FLOAT && expr_tid == LMD_TYPE_INT) {
-                    // G0/E4: int and float share the native lane, so widening an
-                    // int to float is the identity here — no instruction at all.
-                    val = mir_emit_as_double(mt, val, expr_tid);
                 } else if (var_tid == LMD_TYPE_INT && expr_tid == LMD_TYPE_FLOAT) {
                     // C16/G0: `int` is the float64-representable integers, a
                     // SUBSET of float sharing its native lane, so this is a
@@ -20452,8 +20544,13 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // G0: the declared type picks the binding's lane, but the
                 // initializer arrives in whatever lane its own emitter used --
                 // a boxed Item from a call, a double from native arithmetic,
-                // an `int` initializer for a `float` binding (they share the
-                // lane). Coerce before the move instead of assuming they agree.
+                // an `int` initializer for a `float` binding. Coerce before the
+                // move instead of assuming they agree. The int lane is i64
+                // (S4.1.1), so this is the one band-checked widening of an int
+                // initializer, keyed by its expr_tid: an earlier raw i2d left
+                // expr_tid INT, and this widened the double a second time --
+                // an integer `add` on a double register that MIR verification
+                // rejected for `let x: float = 5` and `let x: float? = 5`.
                 if (mtype == MIR_T_D) {
                     MIR_reg_t src = emit_scalar_native_lane(mt, value_producer,
                         LMD_TYPE_FLOAT);
@@ -20665,7 +20762,9 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     GlobalVarEntry* gvar = find_global_var_by_binding(mt,
                         asn->entry);
                     if (gvar) {
-                        store_global_var(mt, gvar, val, var_tid);
+                        // the binding's own register: `val` is still the
+                        // initializer's lane (an int for `let x: float = 5`)
+                        store_global_var(mt, gvar, copy, var_tid);
                     }
                 }
 
@@ -22030,9 +22129,35 @@ static bool mir_map_field_identity(Type* proven, Type* expected) {
          expected->type_id == LMD_TYPE_BOOL || expected->type_id == LMD_TYPE_STRING);
 }
 
+// Do the literal's keys name the contract's fields in the contract's order?
+// Both construction consumers -- the direct store loop and map_fill -- walk the
+// literal's values against the adopted shape in lockstep, so a literal adopts a
+// contract only in its field order. A reordered literal (`{b: "s", a: 1}` for
+// `{a: int, b: string}`) keeps its own shape and is reified into the
+// contract's layout at the boundary (D3.2.4v4); adopting it stored `"s"` in the
+// `int` slot.
+static bool mir_map_literal_keys_follow_contract(AstMapNode* map_node,
+        TypeMap* expected) {
+    ShapeEntry* expected_field = expected->shape;
+    AstNode* item = map_node->item;
+    while (expected_field && item) {
+        if (item->node_type != AST_NODE_KEY_EXPR || !expected_field->name) return false;
+        AstNamedNode* key = (AstNamedNode*)item;
+        if (!key->name || key->name->len != expected_field->name->length ||
+                memcmp(key->name->chars, expected_field->name->str,
+                    key->name->len) != 0) {
+            return false;
+        }
+        expected_field = expected_field->next;
+        item = item->next;
+    }
+    return !expected_field && !item;
+}
+
 static bool mir_map_literal_matches_contract(AstMapNode* map_node,
         TypeMap* expected, bool require_identity) {
     if (!map_node || map_node->has_computed_key || !map_node->type || !expected) return false;
+    if (!mir_map_literal_keys_follow_contract(map_node, expected)) return false;
     TypeMap* candidate = (TypeMap*)map_node->type;
     MapContractRelation relation = lambda_map_contract_relation(candidate, expected);
     if (!require_identity && relation != MAP_CONTRACT_INCOMPATIBLE) {
@@ -22116,29 +22241,13 @@ static bool mir_map_contract_storage_valid(TypeMap* expected) {
 // so every instance allocated its own TypeMap, shape identity never held, and
 // each declared crossing re-walked the whole structure -- O(n) per admission,
 // O(n^2) overall (Tune19 §11).
-//
-// Order is checked because both consumers -- the direct store loop and
-// map_fill -- walk the literal's values against the shape in lockstep.
 static bool mir_map_literal_shape_matches_contract(AstMapNode* map_node,
         TypeMap* expected) {
     if (!map_node || map_node->has_computed_key || !map_node->type || !expected) return false;
     if (!mir_map_contract_storage_valid(expected)) return false;
     TypeMap* candidate = (TypeMap*)map_node->type;
     if (candidate->length != expected->length) return false;
-    ShapeEntry* expected_field = expected->shape;
-    AstNode* item = map_node->item;
-    while (expected_field && item) {
-        if (item->node_type != AST_NODE_KEY_EXPR) return false;
-        AstNamedNode* key = (AstNamedNode*)item;
-        if (!key->name || key->name->len != expected_field->name->length ||
-                memcmp(key->name->chars, expected_field->name->str,
-                    key->name->len) != 0) {
-            return false;
-        }
-        expected_field = expected_field->next;
-        item = item->next;
-    }
-    return !expected_field && !item;
+    return mir_map_literal_keys_follow_contract(map_node, expected);
 }
 
 // Does this literal field already prove its contract, so the construction-time
@@ -27161,6 +27270,48 @@ static MIR_reg_t mir_emit_inline_call(MirTranspiler* mt, AstCallNode* call,
     return frame.result;
 }
 
+// Tune6 L3: call a native libm routine on 1-2 scalar int/float lane
+// arguments, widened to double. S7.10.5v3: a null argument makes the result
+// the float lane's null, never the routine's answer for the sentinel's bits
+// (NaN for the float lane's payload; f(0.0) for the int lane's, which reads
+// as 0.0 once widened). Only an argument that may be null is kept in its own
+// lane and tested.
+static MIR_reg_t emit_native_math_lanes_call(MirTranspiler* mt,
+        const char* c_name, int count, AstNode* const* nodes,
+        const TypeId* tids, const bool* nullable) {
+    MIR_reg_t lanes[2] = {0, 0};
+    for (int i = 0; i < count; i++) {
+        lanes[i] = emit_scalar_native_lane(mt, transpile_expr_value(mt, nodes[i]),
+            nullable[i] ? tids[i] : LMD_TYPE_FLOAT);
+    }
+    MIR_reg_t has_null = emit_scalar_lanes_null_flag(mt, count, lanes, tids, nullable);
+    MIR_label_t l_null = has_null ? new_label(mt) : 0;
+    if (has_null) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, l_null), MIR_new_reg_op(mt->ctx, has_null)));
+    }
+    MIR_reg_t args[2] = {0, 0};
+    for (int i = 0; i < count; i++) {
+        args[i] = nullable[i] && tids[i] == LMD_TYPE_INT
+            ? emit_int_lane_to_double(mt, LaneReg(lanes[i])) : lanes[i];
+    }
+    MIR_reg_t result = count == 1
+        ? emit_call_1(mt, c_name, MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, args[0]))
+        : emit_call_2(mt, c_name, MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, args[0]),
+            MIR_T_D, MIR_new_reg_op(mt->ctx, args[1]));
+    if (!has_null) return result;
+    MIR_reg_t out = new_reg(mt, "nmath", MIR_T_D);
+    MIR_label_t l_done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, result)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+    emit_label(mt, l_null);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, out),
+        MIR_new_reg_op(mt->ctx, emit_float_null_lane(mt))));
+    emit_label(mt, l_done);
+    return out;
+}
+
 static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // Only this call can occupy the tail; its callee and arguments must finish
     // before it runs, even when an argument recursively calls the same function.
@@ -27721,10 +27872,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             }
             if (arg_tid == LMD_TYPE_FLOAT && info->native_c_name &&
                     info->native_func_ptr) {
-                MIR_reg_t value = em_require_rep(&mt->em,
-                    transpile_expr_value(mt, arg), VALUE_REP_F64).reg;
-                RETURN_CALL_VALUE(emit_call_1(mt, info->native_c_name, MIR_T_D,
-                    MIR_T_D, MIR_new_reg_op(mt->ctx, value)));
+                bool nullable = mir_expr_may_be_null(mt, arg);
+                RETURN_CALL_VALUE(emit_native_math_lanes_call(mt,
+                    info->native_c_name, 1, &arg, &arg_tid, &nullable));
             }
         }
 
@@ -27965,7 +28115,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         // call expression has a specific native type, unbox to native format.
         // This ensures consistency with local/dynamic calls which also unbox
         // Items to native types (FLOAT→double, INT→int64, BOOL→int64, INT64→int64,
-        // STRING→String*, SYMBOL→Symbol*).
+        // STRING→String*, SYMBOL→Symbol*). A `float?`/`bool?` result keeps its
+        // reserved null lane, as those call paths do: a plain unbox read the
+        // null `min` of a `float?[]` returns as NaN. So does a float result
+        // the nullability oracle marks -- `min(v[i], 1.0)` on a null read
+        // (S7.10.5v3) -- whose static type is the payload alone.
         TypeId call_expr_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
         #define POST_PROCESS_UNBOX(result) \
             if (sysfunc_returns_optional_int(info) && c_ret_tid == LMD_TYPE_ANY) { \
@@ -27979,7 +28133,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 !mt->emitting_async_call && c_ret_tid == LMD_TYPE_ANY && \
                 (mir_is_native_scalar_value_type(call_expr_tid) || \
                  is_text_type_id(call_expr_tid))) { \
-                result = emit_unbox(mt, result, call_expr_tid); \
+                result = call_expr_tid == LMD_TYPE_FLOAT && \
+                        mir_expr_may_be_null(mt, (AstNode*)call_node) \
+                    ? emit_unbox_float_lane(mt, result) \
+                    : emit_unbox_contract_lane(mt, result, call_expr_tid, \
+                        ((AstNode*)call_node)->type); \
             }
 
         // Tune6 L3: native math lowering. The boxed fn_math_* wrappers are
@@ -27994,33 +28152,33 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 sysfunc_native_math_always_float(info->fn) &&
                 arg_count == info->native_arg_count &&
                 (arg_count == 1 || arg_count == 2)) {
-            AstNode* n1 = call_node->argument;
-            AstNode* n2 = (arg_count == 2 && n1) ? n1->next : NULL;
-            TypeId t1 = n1 ? mir_expr_carrier_type(mt, n1) : LMD_TYPE_ANY;
-            TypeId t2 = n2 ? mir_expr_carrier_type(mt, n2) : LMD_TYPE_ANY;
-            if (n1 && (arg_count == 1 || n2) &&
-                    mir_native_math_arg_type(t1) &&
-                    (arg_count == 1 || mir_native_math_arg_type(t2))) {
-                MIR_reg_t d1 = emit_scalar_native_lane(mt,
-                    transpile_expr_value(mt, n1), LMD_TYPE_FLOAT);
-                MIR_reg_t nresult;
-                if (arg_count == 1) {
-                    nresult = emit_call_1(mt, info->native_c_name, MIR_T_D,
-                        MIR_T_D, MIR_new_reg_op(mt->ctx, d1));
-                } else {
-                    MIR_reg_t d2 = emit_scalar_native_lane(mt,
-                        transpile_expr_value(mt, n2), LMD_TYPE_FLOAT);
-                    nresult = emit_call_2(mt, info->native_c_name, MIR_T_D,
-                        MIR_T_D, MIR_new_reg_op(mt->ctx, d1),
-                        MIR_T_D, MIR_new_reg_op(mt->ctx, d2));
-                }
+            AstNode* nodes[2] = {call_node->argument, NULL};
+            if (arg_count == 2 && nodes[0]) nodes[1] = nodes[0]->next;
+            TypeId tids[2] = {LMD_TYPE_ANY, LMD_TYPE_ANY};
+            bool nullable[2] = {false, false};
+            bool native = true;
+            for (int i = 0; i < arg_count && native; i++) {
+                tids[i] = nodes[i] ? mir_expr_carrier_type(mt, nodes[i]) : LMD_TYPE_ANY;
+                nullable[i] = nodes[i] && mir_expr_may_be_null(mt, nodes[i]);
+                // a full-width int lane has no null spelling of its own
+                // (D2.5.2 carries `i64?` boxed), so one that may still be
+                // null keeps the boxed path
+                native = nodes[i] && mir_native_math_arg_type(tids[i]) &&
+                    !(nullable[i] && tids[i] == LMD_TYPE_INT64);
+            }
+            if (native) {
+                MIR_reg_t nresult = emit_native_math_lanes_call(mt,
+                    info->native_c_name, arg_count, nodes, tids, nullable);
                 // Match the boxed path's contract: these rows are
                 // c_ret_tid==ANY, so POST_PROCESS_UNBOX hands the caller a
                 // native double when the call's static type is FLOAT and a
                 // boxed Item otherwise. The value is always a double either
-                // way — only the representation differs.
+                // way — only the representation differs, and a null
+                // argument's result boxes as null.
                 if (call_expr_tid == LMD_TYPE_FLOAT) RETURN_CALL_VALUE(nresult);
-                RETURN_CALL_VALUE(emit_box(mt, nresult, LMD_TYPE_FLOAT));
+                RETURN_CALL_VALUE(nullable[0] || nullable[1]
+                    ? emit_box_float_lane(mt, nresult)
+                    : emit_box(mt, nresult, LMD_TYPE_FLOAT));
             }
         }
 
@@ -28299,12 +28457,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
 
             // Import calls return boxed Items. A typed string caller uses a
             // raw String* (for example, fn_len_s), so unbox text here just as
-            // the local-call path does before native pointer consumption.
+            // the local-call path does before native pointer consumption --
+            // including its nullable lanes: an imported `float?` null read as
+            // NaN and a `bool?` null as false.
             TypeId call_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
             if (!mt->emitting_async_call &&
                     (mir_is_native_scalar_value_type(call_tid) ||
                      call_tid == LMD_TYPE_STRING)) {
-                result = emit_unbox(mt, result, call_tid);
+                result = emit_unbox_contract_lane(mt, result, call_tid,
+                    ((AstNode*)call_node)->type);
             }
 
             strbuf_free(fn_import_name);
@@ -29221,7 +29382,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                  (mir_expr_may_be_null(mt, resolved_args[i]) &&
                                   !lambda_type_accepts_null(parameter_contract)) ||
                                  mir_map_contract_needs_reification(
-                                     parameter_contract, resolved_args[i], val_tid))) {
+                                     parameter_contract, resolved_args[i], val_tid) ||
+                                 mir_boundary_statically_deferred(resolved_args[i],
+                                     parameter_contract, val_tid, type_param))) {
                             char boundary[192];
                             snprintf(boundary, sizeof(boundary), "argument %d of %s",
                                 i + 1, fn_mangled);
@@ -29398,7 +29561,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                  (mir_expr_may_be_null(mt, resolved_args[i]) &&
                                   !lambda_type_accepts_null(parameter_contract)) ||
                                  mir_map_contract_needs_reification(
-                                     parameter_contract, resolved_args[i], val_tid))) {
+                                     parameter_contract, resolved_args[i], val_tid) ||
+                                 // `_b` admits every declared parameter itself;
+                                 // only a direct body entry needs the caller's
+                                 (!routed_to_boxed_entry &&
+                                  mir_boundary_statically_deferred(resolved_args[i],
+                                      parameter_contract, val_tid, type_param)))) {
                             char boundary[192];
                             snprintf(boundary, sizeof(boundary), "argument %d of %s",
                                 i + 1, fn_mangled);
@@ -35854,7 +36022,10 @@ static bool mir_assignment_boundary_applies(MirTranspiler* mt, AstNode* value,
           contract->kind == TYPE_KIND_BINARY) ||
          (mir_expr_may_be_null(mt, value) &&
           !lambda_type_accepts_null(contract)) ||
-         mir_map_contract_needs_reification(contract, value, val_tid));
+         mir_map_contract_needs_reification(contract, value, val_tid) ||
+         // the checker never decides a reassignment, so a concrete RHS the
+         // relation does not prove (`x = "s"` into `var x: int`) is checked
+         mir_boundary_statically_deferred(value, contract, val_tid));
 }
 
 // A checked declaration boundary emits `emit_return_if_item_error`, so a body
@@ -36179,16 +36350,18 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                 // call for numeric scalar arguments (Tune6 L3). Prove the
                 // arguments through this predicate for the prepass reason
                 // above; ray's `(-b - math.sqrt(disc)) / (2.0 * a)` otherwise
-                // refused the float return lane.
+                // refused the float return lane. A nullable argument no longer
+                // refuses it: the lowering gives its null the float lane's null
+                // (emit_native_math_lanes_call), which the lane carries exactly
+                // as it carries `t + v[i]`'s (S7.10.5v3).
                 AstNode* first = call->argument;
                 AstNode* second = first ? first->next : NULL;
                 bool proven = info->native_arg_count == 1
                     ? first && !second
                     : first && second && !second->next;
                 for (AstNode* arg = first; proven && arg; arg = arg->next) {
-                    proven = !mir_expr_may_be_null(mt, arg) &&
-                        (mir_expr_proves_native_return_lane(mt, arg, LMD_TYPE_INT) ||
-                         mir_expr_proves_native_return_lane(mt, arg, LMD_TYPE_FLOAT));
+                    proven = mir_expr_proves_native_return_lane(mt, arg, LMD_TYPE_INT) ||
+                        mir_expr_proves_native_return_lane(mt, arg, LMD_TYPE_FLOAT);
                 }
                 if (proven) return true;
             }

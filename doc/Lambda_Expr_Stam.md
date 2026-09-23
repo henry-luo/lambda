@@ -85,6 +85,11 @@ Seven operators: `+`, `-`, `*`, `/`, `div`, `%`, `**`. `/` is true division, so
 `10 / 3` is `3.333...` and not `3` — `div` is the integer form. Full table with
 results: [Arithmetic Operators](#arithmetic-operators).
 
+A `null` operand makes the result `null`: `null + 1`, `2 ** null` and the unary
+`-null` are all `null`, so an absent value (an out-of-range read, a missed
+search) stays absent through the arithmetic built on it. A non-numeric operand,
+such as a string, is an `error`.
+
 ### Unary Operators
 
 | Expression | Meaning |
@@ -523,11 +528,22 @@ The `.?` variant is **self-inclusive** — it also tests the root value itself:
 
 ```lambda
 div.?<div>                  // includes div itself if it matches
-42.?int                     // (42) — trivial self-match
+42.?int                     // 42 — a lone match is the value itself
 el.?int                     // self + all int values in subtree
 ```
 
-Both operators traverse attributes, children, map values, and array items in **document order** (depth-first, pre-order). Results are returned as a spreadable array.
+Both operators traverse attributes, children, map values, and array items in **document order** (depth-first, pre-order).
+
+A query is an **accessor**, like `e[1]` or `e.name` — so it answers as a subscript does. The result is the run `T*` of the matches: `null` when nothing matches, the match **itself** when exactly one does, and a list when two or more do. Count matches with `count(q)`, and test for any with `if (q)`:
+
+```lambda
+let imgs = html?<img>                    // null | <img …> | (<img …>, <img …>, …)
+count(imgs)                              // how many matched: 0, 1, or n
+if (imgs) "has images" else "no images"  // null — no match — is falsy
+let all = [*imgs, extra]                 // splice whatever matched
+```
+
+`len(imgs)` is not the match count: a lone match is the value itself, so `len` measures *it*. `count` is the size of the run, which is what you want.
 
 ### Child-Level Query: `[T]`
 
@@ -535,7 +551,7 @@ The `[T]` child-level query searches only **direct** attributes and children —
 
 ```lambda
 [1, "hello", 3, true][int]        // (1, 3) — direct int items
-{name: "Alice", age: 30}[string]  // ("Alice") — map values matching type
+{name: "Alice", age: 30}[string]  // "Alice" — a lone match is the value itself
 el[element]                       // direct child elements only
 el[string]                        // attribute values + text children
 ```
@@ -571,7 +587,8 @@ html?<table>[tr][td]           // all tables → direct rows → direct cells
 | Depth | Unlimited | One level |
 | Self-inclusive | `.?T` | N/A |
 | Analogy | XPath `//`, CSS descendant | XPath `/`, CSS `>` child |
-| Return type | Spreadable array | Spreadable array |
+| Result | The run `T*`: `null`, the match, or a list | The run `T*`: `null`, the match, or a list |
+| Match count | `count(expr?T)` | `count(expr[T])` |
 
 ---
 

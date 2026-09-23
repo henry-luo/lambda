@@ -441,7 +441,7 @@ the value being checked. String patterns cover content validation — see
 
 ```lambda
 type Age = int that (~ >= 0 and ~ <= 150)
-type Email = \(w+ "@" w+ "." a[2,6])
+type Email = \(w+ "@" w+ "." a{2,6})
 
 30 is Age            // true
 200 is Age           // false

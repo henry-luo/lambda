@@ -2476,7 +2476,7 @@ void resolve_sys_paths_recursive(Item item) {
         List* list = item.array;
         if (!list || !list->items) return;
         for (int64_t i = 0; i < list->length; i++) {
-            resolve_sys_paths_recursive(list->items[i]);
+            resolve_sys_paths_recursive(array_item_read(list, i));
         }
     } else if (type_id == LMD_TYPE_MAP) {
         Map* map = item.map;

@@ -7,7 +7,7 @@ mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
 (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
 (closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
 2026-08-27: handler-arm brace placement reaffirmed with rationale (§5.9,
-ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0). 2026-09-22: list/array kind rulings (§7.27 points 16–26) and the run/array type families (§7.28) ratified; spec v29.0.0.
+ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0). 2026-09-22: list/array kind rulings (§7.27 points 16–26) and the run/array type families (§7.28) ratified; spec v29.0.0. 2026-09-23: the occurrence family's open count respelled `T{n+}` (§7.28; S11.1.6v2 + S16.8.6v3, spec v30.0.0).
 
 > **The body states current rulings only.** Superseded wording has been
 > moved out to **Appendix S — Superseded Rulings**, struck through and
@@ -35,7 +35,7 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
 S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7 (v2: now points to S2.6),
-§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6 + S16.8.6v2.
+§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6v2 + S16.8.6v3.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -2872,6 +2872,41 @@ import, not new syntax — recorded as SO37.
 
 ### 7.27 Lists, blocks, and the content model (decided 2026-09-21 — ratified as S2.5 + S2.6)
 
+> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). Open: LaTeX input's unmerged string runs, the transitional deviation D2.6.5v3 names.
+
+**Revision (USER, 2026-09-23): `count(x)` is the size of the run `x` is.**
+S8.3.3v2 had defined `count` as the number of items a value contributes
+where it lands as an item, and never built it. Two things made it urgent.
+Query results are runs (S8.2.4), so the one question everyone asks of them —
+how many matched? — has no `len` answer:
+
+| result `q` | `len(q)` | `len([q])` | `len([*q])` | size of the run |
+|---|---|---|---|---|
+| no match (`null`) | 0 | **1** | 0 | 0 |
+| one element match | the element's own length | 1 | 1 | 1 |
+| one match that is an array `[1, 2, 3]` | **3** | 1 | **3** | 1 |
+| two or more (a list) | n | 1 | n | n |
+
+`len([q])` miscounts absence, and even `len([*q])` — the idiom S8.2.4 first
+wrote — counts a lone array match by its contents, because `*` splices arrays
+as well as lists (S12.3.5v2). Only a builtin is right in every row. And the
+run reading ties `count` to the type families: `count(x)` is the `n` of
+`T{n}`, so `T*`, `T{0+}` and `count` describe one thing.
+
+The ruling changed v2's meaning at exactly one value: `count(null)` is **0**,
+the size of the empty run, where v2 counted a written `null` as one item.
+The literal law survives in a sharper form the user proposed:
+`len([x₁, …, xₙ]) = Σ count(xᵢ or 1)` — `or 1` turns a written `null` (and a
+written error) back into the one item a literal holds, and changes nothing
+else, since every other falsy value already counts 1. The law is about
+sequence literals only; content normalizes (S2.6) and has no such identity.
+
+`count(error)` is **error**, for the reason S8.3.1v3 gives for `len`: an error
+is neither an empty run nor one item, and answering 0 would put a failed
+computation on the same branch as absence. `count` shares `len`'s raw-int ABI
+and its `any \ error` parameter boundary, so the two behave identically on
+an error operand. Ratified as S8.3.3v3 (semantics 32.0.0).
+
 **Question.** S16.7 stated content normalization for the script top level and
 reached elements only through "a script *is* element content". The element —
 the primary case — had no home ruling, and the list/array, binary, and
@@ -3047,19 +3082,33 @@ take/drop/slice `:2761`, zip `:4963`), `fn_join` allocating with no flags
 (`lambda-data-runtime.cpp:2397`), and typed `int[]` admission rebuilding the
 value (`lambda-eval.cpp:9918`). Ledger: LR05-10, LR05-11, LR05-12, LR12-28.
 
-### 7.28 Type families: a run and an array (decided 2026-09-22 — ratified as S11.1.1v3, S11.1.6, S16.8.6v2)
+### 7.28 Type families: a run and an array (decided 2026-09-22, open count respelled 2026-09-23 — ratified as S11.1.1v3, S11.1.6v2, S16.8.6v3)
+
+> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P5, with two spelling restrictions the brace ambiguity forces: a `{` count binds tight (`int{2}`, never `int {2}`) and a return type never takes one, since there the brace is the body — a counted return type goes through a type alias.
+
+**Revision (USER, 2026-09-23): the open count is `T{n+}`, not `T{n,}`.** The
+counts were first ratified in regex spelling, which made the open bound a
+trailing comma. It is now the `+` that already means "or more" as a bare
+suffix, so the family reads `T{n}` exactly, `T{n,m}` between, `T{n+}` at
+least — and `T+` is `T{1+}`, which the old spelling obscured. It also keeps
+the shape of the `T[n+]` this family replaced, so the migration off the
+bracket form is a bracket swap. Regex's `T{n,}` is rejected by name rather
+than read as an exact `T{n}`, which would be a silently different type;
+inside a string island the `+` still compiles to RE2's `{n,}`. Ratified as
+S11.1.6v2 and S16.8.6v3 (semantics 30.0.0 — MAJOR, since it breaks programs
+that used the first spelling).
 
 **Question.** `T[]` could not type a for-expression, since a list collapses
 at 0 and 1 items; and `T[n]`/`T[n+]`/`T[n, m]` were counts that looked like
 array types. What is the type of a list, and how do counts spell?
 
 **Ruling (USER).** Two families by concept. The *occurrence* family `T?`
-`T*` `T+` `T{n,m}` (regex spellings: `T{n}`, `T{n,}`) is a run of `T`s — the
+`T*` `T+` `T{n,m}` (`T{n}` exactly, `T{n+}` at least) is a run of `T`s — the
 list type; the *array* family `T[]` `T[n]` `T[n][m]` is an array. In a
 sequence-pattern slot an occurrence is a run and zero is void; as a boundary
 type it admits what a run *is* once collapsed: `null`, a bare `T`, a sequence
 of ≥ 2 `T` (list or stored array image). So `T?` ≡ `T | null` with no special
-case, `T*` ≡ `T{0,}`, `{f: int*}` admits `null`/`5`/`[5, 6]` but not `[5]`
+case, `T*` ≡ `T{0+}`, `{f: int*}` admits `null`/`5`/`[5, 6]` but not `[5]`
 or `[]`, `(1, 2) is int[2]`, and `[T{n,m}]` is the counted array. The full
 table and the rejected 2026-09-21 draft (`T*` admitting every array, which
 widened `T?`) are in [`Lambda_Type_Pattern.md` §1.3](Lambda_Type_Pattern.md).

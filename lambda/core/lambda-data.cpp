@@ -789,12 +789,9 @@ ConstItem List::get(int index) const {
         log_error("list_get_const: index out of bounds: %d", index);
         return null_result;
     }
-    if (array_has_native_lane((const Array*)this)) {
-        // Occurrence validation reads through List::get; expose a real Item
-        // instead of letting raw nullable-lane words enter the validator.
-        return array_native_lane_read((const Array*)this, index).to_const();
-    }
-    return this->items[index].to_const();
+    // Occurrence validation reads through List::get; expose a real Item
+    // instead of letting raw nullable-lane words enter the validator.
+    return array_item_read((const Array*)this, index).to_const();
 }
 
 // One shaped-field store. Shared by the varargs filler and the array filler so

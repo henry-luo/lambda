@@ -456,8 +456,8 @@ extern "C" Item vmap_from_array(Item array_item) {
     HashMapData* hd = (HashMapData*)vm->data;
 
     for (int64_t i = 0; i < len; i += 2) {
-        Item key = list->items[i];
-        Item value = list->items[i + 1];
+        Item key = array_item_read(list, i);
+        Item value = array_item_read(list, i + 1);
         if (!vmap_key_is_supported(key)) {
             return vmap_invalid_key_error();
         }

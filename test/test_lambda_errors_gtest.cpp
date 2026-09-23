@@ -1321,6 +1321,22 @@ protected:
             << "\nExpected: " << expected_message
             << "\nOutput: " << result.output;
     }
+
+    // A boundary defect on one tier hides behind another tier's golden, so
+    // each tier must reject the script with `expected_message` and never
+    // reach its `bound:` line.
+    void ExpectRejectedOnEveryTier(const char* script_path, bool procedural,
+            const char* expected_message) {
+        static const char* const tiers[] = {"interp", "jit", "auto"};
+        for (const char* tier : tiers) {
+            ScriptResult result = run_lambda_script(script_path, procedural, tier);
+            EXPECT_NE(result.exit_code, 0) << script_path << " tier=" << tier;
+            EXPECT_NE(strstr(result.output.c_str(), expected_message), nullptr)
+                << script_path << " tier=" << tier << "\n" << result.output;
+            EXPECT_EQ(strstr(result.output.c_str(), "bound:"), nullptr)
+                << script_path << " tier=" << tier << "\n" << result.output;
+        }
+    }
 };
 
 // Syntax error tests
@@ -1341,6 +1357,33 @@ TEST_F(NegativeScriptTest, SymbolLiteralInsidePatternReportsDomainDiagnostic) {
 TEST_F(NegativeScriptTest, PatternClassBindingCollisionReportsReservedName) {
     ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_reserved_class.ls",
         "pattern class 'd' is reserved inside pattern islands");
+}
+
+// S11.1.6v2/S16.8.6v3: a count on a *run* is the occurrence family, spelled as
+// in regex. The bracket forms it replaced name their replacement rather than
+// changing meaning under the same spelling.
+TEST_F(NegativeScriptTest, RetiredUnboundedOccurrenceNamesItsReplacement) {
+    ExpectErrorMessage("test/lambda/negative/semantic/occurrence_retired_plus.ls",
+        "are retired: write `T{n+}` or `T{n,m}` for a run of T");
+}
+
+TEST_F(NegativeScriptTest, RetiredRangedOccurrenceNamesItsReplacement) {
+    ExpectErrorMessage("test/lambda/negative/semantic/occurrence_retired_range.ls",
+        "`[T{n,m}]` for an array of one");
+}
+
+// S11.1.1v3: an array suffix may follow an array suffix (`int[2][3]`), and a
+// retired count in that position still names its replacement.
+TEST_F(NegativeScriptTest, RetiredCountAfterArraySuffixNamesItsReplacement) {
+    ExpectErrorMessage("test/lambda/negative/semantic/array_rank_retired_count.ls",
+        "are retired: write `T{n+}` or `T{n,m}` for a run of T");
+}
+
+// S16.8.6v3: the open count is `T{n+}`, not regex's trailing comma. A habit
+// that writes `{n,}` is told, rather than reading as an exact count.
+TEST_F(NegativeScriptTest, RegexOpenCountNamesTheOpenSpelling) {
+    ExpectErrorMessage("test/lambda/negative/semantic/occurrence_regex_open_count.ls",
+        "write `T{n+}` for a run of n or more");
 }
 
 // CW31/S9.2.4 exclusivity face 4: overlapping mutable views of one base
@@ -1529,22 +1572,41 @@ TEST_F(NegativeScriptTest, RequiredLiteralFieldRejectsNullOnEveryTier) {
         // Tune29 §19.1 item 2: the field-carrier admission keeps null rejected
         "test/lambda/negative/runtime/typed_array_field_missing_carrier.ls",
     };
-    const char* tiers[] = {"interp", "jit", "auto"};
-    const char* saved_tier = getenv("LAMBDA_TIER");
-    std::string saved = saved_tier ? saved_tier : "";
     for (const char* script : scripts) {
-        for (const char* tier : tiers) {
-            setenv("LAMBDA_TIER", tier, 1);
-            ScriptResult result = run_lambda_script(script, true);
-            EXPECT_NE(result.exit_code, 0) << script << " tier=" << tier;
-            EXPECT_NE(strstr(result.output.c_str(), "error[E201]"), nullptr)
-                << script << " tier=" << tier << "\n" << result.output;
-            EXPECT_EQ(strstr(result.output.c_str(), "bound:"), nullptr)
-                << script << " tier=" << tier << "\n" << result.output;
-        }
+        ExpectRejectedOnEveryTier(script, true, "error[E201]");
     }
-    if (saved_tier) setenv("LAMBDA_TIER", saved.c_str(), 1);
-    else unsetenv("LAMBDA_TIER");
+}
+
+// S11.4.1v3 (J1/J2): a crossing the checker only deferred is decided by the
+// runtime check on every tier. The JIT read a literal as `null` against a
+// nullable contract and skipped a scalar crossing `int[]?`, binding `5` in
+// both scripts while T0 raised E201.
+TEST_F(NegativeScriptTest, DeferredBoundariesRejectOnEveryTier) {
+    const char* scripts[] = {
+        "test/lambda/negative/runtime/deferred_boundary_literal_union.ls",
+        "test/lambda/negative/runtime/deferred_boundary_scalar_opt_array.ls",
+    };
+    for (const char* script : scripts) {
+        ExpectRejectedOnEveryTier(script, false,
+            "error[E201]: type check at declaration 'w' failed");
+    }
+}
+
+// S7.1.1v3/S7.10.5v3 + S7.7.4: `math.sqrt(null)` is null, so the sum is null,
+// and the declared `float` accumulator rejects it on every tier, naming the
+// binding. The JIT's native libm call read the null lane as NaN and the
+// interpreter reported the binding only as "declared assignment binding".
+TEST_F(NegativeScriptTest, NullNumericReassignmentRejectsOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/null_numeric_reassign_float.ls",
+        true, "error[E201]: type check at assignment to 'total' failed: expected float, got null");
+}
+
+// S11.1.1v3: rank is part of an array type. `int[]` admitted a 2-D reshape
+// because its flat leaf lane holds ints; the runtime check now presents its
+// rows, on every tier.
+TEST_F(NegativeScriptTest, FlatArrayContractRejectsNdArrayOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_rank_flat_contract.ls",
+        false, "error[E201]: type check at declaration 'e' failed: expected int[]");
 }
 
 TEST_F(NegativeScriptTest, InputSchemaUsesTheSharedTypedBoundary) {

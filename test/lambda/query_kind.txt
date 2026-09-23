@@ -1,0 +1,16 @@
+"-- one match is the match itself --"
+[element, true, <img src: "a">]
+"-- no match is null, which reads as absence --"
+[true, "absent"]
+"-- two or more is a list --"
+[list, 2]
+[<img src: "a">, <img src: "b">, 9]
+"-- the child query follows --"
+[list, true, 1, list]
+"-- a value, never a producer: absence lands as null; the packager splices --"
+[null, 9]
+[9]
+"-- the match count is count(q) (S8.3.3v3) --"
+[1, 0, 2]
+"-- the result type is T* --"
+[true, true, true, false]

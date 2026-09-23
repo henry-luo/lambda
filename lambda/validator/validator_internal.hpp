@@ -277,6 +277,18 @@ static inline bool validator_array_elem_embeds(ArrayNumElemType elem_type, Type*
     }
 }
 
+// ==================== Count Constraints ====================
+
+struct CountConstraint {
+    int min;    // minimum count (0 or greater)
+    int max;    // maximum count (-1 means unbounded)
+};
+
+CountConstraint get_count_constraint(TypeUnary* type_unary);
+// The same bounds for a container operand: an occurrence needs two or more
+// items there (S11.1.6v2), an array family type does not.
+CountConstraint get_container_count_constraint(TypeUnary* type_unary);
+
 /**
  * Check if a type is optional (TypeUnary with OPERATOR_OPTIONAL)
  *
@@ -290,6 +302,20 @@ inline bool is_type_optional(Type* type) {
         return unary->op == OPERATOR_OPTIONAL;
     }
     return false;
+}
+
+/**
+ * S11.1.6v2: a run of zero is `null`, so every occurrence type whose minimum is
+ * zero admits a null value — `T?` spells it, and `T*` and `T{0,m}` mean it.
+ * The array family is not a run: `int[]` never admits null. This is about a
+ * *present* null value; whether a field may be absent stays `f?:`.
+ */
+inline bool type_admits_null_value(Type* type) {
+    Type* unwrapped = unwrap_type(type);
+    if (!unwrapped || unwrapped->kind != TYPE_KIND_UNARY) return false;
+    TypeUnary* unary = (TypeUnary*)unwrapped;
+    if (unary->op == OPERATOR_ARRAY) return false;
+    return get_count_constraint(unary).min == 0;
 }
 
 // ==================== Validation State Helpers ====================
@@ -378,19 +404,6 @@ void merge_errors(
 );
 
 // ==================== Occurrence Count Helpers ====================
-
-/**
- * Count constraint structure for occurrence validation
- */
-struct CountConstraint {
-    int min;    // minimum count (0 or greater)
-    int max;    // maximum count (-1 means unbounded)
-};
-
-/**
- * Get count constraint from TypeUnary
- */
-CountConstraint get_count_constraint(TypeUnary* type_unary);
 
 /**
  * Check count against constraint and add error if violated

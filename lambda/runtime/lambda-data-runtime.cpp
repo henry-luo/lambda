@@ -1625,7 +1625,10 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
     }
     if (tid == LMD_TYPE_ARRAY) {
         Array* a = it.array;
-        if (!a || a->is_spreadable) return false;
+        // A native lane is an admitted `T?[]` carrier: its slots are lane
+        // words, not Items, and folding it into a tensor would drop its nulls
+        // and its contract, so it is never a plain numeric row.
+        if (!a || a->is_spreadable || array_has_native_lane(a)) return false;
         if (a->length == 0) return false;
         // Scan items: retain flex-int storage unless a full-width value or a
         // float actually requires a wider semantic lane.
@@ -1856,8 +1859,7 @@ static bool array_push_spread_array_items(Array* arr, Item item, bool require_sp
         Array* inner = rooted_source.get().array;
         // A native lane holds raw payloads, not tagged Items (`split()` builds
         // one): reading the slot directly would publish a `String*` as an Item.
-        Item element = array_has_native_lane(inner)
-            ? array_native_lane_read(inner, i) : inner->items[i];
+        Item element = array_item_read(inner, i);
         // S9.3.1: each spread element is captured into the destination.
         cow_capture_value(element);
         array_push(rooted_array.get(), element);
@@ -1999,7 +2001,7 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         int64_t len = arr ? arr->length : 0;
         h ^= hashmap_hash_bytes(&len, sizeof(len), seed0, seed1);
         for (int64_t i = 0; arr && i < arr->length; i++) {
-            uint64_t child = lambda_item_hash(arr->items[i], seed0, seed1);
+            uint64_t child = lambda_item_hash(array_item_read(arr, i), seed0, seed1);
             h = hash_combine_u64(h, child);
         }
         return h;
@@ -2044,7 +2046,8 @@ int lambda_item_compare(Item a, Item b) {
         if (aa == ab) return 0;
         if (!aa || !ab || aa->length != ab->length) return 1;
         for (int64_t i = 0; i < aa->length; i++) {
-            if (lambda_item_compare(aa->items[i], ab->items[i]) != 0) return 1;
+            if (lambda_item_compare(array_item_read(aa, i),
+                    array_item_read(ab, i)) != 0) return 1;
         }
         return 0;
     }
@@ -3673,7 +3676,10 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             Rooted<ArrayNum*> rooted_src(roots, src);
             // any[] is a boxed value array; ARRAY_NUM annotations must widen
             // at the boundary instead of leaving a packed numeric layout behind.
-            for (int64_t i = 0; i < rooted_src.get()->length; i++) {
+            // An N-D array's elements are its leading-axis rows (S11.1.1v3):
+            // `length` counts its leaves, which appended a null per extra leaf.
+            int64_t count = array_num_iter_count(rooted_src.get());
+            for (int64_t i = 0; i < count; i++) {
                 array_push(rooted_boxed.get(), array_num_get(rooted_src.get(), i));
             }
             return (void*)rooted_boxed.get();
@@ -3885,7 +3891,7 @@ void* ensure_sized_array(Item item, int64_t elem_type_int) {
         int64_t length = arr->length;
         ArrayNum* typed = array_num_new(target_et, length);
         for (int64_t i = 0; i < length; i++) {
-            array_num_set_item(typed, i, arr->items[i]);
+            array_num_set_item(typed, i, array_item_read(arr, i));
         }
         return typed;
     }

@@ -2,9 +2,9 @@
 // Layer: 4 | Category: integration | Covers: string patterns, is, match, find/replace
 
 // ===== Define validation patterns =====
-type email_pat = \(w+ "@" w+ "." a[2,6])
-type phone_pat = \(d[3] "-" d[3] "-" d[4])
-type zip_pat = \(d[5])
+type email_pat = \(w+ "@" w+ "." a{2,6})
+type phone_pat = \(d{3} "-" d{3} "-" d{4})
+type zip_pat = \(d{5})
 type alpha_pat = \(a+)
 type num_pat = \(d+)
 

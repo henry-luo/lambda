@@ -495,7 +495,11 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
     // same-type optimization: direct memcpy of native items (not for Range)
     bool same_lane = left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
         left.array_num->get_elem_type() == right.array_num->get_elem_type();
-    if (left_type == right_type && left_type != LMD_TYPE_RANGE && same_lane) {
+    // A native-lane operand (an admitted `T?[]`) holds lane words, not Items,
+    // so it takes the element-wise path below, which decodes every slot.
+    bool native_lane = left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY &&
+        (array_has_native_lane(left.array) || array_has_native_lane(right.array));
+    if (left_type == right_type && left_type != LMD_TYPE_RANGE && same_lane && !native_lane) {
         if (left_type == LMD_TYPE_ARRAY_NUM) {
             ArrayNum *la = left.array_num, *ra = right.array_num;
             int64_t total = la->length + ra->length;
@@ -689,7 +693,7 @@ Item fn_join(Item left, Item right) {
 static bool array_has_item(Array* arr, Item item) {
     if (!arr) return false;
     for (int64_t i = 0; i < (int64_t)arr->length; i++) {
-        if (fn_eq(arr->items[i], item) == BOOL_TRUE) return true;
+        if (fn_eq(array_item_read(arr, i), item) == BOOL_TRUE) return true;
     }
     return false;
 }
@@ -2390,7 +2394,8 @@ static Bool list_eq(List* a, List* b, int depth, EqualityMode mode) {
     if (a == b) return BOOL_TRUE;  // pointer identity fast-path
     if (a->length != b->length) return BOOL_FALSE;
     for (int64_t i = 0; i < a->length; i++) {
-        Bool r = fn_eq_depth(a->items[i], b->items[i], depth + 1, mode);
+        Bool r = fn_eq_depth(array_item_read(a, i), array_item_read(b, i),
+            depth + 1, mode);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -3818,7 +3823,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         // runtime lists and arrays share LMD_TYPE_ARRAY, so one branch must cover both.
         Array* arr = (Array*)data.array;
         for (int64_t i = 0; i < arr->length; i++) {
-            query_collect(arr->items[i], type_val, true, result, depth + 1);
+            query_collect(array_item_read(arr, i), type_val, true, result, depth + 1);
         }
     } else if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = data.array_num;
@@ -3829,6 +3834,11 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
     }
 }
 
+// S8.2.4: a type subscript is an accessor, not a filter -- `e?T` extends
+// `e[1]` the way a name extends a position -- so its result is the run `T*`
+// a subscript yields: `null` for no match, the match itself for one, and a
+// list for more (S2.5.5v2). It is a value, never an item-position producer,
+// so `[e?T, 9]` with no match is `[null, 9]`, exactly like `[e[-1], 9]`.
 Item fn_query(Item data, Item type_val, int direct) {
     TypeId type_tid = get_type_id(type_val);
     if (type_tid != LMD_TYPE_TYPE) {
@@ -3837,10 +3847,9 @@ Item fn_query(Item data, Item type_val, int direct) {
     }
     // use array (not list) to avoid automatic string merging
     Array* result = array_plain();
-    result->is_spreadable = true;
     // direct=1 means .? (self-inclusive), direct=0 means ? (not self-inclusive)
     query_collect(data, type_val, direct != 0, result, 0);
-    return {.array = result};
+    return list_collapse_value({.array = result});
 }
 
 // child-level query: collect direct attributes + children matching type_val (one level only)
@@ -3882,11 +3891,12 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         // runtime lists and arrays share LMD_TYPE_ARRAY; keep spreadable query arrays here too.
         Array* arr = (Array*)data.array;
         if (arr->is_spreadable) {
-            // A list (a previous query's result among them) distributes the child
-            // query over its container items; a scalar item is tested itself, so
-            // `(1, "a", 2)[int]` filters instead of querying inside scalars.
+            // A list distributes the child query over its container items; a
+            // scalar item is tested itself, so `(1, "a", 2)[int]` filters
+            // instead of querying inside scalars. (Two or more matches of a
+            // query are such a list; fewer collapse to the item or null.)
             for (int64_t i = 0; i < arr->length; i++) {
-                Item child = arr->items[i];
+                Item child = array_item_read(arr, i);
                 TypeId child_type = get_type_id(child);
                 if (child_type == LMD_TYPE_ELEMENT || child_type == LMD_TYPE_MAP ||
                         child_type == LMD_TYPE_ARRAY || child_type == LMD_TYPE_ARRAY_NUM) {
@@ -3897,7 +3907,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
             }
         } else {
             for (int64_t i = 0; i < arr->length; i++) {
-                Item child = arr->items[i];
+                Item child = array_item_read(arr, i);
                 if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
                     array_push_verbatim(result, child);
                 }
@@ -3925,9 +3935,8 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
 // child-level query: expr[T] where T is a type
 Item fn_child_query(Item data, Item type_val) {
     Array* result = array_plain();
-    result->is_spreadable = true;
     child_query_collect(data, type_val, result);
-    return {.array = result};
+    return list_collapse_value({.array = result});   // the run a subscript yields (S8.2.4)
 }
 
 static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) {
@@ -3997,7 +4006,7 @@ Bool fn_in(Item a_item, Item b_item) {
         if (b_type == LMD_TYPE_ARRAY) {
             List *list = b_item.array;
             for (int i = 0; i < list->length; i++) {
-                if (fn_eq(list->items[i], a_item) == BOOL_TRUE) {
+                if (fn_eq(array_item_read(list, i), a_item) == BOOL_TRUE) {
                     return true;
                 }
             }
@@ -5989,6 +5998,18 @@ static inline int64_t map_attr_count(const Map* owner) {
 }
 
 // length of an item's content, relates to indexed access, i.e. item[index]
+// S8.3.3v3: count(x) is the size of the run x is (S2.5.5v2, S11.1.6v2): 0 for
+// null, len(x) for a list, and 1 for any other value -- an array or text is
+// one item. It is what `len` cannot say about a query or any `T*`: a lone
+// match is the value itself, and a lone array match is one item, not its
+// contents. An error never reaches here: the call boundary rejects it first,
+// so count(error) is error, as len(error) is (S8.3.1v3).
+int64_t fn_count(Item item) {
+    if (get_type_id(item) == LMD_TYPE_NULL) return 0;
+    if (item_is_list(item)) return fn_len(item);
+    return 1;
+}
+
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     int64_t size = 0;
@@ -6319,7 +6340,7 @@ Bool fn_contains(Item str_item, Item substr_item) {
         List* list = str_item.array;
         if (!list) return BOOL_FALSE;
         for (int64_t i = 0; i < list->length; i++) {
-            if (fn_eq(list->items[i], substr_item) == BOOL_TRUE) {
+            if (fn_eq(array_item_read(list, i), substr_item) == BOOL_TRUE) {
                 return BOOL_TRUE;
             }
         }
@@ -6460,11 +6481,11 @@ static int64_t fn_index_of_raw_impl(Item str_item, Item sub_item, bool reverse) 
         if (!list) return -1;
         if (!reverse) {
             for (int64_t i = 0; i < list->length; i++) {
-                if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) return i;
+                if (fn_eq(array_item_read(list, i), sub_item) == BOOL_TRUE) return i;
             }
         } else {
             for (int64_t i = list->length - 1; i >= 0; i--) {
-                if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) return i;
+                if (fn_eq(array_item_read(list, i), sub_item) == BOOL_TRUE) return i;
             }
         }
         return -1;
@@ -7365,8 +7386,7 @@ Item fn_join2(Item list_item, Item sep_item) {
     for (int64_t i = 0; i < count; i++) {
         // A native-lane source stores raw payloads in `items[]`, so read it
         // through the lane accessor -- `split()` produces such a list (D2.6.5).
-        Item item = array_has_native_lane((Array*)source)
-            ? array_native_lane_read((Array*)source, i) : source->items[i];
+        Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
             total_len += item.get_len();
@@ -7400,8 +7420,7 @@ Item fn_join2(Item list_item, Item sep_item) {
         }
         // A native-lane source stores raw payloads in `items[]`, so read it
         // through the lane accessor -- `split()` produces such a list (D2.6.5).
-        Item item = array_has_native_lane((Array*)source)
-            ? array_native_lane_read((Array*)source, i) : source->items[i];
+        Item item = array_item_read((Array*)source, i);
         TypeId item_type = get_type_id(item);
         if (is_text_type_id(item_type)) {
             const char* item_chars = item.get_chars();
@@ -8280,6 +8299,13 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
 static void convert_specialized_to_generic(Array* arr) {
     TypeId old_type = arr->type_id;
     int64_t len = arr->length;
+    // A native lane is the Array's specialized carrier: its slots are words
+    // of the declared layout (D3.2.6), decoded one by one like a compact lane.
+    bool native_lane = old_type == LMD_TYPE_ARRAY && array_has_native_lane(arr);
+    if (old_type != LMD_TYPE_ARRAY_NUM && !native_lane) {
+        // shouldn't happen — caller should only call for specialized types
+        return;
+    }
 
     // need room for items + extras (float/int64 values stored at end of buffer)
     int64_t new_capacity = len * 2 + 4;
@@ -8294,43 +8320,41 @@ static void convert_specialized_to_generic(Array* arr) {
         return;
     }
 
-    if (old_type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* num_arr = (ArrayNum*)arr;
-        int64_t extra_count = 0;
-        for (int64_t i = 0; i < len; i++) {
-            // array_num_read_item is the sole decoder for every compact lane.
-            // Reading ELEM_I8/U8/I16/F32 via `items` addressed the first byte
-            // as an i64 and corrupted both the conversion and adjacent data.
-            Item value = array_num_read_item(num_arr, i);
-            TypeId value_type = get_type_id(value);
-            if (value_type == LMD_TYPE_FLOAT) {
-                double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
-                *slot = value.get_double();
-                new_items[i] = lambda_float_ptr_to_item(slot);
-                extra_count++;
-            } else if (value_type == LMD_TYPE_INT64) {
-                int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
-                *slot = value.get_int64();
-                new_items[i] = {.item = l2it(slot)};
-                extra_count++;
-            } else if (value_type == LMD_TYPE_UINT64) {
-                uint64_t* slot = (uint64_t*)(new_items + (new_capacity - extra_count - 1));
-                *slot = value.get_uint64();
-                new_items[i] = {.item = u2it(slot)};
-                extra_count++;
-            } else {
-                new_items[i] = value;
-            }
+    int64_t extra_count = 0;
+    for (int64_t i = 0; i < len; i++) {
+        // array_num_read_item is the sole decoder for every compact lane.
+        // Reading ELEM_I8/U8/I16/F32 via `items` addressed the first byte
+        // as an i64 and corrupted both the conversion and adjacent data.
+        // A float or wide lane slot decodes to a pointer into the old buffer,
+        // so every wide value is copied into the new tail below.
+        Item value = native_lane ? array_native_lane_read(arr, i)
+            : array_num_read_item((ArrayNum*)arr, i);
+        TypeId value_type = get_type_id(value);
+        if (value_type == LMD_TYPE_FLOAT) {
+            double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
+            *slot = value.get_double();
+            new_items[i] = lambda_float_ptr_to_item(slot);
+            extra_count++;
+        } else if (value_type == LMD_TYPE_INT64) {
+            int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
+            *slot = value.get_int64();
+            new_items[i] = {.item = l2it(slot)};
+            extra_count++;
+        } else if (value_type == LMD_TYPE_UINT64) {
+            uint64_t* slot = (uint64_t*)(new_items + (new_capacity - extra_count - 1));
+            *slot = value.get_uint64();
+            new_items[i] = {.item = u2it(slot)};
+            extra_count++;
+        } else {
+            new_items[i] = value;
         }
-        arr->extra = extra_count;
-    } else {
-        // shouldn't happen — caller should only call for specialized types
-        return;
     }
+    arr->extra = extra_count;
 
     arr->items = new_items;
     arr->capacity = new_capacity;
     arr->type_id = LMD_TYPE_ARRAY;
+    if (native_lane) array_native_lane_clear(arr);
     // Widening through an open write abandons the exact declared-array proof.
     arr->rep_cert = NULL;
     log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
@@ -11120,6 +11144,29 @@ Item cow_path_set_inplace(Item owner, Item path, Item value) {
     return cow_path_set_impl(owner, path, 0, NULL, value, true);
 }
 
+// A shape rebuild's replacement data buffer: the GC data zone for a heap
+// container, the runtime pool for a markup one (never the input pool that owns
+// its original data).
+static void* container_rebuild_data_alloc(const Container* container, int64_t byte_size) {
+    size_t bytes = byte_size > 0 ? (size_t)byte_size : 1;
+    return container->is_heap ? heap_data_calloc(bytes)
+        : pool_calloc(context->pool, bytes);
+}
+
+// Publish a rebuilt data buffer and retire the old one by its allocator: GC data
+// is abandoned to the collector, a markup container's earlier runtime-pool
+// migration is freed, and input-pool data is left to its input's lifecycle.
+static void container_rebuild_data_install(Container* container, void** data_slot,
+        int* cap_slot, void* new_data, int64_t byte_size) {
+    void* old_data = *data_slot;
+    *data_slot = new_data;
+    *cap_slot = (int)byte_size;
+    if (container->is_heap) return;
+    if (old_data && container->is_data_migrated) pool_free(context->pool, old_data);
+    // mark data as migrated for future mutations
+    container->is_data_migrated = 1;
+}
+
 // rebuild a map/element shape when a field's type changes
 // creates new ShapeEntry chain + TypeMap/TypeElmt, allocates new data buffer, copies fields
 // For markup containers (!is_heap), uses runtime pool instead of calloc/free to avoid
@@ -11206,9 +11253,6 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     int64_t new_byte_size = byte_offset;
 
     // allocate new data buffer
-    // For heap containers: calloc (consistent with map_fill, freed by free_container)
-    // For markup containers: pool_calloc from runtime pool (data migrated from input pool)
-    bool use_pool = !container->is_heap;
     // Shape rebuild is already a cold path. A structured frame avoids leaving
     // registered native addresses behind on a non-local recovery edge while
     // keeping both unpublished owners exact through the data allocation.
@@ -11216,12 +11260,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     Rooted<Container*> rooted_container(roots, container);
     Rooted<Item> rooted_value(roots, new_value);
 
-    void* new_data;
-    if (use_pool) {
-        new_data = pool_calloc(context->pool, new_byte_size > 0 ? new_byte_size : 1);
-    } else {
-        new_data = heap_data_calloc(new_byte_size > 0 ? new_byte_size : 1);
-    }
+    void* new_data = container_rebuild_data_alloc(container, new_byte_size);
     if (!new_data) {
         log_error("map_rebuild: data allocation failed");
         return;
@@ -11338,25 +11377,9 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         *type_slot = new_mt;
     }
 
-    // replace data
-    *data_slot = new_data;
-    *cap_slot = (int)new_byte_size;
-
-    // free old data buffer with correct allocator
-    if (old_data) {
-        if (container->is_heap) {
-            // old_data is in GC data zone — abandoned, reclaimed by GC
-        } else if (container->is_data_migrated) {
-            // previous mutation already migrated data to runtime pool
-            pool_free(context->pool, old_data);
-        }
-        // else: old data is in input pool — don't free (managed by input lifecycle)
-    }
-
-    // mark data as migrated for future mutations
-    if (use_pool) {
-        container->is_data_migrated = 1;
-    }
+    // replace data, retiring the old buffer with its allocator
+    container_rebuild_data_install(container, data_slot, cap_slot, new_data,
+        new_byte_size);
 
     log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld, migrated=%d",
               field_count, new_byte_size, container->is_data_migrated);
@@ -11398,6 +11421,38 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
         entry = entry->next;
     }
     return NULL;
+}
+
+// D3.2.4v4: admission into a named map contract reifies into the contract's
+// declared layout. Field admission converts each value where it lies, so a map
+// whose fields sit in another order (`{b: "s", a: 1}` for `{a: int, b: string}`)
+// kept its own offsets, and publishing the contract over them misaddressed every
+// direct read -- `p.b` read the `1` as a string pointer. Move each field by name
+// into a buffer laid out by the contract. `map` is the unique admission candidate.
+static bool map_relayout_to_contract(Map* map, TypeMap* contract) {
+    RootFrame roots(1);
+    Rooted<Container*> rooted_map(roots, (Container*)map);
+    void* new_data = container_rebuild_data_alloc((Container*)map, contract->byte_size);
+    if (!new_data) return false;
+    // the allocation may have collected, moving the map's old buffer
+    map = (Map*)rooted_map.get();
+    TypeMap* current = (TypeMap*)map->type;
+    for (ShapeEntry* field = contract->shape; field; field = field->next) {
+        if (!field->name || field->byte_offset < 0) continue;
+        ShapeEntry* source = map_find_shape_entry(current, field->name->str,
+            field->name->length);
+        if (!source) return false;
+        // neither the read nor the store allocates, so the old buffer stays put
+        Item value = map_shape_field_to_item(map->data, source);
+        void* slot = (char*)new_data + field->byte_offset;
+        if (!map_shape_field_store_native_lane(slot, field, value)) {
+            map_field_store(slot, value, shape_entry_storage_type_id(field));
+        }
+    }
+    container_rebuild_data_install((Container*)map, &map->data, &map->data_cap,
+        new_data, contract->byte_size);
+    map->type = contract;
+    return true;
 }
 
 static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
@@ -11500,16 +11555,23 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
         }
     }
 
-    if (relation_proven && rooted_candidate.get().map->data_cap >= expected_map->byte_size) {
-        // Reification constructed the expected lane layout field by field; use
-        // the canonical contract descriptor so later exact admissions remain
-        // O(1) instead of validating this freshly converted root again.
-        rooted_candidate.get().map->type = expected_map;
-    }
     // relation_proven means every field already passed the structural semantic
     // relation; the loop above owns the conversion proof and a graph-wide
     // validator would rescan unchanged child maps.
     if (!relation_proven && !lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    Map* admitted = rooted_candidate.get().map;
+    // The loop converts each field where it lies; fields written in another
+    // order still sit at other offsets, so the contract's layout is reached
+    // only by moving them (D3.2.4v4).
+    if (lambda_map_contract_relation((TypeMap*)admitted->type, expected_map) ==
+            MAP_CONTRACT_NEEDS_REIFICATION) {
+        if (!map_relayout_to_contract(admitted, expected_map)) return false;
+    } else if (relation_proven && admitted->data_cap >= expected_map->byte_size) {
+        // Reification constructed the expected lane layout field by field; use
+        // the canonical contract descriptor so later exact admissions remain
+        // O(1) instead of validating this freshly converted root again.
+        admitted->type = expected_map;
+    }
     *converted = rooted_candidate.get();
     return true;
 }
@@ -11539,7 +11601,7 @@ static bool runtime_array_contract_is_plain(Type* expected) {
 static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type** env,
         Item* converted);
 
-// S11.1.6/S2.5.6: an annotation checks a list without changing its kind. When
+// S11.1.6v2/S2.5.6: an annotation checks a list without changing its kind. When
 // admission packs or rebuilds the list, the fresh container inherits the bit.
 static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
         Item* converted) {
@@ -11698,23 +11760,28 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         }
     }
 
-    if (source_type == LMD_TYPE_ARRAY_NUM &&
+    // S11.1.1v3 preserves rank: an ArrayNum of rank r is exactly a rank-r
+    // contract over its leaf lane -- `reshape(v, [2, 2])` is an `int[][]`,
+    // never an `int[]`, whose elements would be its rows. The rows are
+    // leading-axis views, but every leaf lives in one flat, exact scalar
+    // lane: validate that lane directly and certify the same array without
+    // breaking its reshape/write-through semantics. A rank mismatch falls
+    // through and is rejected below, as `[[1]] is int[]` is false.
+    ArrayNumElemType leaf_type = ELEM_INT;
+    if (source_type == LMD_TYPE_ARRAY_NUM && value.array_num &&
             lambda_array_contract_info(expected, &contract_info) &&
-            contract_info.rank == 1 &&
-            target_has_numeric_lane &&
-            value.array_num && value.array_num->get_elem_type() == compact_type) {
-        // An N-D ArrayNum still owns a flat, exact scalar lane. `item_at`
-        // exposes leading-axis views for normal indexing, so validating it as
-        // a generic Array would incorrectly present a row to an `int[]`
-        // contract. Validate the physical leaf lane directly and certify the
-        // same view without breaking its reshape/write-through semantics.
+            contract_info.rank == array_num_rank(value.array_num) &&
+            lambda_array_num_elem_type_for_contract(contract_info.leaf_element,
+                &leaf_type) &&
+            value.array_num->get_elem_type() == leaf_type) {
+        Type* leaf_element = runtime_boundary_unwrap_type(contract_info.leaf_element);
         RootFrame roots(2);
         Rooted<Item> rooted_value(roots, value);
         Rooted<Item> rooted_element(roots, ItemNull);
         for (int64_t index = 0; index < rooted_value.get().array_num->length; index++) {
             rooted_element.set(array_num_read_item(rooted_value.get().array_num, index));
             Item admitted = ItemNull;
-            if (!runtime_type_admit_value_env(rooted_element.get(), element_type,
+            if (!runtime_type_admit_value_env(rooted_element.get(), leaf_element,
                     env, &admitted) ||
                     get_type_id(admitted) != get_type_id(rooted_element.get())) {
                 return false;
@@ -11754,9 +11821,14 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         rooted_converted.set(element_converted);
         if (rooted_converted.get().item == rooted_element.get().item) continue;
 
-        if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ARRAY_NUM) {
+        if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ARRAY_NUM ||
+                array_has_native_lane(rooted_candidate.get().array)) {
             // A Float ArrayNum has no per-item tags. Reify it before publishing
             // converted elements so `3.0 -> int` cannot remain physically float.
+            // A native lane holds only its own layout: the one-level clone of
+            // an `int?[]` refused the `i8` or `float` its element converts to,
+            // rejecting a value a boxed source admits. The target lane is
+            // rebuilt below either way.
             convert_specialized_to_generic(rooted_candidate.get().array);
         }
         if (get_type_id(fn_array_set(rooted_candidate.get().array, index,
@@ -11995,7 +12067,26 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     }
 
     LambdaNumericKind source_kind = lambda_numeric_kind_from_item(value);
-    LambdaNumericKind target_kind = lambda_numeric_kind_from_type(expected);
+    // S11.1.6v2: `T?` is `T | null`, so a nullable numeric contract admits a
+    // non-null number exactly as its base does -- the base's boundary picks the
+    // representation, as the JIT's nullable F64 lane does (S11.4.5, D3.2.6).
+    // Membership alone kept `5` an int in a `float?` binding on T0 while the
+    // JIT stored 5.0. This covers the two native nullable lanes, `int?` and
+    // `float?`, whose MIR carriers re-represent; the sized and wide optionals
+    // keep membership, as their MIR carriers do. A value already of the base's
+    // kind needs no re-representation either.
+    Type* numeric_contract = expected;
+    if (source_kind != LAMBDA_NUM_INVALID) {
+        bool nullable = false;
+        Type* base = lambda_type_nullable_lane_base(expected, &nullable);
+        LambdaNumericKind base_kind = nullable && base
+            ? lambda_numeric_kind_from_type(base) : LAMBDA_NUM_INVALID;
+        if ((base_kind == LAMBDA_NUM_INT || base_kind == LAMBDA_NUM_FLOAT) &&
+                base_kind != source_kind) {
+            numeric_contract = base;
+        }
+    }
+    LambdaNumericKind target_kind = lambda_numeric_kind_from_type(numeric_contract);
     if (source_kind != LAMBDA_NUM_INVALID && target_kind != LAMBDA_NUM_INVALID &&
             target_kind != LAMBDA_NUM_INTEGER) {
         // A declared concrete numeric boundary establishes the destination
@@ -12003,7 +12094,7 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         // Checking lambda_type_matches first left an int-tagged value at a
         // float boundary, after which a native float body could unbox it as
         // the wrong physical lane.
-        return lambda_numeric_boundary_admit(value, expected, converted);
+        return lambda_numeric_boundary_admit(value, numeric_contract, converted);
     }
 
     // An array annotation is a complete rank-and-element contract, not a

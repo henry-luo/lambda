@@ -674,6 +674,9 @@ typedef enum SysFunc {
     SYSPROC_SLEEP,
     SYSPROC_SELF,
     SYSPROC_CANCEL,
+    // appended, never inserted: existing SysFunc values stay stable for
+    // anything that stores them
+    SYSFUNC_COUNT,      // count(x) - the size of the run x is (S8.3.3v3)
 } SysFunc;
 
 typedef struct Type {
@@ -2755,6 +2758,7 @@ extern "C" {
     Item fn_member_by_id(Item item, uint32_t name_id);
     // length function
     int64_t fn_len(Item item);
+    int64_t fn_count(Item item);  // S8.3.3v3: the size of the run an item is
     Item fn_content(Item item);   // read-only array view over an element's content
     int64_t fn_seq_count(Item item);  // positions a positional traversal visits
     Item fn_int(Item a);

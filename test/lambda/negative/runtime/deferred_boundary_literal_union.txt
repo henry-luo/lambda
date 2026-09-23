@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'w' failed: expected int[] | null, got int 5; validator at |0: Expected type 'array', but got 'int'

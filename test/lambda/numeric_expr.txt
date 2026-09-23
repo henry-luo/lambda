@@ -70,8 +70,8 @@ error
 "Unary Operations - Error Cases - Unsupported Types:"
 error
 error
-error
-error
+"Unary Operations - Null Propagates (S7.1.1v3):"
+[null, null]
 "Unary Operations - Mixed Expressions:"
 32
 -6.28
@@ -87,9 +87,8 @@ error
 error
 error
 error
-"Null Arithmetic (errors):"
-error
-error
+"Null Arithmetic (null propagates, S7.1.1v3):"
+[null, null, null, null, null, null, null, null]
 "String with Numbers (errors):"
 error
 error
@@ -103,7 +102,6 @@ error
 error
 error
 "More Mixed Type Combinations (errors):"
-error
 error
 error
 error

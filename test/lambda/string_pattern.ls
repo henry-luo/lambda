@@ -21,7 +21,7 @@ type hello_pattern = "hello"
 
 type single_digit = \(d)
 type multi_digit = \(d+)
-type exact_3_digits = \(d[3])
+type exact_3_digits = \(d{3})
 
 "2.1"; ("5" is single_digit)         // true
 "2.2"; ("a" is single_digit)         // false
@@ -79,7 +79,7 @@ type h_any_o = \("h" .* "o")
 // ============================================================
 'Test 6: Pattern Concatenation'
 
-type phone = \(d[3] "-" d[3] "-" d[4])
+type phone = \(d{3} "-" d{3} "-" d{4})
 type email_simple = \(w+ "@" w+ "." w+)
 
 "6.1"; ("123-456-7890" is phone)     // true
@@ -93,7 +93,7 @@ type email_simple = \(w+ "@" w+ "." w+)
 // ============================================================
 'Test 7: Optional Pattern (?)'
 
-type optional_dash = \(d[3] "-"? d[4])
+type optional_dash = \(d{3} "-"? d{4})
 
 "7.1"; ("123-4567" is optional_dash) // true - with dash
 "7.2"; ("1234567" is optional_dash)  // true - without dash
@@ -126,7 +126,7 @@ type zero_or_more_a = \("a"*)
 // ============================================================
 'Test 10: Exact Count [n]'
 
-type exactly_5 = \(d[5])
+type exactly_5 = \(d{5})
 
 "10.1"; ("12345" is exactly_5)       // true
 "10.2"; ("1234" is exactly_5)        // false - 4 digits
@@ -137,7 +137,7 @@ type exactly_5 = \(d[5])
 // ============================================================
 'Test 11: Range Count [n, m]'
 
-type range_2_4 = \(d[2, 4])
+type range_2_4 = \(d{2,4})
 
 "11.1"; ("12" is range_2_4)          // true - 2 digits
 "11.2"; ("123" is range_2_4)         // true - 3 digits
@@ -179,7 +179,7 @@ type digit_or_letter = \(d | w)
 // ============================================================
 'Test 14: Complex Combined Patterns'
 
-type us_zip = \(d[5] ("-" d[4])?)
+type us_zip = \(d{5} ("-" d{4})?)
 type identifier = \(("a" to "z" | "A" to "Z" | "_") w*)
 
 "14.1"; ("12345" is us_zip)          // true - 5 digit zip

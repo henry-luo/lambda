@@ -126,12 +126,13 @@ pn main() {
     masked[mask] = dynamic(9)
     print(string(masked) ++ "\n")
 
-    // Multi-coordinate writes use the same declared element contract after a
-    // reshape has changed the physical ArrayNum rank.
-    var matrix: int[] = reshape([1, 2, 3, 4], [2, 2])
+    // Multi-coordinate writes use the declared leaf contract of a reshaped
+    // ArrayNum. Its rank is part of the type (S11.1.1v3): a 2-D reshape is
+    // `int[][]`, never `int[]`.
+    var matrix: int[][] = reshape([1, 2, 3, 4], [2, 2])
     matrix[1, 0] = dynamic(8)
     print(string([matrix[0, 1], matrix[1, 0]]) ++ "\n")
-    print(string([masked is int[], matrix is int[], masked is string[]]) ++ "\n")
+    print(string([masked is int[], matrix is int[][], masked is string[]]) ++ "\n")
 
     // Reordering and joins retain a compatible certificate when they only
     // copy already-admitted leaves into a fresh exact numeric carrier.

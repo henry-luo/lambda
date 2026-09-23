@@ -320,7 +320,7 @@ Query: type-based search
 | Form | Meaning |
 |---|---|
 | `?   .?` | recursive descendant search |
-| `expr[T]` | child-level query (direct only) |
+| `expr[T]` | child-level query (direct only); a query yields `null`, the match, or a list — count with `count(q)` |
 
 Vector Arithmetic:
 
@@ -379,7 +379,7 @@ Self-inclusive query `.?` — self + attributes + all descendants:
 |---|---|
 | `div.?<div>` | includes div itself if it matches |
 | `el.?int` | self + all int values in subtree |
-| `42.?int` | [42] — trivial self-match |
+| `42.?int` | 42 — a lone match is the value itself |
 
 Child-level query `[T]` — direct attributes + children only (no recursion):
 
@@ -592,7 +592,7 @@ Definition:
 | Form | Meaning |
 |---|---|
 | `type digits = \(d+)` | one or more digits |
-| `type email = \(w+ "@" w+ "." a[2,6])` | email-like |
+| `type email = \(w+ "@" w+ "." a{2,6})` | email-like |
 | `type ws = \(s+)` | whitespace |
 | `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
 

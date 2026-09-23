@@ -422,7 +422,7 @@ struct PrintItemVisitor {
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_str(strbuf, ", ");
-            Item value = array_has_native_lane(array) ? array_native_lane_read(array, i) : array->items[i];
+            Item value = array_item_read(array, i);
             print_item(strbuf, value, depth + 1, indent);
         }
         strbuf_append_char(strbuf, ']');
@@ -715,7 +715,7 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
         Array *array = item.array;
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_char(strbuf, '\n');
-            Item value = array_has_native_lane(array) ? array_native_lane_read(array, i) : array->items[i];
+            Item value = array_item_read(array, i);
             print_root_item(strbuf, value, indent);
             // remove the trailing '\n' that print_root_item appends
             if (strbuf->length > 0 && strbuf->str[strbuf->length - 1] == '\n') {

@@ -291,6 +291,10 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     {SYSFUNC_LEN, "len", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_INT64, NULL, "fn_len", FPTR(fn_len), NULL, NULL, false, 0},
+    // S8.3.3v3: count(x) is the size of the run x is -- the same raw-int ABI
+    // as len, so an error operand is rejected at the boundary like len's
+    {SYSFUNC_COUNT, "count", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_INT64, NULL, "fn_count", FPTR(fn_count), NULL, NULL, false, 0},
 
     // content(e) returns a read-only VIEW over the element's content items, so
     // `len(content(e))` is the child count and `content(e)[i]` the child index

@@ -936,6 +936,7 @@ bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info) {
     if (!info || info->is_proc || !info->func_ptr || info->is_async) return false;
     switch (info->fn) {
     case SYSFUNC_LEN:
+    case SYSFUNC_COUNT:
     case SYSFUNC_TYPE:
     case SYSFUNC_NAME:
     case SYSFUNC_INT:

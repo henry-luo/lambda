@@ -99,9 +99,10 @@ null % 2
 // Invalid exponent combinations
 2 ** "hello"
 2 ** true
-2 ** null
 "hello" ** 2
 true ** 2
+// A null operand propagates (S7.1.1v3), as it does for + above
+2 ** null
 null ** 2
 
 // ===== Integer Division (div) =====

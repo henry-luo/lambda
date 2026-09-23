@@ -293,4 +293,11 @@ static inline LambdaNumericComparison lambda_numeric_compare(Item left, Item rig
     return result;
 }
 
+// The sequence walk shared by the vector kernels (lambda-vector.cpp, which
+// defines it) and the numeric folds: a range, packed array, or array of any
+// carrier. vector_get decodes native lanes; the folds' own copy indexed
+// `items` and misread an admitted `int?[]` (sum/min/max/avg crashed).
+int64_t vector_length(Item item);
+Item vector_get(Item item, int64_t index);
+
 #endif

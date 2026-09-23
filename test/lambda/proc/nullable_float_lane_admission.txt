@@ -1,0 +1,7 @@
+[5, float, 6, 5, float, 5, float]
+[5, float, 10, 5, float, 5, float]
+[[5, float], [2.5, float], [null, type.null], 7, float]
+[5, float][null]
+[3, float, 2, int]
+[5, int]
+

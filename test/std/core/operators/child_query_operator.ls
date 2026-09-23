@@ -3,28 +3,28 @@
 
 // ===== Array child query =====
 let arr = [1, "hello", 3, "world", true]
-len(arr[int])
-len(arr[string])
-len(arr[bool])
+count(arr[int])
+count(arr[string])
+count(arr[bool])
 
 // ===== Array child vs recursive =====
 let nested = [1, [2, 3], "a", [4, "b"]]
-len(nested[int])
-len(nested?int)
-len(nested[array])
+count(nested[int])
+count(nested?int)
+count(nested[array])
 
 // ===== Map child query =====
 let m = {name: "Alice", age: 30, active: true}
-len(m[string])
-len(m[int])
-len(m[bool])
+count(m[string])
+count(m[int])
+count(m[bool])
 
 // ===== Element child query =====
 let el = <div class: "main",
     <p "hello">
     <img src: "photo.jpg">
     "some text">
-len(el[element])
+count(el[element])
 
 // ===== Chained child query =====
 let doc = <div
@@ -35,11 +35,11 @@ let doc = <div
 >
 type div_t = <div>
 type p_t = <p>
-len(doc[div_t][p_t])
+count(doc[div_t][p_t])
 
 // ===== Empty results =====
-len(arr[map])
-len(m[element])
+count(arr[map])
+count(m[element])
 
 // ===== Mixed child + recursive =====
 let html = <html
@@ -50,4 +50,4 @@ let html = <html
     >
 >
 type body_t = <body>
-len(html[body_t]?<p>)
+count(html[body_t]?<p>)

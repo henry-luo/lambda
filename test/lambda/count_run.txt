@@ -1,0 +1,13 @@
+"-- the size of a run --"
+[0, 1, 1, 2, 3]
+"-- an array or text is one item, whatever it holds --"
+[1, 1, 1, 1, 1]
+"-- a query: none, one, several --"
+[0, 1, 2]
+"-- a lone array match is ONE match (len([*q]) would count its 3 items) --"
+[1, 3]
+"-- the method form --"
+[2, 0]
+"-- the literal law: len([x1..xn]) = sum of count(xi or 1) --"
+[4, 4]
+[2, 2]

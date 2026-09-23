@@ -865,17 +865,34 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
             return (Type*)out;
         }
         break;
-    case SYS_RESULT_REAL_TO_FLOAT:
+    case SYS_RESULT_REAL_TO_FLOAT: {
         // Complex and vector arguments keep the row's open type: these builtins
-        // are polymorphic and return the argument's own shape for them.
-        if (source->type_id != LMD_TYPE_COMPLEX &&
-                is_magnitude_numeric_type(source->type_id)) {
-            return &TYPE_FLOAT;
+        // are polymorphic and return the argument's own shape for them, and a
+        // null argument makes the result null (S7.10.5v3). Every argument
+        // decides, not only the selected one: `math.atan2(1, null)` is null
+        // and `math.pow(2, [1, 2])` an array, yet both were typed `float`.
+        bool real = true;
+        for (int i = 0; real; i++) {
+            AstNode* argument = sys_func_argument_at(arguments, injected_argument, i);
+            if (!argument) break;
+            real = argument->type && argument->type->type_id != LMD_TYPE_COMPLEX &&
+                is_magnitude_numeric_type(argument->type->type_id);
         }
+        if (real) return &TYPE_FLOAT;
         break;
+    }
     case SYS_RESULT_ELEM_OF_ARGUMENT: {
+        // min/max select an element only when the elements are numeric (a
+        // null element selects null): any other element makes the native
+        // operation fail, so the relation is unproven and the row's open
+        // result stands (D3.3.5). `min` of a `string?[]` was typed `string?`
+        // and the JIT read the error Item back as a string pointer.
         Type* elem = known_array_element_type(source);
-        if (elem && elem != source && elem->type_id != LMD_TYPE_ANY) return elem;
+        bool nullable = false;
+        Type* payload = elem ? lambda_type_nullable_lane_base(elem, &nullable) : NULL;
+        if (elem && elem != source && elem->type_id != LMD_TYPE_ANY && payload &&
+                (payload == &TYPE_NUMBER ||
+                 lambda_numeric_kind_from_type(payload) != LAMBDA_NUM_INVALID)) return elem;
         break;
     }
     case SYS_RESULT_ARRAY_OF_ARGUMENT_ELEM: {
@@ -1626,6 +1643,15 @@ static StaticBoundaryResult static_parameter_boundary_relation(Type* source, Typ
         }
     }
     return static_boundary_relation(source, target);
+}
+
+// See type_contract.hpp. The argument check below and the MIR call-site
+// boundary both select the argument form through this one entry point.
+StaticBoundaryResult lambda_static_boundary_relation(Type* source, Type* target,
+        bool call_argument) {
+    return call_argument && lambda_type_accepts_error(source)
+        ? static_parameter_boundary_relation(source, target)
+        : static_boundary_relation(source, target);
 }
 
 static AstNode* boundary_unwrap_primary(AstNode* node) {
@@ -3041,9 +3067,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         }
         StaticBoundaryResult relation = expected_param->binder
             ? STATIC_BOUNDARY_PROVEN
-            : (lambda_type_accepts_error(arg->type)
-                ? static_parameter_boundary_relation(arg->type, full_type)
-                : static_boundary_relation(arg->type, full_type));
+            : lambda_static_boundary_relation(arg->type, full_type, true);
         bool compatible = relation != STATIC_BOUNDARY_REJECTED;
         if (!compatible) compatible = typed_array_argument_compatible(arg, full_type);
         if (arg->type && !compatible) {
@@ -5044,62 +5068,51 @@ AstBinaryNode* build_registered_binary_type_from_span(Transpiler* tp,
 
 
 
-// Helper function to parse occurrence count from string like "[]", "[2]", "[2, 5]", "[2+]"
-// Sets min_count and max_count; max_count=-1 means unbounded
+// S11.1.6v2/S16.8.6v3: the counted occurrence is `T{n}` exactly, `T{n,m}`
+// between, and `T{n+}` at least -- the open form echoes the bare `+` suffix
+// rather than regex's trailing comma. The counted array is `T[n]` and a bare
+// `T[]` is any length. `{n+}` and `[]` are unbounded above; the retired
+// `[n+]`, `[n, m]` and `{n,}` never reach here -- the parser rejects each
+// with its replacement.
 void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     *min_count = 0;
     *max_count = -1;  // unbounded by default
 
-    if (op_str.length < 2 || op_str.str[0] != '[') {
-        return;
-    }
+    if (op_str.length < 2) { return; }
+    char open = op_str.str[0];
+    if (open != '[' && open != '{') { return; }
+    char close = open == '[' ? ']' : '}';
+    if (op_str.length == 2 && op_str.str[1] == close) { return; }
 
-    // [] - any count (equivalent to *)
-    if (op_str.length == 2 && op_str.str[1] == ']') {
-        *min_count = 0;
-        *max_count = -1;
-        return;
-    }
-
-    if (op_str.length < 3) {
-        return;
-    }
-
-    // skip opening bracket
     const char* p = op_str.str + 1;
     const char* end = op_str.str + op_str.length;
-
-    // parse first number
-    int n1 = 0;
+    int first = 0;
+    bool has_first = false;
     while (p < end && *p >= '0' && *p <= '9') {
-        n1 = n1 * 10 + (*p - '0');
+        first = first * 10 + (*p - '0');
         p++;
+        has_first = true;
     }
-    *min_count = n1;
+    if (!has_first) { return; }
+    // a lone count is exact: `{2}` and `[2]` both mean exactly two
+    *min_count = first;
+    *max_count = first;
 
-    // skip whitespace
     while (p < end && (*p == ' ' || *p == '\t')) p++;
-
-    if (p < end) {
-        if (*p == ']') {
-            // [n] - exact count
-            *max_count = n1;
-        } else if (*p == '+') {
-            // [n+] - unbounded minimum
-            *max_count = -1;
-        } else if (*p == ',') {
-            // [n, m] - range
-            p++;  // skip comma
-            while (p < end && (*p == ' ' || *p == '\t')) p++;  // skip whitespace
-            int n2 = 0;
-            while (p < end && *p >= '0' && *p <= '9') {
-                n2 = n2 * 10 + (*p - '0');
-                p++;
-            }
-            *max_count = n2;
-        }
+    if (p >= end) { return; }
+    // `{n+}` leaves the upper bound open
+    if (*p == '+') { *max_count = -1; return; }
+    if (*p != ',') { return; }
+    p++;
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+    int second = 0;
+    bool has_second = false;
+    while (p < end && *p >= '0' && *p <= '9') {
+        second = second * 10 + (*p - '0');
+        p++;
+        has_second = true;
     }
-
+    if (has_second) *max_count = second;
 }
 
 AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
@@ -9927,7 +9940,9 @@ AstNode* build_query_node_from_parts(Transpiler* tp, SourceSpan span,
     node->object = object;
     node->query = query;
     node->direct = direct;
-    node->type = alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    // S8.2.4: the result is a run -- an item, null, or a list -- so a
+    // container type here would let the JIT unbox a lone match as an array
+    node->type = set_type_any(tp, ANY_LIST);
     return (AstNode*)node;
 }
 

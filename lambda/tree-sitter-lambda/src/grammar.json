@@ -9190,10 +9190,101 @@
         {
           "type": "SYMBOL",
           "name": "occurrence_count"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "array_count"
         }
       ]
     },
     "occurrence_count": {
+      "type": "PREC",
+      "value": 2,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_occurrence_lbrace"
+                },
+                "named": false,
+                "value": "{"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": "}"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_occurrence_lbrace"
+                },
+                "named": false,
+                "value": "{"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": "+"
+              },
+              {
+                "type": "STRING",
+                "value": "}"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_occurrence_lbrace"
+                },
+                "named": false,
+                "value": "{"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": "}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "array_count": {
       "type": "PREC",
       "value": 2,
       "content": {
@@ -9232,62 +9323,6 @@
               {
                 "type": "SYMBOL",
                 "name": "integer"
-              },
-              {
-                "type": "STRING",
-                "value": "]"
-              }
-            ]
-          },
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "ALIAS",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "_index_lbracket"
-                },
-                "named": false,
-                "value": "["
-              },
-              {
-                "type": "SYMBOL",
-                "name": "integer"
-              },
-              {
-                "type": "STRING",
-                "value": ","
-              },
-              {
-                "type": "SYMBOL",
-                "name": "integer"
-              },
-              {
-                "type": "STRING",
-                "value": "]"
-              }
-            ]
-          },
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "ALIAS",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "_index_lbracket"
-                },
-                "named": false,
-                "value": "["
-              },
-              {
-                "type": "SYMBOL",
-                "name": "integer"
-              },
-              {
-                "type": "STRING",
-                "value": "+"
               },
               {
                 "type": "STRING",
@@ -10034,8 +10069,21 @@
               "type": "FIELD",
               "name": "operand",
               "content": {
-                "type": "SYMBOL",
-                "name": "occurrence_type"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "occurrence_type"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "nullable_array_type"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "optional_array_type"
+                  }
+                ]
               }
             },
             {
@@ -10043,12 +10091,85 @@
               "name": "operator",
               "content": {
                 "type": "SYMBOL",
-                "name": "occurrence_count"
+                "name": "array_count"
               }
             }
           ]
         }
       }
+    },
+    "optional_array_type": {
+      "type": "PREC_DYNAMIC",
+      "value": 2,
+      "content": {
+        "type": "PREC_RIGHT",
+        "value": 0,
+        "content": {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "operand",
+              "content": {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_array_occurrence_type"
+                    },
+                    "named": true,
+                    "value": "occurrence_type"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "nullable_array_type"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "FIELD",
+              "name": "operator",
+              "content": {
+                "type": "STRING",
+                "value": "?"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "_array_occurrence_type": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "operand",
+          "content": {
+            "type": "SYMBOL",
+            "name": "primary_type"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "operator",
+          "content": {
+            "type": "ALIAS",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_array_occurrence"
+            },
+            "named": true,
+            "value": "occurrence"
+          }
+        }
+      ]
+    },
+    "_array_occurrence": {
+      "type": "SYMBOL",
+      "name": "array_count"
     },
     "negation_type": {
       "type": "PREC_RIGHT",
@@ -10077,6 +10198,10 @@
       "content": {
         "type": "CHOICE",
         "members": [
+          {
+            "type": "SYMBOL",
+            "name": "optional_array_type"
+          },
           {
             "type": "SYMBOL",
             "name": "nullable_array_type"
@@ -11474,6 +11599,10 @@
     {
       "type": "SYMBOL",
       "name": "_index_lbracket"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_occurrence_lbrace"
     },
     {
       "type": "SYMBOL",

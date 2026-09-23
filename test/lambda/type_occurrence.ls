@@ -1,5 +1,9 @@
 // Type Occurrence Pattern Feature Test Suite
-// Tests the type occurrence count syntax: T[n], T[min, max], T[n+]
+// S11.1.6v2 splits two families: the occurrence family `T?`, `T*`, `T+`,
+// `T{n}`, `T{n,m}`, `T{n,}` counts a *run*, which is what a list is, and the
+// array family `T[]`, `T[n]` describes an array. They coincide at two or more
+// items: a run of none is `null` and a run of one is the bare value, where
+// `T[0]` is `[]` and `T[1]` is `[T]`.
 
 "===== TYPE OCCURRENCE PATTERN TESTS ====="
 
@@ -20,12 +24,12 @@ type ThreeStrings = string[3]
 "1.5"; (["a", "b"] is ThreeStrings)    // false - only 2 strings
 
 // ============================================================
-// Test 2: Range Count [min, max]
+// Test 2: Range Count {min,max}
 // ============================================================
-'Test 2: Range Count [min, max]'
+'Test 2: Range Count {min,max}'
 
-type TwoToFourInts = int[2, 4]
-type OneToThreeStrings = string[1, 3]
+type TwoToFourInts = int{2,4}
+type OneToThreeStrings = string{1,3}
 
 "2.1"; ([1] is TwoToFourInts)          // false - too few
 "2.2"; ([1, 2] is TwoToFourInts)       // true - minimum bound
@@ -34,24 +38,25 @@ type OneToThreeStrings = string[1, 3]
 "2.5"; ([1, 2, 3, 4, 5] is TwoToFourInts) // false - too many
 
 "2.6"; ([] is OneToThreeStrings)       // false - too few
-"2.7"; (["a"] is OneToThreeStrings)    // true - minimum bound
+"2.7"; ("a" is OneToThreeStrings)      // true - a run of one is the bare value
+"2.7b"; (["a"] is OneToThreeStrings)   // false - an array of one is string[1]
 "2.8"; (["a", "b", "c"] is OneToThreeStrings) // true - maximum bound
 "2.9"; (["a", "b", "c", "d"] is OneToThreeStrings) // false - too many
 
 // ============================================================
-// Test 3: Unbounded Minimum [n+]
+// Test 3: Unbounded Minimum {n,}
 // ============================================================
-'Test 3: Unbounded Minimum [n+]'
+'Test 3: Unbounded Minimum {n,}'
 
-type AtLeastTwoInts = int[2+]
-type AtLeastOneString = string[1+]
+type AtLeastTwoInts = int{2+}
+type AtLeastOneString = string{1+}
 
 "3.1"; ([1] is AtLeastTwoInts)         // false - only 1
 "3.2"; ([1, 2] is AtLeastTwoInts)      // true - exactly 2
 "3.3"; ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10] is AtLeastTwoInts) // true - many is ok
 
 "3.4"; ([] is AtLeastOneString)        // false - empty
-"3.5"; (["a"] is AtLeastOneString)     // true - exactly 1
+"3.5"; ("a" is AtLeastOneString)       // true - a run of one is the bare value
 "3.6"; (["a", "b", "c", "d"] is AtLeastOneString) // true - more is ok
 
 // ============================================================
@@ -68,7 +73,8 @@ type ZeroOrMoreInts = int*
 "4.2"; (1 is MaybeInt)                 // true - value matches optional
 "4.3"; ([1, 2] is OneOrMoreInts)       // true - multiple
 "4.4"; ([] is OneOrMoreInts)           // false - zero not allowed
-"4.5"; ([] is ZeroOrMoreInts)          // true - zero allowed
+"4.5"; (null is ZeroOrMoreInts)        // true - a run of none is null
+"4.5b"; ([] is ZeroOrMoreInts)         // false - the empty array is int[]
 "4.6"; ([1, 2, 3] is ZeroOrMoreInts)   // true - any count
 
 // ============================================================
@@ -77,13 +83,13 @@ type ZeroOrMoreInts = int*
 'Test 5: Edge Cases'
 
 type ZeroCount = int[0]
-type ZeroOrOne = int[0, 1]
+type ZeroOrOne = int{0,1}
 type LargeCount = int[10]
 
 "5.1"; ([] is ZeroCount)               // true - exactly 0
 "5.2"; ([1] is ZeroCount)              // false - has 1
-"5.3"; ([] is ZeroOrOne)               // true - 0 is in range
-"5.4"; ([1] is ZeroOrOne)              // true - 1 is in range
+"5.3"; (null is ZeroOrOne)             // true - a run of none
+"5.4"; (1 is ZeroOrOne)                // true - a run of one
 "5.5"; ([1, 2] is ZeroOrOne)           // false - 2 is out of range
 
 // ============================================================
@@ -118,8 +124,8 @@ type PairOfLists = (int*)[2]  // exactly 2 lists of ints (explicit grouping requ
 
 // Inline occurrence must use type aliases
 type InlineThreeInts = int[3]
-type InlineRangeStrings = string[2, 4]
-type InlineAtLeastTwoInts = int[2+]
+type InlineRangeStrings = string{2,4}
+type InlineAtLeastTwoInts = int{2+}
 
 "8.1"; ([1, 2, 3] is InlineThreeInts)     // true
 "8.2"; ([1, 2] is InlineThreeInts)        // false
@@ -128,8 +134,8 @@ type InlineAtLeastTwoInts = int[2+]
 
 // ============================================================
 // Test 9: Empty Bracket Syntax T[] (C/Java-style)
-// T[] is equivalent to T* (zero or more, any length)
-// Matches array, list, and typed range
+// T[] is the array family: an array of any length, a list included since a
+// list is an array (S2.5.1v2). It is NOT T*, which is a run.
 // ============================================================
 'Test 9: Empty Bracket Syntax T[]'
 
@@ -142,7 +148,7 @@ type AnyStrings = string[]
 "9.4"; (["a"] is AnyInts)             // false - wrong element type
 "9.5"; ([] is AnyStrings)             // true - empty array
 "9.6"; (["hello", "world"] is AnyStrings) // true - string array
-"9.7"; (1 is AnyInts)                 // true - single value matches occurrence of 1
+"9.7"; (1 is AnyInts)                 // false - a bare int is a run, not an array
 
 // ============================================================
 // Test 10: Typed Array Matching (float[], range)

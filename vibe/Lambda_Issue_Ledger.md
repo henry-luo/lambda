@@ -159,13 +159,13 @@ This is consistent with CLAUDE.md rule 14.
 A seven-area survey of runtime behaviour against `doc/Lambda_Formal_Semantics.md`
 (probes under `temp/spec_survey/`) surfaced eight defects that return a **wrong
 value with no error**. Each was re-reproduced on both tiers before filing:
-[LR03-11](#lr03-11), [LR04-9](#lr04-9), [LR05-9](#lr05-9), [LR07-17](#lr07-17),
+[LR03-11](#lr03-11), [LR04-9](#lr04-9), [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR07-17](#lr07-17),
 [LR07-18](#lr07-18), [LR10-7](#lr10-7), [LR10-8](#lr10-8), [LR12-27](#lr12-27).
 The survey's spec gaps (behaviour no `S#` ruling covers) are not filed here —
 they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
-(S2.5.6–S2.5.8, S10.6.1, S11.1.6 and companions, semantics 29.0.0) and filed as
-[LR03-12](#lr03-12), [LR05-10](#lr05-10), [LR05-11](#lr05-11),
-[LR05-12](#lr05-12), [LR12-28](#lr12-28). P1 of the list fixes then found
+(S2.5.6–S2.5.8, S10.6.1, S11.1.6v2 and companions, semantics 29.0.0) and filed as
+[LR03-12](<Lambda_Issue_Ledger (fixed).md#lr03-12>), [LR05-10](<Lambda_Issue_Ledger (fixed).md#lr05-10>), [LR05-11](<Lambda_Issue_Ledger (fixed).md#lr05-11>),
+[LR05-12](<Lambda_Issue_Ledger (fixed).md#lr05-12>), [LR12-28](<Lambda_Issue_Ledger (fixed).md#lr12-28>). P1 of the list fixes then found
 [LR02-18](#lr02-18) (reference grammar has no list literal) and fixed
 [LR02-19](#lr02-19) (let-group item loss, another wrong value with no error).
 The effect-colour work of the same day (D7.4.6, ES48) fixed
@@ -175,9 +175,11 @@ top-level expression statements. Triaging the baseline gate against a clean cont
 then found and fixed [LR01-16](#lr01-16), an `auto`-tier satellite key-linking
 defect that made 17 baseline scripts and the MathLive gate timing-dependent, and
 filed [LR01-17](#lr01-17). P2 of the list fixes (sequence operations keep their
-input's kind) filed [LR05-13](#lr05-13): query results have no ruled kind.
-P4 (text, `++`, `*`) closed [LR05-9](#lr05-9), [LR05-11](#lr05-11) and
-[LR05-12](#lr05-12), and found one tier divergence of its own on the way: with
+input's kind) filed [LR05-13](<Lambda_Issue_Ledger (fixed).md#lr05-13>): query results have no ruled kind.
+P5 (type families) closed [LR03-12](<Lambda_Issue_Ledger (fixed).md#lr03-12>), the last of the survey's
+list/array gaps.
+P4 (text, `++`, `*`) closed [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR05-11](<Lambda_Issue_Ledger (fixed).md#lr05-11>) and
+[LR05-12](<Lambda_Issue_Ledger (fixed).md#lr05-12>), and found one tier divergence of its own on the way: with
 a filter over text now returning a string, the checker still typed the result
 `array`, and the JIT folded `("abc" that p) == ""` to false where the
 interpreter answered true (S1.6) — the result type, not the runtime, was the
@@ -406,7 +408,7 @@ fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Obj
 `let` bindings, so `(1, 2)` parses as `ERROR` in the `lambda-cst` verifier's
 grammar (checked with `tree-sitter parse`, 2026-09-22); `()` is rejected with
 it. The C parser accepts both (`()` since P1 of
-[List Fixes](impl/Lambda_List_Fixes.md)). Neither conformance script
+[List Fixes](<impl/Lambda_List_Fixes (done).md>)). Neither conformance script
 (`test/ts_s16_conformance.sh`, `test/c_s16_conformance.sh`) has a list case,
 so the divergence is unguarded. Fix belongs with the grammar work of P5
 (`make generate-grammar`), with accept cases for `()`, `(a, b)` and
@@ -472,17 +474,6 @@ A sized boundary wraps where **S11.4.5** requires value-aware admission and
 literal-union contract is not checked at all (a string literal union such as
 `"a" | "b"` is).
 
-<a id="lr03-12"></a>**LR03-12 · Occurrence/array type families not implemented (S11.1.1v3, S11.1.6, S16.8.6v2) · OPEN (found 2026-09-22)**
-The parser reads `T[n]`, `T[n+]`, `T[n, m]` as occurrence counts
-(`parse_type_pattern.cpp` `apply_occurrence`, `grammar.js` `occurrence_count`)
-where S11.1.1v3 makes `T[n]` an array of exactly n and S11.1.6 spells counts
-`T{n}`/`T{n,m}`/`T{n,}` (string islands included: `\(d{3})`); `T{n,m}` does
-not parse. Boundary semantics: `null is int*` is false (ruled true),
-`[] is int?` is true (ruled false), `[1,2] is [int*]` trips the bare-`[T]`
-lint. Migration: every `[n]`/`[n+]`/`[n, m]` occurrence in the tree and
-`doc/Lambda_Type.md` §Type Occurrences. Design record:
-[`Lambda_Type_Pattern.md` §1.3](Lambda_Type_Pattern.md).
-
 ---
 
 
@@ -545,134 +536,6 @@ hard-codes 256 bins in a stack `int64_t h[256]` (`:4501`).
 Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
-
-<a id="lr05-9"></a>**LR05-9 · `++` on numeric arrays of different element types reinterprets bits · FIXED 2026-09-23**
-`[1,2] ++ [3.5]` is `[1, 2, inf]`, `[1.5] ++ [2]` is `[1.5, 1e-323]`, and
-`[1i8,2i8] ++ [300]` is `[1, 2, 44]`, on both tiers. `fn_join`'s same-type
-shortcut (`lambda-eval.cpp:527`) tests only that both sides are
-`LMD_TYPE_ARRAY_NUM`, then builds the result with the **left** element type
-and copies the right payload's bytes under it. Contradicts **S5.3.1** (a
-numeric array is representation only); the `++` operand table itself has no
-ruling.
-*Fixed 2026-09-23 (P4):* the shortcut now also requires both lanes to have the
-same element type; a mixed pair falls through to the generic item path, so
-`[1, 2] ++ [3.5]` is `[1, 2, 3.5]` and `[1i8, 2i8] ++ [300]` is `[1, 2, 300]`.
-Record: [plan §13](impl/Lambda_List_Fixes.md).
-
-<a id="lr05-10"></a>**LR05-10 · Sequence kind (list vs array) is not preserved anywhere (S2.5.6, S2.5.7, D2.6.5v3) · OPEN (found 2026-09-22)**
-A 562-probe survey (`temp/spec_survey/listarray/`, both tiers) found the
-result kind of every sequence operation decided by how the input was built,
-not by its kind. Root causes: two list flags — `is_content` set by `list_end`
-and by take/drop/slice/zip/reverse/`split`/`find`/the vector ops,
-`is_spreadable` set by `array_spreadable` (`for`), `item_spread`, the child
-queries, and `unique` (`lambda/lambda.h:1015`); the consumers disagree
-(`array_push`/`list_push` splice only `is_content`, `array_push_spread` both,
-`array_push_spread_all` every array — `collection_runtime.cpp:190`, `:385`,
-`:486`; `lambda-data-runtime.cpp:1815`, `:1824`); array literals decide
-spreading from **syntax** — a for-style list spreads only when a sibling is
-written as `for` or `*` (`transpile-mir.cpp:20509`, `interp.cpp:2239`) — so
-`let r = for (x in [1,2]) x; [r, 9]` is `[[1,2],9]`; and each function picks
-its own result flag: `sort` → array (`lambda-vector.cpp:101`), `reverse`
-keys on `!is_spreadable` (`:2409`), `unique` copies `is_spreadable` (`:2696`),
-take/drop/slice/`[i to j]` make a **list** of a plain array or range
-(`:2761`–`:2911`), `zip` always a list (`:4963`), `fn_join` (`++`) always an
-array (`lambda-eval.cpp:441`), pipes always an array
-(`transpile-mir.cpp:30053`, `interp.cpp:2896`), `order by` an array
-(`fn_sort_by_keys` `:2494`, but an empty ordered result stays a list), typed
-`int[]` admission rebuilds the value and drops the flag
-(`lambda-eval.cpp:9918`), `x is list` is hard-coded false (`:2198`).
-For-expressions never collapse (empty is a hidden non-null empty container,
-one item is `[v]`); `(for …)[int]` and `(1 to 3)[int]` return `[]`
-(`child_query_collect` `:3773`). Design: one kind flag, one result-kind
-helper (`array_transform_copy_cert` is the nearest hook, `lambda-vector.cpp:165`),
-value-decided spreading, collapse at every list-producing site.
-Implementation plan: [`vibe/impl/Lambda_List_Fixes.md`](impl/Lambda_List_Fixes.md)
-(also covers LR05-11, LR05-12, LR12-28, LR03-12, LR05-9 and the S2.6 content gaps).
-*Partially resolved 2026-09-22 (P1):* one kind bit, value-decided spreading,
-position-decided finish (void vs null), for-expression collapse, no list
-normalization, `()`, `type()`/`is list`; the per-function result kinds (P2)
-remain. Making `array_push` splice every list (it had spliced only
-`is_content` lists) exposed the positional sites that had relied on for-lists
-not splicing: a for-expression passed as one argument was spliced into the
-rest list (`count_args(for (x in [1, 2]) x)` was 2, the LR09-9 invariant).
-Every positional site — rest and argument lists (JIT, dynamic-call adapter,
-JS timer packs, concurrency args), group/join/order keys and rows, path keys,
-query matches, clones, set operators, element-copying transforms, `zip`,
-index-addressed vector results, and the hosted-Python list operations — now
-uses the verbatim append `array_push_verbatim` (D2.6.5v3).
-*P2 landed 2026-09-22:* every sequence operation keeps its input's kind
-through one finish (`seq_finish_kind`, `seq_operands_are_lists`,
-`lambda-data-runtime.cpp`): sort/reverse/unique/take/drop/slice, element-wise
-arithmetic, masks, and unary functions, `zip`, the set operators, `fill`, the
-mapping pipe and `that` (`pipe_end`, both tiers), and for-expression windows
-(`for_window`, in place ahead of the one collapse); `split`/`find` build
-arrays; typed admission keeps the bit. What remains of the umbrella is the
-slot-store image ([LR12-28](#lr12-28), P3) and text ([LR05-11](#lr05-11), P4).
-Record: [plan §11](impl/Lambda_List_Fixes.md).
-*P3 landed 2026-09-23:* slot stores take the array image
-([LR12-28](#lr12-28) fixed) and insertions splice a list (`a[i] = list`,
-`push`, typed arrays included).
-*P4 landed 2026-09-23:* text walks as a sequence and rebuilds its own kind,
-`++` follows S10.6.1's table, and `*` no longer marks its operand
-([LR05-11](#lr05-11), [LR05-12](#lr05-12), [LR05-9](#lr05-9) fixed). The
-umbrella's remaining part is the type families of P5
-([LR03-12](#lr03-12)).
-
-<a id="lr05-11"></a>**LR05-11 · Text sequence operations, `that`/pipe on scalars, and `++` do not follow S2.5.8, S10.1.2v2, S10.1.5v2, S10.6.1 · FIXED 2026-09-23**
-`reverse`/`sort`/`unique` return a string unchanged (`lambda-vector.cpp:2396`,
-`:2429`, "strings are singular"); `in` on strings is a substring test
-(`lambda-eval.cpp:3814`, `strstr`) where S8.1.1/S2.5.8 rule character
-membership; `that` and the mapping pipe over a string yield characters as a
-spreading list rather than a string; `"s"[-1]` is `""` (S7.2.1 says `null`).
-`5 that ~ > 3` is `[5]` (ruled `5`); `[1,2] that ~ > 9` is `null` (ruled
-`[]`). `++`: `"a" ++ [1]` stringifies to `"a[1]"` and `[1,2] ++ 3` is an
-error, where S10.6.1 rules `["a", 1]` and `[1,2,3]`; `null` is already the
-identity. `keys`/`values`/`names` are not built in (S8.4.1v2 — deliberate).
-*Partially resolved 2026-09-22 (P2):* `that` and the mapping pipe follow
-S10.1.2v2/S10.1.5v2 for list, array, range, map, element, scalar, and null
-sources (`5 that ~ > 3` is `5`, `[1,2] that ~ > 9` is `[]`, a list filtered
-to nothing is `null`). The text operations, `in`, `"s"[-1]`, and `++` remain
-(P4).
-*Fixed 2026-09-23 (P4):* a string or symbol is walked by code point and a
-binary by byte, so `reverse`/`sort`/`unique`/`take`/`drop`/`slice` rebuild the
-source's kind from its characters; a filter over text always gives that kind
-(`""` when empty) and a mapping gives it only when every result item belongs to
-it (`"abc" |> upper(~)` is `"ABC"`, `"abc" |> ord(~)` is `[97, 98, 99]`) — the
-checker types those results accordingly, without which the JIT folded
-`("abc" that p) == ""` to false while the interpreter answered true. `in` is
-code-point membership and `contains` keeps the substring test; an out-of-range
-text subscript is `null` (S7.2.1). `++` follows S10.6.1's table: a sequence
-operand decides the result before any text arm (`[1] ++ "ab"` is `[1, "ab"]`,
-`[1, 2] ++ 3` is `[1, 2, 3]`), kind by S2.5.7, `null` the identity, maps and
-elements rejected. `keys`/`values`/`names` stay out of scope (S8.4.1v2 —
-deliberate). Record: [plan §13](impl/Lambda_List_Fixes.md).
-
-<a id="lr05-12"></a>**LR05-12 · `*` spread mutates its operand and skips ranges (S12.3.5v2) · FIXED 2026-09-23**
-`item_spread` (`lambda-data-runtime.cpp:2397`) sets the spread flag on its
-operand, so `[*a, 3]` permanently turns `a` into a list; on the JIT the operand
-may be a pooled constant literal (`transpile-mir.cpp:8148`), so
-`fn g() => [1, "y"]` returns a list on every later call — JIT gives 3 items
-where the interpreter gives 2 (repro
-`temp/spec_survey/listarray/t/repro_spread_const.ls`). `[*(1 to 3), 9]` does
-not spread the range; `[*null, 1]` keeps the null where `*null` splices
-nothing. S1.6 violation on the JIT half.
-*Fixed 2026-09-23 (P4):* `item_spread` is deleted. `*x` builds the list of x's
-items — a sequence's items with a range materialized, nothing for null, any
-other value (text included) as one item — and finishes by position like every
-other list producer, so it splices where it lands, collapses at one item or
-none, and `[*xs]` packages any value as an array. The operand is untouched.
-Record: [plan §13](impl/Lambda_List_Fixes.md).
-
-<a id="lr05-13"></a>**LR05-13 · Query results are lists of any length (S2.5.5v2; kind unruled) · OPEN (found 2026-09-22)**
-`fn_query` and `fn_child_query` (`lambda-eval.cpp:3728`, `:3822`) return a
-container with the list bit set whatever it holds, so `e[element]` with one
-match is a one-item list (`len` 1, spreads as an item) and with none an empty
-list, where S2.5.5v2 says a list has at least two items. No ruling names the
-kind of `e[T]` / `e?T`: read as a selection (S2.5.7) the result follows its
-source — an array for an element, map, array, or range, a collapsing list for
-a list — but query results placed in element content would then land as one
-array item instead of splicing. Needs a ruling before the query functions
-change. Repro `temp/p2/probe_query.ls`. Both tiers.
 
 ---
 
@@ -1406,20 +1269,6 @@ Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
 (`lambda-eval.cpp:8200`) and the procedure continues with exit 0. Both
 contradict **S7.1.3v2** (writes are checked and raise through the `T^`
 channel).
-
-<a id="lr12-28"></a>**LR12-28 · A list stored in a field or `fill` keeps its list-ness (S2.5.6, S2.5.7) · FIXED 2026-09-23**
-`<e a: (1, 2)>` stores the attribute as a list, so reading `e.a` into an array
-literal spreads it (`[…, e.a]` gains two items); S2.5.6 rules that a
-single-value slot of a persistent container stores the array image `[1, 2]`.
-`fill(2, (1, 2))` stores the list as one element twice (`len` 2) where S2.5.7
-rules the list `(1, 2, 1, 2)` (`len` 4). Both tiers.
-*Partially resolved 2026-09-22 (P2):* `fill` follows its item —
-`fill(2, (1, 2))` is `(1, 2, 1, 2)` and `fill(0, (1, 2))` is `null`.
-*Fixed 2026-09-23 (P3):* every single-value slot stores the array image — map,
-element, and object literals, member writes (`fn_map_set`, the checked and
-COW setters, `vmap_set`), and the MIR's direct field stores, which convert
-through `slot_image` whenever the value's static type may hold a list — and
-the source list keeps its kind. Record: [plan §12](impl/Lambda_List_Fixes.md).
 
 <a id="lr12-29"></a>**LR12-29 · The interpreter ran `on` handler bodies as functional blocks (S12.1.3, S2.5.3) · FIXED 2026-09-22**
 An `on` handler is a `pn` (S12.1.3), so its body yields its last value

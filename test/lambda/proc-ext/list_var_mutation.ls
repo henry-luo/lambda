@@ -1,4 +1,4 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/proc-ext until
+// P0 fixture of vibe/impl/Lambda_List_Fixes (done).md — lives in test/lambda/proc-ext until
 // phases P1/P3 turn it green, then moves to test/lambda/proc (baseline).
 // S2.5.5v2 / S2.5.6 / S2.5.7 in procedures: the kind survives mutation of a
 // `var` list; a collapsed empty list is null and pushes as null (an argument

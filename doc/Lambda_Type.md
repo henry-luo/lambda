@@ -331,9 +331,11 @@ let squares = for (i in 1 to 5) i ** 2  // [1, 4, 9, 16, 25]
 ### Array Types
 
 `T[]` is Lambda's homogeneous array contract: every logical element must
-satisfy `T`. It composes by rank, so `T[][]` is an array of `T[]`. This is
-distinct from a structural bracket pattern such as `[int]` (exactly one
-position) and an occurrence/count pattern such as `T[n]` (**S11.1.1v2**).
+satisfy `T`, and `T[n]` is `T[]` with a fixed length. Suffixes compose by
+rank, left to right, so `T[][]` is an array of `T[]` and `int[2][3]` is three
+arrays of two. This is distinct from a structural bracket pattern such as
+`[int]` (exactly one position) and from the occurrence count `T{n}`, which
+counts a run rather than an array (**S11.1.1v3**, **S11.1.6v2**).
 
 <!-- code-fence: lambda type -->
 | Form | Meaning |
@@ -344,7 +346,7 @@ position) and an occurrence/count pattern such as `T[n]` (**S11.1.1v2**).
 | `int?[]` | Homogeneous array whose elements may be `int` or `null` |
 | `int[]?` | An `int[]` value or `null` |
 | `int[][]` | Homogeneous array whose elements are `int[]` |
-| `int[5]` | Occurrence/count pattern; not a synonym for `int[]` |
+| `int[5]` | An array of exactly five ints — `int[]` with a fixed length |
 
 Examples:
 
@@ -552,19 +554,28 @@ type User = {
 
 ### Type Occurrence Modifiers
 
-Occurrence modifiers express structural pattern cardinality. They are not a
-second spelling of a homogeneous `T[]` contract. Use `T[]` for declarations,
-parameters, returns, and mutations that require every element to satisfy `T`.
+There are **two families**, split by concept (S11.1.6v2). The *occurrence*
+family describes a **run** of `T`s, which is what a list is; the *array*
+family describes an **array**. They coincide at two or more items and differ
+where no list exists: a run of none is `null` and a run of one is the bare
+value, where `int[0]` is `[]` and `int[1]` is `[int]`. Use `T[]` for
+declarations, parameters, returns, and mutations that hold an array of any
+length; use an occurrence where the value may be absent or singular.
 
 <!-- code-fence: lambda type -->
-| Form | Meaning |
-|------|---------|
-| `int*` | Structural occurrence pattern of zero or more ints |
-| `string+` | Structural occurrence pattern of one or more strings |
-| `int[5]` | Structural occurrence pattern of exactly five ints |
-| `int[3+]` | Structural occurrence pattern of at least three ints |
-| `int[2, 10]` | Structural occurrence pattern bounded from two to ten ints |
-| `int[]` | Homogeneous element contract, independent of occurrence syntax |
+| Form | Family | Meaning |
+|------|--------|---------|
+| `int*` | occurrence | A run of zero or more ints: `null`, `5`, `(5, 6)`, `[5, 6]` |
+| `string+` | occurrence | A run of one or more strings |
+| `int{5}` | occurrence | A run of exactly five ints |
+| `int{3+}` | occurrence | A run of at least three ints |
+| `int{2,10}` | occurrence | A run of two to ten ints |
+| `int[]` | array | An array of ints, any length, `[]` included |
+| `int[5]` | array | An array of exactly five ints |
+| `[int{2,10}]` | array | An array holding a run of two to ten ints |
+
+The spellings `T[n+]` and `T[n, m]` are **retired**: a count on a run is the
+occurrence family, so it is written as in regex.
 
 In declarations, variables, parameters and signatures:
 
@@ -585,13 +596,15 @@ fn concat(parts: string[]) => ...
 | Syntax | Meaning | Equivalent |
 |--------|---------|------------|
 | `T` | Exactly one | Required |
-| `T?` | Zero or one | `T \| null` |
-| `T*` | Structural zero-or-more occurrence | Pattern-only cardinality |
-| `T+` | Structural one-or-more occurrence | Pattern-only cardinality |
-| `T[]` | Homogeneous array contract | Every logical element is `T` |
-| `T[n]` | Structural occurrence of exactly n | Count pattern |
-| `T[n+]` | Structural occurrence of n or more | Count pattern |
-| `T[n, m]` | Structural occurrence from n to m | Count pattern |
+| `T?` | A run of zero or one | `T \| null` |
+| `T*` | A run of zero or more | `T{0+}` |
+| `T+` | A run of one or more | `T{1+}` |
+| `T{n}` | A run of exactly n | Exactly n |
+| `T{n,m}` | A run of n to m | Between n and m |
+| `T{n+}` | A run of at least n | The open bound; `{n,}` is not a spelling |
+| `T[]` | An array of any length | Every logical element is `T` |
+| `T[n]` | An array of exactly n | `T[]` with a fixed length |
+| `T[n][m]` | An array of m arrays of n | Rank is preserved: `int[2][3]` is three arrays of two |
 
 ---
 
@@ -914,7 +927,7 @@ and `match` arms:
 'foo' is \symbol(a w*)               // true
 
 fn f(x: \(d+)) => "got " ++ x        // parameter annotation
-let code: \(a[3]) = "abc"            // let annotation
+let code: \(a{3}) = "abc"            // let annotation
 
 match s {
     case \(d+): "number"             // inline arm
@@ -1004,9 +1017,9 @@ element it repeats:
 ```lambda
 type OptionalPrefix = \("pre"? w+)           // optional "pre" prefix
 type Identifier = \(a w*)                    // letter followed by word chars
-type ThreeDigits = \(d[3])                    // exactly 3 digits
-type Phone = \(d[3] "-" d[3] "-" d[4])      // 555-123-4567
-type ZipCode = \(d[5] ("-" d[4])?)           // 12345 or 12345-6789
+type ThreeDigits = \(d{3})                    // exactly 3 digits
+type Phone = \(d{3} "-" d{3} "-" d{4})      // 555-123-4567
+type ZipCode = \(d{5} ("-" d{4})?)           // 12345 or 12345-6789
 ```
 
 ### Pattern Composition
@@ -1032,7 +1045,7 @@ type NotDigit = \(!d)                         // any non-digit character
 
 ```lambda
 // Email-like pattern
-type Email = \(w+ "@" w+ "." a[2, 6])
+type Email = \(w+ "@" w+ "." a{2,6})
 
 // URL path segment
 type PathSegment = \(("/" w+)+)
@@ -1042,13 +1055,13 @@ type Version = \("v" d+ "." d+ "." d+)
 
 // Hex color: #RGB or #RRGGBB
 type HexDigit = \("0" to "9" | "a" to "f" | "A" to "F")
-type HexColor = \("#" (HexDigit[3] | HexDigit[6]))
+type HexColor = \("#" (HexDigit{3} | HexDigit{6}))
 
 // Date format: YYYY-MM-DD
-type DatePattern = \(d[4] "-" d[2] "-" d[2])
+type DatePattern = \(d{4} "-" d{2} "-" d{2})
 
 // Username: 3-20 chars, starts with letter
-type Username = \(a w[2, 19])
+type Username = \(a w{2,19})
 ```
 
 ### Symbol Patterns

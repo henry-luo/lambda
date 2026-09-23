@@ -1,0 +1,26 @@
+'1. every spelling parses and means the same grid'
+"1.1"
+[true, true, true, true, true]
+'2. each layer counts its own axis'
+"2.1"
+[false, false, true]
+"2.2"
+[false, false, false]
+"2.3"
+[true, false, false]
+"2.4"
+[true, false, true]
+'3. N-D arrays, other leaves, and nullable layers'
+"3.1"
+[true, false]
+"3.2"
+[true, false]
+"3.3"
+[true, false, true]
+"3.4"
+[true, false]
+'4. annotations, parameters and match arms'
+"4.1"
+[[[1, 2], [3, 4], [5, 6]], [5, 6], [11, 12]]
+"4.2"
+["3 x 2", "2 x 3", "other"]

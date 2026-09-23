@@ -880,34 +880,6 @@ static Item fn_numeric_binary(Item item_a, Item item_b,
     return ItemError;
 }
 
-// helper: get length of a vector-like item
-static int64_t vector_length(Item item) {
-    TypeId type = get_type_id(item);
-    switch (type) {
-        case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
-        case LMD_TYPE_ARRAY:        return item.array->length;
-        case LMD_TYPE_RANGE:       return item.range->length;
-        default:                   return -1;
-    }
-}
-
-// helper: get element from a vector-like item at index
-static Item vector_get(Item item, int64_t index) {
-    TypeId type = get_type_id(item);
-    switch (type) {
-        case LMD_TYPE_ARRAY_NUM:
-            return array_num_read_item(item.array_num, index);
-        case LMD_TYPE_ARRAY:
-            return item.array->items[index];
-        case LMD_TYPE_RANGE:
-            return item.range->is_char
-                ? fn_chr((Item){.item = i2it(item.range->start + index)})
-                : (Item){ .item = i2it(item.range->start + index) };
-        default:
-            return ItemError;
-    }
-}
-
 enum NumericVectorUnaryOp {
     NUMERIC_VECTOR_ABS,
     NUMERIC_VECTOR_ROUND,
@@ -1020,6 +992,7 @@ Item fn_idiv(Item item_a, Item item_b) {
 
 Item fn_pow(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
+    GUARD_NULL2(item_a, item_b);
     // Defensive check: verify items are valid before accessing
     // Check if the item union pointer fields are valid (not small integers that indicate corruption)
     uint64_t ptr_a = item_a.item;
@@ -1089,6 +1062,7 @@ Item fn_mod(Item item_a, Item item_b) {
 
 Item fn_abs(Item item) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     // abs() - absolute value of a number or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_COMPLEX) {
@@ -1139,6 +1113,7 @@ static Item fn_numeric_rounding(Item item, NumericVectorUnaryOp vector_op,
         const char* name, double (*rounding_op)(double),
         NumericDecimalUnaryFn decimal_op) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     TypeId type = get_type_id(item);
     LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
     if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
@@ -1231,6 +1206,7 @@ Item fn_min2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     // ArrayNum in the first slot is the established min(arr, axis) overload.
     if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) return fn_min_axis(item_a, item_b);
+    GUARD_NULL2(item_a, item_b);  // S7.3.1: as min([a, null]) is null
     bool valid = false;
     Item result = numeric_extreme_pair(item_a, item_b, true, &valid);
     if (!valid) log_debug("min not supported for types: %d, %d",
@@ -1247,6 +1223,7 @@ Item fn_min1(Item item_a) {
 Item fn_max2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) return fn_max_axis(item_a, item_b);
+    GUARD_NULL2(item_a, item_b);  // S7.3.1: as max([a, null]) is null
     bool valid = false;
     Item result = numeric_extreme_pair(item_a, item_b, false, &valid);
     if (!valid) log_debug("max not supported for types: %d, %d",
@@ -1280,6 +1257,7 @@ Item fn_avg(Item item) {
 
 Item fn_pos(Item item) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     // Unary + operator - return the item as-is for numeric types, or cast strings/symbols to numbers
     if (get_type_id(item) == LMD_TYPE_COMPLEX) {
         return item;
@@ -1336,6 +1314,7 @@ Item fn_pos(Item item) {
 
 Item fn_neg(Item item) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     // Unary - operator - negate numeric values or cast and negate strings/symbols
     if (get_type_id(item) == LMD_TYPE_COMPLEX) {
         Complex* value = item.get_complex();
@@ -1404,7 +1383,7 @@ Item fn_neg(Item item) {
                 // compact elements: fall through to generic via array_num_get
                 elem = array_num_get(arr, i);
             } else if (t == LMD_TYPE_ARRAY) {
-                elem = item.array->items[i];
+                elem = array_item_read(item.array, i);
             } else {
                 elem = item.range->is_char
                     ? fn_chr((Item){.item = i2it(item.range->start + i)})

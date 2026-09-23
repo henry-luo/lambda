@@ -23,7 +23,7 @@ type Grouped = (int*)[2]
 let e4: int[3] = [1, 2, 3]
 
 // E5: string/symbol pattern islands in value position
-let isl = \(d[3])
+let isl = \(d{3})
 let e5 = ("123" is isl)
 
 // E6: constrained type via `that` (parenthesized predicate form)

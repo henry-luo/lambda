@@ -1,4 +1,4 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/ext until its
+// P0 fixture of vibe/impl/Lambda_List_Fixes (done).md — lives in test/lambda/ext until its
 // phase turns it green, then moves to test/lambda (baseline). Golden written from the
 // rulings, not from the runtime.
 // S2.2.3, S2.6.2, S2.6.4: content drops null and "", merges adjacent strings

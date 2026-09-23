@@ -250,8 +250,14 @@ typedef struct TypedItem TypedItem;
 
 // TypedItem storage owns its scalar payload inline. Defined in lambda-data.cpp
 // so maps and native Arrays encode the same persistent value representation.
+// C linkage explicitly: lambda-data.hpp includes this header inside its
+// `extern "C"` block (which is how lambda-data.cpp defines them), so a file
+// that includes lambda.hpp first declared C++ symbols the linker could not
+// resolve as soon as it called an inline lane reader.
+extern "C" {
 Item typeditem_to_item(TypedItem* titem);
 bool typeditem_store_item(TypedItem* titem, Item item);
+}
 
 // const read-only item
 // ConstItem, instead of const Item, to hide fields from Item
@@ -373,6 +379,14 @@ extern const Item ItemEmptyString;
     if (get_type_id(a) == LMD_TYPE_ERROR) return (a); \
     if (get_type_id(b) == LMD_TYPE_ERROR) return (b); \
     if (get_type_id(c) == LMD_TYPE_ERROR) return (c)
+
+// Null propagation guards (S7.1.1v3, S7.10.5v3): a scalar numeric function
+// or operator with an absent operand is absent. Placed after the error guards,
+// so an error operand still wins.
+#define GUARD_NULL1(a) \
+    if (get_type_id(a) == LMD_TYPE_NULL) return ItemNull
+#define GUARD_NULL2(a, b) \
+    if (get_type_id(a) == LMD_TYPE_NULL || get_type_id(b) == LMD_TYPE_NULL) return ItemNull
 
 // Bool-returning function guards: propagate error as BOOL_ERROR
 #define GUARD_BOOL_ERROR1(a) \
@@ -550,6 +564,15 @@ static inline void array_native_lane_configure(Array* array, const LaneStorageDe
     }
 }
 
+// The inverse of array_native_lane_configure, for a carrier whose lane words
+// have just been boxed back into Items.
+static inline void array_native_lane_clear(Array* array) {
+    if (!array) return;
+    array->is_native_lane_array = 0;
+    array->map_kind = 0;
+    array->reserved_state = 0;
+}
+
 static inline bool array_has_native_lane(const Array* array) {
     return array && array->is_native_lane_array &&
         array_native_lane_kind(array) != LANE_STORAGE_INVALID;
@@ -616,6 +639,17 @@ static inline Item array_native_lane_read(const Array* array, int64_t index) {
     default:
         return ItemNull;
     }
+}
+
+// One element of an Array as an Item, whatever its carrier: a native lane
+// decodes its slot, a boxed array returns the slot itself. Admission into a
+// `T?[]` contract publishes a native lane (D3.2.6), so a reader that indexes
+// `items` directly takes a lane word for an Item -- a raw int `1` dereferenced
+// as a pointer -- which is how `==`, `in`, `++` and the numeric folds crashed
+// on an admitted `int?[]`. Index must be in range.
+static inline Item array_item_read(const Array* array, int64_t index) {
+    return array_has_native_lane(array) ? array_native_lane_read(array, index)
+        : array->items[index];
 }
 
 static inline bool array_native_lane_store(Array* array, int64_t index, Item value) {
@@ -698,6 +732,15 @@ struct ArrayNum : Map {
     ArrayNumElemType get_elem_type() const { return (ArrayNumElemType)map_kind; }
     void set_elem_type(ArrayNumElemType e) { map_kind = (uint8_t)e; }
 };
+
+// The leading-axis rank of a packed array: a flat array or a 1-D view is rank
+// 1, an N-D array reads its shape. S11.1.1v3 preserves rank, so an array
+// contract compares with this, never with the flattened leaf lane.
+static inline int array_num_rank(const ArrayNum* array) {
+    if (!array || !array->is_ndim || !array->extra) return 1;
+    const ArrayNumShape* shape = (const ArrayNumShape*)(uintptr_t)array->extra;
+    return shape->ndim >= 1 ? shape->ndim : 1;
+}
 
 // Tune5 P5 gate: a List and ArrayNum share the same managed header and tail
 // offsets, but their element buffers still have different semantic contracts.

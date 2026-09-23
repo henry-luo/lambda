@@ -18,8 +18,9 @@ run() {
   # semantic analysis (S16.6.8/S16.6.9 classify block interiors, which the
   # parser cannot see, so they are reported there). Deliberately not "any
   # error": a script can parse and analyse fine and still fail at run time — an
-  # unresolved import, say — which must not read as a rejection.
-  if echo "$out" | grep -qE 'error\[E(100|312)\]'; then got=R; else got=A; fi
+  # unresolved import, say — which must not read as a rejection. E103 is the
+  # type-pattern parser's syntax error (`int??`), the type sublanguage's E100.
+  if echo "$out" | grep -qE 'error\[E(100|103|312)\]'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
 }
@@ -264,6 +265,18 @@ run A "open block with no alias"           'let d = temp("t")\nopen d { commit }
 run A "open closes: [ on next line"        'let d = temp("t")\nopen d { commit }\n[0]\n'
 run A "open is still a data name"          'let m = {open: true}\nm.open\n'
 run A "del is still a data name"           '<del "x">\n'
+
+echo "--- S11.1.1v3 / S11.1.6v2 type suffix chains ---"
+run A "counted ranks chain"                'type G = int[2][3]\n'
+run A "open rank over a counted rank"      'type G = int[][3]\n'
+run A "three ranks"                        'type G = int[2][1][1]\n'
+run A "nullable array"                     'type G = int[]?\n'
+run A "nullable array of nullables"        'type G = int?[]?\n'
+run A "array of nullable arrays"           'type G = int[]?[]\n'
+run A "rank chain in an annotation"        'let g: int[2][3] = [[1, 2], [3, 4], [5, 6]]\n'
+run R "two ? never meet"                   'type G = int??\n'
+run R "no ? after a nullable array"        'type G = int[]??\n'
+run R "no run count after an array"        'type G = int[]+\n'
 
 echo
 echo "pass=$pass fail=$fail"

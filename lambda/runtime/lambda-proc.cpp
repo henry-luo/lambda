@@ -741,7 +741,7 @@ String* format_cmd_args(String* cmd, Item args) {
     else if (args_type == LMD_TYPE_ARRAY) {
         List* arg_list = args.array;
         for (int i = 0; i < arg_list->length; i++) {
-            Item arg_item = arg_list->items[i];
+            Item arg_item = array_item_read(arg_list, i);
             String* arg_str = fn_string(arg_item);
             if (arg_str && arg_str->len > 0) {
                 String* escaped = escape_shell_arg(arg_str);

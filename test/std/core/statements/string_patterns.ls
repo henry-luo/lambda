@@ -17,7 +17,7 @@ type alnum = \(w+)
 "!!!" is alnum
 
 // ===== Email-like pattern =====
-type email_pat = \(w+ "@" w+ "." a[2,6])
+type email_pat = \(w+ "@" w+ "." a{2,6})
 "user@example.com" is email_pat
 "not-an-email" is email_pat
 
@@ -54,7 +54,7 @@ type has_space = \(... s ...)
 "helloworld" is has_space
 
 // ===== Dot pattern =====
-type three_chars = \(.[3])
+type three_chars = \(.{3})
 "abc" is three_chars
 "ab" is three_chars
 "abcd" is three_chars

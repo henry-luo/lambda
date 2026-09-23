@@ -15,6 +15,66 @@
 // From validate.cpp
 ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem item, Type* type);
 
+// ==================== Packed Sequence Elements ====================
+
+// A packed array's element tag (or a range's integers) decides a plain element
+// contract by itself. A structured one -- a union or optional (`int?`,
+// `int | null`), a literal, a constraint, a nested occurrence or array -- has
+// to see the values: `[1, 2] is int?[]` answered false because `int?` embeds
+// no tag, and `[3] is 1[]` true because a literal's tag is just `int`.
+static bool element_contract_is_plain(Type* operand) {
+    operand = unwrap_type(operand);
+    if (!operand) return false;
+    if (type_is_global_meta_type(operand)) return true;
+    return operand->kind == TYPE_KIND_SIMPLE && !operand->is_literal;
+}
+
+// The rows of an N-D array are (ndim-1)-D arrays of one leaf type. Only when
+// the element contract is exactly that many count-free `[]` layers over a plain
+// leaf does the leaf tag decide it (S11.1.1v3: rank is preserved, so a 2-D
+// `[[1]]` is no `int[]`); any other shape is checked row by row.
+static Type* ndim_plain_leaf(Type* operand, int layers) {
+    Type* cur = unwrap_type(operand);
+    for (int i = 0; i < layers; i++) {
+        if (!cur || cur->kind != TYPE_KIND_UNARY) return NULL;
+        TypeUnary* layer = (TypeUnary*)cur;
+        if (layer->op != OPERATOR_ARRAY || layer->min_count != 0 ||
+                layer->max_count != -1) return NULL;
+        cur = unwrap_type(layer->operand);
+    }
+    return cur && element_contract_is_plain(cur) ? cur : NULL;
+}
+
+// S11.1.1v3: `T[]` holds when every element satisfies T. A packed lane or a
+// range has no Item slots, so each element -- an N-D array's leading-axis row
+// -- is read through item_at and validated like a generic array's. A row view
+// or a character allocates, so the container stays rooted across the walk.
+static ValidationResult* validate_sequence_elements(SchemaValidator* validator,
+        Item container, int64_t count, Type* operand_type) {
+    TypeType wrapper;
+    wrapper.type_id = LMD_TYPE_TYPE;
+    wrapper.type = operand_type;
+    RootFrame roots(1);
+    Rooted<Item> rooted(roots, container);
+    if (validator->is_fast_mode()) {
+        for (int64_t i = 0; i < count; i++) {
+            ValidationResult* elem = validate_against_base_type(validator,
+                item_at(rooted.get(), i).to_const(), &wrapper);
+            if (!elem || !elem->valid) return validation_verdict(false);
+        }
+        return validation_verdict(true);
+    }
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    for (int64_t i = 0; i < count; i++) {
+        PathScope scope(validator, (long)i);
+        ValidationResult* elem = validate_against_base_type(validator,
+            item_at(rooted.get(), i).to_const(), &wrapper);
+        if (elem && !elem->valid) merge_errors(result, elem, validator);
+    }
+    if (result->error_count == 0) result->valid = true;
+    return result;
+}
+
 // ==================== Occurrence Validation ====================
 
 /**
@@ -29,13 +89,17 @@ static ValidationResult* validate_single_item_occurrence(
     ValidationResult* result = create_validation_result(validator->get_pool());
     CountConstraint constraint = get_count_constraint(type_unary);
 
-    // For optional (?), null is valid
-    if (type_unary->op == OPERATOR_OPTIONAL && item.type_id() == LMD_TYPE_NULL) {
-        result->valid = true;
+    // S11.1.6v2: a run of zero is `null`, whatever spells the zero -- `T?`,
+    // `T*` and `T{0}` all admit it, and `T+` and `T{1,}` do not.
+    if (item.type_id() == LMD_TYPE_NULL) {
+        result->valid = constraint.min == 0;
+        if (!result->valid) {
+            add_type_mismatch_error(result, validator, "a value", item.type_id());
+        }
         return result;
     }
 
-    // Single item can match occurrence of 1
+    // A run of one is the bare value.
     if (constraint.min <= 1 && (constraint.max == -1 || constraint.max >= 1)) {
         // Validate the single item against the operand type
         Type* operand_type = unwrap_type(type_unary->operand);
@@ -74,27 +138,29 @@ static ValidationResult* validate_array_num_occurrence(
                 fast_count = (int)arr_num->length;
             }
         }
-        CountConstraint fast_c = get_count_constraint(type_unary);
+        CountConstraint fast_c = get_container_count_constraint(type_unary);
         if (fast_count < fast_c.min) return validation_verdict(false);
         if (fast_c.max >= 0 && fast_count > fast_c.max) return validation_verdict(false);
         Type* fast_operand = unwrap_type(type_unary->operand);
         if (!fast_operand) return validation_verdict(false);
         if (fast_operand->type_id == LMD_TYPE_ANY) return validation_verdict(true);
-        if (arr_num && arr_num->is_ndim) {
-            ArrayNumElemType et = arr_num->get_elem_type();
-            TypeId leaf = (et == ELEM_FLOAT64) ? LMD_TYPE_FLOAT :
-                          (et == ELEM_BOOL) ? LMD_TYPE_BOOL : LMD_TYPE_INT;
-            Type* cur = fast_operand;
-            while (cur && cur->kind == TYPE_KIND_UNARY) {
-                Type* inner = unwrap_type(((TypeUnary*)cur)->operand);
-                if (!inner) break;
-                cur = inner;
+        if (!arr_num) return validation_verdict(false);
+        Item fast_container = {.array_num = (ArrayNum*)arr_num};
+        if (arr_num->is_ndim) {
+            Type* leaf = ndim_plain_leaf(fast_operand, array_num_rank(arr_num) - 1);
+            if (leaf) {
+                return validation_verdict(
+                    validator_array_elem_embeds(arr_num->get_elem_type(), leaf));
             }
-            return validation_verdict(cur && (cur->type_id == leaf ||
-                (leaf == LMD_TYPE_INT && cur->type_id == LMD_TYPE_INT64)));
+            return validate_sequence_elements(validator, fast_container, fast_count,
+                fast_operand);
         }
-        return validation_verdict(arr_num &&
-            validator_array_elem_embeds(arr_num->get_elem_type(), fast_operand));
+        if (validator_array_elem_embeds(arr_num->get_elem_type(), fast_operand)) {
+            return validation_verdict(true);
+        }
+        if (element_contract_is_plain(fast_operand)) return validation_verdict(false);
+        return validate_sequence_elements(validator, fast_container, fast_count,
+            fast_operand);
     }
 
     ValidationResult* result = create_validation_result(validator->get_pool());
@@ -117,7 +183,7 @@ static ValidationResult* validate_array_num_occurrence(
             count = (int)arr_num->length;
         }
     }
-    CountConstraint constraint = get_count_constraint(type_unary);
+    CountConstraint constraint = get_container_count_constraint(type_unary);
 
     log_debug("[PATTERN] ArrayNum occurrence: count=%d, ndim=%d, min=%d, max=%d, elem_type=%d",
               count, is_ndim, constraint.min, constraint.max,
@@ -145,32 +211,22 @@ static ValidationResult* validate_array_num_occurrence(
         return result;
     }
 
-    // N-D ArrayNum: leading-axis slices are themselves arrays.  Validate by
-    // treating each "row" as a (ndim-1)-D ArrayNum and checking against
-    // operand_type recursively.  The simplest sufficient check: if operand_type
-    // is itself an occurrence/unary (e.g. int*), and the leaf elem_type matches
-    // the inner numeric type, the structure matches.
+    // N-D ArrayNum: leading-axis slices are themselves arrays. A contract that
+    // is exactly (ndim-1) `[]` layers over a plain leaf is decided by the leaf
+    // tag; anything else -- a rank that does not match, a count, a union or
+    // optional -- checks each row as the (ndim-1)-D array it is. Stripping
+    // every wrapper down to the leaf let a 2-D `[[1]]` pass `int[]`.
     if (is_ndim) {
-        ArrayNumElemType etype = arr_num->get_elem_type();
-        TypeId leaf_tid = (etype == ELEM_FLOAT64) ? LMD_TYPE_FLOAT :
-                          (etype == ELEM_BOOL) ? LMD_TYPE_BOOL :
-                          LMD_TYPE_INT;
-        // Walk down through nested unary/occurrence wrappers to find the leaf type.
-        Type* cur = operand_type;
-        while (cur && cur->kind == TYPE_KIND_UNARY) {
-            TypeUnary* tu = (TypeUnary*)cur;
-            Type* inner = unwrap_type(tu->operand);
-            if (!inner) break;
-            cur = inner;
-        }
-        if (cur && (cur->type_id == leaf_tid ||
-                    (leaf_tid == LMD_TYPE_INT && cur->type_id == LMD_TYPE_INT64))) {
+        Item container = {.array_num = (ArrayNum*)arr_num};
+        Type* leaf = ndim_plain_leaf(operand_type, array_num_rank(arr_num) - 1);
+        if (!leaf) return validate_sequence_elements(validator, container, count, operand_type);
+        if (validator_array_elem_embeds(arr_num->get_elem_type(), leaf)) {
             result->valid = true;
         } else {
             result->valid = false;
             add_constraint_error_fmt(result, validator,
-                "N-D ArrayNum element type mismatch (leaf=%d, expected=%d)",
-                leaf_tid, cur ? cur->type_id : -1);
+                "N-D ArrayNum elements do not embed exactly into expected type_id=%d",
+                leaf->type_id);
         }
         return result;
     }
@@ -178,6 +234,10 @@ static ValidationResult* validate_array_num_occurrence(
     if (arr_num && validator_array_elem_embeds(arr_num->get_elem_type(), operand_type)) {
         // ArrayNum occurrence checks are covariant because validation reads/copies elements.
         result->valid = true;
+    } else if (arr_num && !element_contract_is_plain(operand_type)) {
+        // a structured element contract needs the values, not the lane's tag
+        return validate_sequence_elements(validator, {.array_num = (ArrayNum*)arr_num},
+            count, operand_type);
     } else {
         result->valid = false;
         add_constraint_error_fmt(result, validator,
@@ -200,7 +260,7 @@ static ValidationResult* validate_range_occurrence(
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     int count = range ? (int)range->length : 0;
-    CountConstraint constraint = get_count_constraint(type_unary);
+    CountConstraint constraint = get_container_count_constraint(type_unary);
 
     log_debug("[PATTERN] Range occurrence: count=%d, min=%d, max=%d",
               count, constraint.min, constraint.max);
@@ -210,8 +270,15 @@ static ValidationResult* validate_range_occurrence(
         return result;
     }
 
-    // Range elements are always integers
+    // An integer range's elements are ints; a character range's are
+    // one-codepoint strings (S11.1.3). A structured element contract, or any
+    // character range, needs the element values themselves.
     Type* operand_type = unwrap_type(type_unary->operand);
+    if (range && operand_type &&
+            (range->is_char || !element_contract_is_plain(operand_type))) {
+        return validate_sequence_elements(validator, {.range = (Range*)range}, count,
+            operand_type);
+    }
 
     if (operand_type && validator_numeric_type_embeds(LMD_TYPE_INT, NUM_INT8, operand_type)) {
         result->valid = true;
@@ -238,7 +305,7 @@ static ValidationResult* validate_list_occurrence(
         // no report to assemble it can stop at the first bad element, which
         // full mode must never do (it owes every indexed path).
         int fast_count = list ? (int)list->length : 0;
-        CountConstraint fast_c = get_count_constraint(type_unary);
+        CountConstraint fast_c = get_container_count_constraint(type_unary);
         if (fast_count < fast_c.min) return validation_verdict(false);
         if (fast_c.max >= 0 && fast_count > fast_c.max) return validation_verdict(false);
         Type* fast_operand = unwrap_type(type_unary->operand);
@@ -259,7 +326,7 @@ static ValidationResult* validate_list_occurrence(
     ValidationResult* result = create_validation_result(validator->get_pool());
 
     int count = list ? (int)list->length : 0;
-    CountConstraint constraint = get_count_constraint(type_unary);
+    CountConstraint constraint = get_container_count_constraint(type_unary);
 
     log_debug("[PATTERN] List occurrence: count=%d, min=%d, max=%d",
               count, constraint.min, constraint.max);
@@ -318,19 +385,46 @@ ValidationResult* validate_occurrence_type(
                          item_type_id == LMD_TYPE_RANGE);
 
     if (!is_container) {
+        // S11.1.6v2: the two families differ exactly here. `T[]` and `T[n]`
+        // describe an array, so nothing else satisfies them; an occurrence
+        // describes a run, which at zero is `null` and at one is a bare T.
+        if (type_unary->op == OPERATOR_ARRAY) {
+            ValidationResult* result = create_validation_result(validator->get_pool());
+            result->valid = false;
+            add_type_mismatch_error(result, validator, "array", item_type_id);
+            return result;
+        }
         return validate_single_item_occurrence(validator, item, type_unary);
     }
 
     // Handle typed arrays specially
-    if (item_type_id == LMD_TYPE_ARRAY_NUM) {
-        return validate_array_num_occurrence(validator, item.array_num, type_unary);
-    }
-    if (item_type_id == LMD_TYPE_RANGE) {
-        return validate_range_occurrence(validator, item.range, type_unary);
-    }
+    ValidationResult* as_run =
+        item_type_id == LMD_TYPE_ARRAY_NUM
+            ? validate_array_num_occurrence(validator, item.array_num, type_unary)
+        : item_type_id == LMD_TYPE_RANGE
+            ? validate_range_occurrence(validator, item.range, type_unary)
+            : validate_list_occurrence(validator, item.array, type_unary);
+    if (as_run && as_run->valid) return as_run;
 
-    // Handle generic List/Array
-    return validate_list_occurrence(validator, item.array, type_unary);
+    // S11.1.6v2: a run of one is the bare value, and when the operand itself
+    // admits a container that bare value IS a container -- `int[]?` holds an
+    // array, `[]` included. Only a failed run reading reaches this, so the
+    // common path still tests each element once.
+    // Only a run reads its container as its one item: `T[]` describes the
+    // container itself, so `[1]` must not pass `int[][]` as one `int[]`.
+    CountConstraint bounds = get_count_constraint(type_unary);
+    if (type_unary->op != OPERATOR_ARRAY &&
+            bounds.min <= 1 && (bounds.max < 0 || bounds.max >= 1)) {
+        Type* operand = unwrap_type(type_unary->operand);
+        if (operand) {
+            TypeType wrapper;
+            wrapper.type_id = LMD_TYPE_TYPE;
+            wrapper.type = operand;
+            ValidationResult* as_one = validate_against_base_type(validator, item, &wrapper);
+            if (as_one && as_one->valid) return as_one;
+        }
+    }
+    return as_run;
 }
 
 // ==================== Union Type Validation ====================

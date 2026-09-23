@@ -1,0 +1,14 @@
+decl literal union: error
+arg literal union: error
+decl scalar opt array: error
+decl array opt array: error
+decl scalar run: error
+decl opt record: error
+arg scalar fn: error
+arg scalar pn: error
+reassign scalar: error
+reassign opt array: error
+reassign run: error
+admitted: [null, [5], [3], null, [4], 5, { a: 1}, 1]
+norms: 6
+

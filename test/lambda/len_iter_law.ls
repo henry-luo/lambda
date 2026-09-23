@@ -27,7 +27,7 @@ len(null); [for (i in null) i]
 "-- element: attribute values then content, len matches the walk --"
 len(<elmt a: 1, b: 2, "text">); [for (i in <elmt a: 1, b: 2, "text">) i]
 
-"-- count(): a list splices wherever it lands as an item (S8.3.3v2) --"
+"-- count(): a list splices wherever it lands as an item (S8.3.3v3) --"
 // a for-expression and a spread splice at the construction site...
 len([1, for (x in [2, 3]) x, 4])
 let spliced = [2, 3]

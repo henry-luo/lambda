@@ -486,8 +486,7 @@ ItemReader ArrayReader::get(int64_t index) const {
     if (!array_ || index < 0 || index >= array_->length) {
         return ItemReader();
     }
-    Item value = array_has_native_lane(array_) ? array_native_lane_read(array_, index) :
-        array_->items[index];
+    Item value = array_item_read(array_, index);
     return ItemReader(value.to_const());
 }
 

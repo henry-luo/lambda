@@ -1,4 +1,4 @@
-// Fixture of vibe/impl/Lambda_List_Fixes.md, green since P4 (2026-09-23) on
+// Fixture of vibe/impl/Lambda_List_Fixes (done).md, green since P4 (2026-09-23) on
 // both tiers. Golden written from the rulings, not from the runtime.
 // S12.3.5v2: `*x` splices a sequence's items (list, array, range), nothing
 // for null, a non-sequence as one item, and never modifies its operand —

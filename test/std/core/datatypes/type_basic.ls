@@ -38,6 +38,7 @@ type OneOrMore = int+;
 ([] is OneOrMore)
 
 type ZeroOrMore = int*;
+(null is ZeroOrMore);
 ([] is ZeroOrMore);
 ([1, 2, 3] is ZeroOrMore);
 

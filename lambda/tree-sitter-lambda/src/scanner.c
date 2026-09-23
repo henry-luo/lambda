@@ -56,6 +56,10 @@ enum TokenType {
     BIN_AMP,
     CALL_LPAREN,
     INDEX_LBRACKET,
+    // S11.1.6v2: `{` opens a counted occurrence (`int{2,4}`) and also starts a
+    // map type and a block, so it carries the same same-line guard as the
+    // index bracket.
+    OCCURRENCE_LBRACE,
     MEMBER_DOT,
     POSTFIX_CARET,
     STMT_BOUNDARY,
@@ -392,6 +396,9 @@ bool tree_sitter_lambda_external_scanner_scan(
                 break;
             case '[':
                 if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0, 0); }
+                break;
+            case '{':
+                if (valid_symbols[OCCURRENCE_LBRACE]) { return emit_op(lexer, OCCURRENCE_LBRACE, 0, 0); }
                 break;
             case '^':
                 // §3.6: `^` is followed either by nothing (propagate) or by a

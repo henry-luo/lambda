@@ -1,0 +1,10 @@
+[null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+[2, -0.7568024953079283, 4.123105625617661, 0.24497866312686414, 4, 4, 4, 4, 4, 1, -4, 4, 16, 16, 1, 4, 5, -2.5, 2]
+[null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+[3, 9.055385138137417, 9, 9, -9, 1, 10, 18, 4.5, 4, 1]
+[null, null, null, null, null, null, null, null, null, null, null]
+[[2, 4, 4, -4, 5], [null, null, null, null, null], [2, 4, 4, -4, 5, 2], [null, null, null, null, null, null]]
+[null, type.null, true, null]
+10.2089
+true
+

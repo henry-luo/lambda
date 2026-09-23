@@ -119,6 +119,14 @@ Type* lambda_type_nonnull_map_contract(Type* contract);
 // change the representation.
 bool lambda_boundary_is_redundant(Type* source, Type* target);
 
+// The AST checker's verdict on one annotated crossing, shared with the MIR
+// boundary emitters so both read one relation: a crossing this DEFERS is
+// decided only by its runtime check (S11.4.1v3). `call_argument` selects the
+// argument form, which compares a source's successful members only -- the
+// caller's short-circuit guard owns its error member.
+StaticBoundaryResult lambda_static_boundary_relation(Type* source, Type* target,
+        bool call_argument);
+
 // C16: within the numeric tower, admission is decided by MEMBERSHIP at run time
 // rather than by the static type -- `int` is the float64-representable
 // integers, a subset of float and a superset of i32, so neither direction is
@@ -144,7 +152,7 @@ bool lambda_type_layout_proves_contract(Type* type);
 // Canonicalize a semantic `T | null` result as `T?` when it has one concrete
 // payload type. Abstract/error-bearing cases deliberately remain boxed.
 Type* lambda_type_nullable_normalized(Pool* pool, Type* type);
-// S11.1.6: true when a value of this static type may be a list at run time.
+// S11.1.6v2: true when a value of this static type may be a list at run time.
 bool lambda_type_may_hold_list(Type* type);
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right);
 Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions);

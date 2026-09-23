@@ -1,4 +1,4 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/proc-ext until
+// P0 fixture of vibe/impl/Lambda_List_Fixes (done).md — lives in test/lambda/proc-ext until
 // phase P3 turns it green, then moves to test/lambda/proc (baseline).
 // S2.6.5: content stays normalized under mutation — writing null or "" removes
 // the child, a written list splices, a string beside a string merges, and

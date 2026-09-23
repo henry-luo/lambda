@@ -1,6 +1,11 @@
 # Lambda Set-Oriented Pipe Operator Proposal
 
-## Overview
+> **Status (2026-09-23):** the pipe shipped as `|>` (S10.1.1, S10.1.2v2) and the
+> filter has been respelled twice — `where` → `that` (S10.1.5v2) → **`|:`**,
+> with `that` kept as the single-value proviso. The ruling and its reasoning are
+> in *Filter Stage `|:` and the `that` Proviso* below; the original `|`/`where`
+> text in the body is kept as history and the superseded filter section is in
+> Appendix S. Read `|` in the older examples as `|>`.
 
 This proposal introduces a **set-oriented pipe operator** (`|`) and a **current item reference** (`~`) to Lambda Script, enabling declarative, auto-mapping data transformation pipelines consistent with Lambda's high-level, set-oriented design philosophy.
 
@@ -54,7 +59,7 @@ cat users.txt | grep "active" | sort | uniq | wc -l
 | -------------------- | ----------------------- | ---------------------- |
 | Lines of text        | Collection of items     | Data granularity       |
 | `$0`, `$1` (awk)     | `~`                     | Current item reference |
-| `grep pattern`       | `where condition`       | Filter                 |
+| `grep pattern`       | `\|: condition`        | Filter                 |
 | `awk '{print $1}'`   | `\| ~.field`           | Transform/project      |
 | `sort`, `uniq`, `wc` | `sort`, `unique`, `len` | Aggregators            |
 
@@ -523,73 +528,263 @@ data | take(5)         // take(data, 5)
 data | slice(0, 10)    // slice(data, 0, 10)
 ```
 
-### `where` — Filter Clause
+## Filter Stage `|:` and the `that` Proviso (ruled 2026-09-23)
 
-The `where` keyword filters items, keeping only those where the condition is truthy:
+> **Status:** ruled 2026-09-23 and ratified into the formal spec at
+> **v34.0.0** — S10.1.5v3 (`that` proviso), S10.1.6 (`|:` filter stage),
+> S10.1.2v4 (single-mode; array out), S10.3.1v3 (`where` diagnostic names
+> `|:`), and **S2.5.7v2** (a list is built, never computed — §F.6), with
+> S7.10.1v3/S7.10.5v3 following; cross-refs S2.5.5v2, S2.5.8, S8.2.4,
+> S8.3.1v3, S8.4.1v2, S10.1.3, S10.2.1, S10.6.1, SO38.
+> Implementation pending: lexer, `grammar.js` operator table, the
+> `OPERATOR_WHERE` consumers, the `lambda_parser.c` retirement diagnostic,
+> 152 fixtures.
+
+### §F.1 What was wrong with `that`
+
+The expression-level `that` (`c that p`, S10.1.5v2) was a filter: it walked
+the members of `c` and kept the truthy ones. Three problems, in the order
+they were raised:
+
+1. **One keyword, two arities.** `T that cond` in type position and
+   `for … where cond` are both *one value, one predicate* — they refine a
+   single binding. `c that p` was *many members, one predicate* — a
+   sequence walk. Every "detail" in which the two differed (`~`/`~#`
+   binding per member, kind preservation, list collapse, text walking by
+   code point) was a consequence of the second being a walk. Readers saw one
+   word and two rule sets.
+2. **A pipe stage that did not look like one.** The filter was already a
+   pipe-family operator in every respect but spelling: pipe precedence tier,
+   left-associative, `~`/`~#` under S10.1.3's innermost-wins, walking what
+   `|>` walks. A bare word between two `|>` stages reads as a clause, not a
+   stage, so users did not relate the two.
+3. **A return-type table of its own.** S10.1.5v2 carried a four-row kind
+   table (list→list-or-collapse, array/range/map/element→`[]`, text→`""`,
+   scalar→`T?`) and S8.2.4 had to state that the type-subscript rule was
+   *deliberately not* the filter rule. Two rules that happened to agree with
+   the mapping pipe's, maintained separately.
+
+### §F.2 Prior art: pipe and filter data models
+
+Extends the "Design Inspiration" survey above with the filter half. The
+question each row answers: *what does a filter give back, and how does the
+language keep the container kind straight?*
+
+| Language | Pipeline data model | Filter returns | Empty / single item |
+|---|---|---|---|
+| **Haskell / F# / Elm / Rust / LINQ / Kotlin** | typed sequence `[a]`, `Seq<T>`, `IEnumerable<T>` | `filter :: (a→Bool) → [a] → [a]` — same container, same element type, usually lazy | `[]` or a one-element sequence; never collapses |
+| **XPath / XQuery** | one flat **sequence** type; an item *is* a singleton sequence; sequences never nest | `e/node()[p]` → sequence of the same items | `()`; a singleton ≡ the item, so "collapse" is an identity of the model, not a rule |
+| **PowerShell** | objects flowing down a pipeline; collections are *unrolled* on emit | `Where-Object` emits the survivors | collected as `$null` / the object / `Object[]` — the well-known `@(…)` footgun |
+| **jq** | a **stream** of values, not a collection | `select(p)` emits its input or nothing; `.[] \| select(p)` is a stream; `map(select(p))` rebuilds an array | empty stream / one value |
+| **Nushell** | structured list, record, table | `where` keeps the input's kind — table→table, list→list | empty table / list |
+| **R dplyr** | data frame | `filter` → data frame, columns and grouping kept | 0-row frame |
+| **SQL** | relation | `WHERE` → relation with the same heading | empty relation |
+| **Clojure** | seq abstraction over any collection | `filter` on a **map** yields a seq of `[k v]` entries — map-ness lost | `()` |
+| **Kotlin / Haskell `Data.Map` / Rust `retain`** | keyed container | `filter` on a map **returns a map**, keys kept | empty map |
+
+Three facts fall out:
+
+- **Element type preservation is universal in typed languages.** No
+  language makes `filter` return an untyped bag.
+- **Container-kind preservation is the norm.** Only XPath and PowerShell
+  collapse, for opposite reasons — XPath because item ≡ singleton sequence
+  is a theorem of its model; PowerShell because unrolling is a side effect
+  of emit. Lambda's list under S2.5.5v2 (one-item list *is* the item, empty
+  is `null`) is the XPath kind of collapse: principled, not accidental.
+- **Maps split the field.** Kotlin/Haskell/Rust keep keys; Clojure and JS
+  (`Object.entries(m).filter`) drop them. Lambda's SO38 (keys dropped, array
+  out) is the Clojure choice — defensible, and the one row where a user from
+  a typed language will be surprised.
+
+The design consequence: **a filter is `Seq<T> → Seq<T>` and has no data
+model of its own.** It is the mapping pipe minus the items that fail. That
+is what §F.4 rules.
+
+### §F.3 Syntax options and the ruling: `|:`
+
+Every spelling considered, including the two that were shipped and the one
+before them. Constraints: must read as a pipe-family stage in a chain
+(`xs ⟨filter⟩ p |> f`); must not spend a glyph another family owns; must
+not echo an unrelated operator.
+
+| Spelling | Example | For | Against | Verdict |
+|---|---|---|---|---|
+| `where` | `xs where ~ > 0` | SQL-familiar | collided with the `for`-header `where` clause | retired (S10.3.1v2) |
+| `that` | `xs that ~ > 0` | reads as English | one keyword, two arities (§F.1); not visibly a pipe stage | **retained for the single-value proviso only** (§F.5) |
+| `\| filter(…)` | `xs \|> filter(~ > 0)` | explicit | verbose; makes filter a library call the pipe has to special-case | rejected |
+| `[pred]` | `xs[~ > 0]` | XPath predicate | ambiguous with indexing and with the `e[T]` type subscript (S8.2.4) | rejected |
+| `\|>[ expr ]` | `xs \|>[~ > 0]` | pipe-shaped | same `[]` ambiguity | rejected |
+| `\|?` | `xs \|? ~ > 0` | short | `?` belongs to the optional family (`T?`, `c? in`, `e?T`); reads as null-safe pipe | rejected |
+| `?>` | `xs ?> ~ > 0` | short, `?` connotes test | drops the `\|`, so it does not look like a stage; `?` family reserved | rejected |
+| `\|?>` / `\|>?` | `xs \|?> ~ > 0` | visibly `\|>`-shaped, `?` = test | three characters, heavy; `\|>?` reads as optional chaining | rejected |
+| `:>` | `xs :> ~ > 0` | short, free | mirrors `<:` (`is_in`, `grammar.js` operator table) — the two would be read as a pair they are not; F#/OCaml upcast glyph; says nothing about pipes | rejected |
+| `\|\|>` | `xs \|\|> ~ > 0` | pipe-shaped; not currently lexed (only `\|` and `\|>` are) | `\|` is union everywhere (S10.1.1) so it reads "union pipe"; F# tuple pipe | rejected |
+| `\|:>` | `xs \|:> ~ > 0` | pipe-shaped, chains with `\|>` | it is `\|` + `:>`, so the `<:` echo survives; three characters | rejected |
+| **`\|:`** | `xs \|: ~ > 0` | see below | no `>` | **ruled** |
+
+Why `|:` wins, and why the missing `>` is a feature:
+
+- **It has the right precedent.** Set-builder notation writes "such that"
+  as `|` or `:` — `{x ∈ S | P(x)}`, `{x ∈ S : P(x)}`. `S |: P` spells
+  "S such that P", the same phrase `that` carries in type position. The two
+  proviso forms rhyme: `T that cond` for one value, `xs |: cond` for a
+  sequence.
+- **Dropping `>` is honest.** In `|>` the arrow says "flows into the body":
+  an item goes in, a different value comes out. A filter does not transform;
+  it selects. A `>` would claim a data flow that is not there.
+- **Chains still read as stages.** `users |: ~.active |> ~.name` — "such
+  that", "then". The shared leading `|` is what makes it pipe-family.
+- **It is free.** Only `|` and `|>` are lexed today; `|:` collides with
+  nothing in expression, type, or path syntax.
+
+Lexing note, decided rather than discovered: longest match wins, and the only
+adjacent-`|:` collision is a `match` arm written `case a |: …`, which nobody
+writes (`case int | string: expr` has whitespace and is unaffected). A
+negative fixture covers the glued form.
+
+### §F.4 Semantics of `|:`
+
+- **It is a pipe stage.** `c |: p` walks exactly what `c |> body` walks
+  (S10.1.2v2: array or list by item, map by value, element by attribute
+  values then children, text by code point, a non-sequence scalar as one
+  member) and keeps exactly the members for which `p` is truthy. `~` is the
+  member, `~#` its key or index, scoped by S10.1.3.
+- **Result kind is the pipe's, by reference.** There is no filter kind table.
+  Whatever S10.1.2v4 and S2.5.7v2 say the mapping pipe returns for a source,
+  `|:` returns the same holding the survivors — and since §F.6 that is an
+  **array for every sequence source, a list included** (`[]` when none
+  survive); text gives its own kind (`""` when empty, S2.5.8); a scalar
+  gives itself or `null`. A map's keys are dropped (SO38).
+- **Single-mode: a free `~` is required.** `|>` is dual-mode (S10.1.2v2): a
+  `~`-free body is whole-value application (`data |> sum`). Whole-value
+  filtering is meaningless, and letting `|:` read the same `~`-free text as
+  per-item application (`xs |: is_even` ≡ `xs |: is_even(~)`) would make the
+  two pipes disagree on the same syntax. So a `|:` body with no free `~` is
+  a compile error (new E-code: "filter body must mention `~`"). The
+  per-item-callable reading was considered and rejected on that ground; the
+  idiom is `xs |: is_even(~)`.
+- **Precedence and associativity are unchanged** from `that`: pipe tier,
+  left-associative, so `c |: p |> f |: q` chains left to right.
+- **Static type** is `T[]` for a source of element type `T` (`int[]` for a
+  range, `any[]` for map/element), the text kind for text, `T?` for a scalar
+  — with the element type held fixed, since a filter never changes what an
+  item is. Sound for a list source too: the result is an array (§F.6), so it
+  cannot collapse. Only an `any` source stays open.
+
+### §F.5 `that` is the single-value proviso — and how it differs from the type constraint
+
+`that` survives with one meaning, aligned with its type-position meaning:
+**`x that cond` is `x` when `cond` (with `~` bound to `x`) is truthy, and
+`null` otherwise.** The left operand is one item whatever it is — a
+collection on the left is *not* walked: `xs that len(~) > 2` is the whole
+array or `null`. This is the guard/proviso operator the language lacked, and
+it is the old S10.1.5v2 scalar branch (`5 that ~ > 9` is `null`) promoted to
+the whole rule, with the sequence branch moved to `|:`.
+
+Why `null` and not `error` on a failed proviso:
+
+- **A failed test is absence, not failure.** S7's discipline is that every
+  error value is deliberate: something went wrong that must be discharged.
+  "x, provided that …" — when the proviso fails there is no x, and nothing
+  broke. That is what `null` is.
+- **`error` would make every proviso a must-handle site.** A position that
+  textually admits `error` must engage it (S7), so `x that p` would need
+  `^ {…}` or a `T^` contract everywhere, and `if (x that p)` — the common
+  shape — would be an unhandled-error compile error. `null` composes with the
+  whole `?` family for free: `(x that p) ?? default`, `x that p |> f`,
+  truthiness in `if`.
+- **The type checker already produces `T?`** for the scalar case
+  (`lambda_type_nullable_normalized` in `build_ast.cpp`), and `T?` is
+  `T | null`, not `T | error`.
+
+The subtle difference to keep straight — same keyword, same predicate, same
+`~` binding, **different failure channel**:
+
+| Form | Position | On mismatch | Type |
+|---|---|---|---|
+| `x that cond` | expression | **`null`** — absence; nothing to handle | `T?` |
+| `let x: T that cond`, `f(x: T that cond)`, `{name: string that len(~) > 0}` | type binding / contract | **soft error** — the contract fails as any type contract does (S11), reported at the binding or call boundary | `T` on success; the binding or call carries the error |
+
+The two are not in conflict: the expression form *asks* whether `x`
+satisfies the proviso and answers with `x` or nothing; the type form
+*asserts* that it does, and an assertion that fails is an error. Same
+predicate, one is a query and the other a contract. Readers coming from the
+old filter meaning should note that `xs that p` no longer walks `xs` — that
+is `xs |: p` now — and that the parser rejects nothing here: `xs that p` is
+legal and means "all of `xs`, or `null`", which is a silent semantic change
+for any old filter site. The fixture sweep converts every old filter site to
+`|:` for that reason.
+
+### §F.6 Result kind: three options, ruled "unify as array"
+
+The last question was what a pipe or filter returns when its source is a
+**list** — `(1, 2, 3) |> ~ * 2`, `(1, 2, 3) |: ~ > 1` — given that a list is
+a special array (the spread bit, S2.5.1v2): `(1, 2, 3)` *is* `[1, 2, 3]` in
+every array position, but `[1, 2, 3]` is not `(1, 2, 3)`. Three probes on the
+2026-09-23 build framed it:
 
 ```lambda
-[1, 2, 3, 4, 5] where ~ > 3
-// Result: [4, 5]
-
-users where ~.age >= 18
-// Keep only adult users
-
-// Chained with pipes
-data | ~.name where len(~) > 3 | upper(~)
+let a = [1, 2, 3];  let l = (1, 2, 3);
+len(<d a>) → 1        len(<d l>) → 3        len(<d *a>) → 3
+len([l |> ~ * 2, 9]) → 4                    // mapped list still splices
+len(<d (a that ~ > 1)>) → 1                 // array source in content: one child
+fn f(a: int[]) => len(a);
+f((1, 2, 3) that ~ > 2)         → E201 "expected int[], got int 3"
+let y: int[] = take((1, 2, 3), 1) → E201 "expected int[], got int 1"
 ```
 
-### Why `where` Instead of `|?`
+Two facts drove the ruling. **A list already passes a `T[]` contract — until
+it shrinks**: a ≥2 list is admitted as the array it is, but the moment any
+shrinking operation (`|:`, `take`, `slice`, `unique`, `drop`) leaves 0 or 1
+item, S2.5.5v2 collapses it to `null` or the item and the next `T[]` boundary
+throws E201. The hole is *collapse × shrinker*, not `|:` and not the
+annotation; `|>` was sound all along (a list is ≥2 by construction and a
+mapping never shrinks). **And the primary pipe use case already needed
+`*`**: an array source in content gives one child, so anyone piping data into
+an element writes `*(…)` or a `for` today.
 
-| Option | Example | Pros | Cons |
-|--------|---------|------|------|
-| **`where`** ✓ | `data where ~ > 5` | SQL-familiar, readable, extensible | Keyword vs operator |
-| `\|?` | `data \|? ~ > 5` | Short, operator-based | Cryptic, `?` overloaded |
-| `\| filter(...)` | `data \| filter(~ > 5)` | Explicit | Verbose |
-| `[predicate]` | `data[~ > 5]` | XPath-like | Conflicts with indexing |
+| Option | Rule | Static type of `T[] ⟨op⟩ …` | Content | Verdict |
+|---|---|---|---|---|
+| **1. Follow the input** (S2.5.7 P2, 2026-09-23) | list in → list out, array in → array out, mixed → array | open for every shrinker (`|:`, `take`, `slice`, `unique`, `drop`) — the result may be a collapsed item or `null`; a latent E201 at the next `T[]` boundary | `<d (l |: p)>` splices | consistent, but the shrinker trap cannot be fixed inside it: the collapse *is* the list rule |
+| **2. Unify as array** | every function and pipe returns an array for any sequence input; lists are built by syntax only | `T[]`, always; sound at every boundary; chains through multi-step pipes | `<d *(l |: p)>` or `for … where` — the idiom the array case already uses | **ruled** |
+| **3. Unify as list** | every function and pipe returns a list | open everywhere; `len(xs |: p)` with one survivor is `len(3)` = 0 (S8.3.1v3); `[xs |> f, 9]` splices unexpectedly | splices | rejected — data processing becomes a minefield to buy nothing |
 
-**Precedents:**
+**The ruling (S2.5.7v2): a list is built, never computed.** The list kind
+belongs to construction — a list literal, a `for` expression, a block,
+content, a query (S8.2.4) — because those *compose values and content* and
+must splice where they land. Everything that *processes* a sequence returns
+an array: the mapping pipe and `|:`, `sort`, `reverse`, `unique`, `take`,
+`drop`, `slice`, `[i to j]`, `zip`, `fill`, `split`, `find`, `varg()`, rest
+parameters, `content(e)`, `keys`/`values`/`names`, the vectorized sys funcs.
+`T[]` as the return type is simpler, consistent, easier to join in
+multi-step pipes, and matches every typed language in §F.2. The division of
+labour is clean: **`for … where` is the content filter, `|:` is the data
+filter.** This reverses the list half of P2 of the list fixes (the same
+day); `take((10, 20, 30), 1)` becomes `[10]`.
 
-| Language | Filter Syntax | Notes |
-|----------|---------------|-------|
-| SQL | `WHERE` | Universal familiarity |
-| LINQ (C#) | `.Where()` | Method, but same keyword |
-| PowerShell | `Where-Object` | Cmdlet with `Where` name |
-| XPath | `[predicate]` | Bracket syntax |
-| XQuery | `where` clause | Part of FLWOR |
-
-### Future Query Clauses (Roadmap)
-
-Using `where` as a keyword opens the door to additional **query clauses** inspired by SQL and XQuery's FLWOR expressions:
+**Operators are the one carve-out, and it is principled.** `+ - * /`, the
+mask comparisons `eq ne lt le gt ge`, and `++` are *broadcast notation*, not
+processing — `(1, 2, 3) + 1` reads as "the same list, adjusted", not as a
+function call — so they keep the operand kind: a scalar operand leaves the
+kind alone, list `⊕` list is a list, and any array or range operand gives an
+array (the list is demoted).
 
 ```lambda
-// Current: pipe + where
-data | ~.amount where ~ > 100 | sum
-
-// Future potential clauses:
-data
-    | ~.amount
-    where ~ > 100           // filter
-    order ~ desc            // sort (future)
-    limit 10                // take first N (future)
-    offset 5                // skip first N (future)
-    | sum
-
-// XQuery FLWOR-style expressions (future consideration)
-for (user in users)
-    where user.active
-    order user.name
-    limit 100
-    return {name: user.name, email: user.email}
+(1, 2, 3) + 1          → (2, 3, 4)      // kind kept
+[1, 2, 3] + 1          → [2, 3, 4]
+(1, 2, 3) + [1, 2, 3]  → [2, 4, 6]      // list demoted
+(1, 2) ++ 3            → (1, 2, 3)
+(1, 2) ++ [3]          → [1, 2, 3]
 ```
 
-**XQuery FLWOR reference:**
-- **F**or — iteration
-- **L**et — variable binding  
-- **W**here — filtering
-- **O**rder by — sorting
-- **R**eturn — projection
-
-Lambda's `for` expression + `where` clause provides the foundation. Future additions (`order`, `limit`, `offset`, `group`) would create a powerful, SQL/XQuery-like query syntax while maintaining Lambda's functional nature.
+This is *sound* for exactly the reason option 1 was not: **no operator
+shrinks**. Element-wise arithmetic and the masks return as many lanes as the
+list operand had, and `++` only grows, so an operator result is never a
+collapsing one-item list and a `T[]` static type stays honest through it.
+The line is therefore not "operators vs functions" by fiat — it is "can it
+shrink?", and operators happen to be precisely the sequence operations that
+cannot. Text is untouched throughout (S2.5.8): a text kind is a *type*, not
+a bit.
 
 ## Grammar Changes
 
@@ -760,7 +955,8 @@ Pipes extend vector semantics to arbitrary expressions.
 |---------|--------|-------------|
 | Pipe (with `~`) | `\|` | Auto-iterate over collection, `~` = current item |
 | Pipe (no `~`) | `\|` | Pass whole collection to aggregator/function |
-| Filter Clause | `where` | Keep items where expression is truthy |
+| Filter Stage | `\|:` | Keep items where expression is truthy (was `where`, then `that`) |
+| Proviso | `that` | `x that cond` is `x` or `null`; one item, not a walk |
 | Current Item | `~` | Reference to item being processed |
 | Current Key/Index | `~#` | Key (maps) or index (arrays/lists) |
 
@@ -790,3 +986,79 @@ This design:
 - [jq Manual](https://stedolan.github.io/jq/manual/)
 - [LINQ (C#)](https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/linq/)
 - [Raku Hyper Operators](https://docs.raku.org/language/operators#Hyper_operators)
+
+
+## Appendix S — Superseded rulings
+
+Struck-through text is kept as history per `doc/Doc_Convention.md` §4; what
+replaced it is noted at each heading.
+
+~~### `where` — Filter Clause~~ *(superseded: `where` retired by S10.3.1v2 for
+colliding with the `for`-header clause; respelled `that`, then `|:` — see §F.3)*
+
+~~The `where` keyword filters items, keeping only those where the condition is truthy:~~
+
+```lambda
+[1, 2, 3, 4, 5] where ~ > 3
+// Result: [4, 5]
+
+users where ~.age >= 18
+// Keep only adult users
+
+// Chained with pipes
+data | ~.name where len(~) > 3 | upper(~)
+```
+
+~~### Why `where` Instead of `|?`~~ *(superseded by §F.3)*
+
+| Option | Example | Pros | Cons |
+|--------|---------|------|------|
+| **`where`** ✓ | `data where ~ > 5` | SQL-familiar, readable, extensible | Keyword vs operator |
+| `\|?` | `data \|? ~ > 5` | Short, operator-based | Cryptic, `?` overloaded |
+| `\| filter(...)` | `data \| filter(~ > 5)` | Explicit | Verbose |
+| `[predicate]` | `data[~ > 5]` | XPath-like | Conflicts with indexing |
+
+~~**Precedents:**~~
+
+| Language | Filter Syntax | Notes |
+|----------|---------------|-------|
+| SQL | `WHERE` | Universal familiarity |
+| LINQ (C#) | `.Where()` | Method, but same keyword |
+| PowerShell | `Where-Object` | Cmdlet with `Where` name |
+| XPath | `[predicate]` | Bracket syntax |
+| XQuery | `where` clause | Part of FLWOR |
+
+~~### Future Query Clauses (Roadmap)~~ *(superseded: `order by`, `limit`, `offset`, `group by` landed as `for`-header clauses — S14, `Lambda_Expr_For_Clauses2.md`)*
+
+~~Using `where` as a keyword opens the door to additional **query clauses** inspired by SQL and XQuery's FLWOR expressions:~~
+
+```lambda
+// Current: pipe + where
+data | ~.amount where ~ > 100 | sum
+
+// Future potential clauses:
+data
+    | ~.amount
+    where ~ > 100           // filter
+    order ~ desc            // sort (future)
+    limit 10                // take first N (future)
+    offset 5                // skip first N (future)
+    | sum
+
+// XQuery FLWOR-style expressions (future consideration)
+for (user in users)
+    where user.active
+    order user.name
+    limit 100
+    return {name: user.name, email: user.email}
+```
+
+~~**XQuery FLWOR reference:**~~
+~~- **F**or — iteration~~
+~~- **L**et — variable binding  ~~
+~~- **W**here — filtering~~
+~~- **O**rder by — sorting~~
+~~- **R**eturn — projection~~
+
+~~Lambda's `for` expression + `where` clause provides the foundation. Future additions (`order`, `limit`, `offset`, `group`) would create a powerful, SQL/XQuery-like query syntax while maintaining Lambda's functional nature.~~
+

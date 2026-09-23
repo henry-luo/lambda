@@ -70,6 +70,7 @@ integer type — not `int64`:
 | Function | Returns |
 |----------|---------|
 | `len(x)` | `int` |
+| `count(x)` | `int` |
 | `index_of(s, sub)` | `int \| null` (`null` when not found) |
 | `last_index_of(s, sub)` | `int \| null` (`null` when not found) |
 | `ord(ch)` | `int \| null` (`null` when no first character) |
@@ -94,6 +95,7 @@ returns `int64` by definition. Use it when a value genuinely needs the wide lane
 | `type(x)` | Get type of value | `type(42)` | `'int'` |
 | `name(x)` | Get name of element, function, or type | `name(<div>)` | `'div'` |
 | `len(x)` | Get length of collection or string, as `int` | `len([1, 2, 3])` | `3` |
+| `count(x)` | Size of the run `x` is: `0` for `null`, the length of a list, `1` for any other value | `count(page?<img>)` | `2` |
 
 ```lambda
 // Type conversion examples
@@ -132,6 +134,11 @@ mutating the JavaScript result cannot mutate the original Lambda value.
 > - **Aliased import** (`import m:math;`): `m.sqrt(x)`, `m.pi` — use custom prefix
 >
 > Standalone functions like `abs`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `sum`, `avg` are always available without any prefix or import.
+
+A `null` argument makes a numeric function's result `null`, as `null + 1` is:
+`abs(null)`, `round(null)`, `math.sqrt(null)`, `math.pow(2, null)` and
+`min(null, 3)` are all `null`, so `f(x) or default` rescues an absent input. A
+non-numeric argument, such as a string, is still an `error`.
 
 ### Rounding & Sign (global)
 
@@ -769,7 +776,7 @@ empty. Generic arrays and lists retain their ordinary collection behavior.
 | `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc', by: ~.age})` | Sorted by age desc |
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `set(vec)`           | Remove duplicates                   | `set([1, 1, 2, 2, 3])`                 | `[1, 2, 3]`        |
-| `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[(1, 3), (2, 4)]` |
+| `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[[1, 3], [2, 4]]` |
 
 `reverse`, `sort`, `unique`, `take`, `drop`, and collection `slice` preserve
 the numeric-array carrier and element type when their input is numeric. This

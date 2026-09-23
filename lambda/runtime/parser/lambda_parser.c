@@ -608,6 +608,21 @@ static bool parser_extend_element_name(LambdaRdParser* parser, LambdaToken* name
     return true;
 }
 
+// S11.1.6v2/S16.8.6v3: a `{` after a complete type is the counted occurrence
+// only when it is spelled as in regex -- bound tight to the type, with a
+// count inside. `?`, `+` and `*` already bind that way, and the island parser
+// says so in as many words. Everywhere a brace could instead open a body or a
+// block (`match v { int { … } }`, `fn f() int { 3 }`) the space decides, and
+// a RETURN type never counts at all: there the body always wins, so a counted
+// return type goes through a type alias.
+static bool parser_at_counted_run(const LambdaRdParser* parser) {
+    if (parser->next.kind != LAMBDA_TOK_INTEGER) return false;
+    uint32_t at = parser->current.span.start_byte;
+    if (at == 0 || at > parser->lexer.length) return false;
+    char before = parser->lexer.source[at - 1];
+    return before != ' ' && before != '\t' && before != '\n' && before != '\r';
+}
+
 static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         bool allow_binder, uint32_t reduction_flags) {
     LambdaToken first = parser->current;
@@ -619,6 +634,8 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
     bool need_atom = true;
     // `fn (...)` and `pn (...)` are the two coloured function types (S11.1.5)
     bool function_type = first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_PN;
+    bool counted_run_is_ambiguous =
+        (reduction_flags & LAMBDA_REDUCTION_FLAG_RETURN_TYPE) != 0;
     while (parser->status == LAMBDA_PARSE_OK) {
         LambdaTokenKind kind = parser->current.kind;
         if (kind == LAMBDA_TOK_EOF && nesting) {
@@ -672,6 +689,12 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         }
         if (kind == LAMBDA_TOK_LBRACKET) {
             if (!parser_consume_balanced(parser, LAMBDA_TOK_LBRACKET, LAMBDA_TOK_RBRACKET, error_incomplete_type_occurrence_suffix)) return 0;
+            continue;
+        }
+        if (kind == LAMBDA_TOK_LBRACE && !counted_run_is_ambiguous &&
+                parser_at_counted_run(parser)) {
+            // S11.1.6v2/S16.8.6v3: `T{n}`, `T{n,m}`, `T{n,}` count a run.
+            if (!parser_consume_balanced(parser, LAMBDA_TOK_LBRACE, LAMBDA_TOK_RBRACE, error_incomplete_type_occurrence_suffix)) return 0;
             continue;
         }
         if (kind == LAMBDA_TOK_PIPE || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_BANG) {

@@ -24,7 +24,7 @@
 "-- element: attribute values then content, len matches the walk --"
 3
 [1, 2, "text"]
-"-- count(): a list splices wherever it lands as an item (S8.3.3v2) --"
+"-- count(): a list splices wherever it lands as an item (S8.3.3v3) --"
 4
 4
 4

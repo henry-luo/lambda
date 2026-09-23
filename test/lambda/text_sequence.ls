@@ -1,4 +1,4 @@
-// Fixture of vibe/impl/Lambda_List_Fixes.md, green since P4 (2026-09-23) on
+// Fixture of vibe/impl/Lambda_List_Fixes (done).md, green since P4 (2026-09-23) on
 // both tiers. Golden written from the rulings, not from the runtime.
 // S2.5.8: text is placed as one value and walked as a sequence; select and
 // reorder keep the text kind; a mapping pipe yields the text kind when every

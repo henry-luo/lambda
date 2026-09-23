@@ -172,6 +172,9 @@ module.exports = grammar({
     $._bin_amp,
     $._call_lparen,
     $._index_lbracket,
+    // S11.1.6v2: the counted-occurrence opener, guarded exactly like the index
+    // bracket — a line-start `{` is a new statement, never a type suffix.
+    $._occurrence_lbrace,
     // Same line, or across a break for the S16.2.4 `.ident(` member-call form.
     $._member_dot,
     $._postfix_caret,
@@ -1096,17 +1099,24 @@ module.exports = grammar({
     ))),
     base_type: $ => choice($._base_type_kw, 'type'),
 
-    occurrence: $ => choice('?', '+', '*', $.occurrence_count),
-    // The occurrence bracket takes the same same-line guard as an index: `[` is
-    // dual-role in TYPE space too (`int[3]` is an occurrence, `[int]` an array
-    // type), so `type T = int` ⏎ `[3]` must be the S16.2.3 error rather than a
-    // silent continuation. This is O3's rule applied on the grammar side — type
-    // space shares the S16.2.2 continuation set instead of keeping its own.
+    occurrence: $ => choice('?', '+', '*', $.occurrence_count, $.array_count),
+    // S11.1.6v2/S16.8.6v3: a count on a *run* is the occurrence family —
+    // `T{n}` exactly, `T{n,m}` between, `T{n+}` at least, the open form
+    // echoing the bare `+` rather than regex's trailing comma; the brackets
+    // are the array family (`T[]`, `T[n]`). `T[n+]` and `T[n, m]` are gone.
+    // Both openers take the same same-line guard as an index: `[` and `{` are
+    // dual-role in TYPE space too, so `type T = int` ⏎ `[3]` — or ⏎ `{a: 1}` —
+    // must be the S16.2.3 error rather than a silent continuation. This is
+    // O3's rule applied on the grammar side: type space shares the S16.2.2
+    // continuation set instead of keeping its own.
     occurrence_count: $ => prec(2, choice(
+      seq(alias($._occurrence_lbrace, '{'), $.integer, '}'),
+      seq(alias($._occurrence_lbrace, '{'), $.integer, '+', '}'),
+      seq(alias($._occurrence_lbrace, '{'), $.integer, ',', $.integer, '}'),
+    )),
+    array_count: $ => prec(2, choice(
       seq(alias($._index_lbracket, '['), ']'),
       seq(alias($._index_lbracket, '['), $.integer, ']'),
-      seq(alias($._index_lbracket, '['), $.integer, ',', $.integer, ']'),
-      seq(alias($._index_lbracket, '['), $.integer, '+', ']'),
     )),
 
     return_occurrence_type: $ => seq(
@@ -1187,12 +1197,33 @@ module.exports = grammar({
     occurrence_type: $ => prec.dynamic(1, prec.right(seq(
       field('operand', $.primary_type), field('operator', $.occurrence),
     ))),
+    // S11.1.1v3: array suffixes compose left to right, so an array suffix may
+    // follow any number of array suffixes (`int[2][3]` is three arrays of two)
+    // or a `?` (`int?[]` is an array of nullable ints).
     nullable_array_type: $ => prec.dynamic(2, prec.right(seq(
-      field('operand', $.occurrence_type), field('operator', $.occurrence_count),
+      field('operand', choice($.occurrence_type, $.nullable_array_type,
+        $.optional_array_type)),
+      field('operator', $.array_count),
     ))),
+    // S11.1.6v2: `T?` is `T | null`, so a `?` after an array suffix is the
+    // nullable array (`int[]?`). Only an array suffix takes it, as in the C
+    // parser: `int??` and `int[]??` stay errors.
+    optional_array_type: $ => prec.dynamic(2, prec.right(seq(
+      field('operand', choice(alias($._array_occurrence_type, $.occurrence_type),
+        $.nullable_array_type)),
+      field('operator', '?'),
+    ))),
+    // `T[..]` as the head of `T[..]?`: the occurrence type it is, spelled as
+    // its own symbol so that no other single suffix can take the `?`.
+    _array_occurrence_type: $ => seq(
+      field('operand', $.primary_type),
+      field('operator', alias($._array_occurrence, $.occurrence)),
+    ),
+    _array_occurrence: $ => $.array_count,
     negation_type: $ => prec.right(seq('!', field('operand', $.primary_type))),
 
     unary_type: $ => prec.right(choice(
+      $.optional_array_type,
       $.nullable_array_type,
       $.occurrence_type,
       $.negation_type,

@@ -63,8 +63,9 @@ static inline bool is_array_type(TypeId type) {
     return type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY;
 }
 
-// get length of a vector-like item
-static int64_t vector_length(Item item) {
+// get length of a vector-like item; shared with the numeric folds in
+// lambda-eval-num.cpp through lambda-number-runtime.hpp (rule 13)
+int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
         case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
@@ -75,7 +76,7 @@ static int64_t vector_length(Item item) {
 }
 
 // get element from a vector-like item at index
-static Item vector_get(Item item, int64_t index) {
+Item vector_get(Item item, int64_t index) {
     TypeId type = get_type_id(item);
     switch (type) {
         case LMD_TYPE_ARRAY_NUM: {
@@ -2186,6 +2187,7 @@ typedef Item (*ComplexUnaryMathFn)(Item item);
 static Item fn_math_unary(Item item, double (*func)(double), const char* name,
                           ComplexUnaryMathFn complex_func) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);  // S7.10.5v3: null in is null out
     TypeId type = get_type_id(item);
     if (complex_func && type == LMD_TYPE_COMPLEX) return complex_func(item);
     if (is_scalar_numeric(type)) {
@@ -2363,6 +2365,7 @@ DEFINE_MATH_UNARY(fn_math_atan, atan, NULL)
 // atan2(y, x) - two-argument inverse tangent
 Item fn_math_atan2(Item item_y, Item item_x) {
     GUARD_ERROR2(item_y, item_x);
+    GUARD_NULL2(item_y, item_x);
     TypeId type_y = get_type_id(item_y);
     TypeId type_x = get_type_id(item_x);
     if (is_scalar_numeric(type_y) && is_scalar_numeric(type_x)) {
@@ -2494,6 +2497,7 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
         log_error("fn_clip: lo (%g) must be <= hi (%g)", lo, hi);
         return ItemError;
     }
+    GUARD_NULL1(item);  // S7.10.5v3: null in is null out; the bounds stay checked
     TypeId type = get_type_id(item);
     bool as_list = item_is_list(item);  // read before the result allocation
     if (is_scalar_numeric(type)) {
@@ -2530,6 +2534,7 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
 // hypot(y, x) - Euclidean distance sqrt(y*y + x*x)
 Item fn_math_hypot(Item item_y, Item item_x) {
     GUARD_ERROR2(item_y, item_x);
+    GUARD_NULL2(item_y, item_x);
     TypeId type_y = get_type_id(item_y);
     TypeId type_x = get_type_id(item_x);
     if (is_scalar_numeric(type_y) && is_scalar_numeric(type_x)) {
@@ -2549,6 +2554,7 @@ Item fn_math_log1p(Item item) {
 // sign(vec) - element-wise sign (-1, 0, 1)
 Item fn_sign(Item item) {
     GUARD_ERROR1(item);
+    GUARD_NULL1(item);
     bool as_list = item_is_list(item);  // read before the result allocation
     TypeId type = get_type_id(item);
     if (is_scalar_numeric(type)) {

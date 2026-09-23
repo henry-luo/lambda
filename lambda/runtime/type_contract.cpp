@@ -377,6 +377,45 @@ static bool contract_type_has_unary_op(const Type* type, Operator op) {
         ((const TypeUnary*)type)->op == op;
 }
 
+// S11.1.6v2: the occurrence family — `T?`, `T*`, `T+`, `T{n,m}` — is a run of
+// T. The array family `T[]`/`T[n]` is not one, and neither is anything else.
+static const TypeUnary* contract_type_as_run(const Type* type) {
+    if (!type || type->type_id != LMD_TYPE_TYPE || type_is_global_meta_type(type) ||
+            type->kind != TYPE_KIND_UNARY) return NULL;
+    const TypeUnary* unary = (const TypeUnary*)type;
+    switch (unary->op) {
+    case OPERATOR_OPTIONAL: case OPERATOR_ZERO_MORE:
+    case OPERATOR_ONE_MORE: case OPERATOR_REPEAT:
+        return unary;
+    default:
+        return NULL;
+    }
+}
+
+// The bounds an occurrence carries, normalized: `?` is 0..1, `+` is 1..∞,
+// `*` is 0..∞, and `{n,m}` says so itself. -1 is unbounded above.
+static void contract_run_bounds(const TypeUnary* run, int* min, int* max) {
+    switch (run->op) {
+    case OPERATOR_OPTIONAL: *min = 0; *max = 1; return;
+    case OPERATOR_ONE_MORE: *min = 1; *max = -1; return;
+    case OPERATOR_ZERO_MORE: *min = 0; *max = -1; return;
+    default: *min = run->min_count; *max = run->max_count; return;
+    }
+}
+
+static bool contract_bounds_within(int min, int max, int outer_min, int outer_max) {
+    if (min < outer_min) return false;
+    if (outer_max < 0) return true;
+    return max >= 0 && max <= outer_max;
+}
+
+// The length an array-family type fixes, or -1 when it takes any length.
+static int contract_array_fixed_length(const Type* type) {
+    if (!contract_type_has_unary_op(type, OPERATOR_ARRAY)) return -1;
+    const TypeUnary* array = (const TypeUnary*)type;
+    return array->min_count == array->max_count ? array->min_count : -1;
+}
+
 static bool contract_map_is_subtype(const TypeMap* candidate,
         const TypeMap* expected, int depth) {
     if (!candidate || !expected) return false;
@@ -413,24 +452,66 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
             contract_type_is_subtype(candidate, union_type->right, depth + 1);
     }
 
-    if (contract_type_has_unary_op(candidate, OPERATOR_OPTIONAL)) {
-        TypeUnary* optional = (TypeUnary*)candidate;
-        return contract_type_is_subtype(optional->operand, expected, depth + 1) &&
-            contract_type_is_subtype(&TYPE_NULL, expected, depth + 1);
+    // S11.1.6v2: a run admits `null` at zero, a bare T at one, and a sequence of
+    // two or more T within its bounds. The two families meet at two or more
+    // items and differ everywhere else, so `int <: int*` and `int[2] <: int*`
+    // hold while `int[] <: int*` and `int* <: int[]` do not.
+    if (const TypeUnary* run = contract_type_as_run(expected)) {
+        int min = 0, max = -1;
+        contract_run_bounds(run, &min, &max);
+        if (candidate->type_id == LMD_TYPE_NULL) return min == 0;
+        if (const TypeUnary* inner = contract_type_as_run(candidate)) {
+            int inner_min = 0, inner_max = -1;
+            contract_run_bounds(inner, &inner_min, &inner_max);
+            return contract_bounds_within(inner_min, inner_max, min, max) &&
+                contract_type_is_subtype(inner->operand, run->operand, depth + 1);
+        }
+        int fixed = contract_array_fixed_length(candidate);
+        if (contract_type_has_unary_op(candidate, OPERATOR_ARRAY)) {
+            // only a counted array of two or more is a run of that many
+            return fixed >= 2 && contract_bounds_within(fixed, fixed, min, max) &&
+                contract_type_is_subtype(((const TypeUnary*)candidate)->operand,
+                    run->operand, depth + 1);
+        }
+        return min <= 1 && (max < 0 || max >= 1) &&
+            contract_type_is_subtype(candidate, run->operand, depth + 1);
     }
-    if (contract_type_has_unary_op(expected, OPERATOR_OPTIONAL)) {
-        TypeUnary* optional = (TypeUnary*)expected;
-        return contract_type_is_subtype(candidate, optional->operand, depth + 1) ||
-            candidate->type_id == LMD_TYPE_NULL;
+    if (const TypeUnary* run = contract_type_as_run(candidate)) {
+        int min = 0, max = -1;
+        contract_run_bounds(run, &min, &max);
+        if (contract_type_has_unary_op(expected, OPERATOR_ARRAY)) {
+            // a run is an array only where it always has two or more items
+            int fixed = contract_array_fixed_length(expected);
+            bool length_fits = fixed < 0 || (min == fixed && max == fixed);
+            return min >= 2 && length_fits &&
+                contract_type_is_subtype(run->operand,
+                    ((const TypeUnary*)expected)->operand, depth + 1);
+        }
+        // Outside the two families only a run of at most one has values a
+        // non-sequence type could hold.
+        if (max < 0 || max > 1) return false;
+        return contract_type_is_subtype(run->operand, expected, depth + 1) &&
+            (min > 0 || contract_type_is_subtype(&TYPE_NULL, expected, depth + 1));
     }
 
     if (contract_type_has_unary_op(expected, OPERATOR_ARRAY)) {
         if (!contract_type_has_unary_op(candidate, OPERATOR_ARRAY)) return false;
+        int expected_length = contract_array_fixed_length(expected);
+        int candidate_length = contract_array_fixed_length(candidate);
+        if (expected_length >= 0 && candidate_length != expected_length) return false;
         return contract_type_is_subtype(((TypeUnary*)candidate)->operand,
             ((TypeUnary*)expected)->operand, depth + 1);
     }
     if (contract_type_has_unary_op(candidate, OPERATOR_ARRAY)) {
-        return expected == &TYPE_ARRAY;
+        return expected == (Type*)&TYPE_ARRAY;
+    }
+
+    // S2.5.1v2: `list` and `range` are the two specialized array kinds — each
+    // is an array and neither is the other. `list` shares `array`'s type_id,
+    // which the structural fallback below would read as equality both ways.
+    if (expected == &TYPE_LIST || expected == &TYPE_RANGE) return false;
+    if (candidate == &TYPE_LIST || candidate == &TYPE_RANGE) {
+        return expected == (Type*)&TYPE_ARRAY;
     }
 
     if (expected->is_literal || expected->is_const) return false;
@@ -942,7 +1023,7 @@ bool lambda_type_layout_proves_contract(Type* type) {
     return false;
 }
 
-// S11.1.6: an annotation admits a list without changing its kind, and
+// S11.1.6v2: an annotation admits a list without changing its kind, and
 // kind-preserving transforms hand lists back under array types, so any array
 // type -- or any type that is not a definite scalar, text, range, map, or
 // element -- may hold a list at run time.

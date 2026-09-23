@@ -54,7 +54,7 @@ typedef struct SysFuncArgDesc {
 typedef enum SysFuncResultKind {
     SYS_RESULT_FIXED = 0,       // use success_type/return_type as written
     SYS_RESULT_SAME_AS_ARGUMENT, // result carries the selected argument's type
-    SYS_RESULT_ELEM_OF_ARGUMENT, // result is the selected argument's element type
+    SYS_RESULT_ELEM_OF_ARGUMENT, // result is the selected argument's numeric element type (min/max)
     SYS_RESULT_ARRAY_OF_ARGUMENT_ELEM, // array over the selected element type
     SYS_RESULT_ARGUMENT_NUMERIC, // selected argument's numeric carrier, else fixed
     // Real-scalar transcendental: `float` ONLY when arg0 is a proven real
@@ -347,9 +347,9 @@ typedef struct JitImport {
 static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     if (!info) return LMD_TYPE_ANY;
     switch (info->fn) {
-    // len() stays a raw machine count. Search/ordinal calls return Item so
-    // their public null result cannot be mistaken for an integer sentinel.
-    case SYSFUNC_LEN:
+    // len() and count() stay raw machine counts. Search/ordinal calls return
+    // Item so their public null result cannot be mistaken for an integer sentinel.
+    case SYSFUNC_LEN: case SYSFUNC_COUNT:
         return LMD_TYPE_INT;
     // The raw bitwise family operates on machine words. Its result is
     // converted into the int lane at the boundary below.
@@ -389,7 +389,7 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
 static inline bool sysfunc_params_reject_error(const SysFuncInfo* info) {
     if (!info) return false;
     switch (info->fn) {
-    case SYSFUNC_LEN:
+    case SYSFUNC_LEN: case SYSFUNC_COUNT:
     case SYSFUNC_INDEX_OF: case SYSFUNC_LAST_INDEX_OF: case SYSFUNC_ORD:
     case SYSFUNC_STRING: case SYSFUNC_SYMBOL: case SYSFUNC_NAME:
     case SYSFUNC_NORMALIZE: case SYSFUNC_NORMALIZE2:

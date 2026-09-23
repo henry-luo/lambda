@@ -171,38 +171,30 @@ void merge_errors(
 
 CountConstraint get_count_constraint(TypeUnary* type_unary) {
     CountConstraint c = {0, -1};  // default: 0 to unbounded
-    
     if (!type_unary) return c;
-    
-    // Check explicit min/max from new [n], [n,m], [n+] syntax
-    if (type_unary->min_count > 0 || type_unary->max_count != 0) {
-        c.min = type_unary->min_count;
-        c.max = type_unary->max_count;
-        return c;
-    }
-    
-    // Fall back to operator-based constraints
+
+    // `?`, `+` and `*` carry their bounds in the operator itself; only the
+    // counted forms -- `T{n,m}` and the counted array `T[n]` -- read the
+    // stored pair. Testing the pair for "was it set" cannot work now that
+    // `int[0]` is a legitimate zero-length array (S11.1.6v2).
     switch (type_unary->op) {
-        case OPERATOR_OPTIONAL:  // ?
-            c.min = 0;
-            c.max = 1;
-            break;
-        case OPERATOR_ONE_MORE:  // +
-            c.min = 1;
-            c.max = -1;  // unbounded
-            break;
-        case OPERATOR_ZERO_MORE: // *
-            c.min = 0;
-            c.max = -1;  // unbounded
-            break;
-        case OPERATOR_REPEAT:    // [n], [n,m], [n+]
-            c.min = type_unary->min_count;
-            c.max = type_unary->max_count;
-            break;
-        default:
-            break;
+        case OPERATOR_OPTIONAL:  c.min = 0; c.max = 1;  return c;   // ?
+        case OPERATOR_ONE_MORE:  c.min = 1; c.max = -1; return c;   // +
+        case OPERATOR_ZERO_MORE: c.min = 0; c.max = -1; return c;   // *
+        default: break;                                 // {n,m} and [n]
     }
-    
+    c.min = type_unary->min_count;
+    c.max = type_unary->max_count;
+    return c;
+}
+
+// S11.1.6v2: as a boundary type an occurrence admits what a run *is*, so a
+// container satisfies one only at two or more items -- one item is `[T]` and
+// none is `[]`, both of the array family. The array family itself takes any
+// length its own count allows.
+CountConstraint get_container_count_constraint(TypeUnary* type_unary) {
+    CountConstraint c = get_count_constraint(type_unary);
+    if (type_unary && type_unary->op != OPERATOR_ARRAY && c.min < 2) c.min = 2;
     return c;
 }
 

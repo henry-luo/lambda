@@ -1,4 +1,4 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/ext until its
+// P0 fixture of vibe/impl/Lambda_List_Fixes (done).md — lives in test/lambda/ext until its
 // phase turns it green, then moves to test/lambda (baseline). Golden written from the
 // rulings, not from the runtime.
 // S2.5.5v2: a list has at least two items; (x) ≡ x and () ≡ null; a list

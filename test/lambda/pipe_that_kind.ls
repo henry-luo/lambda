@@ -1,4 +1,4 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/ext until its
+// P0 fixture of vibe/impl/Lambda_List_Fixes (done).md — lives in test/lambda/ext until its
 // phase turns it green, then moves to test/lambda (baseline). Golden written from the
 // rulings, not from the runtime.
 // S10.1.2v2 / S10.1.5v2: the mapping pipe and `that` keep the source's kind;

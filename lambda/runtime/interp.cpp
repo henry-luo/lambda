@@ -1696,10 +1696,10 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
     }
     switch (c_ret) {
     case LMD_TYPE_INT: {
-        // len() has a raw integer C ABI, so its value-family error guard cannot
-        // travel in the return register. Keep the rejected operand intact
-        // before boxing the ordinary count (S7.6/S7.7).
-        if (info->fn == SYSFUNC_LEN) {
+        // len() and count() have a raw integer C ABI, so their value-family
+        // error guard cannot travel in the return register. Keep the rejected
+        // operand intact before boxing the ordinary count (S7.6/S7.7).
+        if (info->fn == SYSFUNC_LEN || info->fn == SYSFUNC_COUNT) {
             for (int i = 0; i < argc; i++) {
                 if (get_type_id(args[i]) == LMD_TYPE_ERROR) return ItemError;
             }
@@ -5390,6 +5390,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // A checked binding rejects a fresh RHS error before publishing it,
             // but an untyped binding must retain that ItemError so a later
             // error-excluding `var` call short-circuits before COW mutation.
+            // The rejected error leaves the function as it does through MIR's
+            // emit_return_if_item_error edge: the binding keeps its old value
+            // and a loop accumulator dies with the batch (S7.7.4, S7.7.5).
+            // Returning it only as this statement's value let a loop carry on
+            // silently with the stale binding (S11.4.1v3: never silence).
+            interp_signal(f, EvalSignal::RETURNED, value);
             return value;
         }
         {
@@ -5414,8 +5420,14 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 }
             }
         }
+        // S7.7.4: the runtime report names the binding, in MIR's spelling
+        char boundary[192] = "declared assignment binding";
+        if (target->declared_type && assign->target) {
+            snprintf(boundary, sizeof(boundary), "assignment to '%.*s'",
+                (int)assign->target->len, assign->target->chars);
+        }
         value = interp_coerce_declared_binding(f, value, target->declared_type,
-            "declared assignment binding");
+            boundary);
         if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
                 !lambda_type_accepts_error(target->declared_type)) {
             // A fresh checked-assignment failure returns before publishing the

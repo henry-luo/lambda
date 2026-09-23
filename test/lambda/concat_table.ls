@@ -1,4 +1,4 @@
-// Fixture of vibe/impl/Lambda_List_Fixes.md, green since P4 (2026-09-23) on
+// Fixture of vibe/impl/Lambda_List_Fixes (done).md, green since P4 (2026-09-23) on
 // both tiers. Golden written from the rulings, not from the runtime.
 // S10.6.1: `++` concatenates sequences (kind by S2.5.7), appends or prepends a
 // scalar as one item, concatenates text for two scalars, treats null as the

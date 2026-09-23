@@ -123,6 +123,21 @@
     }
   },
   {
+    "type": "array_count",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "integer",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "array_type",
     "named": true,
     "fields": {},
@@ -3981,7 +3996,15 @@
         "required": true,
         "types": [
           {
+            "type": "nullable_array_type",
+            "named": true
+          },
+          {
             "type": "occurrence_type",
+            "named": true
+          },
+          {
+            "type": "optional_array_type",
             "named": true
           }
         ]
@@ -3991,7 +4014,7 @@
         "required": true,
         "types": [
           {
-            "type": "occurrence_count",
+            "type": "array_count",
             "named": true
           }
         ]
@@ -4085,6 +4108,10 @@
       "required": false,
       "types": [
         {
+          "type": "array_count",
+          "named": true
+        },
+        {
           "type": "occurrence_count",
           "named": true
         }
@@ -4097,7 +4124,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "integer",
@@ -4199,6 +4226,36 @@
           {
             "type": "while_expr",
             "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "optional_array_type",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "nullable_array_type",
+            "named": true
+          },
+          {
+            "type": "occurrence_type",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "?",
+            "named": false
           }
         ]
       }
@@ -5446,6 +5503,10 @@
         },
         {
           "type": "occurrence_type",
+          "named": true
+        },
+        {
+          "type": "optional_array_type",
           "named": true
         },
         {

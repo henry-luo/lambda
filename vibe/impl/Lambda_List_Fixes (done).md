@@ -1,9 +1,11 @@
 # Lambda List/Array Kind, Content, Text, `++`, and Type Families — Implementation Plan
 
-> **Status:** IN PROGRESS — P0 and P1 done and committed (`fc3153b3b`,
-> 2026-09-22; §7–§10, P1 residue in §10); P2, P3 and P4 done in the working
-> tree, uncommitted (§11, §12, §13 — P2/P3 were lost to a pull's autostash on
-> 2026-09-23 and recovered, see §13); P5 and P6 not started
+> **Status:** DONE 2026-09-23 — all six phases landed on both tiers. P0–P4 are
+> committed (`fc3153b3b` 2026-09-22; `d1a7183a1`/`1d62d7283` 2026-09-23);
+> P5 and the P6 close-out are in the working tree, uncommitted. Phase records:
+> §7–§10 (P1, with its residue), §11 (P2), §12 (P3), §13 (P4, and the P2/P3
+> autostash loss and recovery), §14 (P5), §15 (close-out). The last open item,
+> the kind of a query result, was ruled on 2026-09-23 (S8.2.4; §17).
 >
 > **Date:** 2026-09-22
 >
@@ -15,8 +17,8 @@
 >
 > **Normative semantics** (`doc/Lambda_Formal_Semantics.md` 29.0.0):
 > S2.2.3, S2.5.1v2–S2.5.8, S2.6.1–S2.6.5, S3.3v2, S7.10.1v2, S7.10.5v2,
-> S8.3.1v3, S10.1.2v2, S10.1.5v2, S10.6.1, S11.1.1v3, S11.1.2v2, S11.1.6,
-> S12.3.5v2, S16.7.2v2/S16.7.3v2, S16.8.6v2
+> S8.3.1v3, S10.1.2v2, S10.1.5v2, S10.6.1, S11.1.1v3, S11.1.2v2, S11.1.6v2,
+> S12.3.5v2, S16.7.2v2/S16.7.3v2, S16.8.6v3
 >
 > **Normative implementation constraints:** D2.6.5v3 (three append
 > disciplines, one kind flag), S1.6/SI1 (tier parity, representation
@@ -42,7 +44,7 @@
 | S10.6.1 | the `++` table; LR05-9 |
 | S12.3.5v2 | `*` never mutates; `*null` nothing; `*scalar` one item; `*range` spreads |
 | S2.2.3, S2.6.2, S2.6.4, S2.6.5 | lone `""` dropped; binaries merge; content writes normalize; `push` on elements |
-| S11.1.1v3, S11.1.2v2, S11.1.6, S16.8.6v2 | `T{n,m}` grammar; `T[n]` = array of n; `T[n+]`/`T[n, m]` retired; island spelling; boundary semantics of occurrence types; `is list`; `type()` names `list` |
+| S11.1.1v3, S11.1.2v2, S11.1.6v2, S16.8.6v3 | `T{n,m}` grammar; `T[n]` = array of n; `T[n+]`/`T[n, m]` retired; island spelling; boundary semantics of occurrence types; `is list`; `type()` names `list` |
 | D2.6.5v3 | content / sequence / verbatim appends |
 
 **Non-goals** (tracked elsewhere): the LaTeX parser carrying verbatim string
@@ -206,10 +208,10 @@ sequence `++` scalar → append as one item (text is a scalar here); scalar
 `++` sequence → prepend; scalar `++` scalar → text, same text kind kept;
 `null` identity; map/element operands → error. Paths keep S2.4.2v4.
 
-### 1.11 Type families (S11.1.1v3, S11.1.6, S16.8.6v2)
+### 1.11 Type families (S11.1.1v3, S11.1.6v2, S16.8.6v3)
 
 - **Grammar** (`grammar.js:1099`–`1112`): `occurrence_count` becomes the
-  brace form `{n}` / `{n,m}` / `{n,}`, with the same same-line guard the
+  brace form `{n}` / `{n,m}` / `{n+}`, with the same same-line guard the
   `_index_lbracket` alias gives `[` (a line-start `{` after a complete type is
   the S16.2.3 error, never a continuation); `[n]` moves to the array family as
   a counted `T[]`; `[n+]` and `[n, m]` are removed. Regenerate with
@@ -272,7 +274,7 @@ so when it moves to the baseline it also joins the tier-pinned list in
 | `concat_table.ls` | S10.6.1: every operand pair incl. `null`, text kinds, ranges, maps (error), LR05-9 numeric arrays |
 | `spread_star.ls` | S12.3.5v2: `[*a, 3]` leaves `a` unchanged (call twice through a function — the JIT pooled-literal case), `*range`, `*null`, `*scalar`, `[*xs]` packager |
 | `content_normalize.ls` (extend the existing S2.6 fixtures) | S2.2.3 lone `""`, binary merge, S2.6.5 writes: `e[i] = null`/`""`/list/string-beside-string, removal merging, `push` on an element |
-| `type_families.ls` + `negative/…/occurrence_retired.ls` | S11.1.6: `null is int*`, `[] is int?`, `[5] is int*`, `[5,6] is int*`, `(1,2) is int[2]`, `{f: int*}` cases, `int{2}` vs `int[2]`, `\(d{3})`, `T[n+]`/`T[n, m]` rejected with the hint |
+| `type_families.ls` + `negative/…/occurrence_retired.ls` | S11.1.6v2: `null is int*`, `[] is int?`, `[5] is int*`, `[5,6] is int*`, `(1,2) is int[2]`, `{f: int*}` cases, `int{2}` vs `int[2]`, `\(d{3})`, `T[n+]`/`T[n, m]` rejected with the hint |
 | `proc-ext/content_writes.ls` | S2.6.5 content writes in a `pn` (the write half of `content_normalize`) |
 | `proc-ext/list_var_mutation.ls` | kind survives `push`/`a[i]=` on a `var` list; `push(a, e)` pushes `null`; a field stores the image |
 
@@ -364,7 +366,7 @@ spellings — `test/lambda/string_pattern.ls:140` (`\(d[2, 4])`),
 surfaces — and the ~40 `T[n]`-style type uses (`type_syntax_edges.ls:20`/`:23`,
 `type_occurrence.ls:12`/`:13`/`:79` among them), which keep their meaning at
 n ≥ 2 and change at `int[0]` (`[]`, not void) and `int[1]` (`[int]`, not a
-bare int) — re-verify each golden against S11.1.6. User docs:
+bare int) — re-verify each golden against S11.1.6v2. User docs:
 `doc/Lambda_Type.md` §Type Occurrences (`int[3+]`, `int[2, 10]` rows, and the
 `T*`/`T+` "pattern-only cardinality" rows), `doc/Lambda_Data.md` (`s[-1]`),
 `doc/Lambda_Sys_Func.md` (`zip` shown as list pairs).
@@ -382,9 +384,10 @@ Acceptance: `type_families`, the negative fixture, all migrated goldens.
 Semantics Appendix A: rewrite the four 2026-09-21/22 rows and the S2.2.3/S2.6
 row as conformant (with dates and baseline counts); drop the `*` marks that
 no longer apply (S2.2.3, S2.5.1v2, S2.5.2v2, S2.5.5v2–S2.5.8, S7.10.5v2,
-S10.6.1, S11.1.1v3, S11.1.6, S12.3.5v2). Design Appendix A: D2.6.5v3 row.
-Move LR05-10/11/12, LR12-28, LR03-12, LR05-9 to the fixed ledger with `-R`
-suffixes. Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
+S10.6.1, S11.1.1v3, S11.1.6v2, S12.3.5v2). Design Appendix A: D2.6.5v3 row.
+Move LR05-10/11/12, LR12-28, LR03-12, LR05-9 to the fixed ledger. (They keep
+their original IDs there: the `-R` series this plan first guessed at belongs
+to the archive's own historical appendix, not to central-ledger moves — §15.) Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
 `Lambda_Design_Syntax.md` §7.27/§7.28 status lines; rename this file
 `Lambda_List_Fixes (done).md`.
 
@@ -463,7 +466,7 @@ suffixes. Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
   with `list_push` (D2.6.5v3 footnote); LaTeX stays verbatim by design.
 - **Type-family migration** is small in the tree (five retired spellings, ~40
   `T[n]` uses) but user-visible: `int[0]`/`int[1]` change meaning; the
-  parser's diagnostic for `[n+]`/`[n, m]` must name `{n,}`/`{n,m}`.
+  parser's diagnostic for `[n+]`/`[n, m]` must name `{n+}`/`{n,m}`.
 - **Tier parity.** Every emitter change lands in both `transpile-mir.cpp` and
   `interp.cpp` in the same commit; a fixture green on one tier only is a
   failure.
@@ -479,8 +482,8 @@ suffixes. Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
 | P2 transforms | **done in the working tree 2026-09-22** (see §11) | `list_kind_transform`, `list_kind_for_clauses`, `pipe_that_kind`, `list_collapse_void` green both tiers and under forced GC; moved to the baseline | official `make test-lambda-baseline`: only the pre-existing failures (§11) | 24 goldens followed the rulings (grouping-only diffs); query result kind unruled ([LR05-13](../Lambda_Issue_Ledger.md#lr05-13)) |
 | P3 landing + content writes | **done in the working tree 2026-09-23** (see §12) | `list_kind_landing`, `content_normalize` green both tiers and under forced GC, moved to the baseline; `content_writes` likewise, to `test/lambda/proc`; `list_var_mutation` green except its three LR12-27 lines | official `make test-lambda-baseline`: only the pre-existing failures (§12) | image = one-level copy (`slot_image`); 2 goldens and 2 scripts followed the rulings |
 | P4 text, `++`, `*` | **done in the working tree 2026-09-23** (see §13) | `text_sequence`, `concat_table`, `spread_star` green on interp, jit and auto and under forced GC, moved to the baseline; `spread_star` pinned in the tier-parity table | official `make test-lambda-baseline`: **5826 passed, 0 failed** | LR05-9 fixed with the `++` table; 9 proc scripts migrated off `++` string interpolation; 3 fixtures pinned retired rules and were rewritten |
-| P5 type families + migration | not started | | | `make generate-grammar` |
-| P6 close-out | not started | | | Appendix A, ledger, rename file |
+| P5 type families + migration | **done in the working tree 2026-09-23** (see §14) | `type_families` green on interp, jit and auto and under forced GC, moved to the baseline; both negative fixtures registered in `test_lambda_errors_gtest` | official `make test-lambda-baseline`: only the upstream `dom_module_props` golden (see §14) | grammar regenerated; 18 retired spellings in `type_pattern.ls`, the occurrence suite and five island fixtures migrated |
+| P6 close-out | **done 2026-09-23** (see §15) | n/a | n/a | semantics 29.1.0, design 12.1.0, six records archived, file renamed |
 
 ---
 
@@ -531,7 +534,7 @@ S2.5.5v2:
 **Spec conflict found:** S8.3.3 ("for-expressions and spreads splice at the
 construction site — by the time `count` applies, there is one value"; pinned
 by `len_iter_law.ls` `len([1, bound_for, 4])` = 3) contradicts S2.5.1v2 /
-S2.5.6 (a bound list spreads wherever it lands: 4). Needs S8.3.3v2.
+S2.5.6 (a bound list spreads wherever it lands: 4). Needs S8.3.3v3.
 
 ## 8. P1 library and test migration (2026-09-22, USER chose "migrate now")
 
@@ -580,7 +583,7 @@ fors print as content; `[[84]]` → `[84]`, the LR05-10 `order by` fix),
 `pipe_where` and `that_implicit_name` (empty array pipe/`that` is `[]`),
 `map_spread_len` and `closure_capture_sites` (a bound or returned list spreads
 in an array literal), `for_group_test`, `keyword_binding_clause_priority`,
-`for_expr_content` (top-level lists are content), `len_iter_law` (S8.3.3v2),
+`for_expr_content` (top-level lists are content), `len_iter_law` (S8.3.3v3),
 `proc/function_colour_poly`. Scripts migrated with `[for …]` where the list
 shape is incidental to the test's subject: `for_at_pairs`,
 `io_sqlite_for_clauses` (top-level string lists would merge as content),
@@ -592,7 +595,7 @@ migration (`function_colour_poly`): wrapping a `function`-typed call's result
 in `[…]` made the checker infer `(int | error)[]` and raise E208 where the
 bare for-expression did not — an asymmetry worth a ledger look.
 
-**Spec.** S8.3.3v2 (a list splices wherever it lands; `count` of a list is its
+**Spec.** S8.3.3v3 (a list splices wherever it lands; `count` of a list is its
 `len`) and the S12.3.5v2 clarification that `*x` is the list of `x`'s items
 (which yields every case the ruling lists) — raised with the user.
 
@@ -786,7 +789,7 @@ on both paths, so an ordered `limit -1` is now an error; it was silently a
 limit of 0. `fn_take_last` and `emit_machine_count` lost their last users and
 were removed.
 
-*Typed admission (S11.1.6).* `runtime_type_admit_array_env` carries the bit to
+*Typed admission (S11.1.6v2).* `runtime_type_admit_array_env` carries the bit to
 the fresh container when admission packs or rebuilds a list, so
 `let t: int[] = (4, 5)` stays a list and `fn f(xs: int[])` receives one.
 
@@ -1130,3 +1133,236 @@ sequence-ness before reaching its text arm and they use the operator heavily
 (`log_pipeline2` 21 times): `fast_diff2` and `three_way_merge2` read +4.1% and
 +3.1% against the *pre-P1* control and 0.99/1.01 against this one, which is
 what the control is for.
+
+---
+
+## 14. P5 status (2026-09-23)
+
+**Landed in the working tree (both tiers, uncommitted).** `type_families` is
+green on `interp`, `jit` and `auto` and under forced GC and has moved into
+`test/lambda/`; both negative fixtures are registered in
+`test_lambda_errors_gtest`.
+
+*The split (S11.1.6v2, §1.11).* The two families are told apart by their
+bracket, in every parser that reads a type. `apply_occurrence` takes `{n}` /
+`{n,m}` / `{n+}` as `OPERATOR_REPEAT` and makes every `[…]` form
+`OPERATOR_ARRAY` — a bare `T[]` at any length, `T[n]` at exactly n — and the
+retired `T[n+]` / `T[n, m]` are rejected by name. `parse_occurrence_count`
+reads either bracket, so the open count leaves the upper bound open where the
+old code returned 0. The island parser counts with the same regex spelling, which is
+all `convert_occurrence_to_regex` now has to emit.
+
+*Two spelling restrictions the ambiguity forces.* A `{` after a complete type
+is also a body or a block, so the count binds **tight** (`int{2}`, never
+`int {2}`) and the next token must be a count — `?`, `+` and `*` already bind
+that way, and the island parser said so in as many words. In **return**
+position the brace is the function's body, full stop: a counted return type
+goes through a type alias. Both restrictions are in the parser with the
+reasoning at the site; without them `fn f() int { 3 }` and
+`match v { int { … } }` stop parsing, which is how the first gate found them
+(569 failures).
+
+*Admission (S11.1.6v2).* At a boundary an occurrence admits what a run **is**:
+`null` when its minimum is zero — every zero-minimum spelling, not just `T?` —
+a bare `T` when the bounds admit one, and a container of two or more within
+the bounds. A container of none or one is the array family, so `[5] is int*`
+and `[] is int*` are false. One subtlety the gate caught: when the operand is
+itself a container type, that container IS the run's single item, which is how
+`int[]?` still holds `[]`; the container path therefore falls back to the
+one-item reading when the run reading fails. The array family admits only
+arrays and checks its length, so `5 is int[]` is false and `int[0]` is `[]`.
+The old "was the count set" sentinel (`max_count != 0`) had to go with it: a
+zero maximum is now a real bound.
+
+*Sequence-pattern slots.* A slot occurrence is a run of the sequence's items
+and zero items is void, which no exact-length tuple check can express. The
+matcher backtracks over the counts a run can take, testing each item once as
+the run grows; a pattern with no run keeps the exact-length path. `[1, int*, 2]`
+matches `[1, 2]` and `[1, 5, 6, 2]`, and never `[1, null, 2]` or
+`[1, [5, 6], 2]` — an array item is one item where a list would have spliced.
+
+*`<:` over the families.* An occurrence expected admits a null candidate at
+minimum zero, an occurrence whose bounds fit inside its own, a counted array
+of two or more, and any other type at one; an occurrence candidate reaches an
+array only where it always has two or more items. `list` and `range` are the
+specialized array kinds (S2.5.1v2): each is an array, neither is the other,
+and `array <: list` is false — they share a `type_id`, which the structural
+fallback had been reading as equality in both directions.
+
+*The `<:` operand question P5 was asked to decide.* §2 left it open whether
+`<:` should take a type *expression* like `is` does, since in value position
+`int* <: T` reads `*` as multiplication and the fixture has to bind first
+(`type IntRun = int*`). **Binding stays the rule.** S11.1.4v2 says the
+operands are type values, and that is what the parser implements; making `<:`
+parse a type expression would change the ruling, not the implementation, so it
+needs one. The fixture reads no worse for it — the bound names say what each
+family is — and the restriction is one line of the fixture's own comment.
+
+*Reference grammar.* `occurrence_count` is the brace form and `array_count`
+the bracket form, with a new `_occurrence_lbrace` external token guarded like
+`_index_lbracket`; `make generate-grammar` regenerates cleanly. The C parser
+is the one that runs, but the grammar is the reference and the S16.2.3 guard
+has to read the same on both sides.
+
+*Migration.* 18 retired spellings in `type_pattern.ls` became `[T{n+}]` /
+`[T{n,m}]` — an array of at least n is an array holding a run — and five of
+its `T*` fields became `T[]`, because they hold arrays of any length and `[]`
+is not a run. `type_occurrence.ls` keeps `T[n]` for the array cases, moves the
+rest to braces, and gains two cases for what changed (`["a"] is string{1,3}`
+and `[] is int*` are false). Five island fixtures took the regex count with
+byte-identical output. `type_basic.expected` gains the `null is int*` row.
+
+**Gate.** Official `make test-lambda-baseline` after the migration: 5826
+passed, 3 failed, then two fixed here (`typed_array_admission`, the `int[]?`
+case above, and `core_datatypes_type_basic`, a migrated golden). The third,
+`dom_module_props`, is **not this phase**: upstream `45b88a575` ("bug fix",
+2026-09-23 08:00, pulled at 09:38) made `url_construct_href` give every
+`file:` URL an authority, so `link.href` serializes `file:///docs` where that
+test's golden still records `file:/docs`. It passed on the pre-pull tree and
+fails with no Lambda change; the golden or the serializer needs a decision
+from whoever made that change.
+
+`make test-radiant-baseline`: 3682 passed, 1 failed — only the page suite's
+stale snapshot, now down to three per-page drops with the same numbers as the
+P1 run (`page_facatology` joined `zengarden` in passing, and upstream fixed
+the two `radiant_view_pdf*` fixtures). No emitter changed, so the MIR ratchet
+is unmoved and no A/B is owed: the typed rows still run and agree
+(deltablue2 PASS, havlak2, json2, prettier_ast2).
+
+---
+
+## 15. Close-out (P6, 2026-09-23)
+
+**Semantics, 29.1.0.** The five list-fix rows of Appendix A now read as
+conformance records with their dates, and the `*` implementation mark is gone
+from the nine rulings that earned it: S2.2.3, S2.5.1v2, S2.5.2v2, S2.5.6,
+S2.5.7, S2.5.8, S10.6.1, S11.1.6v2, S12.3.5v2, plus S2.6.2, S2.6.4 and S2.6.5
+on the content side. Four marks **stay**, each for a residue the row names:
+
+- **S2.5.5v2** — `fn_query`/`fn_child_query` still return a list whatever its
+  length, so `e[element]` with one match is a one-item list where the ruling
+  says a list has at least two items. The kind of a query result has no
+  ruling ([LR05-13](<../Lambda_Issue_Ledger (fixed).md#lr05-13>)) — ruled the
+  same day, see §17.
+- **S2.6.1** — LaTeX input keeps consecutive strings unmerged, the
+  transitional deviation D2.6.5v3 names.
+- **S7.10.5v2** — the RF5 audit's typed-`ArrayNum` and error-channel residue,
+  which predates this plan.
+- **S11.1.1v3** — general structural array-pattern composition, likewise.
+
+**Design, 12.1.0.** The D2.6.5v3 row records P1–P4 and points at this file
+under its final name.
+
+**Ledger.** LR03-12, LR05-9, LR05-10, LR05-11 and LR05-12 (with LR12-28) moved
+to the [fixed archive](<../Lambda_Issue_Ledger (fixed).md>) keeping their
+original IDs — the `-R` suffix §2 planned for belongs to that archive's own
+historical appendix (§15 there), not to records moved from the central
+ledger. LR05-13 stays open in the central ledger. LR12-27 (a push onto an
+unannotated number array is a silent no-op) was a declared non-goal
+throughout and is untouched; it still blocks three lines of
+`proc-ext/list_var_mutation`.
+
+**Design records.** `Lambda_Type_Pattern.md` §1.3 and `Lambda_Design_Syntax.md`
+§7.27/§7.28 carry implementation status lines, each naming what stayed open.
+
+**What the six phases changed, in one paragraph.** A list is an array with one
+kind bit, and that bit — never the syntax around a value — decides whether it
+spreads. Every producer finishes by position: in an item position a list
+splices even when it is empty, and elsewhere it collapses to `null` at none
+and to the item at one. Every transform keeps its input's kind, and mixing
+kinds gives an array. A list is transient: a slot stores its array image,
+while an insertion splices it. Content normalizes as it is built and stays
+normalized under writes. Text is walked as a sequence and placed as one value,
+`++` concatenates sequences and appends scalars, and `*x` is the list of x's
+items rather than a mark on x. Types come in two families — a run and an
+array — and neither changes a value's kind at a boundary.
+
+**Gate at close-out.** `make test-lambda-baseline` 5828 passed, one failure
+(the upstream `dom_module_props` URL golden, §14); `make test-radiant-baseline`
+3682 passed, one failure (the page suite's stale snapshot). Nothing in either
+is attributable to this plan.
+
+---
+
+## 16. Follow-up: the open count is `T{n+}` (2026-09-23, USER)
+
+After the close-out the user respelled the occurrence family's open bound:
+`T{n,}` becomes **`T{n+}`**. `T{n}` and `T{n,m}` are unchanged. Ratified by
+revising the two rulings in place — **S11.1.6v2** and **S16.8.6v3** — with a
+MAJOR spec bump to **30.0.0**, since it breaks any program written against the
+first spelling. Argument in [Design_Syntax §7.28](../Lambda_Design_Syntax.md):
+the `+` already means "or more" as a bare suffix, `T+` is now visibly `T{1+}`,
+and the migration off the `T[n+]` this family replaced is a bracket swap.
+
+*Implementation.* `parse_occurrence_count` reads `{n+}` for the open bound and
+keeps the comma for `{n,m}`; `apply_occurrence` rejects a trailing-comma count
+by name, because an exact `T{n}` is a silently different type and a regex
+habit will write `{n,}`. Inside a string island the `+` still compiles to
+RE2's `{n,}`, which is the one place the regex spelling survives —
+`convert_occurrence_to_regex` translates it. The reference grammar takes
+`seq('{', integer, '+', '}')`, regenerated. The diagnostic for the retired
+`T[n+]`/`T[n, m]` now names `T{n+}`.
+
+*Corpus.* 26 sites across `type_pattern.ls`, `type_occurrence.ls` and
+`type_families.ls`, all of which keep their goldens byte for byte — only the
+spelling moved. A third negative fixture,
+`negative/semantic/occurrence_regex_open_count.ls`, pins the rejection.
+`doc/Lambda_Type.md`, `Lambda_Type_Pattern.md` and `Design_Syntax` §7.28
+follow. The JS and tree-sitter regexes elsewhere in the tree are untouched:
+they are regexes, not Lambda types.
+
+---
+
+## 17. Follow-up: a query yields a run (2026-09-23, USER — S8.2.4)
+
+The user ruled the one item P6 left open: `e[T]` and `e?T` return a **list**,
+not an array — precisely, the run `T*`: `null` for no match, the match itself
+for one, a list for more. The argument is an accessor's, not a filter's:
+`e[1]` yields the item and `e[-1]` yields `null`, and a type subscript
+extends `e[1]` the way a name extends a position. Both options, with their
+pros and cons, are recorded in [Expr_Query §4.1](../Lambda_Expr_Query.md);
+the ruling alone is S8.2.4 (semantics 31.0.0 — MAJOR, since `len(e?T)` at one
+match now measures the match). S2.5.5v2 loses its implementation mark.
+
+*Implementation.* `fn_query` and `fn_child_query` finish through
+`list_collapse_value`, the same finish every list producer takes, and stop
+setting the bit by hand. The checker had typed a query as `array`
+(`build_query_node_from_parts`); it is now open (`ANY_LIST`), because a lone
+match is not a container and the JIT would have unboxed it as one — the P2
+crash class. The `e[T]` index path was already typed open.
+
+*Corpus.* The four query fixtures counted matches with `len(q)`, which the
+ruling turns into the lone match's own length; they now count with the
+S12.3.5v2 packager, `len([*q])`, and keep every golden byte for byte, and
+`(42.?int)[0]` became `42.?int` — the lone match is the value. A first pass
+at that rewrite was caught by its own greedy regex on comments containing
+`)`; the repair is exact. `test/lambda/query_kind.ls` pins the ruling on all
+three tiers and under forced GC. The shipped packages use no query result
+(one comment mentions one), so nothing else moved.
+
+---
+
+## 18. Follow-up: `count(x)` (2026-09-23, USER — S8.3.3v3)
+
+S8.2.4 left the match count to `len([*q])`, which is wrong for a lone array
+match (it counts the array's contents). The user asked for the `count` that
+S8.3.3v2 had defined and never built, and ruled its meaning as the size of
+the run `x` is: `0` for `null`, `len(x)` for a list, `1` otherwise, error for
+an error. Ruling in S8.3.3v3 (semantics 32.0.0 — MAJOR, since `count(null)`
+changed from v2's 1 to 0); the literal law is the user's
+`len([x₁…xₙ]) = Σ count(xᵢ or 1)`; argument, with the idiom table, in
+[Design_Syntax §7.27](../Lambda_Design_Syntax.md).
+
+*Implementation.* `fn_count` beside `fn_len`, three lines over
+`item_is_list`. A registry row with `len`'s raw-int ABI (`C_RET_INT64`),
+joined to `len` in the three places that ABI needs special handling: the
+C-return type id, the error-rejecting parameter boundary, and the T0
+interpreter's raw-int error guard; plus the eval-mode allow-list.
+`SYSFUNC_COUNT` is **appended** to the `SysFunc` enum — a first cut inserted
+it after `SYSFUNC_LEN`, which renumbers every later function for anything
+that stores the ids. Method form (`q.count()`) works through the
+method-eligible row.
+
+*Corpus.* The five query fixtures now count with `count(q)`, goldens
+unchanged; `test/lambda/count_run.ls` pins the ruling — including the lone
+array match `len([*q])` gets wrong — on all three tiers and under forced GC.

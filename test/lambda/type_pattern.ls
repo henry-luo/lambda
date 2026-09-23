@@ -17,7 +17,7 @@ type Location = { name: string, coord: Coord }
 type Route = { 
     start: Location,
     end: Location,
-    waypoints: Location*
+    waypoints: Location[]
 }
 
 let simple_route = {
@@ -59,7 +59,7 @@ let route_bad_waypoint = {
 'Section 2: Arrays with Occurrence'
 
 type Point = { x: int, y: int }
-type Polygon = Point[3+]              // at least 3 points
+type Polygon = [Point{3+}]            // an array of at least 3 points
 type Triangle = Point[3]              // exactly 3 points
 type Line = Point[2]                  // exactly 2 points
 
@@ -85,7 +85,7 @@ let empty_pts = []
 type Trip = { 
     id: string,
     route: Route,
-    passengers: string[1+]            // inline occurrence in map field
+    passengers: [string{1+}]          // an array of at least one name
 }
 
 let deep_trip = {
@@ -122,11 +122,11 @@ type Dimensions = { width: int, height: int }
 type Product = {
     name: string,
     dimensions: Dimensions,
-    tags: string*
+    tags: string[]
 }
 type Warehouse = {
     id: string,
-    inventory: Product[1+]            // inline occurrence
+    inventory: [Product{1+}]          // an array of at least one product
 }
 
 let warehouse = {
@@ -158,7 +158,7 @@ let warehouse_bad_product = {
 // ============================================================
 'Section 5: Nested Arrays'
 
-type Matrix = (int*)[2+]              // at least 2 rows of ints (explicit grouping)
+type Matrix = [(int*){2+}]            // an array of at least 2 int rows
 
 let matrix_2x3 = [[1, 2, 3], [4, 5, 6]]
 let matrix_3x3 = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
@@ -171,7 +171,7 @@ let matrix_1x3 = [[1, 2, 3]]
 let empty_matrix = []
 "5.4"; (empty_matrix is Matrix)        // false - need at least 2 rows
 
-type PointGrid = (Point*)[1+]          // at least 1 row of points (explicit grouping)
+type PointGrid = [(Point*){1+}]          // at least 1 row of points (explicit grouping)
 
 let point_grid = [
     [{ x: 0, y: 0 }, { x: 1, y: 0 }],
@@ -226,7 +226,7 @@ type Shape = Circle | Rectangle
 
 type Drawing = {
     name: string,
-    shapes: Shape[1+]                  // inline occurrence with union element type
+    shapes: [Shape{1+}]                  // inline occurrence with union element type
 }
 
 let circle = { kind: "circle", radius: 5.0 }
@@ -260,7 +260,7 @@ type Event = {
     data: map
 }
 
-type EventLog = Event[1+]
+type EventLog = [Event{1+}]
 
 let events = [
     { kind: "click", timestamp: 1000, data: { x: 100, y: 200 } },
@@ -281,9 +281,9 @@ let mixed_events = [
 // ============================================================
 'Section 9: Boundary Cases'
 
-type EmptyAllowed = int[0, 10]         // 0 to 10 ints
+type EmptyAllowed = [int{0,10}]         // 0 to 10 ints
 type ZeroExact = int[0]                // exactly 0 ints (always empty)
-type LargeRange = int[5, 100]          // 5 to 100 ints
+type LargeRange = [int{5,100}]          // 5 to 100 ints
 
 "9.1"; ([] is EmptyAllowed)            // true - 0 is allowed
 "9.2"; ([1,2,3] is EmptyAllowed)       // true - 3 is in range
@@ -306,13 +306,13 @@ type HttpHeader = { name: string, value: string }
 type HttpRequest = {
     method: string,
     url: string,
-    headers: HttpHeader*,
+    headers: HttpHeader[],
     body: string?
 }
 
 type HttpResponse = {
     status: int,
-    headers: HttpHeader[1+],           // inline occurrence
+    headers: [HttpHeader{1+}],           // inline occurrence
     body: string?
 }
 
@@ -322,7 +322,7 @@ type ApiCall = {
     duration_ms: int
 }
 
-type ApiLog = ApiCall[1+]
+type ApiLog = [ApiCall{1+}]
 
 let api_log = [
     {
@@ -393,7 +393,7 @@ type ContentNode = TextNode | ImageNode | LinkNode
 
 type Document = {
     title: string,
-    nodes: ContentNode[1+]
+    nodes: [ContentNode{1+}]
 }
 
 let text_node = { tag: "text", content: "Hello World" }
@@ -436,7 +436,7 @@ type Person = {
 type Team = {
     name: string,
     lead: Person,
-    members: Person[1+]
+    members: [Person{1+}]
 }
 
 let person_full = {
@@ -484,8 +484,8 @@ let team_no_members = {
 'Section 13: Nested Occurrence'
 
 type Tag = { name: string, value: string }
-type TagGroup = Tag[2, 5]              // 2-5 tags per group
-type TagCollection = TagGroup[1+]      // at least 1 group of tags
+type TagGroup = [Tag{2,5}]              // 2-5 tags per group
+type TagCollection = [TagGroup{1+}]      // at least 1 group of tags
 
 let tag_group_2 = [
     { name: "env", value: "prod" },
@@ -520,8 +520,8 @@ type Edge = { from: NodeId, to: NodeId, weight: float? }
 type Node = { id: NodeId, label: string, data: map? }
 
 type Graph = {
-    nodes: Node[1+],
-    edges: Edge*
+    nodes: [Node{1+}],
+    edges: Edge[]
 }
 
 let graph = {
@@ -572,7 +572,7 @@ type CacheConfig = {
 
 type LogConfig = {
     level: string,
-    outputs: string[1+]
+    outputs: [string{1+}]
 }
 
 type AppConfig = {
@@ -648,10 +648,10 @@ let bad_config = {
 'Section 16: Heterogeneous Nesting'
 
 type Metric = { name: string, value: float, unit: string }
-type MetricGroup = { category: string, metrics: Metric[1+] }
+type MetricGroup = { category: string, metrics: [Metric{1+}] }
 type Dashboard = {
     title: string,
-    groups: MetricGroup[2+],           // at least 2 groups
+    groups: [MetricGroup{2+}],           // at least 2 groups
     refreshInterval: int?
 }
 
@@ -735,9 +735,9 @@ let iv5 = [1, 2, 3, 4, 5]
 
 type Metadata = { created: int, modified: int? }
 type FileInfo = { name: string, size: int, meta: Metadata? }
-type Folder = { name: string, files: FileInfo*, subfolders: map? }
+type Folder = { name: string, files: FileInfo[], subfolders: map? }
 type Volume = { label: string, root: Folder }
-type StorageSystem = { volumes: Volume[1+] }
+type StorageSystem = { volumes: [Volume{1+}] }
 
 let storage = {
     volumes: [
@@ -846,9 +846,9 @@ type Payment = {
 type Order = {
     id: string,
     customerId: string,
-    lines: OrderLine[1+],
+    lines: [OrderLine{1+}],
     shipping: ShippingAddress,
-    payments: Payment[1+],
+    payments: [Payment{1+}],
     notes: string?
 }
 

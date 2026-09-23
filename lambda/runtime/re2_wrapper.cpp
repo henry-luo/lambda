@@ -36,64 +36,20 @@ extern "C" {
 extern __thread EvalContext* context;
 #endif
 
-// Convert Lambda occurrence syntax [n], [n, m], [n+] to regex {n}, {n,m}, {n,}
-// Input: "[3]", "[2, 5]", "[3+]"
-// Output to regex buffer: "{3}", "{2,5}", "{3,}"
+// S16.8.6v3: an island's counted occurrence is `{n}`, `{n,m}` or `{n+}`. The
+// first two are already the regex spelling; the open form is not, so its `+`
+// becomes RE2's trailing comma. The retired `[n]`, `[n, m]` and `[n+]` no
+// longer parse.
 static void convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
-    if (!op_str || !op_str->str || op_str->length < 3) {
-        log_error("convert_occurrence_to_regex: invalid op_str");
+    if (!op_str || !op_str->str || op_str->length < 3 ||
+            op_str->str[0] != '{' || op_str->str[op_str->length - 1] != '}') {
+        log_error("convert_occurrence_to_regex: expected a `{n,m}` count");
         return;
     }
-
-    const char* s = op_str->str;
-    size_t len = op_str->length;
-
-    // Skip leading '[' and trailing ']'
-    if (s[0] != '[' || s[len-1] != ']') {
-        // Fallback: might be old {n} syntax or something else, append as-is
-        strbuf_append_str_n(regex, s, len);
-        return;
-    }
-
-    // Parse content between [ and ]
-    // Forms: "n", "n+", "n, m"
-    strbuf_append_char(regex, '{');
-
-    size_t i = 1;  // skip '['
-    // Parse first number
-    while (i < len - 1 && (s[i] >= '0' && s[i] <= '9')) {
-        strbuf_append_char(regex, s[i]);
-        i++;
-    }
-
-    // Skip whitespace
-    while (i < len - 1 && (s[i] == ' ' || s[i] == '\t')) {
-        i++;
-    }
-
-    if (i >= len - 1) {
-        // Just [n] -> {n}
-        strbuf_append_char(regex, '}');
-    } else if (s[i] == '+') {
-        // [n+] -> {n,}
-        strbuf_append_str(regex, ",}");
-    } else if (s[i] == ',') {
-        // [n, m] -> {n,m}
-        i++;  // skip ','
-        // Skip whitespace after comma
-        while (i < len - 1 && (s[i] == ' ' || s[i] == '\t')) {
-            i++;
-        }
-        strbuf_append_char(regex, ',');
-        // Parse second number
-        while (i < len - 1 && (s[i] >= '0' && s[i] <= '9')) {
-            strbuf_append_char(regex, s[i]);
-            i++;
-        }
-        strbuf_append_char(regex, '}');
-    } else {
-        // Unknown format, close the brace
-        strbuf_append_char(regex, '}');
+    for (size_t i = 0; i < op_str->length; i++) {
+        char c = op_str->str[i];
+        if (c == ' ' || c == '\t') continue;
+        strbuf_append_char(regex, c == '+' ? ',' : c);
     }
 }
 
@@ -286,11 +242,11 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
             compile_pattern_to_regex(regex, unary->operand);
             strbuf_append_str(regex, ")*");
         } else if (unary->op == OPERATOR_REPEAT) {
-            // [n], [n+], [n, m] -> (?:a){n}, (?:a){n,}, (?:a){n,m}
+            // `{n}` / `{n,}` / `{n,m}` -> (?:a){n} / (?:a){n,} / (?:a){n,m}
             strbuf_append_str(regex, "(?:");
             compile_pattern_to_regex(regex, unary->operand);
             strbuf_append_str(regex, ")");
-            // Convert Lambda occurrence syntax [n], [n, m], [n+] to regex {n}, {n,m}, {n,}
+            // the island carries the regex spelling; emit it verbatim
             if (unary->op_str.str && unary->op_str.length > 0) {
                 convert_occurrence_to_regex(regex, &unary->op_str);
             }

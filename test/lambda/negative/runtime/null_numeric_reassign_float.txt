@@ -1,0 +1,1 @@
+error[E201]: type check at assignment to 'total' failed: expected float, got null
