@@ -1980,25 +1980,10 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
             (JsAstNode*)cls->superclass);
         if (heritage.kind != JS_INTERP_NORMAL) return heritage;
         super_root.set(heritage.value);
-        if (get_type_id(super_root.get()) != LMD_TYPE_NULL) {
-            if (!js_has_construct_capability(super_root.get())) {
-                return js_interp_throw(js_throw_type_error(
-                    "Class extends value is not a constructor or null"));
-            }
-            value_root.set(js_get_key_cstr(super_root.get(), "prototype"));
-            if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
-            TypeId parent_type = get_type_id(value_root.get());
-            if (parent_type != LMD_TYPE_NULL && parent_type != LMD_TYPE_MAP &&
-                    parent_type != LMD_TYPE_FUNC &&
-                    !js_is_js_array(value_root.get()) && parent_type != LMD_TYPE_ELEMENT) {
-                return js_interp_throw(js_throw_type_error(
-                    "Class extends value has invalid prototype property"));
-            }
-            js_set_prototype(prototype_root.get(), value_root.get());
-            js_set_prototype(class_root.get(), super_root.get());
-        } else {
-            js_set_prototype(prototype_root.get(), ItemNull);
-        }
+        value_root.set(js_class_heritage_prototype_parent(super_root.get()));
+        if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+        js_set_prototype(prototype_root.get(), value_root.get());
+        js_set_class_constructor_parent(class_root.get(), super_root.get());
         js_set_class_superclass(class_root.get(), super_root.get());
     }
 

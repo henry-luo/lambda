@@ -2,10 +2,20 @@
 #include "js_c_ast_helpers.hpp"
 #include "../ts/ts_ast.hpp"
 #include "../../lib/mempool.h"
+#include "../../lib/arraylist.h"
 
 // The direct parser reduces children before their enclosing function or block
 // exists. This pass reconstructs the binding graph from the retained AST so
 // identifier entries describe lexical reality rather than reduction order.
+
+// B.3.3.1 creates a sloppy block function's var companion at function entry,
+// but this walk validates and defines it only on reaching the block. Reads
+// resolved earlier are recorded here and re-resolved once the walk completes.
+struct JsDirectScopeFixups {
+    ArrayList* unresolved_ids;     // JsIdentifierNode* with no entry
+    ArrayList* unresolved_scopes;  // JsScope* active at each such read
+    ArrayList* annex_b_companions; // function-scope Annex B NameEntry*
+};
 
 namespace {
 
@@ -92,6 +102,19 @@ static void direct_set_identifier(JsTranspiler* tp, JsIdentifierNode* id,
         NameEntry* entry) {
     if (!id) return;
     id->entry = entry;
+    JsDirectScopeFixups* fixups = tp ? tp->direct_fixups : NULL;
+    if (!entry && fixups && tp->current_scope) {
+        arraylist_append(fixups->unresolved_ids, id);
+        arraylist_append(fixups->unresolved_scopes, tp->current_scope);
+    }
+    // A declaration's type describes every read only when the binding cannot
+    // be reassigned. `let m = 0; m = "x"; m + 1` otherwise published FLOAT and
+    // lowered the read and its parent `+` as native Number arithmetic.
+    bool immutable = entry && (entry->is_const || entry->is_function_name_binding);
+    if (entry && !immutable) {
+        id->type = js_set_type_any(tp, ANY_WIDENED_VAR);
+        return;
+    }
     id->type = entry && entry->node && entry->node->type
         ? entry->node->type : js_set_type_any(tp, ANY_OPEN_PARAM);
 }
@@ -353,6 +376,10 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
         function->name, (JsAstNode*)placeholder, JS_VAR_VAR);
     if (outer && !outer->is_parameter) {
         lexical->annex_b_outer_binding = outer;
+        // the global companion keeps its established unresolved-name path
+        if (tp->direct_fixups && var_scope->kind == SCOPE_KIND_FUNCTION) {
+            arraylist_append(tp->direct_fixups->annex_b_companions, outer);
+        }
     }
 }
 
@@ -587,6 +614,9 @@ static void direct_walk_for_of(JsTranspiler* tp, JsForOfNode* loop) {
     } else {
         direct_walk_node(tp, loop->left);
     }
+    // Annex B.3.5 `for (var a = init in obj)`: the initializer is an ordinary
+    // expression whose reads need resolved bindings like any other.
+    direct_walk_node(tp, loop->init);
     direct_walk_node(tp, loop->right);
     direct_walk_node(tp, loop->body);
     direct_plan_scope_slots(tp, scope);
@@ -886,6 +916,30 @@ static void direct_walk_list(JsTranspiler* tp, JsAstNode* node) {
     }
 }
 
+// Bind reads that preceded their function's Annex B companion. Only a lookup
+// whose first match is such a companion changes; any other late match keeps
+// the read unresolved exactly as the in-order walk decided.
+static void direct_resolve_annex_b_reads(JsTranspiler* tp,
+        JsDirectScopeFixups* fixups) {
+    if (fixups->annex_b_companions->length == 0) return;
+    JsScope* saved = tp->current_scope;
+    for (int i = 0; i < fixups->unresolved_ids->length; i++) {
+        JsIdentifierNode* id =
+            (JsIdentifierNode*)fixups->unresolved_ids->data[i];
+        if (id->entry) continue;
+        tp->current_scope = (JsScope*)fixups->unresolved_scopes->data[i];
+        NameEntry* entry = js_scope_lookup(tp, id->name);
+        if (!entry) continue;
+        for (int j = 0; j < fixups->annex_b_companions->length; j++) {
+            if (fixups->annex_b_companions->data[j] == entry) {
+                direct_set_identifier(tp, id, entry);
+                break;
+            }
+        }
+    }
+    tp->current_scope = saved;
+}
+
 }  // namespace
 
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast) {
@@ -897,7 +951,15 @@ bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast) {
     tp->global_scope = global;
     tp->current_scope = global;
     ((JsProgramNode*)ast)->global_vars = global;
+    JsDirectScopeFixups fixups = {arraylist_new(16), arraylist_new(16),
+        arraylist_new(4)};
+    tp->direct_fixups = &fixups;
     direct_walk_node(tp, ast);
+    tp->direct_fixups = NULL;
+    direct_resolve_annex_b_reads(tp, &fixups);
+    arraylist_free(fixups.unresolved_ids);
+    arraylist_free(fixups.unresolved_scopes);
+    arraylist_free(fixups.annex_b_companions);
     direct_link_interp_export_bindings(tp);
     direct_plan_scope_slots(tp, global);
     tp->current_scope = global;

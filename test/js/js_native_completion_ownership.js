@@ -5,7 +5,9 @@ function nativeRec(n) {
     return (nativeRec(n - 1) + 1) * 1;
 }
 console.log('native-recursive', nativeRec(8));
-try { nativeRec(20000); } catch (e) { console.log('native-depth', e instanceof RangeError); }
+// the recursion limit is implementation-defined and differs per tier; the
+// depth only needs to exceed every tier's recoverable stack
+try { nativeRec(1e7); } catch (e) { console.log('native-depth', e instanceof RangeError); }
 console.log('native-depth-restored', nativeRec(2), nativeRec(2500));
 function throwWide(n) { if (n > 0) throw n / 2; return n + 1; }
 try { throwWide(Number.MIN_VALUE * 2); } catch (e) {
@@ -58,7 +60,7 @@ function depth(n) {
     if (n <= 0) return 1;
     return depth(n - 1) + 1;
 }
-try { depth(20000); } catch (e) { console.log('direct-depth', e instanceof RangeError); }
+try { depth(1e7); } catch (e) { console.log('direct-depth', e instanceof RangeError); }
 console.log('depth-restored', depth(10), depth(2500));
 var indirectDepth = mixedDepth;
 function mixedDepth(n) {
@@ -66,7 +68,7 @@ function mixedDepth(n) {
     if (n % 2) return indirectDepth(n - 1) + 1;
     return mixedDepth(n - 1) + 1;
 }
-try { mixedDepth(20000); } catch (e) { console.log('mixed-depth', e instanceof RangeError); }
+try { mixedDepth(1e7); } catch (e) { console.log('mixed-depth', e instanceof RangeError); }
 console.log('mixed-restored', mixedDepth(10), mixedDepth(2500));
 
 // a boxed ABI transports the payload even when it originally belonged to a module slot.

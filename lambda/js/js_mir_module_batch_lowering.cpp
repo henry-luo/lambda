@@ -1381,7 +1381,10 @@ static int js_mir_analyze_and_plan(JsMirTranspiler* mt,
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             const char* vname = jm_var_name(vid->name);
                             TypeId modvar_type = (TypeId)0;
-                            if (vd->init && vd->init->node_type == AST_NODE_LITERAL) {
+                            // the literal describes later reads only while the
+                            // binding cannot be reassigned (`let t = 0; t = "ab"`)
+                            if (v->kind == JS_VAR_CONST && vd->init &&
+                                    vd->init->node_type == AST_NODE_LITERAL) {
                                 JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
                                 if (mlit->literal_type == AST_LITERAL_NUMBER) {
                                     modvar_type = mlit->is_bigint
@@ -1531,25 +1534,38 @@ static int js_mir_analyze_and_plan(JsMirTranspiler* mt,
             uint32_t use_count = 0;
             const AstNodeId* use_ids = ast_index_binding_uses(index, binding_id,
                 &use_count);
-            for (uint32_t use_index = 0; use_index < use_count; use_index++) {
-                JsAstNode* node = (JsAstNode*)index->nodes[use_ids[use_index]];
-                if (!node) continue;
-                if (node->node_type == AST_NODE_ASSIGN) {
-                    JsAssignmentNode* assignment = (JsAssignmentNode*)node;
-                    if (assignment->left && assignment->left->node_type == AST_NODE_IDENT &&
-                            ((JsIdentifierNode*)assignment->left)->entry == fn->entry) {
-                        binding_written = true;
+            // Uses are identifier nodes; the write is decided by the nearest
+            // enclosing assignment, update, or loop head.
+            for (uint32_t use_index = 0; use_index < use_count && !binding_written;
+                    use_index++) {
+                AstNodeId current = use_ids[use_index];
+                for (AstNodeId parent = ast_index_parent_id(index, current);
+                        parent != AST_NODE_ID_INVALID;
+                        current = parent, parent = ast_index_parent_id(index, current)) {
+                    JsAstNode* node = (JsAstNode*)index->nodes[parent];
+                    if (!node) break;
+                    if (node->node_type == AST_NODE_ASSIGN) {
+                        binding_written = jm_assignment_targets_binding(
+                            ((JsAssignmentNode*)node)->left, fn->entry);
                         break;
                     }
-                } else if (node->node_type == AST_NODE_UNARY) {
-                    JsUnaryNode* unary = (JsUnaryNode*)node;
-                    if ((unary->op == OPERATOR_JS_INCREMENT ||
-                            unary->op == OPERATOR_JS_DECREMENT) && unary->operand &&
-                            unary->operand->node_type == AST_NODE_IDENT &&
-                            ((JsIdentifierNode*)unary->operand)->entry == fn->entry) {
-                        binding_written = true;
+                    if (node->node_type == AST_NODE_UNARY) {
+                        JsUnaryNode* unary = (JsUnaryNode*)node;
+                        binding_written = (unary->op == OPERATOR_JS_INCREMENT ||
+                            unary->op == OPERATOR_JS_DECREMENT) &&
+                            unary->operand == (JsAstNode*)index->nodes[current];
                         break;
                     }
+                    if (node->node_type == AST_NODE_FOR_OF_STAM ||
+                            node->node_type == AST_NODE_FOR_IN_STAM) {
+                        JsForOfNode* loop = (JsForOfNode*)node;
+                        binding_written = !loop->declares_binding &&
+                            jm_assignment_targets_binding(loop->left, fn->entry);
+                        break;
+                    }
+                    if (node->node_type == AST_NODE_FUNC ||
+                            node->node_type == AST_NODE_FUNC_EXPR ||
+                            node->node_type == AST_NODE_ARROW_FUNC) break;
                 }
             }
             if (binding_written) {

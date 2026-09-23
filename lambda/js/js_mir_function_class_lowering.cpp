@@ -14,12 +14,7 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
     // a synthetic superclass identifier must resolve through its definition-time entry.
     MIR_reg_t super_val = jm_emit_class_object_for_entry(mt, static_superclass);
     if (!super_val) super_val = jm_emit_undefined(mt);
-    MIR_reg_t sp_key = jm_box_property_name_literal(mt, "prototype", 9);
-    MIR_reg_t sp_proto = jm_callr_2(mt, "js_get_key_default", MIR_T_I64, super_val, sp_key);
-    jm_callr_1(mt, "js_check_class_prototype_parent", MIR_T_I64, sp_proto);
-    jm_emit_error_lane_propagate_check(mt);
-    MIR_reg_t current_proto = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
-    jm_callr_void_2(mt, "js_set_prototype", current_proto, sp_proto);
+    jm_link_class_super_prototype(mt, cls_obj, proto_obj, super_val);
     return super_val;
 }
 

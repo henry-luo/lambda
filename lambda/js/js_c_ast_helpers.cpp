@@ -580,36 +580,46 @@ JsAstNode* build_js_unary_from_child(JsTranspiler* tp, SourceSpan span,
     unary->op = op;
     unary->prefix = prefix;
 
-    // Infer result type
+    refresh_js_unary_type(tp, unary);
+    return (JsAstNode*)unary;
+}
+
+void refresh_js_unary_type(JsTranspiler* tp, JsUnaryNode* unary) {
+    if (!unary) return;
     switch (unary->op) {
         case OPERATOR_NOT:
+        case OPERATOR_JS_DELETE:
             unary->type = &TYPE_BOOL;
             break;
         case OPERATOR_JS_TYPEOF:
             unary->type = &TYPE_STRING;
             break;
         case OPERATOR_POS:
+            // ToNumber: a Number or a thrown TypeError, never a BigInt
+            unary->type = &TYPE_FLOAT;
+            break;
         case OPERATOR_NEG:
         case OPERATOR_JS_BIT_NOT:
-            unary->type = &TYPE_FLOAT;
-            break;
         case OPERATOR_JS_INCREMENT:
-        case OPERATOR_JS_DECREMENT:
-            // update expressions produce a JavaScript Number even when the
-            // referenced property has an open static type.
-            unary->type = &TYPE_FLOAT;
+        case OPERATOR_JS_DECREMENT: {
+            // Numeric operators map a BigInt to a BigInt, so only a proven
+            // operand type answers. Typing `-1n` / `x++` as FLOAT let a later
+            // `a + b` pair lower to native double arithmetic on BigInt values.
+            TypeId operand = unary->operand && unary->operand->type
+                ? unary->operand->type->type_id : LMD_TYPE_ANY;
+            if (operand == LMD_TYPE_FLOAT || operand == LMD_TYPE_DECIMAL) {
+                unary->type = unary->operand->type;
+            } else {
+                unary->type = js_set_type_any(tp, ANY_JS_BINARY);
+            }
             break;
-        case OPERATOR_JS_DELETE:
-            unary->type = &TYPE_BOOL;
-            break;
+        }
         case OPERATOR_JS_VOID:
             unary->type = &TYPE_NULL; // void always returns undefined
             break;
         default:
             unary->type = js_set_type_any(tp, ANY_JS_BINARY);
     }
-
-    return (JsAstNode*)unary;
 }
 
 // build a call from parser-owned callee and argument-list children

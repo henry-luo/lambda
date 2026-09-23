@@ -22,6 +22,7 @@ void refresh_js_conditional_type(JsTranspiler* tp,
 JsAstNode* build_js_unary_from_child(JsTranspiler* tp, SourceSpan span,
                                      JsOperator op, JsAstNode* operand,
                                      bool prefix);
+void refresh_js_unary_type(JsTranspiler* tp, JsUnaryNode* unary);
 JsAstNode* build_js_call_from_children(JsTranspiler* tp, SourceSpan span,
                                         JsAstNode* callee,
                                         JsAstNode* arguments, bool optional);

@@ -41,7 +41,9 @@
       "Bash(git -C /Users/henryluo/Projects/Lambda-opus show --stat 4a30bad79)",
       "Bash(time ./lambda.exe run test/benchmark/awfy/cd2.ls)",
       "Bash(timeout 2s ./test/test_own_tagged.exe --gtest_list_tests)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(cd /Users/henryluo/Projects/lambda; sed -n '/---\\\\*\\\\//,$p' test/js262/test/annexB/language/statements/for-in/nonstrict-initializer.js)",
+      "Bash(cd /Users/henryluo/Projects/lambda; sed -n '/---\\\\*\\\\//,$p' test/js262/test/language/expressions/yield/star-throw-is-null.js; sed -n '/---\\\\*\\\\//,$p' test/js262/test/language/expressions/yield/star-rhs-iter-thrw-violation-no-rtrn.js)"
     ]
   }
 }

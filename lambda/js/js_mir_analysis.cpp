@@ -514,7 +514,11 @@ static bool jm_collect_indexed_body_local(const AstIndex* index, AstNodeId node_
             // Direct scope binding publishes the declaration identity before
             // indexed collection. Re-scanning its parent scope by node pointer
             // can select an Annex B companion instead of the call-site binding.
-            NameEntry* binding = fn->entry;
+            // A sloppy block function's owner-level local is its Annex B var
+            // companion: body reads outside the block resolve to that entry,
+            // while the block's lexical cell is declared at block entry.
+            NameEntry* binding = fn->entry && fn->entry->annex_b_outer_binding
+                ? fn->entry->annex_b_outer_binding : fn->entry;
             JsNameSetEntry entry;
             memset(&entry, 0, sizeof(entry));
             entry.name = jm_persist_name(jm_var_name(fn->name));
@@ -780,10 +784,14 @@ static bool jm_index_identifier_is_binding(AstIndex* index, uint32_t node_id,
             definition->node_type == AST_NODE_METHOD) {
         JsFunctionNode* function = (JsFunctionNode*)definition;
         // Function names are stored as interned strings rather than AST name
-        // nodes; the declared name is the only entry use before the body.
-        return function->body && definition->source_span.start_byte <=
+        // nodes; the declared name is the only entry use before the parameter
+        // list. A default initializer may read the name (a named function
+        // expression's own binding), so the bound is the first parameter.
+        JsAstNode* params = (JsAstNode*)function->params;
+        JsAstNode* after_name = params ? params : (JsAstNode*)function->body;
+        return after_name && definition->source_span.start_byte <=
             id->source_span.start_byte && id->source_span.end_byte <=
-            function->body->source_span.start_byte;
+            after_name->source_span.start_byte;
     }
     if (definition->node_type == AST_NODE_CLASS ||
             definition->node_type == AST_NODE_CLASS_EXPR) {

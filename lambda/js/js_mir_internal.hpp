@@ -333,6 +333,9 @@ void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
 JsErrorLaneTrack jm_error_lane_state(JsMirTranspiler* mt);
 JsErrorLaneTrack jm_error_lane_merge(JsErrorLaneTrack a, JsErrorLaneTrack b);
+// Join value-producing arms that each wrote `result`; it becomes the ERROR-lane carrier.
+void jm_emit_value_join(JsMirTranspiler* mt, MIR_label_t label, MIR_reg_t result,
+        JsErrorLaneTrack state);
 void jm_error_lane_set_state(JsMirTranspiler* mt, JsErrorLaneTrack state);
 bool jm_emit_native_throw_exit(JsMirTranspiler* mt, MIR_reg_t lane);
 void jm_error_lane_note_call(JsMirTranspiler* mt, JitExceptionEffect effect);
@@ -427,6 +430,8 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block);
 void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node);
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
 void jm_writeback_scope_env_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pattern);
+// True when an assignment target (identifier or destructuring pattern) writes binding.
+bool jm_assignment_targets_binding(JsAstNode* left, NameEntry* binding);
 void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
                                 struct hashmap* module_consts,
                                 bool captures_with_scope);
@@ -588,6 +593,10 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
 MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
         MIR_reg_t cls_obj, MIR_reg_t proto_obj, JsClassEntry* static_superclass);
+// Link the class prototype object to a heritage value's prototype parent
+// (ClassDefinitionEvaluation 8.e-8.g, `null` included).
+void jm_link_class_super_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+        MIR_reg_t proto_obj, MIR_reg_t super_val);
 MIR_reg_t jm_emit_current_class_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t fallback_proto);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
