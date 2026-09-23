@@ -496,6 +496,7 @@ test/lambda/graph/structurizr/stage4c.ls	direct
 test/lambda/graph/structurizr/stage4d.ls	direct
 test/lambda/graph/structurizr/this_relationships.ls	direct
 test/lambda/proc/abstract_numeric_field.ls	run
+test/lambda/proc/array_view_admission.ls	run
 test/lambda/proc/bool_lane_and_chain.ls	run
 test/lambda/proc/boundary_deferred_checks.ls	run
 test/lambda/proc/clock.ls	run
@@ -534,6 +535,7 @@ test/lambda/proc/native_math_type_preserving.ls	run
 test/lambda/proc/nested_int_index.ls	run
 test/lambda/proc/null_numeric_propagation.ls	run
 test/lambda/proc/nullable_float_lane_admission.ls	run
+test/lambda/proc/nullable_lane_bindings.ls	run
 test/lambda/proc/object_direct_access.ls	run
 test/lambda/proc/object_method_write.ls	run
 test/lambda/proc/object_mutation.ls	run

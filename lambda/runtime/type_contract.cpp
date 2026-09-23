@@ -604,6 +604,8 @@ bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out) {
         if (!element) return false;
         if (out->rank == 0) out->immediate_element = element;
         out->leaf_element = element;
+        // S11.1.1v3: `T[n]` fixes this axis; `T[]` and a TypeArray carrier do not
+        if (contract_array_fixed_length(current) >= 0) out->counted_axes |= 1u << out->rank;
         out->rank++;
         current = element;
     }
@@ -627,6 +629,106 @@ Type* lambda_array_contract_canonical(Type* contract) {
     return array_contract_layer(root, &element) ? root : NULL;
 }
 
+static bool array_axis_length_fits(int fixed_length, int64_t length) {
+    return fixed_length < 0 || length == fixed_length;
+}
+
+// Check axes [axis, last] of `value`, outermost first. A packed N-D array
+// answers every axis from its shape; a boxed array checks its own length and
+// then each element on the next axis, reading them without allocating. A
+// rank-one lane or a range holds scalars, which have no deeper axis, and a
+// non-array fails -- element admission rejects both anyway.
+static bool array_value_meets_axes(Item value, const int* axes,
+        int axis, int last) {
+    TypeId type_id = get_type_id(value);
+    if (type_id == LMD_TYPE_ARRAY_NUM && value.array_num) {
+        ArrayNum* array = value.array_num;
+        if (array->is_ndim && array->extra) {
+            ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
+            int64_t* dims = array_num_shape_dims(shape);
+            for (int k = axis; k <= last; k++) {
+                if (k - axis >= shape->ndim ||
+                        !array_axis_length_fits(axes[k], dims[k - axis])) return false;
+            }
+            return true;
+        }
+        return axis == last && array_axis_length_fits(axes[axis], array->length);
+    }
+    if (type_id == LMD_TYPE_RANGE && value.range) {
+        return axis == last && array_axis_length_fits(axes[axis], value.range->length);
+    }
+    if ((type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ELEMENT) || !value.array) {
+        return false;
+    }
+    Array* array = value.array;
+    if (!array_axis_length_fits(axes[axis], array->length)) return false;
+    if (axis == last) return true;
+    for (int64_t index = 0; index < array->length; index++) {
+        if (!array_value_meets_axes(array_item_read(array, index), axes, axis + 1, last)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool lambda_array_value_meets_counts(Item value, Type* contract) {
+    int axes[32];
+    int rank = 0;
+    int last_counted = -1;
+    Type* current = array_contract_unwrap(contract, 0);
+    Type* element = NULL;
+    while (current && rank < 32 && array_contract_layer(current, &element)) {
+        axes[rank] = contract_array_fixed_length(current);
+        if (axes[rank] >= 0) last_counted = rank;
+        rank++;
+        current = array_contract_unwrap(element, 0);
+    }
+    return last_counted < 0 || array_value_meets_axes(value, axes, 0, last_counted);
+}
+
+static bool contract_counts_array_length(Type* type, int depth) {
+    type = depth <= 32 ? array_contract_unwrap(type, 0) : NULL;
+    if (!type || type->type_id != LMD_TYPE_TYPE || type_is_global_meta_type(type)) {
+        return false;
+    }
+    if (type->kind == TYPE_KIND_UNARY) {
+        return contract_array_fixed_length(type) >= 0 ||
+            contract_counts_array_length(((TypeUnary*)type)->operand, depth + 1);
+    }
+    if (type->kind == TYPE_KIND_BINARY) {
+        return contract_counts_array_length(((TypeBinary*)type)->left, depth + 1) ||
+            contract_counts_array_length(((TypeBinary*)type)->right, depth + 1);
+    }
+    return false;
+}
+
+bool lambda_type_counts_array_length(Type* contract) {
+    return contract_counts_array_length(contract, 0);
+}
+
+// Every axis `expected` fixes, `candidate` fixes alike, so a `T[3]` proof
+// serves a `T[]` target but never the reverse or a `T[4]`.
+static bool array_contract_counts_within(Type* candidate, Type* expected) {
+    candidate = array_contract_unwrap(candidate, 0);
+    expected = array_contract_unwrap(expected, 0);
+    for (int depth = 0; candidate && expected && depth < 32; depth++) {
+        Type* candidate_element = NULL;
+        Type* expected_element = NULL;
+        if (!array_contract_layer(candidate, &candidate_element) ||
+                !array_contract_layer(expected, &expected_element)) {
+            return true;
+        }
+        int expected_length = contract_array_fixed_length(expected);
+        if (expected_length >= 0 &&
+                contract_array_fixed_length(candidate) != expected_length) {
+            return false;
+        }
+        candidate = array_contract_unwrap(candidate_element, 0);
+        expected = array_contract_unwrap(expected_element, 0);
+    }
+    return true;
+}
+
 static bool array_contract_semantically_equal(Type* left, Type* right) {
     left = array_contract_unwrap(left, 0);
     right = array_contract_unwrap(right, 0);
@@ -644,6 +746,11 @@ static bool array_contract_semantically_equal(Type* left, Type* right) {
                 return false;
             }
             return contract_semantics_equal(left, right);
+        }
+        // `T[3]` and `T[]` share rank and leaf, not meaning: an interned
+        // certificate for one must never serve the other (S11.1.1v3)
+        if (contract_array_fixed_length(left) != contract_array_fixed_length(right)) {
+            return false;
         }
         left = array_contract_unwrap(left_element, 0);
         right = array_contract_unwrap(right_element, 0);
@@ -667,6 +774,8 @@ bool lambda_array_contract_compatible(Type* candidate, Type* expected,
             candidate_info.rank != expected_info.rank) {
         return false;
     }
+    if (expected_info.counted_axes &&
+            !array_contract_counts_within(candidate, expected)) return false;
     if (expected_info.immediate_element == &TYPE_ANY) return true;
     return contract_semantics_compatible(candidate_info.immediate_element,
         expected_info.immediate_element);
@@ -740,6 +849,7 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     cert->leaf_lane = info.leaf_lane;
     cert->rank = info.rank;
     cert->flags = ARRAY_REP_CERT_EXACT | ARRAY_REP_CERT_ERROR_FREE;
+    if (info.counted_axes) cert->flags |= ARRAY_REP_CERT_COUNTED;
     ArrayNumElemType element = ELEM_INT;
     cert->has_array_num_lane =
         lambda_array_num_elem_type_for_contract(info.leaf_element, &element);
@@ -751,13 +861,22 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     return cert;
 }
 
+// A counted certificate proves lengths only while the value still has them:
+// they are fixed by the contract, not the carrier, and a push or splice
+// changes them without touching the lane (D3.3.3v3, S11.1.1v3).
+static bool array_value_meets_cert_counts(Item value, const ArrayRepCert* cert) {
+    return !(cert->flags & ARRAY_REP_CERT_COUNTED) ||
+        lambda_array_value_meets_counts(value, cert->array_contract);
+}
+
 // T29-5: the certificate already resolved the contract's lane and rank, so an
 // admission that has it in hand needs only the live carrier checks.
 bool lambda_array_num_matches_cert(Item value, const ArrayRepCert* cert) {
     return cert && cert->has_array_num_lane &&
         get_type_id(value) == LMD_TYPE_ARRAY_NUM && value.array_num &&
         value.array_num->get_elem_type() == cert->array_num_elem &&
-        array_num_layout_proves_contract_rank(value.array_num, cert->rank);
+        array_num_layout_proves_contract_rank(value.array_num, cert->rank) &&
+        array_value_meets_cert_counts(value, cert);
 }
 
 static ArrayRepCert* array_rep_cert_for_value(Item value) {
@@ -788,6 +907,7 @@ static bool array_representation_matches_cert(Item value,
         return lambda_array_num_matches_cert(value, cert);
     }
     if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
+    if (!array_value_meets_cert_counts(value, cert)) return false;
     if (cert->rank != 1) {
         // A nested T[][] outer carrier contains boxed child array Items.
         return !array_has_native_lane(value.array);
@@ -891,17 +1011,24 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
         char operand_name[128];
         lambda_type_format_name_inner(unary->operand, operand_name,
             sizeof(operand_name), depth + 1);
+        // S11.1.6v2 splits the spellings: brackets are the array family
+        // (`T[]`, `T[n]`), braces count a run (`T{n}`, `T{n,m}`, `T{n+}`)
         if (unary->op == OPERATOR_ARRAY) {
-            snprintf(buffer, capacity, "%s[]", operand_name);
+            int fixed_length = contract_array_fixed_length(type);
+            if (fixed_length >= 0) {
+                snprintf(buffer, capacity, "%s[%d]", operand_name, fixed_length);
+            } else {
+                snprintf(buffer, capacity, "%s[]", operand_name);
+            }
             return;
         }
         if (unary->op == OPERATOR_REPEAT) {
             if (unary->max_count < 0) {
-                snprintf(buffer, capacity, "%s[%d+]", operand_name, unary->min_count);
+                snprintf(buffer, capacity, "%s{%d+}", operand_name, unary->min_count);
             } else if (unary->min_count == unary->max_count) {
-                snprintf(buffer, capacity, "%s[%d]", operand_name, unary->min_count);
+                snprintf(buffer, capacity, "%s{%d}", operand_name, unary->min_count);
             } else {
-                snprintf(buffer, capacity, "%s[%d,%d]", operand_name,
+                snprintf(buffer, capacity, "%s{%d,%d}", operand_name,
                     unary->min_count, unary->max_count);
             }
             return;

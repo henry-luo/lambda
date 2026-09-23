@@ -1609,6 +1609,41 @@ TEST_F(NegativeScriptTest, FlatArrayContractRejectsNdArrayOnEveryTier) {
         false, "error[E201]: type check at declaration 'e' failed: expected int[]");
 }
 
+// S11.1.1v3 on the element-wise path: a contract with no exact packed lane now
+// admits a view or an N-D array by presenting its elements, and a matrix's
+// elements are its rows -- so `number[]` still rejects one, on every tier.
+TEST_F(NegativeScriptTest, NonLaneArrayContractRejectsNdArrayOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_rank_view_contract.ls",
+        false, "error[E201]: type check at declaration 'e' failed: expected number[]");
+}
+
+// S11.1.1v3: `T[n]` is `T[]` with a fixed length, per axis (`int[2][3]` is
+// three arrays of two). Once S11.1.6v2 made a counted bracket an array layer,
+// the admission fast paths proved it from lane and rank alone, so a wrong
+// length on any axis -- flat, a nested row, a packed shape -- was admitted.
+TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongLengthOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_flat_contract.ls",
+        false, "error[E201]: type check at declaration 'a' failed: expected int[3]");
+}
+
+TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongInnerAxisOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_nested_contract.ls",
+        false, "error[E201]: type check at declaration 'g' failed: expected int[2][3]");
+}
+
+TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongNdShapeOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_ndim_contract.ls",
+        false, "error[E201]: type check at declaration 'm' failed: expected int[2][3]");
+}
+
+// D3.3.3v3: a push changes a counted array's length without a boundary, so the
+// next `int[3]` boundary re-checks it. The JIT elided the check for a binding
+// declared with that contract, and the interned certificate stayed valid.
+TEST_F(NegativeScriptTest, CountedArrayContractRechecksResizedBindingOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_resized_binding.ls",
+        true, "failed: expected int[3], got array[num]; validator: Array has 4 elements");
+}
+
 TEST_F(NegativeScriptTest, InputSchemaUsesTheSharedTypedBoundary) {
     ScriptResult result = run_lambda_script(
         "test/lambda/negative/runtime/type_enforce_input_schema.ls", true);

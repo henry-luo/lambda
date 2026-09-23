@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'a' failed: expected int[3], got array[num]; validator: Array has 2 elements, but minimum required is 3

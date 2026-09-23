@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'g' failed: expected int[2][3], got array; validator at [1]: Array has 3 elements, but maximum allowed is 2

@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'e' failed: expected number[], got array[num]; validator at [0]: Expected type 'number', but got 'array'

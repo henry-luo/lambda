@@ -3444,6 +3444,17 @@ static Type* mir_var_array_contract(const MirVarEntry* var) {
     return lambda_array_contract_canonical(contract);
 }
 
+// The layout cache holds the header's `length`, which counts leaves. That is
+// the element count only under a rank-one contract: a `float[][]` binding may
+// hold an N-D ArrayNum, whose elements are its leading-axis rows
+// (S11.1.1v3, array_num_iter_count), so `len` read 4 for a 2x2 matrix.
+static bool mir_cached_length_counts_elements(const MirVarEntry* var) {
+    Type* contract = mir_var_array_contract(var);
+    LambdaArrayContractInfo info = {};
+    return !contract || !lambda_array_contract_info(contract, &info) ||
+        info.rank == 1;
+}
+
 static bool mir_local_array_contract_is_proven(MirTranspiler* mt,
         AstNode* source, Type* contract) {
     MirVarEntry* root = mir_direct_root_binding(mt, source);
@@ -5231,15 +5242,24 @@ static MIR_reg_t emit_box_uint64(MirTranspiler* mt, MIR_reg_t val_reg) {
 
 // Box a raw DateTime pointer by copying its value into a GC DateTime object.
 // Native literal storage belongs to the compiled module, never to an Item.
-static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg) {
+static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg,
+        int64_t null_word = (int64_t)ITEM_NULL) {
     MIR_reg_t result = new_reg(mt, "boxk", MIR_T_I64);
-    uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
     MIR_label_t l_nn = new_label(mt);
     MIR_label_t l_end = new_label(mt);
+    // A local datetime binding stores its boxed Item (the Item root lane)
+    // while its reads keep the pointer descriptor. That word is already an
+    // Item: dereferencing it read through the tag byte, which only a
+    // top-byte-ignore CPU tolerates.
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, val_reg)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UBGT, MIR_new_label_op(mt->ctx, l_end),
+        MIR_new_reg_op(mt->ctx, val_reg),
+        MIR_new_int_op(mt->ctx, (int64_t)0x00FFFFFFFFFFFFFFULL)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
         MIR_new_reg_op(mt->ctx, val_reg)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        MIR_new_int_op(mt->ctx, null_word)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     emit_label(mt, l_nn);
     MIR_reg_t raw = new_reg(mt, "dtime", MIR_T_I64);
@@ -5262,11 +5282,13 @@ static MIR_reg_t emit_box_dtime_value(MirTranspiler* mt, MIR_reg_t val_reg) {
 // Pointer-backed scalar Items carry their TypeId in the high byte. Keep this
 // conversion at Item boundaries only: native lanes retain the untagged pointer
 // (and use zero for null) so nullable fields, arrays, and calls share one ABI.
+// `null_word` is what the lane's null becomes: ItemNull at an Item boundary,
+// the lane's own zero for a pointer binding (emit_box_pointer_binding).
 static MIR_reg_t emit_box_tagged_pointer(MirTranspiler* mt, MIR_reg_t ptr_reg,
-        TypeId type_id, const char* reg_name) {
+        TypeId type_id, const char* reg_name,
+        int64_t null_word = (int64_t)ITEM_NULL) {
     MIR_reg_t result = new_reg(mt, reg_name, MIR_T_I64);
     uint64_t type_tag = (uint64_t)type_id << 56;
-    uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
 
     MIR_label_t l_notnull = new_label(mt);
     MIR_label_t l_end = new_label(mt);
@@ -5274,7 +5296,7 @@ static MIR_reg_t emit_box_tagged_pointer(MirTranspiler* mt, MIR_reg_t ptr_reg,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_notnull),
         MIR_new_reg_op(mt->ctx, ptr_reg)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        MIR_new_int_op(mt->ctx, null_word)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     emit_label(mt, l_notnull);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
@@ -5380,6 +5402,28 @@ static MIR_reg_t emit_box_impl(MirTranspiler* mt, MIR_reg_t val_reg,
     default:
         // Already boxed Item or NULL
         return val_reg;
+    }
+}
+
+// A local pointer binding stores its payload on the Item root lane (the string
+// append/freeze path reloads that root as an Item) but keeps the lane's null
+// as the raw zero, since its reads publish the pointer descriptor (D2.5.1).
+// Storing ItemNull let every later box of such a read tag it again as a typed
+// null pointer: "" for a string or symbol, an error for a decimal, a crash for
+// a binary or datetime.
+static MIR_reg_t emit_box_pointer_binding(MirTranspiler* mt, MIR_reg_t ptr_reg,
+        TypeId type_id) {
+    ptr_reg = mir_materialize_pending_reg(mt, ptr_reg,
+        MIR_PENDING_REASON_REP_CONVERSION);
+    switch (type_id) {
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_DECIMAL: case LMD_TYPE_BINARY:
+        return emit_box_tagged_pointer(mt, ptr_reg, type_id, "boxbind", 0);
+    case LMD_TYPE_DTIME:
+        return emit_box_dtime(mt, ptr_reg, 0);
+    default:
+        // containers and types box to themselves; their null is already zero
+        return emit_box(mt, ptr_reg, type_id);
     }
 }
 
@@ -6873,7 +6917,10 @@ static bool mir_member_read_carries_contract(MirTranspiler* mt, AstNode* primary
     if (!record) return false;
     String* name = ((AstIdentNode*)key)->name;
     ShapeEntry* field = find_shape_field_by_name(record, name->chars, name->len);
-    return field && field->type && mir_contract_structurally_equal(field->type, target);
+    // A store into `f` is checked, but a push through it is not a store: a
+    // counted field's length is re-checked at runtime (S11.1.1v3).
+    return field && field->type && mir_contract_structurally_equal(field->type, target) &&
+        !lambda_type_counts_array_length(target);
 }
 
 static bool mir_member_read_proves_contract(MirTranspiler* mt, AstNode* primary,
@@ -6909,8 +6956,10 @@ static bool mir_definition_proves_contract(MirTranspiler* mt, AstNode* primary,
     if (mir_member_read_proves_contract(mt, primary, target)) return true;
     if (!primary || primary->node_type != AST_NODE_IDENT) return false;
     NameEntry* entry = ((AstIdentNode*)primary)->entry;
+    // a declared binding keeps its element contract but not a counted length
     return entry && !entry->type_widened && entry->declared_type &&
-        mir_contract_structurally_equal(entry->declared_type, target);
+        mir_contract_structurally_equal(entry->declared_type, target) &&
+        !lambda_type_counts_array_length(target);
 }
 
 struct MirDefinitionProofScan {
@@ -7138,7 +7187,11 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
                 ((AstIdentNode*)primary)->entry, target)) {
         return true;
     }
-    if (primary && primary->node_type == AST_NODE_IDENT) {
+    // Every binding proof below rests on checked writes keeping the declared
+    // contract. A push or splice is no such write: it changes a counted
+    // array's length (S11.1.1v3), which only a runtime check can see.
+    bool counted_target = lambda_type_counts_array_length(target);
+    if (primary && primary->node_type == AST_NODE_IDENT && !counted_target) {
         NameEntry* entry = ((AstIdentNode*)primary)->entry;
         // An admitted union keeps its selected member representation. Reusing
         // that exact enforced contract requires no new graph validation
@@ -7154,7 +7207,7 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
             return true;
         }
     }
-    if (primary && primary->node_type == AST_NODE_IDENT) {
+    if (primary && primary->node_type == AST_NODE_IDENT && !counted_target) {
         // A declared binding is admitted at its declaration, at every
         // assignment and, for a `var` parameter, at its entry; a callee's
         // published rebind was checked against the same invariant contract
@@ -9724,7 +9777,8 @@ static MirValue mir_string_binding_value(MirTranspiler* mt, AstNode* node,
     MIR_reg_t ptr = emit_text_pointer_lane(mt, value, LMD_TYPE_STRING);
     MIR_reg_t frozen = emit_call_1(mt, "fn_string_freeze", MIR_T_P,
         MIR_T_P, MIR_new_reg_op(mt->ctx, ptr));
-    MIR_reg_t stored = var->mir_type == MIR_T_P ? frozen : emit_box_string(mt, frozen);
+    MIR_reg_t stored = var->mir_type == MIR_T_P ? frozen
+        : emit_box_pointer_binding(mt, frozen, LMD_TYPE_STRING);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, stored)));
     // Runtime publication freezes this value; a different path may still own one.
@@ -20599,10 +20653,18 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         // Local bindings publish through the Item root lane.
                         // The string append/freeze path reloads that root after
                         // allocation; retaining a raw String* here makes it
-                        // decode pointer bits as an Item (D2.2.2).
+                        // decode pointer bits as an Item (D2.2.2). A null stays
+                        // the lane's zero (emit_box_pointer_binding), so an
+                        // admitted Item initializer drops to its payload first:
+                        // tagging it again forged a string out of ItemNull.
                         TypeId pointer_tid = expr_tid != LMD_TYPE_ANY &&
                                 expr_tid != LMD_TYPE_NULL ? expr_tid : var_tid;
-                        src = emit_box(mt, val, pointer_tid);
+                        if (value_rep == VALUE_REP_ITEM) {
+                            val = emit_unbox_container(mt,
+                                mir_materialize_pending_reg(mt, val,
+                                    MIR_PENDING_REASON_REP_CONVERSION));
+                        }
+                        src = emit_box_pointer_binding(mt, val, pointer_tid);
                     }
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, copy), MIR_new_reg_op(mt->ctx, src)));
@@ -26464,8 +26526,16 @@ static MirValue mir_call_value_from_result(MirTranspiler* mt,
     ValueRep rep = returned_boxed_item ? VALUE_REP_ITEM
         : carrier_type == LMD_TYPE_ANY ? VALUE_REP_ITEM
         : lambda_canonical_rep_for_type_id(carrier_type);
-    return mir_value_from_reg(mt, node, result, rep, node->type,
-        mir_expr_semantic_type(node));
+    // A nullable return contract (`bool?`, `string?`) compacts to the TypeId
+    // `any`, but the call site unboxed its result into the payload lane. Name
+    // that lane, as every other nullable-lane producer does: `any` beside a
+    // lane rep made a binding store the raw 0/1/2 bool or String* as an Item
+    // (D2.4.1, D2.5.1).
+    TypeId semantic_type = mir_expr_semantic_type(node);
+    if (rep != VALUE_REP_ITEM && semantic_type == LMD_TYPE_ANY) {
+        semantic_type = carrier_type;
+    }
+    return mir_value_from_reg(mt, node, result, rep, node->type, semantic_type);
 }
 
 // Transport a boxed var binding through its precise root (D5.1.1v2).
@@ -27663,7 +27733,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             arg = call_node->argument;
             MirVarEntry* cached_array = mir_typed_array_cache_for_object(mt, arg);
             if (cached_array && !cached_array->is_var_param &&
-                    !cached_array->elem_type_guarded) {
+                    !cached_array->elem_type_guarded &&
+                    mir_cached_length_counts_elements(cached_array)) {
                 // T22-2b: immutable admitted ArrayNum params cache this header
                 // at entry. Reusing its length makes len(x) loop-invariant
                 // without moving a fallible/effectful expression across a loop.
