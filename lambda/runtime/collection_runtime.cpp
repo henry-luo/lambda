@@ -113,7 +113,14 @@ bool array_reserve_append_slots(Array* array, int64_t append_count) {
     // array_push reserves one handoff slot beyond visible and scalar-tail
     // storage. Matching that invariant avoids a final unnecessary growth.
     int64_t required_capacity = array->length + array->extra + append_count + 1;
-    return list_reserve_capacity((List*)array, required_capacity, nullptr);
+    if (required_capacity <= array->capacity) return true;
+    // Appends must amortize like expand_list: an exact reserve made every
+    // checked push onto a typed array (`push(nodes, n)` under `Node[]`)
+    // reallocate and copy the whole buffer, O(n^2) to build n elements. A
+    // one-shot reserve on a fresh array still gets exactly what it asked for.
+    int64_t doubled = array->capacity > INT64_MAX / 2 ? INT64_MAX : array->capacity * 2;
+    return list_reserve_capacity((List*)array,
+        doubled > required_capacity ? doubled : required_capacity, nullptr);
 }
 
 // D2.6.6v2: a JS array's companion property map now lives in the array's OWN
@@ -257,6 +264,18 @@ void array_push(Array* arr, Item item) {
 
 Item pn_push(Item arr_item, Item value) {
     TypeId tid = get_type_id(arr_item);
+    if (tid == LMD_TYPE_ELEMENT) {
+        // S2.6.5: pushing onto an element appends content -- the content
+        // append drops null and "", splices a list, and merges adjacent text
+        Element* element = (Element*)arr_item.container;
+        if (!element || element->is_static) {
+            log_error("push: cannot mutate a static element");
+            return ItemError;
+        }
+        cow_capture_value(value);  // S9.3.1: an inserted child is captured
+        list_push((List*)element, value);
+        return arr_item;
+    }
     if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_ARRAY_NUM) {
         log_error("push: expected a growable array, got %s", get_type_name(tid));
         // Invalid mutation is an error, never a successful unchanged owner
@@ -437,17 +456,22 @@ void list_push(List* list, Item item) {
     }
 
     if (type_id == LMD_TYPE_STRING) {
+        // S2.2.3/S2.6.2: an empty string contributes nothing to content
+        String* text = item.get_safe_string();
+        if (text && text->len == 0) return;
+
         Arena* ui_arena = ui_collection_arena();
         bool is_ui = ui_arena != nullptr;
         if (is_ui && list->is_spreadable) {
             item = ui_copy_string_to_arena(ui_arena, item);
         }
 
-        // Merging is a content-construction rule, so it applies only while an
-        // input parse owns the allocation (D2.6.5).
-        bool should_merge = (input_context || input_allocation_context) &&
-            list->length > 0 && list->items;
-        if (should_merge) {
+        // S2.6.4: adjacent strings merge wherever content is built; the
+        // allocation follows the owner (UI arena, input pool, or runtime heap).
+        bool runtime_owned = input_context ? input_context->consts != NULL
+            : (!input_allocation_context && context != NULL);
+        bool can_allocate = runtime_owned || input_allocation_context || input_context;
+        if (can_allocate && list->length > 0 && list->items) {
             Item previous_item = list->items[list->length - 1];
             if (get_type_id(previous_item) == LMD_TYPE_STRING) {
                 String* previous = previous_item.get_safe_string();
@@ -459,15 +483,19 @@ void list_push(List* list, Item item) {
                         return;
                     }
                     size_t new_length = previous->len + next->len;
-                    String* merged;
-                    if (input_context && input_context->consts) {
+                    String* merged = NULL;
+                    if (runtime_owned) {
+                        // Runtime content (a script run, or a runtime caller
+                        // with no input owner): the string lives on the heap.
                         // This allocation may compact the list and the incoming
                         // string. Root both owners before reading either again.
                         RootFrame roots(2);
                         Rooted<List*> rooted_list(roots, list);
                         Rooted<Item> rooted_item(roots, item);
-                        merged = (String*)context->context_alloc(
-                            sizeof(String) + new_length + 1, LMD_TYPE_STRING);
+                        int bytes = (int)(sizeof(String) + new_length + 1);
+                        merged = (String*)(context->context_alloc
+                            ? context->context_alloc(bytes, LMD_TYPE_STRING)
+                            : heap_alloc(bytes, LMD_TYPE_STRING));
                         list = rooted_list.get();
                         item = rooted_item.get();
                         previous = list->items[list->length - 1].get_safe_string();
@@ -475,7 +503,7 @@ void list_push(List* list, Item item) {
                     } else if (input_allocation_context) {
                         merged = (String*)pool_calloc(input_allocation_context->pool,
                             sizeof(String) + new_length + 1);
-                    } else {
+                    } else if (input_context) {
                         merged = (String*)pool_calloc(input_context->pool,
                             sizeof(String) + new_length + 1);
                     }
@@ -490,6 +518,22 @@ void list_push(List* list, Item item) {
                 }
             }
         }
+    }
+
+    if (type_id == LMD_TYPE_BINARY && list->length > 0 && list->items &&
+            get_type_id(list->items[list->length - 1]) == LMD_TYPE_BINARY) {
+        // S2.6.4: adjacent binaries merge; the concatenation is a safepoint
+        RootFrame roots(2);
+        Rooted<List*> rooted_list(roots, list);
+        Rooted<Item> rooted_item(roots, item);
+        Binary* merged = heap_binary_concat(
+            list->items[list->length - 1].get_safe_binary(), item.get_safe_binary());
+        list = rooted_list.get();
+        if (merged) {
+            list->items[list->length - 1] = {.item = x2it(merged)};
+            return;
+        }
+        item = rooted_item.get();
     }
 
     if (list->length + list->extra + 2 > list->capacity) {

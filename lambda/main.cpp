@@ -272,6 +272,13 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
         log_error("[JS-DOM-LAYOUT] failed to initialize headless UI context");
         return false;
     }
+    // A headless document still owns session-scoped cookies (S1.6).
+    session->uicon.browsing_session = session_create(nullptr, nullptr);
+    if (!session->uicon.browsing_session) {
+        log_error("[JS-DOM-LAYOUT] failed to create headless browsing session");
+        ui_context_cleanup(&session->uicon);
+        return false;
+    }
     session->initialized = true;
     session->uicon.document = dom_doc;
     dom_set_ui_context(&session->uicon);
@@ -279,6 +286,8 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
     session->uicon.window_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
     session->uicon.viewport_width = JS_DOCUMENT_VIEWPORT_WIDTH;
     session->uicon.viewport_height = JS_DOCUMENT_VIEWPORT_HEIGHT;
+    session_attach_document(session->uicon.browsing_session, dom_doc);
+    session_seed_document(session->uicon.browsing_session, dom_doc);
 
     if (!radiant_document_ensure_state(dom_doc, "js_document_initial_layout")) {
         log_error("[JS-DOM-LAYOUT] failed to ensure DocState");
@@ -298,6 +307,8 @@ static void js_document_session_finish(JsDocumentSession* session) {
 
     dom_set_ui_context(nullptr);
     session->uicon.document = nullptr;
+    session_destroy(session->uicon.browsing_session);
+    session->uicon.browsing_session = nullptr;
     ui_context_cleanup(&session->uicon);
     js_document_session_init(session);
 }

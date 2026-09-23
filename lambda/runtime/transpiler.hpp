@@ -294,6 +294,7 @@ enum { INTERP_SATELLITE_CLUSTER_CAP = 64 };
 typedef struct InterpSatelliteImage {
     MIR_context_t context;
     bool mir_gen_initialized;
+    bool module_state_prepared;
     // Snapshot-only compiler allocations outlive MIR's copied symbol table
     // until the image is retired. Ordinary synchronous satellites leave these
     // null because their Script owns the compiler storage.
@@ -310,6 +311,11 @@ typedef struct InterpSatelliteImage {
     const AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP];
     void* member_entries[INTERP_SATELLITE_CLUSTER_CAP];
 } InterpSatelliteImage;
+
+// seals execution-local key relocation before any entry becomes callable.
+bool interp_satellite_image_prepare(Script* script, InterpSatelliteImage* image);
+// Transfers a prepared private image to its Script owner for entry lifetime.
+bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image);
 
 // A worker owns the cancellation context until its private image is either
 // published or destroyed. The probe is only sampled at Lambda-owned compiler
@@ -415,6 +421,11 @@ void runtime_release_script_generation(Runtime* runtime, int first_script_index,
                                        uint32_t first_module_state_id);
 void runtime_log_script_load_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
+
+// True when a text value's characters are one byte each, so byte offsets are
+// character offsets. Text-rebuilding paths in the vector module carry the same
+// conservative proof the string builders in lambda-eval.cpp do.
+bool text_item_is_ascii(Item item);
 
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,

@@ -27,23 +27,23 @@ pn main() {
     var x: int[] = [0, 0, 0, 0]
     var y: int[] = [9, 9, 9, 9]
     set_pair(x, y, 1, 5)
-    print("pair=" ++ x ++ " " ++ y ++ "\n")
+    print("pair=" ++ string(x) ++ " " ++ string(y) ++ "\n")
     bump(x, 1)
-    print("bump=" ++ x ++ "\n")
+    print("bump=" ++ string(x) ++ "\n")
     var flags: bool[] = fill(4, false)
     fill_row(flags, 1, true)
-    print("flags=" ++ flags ++ "\n")
+    print("flags=" ++ string(flags) ++ "\n")
     // a shared array must be detached before the write reaches it
     var shared: int[] = [1, 2, 3]
     let alias = shared
     set_pair(shared, y, 0, 77)
-    print("cow=" ++ shared ++ " " ++ alias ++ "\n")
+    print("cow=" ++ string(shared) ++ " " ++ string(alias) ++ "\n")
     // a caller whose arrays are themselves `var` parameters writes through
     shift_all(y, x, 3)
-    print("nested=" ++ y ++ " " ++ x ++ "\n")
+    print("nested=" ++ string(y) ++ " " ++ string(x) ++ "\n")
     // an out-of-range store
     var small: int[] = [1, 2]
     set_pair(small, y, 5, 3)
-    print("oob=" ++ small ++ "\n")
+    print("oob=" ++ string(small) ++ "\n")
     print("done\n")
 }

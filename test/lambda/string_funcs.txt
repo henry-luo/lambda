@@ -18,7 +18,13 @@ true
 7
 "11. expect 9 (last l):"
 9
-"12. expect null:Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:abc18. expect ['hello']:hello19. expect ['a', 'b', 'c']:abcTest join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
+"12. expect null:Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:"
+["a", "b", "c"]
+"18. expect ['hello']:"
+["hello"]
+"19. expect ['a', 'b', 'c']:"
+["a", "b", "c"]
+"Test join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
 true
 "26. expect false:"
 false

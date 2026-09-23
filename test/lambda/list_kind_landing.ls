@@ -5,6 +5,7 @@
 // of a persistent container stores the array image; bindings, arguments and
 // returns pass the list through; it prints and formats as its array; a
 // top-level list is content (S2.6.1). (phase P3; print/format half P1)
+// Green on both tiers after P3 (2026-09-23); moved from test/lambda/ext.
 
 let l = (1, 2)
 "-- single-value slots store the array image; the source stays a list --"

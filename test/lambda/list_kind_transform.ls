@@ -4,6 +4,7 @@
 // S2.5.7: sequence operations preserve the input kind; mixing gives an array;
 // constructors fix their own kind; fill follows its item; zip pairs are arrays.
 // (phase P2)
+// Green on both tiers after P2 (2026-09-22); moved from test/lambda/ext.
 
 let L = (3, 1, 2)
 let A = [3, 1, 2]

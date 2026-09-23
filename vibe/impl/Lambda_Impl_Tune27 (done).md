@@ -1156,6 +1156,135 @@ depends on the runtime key values except index exactness. Now:
   had been calling `lambda_lane_storage_desc_for` and `lambda_type_matches`
   to prove `true` is a `bool`.
 
+*Follow-up (2026-09-22): the three-key cap removed.* A store with four or more
+keys still took the old route, building a heap path array (`array_plain` plus
+one `array_push_verbatim` per key) and running the generic checked setter on
+every write. A path-write port of awfy/havlak2 (`a.l0[i0][i1][i2].f = v`, five
+keys) measured 246 ns per write and 20 GC collections per million writes. The
+same store through an untyped root cost 85 ns with no collections. The setter
+is now `lambda_map_path_set_checked_keys(owner, value, keys, shape, expected,
+leaf)`, which takes a span of up to `LAMBDA_PATH_KEYS_MAX` (33) keys. The JIT
+writes the keys into one `ALLOCA` span per function. The span is inserted
+before the root-frame anchor, so a store inside a loop reuses it, and it is
+kept out of async spill tracking because every re-entry reruns the prologue.
+The keys stay rooted in their own slots across the call.
+`cow_path_set_impl` and `runtime_map_path_write_proven` root a fixed key span
+of any length with `RootSpan`. Semantics are unchanged (D3.2.4v3): a proven
+root writes in place, and anything else materializes the descriptor for the
+transactional setter. Fixture: `test/lambda/proc/typed_deep_path_store.ls`.
+
+Porting awfy/havlak2 from its untyped 16×16×32 `array` trie to flat typed
+vectors (`BasicBlock[]`, `UnionFindNode[]`, `SimpleLoop[]`, `int[]`,
+`int[][]`), as in the JS original, exposed four more defects on the same
+seam. Each made a typed write or append cost O(n), or allocate, where the
+untyped equivalent did not:
+
+- **Array-rooted field stores never took the inline arm.** `nodes[i].f = v`
+  under `var nodes: Node[]` went straight to `lambda_array_path_set_checked`
+  with a heap path array, about 350 ns per store. `mir_emit_typed_path_store`
+  already walked rank-one record-array links under a certificate guard, but
+  the member-assign dispatcher offered it map roots only. It now offers it
+  array roots too. The cold arm takes the array setter (LR12-13), fed from the
+  already-evaluated keys, so no index expression is evaluated twice. The
+  inline store takes about 5 ns.
+- **Path borrows built a heap descriptor per call.** `push(a[i].xs, v)`
+  reached the fixed-key borrow only for literal indices and at most 3 keys.
+  `cow_path_borrow_impl` now takes a key span of any length
+  (`cow_path_borrow_keys` / `cow_place_leaf_keys`), and the JIT passes every
+  borrow through the function's span.
+- **A checked append reallocated on every push.** `array_reserve_append_slots`
+  reserved exactly `length + 2`, so `push(xs, v)` on a typed boxed array
+  (`Node[]`, `int[][]`) copied the whole buffer on every append: O(n²) to build
+  n elements, plus one dead buffer per push. It now grows to at least double
+  the capacity, like `expand_list`. `ArrayNum` already did.
+- **Empty literals paid a full validator walk.** `runtime_type_admit_array_env`
+  skipped the whole-array validator for a plain `T[]` only when the contract
+  was spelled as the array operator. The homogeneous `TypeArray` carrier is the
+  same plain `T[]`, since the validator checks its length only for tuple
+  patterns. So every `inEdges: []` bound to a declared field set up a
+  `SchemaValidator`. `runtime_array_contract_is_plain` now names both
+  spellings for both admission arms. Found in passing: refined array contracts
+  (`int[] that (len(~) > 0)`) are not enforced at any boundary on HEAD;
+  `runtime_boundary_unwrap_type` drops the refinement. That is a separate,
+  pre-existing issue.
+
+The flat havlak2 port is correct on both tiers (about 28 COW copies per run)
+and, measured under load, runs about 0.55–0.6× the original trie version's time.
+
+awfy/deltablue2 on the same branch, with attribution by
+`LAMBDA_MIR_LOG_CODE_ADDR=1` plus `sample`:
+
+- **The Tune29 §17 inline tag test skipped native lanes.** It engaged only
+  for an `any` source. So `return v[i]` from an `int[]` into an `int` return,
+  a native int lane that is null when out of range, boxed the value and
+  called `lambda_type_check` every time: 398k of 466k runtime checks per run.
+  A source whose TypeId equals the target's now takes the same tag test, and
+  null or a widened int64 still misses into the call.
+- **Call-derived store indices missed the inline arm.** A callee whose `int`
+  return may defect (`len()` narrowing, a field of a `Constraint?[]` element)
+  gives its call result a wrapper carrier (`LMD_TYPE_TYPE`), and
+  `mir_emit_typed_path_store` required an `int` index carrier. That left
+  `w.vars[out].mark = m` on the checked setter, 34.6k calls per run. An `any`
+  or wrapper index is now evaluated once, rooted as the cold arm's key, and
+  tag-tested on the hot arm.
+- Port fix: `vec_at(var v: Vec, ...)` never writes `v`, but the `var` pass
+  made every `cs = w.vars[i].constraints` place copy count as mutated (D4.4.6),
+  so each call copied the list: 38,980 → 4,340 `int[]` copies per run.
+
+deltablue2 went from 27.9 ms on HEAD to 15.2 ms (release, median of 7): about
+22.5 ms with the tag test alone, 17.9 ms adding the index fix, and 15.2 ms
+with the port fix.
+
+text/prettier_ast2 was ported from a six-arm union `Doc` with a string kind to
+the C port's single record (`{kind: int, text, parts: Doc[], first: Doc?,
+second: Doc?, threshold}`), with its early exit from `flat_length`. The early
+exit is decision-preserving: every consumer compares the capped total against
+a width below `large_length`. Written the obvious way, the new port first ran
+12x slower. The port exposed three engine defects, all fixed:
+
+- **Tail map literals under a record contract were validated after the
+  fact.** A function body scope demanded that every field be *proven*, unlike
+  `return {...}`, so a literal carrying a module-level `D[]` or a `D?` field
+  was built in its own shape and fully validated, subtree included: about
+  1.5 µs per constructor. It now constructs in the contract's layout with
+  per-field admission, like `return`. Union returns keep the strict rule,
+  because their O(1) cached shape proof beats arm construction (relaxing it
+  cost the union port 10%).
+- **Checked boundaries against a record contract always called the
+  runtime.** `emit_checked_boundary` now tests null (for an optional
+  contract) and the exact shape word inline, the same
+  MAP_CONTRACT_EXACT_TRUSTED admission the runtime makes, and calls out only
+  on a miss. That removed ~19k of ~28k runtime checks per formatting pass,
+  and cut jetstream deltablue2 from 23.4 to 20.8 ms.
+- **Admission deep-cloned uncertified arrays.** The copy arm of
+  `runtime_type_admit_array_env` used `fn_mutable_value`, a deep clone with a
+  cycle table. Every `acc ++ [...]` handed to a `Doc[]` parameter copied the
+  whole document subtree. It now copies one level (D4.4.2). The only visible
+  cost is one lazy child detach, pinned in
+  `LambdaOptAdmission.TypedArrayPathPreservesGraphProof`.
+
+Result (release, median of 5): the union port runs 621 ms on HEAD and the
+single-record port 564 ms. The remainder is re-admission of the uncertified
+`acc ++ [...]` accumulators in `join_docs_at` / `print_nodes_at`, which is
+quadratic per list; generic `node.type` reads on the untyped JSON AST; and a
+generic `>=` on a call-derived int. Fixture:
+`test/lambda/proc/record_boundary_admission.ls`.
+
+**Accumulator re-admission (fixed after the first rewrite).** `acc ++ [x]`
+built a plain array with no certificate, so every `acc: T[]` crossing
+re-admitted it: walking every element and, for a record element type,
+rebuilding its native lane. That is quadratic per list. `fn_join` now calls
+`array_concat_inherit_cert`: when one operand carries an exact rank-one
+certificate and every element of the other proves its element contract (or
+carries the same certificate), the result is laid out in the certificate's
+lane and certified, and `lambda_array_rep_proves_cert` re-checks it. A
+mismatched element leaves the result uncertified, so the boundary still
+rejects it. On prettier_ast2 this took map admissions per pass from 5,176 to
+2,872 and the runtime-check profile share from 39% to 28%. What remains in
+the accumulators is the O(n) copy that immutable `++` makes on each step,
+which the union port pays too. Fixture:
+`test/lambda/proc/typed_array_concat_cert.ls`.
+
 | richards (JIT exec) | ms |
 |---|---:|
 | r27 typed | 681–720 |

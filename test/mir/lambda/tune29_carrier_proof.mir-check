@@ -5,7 +5,7 @@
     {
       "in_func": "_set_cell_#",
       "expect": [
-        "call\tlambda_map_path_set_checked_fixed"
+        "call\tlambda_map_path_set_checked_keys"
       ],
       "count": {
         "beq\t": 2,
@@ -22,7 +22,7 @@
           "pattern": "mov\ti64:({{r}}), "
         },
         {
-          "pattern": "call\tlambda_map_path_set_checked_fixed"
+          "pattern": "call\tlambda_map_path_set_checked_keys"
         }
       ]
     },

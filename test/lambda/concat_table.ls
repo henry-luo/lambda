@@ -1,10 +1,9 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/ext until its
-// phase turns it green, then moves to test/lambda (baseline). Golden written from the
-// rulings, not from the runtime.
+// Fixture of vibe/impl/Lambda_List_Fixes.md, green since P4 (2026-09-23) on
+// both tiers. Golden written from the rulings, not from the runtime.
 // S10.6.1: `++` concatenates sequences (kind by S2.5.7), appends or prepends a
 // scalar as one item, concatenates text for two scalars, treats null as the
 // identity, and rejects maps. LR05-9: numeric arrays of different element
-// types concatenate by value. (phase P4)
+// types concatenate by value.
 
 let L = (1, 2)
 let A = [1, 2]

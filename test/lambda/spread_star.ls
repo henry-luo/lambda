@@ -1,9 +1,8 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/ext until its
-// phase turns it green, then moves to test/lambda (baseline). Golden written from the
-// rulings, not from the runtime.
+// Fixture of vibe/impl/Lambda_List_Fixes.md, green since P4 (2026-09-23) on
+// both tiers. Golden written from the rulings, not from the runtime.
 // S12.3.5v2: `*x` splices a sequence's items (list, array, range), nothing
 // for null, a non-sequence as one item, and never modifies its operand —
-// so [*xs] packages any value as an array. (phase P4)
+// so [*xs] packages any value as an array.
 
 let a = [1, 2]
 fn lit() => [1, "y"]

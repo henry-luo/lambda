@@ -1249,12 +1249,15 @@ struct ScriptResult {
     std::string error_output;
 };
 
-ScriptResult run_lambda_script(const char* script_path, bool procedural = false) {
+ScriptResult run_lambda_script(const char* script_path, bool procedural = false,
+                               const char* tier = NULL) {
     ScriptResult result;
     const char* direct_args[] = {LAMBDA_EXE, "--no-log", script_path, NULL};
     const char* procedural_args[] = {LAMBDA_EXE, "run", "--no-log", script_path, NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
+    const ShellEnvEntry env[] = {{"LAMBDA_TIER", tier}, {NULL, NULL}};
+    if (tier) options.env = env;
     // Negative paths are untrusted test data and must not be interpolated into a shell command.
     ShellResult shell_result = shell_exec(LAMBDA_EXE,
         procedural ? procedural_args : direct_args, &options);
@@ -1849,6 +1852,18 @@ TEST_F(NegativeScriptTest, RuntimeError_OperatorComparabilityDynamic) {
 // for graceful recovery instead of crashing with SIGSEGV
 TEST_F(NegativeScriptTest, RuntimeError_StackOverflow) {
     ExpectErrorWithoutCrash("test/lambda/negative/runtime/stack_overflow.ls");
+}
+
+// S7.11.1v2: JIT calls bypass T0's depth counter, so this must exercise the
+// native entry guard rather than relying on AUTO's interpreter fallback.
+TEST_F(NegativeScriptTest, RuntimeError_StackOverflowJit) {
+    const char* script = "test/lambda/negative/runtime/stack_overflow.ls";
+    ScriptResult result = run_lambda_script(script, false, "jit");
+    EXPECT_NE(result.exit_code, 0) << "Expected JIT script to fail: " << script;
+    EXPECT_NE(strstr(result.output.c_str(), "error[E308]: Stack overflow"), nullptr)
+        << "Expected recoverable JIT stack overflow:\n" << result.output;
+    EXPECT_EQ(result.output.find("Segmentation fault"), std::string::npos)
+        << "JIT script crashed:\n" << result.output;
 }
 
 TEST_F(NegativeScriptTest, RuntimeError_CallNonFunction) {

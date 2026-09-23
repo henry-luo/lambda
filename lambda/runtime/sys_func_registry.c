@@ -915,17 +915,17 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
+     /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
 
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
+     /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
 
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
+     /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
 
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_zip", FPTR(fn_zip), NULL, NULL, false, 0},
@@ -1308,6 +1308,14 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
+    // This leaf samples only the native frame address against a context-bound
+    // scalar limit; it cannot allocate, retain a value, or re-enter Lambda.
+    {"lambda_stack_is_exhausted", FPTR(lambda_stack_is_exhausted),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED | JIT_IMPORT_PURE_SCALAR_CALL,
+      JIT_EXCEPTION_PRESERVES, 0}},
     // LR07-7/LR08-3 root-honesty witness (emitted only under LAMBDA_ROOT_WITNESS).
     // The metadata is load-bearing, not decoration: an unannotated row defaults
     // to JIT_EFFECT_MAY_GC with JIT_VALUE_UNKNOWN arguments, which would make
@@ -1373,17 +1381,14 @@ JitImport jit_runtime_imports[] = {
     {"array_float_get_value", FPTR(array_float_get_value)},
     {"array_spreadable", FPTR(array_spreadable)},
     {"array_plain", FPTR(array_plain)},
-    {"array_drop_inplace", FPTR(array_drop_inplace)},
-    {"array_limit_inplace", FPTR(array_limit_inplace)},
-    {"array_limit_last_inplace", FPTR(array_limit_last_inplace)},
-    {"fn_take_last", FPTR(fn_take_last)},
+    {"for_window", FPTR(for_window)},
     {"array_push", FPTR(array_push)},
     {"array_push_verbatim", FPTR(array_push_verbatim)},
     {"array_push_capture", FPTR(array_push_capture)},
     {"array_push_spread", FPTR(array_push_spread)},
-    {"array_push_spread_all", FPTR(array_push_spread_all)},
+    {"seq_spread_value", FPTR(seq_spread_value)},
+    {"seq_spread_item", FPTR(seq_spread_item)},
     {"array_end", FPTR(array_end)},
-    {"item_spread", FPTR(item_spread)},
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
     {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
     {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
@@ -1412,6 +1417,8 @@ JitImport jit_runtime_imports[] = {
     {"list_end_item", FPTR(list_end_item)},
     {"list_collapse_value", FPTR(list_collapse_value)},
     {"list_collapse_item", FPTR(list_collapse_item)},
+    {"slot_image", FPTR(slot_image)},
+    {"lambda_direct_field_store_image", FPTR(lambda_direct_field_store_image)},
 
     // ========================================================================
     // Map, Element, Object operations
@@ -1871,6 +1878,7 @@ JitImport jit_runtime_imports[] = {
     // Pipe operations
     // ========================================================================
     {"fn_pipe_map", FPTR(fn_pipe_map)},
+    {"pipe_end", FPTR(pipe_end)},
     {"fn_pipe_where", FPTR(fn_pipe_where)},
     {"fn_pipe_call", FPTR(fn_pipe_call)},
     {"pipe_map_len", FPTR(pipe_map_len)},
@@ -2065,6 +2073,8 @@ JitImport jit_runtime_imports[] = {
     {"cow_path_borrow_typed_map_field", FPTR(cow_path_borrow_typed_map_field)},
     {"cow_place_leaf", FPTR(cow_place_leaf)},
     {"cow_place_leaf_fixed", FPTR(cow_place_leaf_fixed)},
+    {"cow_path_borrow_keys", FPTR(cow_path_borrow_keys)},
+    {"cow_place_leaf_keys", FPTR(cow_place_leaf_keys)},
     {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"lambda_array_int_push_inferred_cow", FPTR(lambda_array_int_push_inferred_cow)},
     {"pn_push_cow", FPTR(pn_push_cow)},
@@ -2102,7 +2112,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
     {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
-    {"lambda_map_path_set_checked_fixed", FPTR(lambda_map_path_set_checked_fixed)},
+    {"lambda_map_path_set_checked_keys", FPTR(lambda_map_path_set_checked_keys)},
     {"lambda_array_push_checked", FPTR(lambda_array_push_checked)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
@@ -3693,6 +3703,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #else
     static const char* audited[] = {
         "memset", "memcpy", "fmod",
+        "lambda_stack_is_exhausted",
 #if defined(__APPLE__) || defined(__linux__)
         "sigsetjmp",
 #else

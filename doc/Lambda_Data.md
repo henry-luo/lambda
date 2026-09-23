@@ -177,7 +177,8 @@ Strings are indexable by character position (0-based). Both single-character acc
 let s = "hello";
 s[0]              // "h"  — first character
 s[4]              // "o"  — last character
-s[-1]             // "o"  — negative index counts from end
+s[last]           // "o"  — `last` is len - 1 (S7.2.2)
+s[-1]             // null — out of range, like s[5] (S7.2.1)
 
 // Range subscript: str[a to b] (inclusive both ends)
 s[0 to 4]         // "hello"  — full string

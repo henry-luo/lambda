@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "layout.hpp"
 #include "view.hpp"
 #include "render.hpp"
 
@@ -13,6 +14,8 @@ typedef struct SelectionPaintCtx {
     float          scale;
     float          iframe_offset_x;
     float          iframe_offset_y;
+    float          root_scroll_x;
+    float          root_scroll_y;
 } SelectionPaintCtx;
 
 static void render_focus_outline(RenderContext* rdcon, DocState* state) {
@@ -95,28 +98,64 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
     rc_fill_rect(rdcon, x, y, caret_width, height, caret_color);
 }
 
+static RdtLogicalPoint selection_paint_to_canvas(const SelectionPaintCtx* ctx,
+                                                 RdtLogicalPoint point) {
+    if (!ctx) return point;
+    // Range rects are viewport-relative, while the stored iframe offset was
+    // captured from document coordinates. Restore this root scroll once when
+    // joining those coordinate spaces.
+    point.x += ctx->iframe_offset_x + ctx->root_scroll_x;
+    point.y += ctx->iframe_offset_y + ctx->root_scroll_y;
+    return point;
+}
+
 static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud) {
     SelectionPaintCtx* ctx = (SelectionPaintCtx*)ud;
     if (w <= 0 || h <= 0) return;
     float s = ctx->scale;
-    DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context
-        ? ctx->rdcon->ui_context->document : nullptr;
-    ViewBlock* root = doc && doc->view_tree && doc->view_tree->root &&
-        doc->view_tree->root->view_type == RDT_VIEW_BLOCK
-        ? lam::view_require_block(doc->view_tree->root) : nullptr;
-    float root_scroll_x = 0.0f;
-    float root_scroll_y = 0.0f;
-    scroll_state_resolve_view_geometry(root, &root_scroll_x, &root_scroll_y, nullptr);
-    // Range rects are viewport-relative, while the stored iframe offset was
-    // captured from document coordinates. Restore this root scroll once when
-    // joining those coordinate spaces.
-    RdtLogicalPoint point = {x + ctx->iframe_offset_x + root_scroll_x,
-                             y + ctx->iframe_offset_y + root_scroll_y};
+    RdtLogicalPoint point = selection_paint_to_canvas(ctx, {x, y});
     float px = point.x * s;
     float py = point.y * s;
     float pw = w * s;
     float ph = h * s;
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
+}
+
+static int selection_paint_push_overflow_clips(SelectionPaintCtx* ctx,
+                                                View* selection_view) {
+    if (!ctx || !ctx->rdcon || !selection_view) return 0;
+
+    int pushed = 0;
+    for (View* view = selection_view; view; view = view->parent) {
+        if (!view->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(view);
+        if (!block->scroller || !block->scroll()->has_clip) continue;
+
+        BoxEdges border = layout_boundary_border_edges(
+            block->bound ? block->boundary() : nullptr);
+        Bound clip = block->scroll()->clip;
+        RdtLogicalPoint origin = view_geometry_node_viewport_origin(
+            view, scroll_state_resolve_view_geometry);
+        RdtLogicalPoint top_left = selection_paint_to_canvas(ctx, {
+            origin.x + clip.left + border.left,
+            origin.y + clip.top + border.top
+        });
+        RdtLogicalPoint bottom_right = selection_paint_to_canvas(ctx, {
+            origin.x + clip.right - border.right,
+            origin.y + clip.bottom - border.bottom
+        });
+        float width = (bottom_right.x - top_left.x) * ctx->scale;
+        float height = (bottom_right.y - top_left.y) * ctx->scale;
+        if (width <= 0.0f || height <= 0.0f) continue;
+
+        RdtPath* path = rdt_path_new();
+        rdt_path_add_rect(path, top_left.x * ctx->scale, top_left.y * ctx->scale,
+                          width, height, 0, 0);
+        rc_push_clip(ctx->rdcon, path, nullptr);
+        rdt_path_free(path);
+        pushed++;
+    }
+    return pushed;
 }
 
 static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
@@ -201,6 +240,14 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
     ctx.rdcon = rdcon;
     ctx.scale = rdcon->raster_scale;
     selection_get_iframe_offset(state, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
+    ctx.root_scroll_x = 0.0f;
+    ctx.root_scroll_y = 0.0f;
+    DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
+    ViewBlock* root = doc && doc->view_tree && doc->view_tree->root &&
+        doc->view_tree->root->view_type == RDT_VIEW_BLOCK
+        ? lam::view_require_block(doc->view_tree->root) : nullptr;
+    scroll_state_resolve_view_geometry(root, &ctx.root_scroll_x, &ctx.root_scroll_y,
+                                       nullptr);
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
 
     DomRange paint_range;
@@ -213,7 +260,15 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
         return;
     }
 
+    // The content pass has already popped its overflow scopes. Recreate the
+    // selected text's ancestor clips so off-screen editor lines cannot paint
+    // over neighbouring controls.
+    int overflow_clip_depth = selection_paint_push_overflow_clips(
+        &ctx, static_cast<View*>(r->start_view));
     dom_range_for_each_rect(r, rdcon->ui_context, selection_paint_rect_cb, &ctx);
+    while (overflow_clip_depth-- > 0) {
+        rc_pop_clip(rdcon);
+    }
 }
 
 void render_ui_overlays(RenderContext* rdcon, DocState* state) {

@@ -37,9 +37,9 @@ len([42]);
 
 "=== Large Vector Performance ==="
 
-// Large vector creation
-let vec_100 = for (i in 1 to 100) i
-let vec_1000 = for (i in 1 to 1000) i
+// Large vector creation (arrays: a bare for-expression is a list, S2.5.2v2)
+let vec_100 = [for (i in 1 to 100) i]
+let vec_1000 = [for (i in 1 to 1000) i]
 
 // Large vector operations
 vec_100 + vec_100

@@ -148,6 +148,22 @@ function getIdleTimeoutConfig() {
 const IDLE_TIMEOUT = getIdleTimeoutConfig();
 const IDLE_TIMEOUT_MS = IDLE_TIMEOUT.timeoutMs;
 
+// These targets execute hidden batch children and enforce this same ceiling
+// internally in test_run.sh.
+const LONG_RUNNING_TESTS = new Set([
+    'test_lambda_gtest',
+    'test_py_gtest',
+    'test_js_test262_gtest',
+]);
+const LONG_RUNNING_IDLE_TIMEOUT_MS = 600 * 1000;
+
+function getTestIdleTimeoutMs(baseName) {
+    if (LONG_RUNNING_TESTS.has(baseName)) {
+        return Math.max(IDLE_TIMEOUT_MS, LONG_RUNNING_IDLE_TIMEOUT_MS);
+    }
+    return IDLE_TIMEOUT_MS;
+}
+
 // Max concurrent tests: scale to CPU count, leave 1 core free (min 1).
 function getMaxConcurrent() {
     if (!parallelExecution) return 1;
@@ -484,13 +500,14 @@ function scheduleTests(tests) {
 /**
  * Spawns a test executable and monitors its stdout/stderr.
  * Resets an idle timer on every line of output.
- * Kills the process if idle for IDLE_TIMEOUT_MS.
+ * Kills the process if idle for its target-specific timeout.
  *
  * Returns: { passed, failed, total, status, failedTests[], timedOut }
  */
 function runTest(testInfo) {
     return new Promise((resolve) => {
         const { baseName, exePath, scriptPath } = testInfo;
+        const idleTimeoutMs = getTestIdleTimeoutMs(baseName);
         const testPath = testInfo.runner === 'node' ? scriptPath : exePath;
 
         if (!testPath || !fs.existsSync(testPath)) {
@@ -579,9 +596,9 @@ function runTest(testInfo) {
             idleTimer = setTimeout(() => {
                 if (finished) return;
                 timedOut = true;
-                console.error(`   ⏰ ${baseName} idle for ${IDLE_TIMEOUT_MS / 1000}s — killing (stuck?)`)
+                console.error(`   ⏰ ${baseName} idle for ${idleTimeoutMs / 1000}s — killing (stuck?)`)
                 child.kill('SIGKILL');
-            }, IDLE_TIMEOUT_MS);
+            }, idleTimeoutMs);
         }
 
         // Start the idle timer immediately
@@ -636,7 +653,7 @@ function runTest(testInfo) {
             if (testInfo.isGtest) {
                 normalizeGtestCaseTimes(jsonFile);
             }
-            const result = parseTestResults(baseName, jsonFile, timedOut);
+            const result = parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs);
             resolve(result);
         });
     });
@@ -644,12 +661,12 @@ function runTest(testInfo) {
 
 // ─── Result parsing ─────────────────────────────────────────────────────────────
 
-function parseTestResults(baseName, jsonFile, timedOut) {
+function parseTestResults(baseName, jsonFile, timedOut, idleTimeoutMs = IDLE_TIMEOUT_MS) {
     if (timedOut) {
         return {
             passed: 0, failed: 1, total: 1,
             status: '⏰ TIMEOUT',
-            failedTests: [`[${baseName}] timed out (no output for ${IDLE_TIMEOUT_MS / 1000}s)`],
+            failedTests: [`[${baseName}] timed out (no output for ${idleTimeoutMs / 1000}s)`],
             timedOut: true,
         };
     }

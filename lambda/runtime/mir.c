@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <uv.h>
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_grow.h"
 #include <string.h>
@@ -26,6 +27,7 @@ int g_mir_interp_mode = 0;
 // for O(1) symbol resolution instead of O(n) linear scan on every import.
 
 static struct hashmap* func_map = NULL;
+static uv_once_t func_map_once = UV_ONCE_INIT;
 static int g_lambda_lazy_mir = -1;
 
 int lambda_mir_lazy_enabled(void) {
@@ -52,8 +54,7 @@ static JitImportMetadata conservative_import_metadata(void) {
     return metadata;
 }
 
-static void init_func_map(void) {
-    if (func_map) return;  // already initialized
+static void init_func_map_once(void) {
 
 #ifndef NDEBUG
     if (!jit_import_validate_no_gc_allowlist()) {
@@ -92,6 +93,12 @@ static void init_func_map(void) {
         hashmap_set(func_map, &jit_runtime_imports[i]);
     }
     log_info("func_map initialized: %zu runtime functions", total);
+}
+
+static void init_func_map(void) {
+    // P2 satellites start on several pool workers. Publish the resolver only
+    // after its complete immutable table is built (D8.2.6).
+    uv_once(&func_map_once, init_func_map_once);
 }
 
 static bool jit_import_metadata_equal(const JitImportMetadata* left,

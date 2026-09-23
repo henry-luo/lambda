@@ -294,6 +294,121 @@ static double item_to_double(Item item) {
     return it2d(item);
 }
 
+
+// S2.5.8: a string, symbol or binary is walked as a sequence of its code
+// points (its bytes, for a binary) -- what `for … in`, `len` and indexing
+// already see. The select and reorder operations share one shape: those items
+// are materialized as an ordinary array, the array transform runs unchanged,
+// and the finish below rebuilds the source's kind.
+static Item vector_text_items(Item text) {
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, text);
+    Rooted<Array*> rooted_items(roots, array());
+    int64_t count = fn_seq_count(text);
+    for (int64_t i = 0; i < count; i++) {
+        array_push_verbatim(rooted_items.get(), item_at(rooted_source.get(), i));
+    }
+    return {.array = rooted_items.get()};
+}
+
+// Re-dispatch `call` over the code points of a text value, keeping them rooted
+// for the whole call, and rebuild the source's kind from the result.
+#define VECTOR_TEXT_ITEMS(item, call) do {                                  \
+    TypeId text_kind = get_type_id(item);                                   \
+    if (is_sequence_text_type_id(text_kind)) {                              \
+        RootFrame text_roots(1);                                            \
+        Rooted<Item> text_chars(text_roots, vector_text_items(item));       \
+        if (item_is_error(text_chars.get())) return text_chars.get();       \
+        item = text_chars.get();                                            \
+        return seq_finish_text_kind(call, text_kind);                       \
+    }                                                                       \
+} while (0)
+
+// Does this result item belong to the source's text kind? A selection's items
+// always do -- they are the source's own characters -- while a mapping may
+// produce anything. A binary's items are its bytes, so a byte-valued integer
+// belongs to it, as does a whole binary run.
+static bool text_kind_admits(Item value, TypeId text_kind) {
+    TypeId type_id = get_type_id(value);
+    if (text_kind != LMD_TYPE_BINARY) return type_id == text_kind;
+    if (type_id == LMD_TYPE_BINARY) return true;
+    if (type_id != LMD_TYPE_INT && type_id != LMD_TYPE_INT64 &&
+            type_id != LMD_TYPE_NUM_SIZED) return false;
+    double byte = item_to_double(value);
+    return byte >= 0 && byte <= 255 && byte == (double)(int64_t)byte;
+}
+
+// S2.5.8: a sequence operation over text yields that text kind when every
+// result item belongs to it -- concatenated: `"abc" |> upper(~)` is `"ABC"` --
+// and an array otherwise: `"abc" |> ord(~)` is `[97, 98, 99]`. An empty result
+// is the kind's own empty value, so a filter that keeps nothing is `""`.
+static Item seq_finish_text_kind(Item result, TypeId text_kind) {
+    if (!is_sequence_text_type_id(text_kind)) return result;
+    TypeId result_type = get_type_id(result);
+    if (result_type != LMD_TYPE_ARRAY && result_type != LMD_TYPE_ARRAY_NUM) return result;
+    RootFrame roots(1);
+    Rooted<Item> rooted_result(roots, result);
+    int64_t count = fn_seq_count(result);
+    size_t total = 0;
+    bool is_ascii = true;
+    for (int64_t i = 0; i < count; i++) {
+        Item value = item_at(rooted_result.get(), i);
+        if (!text_kind_admits(value, text_kind)) {
+            return seq_finish_kind(rooted_result.get(), false);  // text is never a list
+        }
+        if (text_kind == LMD_TYPE_BINARY) {
+            total += get_type_id(value) == LMD_TYPE_BINARY ? value.get_len() : 1;
+        } else {
+            total += value.get_len();
+            is_ascii = is_ascii && text_item_is_ascii(value);
+        }
+    }
+    if (text_kind == LMD_TYPE_BINARY) {
+        // the bytes are gathered before the result allocation: heap_binary_from_bytes
+        // is a safepoint, and its source buffer must not be GC storage.
+        char* bytes = total ? (char*)mem_calloc(total, 1, MEM_CAT_EVAL) : NULL;
+        size_t at = 0;
+        for (int64_t i = 0; i < count && bytes; i++) {
+            Item value = item_at(rooted_result.get(), i);
+            if (get_type_id(value) == LMD_TYPE_BINARY) {
+                uint32_t run = value.get_len();
+                memcpy(bytes + at, binary_data(value.get_safe_binary()), run);
+                at += run;
+            } else {
+                bytes[at++] = (char)(uint8_t)item_to_double(value);
+            }
+        }
+        Binary* out = heap_binary_from_bytes(bytes ? bytes : "", (int64_t)total);
+        if (bytes) mem_free(bytes);
+        return out ? (Item){.item = x2it(out)} : ItemError;
+    }
+    // the string is allocated once and filled from the rooted result: the
+    // allocation is a safepoint, so every item is re-read after it
+    String* out = (String*)heap_alloc(sizeof(String) + total + 1, LMD_TYPE_STRING);
+    if (!out) return ItemError;
+    out->len = (uint32_t)total;
+    out->flags = 0;
+    out->is_ascii = is_ascii ? 1 : 0;
+    // every read is a safepoint that may move the fresh string, so the copy
+    // addresses it through its root and by offset, never through a saved pointer
+    RootFrame out_roots(1);
+    Rooted<String*> rooted_out(out_roots, out);
+    size_t at = 0;
+    for (int64_t i = 0; i < count; i++) {
+        Item value = item_at(rooted_result.get(), i);
+        uint32_t len = value.get_len();
+        if (len) { memcpy(rooted_out.get()->chars + at, value.get_chars(), len); at += len; }
+    }
+    rooted_out.get()->chars[total] = '\0';
+    if (text_kind == LMD_TYPE_SYMBOL) {
+        // the symbol copies the characters out of the intermediate string,
+        // which its own allocation may move first
+        Symbol* sym = heap_create_symbol(rooted_out.get()->chars, rooted_out.get()->len);
+        return sym ? (Item){.item = y2it(sym)} : ItemError;
+    }
+    return {.item = s2it(rooted_out.get())};
+}
+
 static bool unique_items_equal(Item left, Item right) {
     if (fn_eq(left, right) == BOOL_TRUE) return true;
     // Preserve unique()'s established numeric NaN behavior while using the
@@ -575,11 +690,9 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         return { .array_num = result };
     }
 
-    // heterogeneous: element-wise with ERROR for non-numeric
-    // preserve array type if input was array
-    bool return_array = is_array_type(vec_type);
-    Array* arr_result = return_array ? array() : nullptr;
-    List* list_result = return_array ? nullptr : list();
+    // heterogeneous: element-wise with ERROR for non-numeric; the caller
+    // decides the result's kind (vec_model_op, S2.5.7)
+    Array* arr_result = array();
 
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(vec, i);
@@ -587,8 +700,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
 
         if (!is_scalar_numeric(elem_type)) {
             // non-numeric element: produce ERROR, continue
-            if (return_array) array_push(arr_result, ItemError);
-            else array_push((Array*)list_result, ItemError);
+            array_push(arr_result, ItemError);
             continue;
         }
 
@@ -616,11 +728,9 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
             res_item = push_d(res);
         }
 
-        if (return_array) array_push(arr_result, res_item);
-        else array_push((Array*)list_result, res_item);
+        array_push(arr_result, res_item);
     }
-    if (!return_array && list_result) list_result->is_spreadable = 1;
-    return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
+    return Item{ .array = arr_result };
 }
 
 //==============================================================================
@@ -934,10 +1044,37 @@ static Item vec_cmp_broadcast(ArrayNum* a, ArrayNum* b, int op) {
 }
 
 // keyword a OP b: typed numeric arrays broadcast to a mask; scalar-scalar returns bool.
-Item vec_cmp(Item a, Item b, int op) {
-    GUARD_ERROR2(a, b);
+// A mask over a generic sequence -- a list, a mixed array, a range -- compares
+// item by item under the scalar comparison rules; a failed lane fails the mask.
+static Item vec_cmp_items(Item a, Item b, int op) {
+    bool a_seq = is_vector_type(get_type_id(a));
+    bool b_seq = is_vector_type(get_type_id(b));
+    int64_t len = a_seq ? vector_length(a) : vector_length(b);
+    if (a_seq && b_seq && vector_length(b) != len) {
+        log_error("vec_cmp: size mismatch: %ld vs %ld", len, vector_length(b));
+        return ItemError;
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_a(roots, a);
+    Rooted<Item> rooted_b(roots, b);
+    Rooted<Array*> rooted_result(roots, array());
+    for (int64_t i = 0; i < len; i++) {
+        Item left = a_seq ? vector_get(rooted_a.get(), i) : rooted_a.get();
+        Item right = b_seq ? vector_get(rooted_b.get(), i) : rooted_b.get();
+        Item lane = cmp_scalar_item(left, right, op);
+        if (get_type_id(lane) == LMD_TYPE_ERROR) return lane;
+        array_push_verbatim(rooted_result.get(), lane);
+    }
+    return array_end(rooted_result.get());
+}
+
+static Item vec_cmp_dispatch(Item a, Item b, int op) {
     bool a_arr = (get_type_id(a) == LMD_TYPE_ARRAY_NUM);
     bool b_arr = (get_type_id(b) == LMD_TYPE_ARRAY_NUM);
+    if ((is_vector_type(get_type_id(a)) && !a_arr) ||
+            (is_vector_type(get_type_id(b)) && !b_arr)) {
+        return vec_cmp_items(a, b, op);
+    }
     if (a_arr && b_arr) return vec_cmp_broadcast(a.array_num, b.array_num, op);
     if (a_arr || b_arr) {
         // array vs scalar: wrap the scalar as a 1-element array and broadcast
@@ -961,6 +1098,13 @@ Item vec_cmp(Item a, Item b, int op) {
     }
     // Scalar keyword comparisons share the same scalar rules as symbolic comparisons.
     return cmp_scalar_item(a, b, op);
+}
+
+Item vec_cmp(Item a, Item b, int op) {
+    GUARD_ERROR2(a, b);
+    // S7.10.5v2: a mask keeps its operands' kind (S2.5.7)
+    bool as_list = seq_operands_are_lists(a, b);
+    return seq_finish_kind(vec_cmp_dispatch(a, b, op), as_list);
 }
 
 // True iff either ArrayNum carries n-d shape metadata.
@@ -1180,11 +1324,9 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         }
     }
 
-    // heterogeneous: element-wise with ERROR for non-numeric
-    // preserve array type if either input was array
-    bool return_array = is_array_type(type_a) || is_array_type(type_b);
-    Array* arr_result = return_array ? array() : nullptr;
-    List* list_result = return_array ? nullptr : list();
+    // heterogeneous: element-wise with ERROR for non-numeric; the caller
+    // decides the result's kind (vec_model_op, S2.5.7)
+    Array* arr_result = array();
 
     for (int64_t i = 0; i < len; i++) {
         Item elem_a = vector_get(vec_a, i);
@@ -1193,8 +1335,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         TypeId tb = get_type_id(elem_b);
 
         if (!is_scalar_numeric(ta) || !is_scalar_numeric(tb)) {
-            if (return_array) array_push(arr_result, ItemError);
-            else array_push((Array*)list_result, ItemError);
+            array_push(arr_result, ItemError);
             continue;
         }
 
@@ -1220,11 +1361,9 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
             res_item = push_d(res);
         }
 
-        if (return_array) array_push(arr_result, res_item);
-        else array_push((Array*)list_result, res_item);
+        array_push(arr_result, res_item);
     }
-    if (!return_array && list_result) list_result->is_spreadable = 1;
-    return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
+    return Item{ .array = arr_result };
 }
 
 //==============================================================================
@@ -1509,7 +1648,7 @@ static Item vec_classified_vec_op(Item left, Item right, int op) {
     return vector_finalize_result(&rooted_result, typed, 1, NULL);
 }
 
-static Item vec_model_op(Item left, Item right, int op) {
+static Item vec_model_dispatch(Item left, Item right, int op) {
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
     if (is_scalar_numeric(left_type) && is_vector_type(right_type)) {
         return vec_classified_scalar_op(right, left, op, true);
@@ -1521,6 +1660,13 @@ static Item vec_model_op(Item left, Item right, int op) {
         return vec_classified_vec_op(left, right, op);
     }
     return ItemError;
+}
+
+static Item vec_model_op(Item left, Item right, int op) {
+    // S7.10.5v2: same kind out as in -- a list when every vector operand is a
+    // list (S2.5.7). Decided before the operation, which may move the operands.
+    bool as_list = seq_operands_are_lists(left, right);
+    return seq_finish_kind(vec_model_dispatch(left, right, op), as_list);
 }
 
 Item vec_add(Item a, Item b) {
@@ -1602,6 +1748,8 @@ static Item vector_cumulative_model(Item item, int op) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return (Item){.array = array()};
+    // S7.10.5v2: same kind out as in (S2.5.7)
+    bool as_list = item_is_list(item);
 
     LambdaNumericKind kind = vector_static_numeric_kind(item);
     LambdaNumericDecision decision = lambda_numeric_classify(
@@ -1625,7 +1773,7 @@ static Item vector_cumulative_model(Item item, int op) {
     int ndim = get_type_id(rooted_source.get()) == LMD_TYPE_ARRAY_NUM ?
         get_shape_strides(rooted_source.get().array_num, shape, strides) : 1;
     if (ndim < 1) return ItemError;
-    return vector_finalize_result(&rooted_result, typed, ndim, shape);
+    return seq_finish_kind(vector_finalize_result(&rooted_result, typed, ndim, shape), as_list);
 }
 
 Item fn_math_cumsum(Item item) {
@@ -1699,6 +1847,15 @@ Item fn_fill(Item n_item, Item value) {
     if (n < 0) {
         log_error("fn_fill: count must be non-negative");
         return ItemError;
+    }
+    if (item_is_list(value)) {
+        // S2.5.7: fill follows its item -- a list splices n times into a list,
+        // `fill(2, (1, 2))` is `(1, 2, 1, 2)`, and none collapses to null
+        RootFrame roots(2);
+        Rooted<Item> rooted_value(roots, value);
+        Rooted<Array*> rooted_result(roots, array());
+        for (int64_t i = 0; i < n; i++) array_push(rooted_result.get(), rooted_value.get());
+        return list_collapse_value({ .array = rooted_result.get() });
     }
     if (n == 0) {
         Array *result = (Array *)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -2003,6 +2160,7 @@ Item fn_math_quantile(Item item, Item p_item) {
 
 // Helper: apply unary math function element-wise
 static Item vec_unary_math(Item item, double (*func)(double), const char* name) {
+    bool as_list = item_is_list(item);  // read before the result allocation
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
@@ -2019,7 +2177,8 @@ static Item vec_unary_math(Item item, double (*func)(double), const char* name) 
             result->float_items[i] = func(val);
         }
     }
-    return { .array_num = result };
+    // S7.10.5v2: same kind out as in (S2.5.7)
+    return seq_finish_kind({ .array_num = result }, as_list);
 }
 
 typedef Item (*ComplexUnaryMathFn)(Item item);
@@ -2044,6 +2203,23 @@ typedef Item (*PipeMapFn)(Item item, Item index);
 // helper: create an Item from an integer index
 static Item index_to_item(int64_t index) {
     return { .item = i2it(index) };
+}
+
+// S10.1.2v2/S10.1.5v2: a mapping pipe or `that` keeps its source's kind
+// (S2.5.7). A list, a scalar, or null walks as a list, so its result collapses
+// (S2.5.5v2): `5 |> ~ + 1` is 6, and `5 that ~ > 9` or a list filtered to
+// nothing is null. Text gives back its own kind when every result item belongs
+// to it, `""` when empty (S2.5.8). An array, range, map, or element gives an
+// array, `[]` when empty.
+Item pipe_end(Array* result, Item source) {
+    TypeId type_id = get_type_id(source);
+    if (!item_is_list(source) && is_sequence_text_type_id(type_id)) {
+        return seq_finish_text_kind(array_end(result), type_id);
+    }
+    bool walks_as_list = item_is_list(source) ||
+        !(is_container_type_id(type_id) || type_id == LMD_TYPE_PATH);
+    if (walks_as_list) return list_collapse_value({.array = result});
+    return array_end(result);
 }
 
 static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
@@ -2075,8 +2251,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
             }
             symbol_key_list_free(keys);
         }
-        result->is_spreadable = 1;
-        return { .array = result };
+        return pipe_end((Array*)result, collection);
     }
 
     if (type == LMD_TYPE_ELEMENT) {
@@ -2091,8 +2266,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
                 array_push((Array*)result, filter ? child : transformed);
             }
         }
-        result->is_spreadable = 1;
-        return { .array = result };
+        return pipe_end((Array*)result, collection);
     }
 
     int64_t len = vector_length(collection);
@@ -2107,8 +2281,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
             array_push((Array*)result, filter ? elem : transformed);
         }
     }
-    result->is_spreadable = 1;
-    return { .array = result };
+    return pipe_end((Array*)result, collection);
 }
 
 // fn_pipe_map: apply transform function to each element of a collection
@@ -2322,6 +2495,7 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
         return ItemError;
     }
     TypeId type = get_type_id(item);
+    bool as_list = item_is_list(item);  // read before the result allocation
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         if (std::isnan(val)) return push_d(NAN);
@@ -2349,7 +2523,8 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
             result->float_items[i] = val;
         }
     }
-    return { .array_num = result };
+    // S7.10.5v2: same kind out as in (S2.5.7)
+    return seq_finish_kind({ .array_num = result }, as_list);
 }
 
 // hypot(y, x) - Euclidean distance sqrt(y*y + x*x)
@@ -2374,6 +2549,7 @@ Item fn_math_log1p(Item item) {
 // sign(vec) - element-wise sign (-1, 0, 1)
 Item fn_sign(Item item) {
     GUARD_ERROR1(item);
+    bool as_list = item_is_list(item);  // read before the result allocation
     TypeId type = get_type_id(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
@@ -2397,7 +2573,8 @@ Item fn_sign(Item item) {
             result->items[i] = (val > 0) ? 1 : (val < 0) ? -1 : 0;
         }
     }
-    return { .array_num = result };
+    // S7.10.5v2: same kind out as in (S2.5.7)
+    return seq_finish_kind({ .array_num = result }, as_list);
 }
 
 // math.random(seed) - pure functional PRNG using SplitMix64
@@ -2426,36 +2603,34 @@ Item fn_math_random(Item seed_item) {
 
 // reverse(vec) - reverse order of elements
 // string/symbol passthrough: strings are singular, not iterable
+// A selection's fresh result: the source's items [start, end), in order or
+// reversed, each stored as one item (D2.6.5v3). Source and result stay rooted
+// across the growth safepoints; the caller decides the kind (S2.5.7).
+static Item vector_select_items(Item source, int64_t start, int64_t end, bool reversed) {
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<Array*> rooted_result(roots, array());
+    for (int64_t k = 0; k < end - start; k++) {
+        Item value = vector_get(rooted_source.get(), reversed ? end - 1 - k : start + k);
+        array_push_verbatim(rooted_result.get(), value);
+    }
+    array_transform_copy_cert(rooted_source.get(), rooted_result.get());
+    return {.array = rooted_result.get()};
+}
+
 Item fn_reverse(Item item) {
     GUARD_ERROR1(item);
     VECTOR_NDIM_ROWS(item, fn_reverse(item));
+    VECTOR_TEXT_ITEMS(item, fn_reverse(item));  // S2.5.8
     TypeId type = get_type_id(item);
-    if (is_text_type_id(type)) return item;
 
-    int64_t len = vector_length(item);
+    // S2.5.7: a list reverses to a list, an array or range to an array
+    bool as_list = item_is_list(item);
     if (type == LMD_TYPE_ARRAY_NUM) {
-        return array_num_reverse_result(item);
+        return seq_finish_kind(array_num_reverse_result(item), as_list);
     }
-    if (len == 0) {
-        List* result = list();
-        result->is_spreadable = 1;
-        array_transform_copy_cert(item, (Array*)result);
-        return { .array = result };
-    }
-
-    else {
-        bool preserve_array = type == LMD_TYPE_ARRAY && !item.array->is_spreadable;
-        List* result = list();
-        for (int64_t i = len - 1; i >= 0; i--) {
-            array_push_verbatim((Array*)result, vector_get(item, i));
-        }
-        array_transform_copy_cert(item, (Array*)result);
-        // sort() returns a plain non-spreadable array; reverse() must preserve that
-        // container mode so method chains keep bracketed array output.
-        if (preserve_array) result->is_spreadable = false;
-        else result->is_spreadable = 1;
-        return { .array = result };
-    }
+    int64_t len = vector_length(item);
+    return seq_finish_kind(vector_select_items(item, 0, len > 0 ? len : 0, true), as_list);
 }
 
 // sort(vec) - sort in ascending order
@@ -2463,26 +2638,27 @@ Item fn_reverse(Item item) {
 Item fn_sort1(Item item) {
     GUARD_ERROR1(item);
     VECTOR_NDIM_ROWS(item, fn_sort1(item));
+    VECTOR_TEXT_ITEMS(item, fn_sort1(item));  // S2.5.8
     TypeId type = get_type_id(item);
-    if (is_text_type_id(type)) return item;
 
+    // S2.5.7: a list sorts to a list, an array or range to an array
+    bool as_list = item_is_list(item);
     int64_t len = vector_length(item);
     if (type == LMD_TYPE_ARRAY_NUM) {
-        return array_num_sort_result(item, len, false);
+        return seq_finish_kind(array_num_sort_result(item, len, false), as_list);
     }
     if (len == 0) {
-        List* result = list();
-        result->is_spreadable = 1;
+        Array* result = array();
         // Sorting an empty certified array is still a value-preserving
         // transform; retain its element/layout proof for the next boundary.
-        array_transform_copy_cert(item, (Array*)result);
+        array_transform_copy_cert(item, result);
         return { .array = result };
     }
 
     Array* result = vector_to_plain_array(item, len);
     if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, false);
-    return { .array = result };
+    return seq_finish_kind({ .array = result }, as_list);
 }
 
 // sort_by_keys(values, keys, descending) - sort values array in-place by corresponding keys
@@ -2527,10 +2703,8 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     memcpy(arr->items, temp, len * sizeof(Item));
     mem_free(temp);
     mem_free(indices);
-
-    // mark as non-spreadable so the sorted result displays as a single array
-    // (without this, list_push_spread would spread individual items)
-    arr->is_spreadable = false;
+    // the stream keeps its kind: an ordered for-expression is still a list
+    // (S2.5.2v2), finished by the caller
 }
 
 // sort(vec, option) - sort with direction, key function, or options map
@@ -2542,17 +2716,18 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
     VECTOR_NDIM_ROWS(item, fn_sort2(item, dir_item));
+    VECTOR_TEXT_ITEMS(item, fn_sort2(item, dir_item));  // S2.5.8
     TypeId type = get_type_id(item);
-    if (is_text_type_id(type)) return item;
 
+    // S2.5.7: a list sorts to a list, an array or range to an array
+    bool as_list = item_is_list(item);
     int64_t len = vector_length(item);
     if (type == LMD_TYPE_ARRAY_NUM && len == 0) {
         return array_num_sort_result(item, len, false);
     }
     if (len == 0) {
-        List* result = list();
-        result->is_spreadable = 1;
-        array_transform_copy_cert(item, (Array*)result);
+        Array* result = array();
+        array_transform_copy_cert(item, result);
         return { .array = result };
     }
 
@@ -2664,24 +2839,24 @@ Item fn_sort2(Item item, Item dir_item) {
         mem_free(key_homes);
         mem_free(key_slots);
 
-        result->is_spreadable = false;
         if (type == LMD_TYPE_ARRAY_NUM) {
-            return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
-                rooted_result.get(), rooted_source.get().array_num->rep_cert);
+            return seq_finish_kind(array_num_from_items(
+                rooted_source.get().array_num->get_elem_type(),
+                rooted_result.get(), rooted_source.get().array_num->rep_cert), as_list);
         }
         // A key callback changes only order. Its result owns the same elements,
         // so the source contract remains exact after the sort.
         array_transform_copy_cert(rooted_source.get(), rooted_result.get());
-        return { .array = rooted_result.get() };
+        return seq_finish_kind({ .array = rooted_result.get() }, as_list);
     }
 
     if (type == LMD_TYPE_ARRAY_NUM) {
-        return array_num_sort_result(item, len, descending);
+        return seq_finish_kind(array_num_sort_result(item, len, descending), as_list);
     }
     Array* result = vector_to_plain_array(item, len);
     if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, descending);
-    return { .array = result };
+    return seq_finish_kind({ .array = result }, as_list);
 }
 
 // reduce(collection, fn) - fold/accumulate a collection using a binary function
@@ -2728,17 +2903,13 @@ Item fn_reduce(Item collection, Item func_item) {
 Item fn_unique(Item item) {
     GUARD_ERROR1(item);
     VECTOR_NDIM_ROWS(item, fn_unique(item));
+    VECTOR_TEXT_ITEMS(item, fn_unique(item));  // S2.5.8
     TypeId type = get_type_id(item);
-    if (is_text_type_id(type)) return item;
 
     int64_t len = vector_length(item);
-
-    // determine spreadable flag: lists → true, arrays → follow input
-    bool spreadable = true; // default for list input
-    if (type == LMD_TYPE_ARRAY) {
-        spreadable = item.array->is_spreadable;
-    }
-    // ARRAY_NUM: always spreadable for display (like old ARRAY_INT fallback)
+    // S2.5.7: a list keeps its kind and collapses when one item is left
+    // (S2.5.5v2); an array or range gives an array
+    bool as_list = item_is_list(item);
 
     if (len == 0) {
         if (type == LMD_TYPE_ARRAY_NUM) {
@@ -2746,7 +2917,6 @@ Item fn_unique(Item item) {
             return array_num_from_items(elem_type, array(), item.array_num->rep_cert);
         }
         Array* result = array();
-        result->is_spreadable = spreadable;
         array_transform_copy_cert(item, result);
         return { .array = result };
     }
@@ -2772,14 +2942,18 @@ Item fn_unique(Item item) {
                 array_push_verbatim(result, rooted_elem.get());
             }
         }
-        return array_num_from_items(rooted_source.get().array_num->get_elem_type(),
-            rooted_result.get(), rooted_source.get().array_num->rep_cert);
+        return seq_finish_kind(array_num_from_items(
+            rooted_source.get().array_num->get_elem_type(),
+            rooted_result.get(), rooted_source.get().array_num->rep_cert), as_list);
     }
 
     // generic path: use fn_eq for type-aware comparison (handles strings, symbols, etc.)
-    Array* result = array();
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<Array*> rooted_result(roots, array());
     for (int64_t i = 0; i < len; i++) {
-        Item elem = vector_get(item, i);
+        Item elem = vector_get(rooted_source.get(), i);
+        Array* result = rooted_result.get();
 
         bool found = false;
         for (int64_t j = 0; j < (int64_t)result->length; j++) {
@@ -2792,9 +2966,33 @@ Item fn_unique(Item item) {
             array_push_verbatim(result, elem);
         }
     }
-    result->is_spreadable = spreadable;
-    array_transform_copy_cert(item, result);
-    return { .array = result };
+    array_transform_copy_cert(rooted_source.get(), rooted_result.get());
+    return seq_finish_kind({ .array = rooted_result.get() }, as_list);
+}
+
+// Take/drop counts are explicit (C15): an integer-valued, non-negative number,
+// so tail-relative intent is spelled with `last`, never hidden in the sign.
+static bool vector_count_arg(Item n_item, const char* name, int64_t* n) {
+    if (!lambda_item_to_int64_exact(n_item, n)) {
+        log_error("%s: n must be an integer-valued number", name);
+        return false;
+    }
+    if (*n < 0) {
+        log_error("%s: n must be non-negative", name);
+        return false;
+    }
+    return true;
+}
+
+// Items [start, end) of a sequence, finished in its kind: a list selects to a
+// list that collapses at one item or none (S2.5.5v2, S2.5.7), an array or
+// range to an array.
+static Item vector_select_range(Item vec, int64_t start, int64_t end) {
+    bool as_list = item_is_list(vec);
+    if (get_type_id(vec) == LMD_TYPE_ARRAY_NUM) {
+        return seq_finish_kind(array_num_slice_result(vec, start, end - start), as_list);
+    }
+    return seq_finish_kind(vector_select_items(vec, start, end, false), as_list);
 }
 
 // take(vec, n) - first n elements
@@ -2809,55 +3007,15 @@ Item fn_take(Item vec, Item n_item) {
         Item zero = {.item = i2it(0)};
         return fn_substring(vec, zero, n_item);
     }
+    VECTOR_TEXT_ITEMS(vec, fn_take(vec, n_item));  // a binary walks as its bytes
 
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
     int64_t n = 0;
-    if (!lambda_item_to_int64_exact(n_item, &n)) {
-        log_error("fn_take: n must be an integer-valued number");
-        return ItemError;
-    }
-    if (n < 0) {
-        // C15 forbids negative counts so callers must spell tail-relative intent with `last`.
-        log_error("fn_take: n must be non-negative");
-        return ItemError;
-    }
+    if (!vector_count_arg(n_item, "fn_take", &n)) return ItemError;
     if (n > len) n = len;
-
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        return array_num_slice_result(vec, 0, n);
-    }
-    else {
-        List* result = list();
-        for (int64_t i = 0; i < n; i++) array_push_verbatim((Array*)result, vector_get(vec, i));
-        result->is_spreadable = 1;
-        array_transform_copy_cert(vec, (Array*)result);
-        return { .array = result };
-    }
-}
-
-// take_last(vec, n) - last n elements, preserving original order
-Item fn_take_last(Item vec, Item n_item) {
-    GUARD_ERROR2(vec, n_item);
-    VECTOR_NDIM_ROWS(vec, fn_take_last(vec, n_item));
-
-    int64_t n = 0;
-    if (!lambda_item_to_int64_exact(n_item, &n)) {
-        log_error("fn_take_last: n must be an integer-valued number");
-        return ItemError;
-    }
-    if (n < 0) {
-        // C15 tail counts are explicit counts, not negative-limit sign puns.
-        log_error("fn_take_last: n must be non-negative");
-        return ItemError;
-    }
-
-    int64_t len = fn_len(vec);
-    if (len < 0) return ItemError;
-    if (n > len) n = len;
-    Item start = {.item = i2it(len - n)};
-    return fn_drop(vec, start);
+    return vector_select_range(vec, 0, n);
 }
 
 // drop(vec, n) - drop first n elements
@@ -2873,34 +3031,31 @@ Item fn_drop(Item vec, Item n_item) {
         Item end = {.item = i2it(char_count)};
         return fn_substring(vec, n_item, end);
     }
+    VECTOR_TEXT_ITEMS(vec, fn_drop(vec, n_item));  // a binary walks as its bytes
 
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
     int64_t n = 0;
-    if (!lambda_item_to_int64_exact(n_item, &n)) {
-        log_error("fn_drop: n must be an integer-valued number");
-        return ItemError;
-    }
-    if (n < 0) {
-        // C15 forbids negative counts so slicing direction is never hidden in the sign.
-        log_error("fn_drop: n must be non-negative");
-        return ItemError;
-    }
+    if (!vector_count_arg(n_item, "fn_drop", &n)) return ItemError;
     if (n > len) n = len;
+    return vector_select_range(vec, n, len);
+}
 
-    int64_t new_len = len - n;
-
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        return array_num_slice_result(vec, n, new_len);
+Item for_window(Array* out, Item offset, Item limit, int64_t flags) {
+    int64_t n = 0;
+    if (flags & FOR_WINDOW_OFFSET) {
+        if (get_type_id(offset) == LMD_TYPE_ERROR) return offset;
+        if (!vector_count_arg(offset, "offset", &n)) return ItemError;
+        array_drop_inplace(out, n);
     }
-    else {
-        List* result = list();
-        for (int64_t i = n; i < len; i++) array_push_verbatim((Array*)result, vector_get(vec, i));
-        result->is_spreadable = 1;
-        array_transform_copy_cert(vec, (Array*)result);
-        return { .array = result };
+    if (flags & (FOR_WINDOW_LIMIT | FOR_WINDOW_LIMIT_LAST)) {
+        if (get_type_id(limit) == LMD_TYPE_ERROR) return limit;
+        if (!vector_count_arg(limit, "limit", &n)) return ItemError;
+        if (flags & FOR_WINDOW_LIMIT_LAST) array_limit_last_inplace(out, n);
+        else array_limit_inplace(out, n);
     }
+    return {.array = out};
 }
 
 // slice(vec, start, end) - extract elements from start (inclusive) to end (exclusive)
@@ -2917,6 +3072,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     if (is_text_type_id(type)) {
         return fn_substring(vec, start_item, end_item);
     }
+    VECTOR_TEXT_ITEMS(vec, fn_slice(vec, start_item, end_item));  // bytes
 
     int64_t len = type == LMD_TYPE_BINARY ? fn_len(vec) : vector_length(vec);
     if (len < 0) return ItemError;
@@ -2941,19 +3097,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         Binary* result = heap_binary_slice(bin, (size_t)start, (size_t)new_len);
         return result ? (Item){.item = x2it(result)} : ItemError;
     }
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        return array_num_slice_result(vec, start, new_len);
-    }
-    else {
-        Array* result = array();
-        for (int64_t i = start; i < end; i++) {
-            // slice preserves source item boundaries; list_push would merge adjacent strings from split() results.
-            array_push_verbatim(result, vector_get(vec, i));
-        }
-        result->is_spreadable = 1;
-        array_transform_copy_cert(vec, result);
-        return { .array = result };
-    }
+    return vector_select_range(vec, start, end);
 }
 
 Item fn_slice3(Item vec, Item start_item, Item end_item) {
@@ -5040,9 +5184,10 @@ Item fn_zip(Item a, Item b) {
         rooted_left.set(ItemNull);
         rooted_right.set(ItemNull);
     }
-    result = rooted_result.get();
-    result->is_spreadable = 1;
-    return { .array = result };
+    // S2.5.7: pairs are arrays; the outer sequence is a list only when both
+    // operands are lists
+    return seq_finish_kind({ .array = rooted_result.get() },
+        seq_operands_are_lists(rooted_a.get(), rooted_b.get()));
 }
 
 // range(start, end, step) - generate range with step

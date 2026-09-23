@@ -20,7 +20,7 @@ pn main() {
     let after = wait(handle)^
     // values captured before the suspension must be unchanged after it, and
     // must still be usable as wide operands rather than as tag bits
-    print([before_int, before_float, after] ++ "\n")
-    print([before_int + 1, after + 1, before_int == after] ++ "\n")
-    print([type(before_int), type(before_float), type(after)] ++ "\n")
+    print(string([before_int, before_float, after]) ++ "\n")
+    print(string([before_int + 1, after + 1, before_int == after]) ++ "\n")
+    print(string([type(before_int), type(before_float), type(after)]) ++ "\n")
 }

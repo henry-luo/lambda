@@ -27,8 +27,8 @@
 #ifndef SIMPLE_SCHEMA_PARSER
 extern "C" {
     List* list();
-    void list_push(List *list, Item item);
     void array_push(Array *array, Item item);
+    void array_push_verbatim(Array *array, Item item);
     void* heap_calloc(size_t size, TypeId type_id);
     void* heap_data_calloc(size_t size);
     String* heap_strcpy(const char* src, int64_t len);
@@ -861,7 +861,7 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
 }
 
 // The following functions are only used in the main executable, not the shared library.
-// They depend on runtime symbols (heap_alloc, list, list_push, etc.) not available in lambda-input-full-cpp.
+// They depend on runtime symbols (heap_alloc, list, array_push, etc.) not available in lambda-input-full-cpp.
 #ifndef SIMPLE_SCHEMA_PARSER
 
 // helper: create a heap-allocated String from a char* + len
@@ -873,7 +873,6 @@ static String* make_heap_string(const char* src, size_t len) {
 // allocates TypeMap + ShapeEntry chain + data buffer on heap
 Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     Pool* pool = context->pool;
-    ArrayList* tl = (ArrayList*)context->type_list;
 
     // create shape entries: value(string), index(int)
     // entry 1: "value" -> string
@@ -908,9 +907,10 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     mt->last = e_index;
     mt->length = 2;
     mt->byte_size = byte_size;
-    mt->type_index = tl->length;
+    // match shapes die with the execution pool and must not enter a cached
+    // module's compiler registry (D8.5.1v7).
+    mt->type_index = -1;
     typemap_hash_build(mt, pool);
-    arraylist_append(tl, mt);
 
     // create Map container
     Map* mp = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
@@ -936,8 +936,7 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
 
 List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len,
                                int64_t limit, bool ignore_case) {
-    List* result = list();
-    result->is_spreadable = 1;
+    List* result = list();  // find() constructs an array (S2.5.7)
     RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
@@ -973,7 +972,8 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
             Map* m = create_match_map(match.data(), match_len_val, match_start);
             // Keep a new match live until the rooted result list owns it.
             rooted_match.set(m);
-            list_push(rooted_result.get(), {.map = rooted_match.get()});
+            // find() builds an array of matches: the verbatim append
+            array_push_verbatim((Array*)rooted_result.get(), {.map = rooted_match.get()});
             rooted_match.set((Map*)NULL);
             pushed++;
         }

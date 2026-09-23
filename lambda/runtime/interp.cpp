@@ -13,6 +13,7 @@
 #include "runtime-state.h"
 #include "recovery_frame.h"
 #include "lambda-stack.h"
+#include "concurrency.h"
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
@@ -173,33 +174,29 @@ static void interp_satellite_compile_job(void* opaque) {
     pthread_mutex_lock(&queue->mutex);
     bool retired_before_compile = queue->retiring ||
         job->generation != queue->generation;
-    if (retired_before_compile) {
-        if (queue->pending > 0) queue->pending--;
-        if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
-    }
     pthread_mutex_unlock(&queue->mutex);
-    if (retired_before_compile) {
-        interp_satellite_job_destroy(job);
-        return;
-    }
 
     InterpSatelliteImage* image = NULL;
-    bool compiled = job->runtime && compile_ast_function_satellite_snapshot(
+    bool compiled = !retired_before_compile && job->runtime && compile_ast_function_satellite_snapshot(
         job->runtime, job->script, job->def, job->sequence,
         interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
     bool retired = queue->retiring || job->generation != queue->generation;
-    if (queue->pending > 0) queue->pending--;
     if (!retired && queue->ready && arraylist_append(queue->ready, job)) {
         job->image = compiled ? image : NULL;
         job = NULL;  // the evaluator now owns this completed request
     }
-    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
-    pthread_mutex_unlock(&queue->mutex);
     if (job) {
+        // teardown must keep Script/parent pools alive until the rejected
+        // image has released all compiler-owned references (D8.5.1v7).
+        pthread_mutex_unlock(&queue->mutex);
         interp_satellite_image_destroy(image);
         interp_satellite_job_destroy(job);
+        pthread_mutex_lock(&queue->mutex);
     }
+    if (queue->pending > 0) queue->pending--;
+    if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
+    pthread_mutex_unlock(&queue->mutex);
 }
 
 static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
@@ -247,28 +244,21 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     return true;
 }
 
+bool interp_satellite_image_retain(Script* script, InterpSatelliteImage* image) {
+    if (!script || !image || !image->context) return false;
+    if (!script->interp_satellite_images) {
+        script->interp_satellite_images = arraylist_new(4);
+    }
+    return script->interp_satellite_images &&
+        arraylist_append(script->interp_satellite_images, image);
+}
+
 static bool interp_satellite_publish_image(Script* script,
         InterpSatelliteImage* image) {
     if (!script || !image || !image->context || !image->target_entry ||
             !image->module_layout) return false;
-    // Assign the suffix while the evaluator owns the module state. Workers
-    // may finish out of order, so their compile-time observations are not a
-    // valid append position; layout preparation writes property_key_base
-    // after it links this image's suffix (D8.5.1v6).
-    image->module_layout->reserved = LAMBDA_MODULE_LAYOUT_APPEND_PROPERTY_KEYS;
-    bool prepared = lambda_module_state_bind_static(script->module_state_id,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list) && prepare_context_module_state(image->context,
-            script->const_list ? script->const_list->data : NULL,
-            script->type_list);
-    if (!prepared) return false;
-    if (!script->interp_satellite_images) {
-        script->interp_satellite_images = arraylist_new(4);
-    }
-    if (!script->interp_satellite_images ||
-            !arraylist_append(script->interp_satellite_images, image)) {
-        return false;
-    }
+    if (!interp_satellite_image_prepare(script, image) ||
+            !interp_satellite_image_retain(script, image)) return false;
     bool target_published = false;
     for (uint32_t index = 0; index < image->member_count; index++) {
         if (!image->member_entries[index] || !image->members[index]) continue;
@@ -700,7 +690,8 @@ static void exec_declaration(InterpFrame* f, AstNode* node);
 static bool interp_is_list_producer(AstNode* node) {
     node = ast_unwrap_primary(node);
     return node && (node->node_type == AST_NODE_FOR_EXPR ||
-        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT);
+        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT ||
+        node->node_type == AST_NODE_SPREAD);
 }
 
 // Evaluate an item of a list, array literal, block, content, or for-body. A
@@ -2686,9 +2677,8 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         Array* arr = (Array*)(uintptr_t)acc.get().item;
         if (!arr) return ItemError;
         // The sequence append spreads a list by its kind bit, never by the
-        // literal's syntax (S2.5.1v2, D2.6.5v3).
-        if (item->node_type == AST_NODE_PIPE) array_push_spread_all(arr, value);
-        else if (item->node_type == AST_NODE_SPREAD) {
+        // literal's syntax (S2.5.1v2, D2.6.5v3); a pipe result is a value too.
+        if (item->node_type == AST_NODE_SPREAD) {
             array_push_spread(arr, value);
         } else if (ast_expr_insertion_needs_capture(item)) {
             // S9.3.1: only a NAMED element needs capture; a fresh one has no
@@ -2769,7 +2759,9 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         if (value_node && ast_expr_insertion_needs_capture(value_node)) {
             cow_capture_value(value);
         }
-        words[vi++] = value.item;
+        // S2.5.6: a field stores a list as its array image (the earlier
+        // values are rooted in the span, so the copy may collect)
+        words[vi++] = slot_image(value).item;
     }
     Map* built = map_with_type_tl(map_type, f->module->type_list);
     if (!built) return ItemError;
@@ -2793,7 +2785,7 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
             Item value = eval_expr(f, value_node);
             // S9.3.1: a named field value is captured into the literal.
             if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
-            words[index] = value.item;
+            words[index] = slot_image(value).item;  // S2.5.6: a field holds no list
         } else if (spread_node && field->name) {
             // Preserve `*:source` fields before typed storage conversion; an
             // omitted float/int field must not be sent to set_field_value as a
@@ -2804,7 +2796,7 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
             words[index] = fn_member(spread.get(), key.get()).item;
         } else {
             words[index] = field->default_value
-                ? eval_expr(f, field->default_value).item : ItemNull.item;
+                ? slot_image(eval_expr(f, field->default_value)).item : ItemNull.item;
         }
         if (interp_frame_pending(f)) return ItemNull;
     }
@@ -3195,9 +3187,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         is_scalar = true;
     }
 
-    // Plain array(), not array_spreadable(): a mapping pipe yields one value,
-    // so `[1,2,3] |> ~ * 2` prints as [2, 4, 6] rather than flattening into the
-    // enclosing block. transpile_pipe allocates the same way.
+    // A plain accumulator: pipe_end gives it the source's kind once the walk
+    // is done, as transpile_pipe does.
     Scratch out(f);
     out.set(interp_ptr_item(array()));
     Scratch item_slot(f);
@@ -3243,7 +3234,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         }
     }
     if (keys) symbol_key_list_free(keys);
-    return array_end((Array*)(uintptr_t)out.get().item);
+    // the collection keeps its source's kind (S10.1.2v2, S10.1.5v2)
+    return pipe_end((Array*)(uintptr_t)out.get().item, left.get());
 }
 
 // ---------------------------------------------------------------------------
@@ -3472,51 +3464,28 @@ static Item interp_for_finalize_output(InterpFrame* f, AstForNode* for_node,
         fn_sort_by_keys(interp_ptr_item(out),
             (Item){.item = key_stream_home ? *key_stream_home : ITEM_NULL},
             spec->descending ? 1 : 0);
-        if (for_node->offset) {
-            Item offset = eval_expr(f, for_node->offset);
-            if (interp_frame_pending(f) || item_is_error(offset)) return offset;
-            out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-            if (out) array_drop_inplace(out, it2l(offset));
-        }
-        if (for_node->limit) {
-            Item limit = eval_expr(f, for_node->limit);
-            if (interp_frame_pending(f) || item_is_error(limit)) return limit;
-            out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-            if (out) {
-                if (for_node->limit_from_end) array_limit_last_inplace(out, it2l(limit));
-                else array_limit_inplace(out, it2l(limit));
-            }
-        }
-        // Sorting follows MIR's dedicated ordered-output path, which closes
-        // the spreadable stream before the result reaches its enclosing list.
-        out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-        return out ? array_end(out) : ItemNull;
     }
     if (for_node->offset || for_node->limit) {
-        Scratch selected(f);
-        selected.set((Item){.item = *output_home});
+        // The window trims the raw stream in place, ordered or not, so the
+        // caller's one finish decides the kind and the collapse (S2.5.2v2).
+        Scratch offset_slot(f);
+        Scratch limit_slot(f);
         if (for_node->offset) {
             Item offset = eval_expr(f, for_node->offset);
             if (interp_frame_pending(f)) return ItemNull;
-            Scratch offset_slot(f);
             offset_slot.set(offset);
-            selected.set(fn_drop(selected.get(), offset_slot.get()));
-            if (item_is_error(selected.get())) return selected.get();
         }
         if (for_node->limit) {
             Item limit = eval_expr(f, for_node->limit);
             if (interp_frame_pending(f)) return ItemNull;
-            Scratch limit_slot(f);
             limit_slot.set(limit);
-            // MIR applies unordered windows after the complete stream, so an
-            // early exit would incorrectly suppress body effects on later rows.
-            selected.set(for_node->limit_from_end
-                ? fn_take_last(selected.get(), limit_slot.get())
-                : fn_take(selected.get(), limit_slot.get()));
         }
-        return selected.get();
+        int64_t flags = (for_node->offset ? FOR_WINDOW_OFFSET : 0) | (!for_node->limit ? 0 :
+            for_node->limit_from_end ? FOR_WINDOW_LIMIT_LAST : FOR_WINDOW_LIMIT);
+        out = (Array*)(uintptr_t)*output_home;   // re-read: evaluation may collect
+        return for_window(out, offset_slot.get(), limit_slot.get(), flags);
     }
-    return array_end(out);
+    return interp_ptr_item(out);
 }
 
 static Item interp_eval_grouped_for(ForCtx* fc, AstLoopNode* loop,
@@ -3908,7 +3877,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
             if (value_node && ast_expr_insertion_needs_capture(value_node)) {
                 cow_capture_value(value);
             }
-            attr_words[ai++] = value.item;
+            attr_words[ai++] = slot_image(value).item;  // S2.5.6: an attribute holds no list
             if (interp_frame_pending(f)) return ItemNull;
         }
 
@@ -5077,10 +5046,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     case AST_NODE_UNARY:
         return eval_unary(f, (AstUnaryNode*)node);
-    case AST_NODE_SPREAD:
-        // `*expr` marks its operand spreadable; the collection builders flatten
-        // it from there (transpile_spread is this same one call).
-        return item_spread(eval_expr(f, ((AstSpreadNode*)node)->argument));
+    case AST_NODE_SPREAD: {
+        // S12.3.5v2: `*expr` builds the list of its operand's items rather
+        // than marking the operand, which mutated it for good (LR05-12). It
+        // finishes like any list producer (transpile_spread is the same pair).
+        bool item_position = interp_take_list_item_position(f, node);
+        Item source = eval_expr(f, ((AstSpreadNode*)node)->argument);
+        if (interp_frame_pending(f)) return source;
+        return item_position ? seq_spread_item(source) : seq_spread_value(source);
+    }
     case AST_NODE_BINARY:
         return eval_binary(f, (AstBinaryNode*)node);
     case AST_NODE_PIPE:
@@ -7163,11 +7137,22 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     Script* script = fn->def_module;
     if (!st || !st->runtime || !def || !script || !def->analysis) return false;
 
+    FnPromotionCell* cell = interp_promotion_cell(script, def);
+    if (!cell) return false;
+    if (st->runtime->ui_mode) {
+        // UI output can retain result-arena DOM nodes while nested calls run;
+        // keep their ownership on T0 rather than handing it to a satellite.
+        if (cell->state != FN_PROMOTION_PINNED_INTERP) {
+            cell->state = FN_PROMOTION_PINNED_INTERP;
+            log_notice("interp-tier: pinned UI function='%s' reason=arena-output",
+                def->name ? def->name->chars : "<anonymous>");
+        }
+        return false;
+    }
+
     // A completed worker image is published only between interpreter calls;
     // the current activation keeps its T0 frame and never performs OSR.
     interp_satellite_publish_ready(script);
-    FnPromotionCell* cell = interp_promotion_cell(script, def);
-    if (!cell) return false;
     if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
         interp_upgrade_function_entry(fn, def, cell->boxed_entry);
         return true;
@@ -7563,9 +7548,21 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
                         (int)get_type_id(callee));
                     break;
                 }
-                uint64_t result_home = 0;
-                tail.set(fn_call_into((Function*)(uintptr_t)callee.item, NULL,
-                    &result_home));
+                bool task_root = proc->analysis &&
+                    (proc->analysis->may_await ||
+                     proc->analysis->needs_task_context);
+                // A task-aware `main` must enter through the scheduler so its
+                // task-only builtins have a current task (D6.3.1, S7.11.2).
+                // A synchronous T0 main stays on the direct path: an untyped
+                // dynamic callee can establish its own resumable task root,
+                // while this AST caller has no durable continuation.
+                if (task_root) {
+                    tail.set(lambda_task_run_root_function(callee, NULL));
+                } else {
+                    uint64_t result_home = 0;
+                    tail.set(fn_call_into((Function*)(uintptr_t)callee.item,
+                        NULL, &result_home));
+                }
                 called_main = true;
                 break;
             }

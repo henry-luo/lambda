@@ -528,9 +528,12 @@ UrlError url_parse_into(const char* input, Url* url) {
         if (url->protocol) {
             href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->protocol->chars);
         }
-        // authority
-        if (url->hostname && url->hostname->len > 0) {
+        // File URLs retain an empty authority so their canonical spelling is
+        // file:///path, rather than the relative-looking file:/path.
+        if (url_has_authority(url)) {
             href_appendf(href_buf, sizeof(href_buf), &pos, "//");
+        }
+        if (url->hostname && url->hostname->len > 0) {
             // credentials
             if (url->username && url->username->len > 0) {
                 href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->username->chars);

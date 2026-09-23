@@ -5,6 +5,7 @@
 // a non-sequence scalar is one member; an empty result is null for a list or
 // scalar source and [] for an array, range, or map source; a computed
 // one-item list collapses. (phase P2)
+// Green on both tiers after P2 (2026-09-22); moved from test/lambda/ext.
 
 let L = (1, 2, 3)
 let A = [1, 2, 3]

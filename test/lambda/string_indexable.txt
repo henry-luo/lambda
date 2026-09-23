@@ -1,26 +1,26 @@
-'reverse passthrough'
+'reverse'
 {
-  r: "hello"
+  r: "olleh"
 }
 {
-  r: "café"
+  r: "éfac"
 }
-'sort passthrough'
+'sort'
 {
-  r: "hello"
+  r: "ehllo"
 }
 {
-  r: "hello"
+  r: "ollhe"
 }
-'unique passthrough'
+'unique'
 {
-  r: "hello"
+  r: "helo"
 }
-'min passthrough'
+'min (a reduction, not a selection)'
 {
   r: "abc"
 }
-'max passthrough'
+'max (a reduction, not a selection)'
 {
   r: "xyz"
 }

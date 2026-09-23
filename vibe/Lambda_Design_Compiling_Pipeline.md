@@ -70,8 +70,9 @@ Three structural facts matter for cost:
 
 - **Facts have one owner where possible.** Captures are analysed at build
   (`FUNCTION_END`) and remapped during bind; COW and concurrency reuse the
-  bind function list. MIR return/defer/defect inference is epoch-cached for a
-  call-site round.
+  bind function list. Context-invariant MIR defect-origin inference is
+  epoch-cached for a call-site round; return/defer inference remains local to
+  its active function analysis.
 - **T0 does not materialize JIT-only index columns.** It retains stable IDs
   but reads the AST directly; an on-demand JIT consumer materializes the
   complete graph.
@@ -338,16 +339,48 @@ must keep rejecting unknown forms.
 - `find_var_by_binding` / `find_global_var_by_binding`: a second map keyed by
   `NameEntry*`; `lambda_after_may_gc_call` walks only variables that own a
   typed-array cache (a per-frame list, not the scope maps).
-- `infer_return_type`, `function_return_may_defer`,
-  `function_body_may_originate_defect`: memoized in `FnAnalysis`,
+- `function_body_may_originate_defect` is memoized in `FnAnalysis` and
   invalidated when a call-site round changes that function's resolved
-  parameter types.
+  parameter types. `infer_return_type` and `function_return_may_defer` are
+  contextual (not shared) because recursive native-lane analysis changes their
+  active proof state.
+- A predicted native lane is only an admission to a typed-array fast path;
+  lowering must observe the produced `MirValue` carrier before it writes raw
+  storage. A public-ABI Item produced in a satellite falls back to the checked
+  setter (D2.4.1–D2.4.3, D8.2.6).
+- Every Lambda MIR entry uses the shared native-stack probe against
+  `Context::stack_limit` and shares its recovery-backed exit with side-stack
+  exhaustion. The finalizer inserts the probe only after root coloring, so its
+  scalar temporaries cannot perturb the body liveness plan. Native promotion
+  therefore retains stack-fault containment; fault timing may differ from the
+  interpreter (S7.11.1v2, S7.11.4).
+- The process-wide MIR import catalog is initialized once before any P2 worker
+  creates a private MIR context, so each request receives the fully published
+  immutable resolver table (D8.2.6).
+- A reusable AST map-literal `TypeMap` is an immutable construction recipe.
+  Its null fields retain the dynamic Item lane, so a write in one evaluation
+  cannot retag the packed layout used by another (S1.6, S9.1.2).
+- Execution-pool map/element rebuilds and search-match shapes stay attached to
+  their containers, with no compiler type-list index. Registering those shapes
+  in a cached module left dangling entries after batch teardown and raced
+  satellite shape inference (D4.2.3, D8.5.1v7).
+- Satellite property-key indices are image-local until the receiving evaluator
+  assigns their key-table suffix at publication. Generated entries read the
+  sealed image relocation; workers never query evaluator TLS for a key base.
+  Otherwise every worker sees base zero and later images silently reuse the
+  first image's unrelated property names (D4.6.1v2, D8.5.1v7).
+- Shared name/shape pool reference counts are atomic. Satellite cancellation
+  waits for rejected-image cleanup before reporting the queue idle, so parent
+  pools cannot disappear while workers still release or consult them
+  (D4.2.4, D8.5.1v7).
 
 **Why.** Not on the T0 critical path, but it is the whole `jit` tier budget
 (§1.3) and it bounds satellite promotion latency in AUTO: a satellite for a
-1000-binding `main` would pay the same liveness cost. Governed by the MT7
-emission ratchet (D8.6.1): emitted MIR must be byte-identical before and
-after, since these are analysis-order changes only.
+1000-binding `main` would pay the same liveness cost. The analysis-order
+items are governed by the MT7 emission ratchet (D8.6.1): their emitted MIR
+must be byte-identical before and after. The separate native stack guard is a
+required S7.11.1v2 recovery edge, so its reviewed instruction growth is
+recorded in the same-commit MT7 re-baseline.
 
 ### LC3.8 — Hot-path `log_debug` calls are removed from name lookup and registration
 
@@ -494,9 +527,11 @@ rows separately in `temp/phase_profile.txt`.
    and `LAMBDA_TIER=jit` (SI3v2: tiers evaluate identically);
    `make test-radiant-baseline` 100%; the 20 corpus scripts produce
    byte-identical output before and after.
-4. **Emission**: for LC3.7, MT7 (D8.6.1) at 0% slack — the finalized MIR
-   dump of every corpus script is identical before and after, since the
-   items reorder analysis, not emission.
+4. **Emission**: for LC3.7's analysis reorder, MT7 (D8.6.1) at 0% slack —
+   the finalized MIR dump of every corpus script is identical before and
+   after. The native stack guard is separately reviewed and re-baselined in
+   that same zero-slack gate because it implements the S7.11.1v2 recovery
+   edge rather than an analysis reorder.
 5. **Templates**: for LC3.2, the L1 summary for `input_intent_basic` and
    `commands_basic` reports `ast_misses = 0` for modules that a worker row
    built, and no module appears twice in the phase profile.

@@ -1,26 +1,30 @@
-{
-  value: "world",
-  index: 6
-}
-{
-  value: "abc",
-  index: 0
-}
-{
-  value: "abc",
-  index: 3
-}
-"hello LambdaaaXXccabchelloworldonetwothree"
-{
-  value: "123",
-  index: 3
-}
-"abcNUMdefNUMhelloworldtest"
-{
-  value: "hello",
-  index: 0
-}
-{
-  value: "world",
-  index: 6
-}
+[{
+    value: "world",
+    index: 6
+  }]
+[]
+[{
+    value: "abc",
+    index: 0
+  }, {
+    value: "abc",
+    index: 3
+  }]
+"hello LambdaaaXXcc"
+["a", "b", "c"]
+["hello", "world"]
+["one", "two", "three"]
+[{
+    value: "123",
+    index: 3
+  }]
+[]
+"abcNUMdefNUM"
+["hello", "world", "test"]
+[{
+    value: "hello",
+    index: 0
+  }, {
+    value: "world",
+    index: 6
+  }]

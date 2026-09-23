@@ -1,12 +1,14 @@
 # Lambda List/Array Kind, Content, Text, `++`, and Type Families — Implementation Plan
 
-> **Status:** IN PROGRESS — P0 and P1 done in the working tree, uncommitted
-> (2026-09-22; §7–§9); P2–P6 not started
+> **Status:** IN PROGRESS — P0 and P1 done and committed (`fc3153b3b`,
+> 2026-09-22; §7–§10, P1 residue in §10); P2, P3 and P4 done in the working
+> tree, uncommitted (§11, §12, §13 — P2/P3 were lost to a pull's autostash on
+> 2026-09-23 and recovered, see §13); P5 and P6 not started
 >
 > **Date:** 2026-09-22
 >
-> **Last verified against the live tree:** 2026-09-22 (anchors below are from
-> the tree at that date; re-resolve before editing)
+> **Last verified against the live tree:** 2026-09-23 (anchors below are from
+> the tree at 2026-09-22; re-resolve before editing)
 >
 > **Design authority:** `vibe/Lambda_Design_Syntax.md` §7.27 (points 1–26) and
 > §7.28; `vibe/Lambda_Type_Pattern.md` §1.3
@@ -473,10 +475,10 @@ suffixes. Update `vibe/Lambda_Type_Pattern.md` §1.3 status and
 | Phase | Status | Fixtures | Baseline (jit / interp) | Notes |
 |---|---|---|---|---|
 | P0 fixtures | **done 2026-09-22** | 11 in `ext/`, 2 in `proc-ext/`, 2 negative | n/a (ext, red by design) | goldens from the rulings; all parse except `type_families` (P5 syntax) |
-| P1 kind bit + appends + finish modes + library migration | **done in the working tree 2026-09-22** (see §7–§9) | `list_kind_literal` green both tiers and moved to the baseline; new baseline fixtures `list_positional_verbatim`, `list_declarations`; `list_var_mutation` blocked by LR12-27 (§9); `list_collapse_void` green except its P2 `take` lines; new baseline fixture `ndim_sequence_ops` | official `make test-lambda-baseline`: every remaining failure fails on HEAD, flakes, or arrived with the 17:15 upstream rebase (§9) | library + test migration (§8); positional sites, S2.5.4 declarations, type names (§9) |
-| P2 transforms | not started | | | |
-| P3 landing + content writes | not started | | | choose image strategy by measurement |
-| P4 text, `++`, `*` | not started | | | LR05-9 first |
+| P1 kind bit + appends + finish modes + library migration | **done 2026-09-22, committed `fc3153b3b`** (see §7–§9; residue §10) | `list_kind_literal` green both tiers and moved to the baseline; new baseline fixtures `list_positional_verbatim`, `list_declarations`; `list_var_mutation` blocked by LR12-27 (§9); `list_collapse_void` green except its P2 `take` lines; new baseline fixture `ndim_sequence_ops` | official `make test-lambda-baseline`: every remaining failure fails on HEAD, flakes, or arrived with the 17:15 upstream rebase (§9) | library + test migration (§8); positional sites, S2.5.4 declarations, type names (§9) |
+| P2 transforms | **done in the working tree 2026-09-22** (see §11) | `list_kind_transform`, `list_kind_for_clauses`, `pipe_that_kind`, `list_collapse_void` green both tiers and under forced GC; moved to the baseline | official `make test-lambda-baseline`: only the pre-existing failures (§11) | 24 goldens followed the rulings (grouping-only diffs); query result kind unruled ([LR05-13](../Lambda_Issue_Ledger.md#lr05-13)) |
+| P3 landing + content writes | **done in the working tree 2026-09-23** (see §12) | `list_kind_landing`, `content_normalize` green both tiers and under forced GC, moved to the baseline; `content_writes` likewise, to `test/lambda/proc`; `list_var_mutation` green except its three LR12-27 lines | official `make test-lambda-baseline`: only the pre-existing failures (§12) | image = one-level copy (`slot_image`); 2 goldens and 2 scripts followed the rulings |
+| P4 text, `++`, `*` | **done in the working tree 2026-09-23** (see §13) | `text_sequence`, `concat_table`, `spread_star` green on interp, jit and auto and under forced GC, moved to the baseline; `spread_star` pinned in the tier-parity table | official `make test-lambda-baseline`: **5826 passed, 0 failed** | LR05-9 fixed with the `++` table; 9 proc scripts migrated off `++` string interpolation; 3 fixtures pinned retired rules and were rewritten |
 | P5 type families + migration | not started | | | `make generate-grammar` |
 | P6 close-out | not started | | | Appendix A, ledger, rename file |
 
@@ -695,3 +697,436 @@ worktree `temp/tune14/head_control`):
   linkage break from 2026-09-18 ([LR01-14](../Lambda_Issue_Ledger.md), fixed
   in `py_runtime.h`). `test_py_gtest` passes 39 of 43, and the four failures
   are identical on upstream HEAD.
+
+## 10. Status check after the P1 commit (2026-09-22)
+
+P0 and P1 were committed as `fc3153b3b` ("lambda list semantics change"); the
+later `list fixes` commits (`e3b5723bf`, `42a3d2a82`) carry the effect-colour
+work (LR12-30) and the auto-tier key-linking fix (LR01-16), not plan phases.
+The P2 request was interrupted before any P2 change was made.
+
+**Fixtures on a debug build of `43fd2c3d1`** (golden lines matched, compared by
+position; driver `temp/list_status/run_fixtures.py`):
+
+| Fixture | Phase | jit | interp | What still fails |
+|---|---|---|---|---|
+| `list_kind_literal`, `list_positional_verbatim`, `list_declarations`, `ndim_sequence_ops` | P1 | pass | pass | — (baseline) |
+| `ext/list_collapse_void` | P1/P2 | 24/27 | 24/27 | the one-item `take` lines |
+| `ext/list_kind_landing` | P1/P3 | 14/18 | 14/18 | print/format half passes; field, attribute and object stores keep the list (LR12-28) |
+| `ext/list_kind_for_clauses` | P2 | 14/16 | 14/16 | `order by` / `limit` return arrays |
+| `ext/list_kind_transform` | P2 | 14/32 | 14/32 | per-function result kinds |
+| `ext/pipe_that_kind` | P2 | 8/21 | 8/21 | pipe and `that` result kinds, scalar sources |
+| `ext/content_normalize` | P3 | 6/7 | 6/7 | lone `""`, binary merge |
+| `proc-ext/content_writes` | P3 | 1/7 | 1/7 | content writes do not re-normalize |
+| `proc-ext/list_var_mutation` | P1/P3 | 2/7 | 2/7 | three lines LR12-27, two lines P3 |
+| `ext/text_sequence` | P4 | 8/17 | 8/17 | text as a sequence |
+| `ext/concat_table` | P4 | 10/17 | 10/17 | the `++` table, LR05-9 |
+| `ext/spread_star` | P4 | 10/18 | 14/18 | tiers differ: the JIT `*` marks the pooled literal `lit()` returns (LR05-12) |
+| `ext/type_families` | P5 | parse error | parse error | `T{n,m}` is not yet syntax |
+
+The negative fixtures `occurrence_retired_{plus,range}` are still accepted (P5).
+
+**P1 residue.** Four P1 steps did not land as §2 describes them; none changes
+a ruled behaviour, and each stays open:
+
+1. **JS guard test not written.** The `test_js_*` case (a Lambda list reaches
+   JS as a plain array; Arguments objects keep their snapshot length) does not
+   exist; the rename was checked by spot runs of the JS gate only.
+2. **JS boundary (P1 step 8).** Only the `split` result cleared
+   `is_spreadable` on its way into JS (`js_runtime.cpp:23334`), not every
+   Lambda value published into JS. P2 made `split` build an array, so that
+   clear is gone; the general boundary is still open.
+3. **Content-flag consumers (P1 step 7).** `collection_io.cpp:73`, `:86` and
+   `render_map.cpp:577`, `:593`, `:611` now test the list bit under its new
+   name; the container/call-site audit was not done. The UI and DOM gates
+   pass (119/119, 127/127).
+4. **Root printing (P1 step 5).** `print_root_item` keeps its
+   one-item-per-line branch, keyed on the list bit, instead of moving to the
+   runner. Output matches S2.5.6 (a list reaching the root is the script's
+   content), so only the structure differs from §1.7.
+
+## 11. P2 status (2026-09-22)
+
+**Landed in the working tree (both tiers, uncommitted).**
+
+*One finish for every result kind (§1.4).* `item_is_list` (the bit on a
+generic or packed array), `seq_finish_kind(result, as_list)` (a list collapses
+through `list_collapse_value`; an array clears the bit), and
+`seq_operands_are_lists(a, b)` (a list only when some operand is a list and none
+is of array kind; scalars and `null` are neutral), all in
+`lambda-data-runtime.cpp`. Every multi-input operation decides the kind before
+it allocates, since a collection may move its operands.
+
+*Transforms.* `reverse`, `sort` (both forms), `unique`, `take`, `drop`, and
+`slice` (which `[i to j]` calls) finish in the source's kind; `reverse`,
+`take`, `drop`, and `slice` share one rooted copy (`vector_select_items`,
+`vector_select_range`) and one C15 count check (`vector_count_arg`).
+Element-wise arithmetic (`vec_model_op`), masks (`vec_cmp`), and the unary
+element-wise functions (`abs`, `round`, `floor`, `ceil`, the math functions,
+`sign`, `clip`, negation, `cumsum`, `cumprod`) keep the kind (S7.10.5v2). Masks
+gained a generic path: a list, mixed array, or range compares item by item —
+before, only a packed array did, and `(1, 2, 3) eq 2` compared the whole list
+to `2`. `zip` and the set operators are lists only for two lists; `fill`
+follows its item. `split` and `find` build arrays (S2.5.7), `[]` when nothing
+matches. `(1 to 3)[int]` filters the range.
+
+*Pipes and `that`.* Both tiers finish through `pipe_end(result, source)`: a
+list, `null`, or scalar source collapses (`5 |> ~ + 1` is `6`,
+`5 that ~ > 9` is `null`); an array, range, map, or element source gives an
+array, `[]` when empty; text keeps its array result until P4. A pipe item in
+an array literal is placed as a value like any other: the syntactic
+`array_push_spread_all` special case, and the function, are gone.
+
+*For-expression windows.* `limit` and `offset` trim the raw stream in place
+through `for_window` in both tiers, ordered or not, so the single
+`list_collapse_*` decides the kind. Calling `take`/`drop` on the stream, as
+the unordered path did, would now collapse twice and turn a lone row into a
+list. `order by` no longer clears the bit. Counts follow take/drop's contract
+on both paths, so an ordered `limit -1` is now an error; it was silently a
+limit of 0. `fn_take_last` and `emit_machine_count` lost their last users and
+were removed.
+
+*Typed admission (S11.1.6).* `runtime_type_admit_array_env` carries the bit to
+the fresh container when admission packs or rebuilds a list, so
+`let t: int[] = (4, 5)` stays a list and `fn f(xs: int[])` receives one.
+
+*Checker.* A selection can leave a list one item or none, which is an item or
+`null`, not a container. `take`, `drop`, and `unique` (new registry kind
+`SYS_RESULT_SELECTION_OF_ARGUMENT`) and `slice` are therefore typed open when
+the source may hold a list (`type_may_hold_list`: any array type, `any`, and
+unions that reach them, since an annotation admits lists). `fill` with such an
+item is open too, because a list item splices. `pipe_collection_result_type`
+types a pipe or filter: a scalar source maps to the body's type and filters to
+`T?`, `null` gives `null`, a range, map, element, or text source filters to an
+array, and a filter over an array type or a pipe over an open source is open.
+Without this, `len(take(L, 1))` would unbox `10` as a container (`fn_len_l`).
+Every benchmark `fill` passes a scalar item (228 sites), so the open `fill`
+type costs them nothing.
+
+*Latent P1 defect.* `list_end` and `list_collapse` returned a one-item list's
+item straight from its storage; the item now goes through `array_get`, which
+re-homes a wide scalar held in the dying container (D2.5.2v2).
+
+**Where P2 differs from §1.**
+- A packed array can be a list. A list-kind vector result keeps its compact
+  `ArrayNum` and carries the bit; `item_is_list`, `type()`, `is list`, the
+  sequence append, and the root printer all read the bit on both
+  representations. §1.5's "lists stay generic" still holds for list producers.
+- Query results (`e[T]`, `e?T`) still carry the bit at any length. Their kind
+  is unruled ([LR05-13](../Lambda_Issue_Ledger.md#lr05-13)), and a pipe or
+  `that` over one now yields a collapsing list where it used to yield an array
+  (`page?<p> |> len(~)` prints as content).
+
+**Fixtures and goldens.** `list_kind_transform`, `list_kind_for_clauses`,
+`pipe_that_kind`, and `list_collapse_void` pass on both tiers and under
+`LAMBDA_GC_FORCE_EVERY=1` with poisoned frees, and moved to the baseline.
+The first gate run had 26 new failures. Every changed golden differs from its
+old output only in grouping (brackets, quotes, line breaks — checked
+mechanically), and each follows a ruling: `split` and `find` results are
+arrays, so they no longer splice or merge into top-level strings
+(`split_null_concat`, `string_funcs`, `string_pattern_ops`, `typed_array_split`,
+`pipe_sysfunc`, `find_replace_options`, `tune22_text_paths`, std
+`string_pattern_funcs`, `string_split_join`); a pipe or `that` over an array
+is one array item and over a scalar is its value (`chained_comparisons`,
+`complex`, `member_int_steps`, `path_index_capture`, `sized_numeric_type_annot`,
+std `pipe_operator`); an array's transform is an array (`vector_sys_func`, std
+`collection_construction`, `collection_reverse`, `collection_sort`,
+`take_drop`, `zip`); a pipe over a query result is a list (`query`, see
+LR05-13). `pipe_spread` pinned the retired "pipes spread their arrays" rule; it
+now cites S10.1.2v2/S10.1.5v2 and gained list-source cases that do spread.
+`tune26_split_string_lane` (and its opt contract, which keeps
+`fn_mutable_value_calls == 0`) prints the split array as one item.
+`vector_performance` and `ndim_sequence_ops` kept their goldens: the first now
+builds its vectors with `[for …]` (the list shape was incidental), the second
+counts rows with `len(take(nd, 2))`.
+
+**Gate.** Official `make test-lambda-baseline` after the golden updates: std
+105/105, MathLive 921/921, MIR emission 172/172, JS opt 79/79. The remaining
+failures are the pre-existing set from the post-LR01-16 gate: 22 in
+`test_lambda_gtest` (13 `conc/*` and 3 proc async on the interpreter, LR01-17;
+4 graph goldens; `cow_move_out_bind` and Tune27 through it), `LambdaOptCow.MoveOutBindsBorrow`,
+the `js_corpus_array_methods` ratchet, `dom_document_cookie`, and three forced-GC
+cases. Two other forced-GC cases failed once under the gate's load and pass 5 of 5
+standalone. `make test-radiant-baseline` (run although §4 schedules it only after
+P1 and P3, because `split`, `find`, and the transforms now land in content as
+arrays, S2.6.3): layout baseline 2934 passed and 0 failed, UI automation 119/119,
+DOM UI 125 passed and 0 failed, render, WPT, and fuzz suites green. Its two red
+groups match the P1 run exactly: the page suite's five per-page drops, with the
+same numbers as `temp/p1_radiant2.log` (stale snapshot), and the view command's
+three memtrack leak checks plus the script-budget test.
+
+**Performance (§4).** Release builds A/B'd on one machine, alternating run by
+run, `LAMBDA_TIER=jit`, the median of 5 runs (11 for the rows that first moved
+by more than 2%): the pre-P1 control (`bb3909e36`, whose engine sources match
+`dd32bf595`; release build in `temp/tune14/head_control`, which now holds a
+release binary) against P2 (a worktree carrying this patch). Every row's output
+is identical, and every ratio is noise:
+
+| Row | pre-P1 ms | P2 ms | P2/pre |
+|---|---:|---:|---:|
+| awfy/json2 | 2.6 | 2.5 | 0.99 |
+| awfy/havlak2 | 61.1 | 60.7 | 0.99 |
+| awfy/deltablue2 | 28.2 | 28.4 | 1.01 |
+| awfy/richards2 | 370.1 | 371.5 | 1.00 |
+| awfy/cd2 | 204.7 | 198.8 | 0.97 |
+| jetstream/deltablue2 | 25.8 | 26.0 | 1.01 |
+| jetstream/richards2 | 409.2 | 406.1 | 0.99 |
+| jetstream/splay2 | 345.6 | 343.9 | 1.00 |
+| text/fast_diff2 | 58.1 | 58.2 | 1.00 |
+| text/microdiff2 | 62.8 | 62.9 | 1.00 |
+| text/log_pipeline2 | 2807.5 | 2788.2 | 0.99 |
+| text/text_search2 | 6075.4 | 5869.8 | 0.97 |
+| text/three_way_merge2 | 5528.3 | 5474.9 | 0.99 |
+| text/prettier_ast2 | 634.1 | 637.3 | 1.01 |
+
+The machine carried another session's compile load during the first pass
+(load average 9–20), so absolute times are high; the alternation keeps the
+ratios comparable. No benchmark uses a pipe with `~`, `that`, `take`, `drop`,
+or `unique`, and `slice` almost only on text, so the checker's open result
+types do not reach them.
+
+## 12. P3 status (2026-09-23)
+
+**Landed in the working tree (both tiers, uncommitted).**
+
+*Slot stores take the array image (S2.5.6, §1.6).* `slot_image(value)`
+(`lambda-eval.cpp`) returns a list's array image, a one-level copy
+(`cow_clone_one_level`, children marked shared) with the kind bit clear, and
+any other value unchanged, so the source list keeps its kind. The runtime
+converts at `fn_map_set`'s entry — which also covers `map_set_cow`, the
+checked map setters, `map_literal_put`, and the `put`/`del` write set — and at
+`vmap_set`'s. The MIR converts where it evaluates a slot value
+(`mir_box_slot_value`): map literal fields (the inline container arm and the
+boxed fallback), element attributes, object literal fields and defaults, and
+every member-assignment path (edit bridge, typed path store, COW path set,
+marked root, the T20-1d guarded store, the fallback setter). The call is
+emitted only when the value's static type may hold a list
+(`lambda_type_may_hold_list`, promoted from the checker to `type_contract`).
+The trusted-contract direct field writer cannot build the image, so a
+container field whose value may be a list takes the setter instead; a map
+value can never be a list, so record-shaped fields keep the direct write. The
+interpreter converts each literal value as it roots it. Record results
+(`mir_scalar_record_shape`) admit only int, bool, and string fields, so no
+list reaches them.
+
+*Insertion splices a list (S2.5.6).* `a[i] = list` replaces one item with the
+list's items (`array_splice_list_at`): a packed array keeps its lane when every
+item fits it (`array_num_admits_value`, split out of
+`array_num_store_admitted`), otherwise it widens, and a generic array is
+rebuilt from a snapshot in its own lane. A typed array admits each item, not
+the list (`runtime_admit_list_items`), in the checked setter and in typed
+`push`, which admits every item before it appends the first, so a bad item
+cannot leave a partial append. Untyped `push` already spliced (P1).
+
+*Content stays normalized (S2.2.3, S2.6.2, S2.6.4, S2.6.5).* The content append
+(`list_push`) drops `""`, merges adjacent binaries (`heap_binary_concat`), and
+merges strings wherever content is built: the `input_context` gate — the
+retired `disable_string_merging` flag in disguise (D2.6.5v3) — is gone, and the
+merged string is allocated by the owner (the runtime context's allocator, the
+input pool, or the heap when there is no context). `e[i] = v` on an element
+(`element_content_set`) snapshots the children and appends them back through
+the content append, so `null`/`""` removes the child, a list splices, and
+neighbours of a removed separator merge; `push` on an element appends content.
+The `put`/`del` write set rebuilds an element through the content append and
+an array through the verbatim append, splicing an inserted list with the
+sequence append.
+
+*Appends that built sequences with the content append (D2.6.5v3).* `find`'s
+match lists (runtime and RE2) and `path.c`'s directory listings and glob
+matches now use `array_push_verbatim`; `input-ics.cpp` builds its component
+sequence with the pool-owned verbatim `array_append` (the static input library
+has no runtime append). `input-mark.cpp`'s `list_push` is element content, the
+content append's own case.
+
+**Image strategy.** §1.6 left the choice to measurement. No benchmark stores a
+list into a slot, and a list is transient and small, so the one-level copy was
+taken over a second header sharing the items buffer, which would need a COW
+protocol on the shared buffer. What every write pays is the check, measured
+below.
+
+**Fixtures and goldens.** `list_kind_landing` and `content_normalize` (to
+`test/lambda/`) and `content_writes` (to `test/lambda/proc/`) pass on both
+tiers and under forced GC with poisoned frees. `list_var_mutation` passes
+except its three LR12-27 lines (`push` onto an unannotated `var a = [1]`), and
+stays in `proc-ext`. A probe (`temp/p2/p3_probe.ls`) covered nested
+`m.a.b = list`, an attribute write, typed `int[]` index writes and pushes (the
+lane survives), a typed record field, and a removed separator element. Gate
+triage: `expr_stam` stores a for-result in a field, which is now the array
+image (golden updated); `string_pattern_ops` printed a bare `""` at the top
+level, which content now drops, so the case reads `[replace(…)]`;
+`test_item_repr_gtest` built element content from zeroed slots, which read as
+`null` and a content write now removes, so the fixture seeds two integers;
+the `lambda_corpus_prettier_ast` ratchet grew by 17 instructions (the
+`slot_image` calls; budget updated with a note).
+
+**The direct field writer, and what the A/B caught.** The first cut sent a
+container-field store whose value may hold a list to the checked setter,
+because the raw writer cannot build an image. That cost awfy/havlak2 26% and
+awfy/cd2 15% (`s.items = items`, `tree.vals = vals`), which the release A/B
+found and a build with only that skip reverted confirmed (1.02 and 0.975).
+The writer keeps the direct store instead: an inline test — no tag byte, the
+kind bit in the container's flags, an array or packed-array header — takes a
+list to `lambda_direct_field_store_image`, which re-derives the slot from the
+rooted owner because the image copy may move it, and everything else stores
+raw. `mir_box_slot_value` tests inline for the same reason: with a
+`slot_image` call at every site, awfy/deltablue2 ran 3.3% slower, since
+`w.vars[vid].constraints = cs` stores an array-typed value that (after P3)
+can never be a list. Emission grew: `lambda_corpus_deltablue` +43 and
+`lambda_corpus_prettier_ast` +93 module instructions; both budgets are
+updated with that note.
+
+**Gate.** Official `make test-lambda-baseline`: std 105/105, MathLive 921/921,
+MIR emission 172/172, the ratchet green except the pre-existing
+`js_corpus_array_methods`. The remaining failures are the pre-existing set
+(§11) plus two known flakes that also fail on the pre-P1 control:
+`proc_tune23_record_constructor` on the `auto` tier (a satellite compile of
+`forward_column` reports an unavailable ITEM->INT_LANE transition; a pre-P1
+debug control logs it on every run and prints its output only sometimes) and
+the `tune30_inline_arg_interval` forced-GC case (1 in 5 standalone).
+`make test-radiant-baseline`: layout baseline 2934 passed and 0 failed; the
+page suite's five drops and the view command's four leak/budget checks match
+the P1 run exactly. Four UI cases failed in the gate run and pass standalone;
+the baseline suite then ran 118/119 and 119/119 (a different flake), the DOM
+suite 127/127 twice.
+
+**Performance (§4).** Release builds A/B'd on one machine, alternating run by
+run, `LAMBDA_TIER=jit`, the median of 5 runs (11 or 21 for the rows that
+moved), pre-P1 (`bb3909e36`) against P3. Every row's output is identical and
+every ratio is noise: json2 0.97, havlak2 1.01, awfy/deltablue2 1.00,
+awfy/richards2 1.01, cd2 0.98, jetstream deltablue2 0.99, richards2 1.01,
+splay2 1.00, fast_diff2 1.00, microdiff2 1.01, log_pipeline2 1.00,
+text_search2 1.00, three_way_merge2 1.00, prettier_ast2 1.00.
+
+---
+
+## 13. P4 status (2026-09-23)
+
+**Landed in the working tree (both tiers, uncommitted).** The three P4
+fixtures are green on `interp`, `jit` and `auto` and under forced GC, and have
+moved into `test/lambda/`. The official `make test-lambda-baseline` run is
+**5826 passed, 0 failed**.
+
+*Recovery first.* P2 and P3 were not in the tree at the start of this phase: a
+`git pull --tags` on 2026-09-23 07:40 autostashed the 62 uncommitted files and
+never restored them (only the staged fixture renames reached the commit). The
+stash commit was still reachable, so the work was recovered with
+`git stash apply` onto the merged HEAD and its three conflicts resolved —
+`lambda-eval.cpp` and `transpile-mir.cpp` took both sides (upstream's certified
+spine fast path with P3's `mir_box_slot_value`), and the two MIR budgets were
+re-measured on the merged base, where P3 now costs +139 (`deltablue`) and +106
+(`prettier_ast`) module instructions rather than +43/+93: upstream's new inline
+admission arms added store sites that each carry the inline list test. The
+recovered tree gated at 5821 passed with only those two budgets failing. The
+recovery branch `p23-recovery` holds the stash commit.
+
+*`*` is a value, not a mark (S12.3.5v2, §1.8).* `item_spread` is deleted.
+`*x` builds the list of x's items — `seq_push_spread` splices a list, an array
+(generic or packed) or a range, materialized, appends nothing for `null`, and
+appends every other value, text included, as one item — and the result
+finishes like any other list producer, so `AST_NODE_SPREAD` joined
+`mir_is_list_producer` / `interp_is_list_producer` and the two entry points
+`seq_spread_item` / `seq_spread_value` pick the item-position or value finish
+(S2.5.5v2). Nothing else in either emitter changed: the produced list splices
+through the appends that already splice by the kind bit.
+
+The alternative — per-item spread intent carried from the emitter to a
+splicing append, which is what §1.8 proposed — was built first and rejected. It
+leaves `*` meaning nothing outside a collection, and the ruling is explicit
+that `*x` **is** the list of x's items, which `test/lambda/len_iter_law.ls`
+already pinned (`let b = *[2, 3]; len([1, b, 4])` is 4). One mechanism also
+keeps the two tiers honest. The cost is one array per spread evaluation; no
+benchmark uses the operator.
+
+*Text walks as a sequence (S2.5.8, §1.9).* `is_sequence_text_type_id` names the
+three kinds S2.5.8 walks, and one macro, `VECTOR_TEXT_ITEMS`, re-dispatches a
+text argument over its code points (its bytes, for a binary) exactly as
+`VECTOR_NDIM_ROWS` re-dispatches an N-D array over its rows, keeping the
+characters rooted for the whole call. `reverse`, `sort`, `sort2` and `unique`
+use it; `take`, `drop` and `slice` keep their `fn_substring` fast path for a
+string or symbol and use the macro for a binary, which they had no arm for at
+all. `seq_finish_text_kind` rebuilds the source's kind when every result item
+belongs to it — a selection's items always do, a mapping's may not — and gives
+an array otherwise; an empty result is the kind's own empty value, which is
+what makes a filter that keeps nothing `""`. For a binary, "belongs to it"
+means a byte-valued integer or a whole binary run. `pipe_end` routes a text
+source through the same finish.
+
+The checker had to follow: `pipe_collection_result_type` typed a filter or
+mapping over text as `array`, and with a string result the JIT folded
+`("abc" that ~ == "z") == ""` to **false** while the interpreter answered true —
+an S1.6 divergence the fixture caught. A filter over text is now typed as the
+source's canonical kind (not the source type: a filtered literal is a different
+value) and a mapping as open (`ANY_PIPE`).
+
+`in` is code-point membership: only a one-code-point text can equal one of the
+items, so the walk is skipped for everything else and `contains` keeps the
+substring test. `item_at_empty_string` is deleted — an out-of-range text
+subscript is `null` like every other sequence's (S7.2.1), and `""` stays the
+empty *result* of a text operation (S7.10.1v2).
+
+*`++` follows its table (S10.6.1, §1.10).* A sequence operand now decides the
+result before any text arm is consulted, which is the whole fix: `[1] ++ "ab"`
+is `[1, "ab"]`, not `"[1]ab"`. `join_operand_is_sequence` and
+`join_operand_is_scalar` split the cases, `join_push_operand` contributes one
+operand's items or the operand itself, and the two-sequence arm moved into
+`fn_join_sequences` so the kind decision reads once: both sequences take
+S2.5.7's rule through `seq_operands_are_lists`, and a sequence beside a scalar
+keeps the sequence's own kind. `null` is the identity for every operand type,
+and a map or element is rejected. LR05-9 closed with it: the packed-lane
+shortcut required only that both sides be `ARRAY_NUM`, then copied the right
+payload under the **left** element type (`[1, 2] ++ [3.5]` was `[1, 2, inf]`);
+it now also requires the same element type and a mixed pair takes the generic
+item path.
+
+*Migration.* Nine procedural fixtures used `"label=" ++ container` as string
+interpolation — the idiom S10.6.1 retires — and now call `string(…)`, which
+reproduces their goldens byte for byte. Three fixtures pinned retired rules and
+were rewritten with the ruling cited: `string_index_oob` (out of range is
+`null`, not `""`), `string_indexable` (the "passthrough functions" section is
+now select/reorder, with five golden lines), and `in_container` (`"ell" in
+"hello"` is false; the case now shows `contains` beside it). `cross_type_concat`
+in the std suite had `42 ++ [1]` and `[1, 2] ++ 3` as errors; both are ruled
+values.
+
+**Gate.** Official `make test-lambda-baseline`: 5826 passed, **0 failed** —
+`test_lambda_gtest` 991/991, std 105/105, MathLive 921/921, JS 476/476,
+forced-GC stress 220/220, MIR ratchet 20/20 (P4 moved no budget: the spread
+call site kept its one-call shape). The two flakes §12 recorded did not fire.
+`make test-radiant-baseline`: 3680 passed, 3 failed — the layout baseline
+70/70 and 2934 cases with 0 failures, UI automation 119/119, DOM UI 125/125,
+the view command 55/55, render, WPT and fuzz suites green. The three failures
+are the P1 run's own (`temp/p1_radiant2.log`): the two `radiant_view_pdf*`
+view fixtures, and the page suite's stale snapshot, whose four per-page drops
+carry the same numbers as P1 to the tenth of a percent (`zengarden`, P1's
+fifth, now passes).
+
+**Performance (§4).** The pre-P1 control is no longer a usable baseline for a
+P4-only reading: the 2026-09-23 upstream merge is between them, and against it
+`prettier_ast2` runs 5x and `havlak2` 3.4x faster, which buries a percent. A
+second release worktree therefore holds the **pre-P4** tree — the same HEAD
+with P2 and P3 applied and P4 absent — and the A/B alternates the two run by
+run, `LAMBDA_TIER=jit`, the median of 5. Every row's output is identical and
+every ratio is noise:
+
+| Row | pre-P4 ms | P4 ms | P4/ctl |
+|---|---:|---:|---:|
+| awfy/json2 | 2.0 | 1.9 | 0.96 |
+| awfy/havlak2 | 27.9 | 27.8 | 1.00 |
+| awfy/deltablue2 | 14.6 | 14.6 | 1.00 |
+| awfy/richards2 | 337.3 | 341.9 | 1.01 |
+| awfy/cd2 | 163.1 | 162.1 | 0.99 |
+| jetstream/deltablue2 | 20.5 | 20.5 | 1.00 |
+| jetstream/richards2 | 336.8 | 339.9 | 1.01 |
+| jetstream/splay2 | 317.4 | 319.3 | 1.01 |
+| text/fast_diff2 | 57.4 | 57.1 | 0.99 |
+| text/microdiff2 | 59.9 | 60.5 | 1.01 |
+| text/log_pipeline2 | 2072.2 | 2064.3 | 1.00 |
+| text/text_search2 | 1783.1 | 1781.8 | 1.00 |
+| text/three_way_merge2 | 2233.4 | 2245.3 | 1.01 |
+| text/prettier_ast2 | 523.7 | 522.4 | 1.00 |
+
+The text rows are the ones to watch, because `++` now tests both operands for
+sequence-ness before reaching its text arm and they use the operator heavily
+(`log_pipeline2` 21 times): `fast_diff2` and `three_way_merge2` read +4.1% and
++3.1% against the *pre-P1* control and 0.99/1.01 against this one, which is
+what the control is for.

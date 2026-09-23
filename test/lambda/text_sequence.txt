@@ -2,6 +2,8 @@
 ["cba", "abc", "ab", "ab", "bc", "bc", "bc"]
 ['cba', b'\x0201']
 [string, symbol, binary]
+"-- a binary walks as its bytes, and rebuilds as a binary --"
+[b'\x0102', b'\x0203', b'\x0203', 1, true]
 "-- filter --"
 ["ac", string, "", true]
 "-- mapping pipe: text when every result is text, else an array --"

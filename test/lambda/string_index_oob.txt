@@ -1,1 +1,1 @@
-[true, true, true, string]
+[true, true, true, type.null, true]

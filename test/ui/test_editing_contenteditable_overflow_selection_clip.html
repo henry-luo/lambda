@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Contenteditable selection overflow clip</title>
+  <style>
+    body { margin: 0; font: 16px/20px Arial, sans-serif; }
+    #scrollport {
+      border: 1px solid #222;
+      height: 40px;
+      overflow: hidden;
+      width: 160px;
+    }
+    #editor {
+      width: 400px;
+      white-space: normal;
+    }
+    #outside {
+      background: #f00;
+      height: 40px;
+      margin-top: 10px;
+      width: 240px;
+    }
+  </style>
+</head>
+<body>
+  <div id="scrollport"><div id="editor" contenteditable="true" tabindex="0">alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu</div></div>
+  <div id="outside"></div>
+</body>
+</html>

@@ -190,6 +190,12 @@ bool url_is_valid(const Url* url) {
     return url && url->is_valid;
 }
 
+bool url_has_authority(const Url* url) {
+    return url && (url->scheme == URL_SCHEME_FILE ||
+        (url->hostname && url->hostname->len > 0) ||
+        (url->host && url->host->len > 0));
+}
+
 // URL serialization functions - Phase 5 implementation
 
 // Main URL serialization function
@@ -219,8 +225,7 @@ String* url_construct_href(const Url* url) {
     }
 
     // Authority section (//)
-    bool has_authority = (url->hostname && url->hostname->len > 0) ||
-                        (url->host && url->host->len > 0);
+    bool has_authority = url_has_authority(url);
     if (has_authority) total_size += 2; // "//"
 
     // Credentials

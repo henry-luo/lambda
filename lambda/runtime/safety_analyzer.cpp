@@ -6,6 +6,17 @@
 // Tail Call Optimization Analysis
 // ==============================================================================
 
+// P2 lowering copies the function node, but direct identifiers retain their
+// original declaration entry. D8.1.1v12 requires this private image to retain
+// source-definition semantics, including self-tail-call recognition.
+static bool same_function_definition(const AstFuncNode* left,
+        const AstFuncNode* right) {
+    if (left == right) return true;
+    if (!left || !right || !left->analysis || !right->analysis) return false;
+    NameEntry* left_decl = left->analysis->decl_entry;
+    return left_decl && left_decl == right->analysis->decl_entry;
+}
+
 /**
  * Check if a call expression is a direct recursive call to the given function.
  * Returns true if call_node calls func_node directly (not through a variable).
@@ -29,6 +40,16 @@ bool is_recursive_call(AstCallNode* call_node, AstFuncNode* func_node) {
         // Check if the identifier resolves to our function
         AstNode* resolved = ident->entry->node;
         if (resolved == (AstNode*)func_node) {
+            return true;
+        }
+
+        if ((func_node->analysis &&
+                    ident->entry == func_node->analysis->decl_entry) ||
+                (resolved && (resolved->node_type == AST_NODE_FUNC ||
+                    resolved->node_type == AST_NODE_PROC ||
+                    resolved->node_type == AST_NODE_FUNC_EXPR ||
+                    resolved->node_type == AST_NODE_ARROW_FUNC) &&
+                    same_function_definition((AstFuncNode*)resolved, func_node))) {
             return true;
         }
 

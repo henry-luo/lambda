@@ -25,7 +25,7 @@
 7
 11
 '=== string split unaffected ==='
-"abc"
+["a", "b", "c"]
 '=== errors ==='
 error
 error

@@ -438,19 +438,146 @@ static String* fn_concat_string_items(Item left, Item right) {
     return result;
 }
 
+static bool runtime_value_rep_proves_contract(Item value, Type* contract);
+static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
+    Item* rebuilt);
+static bool array_native_lane_supported(const LaneStorageDesc* desc);
+
+// `acc ++ [x]` under a typed accumulator: when one operand carries an exact
+// representation certificate and every element of the other operand proves
+// that certificate's element contract (or carries the same certificate), the
+// concatenation is the same T[] -- publish the certificate on the result,
+// laid out in the certificate's native lane when it has one (a record lane
+// for `Node[]`). Without it every `acc: T[]` crossing re-admitted and rebuilt
+// the whole accumulator, quadratic per list (prettier_ast2 join_docs_at /
+// print_nodes_at). lambda_array_rep_proves_cert re-checks the final layout.
+static Item array_concat_inherit_cert(Item result, Item left, Item right) {
+    ArrayRepCert* left_cert = left.array ? left.array->rep_cert : NULL;
+    ArrayRepCert* right_cert = right.array ? right.array->rep_cert : NULL;
+    ArrayRepCert* cert = left_cert ? left_cert : right_cert;
+    if (!cert || !cert->immediate_element || cert->rank != 1) return result;
+    // item_at may box a wide element and the lane rebuild allocates: the
+    // fresh result and the operand being proven stay rooted across both
+    RootFrame roots(2);
+    Rooted<Item> rooted_result(roots, result);
+    Rooted<Item> rooted_other(roots, cert == left_cert ? right : left);
+    ArrayRepCert* other_cert = cert == left_cert ? right_cert : left_cert;
+    if (other_cert != cert) {
+        int64_t count = rooted_other.get().array->length;
+        for (int64_t i = 0; i < count; i++) {
+            if (!runtime_value_rep_proves_contract(item_at(rooted_other.get(), i),
+                    cert->immediate_element)) {
+                return rooted_result.get();
+            }
+        }
+    }
+    LaneStorageDesc lane = {};
+    if (get_type_id(rooted_result.get()) == LMD_TYPE_ARRAY &&
+            lambda_type_array_lane_storage_desc(cert->immediate_element, &lane) &&
+            array_native_lane_supported(&lane) &&
+            !array_native_lane_matches_desc(rooted_result.get().array, &lane)) {
+        Item rebuilt = ItemNull;
+        if (!array_rebuild_native_lane(rooted_result.get(), &lane, &rebuilt)) {
+            return rooted_result.get();
+        }
+        rooted_result.set(rebuilt);
+    }
+    lambda_array_install_rep_cert(rooted_result.get(), cert);
+    if (!lambda_array_rep_proves_cert(rooted_result.get(), cert, true)) {
+        lambda_array_clear_rep_cert(rooted_result.get());
+    }
+    return rooted_result.get();
+}
+
+// The two-sequence arm of `++` (S10.6.1): concatenate the items, keeping a
+// packed lane when both sides share it. The caller decides the result's kind.
+static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId right_type) {
+    // same-type optimization: direct memcpy of native items (not for Range)
+    bool same_lane = left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
+        left.array_num->get_elem_type() == right.array_num->get_elem_type();
+    if (left_type == right_type && left_type != LMD_TYPE_RANGE && same_lane) {
+        if (left_type == LMD_TYPE_ARRAY_NUM) {
+            ArrayNum *la = left.array_num, *ra = right.array_num;
+            int64_t total = la->length + ra->length;
+            ArrayNum *result = (ArrayNum *)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+            result->type_id = LMD_TYPE_ARRAY_NUM;
+            result->set_elem_type(la->get_elem_type());
+            result->length = total;  result->capacity = total;
+            RootFrame roots(1);
+            Rooted<ArrayNum*> rooted_result(roots, result);
+            size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
+            result->data = heap_data_alloc(total * elem_size);
+            result = rooted_result.get();
+            memcpy(result->data, la->data, elem_size*la->length);
+            memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
+            return array_concat_inherit_cert({.array_num = result}, left, right);
+        }
+        // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
+        Array *la = left.array, *ra = right.array;
+        int64_t total_len = la->length + ra->length;
+        int64_t total_extra = la->extra + ra->extra;
+        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
+        result->type_id = left_type;
+        result->length = total_len;
+        result->capacity = total_len + total_extra;
+        result->extra = 0;
+        result->items = (Item*)(result + 1);
+        // Source tail pointers cannot survive after either operand dies.
+        array_copy_owned_items(result, 0, la->items, la->length);
+        array_copy_owned_items(result, la->length, ra->items, ra->length);
+        return array_concat_inherit_cert({.array = result}, left, right);
+    }
+    // different types: produce generic Array, convert typed elements to Items
+    int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
+    int64_t total_len = left_len + right_len;
+    // A typed source can expose one external scalar payload per element;
+    // reserve the exact worst-case tail before copy-in discovers the mix.
+    Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len * 2), LMD_TYPE_ARRAY);
+    result->type_id = LMD_TYPE_ARRAY;
+    result->length = total_len;
+    result->capacity = total_len * 2;
+    result->extra = 0;
+    result->items = (Item*)(result + 1);
+    for (int64_t i = 0; i < left_len; i++) array_set(result, i, item_at(left, i));
+    for (int64_t i = 0; i < right_len; i++) array_set(result, left_len + i, item_at(right, i));
+    return {.array = result};
+}
+
+// S10.6.1: `++` concatenates sequences and places every other value as one
+// item. A sequence is a list, an array (packed or generic) or a range -- text
+// is a scalar here, the one place where S2.5.8's "placed as one value" rule
+// differs from the sequence walk.
+static bool join_operand_is_sequence(TypeId type_id) {
+    return type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_NUM ||
+        type_id == LMD_TYPE_RANGE;
+}
+
+// A map or an element is not a concatenation operand (S10.6.1): merge is
+// `{*: m1, *: m2}`.
+static bool join_operand_is_scalar(TypeId type_id) {
+    return type_id <= LMD_TYPE_BINARY || type_id == LMD_TYPE_PATH;
+}
+
+// One operand's contribution: a sequence gives its items, anything else gives
+// itself. The destination stays rooted across the reads, which may box a wide
+// scalar out of a packed lane.
+static void join_push_operand(Array* out, Item value, bool is_sequence) {
+    if (!is_sequence) { array_push_verbatim(out, value); return; }
+    RootFrame roots(2);
+    Rooted<Array*> rooted_out(roots, out);
+    Rooted<Item> rooted_value(roots, value);
+    int64_t count = fn_seq_count(rooted_value.get());
+    for (int64_t i = 0; i < count; i++) {
+        array_push_verbatim(rooted_out.get(), item_at(rooted_value.get(), i));
+    }
+}
+
 Item fn_join(Item left, Item right) {
     GUARD_ERROR2(left, right);
-    // concat two scalars, or join two lists/arrays/maps, or join scalar with list/array, or join two binaries, else error
+    // S10.6.1: sequence ++ sequence concatenates, a scalar beside a sequence is
+    // one item, scalar ++ scalar is text, `null` is the identity, a map or an
+    // element is an error; a path on the left keeps S2.4.2v4.
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
-
-    if (left_type == LMD_TYPE_NULL &&
-        (right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_RANGE)) {
-        return right;
-    }
-    if (right_type == LMD_TYPE_NULL &&
-        (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_RANGE)) {
-        return left;
-    }
 
     // Handle path concatenation first (path must be on the left)
     if (left_type == LMD_TYPE_PATH) {
@@ -487,6 +614,34 @@ Item fn_join(Item left, Item right) {
         }
     }
 
+    // S10.6.1: a sequence operand decides the shape of the result before any
+    // text arm is consulted -- `[1] ++ "ab"` is `[1, "ab"]`, not `"[1]ab"`.
+    bool left_seq = join_operand_is_sequence(left_type);
+    bool right_seq = join_operand_is_sequence(right_type);
+    if (left_seq || right_seq) {
+        if (left_type == LMD_TYPE_NULL) return right;   // null is the identity
+        if (right_type == LMD_TYPE_NULL) return left;
+        if (!(left_seq || join_operand_is_scalar(left_type)) ||
+                !(right_seq || join_operand_is_scalar(right_type))) {
+            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
+                type_info[left_type].name, type_info[right_type].name);
+            return ItemError;
+        }
+        // S2.5.7: a list only when no operand is of array kind; a scalar
+        // leaves the kind to the sequence it is appended to.
+        bool as_list = left_seq && right_seq ? seq_operands_are_lists(left, right)
+            : item_is_list(left_seq ? left : right);
+        if (left_seq && right_seq) return seq_finish_kind(
+            fn_join_sequences(left, right, left_type, right_type), as_list);
+        RootFrame roots(3);
+        Rooted<Item> rooted_left(roots, left);
+        Rooted<Item> rooted_right(roots, right);
+        Rooted<Array*> rooted_out(roots, array());
+        join_push_operand(rooted_out.get(), rooted_left.get(), left_seq);
+        join_push_operand(rooted_out.get(), rooted_right.get(), right_seq);
+        return seq_finish_kind({ .array = rooted_out.get() }, as_list);
+    }
+
     if (left_type == LMD_TYPE_BINARY && right_type == LMD_TYPE_BINARY) {
         Binary* result = heap_binary_concat(left.get_safe_binary(), right.get_safe_binary());
         if (!result) {
@@ -517,62 +672,7 @@ Item fn_join(Item left, Item right) {
         Symbol* sym = heap_create_symbol(result->chars, result->len);
         return {.item = y2it(sym)};
     }
-    // merge two array-like types (List, Array, ArrayNum, Range)
-    else if (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_RANGE) {
-        if (!(right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_RANGE)) {
-            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
-                type_info[left_type].name, type_info[right_type].name);
-            return ItemError;
-        }
-        // same-type optimization: direct memcpy of native items (not for Range)
-        if (left_type == right_type && left_type != LMD_TYPE_RANGE) {
-            if (left_type == LMD_TYPE_ARRAY_NUM) {
-                ArrayNum *la = left.array_num, *ra = right.array_num;
-                int64_t total = la->length + ra->length;
-                ArrayNum *result = (ArrayNum *)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
-                result->type_id = LMD_TYPE_ARRAY_NUM;
-                result->set_elem_type(la->get_elem_type());
-                result->length = total;  result->capacity = total;
-                RootFrame roots(1);
-                Rooted<ArrayNum*> rooted_result(roots, result);
-                size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
-                result->data = heap_data_alloc(total * elem_size);
-                result = rooted_result.get();
-                memcpy(result->data, la->data, elem_size*la->length);
-                memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
-                return {.array_num = result};
-            }
-            // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
-            Array *la = left.array, *ra = right.array;
-            int64_t total_len = la->length + ra->length;
-            int64_t total_extra = la->extra + ra->extra;
-            Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
-            result->type_id = left_type;
-            result->length = total_len;
-            result->capacity = total_len + total_extra;
-            result->extra = 0;
-            result->items = (Item*)(result + 1);
-            // Source tail pointers cannot survive after either operand dies.
-            array_copy_owned_items(result, 0, la->items, la->length);
-            array_copy_owned_items(result, la->length, ra->items, ra->length);
-            return {.array = result};
-        }
-        // different types: produce generic Array, convert typed elements to Items
-        int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
-        int64_t total_len = left_len + right_len;
-        // A typed source can expose one external scalar payload per element;
-        // reserve the exact worst-case tail before copy-in discovers the mix.
-        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len * 2), LMD_TYPE_ARRAY);
-        result->type_id = LMD_TYPE_ARRAY;
-        result->length = total_len;
-        result->capacity = total_len * 2;
-        result->extra = 0;
-        result->items = (Item*)(result + 1);
-        for (int64_t i = 0; i < left_len; i++) array_set(result, i, item_at(left, i));
-        for (int64_t i = 0; i < right_len; i++) array_set(result, left_len + i, item_at(right, i));
-        return {.array = result};
-    }
-    else if (left_type <= LMD_TYPE_BINARY && right_type <= LMD_TYPE_BINARY) {
+    if (left_type <= LMD_TYPE_BINARY && right_type <= LMD_TYPE_BINARY) {
         // scalar ++ scalar: convert both to string and concatenate
         if (left_type == LMD_TYPE_NULL) return right;
         if (right_type == LMD_TYPE_NULL) return left;
@@ -596,6 +696,8 @@ static bool array_has_item(Array* arr, Item item) {
 
 Item fn_union(Item left, Item right) {
     GUARD_ERROR2(left, right);
+    // S2.5.7: a list only when both operands are lists (decided before allocation)
+    bool as_list = seq_operands_are_lists(left, right);
     Array* result = array();
     int64_t left_len = fn_seq_count(left);
     int64_t right_len = fn_seq_count(right);
@@ -609,7 +711,7 @@ Item fn_union(Item left, Item right) {
         Item item = item_at(right, i);
         if (!array_has_item(result, item)) array_push_verbatim(result, item);
     }
-    return { .array = result };
+    return seq_finish_kind({ .array = result }, as_list);
 }
 
 // Set intersection and exclusion, the `&` and `!` value operators. Both mirror
@@ -619,6 +721,7 @@ Item fn_union(Item left, Item right) {
 // instead of them inventing a second notion of membership.
 Item fn_intersect(Item left, Item right) {
     GUARD_ERROR2(left, right);
+    bool as_list = seq_operands_are_lists(left, right);  // S2.5.7
     Array* result = array();
     int64_t left_len = fn_seq_count(left);
     for (int64_t i = 0; i < left_len; i++) {
@@ -628,11 +731,12 @@ Item fn_intersect(Item left, Item right) {
         if (present >= BOOL_ERROR) return ItemError;
         if (present == BOOL_TRUE) array_push_verbatim(result, item);
     }
-    return { .array = result };
+    return seq_finish_kind({ .array = result }, as_list);
 }
 
 Item fn_exclude(Item left, Item right) {
     GUARD_ERROR2(left, right);
+    bool as_list = seq_operands_are_lists(left, right);  // S2.5.7
     Array* result = array();
     int64_t left_len = fn_seq_count(left);
     for (int64_t i = 0; i < left_len; i++) {
@@ -642,7 +746,7 @@ Item fn_exclude(Item left, Item right) {
         if (present >= BOOL_ERROR) return ItemError;
         if (present != BOOL_TRUE) array_push_verbatim(result, item);
     }
-    return { .array = result };
+    return seq_finish_kind({ .array = result }, as_list);
 }
 
 String *str_repeat(String *str, int64_t times) {
@@ -1123,6 +1227,7 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
     if (fn->arity > LAMBDA_MAX_FUNCTION_ARGS) {
         return lambda_dynamic_argument_limit_error(caller, fn->arity, "function arity");
     }
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
     if ((mode == LAMBDA_DYNAMIC_CALL_FUNCTION || mode == LAMBDA_DYNAMIC_CALL_BORROWED) &&
             !lambda_dynamic_abi_is_core(fn->entry_abi) &&
             fn->entry_abi != FN_ENTRY_ABI_HOST_ADAPTER) {
@@ -1132,9 +1237,13 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
             "dynamic expression call requires a boxed Lambda callable entry");
     }
     if (mode == LAMBDA_DYNAMIC_CALL_PROCEDURE &&
-            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE) {
+            fn->entry_abi != FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE &&
+            !(fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED &&
+              signature && signature->is_proc)) {
+        // T0 procedures retain their source entry until the scheduler invokes
+        // it; rejecting them here leaves `start` and `run pn main` tier-only.
         return lambda_dynamic_call_error(ERR_UNSUPPORTED_DYNAMIC_ABI, caller,
-            "task launch requires a boxed Lambda procedure entry");
+            "task launch requires a Lambda procedure entry");
     }
     if (!fn->ptr && fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
         return lambda_dynamic_call_error(ERR_INVALID_CALL, caller,
@@ -1145,7 +1254,6 @@ static Item lambda_dynamic_check_signature(Function* fn, int actual,
             "builtin references do not expose the boxed dynamic-call ABI");
     }
 
-    TypeFunc* signature = (TypeFunc*)fn->fn_type;
     if (lambda_dynamic_abi_is_core(fn->entry_abi) &&
             (!signature || signature->type_id != LMD_TYPE_FUNC) &&
             mode != LAMBDA_DYNAMIC_CALL_PROCEDURE) {
@@ -2197,8 +2305,7 @@ Bool fn_is(Item a, Item b) {
         }
         // S2.5.1v2: `is list` tests the kind bit; `is array` holds for lists too
         if (type_b == &LIT_TYPE_LIST) {
-            return a_type_id == LMD_TYPE_ARRAY && a.array && a.array->is_spreadable
-                ? BOOL_TRUE : BOOL_FALSE;
+            return item_is_list(a) ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_nominal_record(type_b->type)) {
             TypeNominal* actual = lambda_value_nominal(a_type_id,
@@ -3804,6 +3911,14 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
                 array_push_verbatim(result, val);
             }
         }
+    } else if (type_id == LMD_TYPE_RANGE) {
+        // a range is the sequence of its values, so `(1 to 3)[int]` filters them
+        for (int64_t i = 0; i < data.range->length; i++) {
+            Item val = item_at(data, i);
+            if (fn_is(val, type_val) == BOOL_TRUE) {
+                array_push_verbatim(result, val);
+            }
+        }
     }
 }
 
@@ -3847,10 +3962,22 @@ Bool fn_in(Item a_item, Item b_item) {
         return BOOL_ERROR;
     }
     if (b_item._type_id) { // b is scalar
-        if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
-            String *str_a = a_item.get_safe_string();
-            String *str_b = b_item.get_safe_string();
-            return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
+        if (is_text_type_id((TypeId)b_item._type_id)) {
+            // S2.5.8/S8.1.1: `in` tests what `for … in` walks, so a string or
+            // symbol is tested by code point -- `"a" in "cat"` is true and
+            // `"at" in "cat"` is false. The substring test is `contains`.
+            // Only a one-code-point text can equal one of those items.
+            if (!is_text_type_id(get_type_id(a_item)) || fn_len(a_item) != 1) return BOOL_FALSE;
+            RootFrame roots(2);
+            Rooted<Item> rooted_needle(roots, a_item);
+            Rooted<Item> rooted_text(roots, b_item);
+            int64_t count = fn_len(rooted_text.get());
+            for (int64_t i = 0; i < count; i++) {
+                if (fn_eq(rooted_needle.get(), item_at(rooted_text.get(), i)) == BOOL_TRUE) {
+                    return BOOL_TRUE;
+                }
+            }
+            return BOOL_FALSE;
         }
         if (b_item._type_id == LMD_TYPE_BINARY) {
             Binary* bin = b_item.get_safe_binary();
@@ -4304,7 +4431,7 @@ Type* fn_type(Item item) {
             return (Type*)type;
         }
     }
-    if (resolved_type == LMD_TYPE_ARRAY && item.array && item.array->is_spreadable) {
+    if (item_is_list(item)) {
         // S2.5.1v2: a list is a specialized array and type() names its kind
         type->type = &TYPE_LIST;
         return (Type*)type;
@@ -6713,7 +6840,7 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     return {.item = s2it(result)};
 }
 
-static bool text_item_is_ascii(Item item) {
+bool text_item_is_ascii(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
         String* string = item.get_safe_string();
@@ -6821,11 +6948,11 @@ static int64_t split_utf8_part_count(const char* chars, size_t chars_len) {
 static bool literal_type_pattern_item(Item type_item, Item* literal_item);
 static TypePattern* runtime_pattern_from_type(Type* type);
 
-// split(str, sep) - split string by separator, returns list of strings
+// split(str, sep) - split string by separator; a constructor, so its result
+// is an array of strings (S2.5.7)
 static List* split_string_list(void) {
     List* result = list();
     if (!result) return NULL;
-    result->is_spreadable = 1;
     LaneStorageDesc lane = {};
     if (lambda_type_lane_storage_desc(&TYPE_STRING, &lane)) {
         // Text split has a full inferred string[] result. Construct that
@@ -6892,10 +7019,7 @@ Item fn_split(Item str_item, Item sep_item) {
                 return ItemError;
             }
             List* ps = pattern_split(pattern, str_item, false);
-            if (ps) {
-                ps->is_spreadable = 1;
-                split_adopt_string_lane(ps);
-            }
+            if (ps) split_adopt_string_lane(ps);
             return {.array = ps};
         }
     }
@@ -7056,10 +7180,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
                 return ItemError;
             }
             List* ps = pattern_split(pattern, str_item, keep_delim);
-            if (ps) {
-                ps->is_spreadable = 1;
-                split_adopt_string_lane(ps);
-            }
+            if (ps) split_adopt_string_lane(ps);
             return {.array = ps};
         }
     }
@@ -7625,8 +7746,8 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         pattern_type = LMD_TYPE_STRING;
     }
 
-    // null source -> empty list
-    if (source_type == LMD_TYPE_NULL) { List* e = list(); e->is_spreadable = 1; return {.array = e}; }
+    // find() constructs an array (S2.5.7): `[]` for a null source or no match
+    if (source_type == LMD_TYPE_NULL) return {.array = array()};
 
     if (!is_text_type_id(source_type)) {
         log_debug("fn_find: first argument must be a string or symbol");
@@ -7636,7 +7757,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     const char* str_chars = source_item.get_chars();
     uint32_t str_len = source_item.get_len();
 
-    if (!str_chars || str_len == 0) { List* e = list(); e->is_spreadable = 1; return {.array = e}; }
+    if (!str_chars || str_len == 0) return {.array = array()};
 
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
@@ -7649,13 +7770,10 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
             }
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) {
-                List* e = list();
-                e->is_spreadable = 1;
-                return {.array = e};
+                return {.array = array()};
             }
             int64_t pattern_limit = options_legacy_pattern_limit(options);
             List* r = pattern_find_all_options(pattern, str_chars, str_len, pattern_limit, options.ignore_case);
-            if (r) r->is_spreadable = 1;
             return {.array = r};
         }
     }
@@ -7670,7 +7788,6 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     uint32_t needle_len = pattern_item.get_len();
 
     List* result = list();
-    result->is_spreadable = 1;
     RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
@@ -7694,7 +7811,8 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
                 // The match is not reachable from the result until list_push
                 // finishes, and that push may grow the list and collect.
                 rooted_match.set(m);
-                list_push(rooted_result.get(), {.map = rooted_match.get()});
+                // find() builds an array of matches: the verbatim append
+                array_push_verbatim((Array*)rooted_result.get(), {.map = rooted_match.get()});
                 rooted_match.set((Map*)NULL);
                 pushed++;
             }
@@ -8218,8 +8336,87 @@ static void convert_specialized_to_generic(Array* arr) {
     log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
 }
 
+// S2.5.6: a list written into a sequence slot (`a[i] = v`) splices there --
+// element i is replaced by the list's items and every later index moves. A
+// packed array keeps its lane when every item fits it (a typed array's items
+// were admitted first); otherwise it widens and the sequence is rebuilt.
+static Item array_splice_list_at(Array* arr, int64_t index, Item list) {
+    RootFrame roots(3);
+    Rooted<Array*> rooted_arr(roots, arr);
+    Rooted<Item> rooted_list(roots, list);
+    Rooted<Array*> rooted_snapshot(roots, (Array*)NULL);
+    int64_t count = fn_seq_count(list);
+    if (arr->type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* packed = (ArrayNum*)arr;
+        if (packed->is_view || packed->is_ndim) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "a list cannot splice into an array view or an N-D array");
+            return ItemError;
+        }
+        bool fits = true;
+        for (int64_t j = 0; j < count && fits; j++) {
+            fits = array_num_admits_value(packed, item_at(rooted_list.get(), j));
+        }
+        if (fits) {
+            int64_t length = packed->length;
+            packed = array_num_reserve_capacity(packed, length - 1 + count);
+            if (!packed) return ItemError;
+            size_t width = ELEM_TYPE_SIZE[packed->get_elem_type() >> 4];
+            char* data = (char*)packed->data;
+            memmove(data + (size_t)(index + count) * width, data + (size_t)(index + 1) * width,
+                (size_t)(length - index - 1) * width);
+            packed->length = length - 1 + count;
+            for (int64_t j = 0; j < count; j++) {
+                array_num_store_admitted(packed, index + j, item_at(rooted_list.get(), j));
+            }
+            return ItemNull;
+        }
+        convert_specialized_to_generic(rooted_arr.get());
+    }
+    // Rebuild from a snapshot: the sequence append splices the list at i and
+    // every other item goes back as it was, in the array's own lane.
+    rooted_snapshot.set(array_plain());
+    if (!rooted_snapshot.get()) return ItemError;
+    int64_t length = rooted_arr.get()->length;
+    for (int64_t i = 0; i < length; i++) {
+        array_push_verbatim(rooted_snapshot.get(), array_get(rooted_arr.get(), i));
+    }
+    Array* live = rooted_arr.get();
+    live->length = 0;
+    if (!array_has_native_lane(live)) live->extra = 0;
+    for (int64_t i = 0; i < length; i++) {
+        if (i == index) array_push(rooted_arr.get(), rooted_list.get());
+        else array_push_verbatim(rooted_arr.get(), array_get(rooted_snapshot.get(), i));
+    }
+    return ItemNull;
+}
+
+// S2.6.5: a content write leaves an element's content normalized exactly as
+// if it had been built afresh -- `null` or `""` removes the child, a list
+// splices in place, and strings or binaries that end up adjacent merge. The
+// children are snapshot and appended back through the content append.
+static Item element_content_set(Element* elmt, int64_t index, Item value) {
+    RootFrame roots(3);
+    Rooted<Element*> rooted_elmt(roots, elmt);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Array*> rooted_snapshot(roots, array_plain());
+    if (!rooted_snapshot.get()) return ItemError;
+    int64_t length = elmt->length;
+    for (int64_t i = 0; i < length; i++) {
+        array_push_verbatim(rooted_snapshot.get(), list_get((List*)rooted_elmt.get(), i));
+    }
+    Element* live = rooted_elmt.get();
+    live->length = 0;
+    live->extra = 0;
+    for (int64_t i = 0; i < length; i++) {
+        Item child = i == index ? rooted_value.get() : array_get(rooted_snapshot.get(), i);
+        list_push((List*)rooted_elmt.get(), child);
+    }
+    return ItemNull;
+}
+
 // array indexed assignment: arr[i] = val
-// Handles Array, ArrayInt, ArrayInt64, ArrayFloat
+// Handles Array, ArrayInt, ArrayInt64, ArrayFloat, and element content
 Item fn_array_set(Array* arr, int64_t index, Item value) {
     if (!arr || ((uintptr_t)arr >> 56)) {
         static int _err_count = 0;
@@ -8250,6 +8447,14 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
             "fn_array_set: index %lld out of bounds (length %lld)",
             (long long)index, (long long)len);
         return ItemError;
+    }
+
+    if (arr_type == LMD_TYPE_ELEMENT) {
+        return element_content_set((Element*)arr, index, value);
+    }
+    if (item_is_list(value)) {
+        lambda_array_clear_rep_cert({.array = arr});
+        return array_splice_list_at(arr, index, value);
     }
 
     // A raw mutation may retain an exact proof only when its replacement
@@ -8369,11 +8574,6 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 array_set(arr, index, value);
             }
         }
-        break;
-    }
-    case LMD_TYPE_ELEMENT: {
-        // Element has Item* items — use array_set directly
-        array_set(arr, index, value);
         break;
     }
     default:
@@ -9371,6 +9571,26 @@ static Item cow_clone_one_level(Item source) {
     }
 }
 
+Item slot_image(Item value) {
+    // S2.5.6: a single-value slot of a persistent container -- a map field, an
+    // attribute, an object field -- holds no list; the list is stored as the
+    // array it is. The image is a one-level copy, so the list itself, which may
+    // still be bound and spread elsewhere, keeps its kind.
+    if (!item_is_list(value)) return value;
+    return seq_finish_kind(cow_clone_one_level(value), false);
+}
+
+void lambda_direct_field_store_image(Item owner, int64_t byte_offset, Item list) {
+    // The raw writer had loaded the slot address before this call; the image
+    // copy may move the owner, so the address is re-read from the rooted owner.
+    RootFrame roots(1);
+    Rooted<Item> rooted_owner(roots, owner);
+    Item image = slot_image(list);
+    Map* live = rooted_owner.get().map;
+    if (!live || !live->data) return;
+    *(Container**)((char*)live->data + byte_offset) = image.container;
+}
+
 Item cow_prepare_write(Item old) {
     Container* container = cow_item_container(old);
     if (!container) return old;
@@ -9516,16 +9736,17 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
     if (runtime_value_rep_proves_contract(value, leaf_contract)) {
         return cow_path_set_impl(owner, path, fixed_count, fixed_keys, value, inplace);
     }
-    RootFrame roots(6);
+    RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
-    Rooted<Item> rooted_key0(roots, fixed_count > 0 ? fixed_keys[0] : ItemNull);
-    Rooted<Item> rooted_key1(roots, fixed_count > 1 ? fixed_keys[1] : ItemNull);
-    Rooted<Item> rooted_key2(roots, fixed_count > 2 ? fixed_keys[2] : ItemNull);
+    // the leaf check may allocate; keep the caller's fixed keys alive across it
+    RootSpan key_roots((size_t)fixed_count);
+    Item local_keys[LAMBDA_PATH_KEYS_MAX];
+    Item* keys = key_roots.valid() ? key_roots.items() : local_keys;
+    for (int64_t i = 0; i < fixed_count; i++) keys[i] = fixed_keys[i];
     rooted_value.set(lambda_type_check(rooted_value.get(), leaf_contract, boundary));
     if (get_type_id(rooted_value.get()) == LMD_TYPE_ERROR) return rooted_value.get();
-    Item keys[3] = {rooted_key0.get(), rooted_key1.get(), rooted_key2.get()};
     return cow_path_set_impl(rooted_owner.get(), rooted_path.get(), fixed_count, keys,
         rooted_value.get(), inplace);
 }
@@ -9631,7 +9852,9 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->last = added;
     new_type->length = old_count + 1;
     new_type->byte_size = new_size;
-    new_type->type_index = ((ArrayList*)context->type_list)->length;
+    // execution-owned shapes are reached through their container, never the
+    // cached compiler type list or its concurrent satellite readers (D8.5.1v7).
+    new_type->type_index = -1;
     // the copied chain above carries old_type's entries verbatim, spread slots included
     new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
@@ -9646,7 +9869,6 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->struct_name = old_type->struct_name;
     new_type->is_private_clone = true;
     typemap_hash_build(new_type, context->pool);
-    arraylist_append((ArrayList*)context->type_list, new_type);
 
     // The candidate is private. Publishing the new shape/data pair together
     // makes the additional open field immediately match its physical slot.
@@ -9852,21 +10074,25 @@ Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
         boundary);
 }
 
-// T27-4: the fixed-descriptor twin of the two checked path setters above, for
-// one to three keys. The compiler resolved `leaf_contract` from the declared
-// root and the key kinds; bit 16+i of `shape` marks key i as an index, whose
-// exactness is the one part of that resolution only the runtime can confirm.
-// A proven root writes through one rooted walk with no path array and no
-// per-store contract walk; everything else materializes the descriptor and
-// takes the unchanged transactional path (D3.2.4v3).
-Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item key1,
-        Item key2, int64_t shape, Type* expected, Type* leaf_contract) {
+// T27-4: the fixed-descriptor twin of the two checked path setters above. The
+// compiler resolved `leaf_contract` from the declared root and the key kinds;
+// bit 16+i of `shape` marks key i as an index, whose exactness is the one part
+// of that resolution only the runtime can confirm. A proven root writes through
+// one rooted walk with no path array and no per-store contract walk; everything
+// else materializes the descriptor and takes the unchanged transactional path
+// (D3.2.4v3). `keys` is a caller span of any length up to LAMBDA_PATH_KEYS_MAX:
+// the cap used to be three keys, and a deeper typed store (`a.l0[i][j][k].f`)
+// then built a heap path array on every write.
+Item lambda_map_path_set_checked_keys(Item owner, Item value, const Item* keys,
+        int64_t shape, Type* expected, Type* leaf_contract) {
     int64_t count = shape & 0xff;
     bool inplace = (shape & 0x100) != 0;
     const char* boundary = "typed nested map assignment";
     Type* contract = runtime_boundary_unwrap_type(expected);
-    Item keys[3] = {key0, key1, key2};
-    bool keys_match_leaf = leaf_contract && count >= 1 && count <= 3 &&
+    if (count < 1 || count > LAMBDA_PATH_KEYS_MAX) {
+        return lambda_type_error(value, expected, boundary);
+    }
+    bool keys_match_leaf = leaf_contract &&
         contract && contract->type_id == LMD_TYPE_MAP;
     for (int64_t i = 0; keys_match_leaf && i < count; i++) {
         int64_t ignored = 0;
@@ -9878,16 +10104,17 @@ Item lambda_map_path_set_checked_fixed(Item owner, Item value, Item key0, Item k
         return runtime_map_path_write_proven(owner, ItemNull, count, keys, value,
             leaf_contract, boundary, inplace);
     }
-    RootFrame roots(6);
+    RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_value(roots, value);
-    Rooted<Item> rooted_key0(roots, key0);
-    Rooted<Item> rooted_key1(roots, key1);
-    Rooted<Item> rooted_key2(roots, key2);
+    // array_plain may collect; root the caller's keys before building the path
+    RootSpan key_roots((size_t)count);
+    Item local_keys[LAMBDA_PATH_KEYS_MAX];
+    Item* rooted_keys = key_roots.valid() ? key_roots.items() : local_keys;
+    for (int64_t i = 0; i < count; i++) rooted_keys[i] = keys[i];
     Rooted<Item> rooted_path(roots, {.array = array_plain()});
-    Rooted<Item>* rooted_keys[3] = {&rooted_key0, &rooted_key1, &rooted_key2};
-    for (int64_t i = 0; i < count && i < 3; i++) {
-        array_push_verbatim(rooted_path.get().array, rooted_keys[i]->get());
+    for (int64_t i = 0; i < count; i++) {
+        array_push_verbatim(rooted_path.get().array, rooted_keys[i]);
     }
     return inplace
         ? lambda_map_path_set_checked_inplace(rooted_owner.get(), rooted_path.get(),
@@ -9996,6 +10223,24 @@ Item lambda_array_empty_for_contract(Type* expected, const char* boundary) {
     return lambda_type_check({.array = empty}, expected, boundary);
 }
 
+// A list written into a typed array splices its items there (S2.5.6), so
+// each item -- not the list -- crosses the element contract. The admitted
+// items stay a list, which the store then splices.
+static Item runtime_admit_list_items(Item list, Type* element_type, const char* boundary) {
+    RootFrame roots(2);
+    Rooted<Item> rooted_list(roots, list);
+    Rooted<Array*> rooted_admitted(roots, array_plain());
+    if (!rooted_admitted.get()) return ItemError;
+    int64_t count = fn_seq_count(list);
+    for (int64_t j = 0; j < count; j++) {
+        Item checked = lambda_type_check(item_at(rooted_list.get(), j), element_type, boundary);
+        if (get_type_id(checked) == LMD_TYPE_ERROR) return checked;
+        array_push_verbatim(rooted_admitted.get(), checked);
+    }
+    rooted_admitted.get()->is_spreadable = 1;
+    return {.array = rooted_admitted.get()};
+}
+
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, bool publish_in_place, const LaneStorageDesc* lane_hint) {
     if (cow_profile_enabled()) {
@@ -10007,7 +10252,9 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     // ArrayNum-to-Array degradation or leak through a COW snapshot.
     Type* element_type = runtime_array_contract_element(expected);
     if (!element_type) return lambda_type_error(value, expected, boundary);
-    Item checked_value = lambda_type_check(value, element_type, boundary);
+    Item checked_value = item_is_list(value)
+        ? runtime_admit_list_items(value, element_type, boundary)
+        : lambda_type_check(value, element_type, boundary);
     if (get_type_id(checked_value) == LMD_TYPE_ERROR) return checked_value;
 
     // A lane tag proves neither rank nor a named record's field layout. Admit
@@ -10375,6 +10622,23 @@ static Item lambda_array_push_checked_impl(Item owner, Item value, Type* expecte
         const char* boundary, bool publish_in_place) {
     Type* element_type = runtime_array_contract_element(expected);
     if (!element_type) return lambda_type_error(value, expected, boundary);
+    if (item_is_list(value)) {
+        // S2.5.6: a pushed list splices. Every item is admitted before the
+        // first is pushed, so a bad item cannot leave a partial append.
+        RootFrame roots(2);
+        Rooted<Item> rooted_owner(roots, owner);
+        Rooted<Item> rooted_items(roots, runtime_admit_list_items(value, element_type,
+            boundary));
+        if (item_is_error(rooted_items.get())) return rooted_items.get();
+        int64_t count = fn_seq_count(rooted_items.get());
+        for (int64_t j = 0; j < count; j++) {
+            Item next = lambda_array_push_checked_impl(rooted_owner.get(),
+                item_at(rooted_items.get(), j), expected, boundary, publish_in_place);
+            if (item_is_error(next)) return next;
+            rooted_owner.set(next);
+        }
+        return rooted_owner.get();
+    }
 
     RootFrame roots(3);
     Rooted<Item> rooted_owner(roots, owner);
@@ -10575,45 +10839,42 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
 // in-place writes land in the caller's container and no writeback is required.
 //
 // `owner` must already be the caller's detached root.  `path` selects the
-// dynamic descriptor form; otherwise the three rooted fixed operands carry a
-// compiler-proven descriptor.  Keeping one walker makes both ABI shapes obey
-// the same S9.2.2 ownership and shape checks.
+// dynamic descriptor form; otherwise `fixed_count` keys arrive in a caller span
+// (rooted here, since the caller's memory need not be GC-visible).  Keeping one
+// walker makes both ABI shapes obey the same S9.2.2 ownership and shape checks.
 // `value_leaf` serves a builtin mutator's place (`push(m.a, v)`): a link that
 // holds no container ends the walk and is returned as the value the mutator
 // would have read, so the mutator reports its own error exactly as before.
 static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
-        Item key0, Item key1, Item key2, bool value_leaf = false) {
+        const Item* fixed_keys, bool value_leaf = false) {
     bool dynamic_path = get_type_id(path) != LMD_TYPE_NULL;
     if (dynamic_path && (get_type_id(path) != LMD_TYPE_ARRAY || !path.array ||
             path.array->length <= 0)) {
         log_error("cow path borrow requires a non-empty array path");
         return ItemError;
     }
-    if (!dynamic_path && (fixed_count < 1 || fixed_count > 3)) {
-        log_error("cow fixed path borrow requires one to three keys");
+    if (!dynamic_path && (fixed_count < 1 || fixed_count > LAMBDA_PATH_KEYS_MAX)) {
+        log_error("cow fixed path borrow requires 1..%d keys", (int)LAMBDA_PATH_KEYS_MAX);
         return ItemError;
     }
-    RootFrame roots(8);
+    RootFrame roots(5);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_current(roots, owner);
     Rooted<Item> rooted_child(roots, ItemNull);
     Rooted<Item> rooted_key(roots, ItemNull);
-    Rooted<Item> rooted_key0(roots, key0);
-    Rooted<Item> rooted_key1(roots, key1);
-    Rooted<Item> rooted_key2(roots, key2);
+    // a GC-free context (no runtime) has no span and needs no root
+    RootSpan key_roots(dynamic_path ? 0 : (size_t)fixed_count);
+    Item local_keys[LAMBDA_PATH_KEYS_MAX];
+    Item* fixed_rooted = dynamic_path ? NULL
+        : key_roots.valid() ? key_roots.items() : local_keys;
+    for (int64_t i = 0; !dynamic_path && i < fixed_count; i++) {
+        fixed_rooted[i] = fixed_keys[i];
+    }
     int64_t count = dynamic_path ? rooted_path.get().array->length : fixed_count;
 
     for (int64_t i = 0; i < count; i++) {
-        if (dynamic_path) {
-            rooted_key.set(item_at(rooted_path.get(), i));
-        } else if (i == 0) {
-            rooted_key.set(rooted_key0.get());
-        } else if (i == 1) {
-            rooted_key.set(rooted_key1.get());
-        } else {
-            rooted_key.set(rooted_key2.get());
-        }
+        rooted_key.set(dynamic_path ? item_at(rooted_path.get(), i) : fixed_rooted[i]);
         if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) {
             return value_leaf ? ItemNull : ItemError;
         }
@@ -10637,12 +10898,18 @@ static Item cow_path_borrow_impl(Item owner, Item path, int64_t fixed_count,
 }
 
 Item cow_path_borrow(Item owner, Item path) {
-    return cow_path_borrow_impl(owner, path, 0, ItemNull, ItemNull, ItemNull);
+    return cow_path_borrow_impl(owner, path, 0, NULL);
 }
 
 Item cow_path_borrow_fixed(Item owner, int64_t count, Item key0, Item key1,
         Item key2) {
-    return cow_path_borrow_impl(owner, ItemNull, count, key0, key1, key2);
+    Item keys[3] = {key0, key1, key2};
+    return cow_path_borrow_impl(owner, ItemNull, count, keys);
+}
+
+// the key-span form, for a descriptor of any length the compiler evaluated
+Item cow_path_borrow_keys(Item owner, const Item* keys, int64_t count) {
+    return cow_path_borrow_impl(owner, ItemNull, count, keys);
 }
 
 // Tune31 Phase III A1: a typed `var record.field` borrow can read its known
@@ -10694,12 +10961,17 @@ Item cow_path_borrow_typed_map_field(Item owner, TypeMap* expected_shape,
 // place borrow, yielding the installed private leaf -- or, for a place that
 // holds no container, the value itself for the mutator to reject.
 Item cow_place_leaf(Item owner, Item path) {
-    return cow_path_borrow_impl(owner, path, 0, ItemNull, ItemNull, ItemNull, true);
+    return cow_path_borrow_impl(owner, path, 0, NULL, true);
 }
 
 Item cow_place_leaf_fixed(Item owner, int64_t count, Item key0, Item key1,
         Item key2) {
-    return cow_path_borrow_impl(owner, ItemNull, count, key0, key1, key2, true);
+    Item keys[3] = {key0, key1, key2};
+    return cow_path_borrow_impl(owner, ItemNull, count, keys, true);
+}
+
+Item cow_place_leaf_keys(Item owner, const Item* keys, int64_t count) {
+    return cow_path_borrow_impl(owner, ItemNull, count, keys, true);
 }
 
 // NM-O8: `publish_in_place` skips the ROOT detach. A `var` parameter's root was
@@ -10764,14 +11036,14 @@ static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
         log_error("cow path mutation requires a non-empty array path");
         return ItemError;
     }
-    if (!dynamic_path && (fixed_count < 1 || fixed_count > 3)) {
-        log_error("cow fixed path mutation requires one to three keys");
+    if (!dynamic_path && (fixed_count < 1 || fixed_count > LAMBDA_PATH_KEYS_MAX)) {
+        log_error("cow fixed path mutation requires 1..%d keys", (int)LAMBDA_PATH_KEYS_MAX);
         return ItemError;
     }
 
     // Every spine link may allocate while it is detached, so all live owners,
     // keys, and the incoming value need exact roots across raw setter calls.
-    RootFrame roots(10);
+    RootFrame roots(7);
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_path(roots, path);
     Rooted<Item> rooted_value(roots, value);
@@ -10779,9 +11051,15 @@ static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
     Rooted<Item> rooted_child(roots, ItemNull);
     Rooted<Item> rooted_key(roots, ItemNull);
     Rooted<Item> rooted_replacement(roots, ItemNull);
-    Rooted<Item> rooted_key0(roots, dynamic_path ? ItemNull : fixed_keys[0]);
-    Rooted<Item> rooted_key1(roots, !dynamic_path && fixed_count > 1 ? fixed_keys[1] : ItemNull);
-    Rooted<Item> rooted_key2(roots, !dynamic_path && fixed_count > 2 ? fixed_keys[2] : ItemNull);
+    // fixed keys arrive in caller memory the collector cannot see; a GC-free
+    // context (no runtime) has no span and needs no root, as for RootFrame
+    RootSpan key_roots(dynamic_path ? 0 : (size_t)fixed_count);
+    Item local_keys[LAMBDA_PATH_KEYS_MAX];
+    Item* fixed_rooted = dynamic_path ? NULL
+        : key_roots.valid() ? key_roots.items() : local_keys;
+    for (int64_t i = 0; !dynamic_path && i < fixed_count; i++) {
+        fixed_rooted[i] = fixed_keys[i];
+    }
     int64_t count = dynamic_path ? rooted_path.get().array->length : fixed_count;
 
     rooted_current.set(publish_in_place ? rooted_owner.get()
@@ -10796,8 +11074,7 @@ static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
         Item packed_keys[LAMBDA_ARRAY_NUM_MAX_NDIM];
         for (int64_t i = 0; i < count; i++) {
             packed_keys[i] = dynamic_path ? item_at(rooted_path.get(), i)
-                : i == 0 ? rooted_key0.get() : i == 1 ? rooted_key1.get()
-                : rooted_key2.get();
+                : fixed_rooted[i];
         }
         if (cow_packed_index_store(rooted_current.get(), count, packed_keys,
                 rooted_value.get())) {
@@ -10806,12 +11083,7 @@ static Item cow_path_set_impl(Item owner, Item path, int64_t fixed_count,
     }
 
     for (int64_t i = 0; i < count; i++) {
-        if (dynamic_path) {
-            rooted_key.set(item_at(rooted_path.get(), i));
-        } else {
-            rooted_key.set(i == 0 ? rooted_key0.get()
-                : i == 1 ? rooted_key1.get() : rooted_key2.get());
-        }
+        rooted_key.set(dynamic_path ? item_at(rooted_path.get(), i) : fixed_rooted[i]);
         if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) return ItemError;
         if (i + 1 == count) {
             if (get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(), rooted_value.get())) ==
@@ -11000,8 +11272,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_e = new_e->next;
     }
 
-    // create new TypeMap or TypeElmt (never mutate shared types)
-    ArrayList* tl = (ArrayList*)context->type_list;
+    // rebuilt shapes belong to this execution pool, not the retained module's
+    // compiler registry; the container owns their direct reference (D8.5.1v7).
 
     if (container_type_id == LMD_TYPE_ELEMENT) {
         TypeElmt* old_et = (TypeElmt*)old_map_type;
@@ -11020,12 +11292,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         // stop being an instance of its type and lose its methods (LR03-8).
         new_et->nominal = old_map_type->nominal;
         new_et->is_nominal = old_map_type->is_nominal;
-        new_et->type_index = tl->length;
+        new_et->type_index = -1;
 
         // Populate/grow hash table for O(1) property lookup.
         typemap_hash_build((TypeMap*)new_et, context->pool);
 
-        arraylist_append(tl, new_et);
         *type_slot = new_et;
     } else {
         TypeMap* new_mt = (TypeMap*)alloc_type(context->pool,
@@ -11036,7 +11307,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_mt->byte_size = new_byte_size;
         new_mt->nominal = old_map_type->nominal;   // S2.1.4/OB16, see above
         new_mt->is_nominal = old_map_type->is_nominal;
-        new_mt->type_index = tl->length;
+        new_mt->type_index = -1;
         new_mt->has_named_shape = old_map_type->has_named_shape;
         new_mt->is_trusted_contract = false;
         new_mt->struct_name = old_map_type->struct_name;
@@ -11064,7 +11335,6 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             }
         }
 
-        arraylist_append(tl, new_mt);
         *type_slot = new_mt;
     }
 
@@ -11244,7 +11514,46 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     return true;
 }
 
+// A plain unary `T[]` -- spelled as the array operator or as the homogeneous
+// TypeArray carrier (`nested`, no per-slot tuple patterns) -- constrains only
+// its elements: the validator checks a TypeArray's length for tuple patterns
+// alone, and a refined contract keeps its constrained wrapper here. Once every
+// element is admitted under T, the whole-array validator walk only repeats
+// that proof, deeply, through every nested element graph (T27-1). Missing the
+// TypeArray spelling sent every empty `[]` bound to a declared `int[]` or
+// `Node[]` field through a full validator setup.
+static bool runtime_array_contract_is_plain(Type* expected) {
+    Type* outer = runtime_boundary_unwrap_type(expected);
+    if (!outer) return false;
+    if (outer->type_id == LMD_TYPE_TYPE && outer->kind == TYPE_KIND_UNARY) {
+        return ((TypeUnary*)outer)->op == OPERATOR_ARRAY;
+    }
+    if (outer == &TYPE_ARRAY || outer == &TYPE_LIST ||
+            (outer->type_id != LMD_TYPE_ARRAY && outer->type_id != LMD_TYPE_ARRAY_NUM)) {
+        return false;
+    }
+    TypeArray* homogeneous = (TypeArray*)outer;
+    return homogeneous->nested && !homogeneous->item_patterns;
+}
+
+static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type** env,
+        Item* converted);
+
+// S11.1.6/S2.5.6: an annotation checks a list without changing its kind. When
+// admission packs or rebuilds the list, the fresh container inherits the bit.
 static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
+        Item* converted) {
+    bool is_list = item_is_list(value);
+    if (!runtime_type_admit_array_env_impl(value, expected, env, converted)) return false;
+    if (is_list) {
+        TypeId type_id = get_type_id(*converted);
+        if (type_id == LMD_TYPE_ARRAY) converted->array->is_spreadable = 1;
+        else if (type_id == LMD_TYPE_ARRAY_NUM) converted->array_num->is_spreadable = 1;
+    }
+    return true;
+}
+
+static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type** env,
         Item* converted) {
     Type* element_type = runtime_array_contract_element(expected);
     TypeId source_type = get_type_id(value);
@@ -11377,11 +11686,8 @@ static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
             // proof -- deeply, through every nested element graph. prettier_ast
             // rebuilt uncertified `Doc[]` accumulators per step and paid the
             // walk each time (T27-1, D3.2.2 "on first crossing").
-            Type* outer = runtime_boundary_unwrap_type(expected);
-            bool plain_array = outer && outer->type_id == LMD_TYPE_TYPE &&
-                outer->kind == TYPE_KIND_UNARY &&
-                ((TypeUnary*)outer)->op == OPERATOR_ARRAY;
-            if (!plain_array && !lambda_type_matches(rooted_value.get(), expected)) {
+            if (!runtime_array_contract_is_plain(expected) &&
+                    !lambda_type_matches(rooted_value.get(), expected)) {
                 return false;
             }
             ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
@@ -11421,8 +11727,13 @@ static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
         return true;
     }
 
+    // The candidate only has to leave the source untouched while its elements
+    // are admitted and replaced, which a one-level COW copy does (D4.4.2): its
+    // children are shared and marked, never rewritten here. fn_mutable_value
+    // deep-cloned the whole element graph instead -- every admission of an
+    // uncertified `Doc[]` copied the entire document subtree (prettier_ast2).
     RootFrame roots(4);
-    Rooted<Item> rooted_candidate(roots, fn_mutable_value(value));
+    Rooted<Item> rooted_candidate(roots, cow_clone_one_level(value));
     Rooted<Item> rooted_element(roots, ItemNull);
     Rooted<Item> rooted_converted(roots, ItemNull);
     Rooted<ArrayNum*> rooted_packed(roots, (ArrayNum*)NULL);
@@ -11479,7 +11790,10 @@ static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
         }
         rooted_candidate.set(rebuilt);
     }
-    if (!lambda_type_matches(rooted_candidate.get(), expected)) return false;
+    // every element was admitted above; only a non-plain contract adds a
+    // whole-array constraint for the validator to check (T27-1)
+    if (!runtime_array_contract_is_plain(expected) &&
+            !lambda_type_matches(rooted_candidate.get(), expected)) return false;
     ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
     if (!cert) return false;
     lambda_array_install_rep_cert(rooted_candidate.get(), cert);
@@ -11838,6 +12152,15 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
 }
 
 Item fn_map_set(Item map_item, Item key, Item value) {
+    if (item_is_list(value)) {
+        // a field or attribute stores the list's array image (S2.5.6); the
+        // copy is a safepoint, so the owner and key stay rooted across it
+        RootFrame roots(2);
+        Rooted<Item> rooted_map(roots, map_item);
+        Rooted<Item> rooted_key(roots, key);
+        Item image = slot_image(value);
+        return fn_map_set(rooted_map.get(), rooted_key.get(), image);
+    }
     TypeId map_type_id = get_type_id(map_item);
 
     // VMap: in-place mutation via vtable
