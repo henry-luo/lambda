@@ -169,11 +169,19 @@ bool ast_index_publish_scope(AstIndex* index, NameScope* scope) {
     return true;
 }
 
-static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry) {
-    if (!entry || !ast_index_publish_scope(index, entry->scope)) return AST_BINDING_ID_INVALID;
+AstBindingId ast_index_find_binding_entry(const AstIndex* index,
+        const NameEntry* entry) {
+    if (!index || !entry) return AST_BINDING_ID_INVALID;
     for (uint32_t i = 0; i < index->binding_count; i++) {
         if (index->bindings[i] == entry) return i;
     }
+    return AST_BINDING_ID_INVALID;
+}
+
+static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry) {
+    if (!entry || !ast_index_publish_scope(index, entry->scope)) return AST_BINDING_ID_INVALID;
+    AstBindingId existing = ast_index_find_binding_entry(index, entry);
+    if (existing != AST_BINDING_ID_INVALID) return existing;
     if (index->binding_count >= index->capacity) return AST_BINDING_ID_INVALID;
     AstBindingId id = index->binding_count++;
     index->bindings[id] = entry;

@@ -40702,6 +40702,16 @@ static AstFuncNode* mir_indexed_call_enclosing_function(const AstIndex* index,
     return (AstFuncNode*)node;
 }
 
+static bool mir_indexed_call_is_task_launch(const AstIndex* index,
+        AstNodeId call_id) {
+    if (!index || call_id >= index->count) return false;
+    AstNodeId parent_id = ast_index_parent_id(index, call_id);
+    AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
+    AstNode* call = index->nodes[call_id];
+    return parent && parent->node_type == AST_NODE_START &&
+        ((AstStartNode*)parent)->call == call;
+}
+
 // The reverse callee table is the sole direct-call evidence source. The
 // surrounding prepass still records escape and return-shape facts, which are
 // not call edges and retain their distinct dataflow meaning (D8.2.4).
@@ -40718,6 +40728,10 @@ static void prepass_collect_indexed_call_sites(MirTranspiler* mt,
             AstNodeId call_id = calls[i];
             AstNode* node = call_id < index->count ? index->nodes[call_id] : NULL;
             if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
+            // `start(f, [args])` retains a syntactic call for signature
+            // validation, but its array is the task ABI vector, not f's first
+            // argument. The ordinary walk records f as escaped below.
+            if (mir_indexed_call_is_task_launch(index, call_id)) continue;
             mt->prepass_enclosing = mir_indexed_call_enclosing_function(index, call_id);
             (void)mir_callsite_record(mt, (AstCallNode*)node);
         }

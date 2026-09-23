@@ -698,6 +698,8 @@ AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
                                    bool include_node);
 bool ast_index_node_is_function(const AstNode* node);
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
+AstBindingId ast_index_find_binding_entry(const AstIndex* index,
+                                          const NameEntry* entry);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
 // NameScope owns the shared pointer-identity lookup table. Both front ends

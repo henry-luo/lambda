@@ -2663,9 +2663,8 @@ static int jm_typed_array_parameter_kind_impl(JsMirTranspiler* mt,
     int kind = JM_TYPED_ARRAY_KIND_UNKNOWN;
     int call_count = 0;
     AstIndex* index = &mt->tp->ast_index;
-    AstBindingId binding_id = function->node->entry && function->node->entry->node
-        ? ast_index_binding_id(index, function->node->entry->node)
-        : AST_BINDING_ID_INVALID;
+    AstBindingId binding_id = ast_index_find_binding_entry(index,
+        function->node->entry);
     uint32_t indexed_call_count = 0;
     const AstNodeId* call_ids = ast_index_callee_calls(index, binding_id,
         &indexed_call_count);
@@ -3229,14 +3228,11 @@ static bool jm_literal_shape_property_supported(JsMirTranspiler* mt,
     return true;
 }
 
-static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
-        JsObjectNode* object) {
-    if (!mt || !mt->tp || !object) return false;
+static int jm_literal_shape_count_static_field_uses(JsMirTranspiler* mt,
+        JsObjectNode* object, const AstNodeId* member_ids,
+        uint32_t member_count) {
+    if (!mt || !mt->tp || !object) return -1;
     AstIndex* index = &mt->tp->ast_index;
-    AstNodeId object_id = ast_index_find(index, (AstNode*)object);
-    uint32_t member_count = 0;
-    const AstNodeId* member_ids = ast_index_object_member_uses(index, object_id,
-        &member_count);
     int static_field_uses = 0;
     for (uint32_t i = 0; i < member_count; i++) {
         JsAstNode* node = (JsAstNode*)index->nodes[member_ids[i]];
@@ -3248,11 +3244,11 @@ static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
         String* member_name = ((JsIdentifierNode*)member->property)->name;
         for (JsAstNode* property_node = object->properties; property_node;
                 property_node = property_node->next) {
-            if (property_node->node_type != AST_NODE_PROPERTY) return false;
+            if (property_node->node_type != AST_NODE_PROPERTY) return -1;
             String* field_name = NULL;
             if (!jm_literal_shape_property_supported(mt,
                     (JsPropertyNode*)property_node, &field_name, NULL)) {
-                return false;
+                return -1;
             }
             if (field_name && member_name && field_name->len == member_name->len &&
                     memcmp(field_name->chars, member_name->chars,
@@ -3261,6 +3257,45 @@ static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
                 break;
             }
         }
+    }
+    return static_field_uses;
+}
+
+static bool jm_literal_shape_has_static_field_use(JsMirTranspiler* mt,
+        JsObjectNode* object) {
+    if (!mt || !mt->tp || !object) return false;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId object_id = ast_index_find(index, (AstNode*)object);
+    uint32_t member_count = 0;
+    const AstNodeId* member_ids = ast_index_object_member_uses(index, object_id,
+        &member_count);
+    int static_field_uses = jm_literal_shape_count_static_field_uses(mt, object,
+        member_ids, member_count);
+    if (static_field_uses < 0) return false;
+
+    // The reverse member table is exact-node keyed. Also follow the literal's
+    // declaration binding so `const point = {...}; point.x` publishes its
+    // construction layout before lowering either field access.
+    AstNodeId parent_id = ast_index_parent_id(index, object_id);
+    AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
+    if (!parent || parent->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            ((JsVariableDeclaratorNode*)parent)->init != (JsAstNode*)object) {
+        return static_field_uses >= 2;
+    }
+    JsAstNode* declaration_id = ((JsVariableDeclaratorNode*)parent)->id;
+    AstBindingId binding_id = ast_index_binding_id(index,
+        (AstNode*)declaration_id);
+    uint32_t use_count = 0;
+    const AstNodeId* use_ids = ast_index_binding_uses(index, binding_id,
+        &use_count);
+    for (uint32_t use_index = 0; use_index < use_count; use_index++) {
+        uint32_t binding_member_count = 0;
+        const AstNodeId* binding_member_ids = ast_index_object_member_uses(index,
+            use_ids[use_index], &binding_member_count);
+        int binding_uses = jm_literal_shape_count_static_field_uses(mt, object,
+            binding_member_ids, binding_member_count);
+        if (binding_uses < 0) return false;
+        static_field_uses += binding_uses;
     }
     // A physical guard is intentionally not emitted for a one-off field
     // lookup: its code cost exceeds the one generic NameId lookup it replaces.
@@ -3408,8 +3443,8 @@ static bool jm_recursive_literal_member_targets_function(JsMirTranspiler* mt,
     if (!consumer || parameter_index < 0) return false;
 
     AstIndex* index = &mt->tp->ast_index;
-    AstBindingId consumer_binding = consumer->entry && consumer->entry->node
-        ? ast_index_binding_id(index, consumer->entry->node) : AST_BINDING_ID_INVALID;
+    AstBindingId consumer_binding = ast_index_find_binding_entry(index,
+        consumer->entry);
     uint32_t call_count = 0;
     const AstNodeId* call_ids = ast_index_callee_calls(index, consumer_binding,
         &call_count);
@@ -3437,18 +3472,11 @@ static int jm_recursive_literal_static_field_uses(JsMirTranspiler* mt,
         int field_count) {
     if (!mt || !mt->tp || !function || !fields || field_count <= 0) return 0;
     AstIndex* index = &mt->tp->ast_index;
-    AstBindingId binding_id = function->entry && function->entry->node
-        ? ast_index_binding_id(index, function->entry->node) : AST_BINDING_ID_INVALID;
-    uint32_t call_count = 0;
-    const AstNodeId* call_ids = ast_index_callee_calls(index, binding_id,
-        &call_count);
     int uses = 0;
-    for (uint32_t call_index = 0; call_index < call_count; call_index++) {
-        uint32_t member_count = 0;
-        const AstNodeId* member_ids = ast_index_object_member_uses(index,
-            call_ids[call_index], &member_count);
-        for (uint32_t member_index = 0; member_index < member_count; member_index++) {
-            JsAstNode* node = (JsAstNode*)index->nodes[member_ids[member_index]];
+    // A returned node can reach a field through a consumer parameter, so its
+    // source call does not directly own the eventual member expression.
+    for (AstNodeId node_id = 0; node_id < index->count; node_id++) {
+        JsAstNode* node = (JsAstNode*)index->nodes[node_id];
         if (!node || node->node_type != AST_NODE_MEMBER_EXPR) continue;
         JsMemberNode* member = (JsMemberNode*)node;
         if (member->computed || !member->property ||
@@ -3459,7 +3487,6 @@ static int jm_recursive_literal_static_field_uses(JsMirTranspiler* mt,
         }
         String* name = ((JsIdentifierNode*)member->property)->name;
         if (jm_literal_shape_field_name_matches(fields, field_count, name)) uses++;
-        }
     }
     return uses;
 }
@@ -3525,9 +3552,10 @@ void jm_plan_literal_field_shapes(JsMirTranspiler* mt) {
             returns[return_count++] = (JsObjectNode*)expression;
             has_recursive_call = has_recursive_call || return_has_recursive_call;
         }
+        int static_field_uses = jm_recursive_literal_static_field_uses(mt,
+            function, fields, field_count);
         if (!supported || return_count < 2 || !has_recursive_call ||
-                jm_recursive_literal_static_field_uses(mt, function, fields,
-                    field_count) < 2) {
+                static_field_uses < 2) {
             continue;
         }
         TypeMap* shape = jm_build_static_shape(mt, fields, field_count);
@@ -3580,8 +3608,8 @@ static TypeMap* jm_literal_shape_for_parameter_candidate(JsMirTranspiler* mt,
         &parameter_index);
     if (!mt || !mt->tp || !function || parameter_index < 0) return NULL;
     AstIndex* index = &mt->tp->ast_index;
-    AstBindingId binding_id = function->entry && function->entry->node
-        ? ast_index_binding_id(index, function->entry->node) : AST_BINDING_ID_INVALID;
+    AstBindingId binding_id = ast_index_find_binding_entry(index,
+        function->entry);
     uint32_t call_count = 0;
     const AstNodeId* call_ids = ast_index_callee_calls(index, binding_id,
         &call_count);
@@ -9271,8 +9299,10 @@ static MirValue jm_emit_object_value(JsMirTranspiler* mt,
         return jm_expression_value(mt, (JsAstNode*)obj, object, LMD_TYPE_MAP,
             VALUE_REP_ITEM);
     }
-    JsStaticLiteralRecipe* static_recipe = jm_static_composite_literal_recipe(mt,
-        (JsAstNode*)obj);
+    // An exact field plan must construct the matching layout; a generic
+    // composite recipe would force its guarded accesses onto fallback slots.
+    JsStaticLiteralRecipe* static_recipe = literal_shape ? NULL :
+        jm_static_composite_literal_recipe(mt, (JsAstNode*)obj);
     if (static_recipe) {
         MIR_reg_t object = jm_call_1(mt, "js_static_literal_from_recipe", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)static_recipe));
