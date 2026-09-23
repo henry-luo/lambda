@@ -3797,41 +3797,52 @@ static int behavior_init_control_document_order(ArrayListValue left, ArrayListVa
 }
 
 static void behavior_init_control(DomDocument* doc, DocState* state, View* view,
-                                  int* out_count) {
+                                  int* out_count, BehaviorInitPhaseTiming* timing) {
     if (!doc || !state || !view || !view->is_element()) return;
     DomElement* elem = lam::dom_require_element(view);
     if (elem->doc != doc || !elem->form_control() ||
         form_control_behavior_inited(state, view)) {
         return;
     }
+    if (timing) timing->candidate_control_count++;
     // Give the document its evaluator here rather than at load, so only a
     // document that actually owns a control the package governs pays for one.
     // A thread holds a single Runtime, so an unnecessary evaluator denies it
     // to a Lambda-script subdocument (EO4).
+    uint64_t evaluator_start = timing ? time_now_ns() : 0;
     radiant_document_ensure_evaluator(doc);
+    if (timing) {
+        timing->evaluator_ms += time_elapsed_ms_f(evaluator_start, time_now_ns());
+    }
     // The bit is recorded only when a template actually claimed init, because
     // it creates durable ViewState. An unclaimed control is re-offered next
     // phase; that failed match does not change the state-store shape.
-    if (dispatch_behavior_handler(nullptr, view, "init", nullptr, nullptr)) {
+    uint64_t dispatch_start = timing ? time_now_ns() : 0;
+    bool initialized = dispatch_behavior_handler(nullptr, view, "init", nullptr, nullptr);
+    if (timing) {
+        timing->handler_dispatch_ms += time_elapsed_ms_f(dispatch_start, time_now_ns());
+    }
+    if (initialized) {
         form_control_set_behavior_inited(state, view, true);
         (*out_count)++;
+        if (timing) timing->initialized_control_count++;
     }
 }
 
 static void behavior_init_visit(DomNode* node, DomDocument* doc, DocState* state,
-                                int* out_count) {
+                                int* out_count, BehaviorInitPhaseTiming* timing) {
     if (!node) return;
     if (node->is_element()) {
         View* view = static_cast<View*>(node);
-        behavior_init_control(doc, state, view, out_count);
+        behavior_init_control(doc, state, view, out_count, timing);
         DomElement* elem = static_cast<DomElement*>(node);
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            behavior_init_visit(child, doc, state, out_count);
+            behavior_init_visit(child, doc, state, out_count, timing);
         }
     }
 }
 
-void radiant_run_behavior_init(DomDocument* doc) {
+void radiant_run_behavior_init(DomDocument* doc, BehaviorInitPhaseTiming* timing) {
     if (!doc || !doc->behavior_init_pending) return;
     // Cleared up front: a handler may create a control (and re-arm the gate),
     // and that control belongs to the next phase, not to this walk.
@@ -3843,19 +3854,31 @@ void radiant_run_behavior_init(DomDocument* doc) {
     int count = 0;
     // Initial handlers commonly seed both :valid and :invalid. Apply their
     // final pseudo-state together; nothing can paint between init turns.
+    uint64_t pseudo_state_start = timing ? time_now_ns() : 0;
     pseudo_state_batch_begin(state);
+    if (timing) {
+        timing->pseudo_state_begin_ms += time_elapsed_ms_f(pseudo_state_start, time_now_ns());
+    }
     if (controls) {
+        uint64_t sort_start = timing ? time_now_ns() : 0;
         arraylist_sort(controls, behavior_init_control_document_order);
+        if (timing) {
+            timing->queue_sort_ms += time_elapsed_ms_f(sort_start, time_now_ns());
+        }
         for (int index = 0; index < controls->length; index++) {
-            behavior_init_control(doc, state, (View*)controls->data[index], &count);
+            behavior_init_control(doc, state, (View*)controls->data[index], &count, timing);
         }
         arraylist_free(controls);
     } else {
         // Queue allocation failed while controls were created; preserve behavior
         // with the former document walk until a later pass can allocate it.
-        behavior_init_visit(static_cast<DomNode*>(doc->root), doc, state, &count);
+        behavior_init_visit(static_cast<DomNode*>(doc->root), doc, state, &count, timing);
     }
+    uint64_t pseudo_state_end_start = timing ? time_now_ns() : 0;
     pseudo_state_batch_end(doc, state);
+    if (timing) {
+        timing->pseudo_state_end_ms += time_elapsed_ms_f(pseudo_state_end_start, time_now_ns());
+    }
     if (count > 0) log_debug("behavior-init: inited %d control(s)", count);
 }
 

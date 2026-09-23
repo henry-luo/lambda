@@ -219,7 +219,8 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Aren
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
     int viewport_width, int viewport_height,
-    const DocumentJsHostConfig* js_host_config, CookieJar* top_level_cookie_jar);
+    const DocumentJsHostConfig* js_host_config, CookieJar* top_level_cookie_jar,
+    HtmlLoadPhaseTiming* timing, DocumentScriptPhaseTiming* script_timing);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -2056,29 +2057,6 @@ static char* generate_error_page_html(const char* url, const char* error_title, 
     return mem_strdup(buf, MEM_CAT_LAYOUT);
 }
 
-// load, style, and build an HTML document.
-struct HtmlLoadPhaseTiming {
-    double loader_total_ms;
-    double read_ms;
-    double html_parse_ms;
-    double dom_build_ms;
-    double css_parse_ms;
-    double stylesheet_setup_ms;
-    double inline_style_ms;
-    double initial_cascade_ms;
-    double script_exec_ms;
-    double post_script_ms;
-    double post_script_recascade_ms;
-    double post_script_handler_install_ms;
-    uint64_t post_script_mutation_count;
-    uint64_t post_script_mutation_kind_mask;
-    bool post_script_mutation_overflow;
-    bool post_script_full_recascade;
-    bool post_script_incremental_recascade;
-    double final_cascade_ms;
-    double finalize_ms;
-};
-
 static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css_filename,
     bool css_at_head_end,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
@@ -2564,10 +2542,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 static DomDocument* load_lambda_html_doc_with_host_config(
     Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
     Pool* pool, const DocumentJsHostConfig* js_host_config,
-    CookieJar* top_level_cookie_jar) {
+    CookieJar* top_level_cookie_jar, HtmlLoadPhaseTiming* timing,
+    DocumentScriptPhaseTiming* script_timing) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
-                                         pool, nullptr, false, true, nullptr, nullptr,
+                                         pool, nullptr, false, true, timing, script_timing,
                                          js_host_config, top_level_cookie_jar);
 }
 
@@ -2688,7 +2667,9 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
                                               int viewport_height,
                                               const DocumentJsHostConfig* js_host_config,
-                                              CookieJar* top_level_cookie_jar) {
+                                              CookieJar* top_level_cookie_jar,
+                                              HtmlLoadPhaseTiming* timing,
+                                              DocumentScriptPhaseTiming* script_timing) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -2705,14 +2686,14 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-            viewport_height, pool, js_host_config, top_level_cookie_jar);
+            viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing);
     } else {
     bool handled = false;
     doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
                                    pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-            viewport_height, pool, js_host_config, top_level_cookie_jar);
+            viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing);
     }
     }
 
@@ -2728,9 +2709,12 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     return doc;
 }
 
-DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height,
-                           const DocumentJsHostConfig* js_host_config,
-                           CookieJar* top_level_cookie_jar) {
+DomDocument* load_html_doc_profiled(Url* base, char* doc_url, int viewport_width,
+                                    int viewport_height,
+                                    const DocumentJsHostConfig* js_host_config,
+                                    CookieJar* top_level_cookie_jar,
+                                    HtmlLoadPhaseTiming* timing,
+                                    DocumentScriptPhaseTiming* script_timing) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -2738,7 +2722,8 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
-            viewport_width, viewport_height, js_host_config, top_level_cookie_jar);
+            viewport_width, viewport_height, js_host_config, top_level_cookie_jar,
+            timing, script_timing);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;
@@ -2773,6 +2758,13 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     log_error("load_html_doc: too many document redirects from %s", doc_url ? doc_url : "(null)");
     if (owned_doc_url) mem_free(owned_doc_url);
     return nullptr;
+}
+
+DomDocument* load_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height,
+                           const DocumentJsHostConfig* js_host_config,
+                           CookieJar* top_level_cookie_jar) {
+    return load_html_doc_profiled(base, doc_url, viewport_width, viewport_height,
+                                  js_host_config, top_level_cookie_jar, nullptr, nullptr);
 }
 
 static char* escape_image_document_html_attr(const char* value) {

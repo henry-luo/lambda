@@ -29,6 +29,12 @@ TEST(RadiantOnlineViewTest, SkippedOnWindows) {
 #define ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS \
     (RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS + ONLINE_VIEW_CLEANUP_GRACE_SECONDS)
 #define ONLINE_VIEW_OUTPUT_LIMIT (1024 * 1024)
+#define ONLINE_VIEW_METRICS_PATH "./temp/test_radiant_online_view_metrics.tsv"
+
+static const char* online_view_lambda_exe() {
+    const char* executable = getenv("LAMBDA_RADIANT_ONLINE_VIEW_EXE");
+    return executable && executable[0] ? executable : LAMBDA_EXE;
+}
 
 static_assert(ONLINE_VIEW_DEFAULT_TIMEOUT_SECONDS >
                   RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS,
@@ -53,10 +59,14 @@ struct RadiantOnlineViewResult {
     bool exec_failed;
     bool output_alloc_failed;
     uint64_t elapsed_ms;
+    uint64_t memtrack_peak_bytes;
     uint64_t memtrack_live_bytes;
     uint64_t memtrack_live_count;
+    uint64_t peak_footprint_mb;
+    uint64_t peak_resident_mb;
     char output_path[256];
     char lambda_log_path[256];
+    char timing_path[256];
     RadiantOnlineViewBuffer output;
 };
 
@@ -586,22 +596,6 @@ static void online_view_ensure_temp_dir() {
     mkdir("./temp", 0755);
 }
 
-static bool online_view_write_noop_events(const char* path) {
-    static const char content[] =
-        "{\n"
-        "  \"name\": \"radiant online URL smoke\",\n"
-        "  \"viewport\": {\"width\": 1200, \"height\": 800},\n"
-        "  \"events\": [\n"
-        "    {\"type\": \"wait\", \"ms\": 200}\n"
-        "  ]\n"
-        "}\n";
-    FILE* file = fopen(path, "wb");
-    if (!file) return false;
-    size_t written = fwrite(content, 1, sizeof(content) - 1, file);
-    fclose(file);
-    return written == sizeof(content) - 1;
-}
-
 static bool online_view_buffer_append(RadiantOnlineViewBuffer* buffer,
                                       const char* data, size_t len) {
     if (!buffer || !data || len == 0) return true;
@@ -719,6 +713,25 @@ static bool online_view_result_contains(const RadiantOnlineViewResult* result,
     return false;
 }
 
+static bool online_view_timing_has_detail(const char* timing_path) {
+    static const char* required_metrics[] = {
+        "html_download_read\t",
+        "stylesheet_setup\t",
+        "initial_cascade\t",
+        "post_script_recascade\t",
+        "script_network_wait\t",
+        "layout\t",
+        "behavior_handler_dispatch\t",
+        "render\t",
+        "cleanup_network\t",
+    };
+    if (!timing_path) return false;
+    for (size_t i = 0; i < sizeof(required_metrics) / sizeof(required_metrics[0]); i++) {
+        if (!online_view_file_contains(timing_path, required_metrics[i])) return false;
+    }
+    return true;
+}
+
 static uint64_t online_view_parse_tagged_uint64(const char* output,
                                                 const char* tag,
                                                 const char* key) {
@@ -731,6 +744,56 @@ static uint64_t online_view_parse_tagged_uint64(const char* output,
     while (*pos && (*pos < '0' || *pos > '9')) pos++;
     if (!*pos) return 0;
     return strtoull(pos, NULL, 10);
+}
+
+static uint64_t online_view_parse_peak_mem_stage_mb(const char* output,
+                                                     const char* key) {
+    if (!output || !key) return 0;
+    uint64_t peak = 0;
+    const char* stage = output;
+    while ((stage = strstr(stage, "MEMSTAGE:")) != NULL) {
+        const char* line_end = strchr(stage, '\n');
+        const char* value = strstr(stage, key);
+        if (value && (!line_end || value < line_end)) {
+            value += strlen(key);
+            while (*value && (*value < '0' || *value > '9')) value++;
+            if (*value) {
+                uint64_t parsed = strtoull(value, NULL, 10);
+                if (parsed > peak) peak = parsed;
+            }
+        }
+        stage = line_end ? line_end + 1 : stage + strlen(stage);
+    }
+    return peak;
+}
+
+static bool online_view_append_metrics(const RadiantOnlineViewCase* view_case,
+                                       const RadiantOnlineViewResult* result) {
+    static bool initialized = false;
+    if (!view_case || !result) return false;
+
+    FILE* file = fopen(ONLINE_VIEW_METRICS_PATH, initialized ? "ab" : "wb");
+    if (!file) return false;
+    int header_written = 1;
+    if (!initialized) {
+        header_written = fprintf(file, "label\turl\telapsed_ms\tmemtrack_peak_bytes\t"
+            "peak_footprint_mb\tpeak_resident_mb\tmemtrack_live_bytes\t"
+            "memtrack_live_count\texit_code\ttimed_out\toutput_path\ttiming_path\n");
+    }
+    int written = fprintf(file,
+        "%s\t%s\t%llu\t%llu\t%llu\t%llu\t%llu\t%llu\t%d\t%d\t%s\t%s\n",
+        view_case->label, view_case->url,
+        (unsigned long long)result->elapsed_ms,
+        (unsigned long long)result->memtrack_peak_bytes,
+        (unsigned long long)result->peak_footprint_mb,
+        (unsigned long long)result->peak_resident_mb,
+        (unsigned long long)result->memtrack_live_bytes,
+        (unsigned long long)result->memtrack_live_count,
+        result->exit_code, result->timed_out ? 1 : 0, result->output_path,
+        result->timing_path);
+    bool saved = header_written > 0 && written > 0 && fclose(file) == 0;
+    if (saved) initialized = true;
+    return saved;
 }
 
 static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
@@ -747,14 +810,12 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
     int out_written = snprintf(result->output_path, sizeof(result->output_path),
                                "./temp/test_radiant_online_view_%s_output.log",
                                view_case->label);
+    int timing_written = snprintf(result->timing_path, sizeof(result->timing_path),
+                                  "./temp/test_radiant_online_view_%s_timing.tsv",
+                                  view_case->label);
     if (log_written <= 0 || log_written >= (int)sizeof(result->lambda_log_path) ||
-        out_written <= 0 || out_written >= (int)sizeof(result->output_path)) {
-        result->exec_failed = true;
-        return false;
-    }
-
-    const char* event_path = "./temp/test_radiant_online_view_events.json";
-    if (!online_view_write_noop_events(event_path)) {
+        out_written <= 0 || out_written >= (int)sizeof(result->output_path) ||
+        timing_written <= 0 || timing_written >= (int)sizeof(result->timing_path)) {
         result->exec_failed = true;
         return false;
     }
@@ -780,12 +841,16 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
         close(pipefd[1]);
         setpgid(0, 0);
         setenv("VIEW_MEM_STAGES", "1", 1);
+        setenv("VIEW_MEM_STATS", "1", 1);
         setenv("LAMBDA_LOG_FILE", result->lambda_log_path, 1);
+        setenv("RADIANT_VIEW_TIMING_PATH", result->timing_path, 1);
         // Keep smoke-test milestones while suppressing per-node diagnostics
         // that distort the load time of large real documents.
         setenv("LAMBDA_LOG_LEVEL", "NOTICE", 1);
-        execl(LAMBDA_EXE, LAMBDA_EXE, "view", view_case->url,
-              "--event-file", event_path, "--headless", (char*)NULL);
+        const char* lambda_exe = online_view_lambda_exe();
+        // The smoke test ends after first render. A synthetic wait pumps arbitrary
+        // page timers and turns post-load reflows into apparent load time.
+        execl(lambda_exe, lambda_exe, "view", view_case->url, "--headless", (char*)NULL);
         _exit(127);
     }
 
@@ -841,6 +906,12 @@ static bool online_view_run_case(const RadiantOnlineViewCase* view_case,
         result->output.data, "[MEMTRACK_LIVE]", "bytes=");
     result->memtrack_live_count = online_view_parse_tagged_uint64(
         result->output.data, "[MEMTRACK_LIVE]", "count=");
+    result->memtrack_peak_bytes = online_view_parse_tagged_uint64(
+        result->output.data, "[MEMSTATS] total", "peak=");
+    result->peak_footprint_mb = online_view_parse_peak_mem_stage_mb(
+        result->output.data, "peak=");
+    result->peak_resident_mb = online_view_parse_peak_mem_stage_mb(
+        result->output.data, "resident=");
     online_view_save_buffer(result->output_path, &result->output);
     return true;
 }
@@ -883,13 +954,17 @@ static const char* online_view_first_runtime_error(const RadiantOnlineViewResult
 }
 
 static void online_view_expect_case(size_t index) {
-    ASSERT_TRUE(online_view_file_readable(LAMBDA_EXE)) << "lambda.exe not found";
-    ASSERT_TRUE(online_view_file_executable(LAMBDA_EXE)) << "lambda.exe is not executable";
+    const char* lambda_exe = online_view_lambda_exe();
+    ASSERT_TRUE(online_view_file_readable(lambda_exe)) << "online renderer not found";
+    ASSERT_TRUE(online_view_file_executable(lambda_exe)) << "online renderer is not executable";
     ASSERT_LT(index, sizeof(g_online_view_cases) / sizeof(g_online_view_cases[0]));
 
     RadiantOnlineViewResult result;
     const RadiantOnlineViewCase* view_case = &g_online_view_cases[index];
-    ASSERT_TRUE(online_view_run_case(view_case, &result))
+    bool ran = online_view_run_case(view_case, &result);
+    ASSERT_TRUE(online_view_append_metrics(view_case, &result))
+        << "failed to append metrics to " << ONLINE_VIEW_METRICS_PATH;
+    ASSERT_TRUE(ran)
         << "failed to launch online view case " << view_case->label;
 
     GTEST_LOG_(INFO) << "radiant-online-view: url=" << view_case->url
@@ -906,6 +981,12 @@ static void online_view_expect_case(size_t index) {
         << view_case->url << " exited with " << result.exit_code
         << "; stdout/stderr: " << result.output_path
         << ", lambda log: " << result.lambda_log_path;
+    EXPECT_TRUE(online_view_file_readable(result.timing_path))
+        << "missing phase timing report for " << view_case->url
+        << ": " << result.timing_path;
+    EXPECT_TRUE(online_view_timing_has_detail(result.timing_path))
+        << "incomplete phase timing report for " << view_case->url
+        << ": " << result.timing_path;
 
     // Top-level HTTP pages are staged through ./temp; the invariant is that
     // the original document URL still drives resource discovery and downloads.

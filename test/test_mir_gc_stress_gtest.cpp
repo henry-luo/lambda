@@ -48,6 +48,7 @@ static const char* kExtraJsScripts[] = {
     "test/js/js_shared_native_lanes.js",
     "test/js/js_shared_loop_effects.js",
     "test/js/js_callable_definition_sharing.js",
+    "test/js/regression_regexp_split_gc_roots.js",
     "test/node/js_shared_search_leaf.js",
 };
 
