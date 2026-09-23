@@ -846,25 +846,25 @@ static void jm_collect_indexed_body_ref_node(JsMirTranspiler* mt,
 }
 
 void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
-        struct hashmap* refs) {
+        struct hashmap* refs, bool free_only) {
     if (!mt || !fn || !refs || !mt->tp) return;
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fn);
     AstFunctionId owner = fn_node_id == AST_NODE_ID_INVALID ?
         AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
     if (owner == AST_FUNCTION_ID_INVALID) return;
-    AstNodeId fn_end = ast_index_subtree_end(index, fn_node_id);
-    if (fn_end == AST_NODE_ID_INVALID) return;
     uint32_t body_start = fn->body ? fn->body->source_span.start_byte : 0;
     uint32_t body_end = fn->body ? fn->body->source_span.end_byte : 0;
-    for (uint32_t i = fn_node_id; i < fn_end; i++) {
-        jm_collect_indexed_body_ref_node(mt, fn, refs, owner, i, body_start, body_end);
-    }
-    uint32_t overlay_count = 0;
-    const AstNodeId* overlay_nodes = ast_index_function_overlay_nodes(index,
-        owner, &overlay_count);
-    for (uint32_t i = 0; overlay_nodes && i < overlay_count; i++) {
-        jm_collect_indexed_body_ref_node(mt, fn, refs, owner, overlay_nodes[i],
+    // The index owns function membership, including non-contiguous synthetic
+    // fragments. This avoids a range scan and gives capture analysis the same
+    // resolved binding facts consumed by Lambda (D8.2.4).
+    uint32_t reference_count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index,
+        owner, &reference_count);
+    for (uint32_t i = 0; references && i < reference_count; i++) {
+        if (!(references[i].flags & AST_FUNCTION_REF_READ)) continue;
+        if (free_only && !(references[i].flags & AST_FUNCTION_REF_FREE)) continue;
+        jm_collect_indexed_body_ref_node(mt, fn, refs, owner, references[i].node_id,
             body_start, body_end);
     }
 }
@@ -934,7 +934,12 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // Collect all identifier references in the body
     struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_indexed_body_refs(mt, fn, refs);
+    struct hashmap* all_refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_binding_cmp, NULL, NULL);
+    // Capture candidates come only from the shared free-reference fact. The
+    // complete set remains for recursive self-name detection below.
+    jm_collect_indexed_body_refs(mt, fn, refs, true);
+    jm_collect_indexed_body_refs(mt, fn, all_refs);
 
     // Default initializers execute in the function environment and can read
     // this/new.target before the body; classify them before stamping call ABI
@@ -951,7 +956,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus
     // becomes a closure), it also needs to capture itself for recursive calls.
-    bool has_self_ref = false;
+    bool has_self_ref = jm_binding_set_has(all_refs, fn->entry);
     const char* self_name = fn->name ? jm_var_name(fn->name) : NULL;
     bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);
     bool is_func_expr = fn->node_type == AST_NODE_FUNC_EXPR;
@@ -970,7 +975,6 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         // but MIR still represents recursion through the closure environment.
         if (!JM_JS_FACT(fc, is_class_method) && !is_method_syntax &&
             ref->entry == fn->entry && !local_binding) {
-            has_self_ref = true;
             continue;
         }
         if (local_binding) continue;
@@ -1087,4 +1091,5 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     analysis->capture_count = JM_CAPTURE_COUNT(fc);
 
     hashmap_free(refs);
+    hashmap_free(all_refs);
 }

@@ -1440,7 +1440,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     get_time(&start);
     tp->source = script->source;
-    tp->defer_ast_index_columns = lambda_tier_selected() != LAMBDA_TIER_JIT;
+    // Capture, support, and call-site passes share the published graph in
+    // every tier; delaying its columns for T0 would reintroduce tree scans.
+    tp->defer_ast_index_columns = false;
     LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
     compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
     CompilerPassSpec parse_pass = {"parse", COMPILER_FACT_NONE,
@@ -1478,9 +1480,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         arraylist_free(front_end.functions);
         if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
-    }
-    if (tp->defer_ast_index_columns) {
-        tp->pass_manager.facts &= ~COMPILER_FACT_INDEXED;
     }
     if (profiling || compiler_timing) profile_get_time(&p3);
     get_time(&end);

@@ -536,6 +536,70 @@ TEST(JsScriptOwnership, PublishesRangeAndReverseQueryFacts) {
     js_transpiler_destroy(tp);
 }
 
+static AstIndexProfileSupport count_index_profile_nodes(const AstIndex* index,
+        AstNodeId node_id, void* context) {
+    (void)index;
+    (void)node_id;
+    int* count = (int*)context;
+    (*count)++;
+    return AST_INDEX_PROFILE_ACCEPT;
+}
+
+TEST(JsScriptOwnership, PublishesFreeReadWriteFactsAndCachesProfileSupport) {
+    const char source[] =
+        "function outer() { let value = 1; "
+        "function inner() { value = 2; return value; } return inner; }";
+    JsTranspiler* tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source, sizeof(source) - 1,
+        JS_PARSE_SCRIPT));
+
+    AstIndex* index = &tp->ast_index;
+    AstFunctionId inner = AST_FUNCTION_ID_INVALID;
+    for (AstFunctionId function_id = 0; function_id < index->function_count;
+            function_id++) {
+        if (index->functions[function_id].parent != AST_FUNCTION_ID_INVALID) {
+            inner = function_id;
+            break;
+        }
+    }
+    ASSERT_NE(inner, AST_FUNCTION_ID_INVALID);
+    uint32_t reference_count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index,
+        inner, &reference_count);
+    ASSERT_NE(references, nullptr);
+    bool found_free_read = false;
+    bool found_free_write = false;
+    for (uint32_t i = 0; i < reference_count; i++) {
+        if (!(references[i].flags & AST_FUNCTION_REF_FREE)) continue;
+        if (references[i].flags & AST_FUNCTION_REF_READ) found_free_read = true;
+        if (references[i].flags & AST_FUNCTION_REF_WRITE) found_free_write = true;
+    }
+    EXPECT_TRUE(found_free_read);
+    EXPECT_TRUE(found_free_write);
+
+    int profile_visits = 0;
+    EXPECT_TRUE(ast_index_scan_profile_support(index,
+        count_index_profile_nodes, &profile_visits));
+    EXPECT_EQ(profile_visits, (int)index->count);
+    EXPECT_TRUE(ast_index_scan_profile_support(index,
+        count_index_profile_nodes, &profile_visits));
+    EXPECT_EQ(profile_visits, (int)index->count);
+    ASSERT_NE(index->profile_support, nullptr);
+    EXPECT_TRUE(index->profile_supported);
+    js_transpiler_destroy(tp);
+
+    const char no_function_source[] = "let answer = 42;";
+    tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, no_function_source,
+        sizeof(no_function_source) - 1, JS_PARSE_SCRIPT));
+    EXPECT_EQ(tp->ast_index.function_count, 0u);
+    ASSERT_NE(tp->ast_index.function_reference_offsets, nullptr);
+    EXPECT_EQ(tp->ast_index.function_reference_offsets[0], 0u);
+    js_transpiler_destroy(tp);
+}
+
 TEST(JsInterpreter, ExecutesThroughSharedRuntimeAndModuleState) {
     Runtime runtime = {};
     runtime_init(&runtime);

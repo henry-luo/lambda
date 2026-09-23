@@ -417,7 +417,7 @@ int jm_count_awaits(JsMirTranspiler* mt, JsAstNode* node);
 void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* names);
 void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
-    struct hashmap* refs);
+    struct hashmap* refs, bool free_only = false);
 void jm_collect_indexed_body_locals(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* locals, bool var_only = false);
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names);

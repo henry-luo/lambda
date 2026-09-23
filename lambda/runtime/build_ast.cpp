@@ -1957,120 +1957,76 @@ void mark_capture_mutable(FnCapture** captures, String* name) {
     }
 }
 
-typedef struct CaptureWalk {
-    Transpiler* tp;
-    NameScope* fn_scope;
-    NameScope* global_scope;
-    FnCapture** captures;
-} CaptureWalk;
-
-// Records `entry` when it binds in an enclosing function: not local to this
-// function, not global, not an import.
-static void capture_outer_binding(CaptureWalk* walk, String* name, NameEntry* entry,
-                                  bool is_mutable) {
-    if (!entry || entry->import || is_local_to_scope(entry, walk->fn_scope) ||
-            is_global_entry(entry, walk->global_scope)) return;
-    add_capture(walk->tp, walk->captures, name, entry);
-    if (is_mutable) mark_capture_mutable(walk->captures, name);
+// Records an indexed external binding unless Lambda owns it locally, globally,
+// or as an implicit object field. The index has already resolved its identity.
+static void capture_indexed_outer_binding(Transpiler* tp, AstFuncNode* fn_node,
+        NameScope* global_scope, String* name, NameEntry* entry, bool is_mutable) {
+    if (!entry || entry->import || is_object_field_entry(entry) ||
+            is_local_to_scope(entry, fn_node->vars) ||
+            is_global_entry(entry, global_scope)) return;
+    add_capture(tp, &fn_node->captures, name, entry);
+    if (is_mutable) mark_capture_mutable(&fn_node->captures, name);
 }
 
-// Child edges come from walk_lambda_ast, the shared Lambda traversal, so every
-// node kind it knows is covered; the hand-written per-kind walk this replaced
-// skipped named arguments, parameter defaults, pipes, for-clauses, match
-// patterns and other kinds, dropping captures used only there.
-static bool capture_visit(AstNode* node, void* data) {
-    CaptureWalk* walk = (CaptureWalk*)data;
-    switch (node->node_type) {
-    case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
-        // Object fields in method scope are implicit receiver slots, not
-        // closure captures; method write-back owns their mutation rules.
-        if (ident->entry && ident->entry->node && !is_object_field_entry(ident->entry)) {
-            capture_outer_binding(walk, ident->name, ident->entry, false);
-        }
-        return false;
-    }
-    case AST_NODE_ASSIGN_STAM: {
-        AstAssignStamNode* assign = (AstAssignStamNode*)node;
-        if (!is_object_field_entry(assign->target_entry)) {
-            capture_outer_binding(walk, assign->target, assign->target_entry, true);
-        }
-        return true;
-    }
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM: {
-        // A write through a captured container root mutates the capture.
-        AstIdentNode* root = compound_root_ident(((AstCompoundAssignNode*)node)->object);
-        if (root && !is_object_field_entry(root->entry)) {
-            capture_outer_binding(walk, root->name, root->entry, true);
-        }
-        return true;
-    }
-    case AST_NODE_FUNC:
-    case AST_NODE_FUNC_EXPR:
-    case AST_NODE_PROC: {
-        // A nested function's captures from scopes above this function must
-        // also be captured here, so this closure can build the nested
-        // function's environment. Its body is analyzed separately.
-        for (FnCapture* cap = ((AstFuncNode*)node)->captures; cap; cap = cap->next) {
-            capture_outer_binding(walk, cap->lambda_name, cap->entry, false);
-        }
-        return false;
-    }
-    case AST_NODE_FOR_EXPR:
-        // join keys are the only for-clause edges walk_lambda_ast omits.
-        for (AstNode* clause = ((AstForNode*)node)->loop; clause; clause = clause->next) {
-            if (clause->node_type != AST_NODE_FOR_CLAUSE) continue;
-            for (AstJoinKey* key = ((AstLoopNode*)clause)->join_keys; key;
-                    key = (AstJoinKey*)key->next) {
-                walk_lambda_ast(key->prior_expr, capture_visit, walk, false);
-                walk_lambda_ast(key->new_expr, capture_visit, walk, false);
-            }
-        }
-        return true;
-    default:
-        return true;
-    }
-}
-
-// Analyze captures for a function node
-void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_scope) {
-    fn_node->captures = nullptr;
-    CaptureWalk walk = {tp, fn_node->vars, global_scope, &fn_node->captures};
-    // Parameter defaults are evaluated in this function and can read outer bindings.
-    for (AstNode* param = (AstNode*)fn_node->param; param; param = param->next) {
-        walk_lambda_ast(param, capture_visit, &walk, false);
-    }
-    walk_lambda_ast(fn_node->body, capture_visit, &walk, false);
+static void finish_capture_analysis(Transpiler* tp, AstFuncNode* fn_node) {
     if (!fn_node->analysis) {
         fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
     }
     fn_node->analysis->captures = fn_node->captures;
     fn_node->analysis->capture_count = 0;
 
-    if (fn_node->captures) {
-        FnCapture* c = fn_node->captures;
-        while (c) {
-            fn_node->analysis->capture_count++;
-            String* capture_name = c->lambda_name;
-            // A mutable capture is an explicit cross-frame write only when the
-            // outer binding itself is a `var`; immutable captures remain pure.
-            if (c->is_mutable && (!c->entry || !c->entry->is_mutable)) {
-                record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
-                    "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
-                    (int)capture_name->len, capture_name->chars);
-            }
-            c = c->next;
+    for (FnCapture* capture = fn_node->captures; capture; capture = capture->next) {
+        fn_node->analysis->capture_count++;
+        // A mutable capture is an explicit cross-frame write only when the
+        // outer binding itself is a `var`; immutable captures remain pure.
+        if (capture->is_mutable && (!capture->entry || !capture->entry->is_mutable)) {
+            record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
+                "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
+                (int)capture->lambda_name->len, capture->lambda_name->chars);
         }
     }
 }
 
-// Find the global scope by walking up the parent chain
-NameScope* find_global_scope(NameScope* scope) {
-    while (scope && scope->parent) {
-        scope = scope->parent;
+// Analyze one closure from the shared owner-grouped reference table. Callers
+// process functions from inner to outer so direct child captures propagate
+// without walking a function body again (D8.2.4).
+static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
+        NameScope* global_scope) {
+    if (!tp || !fn_node || !global_scope || !tp->ast_index.graph_published) return false;
+    fn_node->captures = nullptr;
+    AstIndex* index = &tp->ast_index;
+    AstNodeId function_node_id = ast_index_find(index, (AstNode*)fn_node);
+    if (function_node_id == AST_NODE_ID_INVALID) return false;
+    AstFunctionId function_id = index->owner_functions[function_node_id];
+    uint32_t reference_count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index,
+        function_id, &reference_count);
+    for (uint32_t i = 0; references && i < reference_count; i++) {
+        const AstFunctionReference* reference = &references[i];
+        if (!(reference->flags & AST_FUNCTION_REF_FREE)) continue;
+        NameEntry* entry = ast_index_binding(index, reference->binding_id);
+        capture_indexed_outer_binding(tp, fn_node, global_scope,
+            entry ? entry->name : NULL, entry,
+            (reference->flags & AST_FUNCTION_REF_WRITE) != 0);
     }
-    return scope;
+    uint32_t child_count = 0;
+    const AstFunctionId* children = ast_index_function_children(index, function_id,
+        &child_count);
+    for (uint32_t i = 0; children && i < child_count; i++) {
+        AstFunctionId child_id = children[i];
+        AstNode* child_node = child_id < index->function_count
+            ? index->functions[child_id].node : NULL;
+        if (!child_node || (child_node->node_type != AST_NODE_FUNC &&
+                child_node->node_type != AST_NODE_FUNC_EXPR &&
+                child_node->node_type != AST_NODE_PROC)) continue;
+        for (FnCapture* capture = ((AstFuncNode*)child_node)->captures;
+                capture; capture = capture->next) {
+            capture_indexed_outer_binding(tp, fn_node, global_scope,
+                capture->lambda_name, capture->entry, false);
+        }
+    }
+    finish_capture_analysis(tp, fn_node);
+    return tp->error_count == 0;
 }
 
 // str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
@@ -7950,9 +7906,25 @@ static bool colour_walk_visit(AstNode* node, void* data) {
     return true;
 }
 
+static bool lambda_ast_analyze_indexed_captures(Transpiler* tp, AstScript* script) {
+    AstIndex* index = tp ? &tp->ast_index : NULL;
+    if (!index || !script || !script->global_vars || !index->graph_published) return false;
+    // Function IDs are structural preorder, so reverse order finalizes every
+    // child closure before its parent imports the child's outer captures.
+    for (AstFunctionId function_id = index->function_count; function_id-- > 0;) {
+        AstNode* node = index->functions[function_id].node;
+        if (!node || (node->node_type != AST_NODE_FUNC &&
+                node->node_type != AST_NODE_FUNC_EXPR &&
+                node->node_type != AST_NODE_PROC)) continue;
+        if (!analyze_captures(tp, (AstFuncNode*)node, script->global_vars)) return false;
+    }
+    return true;
+}
+
 bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         AstScript* script, ArrayList* functions) {
     if (!tp || !script || tp->error_count != 0) return false;
+    if (!lambda_ast_analyze_indexed_captures(tp, script)) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
@@ -14277,15 +14249,11 @@ static LambdaParseValue direct_ast_reduce(void* context,
             AstFuncNode* fn = sink->function_nodes[slot];
             NameScope* function_scope = sink->function_scopes[slot];
             lambda_ast_leave_scope(tp, function_scope);
-            // Capture analysis must run after the body and nested functions
-            // are complete; otherwise an outer closure loses transitive
-            // captures and MIR sees those names as undefined variables.
             uint64_t inline_analysis_started = 0;
             if (lambda_compiler_timing_collecting()) {
                 inline_analysis_started = time_now_ns();
             }
             if (fn) {
-                analyze_captures(tp, fn, find_global_scope(function_scope->parent));
                 validate_cross_frame_binding_reads(tp, fn);
             }
             // CW24: the body is complete, so every write-back that could

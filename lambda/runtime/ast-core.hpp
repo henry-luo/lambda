@@ -546,6 +546,33 @@ typedef struct AstFunctionIndexEntry {
     AstNodeId end_node;
 } AstFunctionIndexEntry;
 
+// A resolved lexical reference owned by one function.  The shared index
+// records the binding identity once; front ends apply only their language
+// specific environment rules when consuming the fact (D8.2.4).
+typedef enum AstFunctionReferenceFlags : uint8_t {
+    AST_FUNCTION_REF_READ  = 1 << 0,
+    AST_FUNCTION_REF_WRITE = 1 << 1,
+    AST_FUNCTION_REF_FREE  = 1 << 2,
+} AstFunctionReferenceFlags;
+
+typedef struct AstFunctionReference {
+    AstNodeId node_id;
+    AstBindingId binding_id;
+    uint8_t flags;
+} AstFunctionReference;
+
+// A profile decides each indexed node once. Skipping a subtree preserves the
+// front end's explicit satellite boundaries without restoring a recursive scan.
+typedef enum AstIndexProfileSupport {
+    AST_INDEX_PROFILE_REJECT = 0,
+    AST_INDEX_PROFILE_ACCEPT = 1,
+    AST_INDEX_PROFILE_SKIP_SUBTREE = 2,
+} AstIndexProfileSupport;
+
+struct AstIndex;
+typedef AstIndexProfileSupport (*AstIndexProfileVisitor)(
+    const struct AstIndex* index, AstNodeId node_id, void* context);
+
 typedef struct AstIndex {
     AstNode** nodes;
     AstNode** parents;
@@ -573,11 +600,21 @@ typedef struct AstIndex {
     AstNodeId* object_member_uses;
     uint32_t* function_child_offsets;
     AstFunctionId* function_children;
+    // Function-local resolved reads and writes replace frontend capture
+    // walkers. A FREE flag means the defining scope is outside that function.
+    uint32_t* function_reference_offsets;
+    AstFunctionReference* function_references;
     // Shared source fragments can be logically owned by a synthetic function
     // while retaining their original structural position. This CSR table keeps
     // those non-contiguous function nodes explicit without weakening ranges.
     uint32_t* function_overlay_offsets;
     AstNodeId* function_overlay_nodes;
+    // The last frontend support profile is a Script-owned immutable fact.
+    // Values are AstIndexProfileSupport and are invalidated with queries.
+    uint8_t* profile_support;
+    AstIndexProfileVisitor profile_support_visitor;
+    bool profile_support_scanned;
+    bool profile_supported;
     uint32_t count;
     uint32_t capacity;
     uint32_t function_count;
@@ -646,8 +683,14 @@ const AstNodeId* ast_index_object_member_uses(const AstIndex* index,
     AstNodeId object_id, uint32_t* count);
 const AstFunctionId* ast_index_function_children(const AstIndex* index,
     AstFunctionId function_id, uint32_t* count);
+const AstFunctionReference* ast_index_function_references(const AstIndex* index,
+    AstFunctionId function_id, uint32_t* count);
 const AstNodeId* ast_index_function_overlay_nodes(const AstIndex* index,
     AstFunctionId function_id, uint32_t* count);
+// Visit indexed nodes in source order once and cache the profile result on
+// the Script-owned index. A visitor may exclude a semantic satellite range.
+bool ast_index_scan_profile_support(AstIndex* index,
+    AstIndexProfileVisitor visitor, void* context);
 // Rebuild derived range and reverse-query tables after a sanctioned AST
 // extension adjusts lexical function parents.
 bool ast_index_rebuild_queries(AstIndex* index);

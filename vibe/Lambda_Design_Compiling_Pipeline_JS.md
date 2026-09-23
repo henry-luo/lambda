@@ -1,10 +1,10 @@
 # LambdaJS Compile Pipeline — stage map, alignment with Lambda, and tuning proposal
 
-> **Status**: **PARTIALLY IMPLEMENTED (2026-09-23).** LC4.1–LC4.2,
-> LC4.4, LC4.7–LC4.12, and the JS-side indexed consumers landed; the
-> remaining cross-frontend capture, support-scan, and Lambda call-site work
-> remains active. The 2026-09-22 measurements below remain the historical
-> baseline; the implementation record is in §4.4. Companion to
+> **Status**: **IMPLEMENTED (2026-09-23).** LC4.1–LC4.12 are landed. The
+> shared index now owns per-function free read/write facts, the cached
+> profile-support bitmap, and direct-call evidence for both front ends. The
+> 2026-09-22 measurements below remain the historical baseline; the
+> implementation record is in §4.4. Companion to
 > `Lambda_Design_Compile_Pipeline.md` (LC3.1–LC3.8, the Lambda front-end
 > budget). Everything here is an implementation of the shared pipeline
 > contract (**D8.2.4v2**, **D8.2.5v3**) and the revised default-backend
@@ -245,8 +245,9 @@ by an enclosing function. Lambda's `analyze_captures` and JS's
 `jm_analyze_captures` consume this record to build `FnAnalysis::captures`
 under their own rules (Lambda: mutability and `var`-param semantics; JS:
 `this`/`new.target`/`with`/eval observations, self-reference, class owner).
-Lambda drops its build-time and bind-time body walks (Lambda doc LC3.3);
-JS drops `jm_collect_indexed_body_refs`. The transitive-capture fixed point
+Lambda drops its build-time and bind-time body walks (Lambda doc LC3.3); the
+retained `jm_collect_indexed_body_refs` name is now only a language-specific
+filter over that CSR fact, not a body scan. The transitive-capture fixed point
 (JS 1.6) runs once, shared, over the function parent table.
 
 #### LC4.4 (implemented 2026-09-23) — The hashed scope index moves into `NameScope`
@@ -275,10 +276,11 @@ computed once and cached on `Script`.
 #### LC4.6 (implemented 2026-09-23) — One call-site table feeds both parameter-evidence inferences
 
 **Decision.** The calls-by-callee-binding table (LC4.2) replaces Lambda's
-six-round whole-tree `prepass_collect_call_sites` and JS's per-function
-`jm_infer_indexed` scans. The shared part is the table and the fixed-point
-driver over the *callee set* (a callee is re-examined only when a caller's
-resolved argument types changed). The evidence rules stay per language
+direct-call portion of the six-round `prepass_collect_call_sites` walk and
+JS's per-function `jm_infer_indexed` scans. Lambda enumerates the table by
+callee binding on every inference round; its retained prepass walk carries
+only distinct escape and return-shape facts. The evidence rules stay per
+language
 (`infer_param_types_batched` for Lambda, `jm_infer_param_types` for JS).
 `infer_return_type` and its body predicates are memoized in `FnAnalysis`
 (Lambda doc LC3.7 third bullet) so a callee is inferred once per round.
@@ -467,7 +469,7 @@ parse-build, bind, validate, and index fields.
    alpine + htmx + bootstrap trio is measured at the AST-lane front-end
    figure.
 
-### 4.4 Partial implementation record (2026-09-23)
+### 4.4 Implementation record (2026-09-23)
 
 The implemented subset is governed by **D8.2.4v2**, **D8.2.5v3**, and
 **D8.1.3v19**. `AstIndex` now publishes preorder ranges, reverse tables,
@@ -505,12 +507,30 @@ The reproducible corpus is the eight checked-in Are-We-Fast-Yet JavaScript
 benchmarks plus the twelve listed `test/js` libraries. Historical Octane paths
 in §4.1 describe the 2026-09-22 measurement only; they are not harness input.
 
-The remaining work is literal proposal scope, not test fallout: LC4.3 still
-needs one shared per-function free-variable fact consumed by Lambda and JS;
-LC4.5 still needs the shared index/profile support query on the Lambda path;
-and LC4.6 still needs Lambda parameter-evidence collection to consume the
-callee reverse table instead of `prepass_collect_call_sites`. This record
-must not be read as final acceptance until those consumers land.
+The final shared consumers landed after the first implementation record:
+
+- LC4.3 adds `AstFunctionReference` CSR slices keyed by `AstFunctionId`.
+  Each entry records its indexed node, resolved `AstBindingId`, read/write
+  role, and whether its binding is free of the owning function. Lambda builds
+  captures directly from that fact and propagates direct-child captures;
+  JavaScript filters the same fact for its lexical environment rules.
+- LC4.5 adds `ast_index_scan_profile_support`: one indexed node loop invokes
+  the frontend callback, stores its accept/reject/subtree-skip bitmap, and
+  caches the result on the Script-owned `AstIndex`. Lambda and JavaScript
+  support admission both consume it; Lambda's task satellite boundary is an
+  explicit subtree skip rather than a recursive scan.
+- LC4.6 enumerates `ast_index_callee_calls` by binding before Lambda's
+  inference round. The general prepass no longer records direct calls while
+  collecting: it remains only for forward declarations plus non-call-edge
+  escape and return-shape sources.
+
+The new `JsScriptOwnership.PublishesFreeReadWriteFactsAndCachesProfileSupport`
+regression covers JS outer reads/writes and verifies that a second same-profile
+query reuses the cached bitmap. It also caught and fixed the zero-function
+CSR case. Targeted Lambda closure/shadowing/call-site inference and JS
+MIR/AUTO parity checks pass with this record. These changes implement the
+shared-unit requirements of **D8.2.4v2** and the fact ownership/scheduling
+requirements of **D8.2.5v3**; they do not alter JavaScript or Lambda semantics.
 
 ---
 

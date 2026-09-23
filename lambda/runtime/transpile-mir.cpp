@@ -640,6 +640,7 @@ struct MirTranspiler {
     // T20-1c candidate shapes: AST_NODE_PARAM* -> Type* (an untrusted TypeMap).
     struct hashmap* shape_hints;
     bool prepass_collect_only;      // collect stage: gather call sites, emit nothing
+    bool prepass_indexed_calls;     // direct-call evidence comes from AstIndex CSR
     AstFuncNode* prepass_enclosing; // function whose body the collect walk is inside
     bool prepass_dispatched_fn;     // inside object methods / view handlers, which
                                     // are invoked by dispatch, not by a visible call
@@ -40485,6 +40486,41 @@ static bool mir_callsite_record(MirTranspiler* mt, AstCallNode* call) {
     return true;
 }
 
+static AstFuncNode* mir_indexed_call_enclosing_function(const AstIndex* index,
+        AstNodeId call_id) {
+    if (!index || call_id >= index->count) return NULL;
+    AstFunctionId owner = index->owner_functions[call_id];
+    if (owner >= index->function_count) return NULL;
+    AstNode* node = index->functions[owner].node;
+    if (!node || (node->node_type != AST_NODE_FUNC &&
+            node->node_type != AST_NODE_FUNC_EXPR &&
+            node->node_type != AST_NODE_PROC)) return NULL;
+    return (AstFuncNode*)node;
+}
+
+// The reverse callee table is the sole direct-call evidence source. The
+// surrounding prepass still records escape and return-shape facts, which are
+// not call edges and retain their distinct dataflow meaning (D8.2.4).
+static void prepass_collect_indexed_call_sites(MirTranspiler* mt,
+        const AstIndex* index) {
+    if (!mt || !index || !index->graph_published) return;
+    AstFuncNode* saved_enclosing = mt->prepass_enclosing;
+    for (AstBindingId binding_id = 0; binding_id < index->binding_count;
+            binding_id++) {
+        uint32_t call_count = 0;
+        const AstNodeId* calls = ast_index_callee_calls(index, binding_id,
+            &call_count);
+        for (uint32_t i = 0; calls && i < call_count; i++) {
+            AstNodeId call_id = calls[i];
+            AstNode* node = call_id < index->count ? index->nodes[call_id] : NULL;
+            if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
+            mt->prepass_enclosing = mir_indexed_call_enclosing_function(index, call_id);
+            (void)mir_callsite_record(mt, (AstCallNode*)node);
+        }
+    }
+    mt->prepass_enclosing = saved_enclosing;
+}
+
 typedef struct MirForwardPrepassVisit {
     MirTranspiler* mt;
     AstNode* sibling_chain;
@@ -40731,7 +40767,13 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
         }
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)node;
-            bool consumed_callee = mt->prepass_collect_only && mir_callsite_record(mt, call);
+            // Direct calls were joined from AstIndex's callee reverse table.
+            // Keep walking non-direct callees: they can still expose an
+            // escaping function value through a dynamic call expression.
+            bool consumed_callee = mt->prepass_collect_only &&
+                (mt->prepass_indexed_calls
+                    ? mir_ident_local_func(call->function) != NULL
+                    : mir_callsite_record(mt, call));
             // a consumed callee ident is a call, not an escaping reference
             if (call->function && !consumed_callee) prepass_forward_declare(mt, call->function);
             if (call->argument) prepass_forward_declare(mt, call->argument);
@@ -40825,7 +40867,8 @@ static uint32_t mir_next_inference_cache_epoch(void) {
     return epoch;
 }
 
-static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child) {
+static void prepass_collect_call_sites(MirTranspiler* mt, const AstIndex* index,
+        AstNode* script_child) {
     if (!mt->callsite_info) return;
     for (int round = 0; round < MIR_CALLSITE_MAX_ROUNDS; round++) {
         mt->inference_cache_epoch = mir_next_inference_cache_epoch();
@@ -40848,8 +40891,11 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
 
         mt->prepass_collect_only = true;
         mt->prepass_enclosing = NULL;
+        mt->prepass_indexed_calls = index && index->graph_published;
+        if (mt->prepass_indexed_calls) prepass_collect_indexed_call_sites(mt, index);
         prepass_forward_declare(mt, script_child);
         mt->prepass_collect_only = false;
+        mt->prepass_indexed_calls = false;
 
         // T20-1c: with every call site and return source recorded, push
         // candidate shapes along the return and argument edges.
@@ -41582,10 +41628,12 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     // complete retained AST for collection (exactly the eager caller set;
     // an unseen T0 caller is the wrapper's exact-shape guard's business).
     AstNode* callsite_root = script->child;
+    const AstIndex* callsite_index = mt.ast_index;
     if (mt.satellite_target && interp_module_owner && interp_module_owner->ast_root) {
         callsite_root = ((AstScript*)interp_module_owner->ast_root)->child;
+        callsite_index = &interp_module_owner->ast_index;
     }
-    prepass_collect_call_sites(&mt, callsite_root);
+    prepass_collect_call_sites(&mt, callsite_index, callsite_root);
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);

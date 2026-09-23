@@ -186,6 +186,10 @@ static NameEntry* ast_index_node_entry(AstNode* node) {
     case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG:
     case AST_NODE_FOR_INDEX: return ((AstNamedNode*)node)->entry;
     case AST_NODE_VARIABLE_DECLARATOR: return ((AstDeclaratorNode*)node)->entry;
+    // A Lambda assignment carries its resolved target directly. Publishing it
+    // makes a captured write a first-class index fact even without a target
+    // identifier child.
+    case AST_NODE_ASSIGN_STAM: return ((AstAssignStamNode*)node)->target_entry;
     default:
         return NULL;
     }
@@ -289,8 +293,14 @@ bool ast_index_prepare_binding(AstIndex* index) {
     free(index->object_member_uses); index->object_member_uses = NULL;
     free(index->function_child_offsets); index->function_child_offsets = NULL;
     free(index->function_children); index->function_children = NULL;
+    free(index->function_reference_offsets); index->function_reference_offsets = NULL;
+    free(index->function_references); index->function_references = NULL;
     free(index->function_overlay_offsets); index->function_overlay_offsets = NULL;
     free(index->function_overlay_nodes); index->function_overlay_nodes = NULL;
+    free(index->profile_support); index->profile_support = NULL;
+    index->profile_support_visitor = NULL;
+    index->profile_support_scanned = false;
+    index->profile_supported = false;
     index->graph_published = false;
     return true;
 }
@@ -345,8 +355,14 @@ static void ast_index_free_queries(AstIndex* index) {
     free(index->object_member_uses); index->object_member_uses = NULL;
     free(index->function_child_offsets); index->function_child_offsets = NULL;
     free(index->function_children); index->function_children = NULL;
+    free(index->function_reference_offsets); index->function_reference_offsets = NULL;
+    free(index->function_references); index->function_references = NULL;
     free(index->function_overlay_offsets); index->function_overlay_offsets = NULL;
     free(index->function_overlay_nodes); index->function_overlay_nodes = NULL;
+    free(index->profile_support); index->profile_support = NULL;
+    index->profile_support_visitor = NULL;
+    index->profile_support_scanned = false;
+    index->profile_supported = false;
 }
 
 static bool ast_index_build_query_slice(uint32_t key_count,
@@ -372,7 +388,7 @@ static bool ast_index_build_query_slice(uint32_t key_count,
         } else if (kind == 1 && node &&
                 (node->node_type == AST_NODE_CALL_EXPR ||
                  node->node_type == AST_NODE_NEW_EXPR)) {
-            AstNode* callee = ((AstCallNode*)node)->function;
+            AstNode* callee = ast_unwrap_primary(((AstCallNode*)node)->function);
             if (callee && callee->node_type == AST_NODE_IDENT) {
                 AstNodeId callee_id = ast_index_find(index, callee);
                 if (callee_id != AST_NODE_ID_INVALID) key = index->node_bindings[callee_id];
@@ -385,6 +401,111 @@ static bool ast_index_build_query_slice(uint32_t key_count,
     free(write);
     *offsets_out = offsets;
     *ids_out = ids;
+    return true;
+}
+
+static bool ast_index_function_reference_is_free(const AstIndex* index,
+        AstFunctionId function_id, NameEntry* entry) {
+    if (!index || !entry || function_id >= index->function_count) return false;
+    AstNode* function = index->functions[function_id].node;
+    NameScope* function_scope = function ? ((AstFuncNode*)function)->vars : NULL;
+    if (!function_scope || !entry->scope) return false;
+    for (NameScope* scope = entry->scope; scope; scope = scope->parent) {
+        if (scope == function_scope) return false;
+    }
+    return true;
+}
+
+static bool ast_index_function_reference_for_node(const AstIndex* index,
+        AstNodeId node_id, bool write, AstFunctionReference* reference) {
+    if (!index || !reference || node_id >= index->count) return false;
+    AstNode* node = index->nodes[node_id];
+    AstFunctionId owner = index->owner_functions[node_id];
+    if (!node || owner >= index->function_count) return false;
+    AstBindingId binding_id = AST_BINDING_ID_INVALID;
+    uint8_t flags = 0;
+    if (!write && node->node_type == AST_NODE_IDENT) {
+        binding_id = index->node_bindings[node_id];
+        flags = AST_FUNCTION_REF_READ;
+    } else if (write && node->node_type == AST_NODE_ASSIGN_STAM) {
+        binding_id = index->node_bindings[node_id];
+        flags = AST_FUNCTION_REF_WRITE;
+    } else if (write && node->node_type == AST_NODE_ASSIGN) {
+        // JavaScript keeps the assignment target as its left child rather
+        // than duplicating Lambda's target_entry field on the shared shape.
+        AstNode* target = ast_unwrap_primary(((AstAssignNode*)node)->left);
+        AstNodeId target_id = ast_index_find(index, target);
+        binding_id = target_id < index->count ? index->node_bindings[target_id] :
+            AST_BINDING_ID_INVALID;
+        flags = AST_FUNCTION_REF_WRITE;
+    } else if (write && node->node_type == AST_NODE_UNARY &&
+            (((AstUnaryNode*)node)->op == OPERATOR_JS_INCREMENT ||
+             ((AstUnaryNode*)node)->op == OPERATOR_JS_DECREMENT)) {
+        AstNode* target = ast_unwrap_primary(((AstUnaryNode*)node)->operand);
+        AstNodeId target_id = ast_index_find(index, target);
+        binding_id = target_id < index->count ? index->node_bindings[target_id] :
+            AST_BINDING_ID_INVALID;
+        flags = AST_FUNCTION_REF_WRITE;
+    } else if (write && (node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM)) {
+        AstIdentNode* root = ast_compound_root_ident(
+            ((AstCompoundAssignNode*)node)->object);
+        AstNodeId root_id = ast_index_find(index, (AstNode*)root);
+        binding_id = root_id < index->count ? index->node_bindings[root_id] :
+            AST_BINDING_ID_INVALID;
+        flags = AST_FUNCTION_REF_WRITE;
+    }
+    if (binding_id >= index->binding_count) return false;
+    NameEntry* entry = index->bindings[binding_id];
+    if (!entry) return false;
+    if (ast_index_function_reference_is_free(index, owner, entry)) {
+        flags |= AST_FUNCTION_REF_FREE;
+    }
+    reference->node_id = node_id;
+    reference->binding_id = binding_id;
+    reference->flags = flags;
+    return true;
+}
+
+static bool ast_index_build_function_references(AstIndex* index,
+        uint32_t* counts) {
+    // A script without functions owns an empty CSR slice. Its count array is
+    // intentionally null, just like the other zero-key reverse tables.
+    if (!index || (index->function_count && !counts)) return false;
+    index->function_reference_offsets = (uint32_t*)calloc(
+        (size_t)index->function_count + 1, sizeof(uint32_t));
+    if (!index->function_reference_offsets) return false;
+    for (AstFunctionId i = 0; i < index->function_count; i++) {
+        index->function_reference_offsets[i + 1] = counts[i];
+    }
+    for (AstFunctionId i = 1; i <= index->function_count; i++) {
+        index->function_reference_offsets[i] +=
+            index->function_reference_offsets[i - 1];
+    }
+    uint32_t total = index->function_reference_offsets[index->function_count];
+    index->function_references = total ? (AstFunctionReference*)malloc(
+        sizeof(AstFunctionReference) * total) : NULL;
+    uint32_t* write = index->function_count ? (uint32_t*)malloc(
+        sizeof(uint32_t) * index->function_count) : NULL;
+    if ((total && !index->function_references) ||
+            (index->function_count && !write)) {
+        free(write);
+        return false;
+    }
+    if (index->function_count) memcpy(write, index->function_reference_offsets,
+        sizeof(uint32_t) * index->function_count);
+    for (AstNodeId node_id = 0; node_id < index->count; node_id++) {
+        AstFunctionReference reference = {};
+        if (ast_index_function_reference_for_node(index, node_id, false, &reference)) {
+            AstFunctionId owner = index->owner_functions[node_id];
+            index->function_references[write[owner]++] = reference;
+        }
+        if (ast_index_function_reference_for_node(index, node_id, true, &reference)) {
+            AstFunctionId owner = index->owner_functions[node_id];
+            index->function_references[write[owner]++] = reference;
+        }
+    }
+    free(write);
     return true;
 }
 
@@ -418,11 +539,13 @@ bool ast_index_rebuild_queries(AstIndex* index) {
         sizeof(uint32_t));
     uint32_t* overlay_counts = index->function_count
         ? (uint32_t*)calloc(index->function_count, sizeof(uint32_t)) : NULL;
+    uint32_t* reference_counts = index->function_count
+        ? (uint32_t*)calloc(index->function_count, sizeof(uint32_t)) : NULL;
     if ((index->binding_count && (!binding_counts || !call_counts)) ||
             (index->count && !member_counts) || !child_counts ||
-            (index->function_count && !overlay_counts)) {
+            (index->function_count && (!overlay_counts || !reference_counts))) {
         free(binding_counts); free(call_counts); free(member_counts); free(child_counts);
-        free(overlay_counts);
+        free(overlay_counts); free(reference_counts);
         return false;
     }
     for (AstNodeId i = 0; i < index->count; i++) {
@@ -431,7 +554,7 @@ bool ast_index_rebuild_queries(AstIndex* index) {
         AstNode* node = index->nodes[i];
         if (node && (node->node_type == AST_NODE_CALL_EXPR ||
                 node->node_type == AST_NODE_NEW_EXPR)) {
-            AstNode* callee = ((AstCallNode*)node)->function;
+            AstNode* callee = ast_unwrap_primary(((AstCallNode*)node)->function);
             AstNodeId callee_id = callee ? ast_index_find(index, callee) : AST_NODE_ID_INVALID;
             AstBindingId callee_binding = callee_id < index->count
                 ? index->node_bindings[callee_id] : AST_BINDING_ID_INVALID;
@@ -446,6 +569,13 @@ bool ast_index_rebuild_queries(AstIndex* index) {
                 !ast_index_node_descends(index, i,
                     index->functions[owner].first_node)) {
             overlay_counts[owner]++;
+        }
+        AstFunctionReference reference = {};
+        if (ast_index_function_reference_for_node(index, i, false, &reference)) {
+            reference_counts[owner]++;
+        }
+        if (ast_index_function_reference_for_node(index, i, true, &reference)) {
+            reference_counts[owner]++;
         }
     }
     for (AstFunctionId i = 0; i < index->function_count; i++) {
@@ -489,6 +619,9 @@ bool ast_index_rebuild_queries(AstIndex* index) {
         }
     }
     if (ok) {
+        ok = ast_index_build_function_references(index, reference_counts);
+    }
+    if (ok) {
         index->function_overlay_offsets = (uint32_t*)calloc(
             (size_t)index->function_count + 1, sizeof(uint32_t));
         if (!index->function_overlay_offsets) ok = false;
@@ -521,7 +654,7 @@ bool ast_index_rebuild_queries(AstIndex* index) {
         }
     }
     free(binding_counts); free(call_counts); free(member_counts); free(child_counts);
-    free(overlay_counts);
+    free(overlay_counts); free(reference_counts);
     if (!ok) ast_index_free_queries(index);
     return ok;
 }
@@ -1074,6 +1207,50 @@ const AstFunctionId* ast_index_function_children(const AstIndex* index,
     uint32_t end = index->function_child_offsets[bucket + 1];
     if (count) *count = end - first;
     return index->function_children ? index->function_children + first : NULL;
+}
+
+const AstFunctionReference* ast_index_function_references(const AstIndex* index,
+        AstFunctionId function_id, uint32_t* count) {
+    if (count) *count = 0;
+    if (!index || function_id >= index->function_count ||
+            !index->function_reference_offsets) return NULL;
+    uint32_t first = index->function_reference_offsets[function_id];
+    uint32_t end = index->function_reference_offsets[function_id + 1];
+    if (count) *count = end - first;
+    return index->function_references ? index->function_references + first : NULL;
+}
+
+bool ast_index_scan_profile_support(AstIndex* index,
+        AstIndexProfileVisitor visitor, void* context) {
+    if (!index || !visitor || !index->graph_published) return false;
+    if (index->profile_support_scanned &&
+            index->profile_support_visitor == visitor) {
+        return index->profile_supported;
+    }
+    free(index->profile_support);
+    index->profile_support = index->count ? (uint8_t*)calloc(index->count,
+        sizeof(uint8_t)) : NULL;
+    if (index->count && !index->profile_support) return false;
+    index->profile_support_visitor = visitor;
+    index->profile_support_scanned = true;
+    index->profile_supported = true;
+    for (AstNodeId node_id = 0; node_id < index->count;) {
+        AstIndexProfileSupport support = visitor(index, node_id, context);
+        index->profile_support[node_id] = (uint8_t)support;
+        if (support == AST_INDEX_PROFILE_REJECT) {
+            index->profile_supported = false;
+            return false;
+        }
+        if (support == AST_INDEX_PROFILE_SKIP_SUBTREE) {
+            AstNodeId end = ast_index_subtree_end(index, node_id);
+            if (end > node_id) {
+                node_id = end;
+                continue;
+            }
+        }
+        node_id++;
+    }
+    return true;
 }
 
 const AstNodeId* ast_index_function_overlay_nodes(const AstIndex* index,

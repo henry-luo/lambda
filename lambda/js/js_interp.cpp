@@ -5705,8 +5705,9 @@ static bool js_interp_iteration_head_supported(JsAstNode* left) {
         js_interp_pattern_supported((JsAstNode*)declarator->id);
 }
 
-static void js_interp_check_node(JsAstNode* node, bool* supported) {
-    if (!node || !supported || !*supported) return;
+static bool js_interp_node_is_supported(JsAstNode* node) {
+    if (!node) return false;
+    bool supported = true;
     switch (node->node_type) {
     case AST_SCRIPT: case AST_NODE_BLOCK: case AST_NODE_EXPR_STMT:
     case AST_NODE_VAR_STAM:
@@ -5735,7 +5736,7 @@ static void js_interp_check_node(JsAstNode* node, bool* supported) {
     case AST_NODE_METHOD: {
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)node;
         if ((method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR &&
-                 method->static_method)) *supported = false;
+                 method->static_method)) supported = false;
         break;
     }
     case AST_NODE_FIELD: {
@@ -5753,13 +5754,13 @@ static void js_interp_check_node(JsAstNode* node, bool* supported) {
         // may be syntactically valid in an uninvoked async body even though
         // iteration itself is deferred until that function resumes.
         if (!js_interp_iteration_head_supported((JsAstNode*)loop->left)) {
-            *supported = false;
+            supported = false;
         }
         break;
     }
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_ARROW_FUNC: {
         JsFunctionNode* function = (JsFunctionNode*)node;
-        if (!js_interp_function_params_supported(function)) *supported = false;
+        if (!js_interp_function_params_supported(function)) supported = false;
         break;
     }
     case AST_NODE_IDENT:
@@ -5769,7 +5770,7 @@ static void js_interp_check_node(JsAstNode* node, bool* supported) {
     case AST_NODE_VARIABLE_DECLARATOR:
         if (!((JsVariableDeclaratorNode*)node)->id ||
                 !js_interp_pattern_supported((JsAstNode*)((JsVariableDeclaratorNode*)node)->id)) {
-            *supported = false;
+            supported = false;
         }
         break;
     case AST_NODE_CALL_EXPR:
@@ -5783,23 +5784,29 @@ static void js_interp_check_node(JsAstNode* node, bool* supported) {
     case AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* handler = (JsCatchNode*)node;
         if (handler->param && !js_interp_pattern_supported((JsAstNode*)handler->param)) {
-            *supported = false;
+            supported = false;
         }
         break;
     }
     case AST_NODE_UNARY:
-        if (!js_interp_operator_supported(((JsUnaryNode*)node)->op)) *supported = false;
+        if (!js_interp_operator_supported(((JsUnaryNode*)node)->op)) supported = false;
         break;
     case AST_NODE_BINARY:
-        if (!js_interp_operator_supported(((JsBinaryNode*)node)->op)) *supported = false;
+        if (!js_interp_operator_supported(((JsBinaryNode*)node)->op)) supported = false;
         break;
     case AST_NODE_ASSIGN:
-        if (!js_interp_operator_supported(((JsAssignmentNode*)node)->op)) *supported = false;
+        if (!js_interp_operator_supported(((JsAssignmentNode*)node)->op)) supported = false;
         break;
     default:
-        *supported = false;
+        supported = false;
         break;
     }
+    return supported;
+}
+
+static void js_interp_check_node(JsAstNode* node, bool* supported) {
+    if (!node || !supported || !*supported) return;
+    *supported = js_interp_node_is_supported(node);
     if (*supported) js_ast_visit_children(node, js_interp_check_child, supported);
 }
 
@@ -5807,8 +5814,21 @@ static void js_interp_check_child(JsAstNode* child, void* opaque) {
     js_interp_check_node(child, (bool*)opaque);
 }
 
+static AstIndexProfileSupport js_interp_profile_support_node(
+        const AstIndex* index, AstNodeId node_id, void* context) {
+    (void)context;
+    return index && node_id < index->count &&
+            js_interp_node_is_supported((JsAstNode*)index->nodes[node_id])
+        ? AST_INDEX_PROFILE_ACCEPT : AST_INDEX_PROFILE_REJECT;
+}
+
 bool js_interp_script_is_supported(JsScript* script) {
     if (!script || !script->ast_root) return false;
+    AstIndex* index = &script->ast_index;
+    if (index->graph_published) {
+        return ast_index_scan_profile_support(index,
+            js_interp_profile_support_node, NULL);
+    }
     bool supported = true;
     js_interp_check_node((JsAstNode*)script->ast_root, &supported);
     return supported;
