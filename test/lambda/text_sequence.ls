@@ -1,15 +1,16 @@
-// P0 fixture of vibe/impl/Lambda_List_Fixes.md — lives in test/lambda/ext until its
-// phase turns it green, then moves to test/lambda (baseline). Golden written from the
-// rulings, not from the runtime.
+// Fixture of vibe/impl/Lambda_List_Fixes.md, green since P4 (2026-09-23) on
+// both tiers. Golden written from the rulings, not from the runtime.
 // S2.5.8: text is placed as one value and walked as a sequence; select and
 // reorder keep the text kind; a mapping pipe yields the text kind when every
 // result is of that kind and an array otherwise; `in` is code-point
-// membership; S7.2.1: an out-of-range subscript is null. (phase P4)
+// membership; S7.2.1: an out-of-range subscript is null.
 
 "-- select / reorder keep the text kind --";
 [reverse("abc"), sort("cba"), unique("aab"), take("abc", 2), drop("abc", 1), slice("abc", 1, 3), "abc"[1 to 2]];
 [reverse('abc'), reverse(b'\x0102')];
 [type(reverse("abc")), type(reverse('abc')), type(reverse(b'\x0102'))]
+"-- a binary walks as its bytes, and rebuilds as a binary --";
+[take(b'\x010203', 2), drop(b'\x010203', 1), slice(b'\x010203', 1, 3), b'\x010203'[0], b'\x010203'[3] == null]
 "-- filter --";
 ["abc" that ~ != "b", type("abc" that ~ != "b"), "abc" that ~ == "z", ("abc" that ~ == "z") == ""]
 "-- mapping pipe: text when every result is text, else an array --";

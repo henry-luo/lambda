@@ -50,7 +50,7 @@ type(false ++ "no")
 0;
 (42 ++ null)
 0
-// ===== Invalid ++ combinations =====
+// ===== Scalar ++ sequence prepends, sequence ++ scalar appends (S10.6.1) =====
 42 ++ [1];
 (true ++ null)
 true ++ [1];

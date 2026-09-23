@@ -422,6 +422,11 @@ void runtime_release_script_generation(Runtime* runtime, int first_script_index,
 void runtime_log_script_load_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
 
+// True when a text value's characters are one byte each, so byte offsets are
+// character offsets. Text-rebuilding paths in the vector module carry the same
+// conservative proof the string builders in lambda-eval.cpp do.
+bool text_item_is_ascii(Item item);
+
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,
                           uint64_t* result_home);

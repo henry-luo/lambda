@@ -70,5 +70,5 @@ type words = \(w+)
 'Test 7: Replace Empty String'
 
 21; replace("abc", "b", "")                 // "ac" (delete match)
-22; replace("aaa", "a", "")                 // "" (delete all)
+22; [replace("aaa", "a", "")]               // [""] (delete all; a bare "" is dropped as top-level content, S2.6.2)
 23; replace("hello", "x", "")              // "hello" (no match)

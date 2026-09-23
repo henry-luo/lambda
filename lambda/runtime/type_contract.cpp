@@ -942,6 +942,38 @@ bool lambda_type_layout_proves_contract(Type* type) {
     return false;
 }
 
+// S11.1.6: an annotation admits a list without changing its kind, and
+// kind-preserving transforms hand lists back under array types, so any array
+// type -- or any type that is not a definite scalar, text, range, map, or
+// element -- may hold a list at run time.
+bool lambda_type_may_hold_list(Type* type) {
+    for (int depth = 0; type && depth <= 16; depth++) {
+        switch (type->type_id) {
+        case LMD_TYPE_ANY:
+        case LMD_TYPE_ARRAY:
+        case LMD_TYPE_ARRAY_NUM:
+            return true;
+        case LMD_TYPE_TYPE:
+            if (type->kind == TYPE_KIND_BINARY &&
+                    ((TypeBinary*)type)->op == OPERATOR_UNION) {
+                TypeBinary* binary = (TypeBinary*)type;
+                if (lambda_type_may_hold_list(binary->left)) return true;
+                type = binary->right;
+                continue;
+            }
+            if (type->kind == TYPE_KIND_UNARY &&
+                    ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
+                type = ((TypeUnary*)type)->operand;
+                continue;
+            }
+            return true;  // other type terms stay open
+        default:
+            return false;
+        }
+    }
+    return true;
+}
+
 Type* lambda_type_nullable_normalized(Pool* pool, Type* type) {
     type = contract_unwrap_type(type);
     if (!type || lambda_type_accepts_null(type) || lambda_type_accepts_error(type) ||

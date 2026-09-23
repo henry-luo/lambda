@@ -23381,11 +23381,8 @@ static Item js_string_intrinsic_algorithm(Item str,
             return units_result;
         }
         Item result = fn_split(str, sep);
-        // A Lambda list never spreads inside JS: clear the kind bit on the value
-        // published to JS (S2.5.6; the flag is Lambda's, not an Arguments mark).
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
-            result.array->is_spreadable = 0;
-            // fn_split returns a content list on an inferred pointer lane, whose
+            // fn_split builds an array (S2.5.7) on an inferred pointer lane, whose
             // `items[]` words are raw `String*` rather than tagged Items. Every
             // JS array read goes straight to `items[]`, so an un-widened lane
             // reaches get_type_id() as a raw pointer -- which then reads the

@@ -988,6 +988,9 @@ enum MapKind {
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
+// the list kind bit (`is_spreadable`, S2.5.1v2), for code that tests `flags`
+// without a Container pointer -- the JIT's slot-store list test (S2.5.6)
+#define CONTAINER_FLAG_SPREADABLE (1u << 1)
 // raw masks remain part of the container ABI for code that snapshots `flags`
 // without a Container pointer (notably the moving GC).
 // D2.6.6v2/D2.6.11: bit 6 was `has_js_props`, retired when the JS companion map
@@ -1392,6 +1395,25 @@ Item list_end(List *list);  // value finish: none is null, one is the item (S2.5
 Item list_end_item(List *list);  // item-position finish: none is a skip marker
 Item list_collapse_value(Item value);  // collapse a finished for-expression result
 Item list_collapse_item(Item value);   // same, in an item position
+#ifdef __cplusplus
+extern "C" {
+#endif
+bool item_is_list(Item value);  // the list kind bit, on a generic or packed array (S2.5.1v2)
+// S2.5.6: a single-value slot stores a list as its array image (a one-level
+// copy with the kind bit clear); any other value is returned unchanged.
+Item slot_image(Item value);
+// The JIT's direct field writer on a list value: store the image at the slot,
+// re-deriving the slot from the rooted owner after the copy allocates.
+void lambda_direct_field_store_image(Item owner, int64_t byte_offset, Item list);
+// Finish a transform result in the kind its sources decide (S2.5.7): a list
+// collapses (none is null, one is its item, S2.5.5v2); an array keeps its length.
+Item seq_finish_kind(Item result, bool as_list);
+// S2.5.7: an operation over two sequences is a list only when every sequence
+// operand is a list; scalars and null do not decide.
+bool seq_operands_are_lists(Item left, Item right);
+#ifdef __cplusplus
+}
+#endif
 
 // Spreadable array functions for for-expression results
 Array* array_plain();  // constructs a plain empty array (no frame management)
@@ -1432,6 +1454,13 @@ int64_t lambda_restore_number_frame_top(uint64_t* top);
 void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
+// A for-expression's window clauses trim its raw stream in place, ahead of its
+// one list finish (S2.5.2v2); counts follow take/drop (C15). Returns the
+// stream, or an error for an invalid count.
+#define FOR_WINDOW_OFFSET 1
+#define FOR_WINDOW_LIMIT 2
+#define FOR_WINDOW_LIMIT_LAST 4
+Item for_window(Array* out, Item offset, Item limit, int64_t flags);
 Array* array_spreadable();  // constructs a spreadable empty array
 // Box an inferred pointer lane's words in place and drop the lane. An inferred
 // lane is a representation choice, not a source contract (D3.3.1v2, D3.3.3v3),
@@ -1443,7 +1472,11 @@ void array_push_verbatim(Array* arr, Item item);  // verbatim append: one value,
 // S9.3.1 capturing append for Lambda literals/comprehensions; array_push does not capture.
 void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
-void array_push_spread_all(Array* arr, Item item);  // push item, spreading any array (for pipe exprs in array literals)
+// S12.3.5v2: `*x` is the list of x's items -- a sequence's items (a range
+// materialized), nothing for null, any other value as one item -- collapsed
+// for a value position or for an item position (S2.5.5v2)
+Item seq_spread_value(Item item);
+Item seq_spread_item(Item item);
 Item array_end(Array* arr);  // finalize and return array as Item
 #ifdef __cplusplus
 extern "C" {
@@ -1460,9 +1493,6 @@ Array* fn_cross_join_tuples(Item prior_tuples_item, Item rows_item, Item name_it
 #ifdef __cplusplus
 }
 #endif
-
-// Mark an item as spreadable (for spread operator *expr)
-Item item_spread(Item item);
 
 typedef void* (*fn_ptr)();
 
@@ -1848,6 +1878,13 @@ static inline bool is_native_numeric_or_bool_type_id(TypeId type_id) {
 
 static inline bool is_text_type_id(TypeId type_id) {
     return type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL;
+}
+
+// S2.5.8: text -- a string or symbol by code point, a binary by byte -- is
+// walked as a sequence by every sequence operation and placed as one value by
+// `++` and the appends.
+static inline bool is_sequence_text_type_id(TypeId type_id) {
+    return is_text_type_id(type_id) || type_id == LMD_TYPE_BINARY;
 }
 
 static inline TypeId item_semantic_type_id(TypeId type_id) {
@@ -2567,6 +2604,7 @@ extern "C" {
     // Exact-width store for a value that has already crossed the destination
     // element contract. Unlike array_num_set_item(), this never coerces.
     bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value);
+    bool array_num_admits_value(ArrayNum *arr, Item value);  // exactly the lane type
     void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
     Item array_num_read_item(ArrayNum *arr, int64_t index);
     double array_num_read_double(ArrayNum *arr, int64_t index);
@@ -3007,7 +3045,6 @@ extern "C" {
     void fn_sort_by_keys(Item values, Item keys, int64_t descending);
     Item fn_unique(Item a);
     Item fn_take(Item a, Item n);
-    Item fn_take_last(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
     Item fn_slice3(Item a, Item start, Item end);
@@ -3085,6 +3122,9 @@ extern "C" {
     typedef Item (*PipeMapFn)(Item item, Item index);
     Item fn_pipe_map(Item collection, PipeMapFn transform);
     Item fn_pipe_where(Item collection, PipeMapFn predicate);
+    // Finish a mapping pipe or `that` collection in its source's kind
+    // (S10.1.2v2, S10.1.5v2).
+    Item pipe_end(Array* result, Item source);
     Item fn_pipe_call(Item collection, Item func);
 
     String* fn_string(Item item);

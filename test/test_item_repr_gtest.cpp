@@ -238,6 +238,10 @@ protected:
 
         element->items = (Item*)pool_calloc(pool, 6 * sizeof(Item));
         if (!element->items) return nullptr;
+        // normalized content holds no nulls (S2.6.2), so a content write that
+        // replaces a child must find a real one there (S2.6.5)
+        element->items[0] = {.item = i2it(1)};
+        element->items[1] = {.item = i2it(2)};
         element->length = 2;
         element->capacity = 6;
 

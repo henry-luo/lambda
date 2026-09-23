@@ -4,6 +4,7 @@
 // S2.5.2v2: a for-expression produces a list whatever its clauses; nested
 // for-results splice; empty and one-item results collapse (S2.5.5v2).
 // (phase P2)
+// Green on both tiers after P2 (2026-09-22); moved from test/lambda/ext.
 
 let xs = [3, 1, 2]
 "-- every clause keeps it a list --";

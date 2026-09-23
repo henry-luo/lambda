@@ -17,7 +17,7 @@ pn arm_detach(flag: bool) {
     var keep = c
     if (flag) { c[0] = 5 }
     c[1] = 7
-    print("arm_detach " ++ flag ++ ": c=" ++ c ++ " keep=" ++ keep ++ "\n")
+    print("arm_detach " ++ string(flag) ++ ": c=" ++ string(c) ++ " keep=" ++ string(keep) ++ "\n")
 }
 
 pn arm_rebind(flag: bool) {
@@ -25,14 +25,14 @@ pn arm_rebind(flag: bool) {
     var c = src
     if (flag) { c = fresh() }
     c[2] = 9
-    print("arm_rebind " ++ flag ++ ": c=" ++ c ++ " src=" ++ src ++ "\n")
+    print("arm_rebind " ++ string(flag) ++ ": c=" ++ string(c) ++ " src=" ++ string(src) ++ "\n")
 }
 
 pn else_after_rebind(flag: bool) {
     var src = fresh()
     var c = src
     if (flag) { c = fresh() } else { c[0] = 4 }
-    print("else_after_rebind " ++ flag ++ ": c=" ++ c ++ " src=" ++ src ++ "\n")
+    print("else_after_rebind " ++ string(flag) ++ ": c=" ++ string(c) ++ " src=" ++ string(src) ++ "\n")
 }
 
 pn match_rebind(k: int) {
@@ -43,7 +43,7 @@ pn match_rebind(k: int) {
         default { c[1] = 1 }
     }
     c[0] = 8
-    print("match_rebind " ++ k ++ ": c=" ++ c ++ " src=" ++ src ++ "\n")
+    print("match_rebind " ++ string(k) ++ ": c=" ++ string(c) ++ " src=" ++ string(src) ++ "\n")
 }
 
 pn while_share() {
@@ -56,7 +56,7 @@ pn while_share() {
         push(snaps, d)
         i = i + 1
     }
-    print("while_share: " ++ snaps ++ "\n")
+    print("while_share: " ++ string(snaps) ++ "\n")
 }
 
 pn for_share() {
@@ -66,7 +66,7 @@ pn for_share() {
         c[1] = i
         push(snaps, c)
     }
-    print("for_share: " ++ snaps ++ "\n")
+    print("for_share: " ++ string(snaps) ++ "\n")
 }
 
 pn break_share() {
@@ -82,7 +82,7 @@ pn break_share() {
         i = i + 1
     }
     c[2] = 99
-    print("break_share: c=" ++ c ++ " keep=" ++ keep ++ "\n")
+    print("break_share: c=" ++ string(c) ++ " keep=" ++ string(keep) ++ "\n")
 }
 
 pn nested_share() {
@@ -98,7 +98,7 @@ pn nested_share() {
         push(rows, {row: c})
         i = i + 1
     }
-    print("nested_share: " ++ rows ++ "\n")
+    print("nested_share: " ++ string(rows) ++ "\n")
 }
 
 // the havlak2 three-level store shape: a rebind in one arm of a nested
@@ -122,11 +122,11 @@ pn nested_handle() {
     var h: Holder = {arr: a}
     var b: Arr = h.arr
     arr_set(a, 0, 1, 2)
-    print("nested_handle: a=" ++ a.l0 ++ " b=" ++ b.l0 ++ "\n")
+    print("nested_handle: a=" ++ string(a.l0) ++ " b=" ++ string(b.l0) ++ "\n")
     var holder: Holder = {arr: a}
     var a2: Arr = holder.arr
     arr_set(a2, 0, 0, 9)
-    print("nested_handle: a2=" ++ a2.l0 ++ " holder=" ++ holder.arr.l0 ++ "\n")
+    print("nested_handle: a2=" ++ string(a2.l0) ++ " holder=" ++ string(holder.arr.l0) ++ "\n")
 }
 
 pn main() {

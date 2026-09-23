@@ -6,6 +6,7 @@
 // collapsed (a bound empty list is null and lands as null). S8.3.1v3: a
 // scalar has no content, so a computed one-item list is invisible to for/len/
 // index — wrap in [...] for a stable collection. (phase P1; take: P2)
+// Green on both tiers after P2 (2026-09-22); moved from test/lambda/ext.
 
 "-- collapse --";
 [(5) == 5, type((5)), ((5)) == 5, (((1, 2))) == (1, 2)]

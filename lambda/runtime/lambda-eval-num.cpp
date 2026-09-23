@@ -919,6 +919,8 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
         const char* function_name) {
     int64_t length = vector_length(item);
     if (length < 0) return ItemError;
+    // S7.10.5v2: same kind out as in (S2.5.7)
+    bool as_list = item_is_list(item);
 
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
@@ -942,7 +944,7 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
         }
         rooted_result.get()->float_items[i] = value;
     }
-    return {.array_num = rooted_result.get()};
+    return seq_finish_kind({.array_num = rooted_result.get()}, as_list);
 }
 
 Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out) {
@@ -1374,6 +1376,7 @@ Item fn_neg(Item item) {
              get_type_id(item) == LMD_TYPE_ARRAY ||
              get_type_id(item) == LMD_TYPE_RANGE) {
         TypeId t = get_type_id(item);
+        bool as_list = item_is_list(item);  // read before the result allocation
         int64_t len = (t == LMD_TYPE_ARRAY_NUM) ? item.array_num->length :
                       (t == LMD_TYPE_ARRAY) ? item.array->length :
                       item.range->length;
@@ -1425,7 +1428,8 @@ Item fn_neg(Item item) {
                 return ItemError;
             }
         }
-        return { .array_num = result };
+        // S7.10.5v2: same kind out as in (S2.5.7)
+        return seq_finish_kind({ .array_num = result }, as_list);
     }
     else if (is_text_type_id(get_type_id(item))) {
         // Cast string/symbol to number, then negate

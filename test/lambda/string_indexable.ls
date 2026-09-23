@@ -1,24 +1,25 @@
 // Test string-as-indexable behavior
-// Strings are singular (not iterable) in collection functions
+// S2.5.8: text is walked as a sequence of its code points, so a select or
+// reorder operation returns the same text kind, rebuilt from its characters.
 
 // ============================================================
-// PASSTHROUGH FUNCTIONS
+// SELECT / REORDER (S2.5.8)
 // ============================================================
-'reverse passthrough'
+'reverse'
 {r: reverse("hello")}
 {r: reverse("café")}
 
-'sort passthrough'
+'sort'
 {r: sort("hello")}
 {r: sort("hello", "desc")}
 
-'unique passthrough'
+'unique'
 {r: unique("hello")}
 
-'min passthrough'
+'min (a reduction, not a selection)'
 {r: min("abc")}
 
-'max passthrough'
+'max (a reduction, not a selection)'
 {r: max("xyz")}
 
 // ============================================================

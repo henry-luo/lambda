@@ -1,10 +1,11 @@
-// Test pipe and 'that' spreading in array literals
-// Pipe (|) and filter (that) expressions inside array literals
-// produce spreadable results that flatten into the enclosing array.
+// Pipe and 'that' results in array literals (S10.1.2v2, S10.1.5v2, S2.5.1v2).
+// A pipe or filter result keeps its source's kind and is placed as a value:
+// an array source gives an array, which stays one item; a list source gives a
+// list, which spreads; a scalar source gives its one value.
 
-"=== Pipe spread in array literals ===";
+"=== Pipe over an array: one item ===";
 
-// Test 1: Basic identity pipe spread
+// Test 1: Basic identity pipe
 [1, [2, 3] |> ~, 4, 5];
 
 // Test 2: Pipe with transformation
@@ -14,7 +15,7 @@
 fn double(x: int) { x * 2 }
 [1, 5 |> double, 4];
 
-// Test 4: Pipe with empty array — produces nothing
+// Test 4: Pipe over an empty array is `[]`
 [1, [] |> ~, 4];
 
 // Test 5: Pipe only element
@@ -23,23 +24,23 @@ fn double(x: int) { x * 2 }
 // Test 6: Multiple pipes in same array
 [[1, 2] |> ~, [3, 4] |> ~ * 10]
 
-"=== That/filter spread in array literals ===";
+"=== That over an array: one item ===";
 
-// Test 7: Basic that filter spread
+// Test 7: Basic that filter
 [1, [1, 5, 7, 10, 15] that (~ > 5), 99];
 
 // Test 8: That filter with equality (no parens needed)
 [0, [1, 2, 3, 4, 5] that ~ == 3, 9];
 
-// Test 9: That filter removes all — empty result dropped
+// Test 9: That filter removes all — `[]` (S10.1.5v2)
 [1, [10, 20, 30] that (~ > 100), 4];
 
 // Test 10: That filter keeps all
 [0, [5, 6, 7] that (~ > 0), 9]
 
-"=== Mixed spreading ===";
+"=== Mixed ===";
 
-// Test 11: For-expr + pipe in same array
+// Test 11: For-expr + pipe in same array: the for-expression spreads
 [for (x in [1, 2]) x, [3, 4] |> ~ * 10];
 
 // Test 12: For-expr + that in same array
@@ -52,7 +53,19 @@ let a = [100, 200];
 // Test 14: For-expr + pipe + that
 [for (x in [1]) x, [10, 20] |> ~, [3, 4, 5] that (~ > 3)];
 
-// Test 15: Pipe spread alongside plain values
+// Test 15: Pipe results alongside plain values
 [0, [1, 2, 3] |> ~ + 10, 50, [4, 5] |> ~ * 2, 100]
+
+"=== Pipe over a list: spreads ===";
+
+// Test 16: a list maps to a list, which spreads
+[1, (2, 3) |> ~ * 10, 4];
+
+// Test 17: a list filters to a list, which spreads
+[0, (1, 5, 7, 10) that (~ > 4), 99];
+
+// Test 18: one item left is that item; none is null, placed as a value (S2.5.5v2)
+[0, (1, 5) that (~ > 4), 9];
+[0, (1, 2) that (~ > 4), 9]
 
 "=== End of pipe spread tests ==="

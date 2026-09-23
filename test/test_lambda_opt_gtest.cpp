@@ -828,7 +828,8 @@ TEST(LambdaOptAdmission, SplitBuildsInferredStringLane) {
     FixtureRun run = run_source_fixture("split_string_lane",
         "test/lambda/proc/tune26_split_string_lane.ls", "jit");
     ASSERT_TRUE(run.ok);
-    EXPECT_EQ(run.std_out, "[\"alpha\", \"beta\", 7, \"gamma\"]\n");
+    // split builds an array (S2.5.7), so `parts` is one item of the printed array
+    EXPECT_EQ(run.std_out, "[[\"alpha\", \"beta\", 7], \"gamma\"]\n");
     // The open first result must widen for the int append. The second result
     // already owns the string pointer lane, so its explicit string[] crossing
     // certifies in place instead of cloning (D3.3.1v2, D3.3.3v3, D3.3.4).

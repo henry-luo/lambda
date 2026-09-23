@@ -320,6 +320,12 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/mir/lambda/tune27_place_borrow.ls", "test/mir/lambda/tune27_place_borrow.txt"},
     {"test/mir/lambda/tune27_call_defined_binding.ls", "test/mir/lambda/tune27_call_defined_binding.txt"},
     {"test/mir/lambda/tune27_float_literal_nullable.ls", "test/mir/lambda/tune27_float_literal_nullable.txt"},
+    // List fixes P4 (S12.3.5v2): the retired `item_spread` marked its operand,
+    // and on the JIT that operand could be a pooled constant literal -- the
+    // same function then returned a list on every later call, where the
+    // interpreter returned an array. The divergence is only visible on a tier
+    // that compiles, so this fixture is pinned to all three.
+    {"test/lambda/spread_star.ls", "test/lambda/spread_star.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

@@ -44,6 +44,8 @@ let af = [1.5, 2.5, 3.5]
 "b" in ["a", "b", "c"]
 "d" in ["a", "b", "c"]
 
-"=== String substring ==="
+"=== String membership is by code point (S2.5.8) ==="
 "ell" in "hello"
+"e" in "hello"
 "xyz" in "hello"
+contains("hello", "ell")

@@ -944,8 +944,9 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
         FileStat fs = file_stat(full_path);
         path_apply_stat_metadata(child_path, pool, fs);
         
-        // Add child path to list (cast Path* to uint64_t since Item is uint64_t in C)
-        list_push(children, (Item)(uint64_t)child_path);
+        // Add child path to the array (cast Path* to uint64_t since Item is
+        // uint64_t in C); a listing is a sequence, so the verbatim append
+        array_push_verbatim((Array*)children, (Item)(uint64_t)child_path);
         dir_entry_free(entry);
     }
     
@@ -1032,8 +1033,9 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
         
         path_apply_stat_metadata(child, pool, fs);
         
-        // Add to matches (cast Path* to uint64_t since Item is uint64_t in C)
-        list_push(matches, (Item)(uint64_t)child);
+        // Add to matches (cast Path* to uint64_t since Item is uint64_t in C);
+        // the matches are a sequence, so the verbatim append
+        array_push_verbatim((Array*)matches, (Item)(uint64_t)child);
         
         // Recurse into subdirectories for **
         if (recursive && fs.is_dir) {

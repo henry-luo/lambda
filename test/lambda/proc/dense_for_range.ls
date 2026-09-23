@@ -46,19 +46,19 @@ pn grid(a: int[], n: int) int {
 
 pn main() {
     var a: int[] = [1, 2, 3, 4]
-    print("in_range=" ++ count_range(a, 3) ++ " " ++ count_range(a, 1) ++ "\n")
+    print("in_range=" ++ string(count_range(a, 3)) ++ " " ++ string(count_range(a, 1)) ++ "\n")
     // the array is shorter than the range: the guard is false, reads are null
-    print("short=" ++ count_range(a, 9) ++ "\n")
+    print("short=" ++ string(count_range(a, 9)) ++ "\n")
     // a negative start keeps the checked path too
-    print("neg=" ++ count_from(a, 0 - 2, 2) ++ " " ++ count_from(a, 1, 2) ++ "\n")
+    print("neg=" ++ string(count_from(a, 0 - 2, 2)) ++ " " ++ string(count_from(a, 1, 2)) ++ "\n")
     // an empty range runs no iteration
-    print("empty=" ++ count_range(a, 0 - 1) ++ " " ++ count_from(a, 3, 1) ++ "\n")
+    print("empty=" ++ string(count_range(a, 0 - 1)) ++ " " ++ string(count_from(a, 3, 1)) ++ "\n")
     var b: int[] = [0, 0, 0, 0]
     fill_range(b, 3)
-    print("filled=" ++ b ++ "\n")
+    print("filled=" ++ string(b) ++ "\n")
     var c: int[] = [9, 9]
     fill_range(c, 5)
-    print("short_store=" ++ c ++ "\n")
-    print("grid=" ++ grid(a, 1) ++ " " ++ grid(a, 7) ++ "\n")
+    print("short_store=" ++ string(c) ++ "\n")
+    print("grid=" ++ string(grid(a, 1)) ++ " " ++ string(grid(a, 7)) ++ "\n")
     print("done\n")
 }
