@@ -174,7 +174,14 @@ effect examples into a `pn` found [LR10-9](#lr10-9): E228 is checked only in
 top-level expression statements. Triaging the baseline gate against a clean control
 then found and fixed [LR01-16](#lr01-16), an `auto`-tier satellite key-linking
 defect that made 17 baseline scripts and the MathLive gate timing-dependent, and
-filed [LR01-17](#lr01-17).
+filed [LR01-17](#lr01-17). P2 of the list fixes (sequence operations keep their
+input's kind) filed [LR05-13](#lr05-13): query results have no ruled kind.
+P4 (text, `++`, `*`) closed [LR05-9](#lr05-9), [LR05-11](#lr05-11) and
+[LR05-12](#lr05-12), and found one tier divergence of its own on the way: with
+a filter over text now returning a string, the checker still typed the result
+`array`, and the JIT folded `("abc" that p) == ""` to false where the
+interpreter answered true (S1.6) — the result type, not the runtime, was the
+defect.
 
 ---
 
@@ -539,7 +546,7 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
-<a id="lr05-9"></a>**LR05-9 · `++` on numeric arrays of different element types reinterprets bits · OPEN (found 2026-09-21)**
+<a id="lr05-9"></a>**LR05-9 · `++` on numeric arrays of different element types reinterprets bits · FIXED 2026-09-23**
 `[1,2] ++ [3.5]` is `[1, 2, inf]`, `[1.5] ++ [2]` is `[1.5, 1e-323]`, and
 `[1i8,2i8] ++ [300]` is `[1, 2, 44]`, on both tiers. `fn_join`'s same-type
 shortcut (`lambda-eval.cpp:527`) tests only that both sides are
@@ -547,6 +554,10 @@ shortcut (`lambda-eval.cpp:527`) tests only that both sides are
 and copies the right payload's bytes under it. Contradicts **S5.3.1** (a
 numeric array is representation only); the `++` operand table itself has no
 ruling.
+*Fixed 2026-09-23 (P4):* the shortcut now also requires both lanes to have the
+same element type; a mixed pair falls through to the generic item path, so
+`[1, 2] ++ [3.5]` is `[1, 2, 3.5]` and `[1i8, 2i8] ++ [300]` is `[1, 2, 300]`.
+Record: [plan §13](impl/Lambda_List_Fixes.md).
 
 <a id="lr05-10"></a>**LR05-10 · Sequence kind (list vs array) is not preserved anywhere (S2.5.6, S2.5.7, D2.6.5v3) · OPEN (found 2026-09-22)**
 A 562-probe survey (`temp/spec_survey/listarray/`, both tiers) found the
@@ -589,8 +600,25 @@ JS timer packs, concurrency args), group/join/order keys and rows, path keys,
 query matches, clones, set operators, element-copying transforms, `zip`,
 index-addressed vector results, and the hosted-Python list operations — now
 uses the verbatim append `array_push_verbatim` (D2.6.5v3).
+*P2 landed 2026-09-22:* every sequence operation keeps its input's kind
+through one finish (`seq_finish_kind`, `seq_operands_are_lists`,
+`lambda-data-runtime.cpp`): sort/reverse/unique/take/drop/slice, element-wise
+arithmetic, masks, and unary functions, `zip`, the set operators, `fill`, the
+mapping pipe and `that` (`pipe_end`, both tiers), and for-expression windows
+(`for_window`, in place ahead of the one collapse); `split`/`find` build
+arrays; typed admission keeps the bit. What remains of the umbrella is the
+slot-store image ([LR12-28](#lr12-28), P3) and text ([LR05-11](#lr05-11), P4).
+Record: [plan §11](impl/Lambda_List_Fixes.md).
+*P3 landed 2026-09-23:* slot stores take the array image
+([LR12-28](#lr12-28) fixed) and insertions splice a list (`a[i] = list`,
+`push`, typed arrays included).
+*P4 landed 2026-09-23:* text walks as a sequence and rebuilds its own kind,
+`++` follows S10.6.1's table, and `*` no longer marks its operand
+([LR05-11](#lr05-11), [LR05-12](#lr05-12), [LR05-9](#lr05-9) fixed). The
+umbrella's remaining part is the type families of P5
+([LR03-12](#lr03-12)).
 
-<a id="lr05-11"></a>**LR05-11 · Text sequence operations, `that`/pipe on scalars, and `++` do not follow S2.5.8, S10.1.2v2, S10.1.5v2, S10.6.1 · OPEN (found 2026-09-22)**
+<a id="lr05-11"></a>**LR05-11 · Text sequence operations, `that`/pipe on scalars, and `++` do not follow S2.5.8, S10.1.2v2, S10.1.5v2, S10.6.1 · FIXED 2026-09-23**
 `reverse`/`sort`/`unique` return a string unchanged (`lambda-vector.cpp:2396`,
 `:2429`, "strings are singular"); `in` on strings is a substring test
 (`lambda-eval.cpp:3814`, `strstr`) where S8.1.1/S2.5.8 rule character
@@ -600,8 +628,26 @@ spreading list rather than a string; `"s"[-1]` is `""` (S7.2.1 says `null`).
 `[]`). `++`: `"a" ++ [1]` stringifies to `"a[1]"` and `[1,2] ++ 3` is an
 error, where S10.6.1 rules `["a", 1]` and `[1,2,3]`; `null` is already the
 identity. `keys`/`values`/`names` are not built in (S8.4.1v2 — deliberate).
+*Partially resolved 2026-09-22 (P2):* `that` and the mapping pipe follow
+S10.1.2v2/S10.1.5v2 for list, array, range, map, element, scalar, and null
+sources (`5 that ~ > 3` is `5`, `[1,2] that ~ > 9` is `[]`, a list filtered
+to nothing is `null`). The text operations, `in`, `"s"[-1]`, and `++` remain
+(P4).
+*Fixed 2026-09-23 (P4):* a string or symbol is walked by code point and a
+binary by byte, so `reverse`/`sort`/`unique`/`take`/`drop`/`slice` rebuild the
+source's kind from its characters; a filter over text always gives that kind
+(`""` when empty) and a mapping gives it only when every result item belongs to
+it (`"abc" |> upper(~)` is `"ABC"`, `"abc" |> ord(~)` is `[97, 98, 99]`) — the
+checker types those results accordingly, without which the JIT folded
+`("abc" that p) == ""` to false while the interpreter answered true. `in` is
+code-point membership and `contains` keeps the substring test; an out-of-range
+text subscript is `null` (S7.2.1). `++` follows S10.6.1's table: a sequence
+operand decides the result before any text arm (`[1] ++ "ab"` is `[1, "ab"]`,
+`[1, 2] ++ 3` is `[1, 2, 3]`), kind by S2.5.7, `null` the identity, maps and
+elements rejected. `keys`/`values`/`names` stay out of scope (S8.4.1v2 —
+deliberate). Record: [plan §13](impl/Lambda_List_Fixes.md).
 
-<a id="lr05-12"></a>**LR05-12 · `*` spread mutates its operand and skips ranges (S12.3.5v2) · OPEN (found 2026-09-22)**
+<a id="lr05-12"></a>**LR05-12 · `*` spread mutates its operand and skips ranges (S12.3.5v2) · FIXED 2026-09-23**
 `item_spread` (`lambda-data-runtime.cpp:2397`) sets the spread flag on its
 operand, so `[*a, 3]` permanently turns `a` into a list; on the JIT the operand
 may be a pooled constant literal (`transpile-mir.cpp:8148`), so
@@ -610,6 +656,23 @@ where the interpreter gives 2 (repro
 `temp/spec_survey/listarray/t/repro_spread_const.ls`). `[*(1 to 3), 9]` does
 not spread the range; `[*null, 1]` keeps the null where `*null` splices
 nothing. S1.6 violation on the JIT half.
+*Fixed 2026-09-23 (P4):* `item_spread` is deleted. `*x` builds the list of x's
+items — a sequence's items with a range materialized, nothing for null, any
+other value (text included) as one item — and finishes by position like every
+other list producer, so it splices where it lands, collapses at one item or
+none, and `[*xs]` packages any value as an array. The operand is untouched.
+Record: [plan §13](impl/Lambda_List_Fixes.md).
+
+<a id="lr05-13"></a>**LR05-13 · Query results are lists of any length (S2.5.5v2; kind unruled) · OPEN (found 2026-09-22)**
+`fn_query` and `fn_child_query` (`lambda-eval.cpp:3728`, `:3822`) return a
+container with the list bit set whatever it holds, so `e[element]` with one
+match is a one-item list (`len` 1, spreads as an item) and with none an empty
+list, where S2.5.5v2 says a list has at least two items. No ruling names the
+kind of `e[T]` / `e?T`: read as a selection (S2.5.7) the result follows its
+source — an array for an element, map, array, or range, a collapsing list for
+a list — but query results placed in element content would then land as one
+array item instead of splicing. Needs a ruling before the query functions
+change. Repro `temp/p2/probe_query.ls`. Both tiers.
 
 ---
 
@@ -1344,12 +1407,19 @@ Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
 contradict **S7.1.3v2** (writes are checked and raise through the `T^`
 channel).
 
-<a id="lr12-28"></a>**LR12-28 · A list stored in a field or `fill` keeps its list-ness (S2.5.6, S2.5.7) · OPEN (found 2026-09-22)**
+<a id="lr12-28"></a>**LR12-28 · A list stored in a field or `fill` keeps its list-ness (S2.5.6, S2.5.7) · FIXED 2026-09-23**
 `<e a: (1, 2)>` stores the attribute as a list, so reading `e.a` into an array
 literal spreads it (`[…, e.a]` gains two items); S2.5.6 rules that a
 single-value slot of a persistent container stores the array image `[1, 2]`.
 `fill(2, (1, 2))` stores the list as one element twice (`len` 2) where S2.5.7
 rules the list `(1, 2, 1, 2)` (`len` 4). Both tiers.
+*Partially resolved 2026-09-22 (P2):* `fill` follows its item —
+`fill(2, (1, 2))` is `(1, 2, 1, 2)` and `fill(0, (1, 2))` is `null`.
+*Fixed 2026-09-23 (P3):* every single-value slot stores the array image — map,
+element, and object literals, member writes (`fn_map_set`, the checked and
+COW setters, `vmap_set`), and the MIR's direct field stores, which convert
+through `slot_image` whenever the value's static type may hold a list — and
+the source list keeps its kind. Record: [plan §12](impl/Lambda_List_Fixes.md).
 
 <a id="lr12-29"></a>**LR12-29 · The interpreter ran `on` handler bodies as functional blocks (S12.1.3, S2.5.3) · FIXED 2026-09-22**
 An `on` handler is a `pn` (S12.1.3), so its body yields its last value

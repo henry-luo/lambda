@@ -5,7 +5,7 @@
 '=== type and equality ==='
 [true, true, true, false, complex]
 '=== maps, arrays, and total order ==='
-[0+1j, 0+2j, 1, 2+0j, 0-2j, 0+3j, [2, 0+2j]]
+[0+1j, 0+2j, [1, 2+0j, 0-2j, 0+3j], [2, 0+2j]]
 '=== complex math ==='
 [0+1j, 1+0j, 0+0j, 1-0j, 0+0j]
 '=== typed parameters ==='

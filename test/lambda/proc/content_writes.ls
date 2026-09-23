@@ -4,6 +4,7 @@
 // the child, a written list splices, a string beside a string merges, and
 // removing a separator merges its neighbours; `push` on an element inserts
 // content.
+// Green on both tiers after P3 (2026-09-23); moved from test/lambda/proc-ext.
 
 pn main() {
     var e = <e "x" 1 "y">

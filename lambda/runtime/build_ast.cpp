@@ -887,21 +887,30 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     }
     case SYS_RESULT_ARRAY_OF_ARGUMENT:
         // An open source cannot instantiate a concrete `T[]` relation; keep
-        // the row's open result as required by S11.4.9.
-        if (source->type_id != LMD_TYPE_ANY) {
+        // the row's open result as required by S11.4.9. A list argument is
+        // spliced, not wrapped (`fill` follows its item, S2.5.7), so an
+        // argument that may be a list keeps the result open too.
+        if (source->type_id != LMD_TYPE_ANY && !lambda_type_may_hold_list(source)) {
             if (Type* result = sys_func_array_of_argument_type(tp, source)) return result;
         }
+        if (lambda_type_may_hold_list(source)) return set_type_any(tp, ANY_LIST);
         break;
     case SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT:
         if (Type* result = sys_func_collection_result_type(tp, source, false, false)) {
             return result;
         }
         break;
-    case SYS_RESULT_SLICE_OF_ARGUMENT:
-        if (Type* result = sys_func_collection_result_type(tp, source, true, true)) {
+    case SYS_RESULT_SELECTION_OF_ARGUMENT:
+    case SYS_RESULT_SLICE_OF_ARGUMENT: {
+        // A selection from a list is that item or null at one item or none
+        // (S2.5.5v2), not a container, so such a source keeps the result open.
+        if (lambda_type_may_hold_list(source)) return set_type_any(tp, ANY_LIST);
+        bool slice = info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT;
+        if (Type* result = sys_func_collection_result_type(tp, source, slice, slice)) {
             return result;
         }
         break;
+    }
     case SYS_RESULT_FIXED:
     default:
         break;
@@ -9307,6 +9316,48 @@ static Type* direct_open_binary_result_type(Transpiler* tp, AnyReason reason,
     return &TYPE_ANY;
 }
 
+// S10.1.2v2/S10.1.5v2: a mapping pipe or `that` keeps its source's kind. A
+// scalar source is one member (`5 |> ~ + 1` is 6, `5 that p` is 5 or null),
+// null has none, and a list source collapses when a filter leaves one item or
+// none (S2.5.5v2), so only a definite array-kind source gives a container.
+static Type* pipe_collection_result_type(Transpiler* tp, Operator op,
+        Type* source, Type* body) {
+    TypeId source_id = source ? source->type_id : LMD_TYPE_ANY;
+    if (source_id == LMD_TYPE_NULL) return &TYPE_NULL;
+    if (source_id >= LMD_TYPE_BOOL && source_id <= LMD_TYPE_DTIME) {
+        return op == OPERATOR_WHERE
+            ? lambda_type_nullable_normalized(tp->pool, source) : body;
+    }
+    bool text = is_sequence_text_type_id(source_id);
+    bool array_kind = source_id == LMD_TYPE_RANGE ||
+        source_id == LMD_TYPE_VARRAY || is_map_family_type_id(source_id);
+    if (op == OPERATOR_WHERE) {
+        // S2.5.8: a filter over text keeps that kind -- its items are the
+        // source's own characters, so they always rebuild it. The canonical
+        // kind, not the source type: a filtered literal is a different value.
+        if (text) {
+            return source_id == LMD_TYPE_STRING ? (Type*)&TYPE_STRING :
+                source_id == LMD_TYPE_SYMBOL ? (Type*)&TYPE_SYMBOL : (Type*)&TYPE_BINARY;
+        }
+        // a range, map or element filters to an array; an array type may hold
+        // a list, which can collapse
+        return array_kind ? (Type*)&TYPE_ARRAY : set_type_any(tp, ANY_LIST);
+    }
+    // S2.5.8: a mapping over text gives that kind only when every result item
+    // belongs to it, and an array otherwise -- no static type decides which
+    if (text) return set_type_any(tp, ANY_PIPE);
+    // a mapping never shrinks a list, so an array-typed source still maps to
+    // a container; a body that may yield a list splices it, opening the items
+    if (!array_kind && source_id != LMD_TYPE_ARRAY && source_id != LMD_TYPE_ARRAY_NUM) {
+        return set_type_any(tp, ANY_LIST);
+    }
+    TypeArray* mapped = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
+        sizeof(TypeArray));
+    mapped->nested = lambda_type_may_hold_list(body) ? &TYPE_ANY : body;
+    mapped->type_index = -1;
+    return (Type*)mapped;
+}
+
 static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         AstNode* left, AstNode* right) {
     Type* lt = left && left->type ? left->type : &TYPE_ANY;
@@ -9339,15 +9390,8 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         return lambda_type_union_normalized(tp->pool, clean, rt);
     }
     if (op == OPERATOR_PIPE || op == OPERATOR_WHERE) {
-        if (op == OPERATOR_WHERE) return lt;
-        if (has_current_item_ref(right)) {
-            TypeArray* mapped = (TypeArray*)alloc_type(tp->pool,
-                LMD_TYPE_ARRAY, sizeof(TypeArray));
-            mapped->nested = rt;
-            mapped->type_index = -1;
-            return (Type*)mapped;
-        }
-        return rt;
+        if (op == OPERATOR_PIPE && !has_current_item_ref(right)) return rt;
+        return pipe_collection_result_type(tp, op, lt, rt);
     }
     if ((op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
             op == OPERATOR_DIV || op == OPERATOR_POW) &&

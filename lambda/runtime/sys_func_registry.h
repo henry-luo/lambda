@@ -78,7 +78,11 @@ typedef enum SysFuncResultKind {
     // Collection transforms retain text and array contracts, but normalize a
     // range to the generic array that the runtime materializes.
     SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT,
-    // A slice additionally retains a binary source as binary.
+    // A selection is a collection transform that may drop items, so a list
+    // source can collapse to one item or null (S2.5.5v2); a source that may
+    // hold a list gets an open result.
+    SYS_RESULT_SELECTION_OF_ARGUMENT,
+    // A slice is a selection that additionally retains a binary source as binary.
     SYS_RESULT_SLICE_OF_ARGUMENT,
 } SysFuncResultKind;
 

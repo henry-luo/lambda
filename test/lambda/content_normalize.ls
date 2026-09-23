@@ -5,6 +5,7 @@
 // and adjacent binaries, and keeps every other item apart; lists spread into
 // content and normalize there (S2.6.3); the script top level is content
 // (S16.7.2v2/S16.7.3v2). (phase P3)
+// Green on both tiers after P3 (2026-09-23); moved from test/lambda/ext.
 
 let e1 = <e "">
 let e2 = <e "a" "" "b">

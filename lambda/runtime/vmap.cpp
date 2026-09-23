@@ -471,6 +471,15 @@ extern "C" Item vmap_from_array(Item array_item) {
 // in-place mutation: insert or update an entry in the VMap (for procedural m.set(k, v))
 extern "C" Item vmap_set(Item vmap_item, Item key, Item value) {
     log_debug("vmap_set: in-place insert on VMap");
+    if (item_is_list(value)) {
+        // a map entry stores the list's array image (S2.5.6); the copy is a
+        // safepoint, so the receiver and key stay rooted across it
+        RootFrame roots(2);
+        Rooted<Item> rooted_vmap(roots, vmap_item);
+        Rooted<Item> rooted_key(roots, key);
+        Item image = slot_image(value);
+        return vmap_set(rooted_vmap.get(), rooted_key.get(), image);
+    }
     TypeId type_id = get_type_id(vmap_item);
 
     if (type_id != LMD_TYPE_VMAP) {

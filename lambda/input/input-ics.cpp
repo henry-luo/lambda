@@ -330,9 +330,10 @@ void parse_ics(Input* input, const char* ics_string) {
                     ctx.builder.putToMap(lam::gc_borrow(current_component), props_key, props_value);
                 }
 
-                // Add component to list
+                // Add the component; the components are a sequence, not
+                // element content, so the pool-owned verbatim append (D2.6.5v3)
                 Item component_item = {.item = (uint64_t)current_component};
-                list_push(components_list, component_item);
+                array_append((Array*)components_list, component_item, input->pool);
 
                 current_component = NULL;
                 current_component_props = NULL;

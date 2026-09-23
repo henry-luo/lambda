@@ -144,6 +144,8 @@ bool lambda_type_layout_proves_contract(Type* type);
 // Canonicalize a semantic `T | null` result as `T?` when it has one concrete
 // payload type. Abstract/error-bearing cases deliberately remain boxed.
 Type* lambda_type_nullable_normalized(Pool* pool, Type* type);
+// S11.1.6: true when a value of this static type may be a list at run time.
+bool lambda_type_may_hold_list(Type* type);
 Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right);
 Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions);
 

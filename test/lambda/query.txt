@@ -29,7 +29,8 @@
 "--- chained ---"
 1
 "--- query + pipe ---"
-[1, 1]
+1
+1
 "--- query precedence ---"
 function
 1

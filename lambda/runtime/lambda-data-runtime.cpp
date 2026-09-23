@@ -1286,42 +1286,34 @@ static bool array_num_elem_expected_sized_type(ArrayNumElemType elem_type,
 // Stores only values already admitted to this exact lane. Keeping this apart
 // from the legacy coercive writer prevents a typed narrow lane from silently
 // truncating, wrapping, or treating an arbitrary Item as false.
-bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value) {
-    if (!arr || index < 0 || index >= arr->capacity) return false;
-    if (arr->is_view && !arr->is_mutable_view) return false;
-    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return false;
-
+// True when `value` is exactly the packed array's lane type, so storing it
+// needs no conversion and no widening.
+bool array_num_admits_value(ArrayNum *arr, Item value) {
+    if (!arr) return false;
     TypeId value_type = get_type_id(value);
     ArrayNumElemType elem_type = arr->get_elem_type();
     NumSizedType expected_sized = NUM_SIZED_COUNT;
     if (array_num_elem_expected_sized_type(elem_type, &expected_sized)) {
-        if (value_type != LMD_TYPE_NUM_SIZED || value.get_num_type() != expected_sized) {
-            return false;
-        }
-    } else {
-        switch (elem_type) {
-        case ELEM_INT:
-            if (value_type != LMD_TYPE_INT && !lambda_item_is_merged_poison(value.item)) {
-                return false;
-            }
-            break;
-        case ELEM_INT64:
-            if (value_type != LMD_TYPE_INT64) return false;
-            break;
-        case ELEM_FLOAT64:
-            if (value_type != LMD_TYPE_FLOAT) return false;
-            break;
-        case ELEM_UINT64:
-            if (value_type != LMD_TYPE_UINT64) return false;
-            break;
-        case ELEM_BOOL:
-            if (value_type != LMD_TYPE_BOOL) return false;
-            break;
-        default:
-            return false;
-        }
+        return value_type == LMD_TYPE_NUM_SIZED && value.get_num_type() == expected_sized;
     }
+    switch (elem_type) {
+    case ELEM_INT:
+        return value_type == LMD_TYPE_INT || lambda_item_is_merged_poison(value.item);
+    case ELEM_INT64:  return value_type == LMD_TYPE_INT64;
+    case ELEM_FLOAT64: return value_type == LMD_TYPE_FLOAT;
+    case ELEM_UINT64: return value_type == LMD_TYPE_UINT64;
+    case ELEM_BOOL:   return value_type == LMD_TYPE_BOOL;
+    default:          return false;
+    }
+}
 
+bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value) {
+    if (!arr || index < 0 || index >= arr->capacity) return false;
+    if (arr->is_view && !arr->is_mutable_view) return false;
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return false;
+    if (!array_num_admits_value(arr, value)) return false;
+
+    ArrayNumElemType elem_type = arr->get_elem_type();
     switch (elem_type) {
     case ELEM_INT:
         arr->items[index] = lambda_int_item_to_lane(value.item);
@@ -1483,7 +1475,8 @@ Item list_end(List *list) {
         }
         // flatten list, not element
         else if (list->length == 1) {
-            return list->items[0];
+            // the list dies here: re-home a wide scalar before it escapes
+            return array_get((Array*)list, 0);
         } else {
             // S2.5.1v2/S2.5.5v2: a list value has at least two items and
             // carries the kind bit; one item is that item, none is null.
@@ -1523,8 +1516,8 @@ static Item list_collapse(Item value, bool item_position) {
     }
     if (length == 1) {
         if (type_id == LMD_TYPE_ARRAY_NUM) return array_num_get(value.array_num, 0);
-        Array* arr = value.array;
-        return array_has_native_lane(arr) ? array_native_lane_read(arr, 0) : arr->items[0];
+        // the container dies here: re-home a wide scalar before it escapes
+        return array_get(value.array, 0);
     }
     if (type_id == LMD_TYPE_ARRAY) value.array->is_spreadable = 1;
     else value.array_num->is_spreadable = 1;
@@ -1533,6 +1526,37 @@ static Item list_collapse(Item value, bool item_position) {
 
 Item list_collapse_value(Item value) { return list_collapse(value, false); }
 Item list_collapse_item(Item value) { return list_collapse(value, true); }
+
+bool item_is_list(Item value) {
+    TypeId type_id = get_type_id(value);
+    // a list-kind transform may compact its result into a packed array, which
+    // then carries the bit (S1.6: the representation stays invisible)
+    if (type_id == LMD_TYPE_ARRAY) return value.array && value.array->is_spreadable;
+    if (type_id == LMD_TYPE_ARRAY_NUM) return value.array_num && value.array_num->is_spreadable;
+    return false;
+}
+
+Item seq_finish_kind(Item result, bool as_list) {
+    if (as_list) return list_collapse_value(result);
+    TypeId type_id = get_type_id(result);
+    if (type_id == LMD_TYPE_ARRAY && result.array) result.array->is_spreadable = 0;
+    else if (type_id == LMD_TYPE_ARRAY_NUM && result.array_num) result.array_num->is_spreadable = 0;
+    return result;
+}
+
+// 1 = a list, -1 = a sequence of array kind (array, range, map, element, text),
+// 0 = null or a scalar, which leaves the kind to the other operand (S2.5.7).
+static int seq_operand_kind(Item value) {
+    if (item_is_list(value)) return 1;
+    TypeId type_id = get_type_id(value);
+    if (is_container_type_id(type_id) || is_sequence_text_type_id(type_id)) return -1;
+    return 0;
+}
+
+bool seq_operands_are_lists(Item left, Item right) {
+    int left_kind = seq_operand_kind(left), right_kind = seq_operand_kind(right);
+    return (left_kind == 1 || right_kind == 1) && left_kind >= 0 && right_kind >= 0;
+}
 
 // create a plain array without frame management (for auxiliary arrays like sort keys)
 Array* array_plain() {
@@ -1830,9 +1854,13 @@ static bool array_push_spread_array_items(Array* arr, Item item, bool require_sp
     Rooted<Item> rooted_source(roots, item);
     for (int i = 0; i < rooted_source.get().array->length; i++) {
         Array* inner = rooted_source.get().array;
+        // A native lane holds raw payloads, not tagged Items (`split()` builds
+        // one): reading the slot directly would publish a `String*` as an Item.
+        Item element = array_has_native_lane(inner)
+            ? array_native_lane_read(inner, i) : inner->items[i];
         // S9.3.1: each spread element is captured into the destination.
-        cow_capture_value(inner->items[i]);
-        array_push(rooted_array.get(), inner->items[i]);
+        cow_capture_value(element);
+        array_push(rooted_array.get(), element);
     }
     return true;
 }
@@ -1859,14 +1887,47 @@ void array_push_spread(Array* arr, Item item) {
     array_push_capture(arr, item);
 }
 
-// push item to array, spreading any array type unconditionally (regardless of is_spreadable flag)
-// used for pipe expression results in array literals: [a, pipe_expr | ~, b]
-void array_push_spread_all(Array* arr, Item item) {
+// The items `*x` yields: those of a sequence -- a list, an array (generic or
+// packed) or a range, materialized -- none at all for null, and every other
+// value, text included, as one item (S2.5.8, S12.3.5v2).
+static void seq_push_spread(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_NULL) return;
     if (array_push_spread_array_items(arr, item, false) ||
             array_push_spread_array_num_items(arr, item, false)) return;
+    if (type_id == LMD_TYPE_RANGE) {
+        RootFrame roots(2);
+        Rooted<Array*> rooted_array(roots, arr);
+        Rooted<Item> rooted_source(roots, item);
+        Range* range = rooted_source.get().range;
+        int64_t length = range ? range->length : 0;
+        for (int64_t i = 0; i < length; i++) {
+            array_push(rooted_array.get(), item_at(rooted_source.get(), i));
+        }
+        return;
+    }
     array_push_capture(arr, item);
 }
+
+// S12.3.5v2: `*x` **is** the list of x's items. It is a fresh value -- the
+// operator no longer marks its operand, which turned `a` into a list for good
+// and rewrote pooled JIT literals (LR05-12) -- and it finishes like any list
+// producer (S2.5.5v2): none is void in an item position and `null` in a value
+// position, one item is that item, so `[*xs]` packages any value as an array.
+static Item seq_spread(Item item, bool item_position) {
+    RootFrame roots(2);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<Array*> rooted_out(roots, array());
+    seq_push_spread(rooted_out.get(), rooted_source.get());
+    Array* out = rooted_out.get();
+    out->is_spreadable = 1;
+    return item_position ? list_collapse_item({.array = out})
+                         : list_collapse_value({.array = out});
+}
+
+Item seq_spread_value(Item item) { return seq_spread(item, false); }
+Item seq_spread_item(Item item) { return seq_spread(item, true); }
 
 // S9.3.1 append for Lambda literals and comprehension output. array_push itself
 // stays policy-free: LambdaJS, the Python/Node modules, and the Radiant bridge
@@ -2429,25 +2490,6 @@ Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item ro
 
     hashmap_free(table);
     return rooted_out.get();
-}
-
-// mark an item as spreadable (for spread operator *expr)
-// works on arrays and lists - marks the is_spreadable flag
-// returns the item unchanged for spreading when used with push_spread functions
-Item item_spread(Item item) {
-    TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* arr = item.array;
-        if (arr) arr->is_spreadable = true;
-    } else if (type_id == LMD_TYPE_ARRAY) {
-        List* list = item.array;
-        if (list) list->is_spreadable = true;
-    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr) arr->is_spreadable = true;
-    }
-    // for other types, just return as-is (they will be pushed normally)
-    return item;
 }
 
 Item list_fill(List *list, int count, ...) {
@@ -3101,18 +3143,13 @@ Item elmt_get(Element* elmt, Item key) {
     return ItemNull;
 }
 
-static Item item_at_empty_string() {
-    // string indexing defines an out-of-range read as a real empty string, not absence.
-    String* empty = heap_strcpy("", 0);
-    return empty ? (Item){.item = s2it(empty)} : ItemError;
-}
-
 // ASCII strings use byte offsets for character indexes; keep this allocation
 // path separate so the JIT can bypass UTF-8 scanning without changing the
-// single-character-string result contract of item_at (S4.1, D2.2.2).
+// single-character-string result contract of item_at (S4.1, D2.2.2). An
+// out-of-range index is absence, as it is for every sequence (S7.2.1).
 static Item string_ascii_at(String* str, int64_t index) {
     if (!str || index < 0 || (uint64_t)index >= str->len) {
-        return item_at_empty_string();
+        return ItemNull;
     }
     unsigned char ch = (unsigned char)str->chars[index];
     String* interned = get_ascii_char_string(ch);
@@ -3156,7 +3193,7 @@ Item item_at(Item data, int64_t index) {
         const char* chars = data.get_chars();
         uint32_t byte_len = data.get_len();
         if (index < 0) {
-            return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+            return ItemNull;
         }
         bool is_ascii = true;
         if (type_id == LMD_TYPE_STRING) {
@@ -3168,7 +3205,7 @@ Item item_at(Item data, int64_t index) {
         // ASCII fast-path: byte index == char index, O(1)
         if (is_ascii) {
             if ((uint32_t)index >= byte_len) {
-                return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+                return ItemNull;
             }
             if (type_id == LMD_TYPE_SYMBOL) {
                 Symbol* ch_sym = heap_create_symbol(chars + index, 1);
@@ -3181,13 +3218,13 @@ Item item_at(Item data, int64_t index) {
         // str_utf8_char_to_byte returns STR_NPOS if index is out of range
         size_t byte_offset = str_utf8_char_to_byte(chars, byte_len, (size_t)index);
         if (byte_offset == STR_NPOS) {
-            return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+            return ItemNull;
         }
         // get the UTF-8 character length (1-4 bytes)
         size_t ch_len = str_utf8_char_len((unsigned char)chars[byte_offset]);
         if (ch_len == 0) ch_len = 1; // fallback for invalid UTF-8
         if (byte_offset + ch_len > byte_len) {
-            return type_id == LMD_TYPE_STRING ? item_at_empty_string() : ItemNull;
+            return ItemNull;
         }
         // return a single character string/symbol
         if (type_id == LMD_TYPE_SYMBOL) {

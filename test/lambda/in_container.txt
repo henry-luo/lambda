@@ -27,6 +27,8 @@ false
 "=== List ==="
 true
 false
-"=== String substring ==="
+"=== String membership is by code point (S2.5.8) ==="
+false
 true
 false
+true

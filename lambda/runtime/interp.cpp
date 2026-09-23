@@ -690,7 +690,8 @@ static void exec_declaration(InterpFrame* f, AstNode* node);
 static bool interp_is_list_producer(AstNode* node) {
     node = ast_unwrap_primary(node);
     return node && (node->node_type == AST_NODE_FOR_EXPR ||
-        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT);
+        node->node_type == AST_NODE_LIST || node->node_type == AST_NODE_CONTENT ||
+        node->node_type == AST_NODE_SPREAD);
 }
 
 // Evaluate an item of a list, array literal, block, content, or for-body. A
@@ -2676,9 +2677,8 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         Array* arr = (Array*)(uintptr_t)acc.get().item;
         if (!arr) return ItemError;
         // The sequence append spreads a list by its kind bit, never by the
-        // literal's syntax (S2.5.1v2, D2.6.5v3).
-        if (item->node_type == AST_NODE_PIPE) array_push_spread_all(arr, value);
-        else if (item->node_type == AST_NODE_SPREAD) {
+        // literal's syntax (S2.5.1v2, D2.6.5v3); a pipe result is a value too.
+        if (item->node_type == AST_NODE_SPREAD) {
             array_push_spread(arr, value);
         } else if (ast_expr_insertion_needs_capture(item)) {
             // S9.3.1: only a NAMED element needs capture; a fresh one has no
@@ -2759,7 +2759,9 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         if (value_node && ast_expr_insertion_needs_capture(value_node)) {
             cow_capture_value(value);
         }
-        words[vi++] = value.item;
+        // S2.5.6: a field stores a list as its array image (the earlier
+        // values are rooted in the span, so the copy may collect)
+        words[vi++] = slot_image(value).item;
     }
     Map* built = map_with_type_tl(map_type, f->module->type_list);
     if (!built) return ItemError;
@@ -2783,7 +2785,7 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
             Item value = eval_expr(f, value_node);
             // S9.3.1: a named field value is captured into the literal.
             if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
-            words[index] = value.item;
+            words[index] = slot_image(value).item;  // S2.5.6: a field holds no list
         } else if (spread_node && field->name) {
             // Preserve `*:source` fields before typed storage conversion; an
             // omitted float/int field must not be sent to set_field_value as a
@@ -2794,7 +2796,7 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
             words[index] = fn_member(spread.get(), key.get()).item;
         } else {
             words[index] = field->default_value
-                ? eval_expr(f, field->default_value).item : ItemNull.item;
+                ? slot_image(eval_expr(f, field->default_value)).item : ItemNull.item;
         }
         if (interp_frame_pending(f)) return ItemNull;
     }
@@ -3185,9 +3187,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         is_scalar = true;
     }
 
-    // Plain array(), not array_spreadable(): a mapping pipe yields one value,
-    // so `[1,2,3] |> ~ * 2` prints as [2, 4, 6] rather than flattening into the
-    // enclosing block. transpile_pipe allocates the same way.
+    // A plain accumulator: pipe_end gives it the source's kind once the walk
+    // is done, as transpile_pipe does.
     Scratch out(f);
     out.set(interp_ptr_item(array()));
     Scratch item_slot(f);
@@ -3233,7 +3234,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         }
     }
     if (keys) symbol_key_list_free(keys);
-    return array_end((Array*)(uintptr_t)out.get().item);
+    // the collection keeps its source's kind (S10.1.2v2, S10.1.5v2)
+    return pipe_end((Array*)(uintptr_t)out.get().item, left.get());
 }
 
 // ---------------------------------------------------------------------------
@@ -3462,51 +3464,28 @@ static Item interp_for_finalize_output(InterpFrame* f, AstForNode* for_node,
         fn_sort_by_keys(interp_ptr_item(out),
             (Item){.item = key_stream_home ? *key_stream_home : ITEM_NULL},
             spec->descending ? 1 : 0);
-        if (for_node->offset) {
-            Item offset = eval_expr(f, for_node->offset);
-            if (interp_frame_pending(f) || item_is_error(offset)) return offset;
-            out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-            if (out) array_drop_inplace(out, it2l(offset));
-        }
-        if (for_node->limit) {
-            Item limit = eval_expr(f, for_node->limit);
-            if (interp_frame_pending(f) || item_is_error(limit)) return limit;
-            out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-            if (out) {
-                if (for_node->limit_from_end) array_limit_last_inplace(out, it2l(limit));
-                else array_limit_inplace(out, it2l(limit));
-            }
-        }
-        // Sorting follows MIR's dedicated ordered-output path, which closes
-        // the spreadable stream before the result reaches its enclosing list.
-        out = output_home ? (Array*)(uintptr_t)*output_home : NULL;
-        return out ? array_end(out) : ItemNull;
     }
     if (for_node->offset || for_node->limit) {
-        Scratch selected(f);
-        selected.set((Item){.item = *output_home});
+        // The window trims the raw stream in place, ordered or not, so the
+        // caller's one finish decides the kind and the collapse (S2.5.2v2).
+        Scratch offset_slot(f);
+        Scratch limit_slot(f);
         if (for_node->offset) {
             Item offset = eval_expr(f, for_node->offset);
             if (interp_frame_pending(f)) return ItemNull;
-            Scratch offset_slot(f);
             offset_slot.set(offset);
-            selected.set(fn_drop(selected.get(), offset_slot.get()));
-            if (item_is_error(selected.get())) return selected.get();
         }
         if (for_node->limit) {
             Item limit = eval_expr(f, for_node->limit);
             if (interp_frame_pending(f)) return ItemNull;
-            Scratch limit_slot(f);
             limit_slot.set(limit);
-            // MIR applies unordered windows after the complete stream, so an
-            // early exit would incorrectly suppress body effects on later rows.
-            selected.set(for_node->limit_from_end
-                ? fn_take_last(selected.get(), limit_slot.get())
-                : fn_take(selected.get(), limit_slot.get()));
         }
-        return selected.get();
+        int64_t flags = (for_node->offset ? FOR_WINDOW_OFFSET : 0) | (!for_node->limit ? 0 :
+            for_node->limit_from_end ? FOR_WINDOW_LIMIT_LAST : FOR_WINDOW_LIMIT);
+        out = (Array*)(uintptr_t)*output_home;   // re-read: evaluation may collect
+        return for_window(out, offset_slot.get(), limit_slot.get(), flags);
     }
-    return array_end(out);
+    return interp_ptr_item(out);
 }
 
 static Item interp_eval_grouped_for(ForCtx* fc, AstLoopNode* loop,
@@ -3898,7 +3877,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
             if (value_node && ast_expr_insertion_needs_capture(value_node)) {
                 cow_capture_value(value);
             }
-            attr_words[ai++] = value.item;
+            attr_words[ai++] = slot_image(value).item;  // S2.5.6: an attribute holds no list
             if (interp_frame_pending(f)) return ItemNull;
         }
 
@@ -5067,10 +5046,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     case AST_NODE_UNARY:
         return eval_unary(f, (AstUnaryNode*)node);
-    case AST_NODE_SPREAD:
-        // `*expr` marks its operand spreadable; the collection builders flatten
-        // it from there (transpile_spread is this same one call).
-        return item_spread(eval_expr(f, ((AstSpreadNode*)node)->argument));
+    case AST_NODE_SPREAD: {
+        // S12.3.5v2: `*expr` builds the list of its operand's items rather
+        // than marking the operand, which mutated it for good (LR05-12). It
+        // finishes like any list producer (transpile_spread is the same pair).
+        bool item_position = interp_take_list_item_position(f, node);
+        Item source = eval_expr(f, ((AstSpreadNode*)node)->argument);
+        if (interp_frame_pending(f)) return source;
+        return item_position ? seq_spread_item(source) : seq_spread_value(source);
+    }
     case AST_NODE_BINARY:
         return eval_binary(f, (AstBinaryNode*)node);
     case AST_NODE_PIPE:

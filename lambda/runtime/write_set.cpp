@@ -265,21 +265,29 @@ static Item sequence_splice(Item seq, int64_t index, Item value, SpliceKind kind
         if (!array) return ItemError;
         rooted_result.set((Item){.item = (uint64_t)(uintptr_t)array});
     }
-    for (int64_t i = 0; i < length; i++) {
+    // The append follows the destination (D2.6.5v3): element content is
+    // re-normalized through the content append (S2.6.5); an array keeps its
+    // items verbatim, and an inserted list splices by the sequence append.
+    auto append = [&](Item item, bool inserted) {
         List* result = (List*)rooted_result.get().container;
+        if (is_element) list_push(result, item);
+        else if (inserted) array_push((Array*)result, item);
+        else array_push_verbatim((Array*)result, item);
+    };
+    for (int64_t i = 0; i < length; i++) {
         if (i == index) {
             if (kind == SPLICE_REMOVE) continue;
-            list_push(result, rooted_value.get());
-            result = (List*)rooted_result.get().container;
+            append(rooted_value.get(), true);
             if (kind == SPLICE_REPLACE) continue;
         }
         Item element = is_numeric
             ? array_num_get(rooted_seq.get().array_num, i)
-            : ((List*)rooted_seq.get().container)->items[i];
-        list_push(result, element);
+            : is_element ? ((List*)rooted_seq.get().container)->items[i]
+            : array_get((Array*)rooted_seq.get().container, i);
+        append(element, false);
     }
     if (past_end && kind != SPLICE_REMOVE) {
-        list_push((List*)rooted_result.get().container, rooted_value.get());
+        append(rooted_value.get(), true);
     }
     return rooted_result.get();
 }
