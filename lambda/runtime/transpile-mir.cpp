@@ -293,6 +293,9 @@ struct MirTranspiler {
     const AstIndex* ast_index;
     const char* source;
     Runtime* runtime;
+    // The retained AST may be a cache template. This shell owns its current
+    // import graph and therefore the valid generated import namespaces.
+    Script* owner_script;
     bool is_main;
     int script_index;
     // P2 satellite lowering uses the T0 Script's already planned module slab
@@ -640,6 +643,7 @@ struct MirTranspiler {
     // T20-1c candidate shapes: AST_NODE_PARAM* -> Type* (an untrusted TypeMap).
     struct hashmap* shape_hints;
     bool prepass_collect_only;      // collect stage: gather call sites, emit nothing
+    bool prepass_indexed_calls;     // direct-call evidence comes from AstIndex CSR
     AstFuncNode* prepass_enclosing; // function whose body the collect walk is inside
     bool prepass_dispatched_fn;     // inside object methods / view handlers, which
                                     // are invoked by dispatch, not by a visible call
@@ -658,6 +662,29 @@ struct MirTranspiler {
     // Name pool for interning template_ref strings (shared with Transpiler/Input)
     NamePool* name_pool;
 };
+
+static Script* mir_import_script(MirTranspiler* mt, AstImportNode* import) {
+    if (!import) return NULL;
+    if (!mt || !mt->owner_script || import->is_cross_lang) {
+        return import->script;
+    }
+    return lambda_ast_overlay_import_script(mt->owner_script, import);
+}
+
+static void mir_write_fn_name_ex(MirTranspiler* mt, StrBuf* strbuf,
+        AstFuncNode* fn_node, AstImportNode* import, const char* suffix) {
+    if (!import) {
+        write_fn_name_ex(strbuf, fn_node, NULL, suffix);
+        return;
+    }
+    write_fn_name_for_script_ex(strbuf, fn_node,
+        mir_import_script(mt, import), suffix);
+}
+
+static void mir_write_fn_name(MirTranspiler* mt, StrBuf* strbuf,
+        AstFuncNode* fn_node, AstImportNode* import) {
+    mir_write_fn_name_ex(mt, strbuf, fn_node, import, NULL);
+}
 
 enum MirFlowFactKind { MIR_FLOW_SEMANTIC, MIR_FLOW_ADMITTED, MIR_FLOW_LAYOUT };
 
@@ -9854,9 +9881,11 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
                 bool needs_context_abi = import_requires_context_abi(
                     ident->entry->import);
                 if (use_wrapper) {
-                    write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
+                    mir_write_fn_name_ex(mt, fn_import_name, fn_node,
+                        ident->entry->import, "_b");
                 } else {
-                    write_fn_name(fn_import_name, fn_node, ident->entry->import);
+                    mir_write_fn_name(mt, fn_import_name, fn_node,
+                        ident->entry->import);
                 }
                 log_debug("mir: imported function reference '%s'", fn_import_name->str);
 
@@ -9880,11 +9909,12 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
 
             // Look up the MIR function item
             StrBuf* nm_buf = strbuf_new_cap(64);
-            write_fn_name(nm_buf, fn_node, ident->entry->import);
+            mir_write_fn_name(mt, nm_buf, fn_node, ident->entry->import);
             MIR_item_t func_item = find_local_func(mt, nm_buf->str);
 
             StrBuf* wrapper_buf = strbuf_new_cap(64);
-            write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
+            mir_write_fn_name_ex(mt, wrapper_buf, fn_node,
+                ident->entry->import, "_b");
             MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
             bool uses_wrapper = wrapper_item != NULL;
             if (wrapper_item) {
@@ -27121,7 +27151,7 @@ static AstFuncNode* mir_inline_call_target(MirTranspiler* mt, AstCallNode* call,
     // an identifier bound to a local holds a function value: a dynamic target
     if (!fn || !ident || !ident->entry || mir_var_for_ident(mt, ident)) return NULL;
     StrBuf* name_buf = strbuf_new_cap(64);
-    write_fn_name(name_buf, fn, ident->entry->import);
+    mir_write_fn_name(mt, name_buf, fn, ident->entry->import);
     NativeFuncInfo* info = find_local_func(mt, name_buf->str)
         ? find_native_func_info(mt, name_buf->str) : NULL;
     strbuf_free(name_buf);
@@ -28308,9 +28338,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 ident->entry->import);
             bool use_js_export_bridge = import_is_js(ident->entry->import);
             if (use_wrapper) {
-                write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
+                mir_write_fn_name_ex(mt, fn_import_name, fn_node,
+                    ident->entry->import, "_b");
             } else {
-                write_fn_name(fn_import_name, fn_node, ident->entry->import);
+                mir_write_fn_name(mt, fn_import_name, fn_node,
+                    ident->entry->import);
             }
             log_debug("mir: imported function call '%s' (wrapper=%d)", fn_import_name->str, use_wrapper);
 
@@ -28504,7 +28536,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             entry_node->node_type == AST_NODE_PROC)) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
             name_buf = strbuf_new_cap(64);
-            write_fn_name(name_buf, fn_node, ident->entry->import);
+            mir_write_fn_name(mt, name_buf, fn_node, ident->entry->import);
             fn_mangled = name_buf->str;
             local_func = find_local_func(mt, fn_mangled);
         }
@@ -28847,7 +28879,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // the same prepass, so source order cannot select the generic
                 // body and accidentally bypass an admitted TG8 variant.
                 entry_name_buf = strbuf_new_cap(64);
-                write_fn_name_ex(entry_name_buf, fn_def,
+                mir_write_fn_name_ex(mt, entry_name_buf, fn_def,
                     ident->entry ? ident->entry->import : NULL, "_b");
                 MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
                 if (boxed_entry) {
@@ -28883,7 +28915,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     (native_call && call_nfi->record_result &&
                      mt->record_call_target != call_node)) {
                 entry_name_buf = strbuf_new_cap(64);
-                write_fn_name_ex(entry_name_buf, fn_def,
+                mir_write_fn_name_ex(mt, entry_name_buf, fn_def,
                     ident->entry ? ident->entry->import : NULL, "_b");
                 MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
                 if (boxed_entry) {
@@ -29016,7 +29048,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 }
                 if (routed_to_boxed_entry) {
                     entry_name_buf = strbuf_new_cap(64);
-                    write_fn_name_ex(entry_name_buf, fn_def,
+                    mir_write_fn_name_ex(mt, entry_name_buf, fn_def,
                         ident->entry ? ident->entry->import : NULL, "_b");
                     MIR_item_t boxed_entry = find_local_func(mt, entry_name_buf->str);
                     if (boxed_entry) {
@@ -40658,6 +40690,41 @@ static bool mir_callsite_record(MirTranspiler* mt, AstCallNode* call) {
     return true;
 }
 
+static AstFuncNode* mir_indexed_call_enclosing_function(const AstIndex* index,
+        AstNodeId call_id) {
+    if (!index || call_id >= index->count) return NULL;
+    AstFunctionId owner = index->owner_functions[call_id];
+    if (owner >= index->function_count) return NULL;
+    AstNode* node = index->functions[owner].node;
+    if (!node || (node->node_type != AST_NODE_FUNC &&
+            node->node_type != AST_NODE_FUNC_EXPR &&
+            node->node_type != AST_NODE_PROC)) return NULL;
+    return (AstFuncNode*)node;
+}
+
+// The reverse callee table is the sole direct-call evidence source. The
+// surrounding prepass still records escape and return-shape facts, which are
+// not call edges and retain their distinct dataflow meaning (D8.2.4).
+static void prepass_collect_indexed_call_sites(MirTranspiler* mt,
+        const AstIndex* index) {
+    if (!mt || !index || !index->graph_published) return;
+    AstFuncNode* saved_enclosing = mt->prepass_enclosing;
+    for (AstBindingId binding_id = 0; binding_id < index->binding_count;
+            binding_id++) {
+        uint32_t call_count = 0;
+        const AstNodeId* calls = ast_index_callee_calls(index, binding_id,
+            &call_count);
+        for (uint32_t i = 0; calls && i < call_count; i++) {
+            AstNodeId call_id = calls[i];
+            AstNode* node = call_id < index->count ? index->nodes[call_id] : NULL;
+            if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
+            mt->prepass_enclosing = mir_indexed_call_enclosing_function(index, call_id);
+            (void)mir_callsite_record(mt, (AstCallNode*)node);
+        }
+    }
+    mt->prepass_enclosing = saved_enclosing;
+}
+
 typedef struct MirForwardPrepassVisit {
     MirTranspiler* mt;
     AstNode* sibling_chain;
@@ -40904,7 +40971,13 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
         }
         case AST_NODE_CALL_EXPR: {
             AstCallNode* call = (AstCallNode*)node;
-            bool consumed_callee = mt->prepass_collect_only && mir_callsite_record(mt, call);
+            // Direct calls were joined from AstIndex's callee reverse table.
+            // Keep walking non-direct callees: they can still expose an
+            // escaping function value through a dynamic call expression.
+            bool consumed_callee = mt->prepass_collect_only &&
+                (mt->prepass_indexed_calls
+                    ? mir_ident_local_func(call->function) != NULL
+                    : mir_callsite_record(mt, call));
             // a consumed callee ident is a call, not an escaping reference
             if (call->function && !consumed_callee) prepass_forward_declare(mt, call->function);
             if (call->argument) prepass_forward_declare(mt, call->argument);
@@ -40998,7 +41071,8 @@ static uint32_t mir_next_inference_cache_epoch(void) {
     return epoch;
 }
 
-static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child) {
+static void prepass_collect_call_sites(MirTranspiler* mt, const AstIndex* index,
+        AstNode* script_child) {
     if (!mt->callsite_info) return;
     for (int round = 0; round < MIR_CALLSITE_MAX_ROUNDS; round++) {
         mt->inference_cache_epoch = mir_next_inference_cache_epoch();
@@ -41021,8 +41095,11 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
 
         mt->prepass_collect_only = true;
         mt->prepass_enclosing = NULL;
+        mt->prepass_indexed_calls = index && index->graph_published;
+        if (mt->prepass_indexed_calls) prepass_collect_indexed_call_sites(mt, index);
         prepass_forward_declare(mt, script_child);
         mt->prepass_collect_only = false;
+        mt->prepass_indexed_calls = false;
 
         // T20-1c: with every call site and return source recorded, push
         // candidate shapes along the return and argument edges.
@@ -41517,10 +41594,11 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         }
     }
 
-    // transpile handler body (procedural)
+    // handlers are procedural bodies: preserve their terminal value so
+    // `on` follows S12.1.2's implicit-return rule.
+    MIR_reg_t handler_result = emit_null_item_reg(mt);
     if (handler->body) {
-        (void)em_apply_value_demand(&mt->em,
-            transpile_expr_value(mt, handler->body), MIR_VALUE_DISCARD);
+        handler_result = transpile_box_item(mt, handler->body);
     }
 
     // Phase 4: auto-commit after edit handler body completes
@@ -41531,13 +41609,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         log_debug("mir: edit handler auto-commit for '%s'", handler_name);
     }
 
-    // emit return ItemNull (handlers are void-like)
-    MIR_reg_t null_r = new_reg(mt, "null_ret", MIR_T_I64);
-    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, null_r),
-        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-    emit_function_return(mt, MIR_new_reg_op(mt->ctx, null_r));
+    emit_function_return(mt, MIR_new_reg_op(mt->ctx, handler_result));
     finish_function_epilogue(mt);
     finalize_gc_root_publication(mt, handler_name);
     finalize_side_root_frame(mt);
@@ -41662,6 +41734,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
                                     const MirModuleNames* module_names,
                                     ArrayList** out_property_keys,
                                     MirModuleArtifacts* out_artifacts,
+                                    Script* owner_script,
                                     Script* interp_module_owner,
                                     AstFuncNode* satellite_target,
                                     AstFuncNode* const* satellite_cluster,
@@ -41694,6 +41767,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.em.lookup_import_metadata = lambda_lookup_import_metadata;
     mt.script = script;
     mt.ast_index = ast_index;
+    mt.owner_script = owner_script;
     mt.interp_module_owner = interp_module_owner;
     mt.satellite_target = satellite_target;
     // set before any prepass: the forward-declare pass pre-registers each
@@ -41755,10 +41829,12 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     // complete retained AST for collection (exactly the eager caller set;
     // an unseen T0 caller is the wrapper's exact-shape guard's business).
     AstNode* callsite_root = script->child;
+    const AstIndex* callsite_index = mt.ast_index;
     if (mt.satellite_target && interp_module_owner && interp_module_owner->ast_root) {
         callsite_root = ((AstScript*)interp_module_owner->ast_root)->child;
+        callsite_index = &interp_module_owner->ast_index;
     }
-    prepass_collect_call_sites(&mt, callsite_root);
+    prepass_collect_call_sites(&mt, callsite_index, callsite_root);
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);
@@ -42029,9 +42105,11 @@ typedef struct LambdaMirPipelinePassContext {
     Script* script;
     ArrayList** property_keys;
     uint64_t* link_instruction_count;
+    uint64_t* link_largest_function_instruction_count;
     uint64_t mir_module_count;
     uint64_t mir_function_count;
     uint64_t mir_instruction_count;
+    uint64_t mir_largest_function_instruction_count;
     MirModuleBuild build;
 } LambdaMirPipelinePassContext;
 
@@ -42041,7 +42119,7 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
     transpile_mir_ast_begin(&pass->build, pass->ctx, (AstScript*)pass->tp->ast_root,
         pass->tp->source, pass->tp->type_list, pass->tp->const_list,
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
-        pass->property_keys, NULL,
+        pass->property_keys, NULL, pass->script,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
         NULL, NULL, 0, false, pass->tp->whole_script_poc, &pass->tp->ast_index);
     return 1;
@@ -42059,9 +42137,14 @@ static int lambda_mir_finalize_compiler_pass(void* opaque) {
     if (!pass || !pass->build.mt.module) return 0;
     transpile_mir_ast_finalize(&pass->build, pass->property_keys, NULL);
     mir_count_module_volume(pass->ctx, &pass->mir_module_count,
-        &pass->mir_function_count, &pass->mir_instruction_count);
+        &pass->mir_function_count, &pass->mir_instruction_count,
+        &pass->mir_largest_function_instruction_count);
     if (pass->link_instruction_count) {
         *pass->link_instruction_count = pass->mir_instruction_count;
+    }
+    if (pass->link_largest_function_instruction_count) {
+        *pass->link_largest_function_instruction_count =
+            pass->mir_largest_function_instruction_count;
     }
     return 1;
 }
@@ -42404,7 +42487,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
     lowering_members = snapshot ? compiled_members : members;
     transpile_mir_ast_begin(&build, satellite_context, &satellite_root, script->source,
         compile_type_list, compile_const_list, compile_pool, compile_name_pool,
-        &names, &property_keys, &artifacts, script, lowering_target,
+        &names, &property_keys, &artifacts, script, script, lowering_target,
         lowering_members, member_count, snapshot, false, &script->ast_index);
     transpile_mir_ast_lower(&build);
     mem_free(copies);
@@ -42596,18 +42679,25 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
 // Registers all pub functions and pub variable BSS addresses from imp's already-compiled
 // jit_context into the global dynamic_import_table so import_resolver can resolve them
 // when MIR_link() is called for the module that imports this one.
-static void register_module_pub_fns(AstImportNode* imp) {
-    if (!imp->script || !imp->script->jit_context) {
-        log_error("mir cache: import '%.*s' has no compiled dependency context",
-                  (int)imp->module.length, imp->module.str);
+static void register_module_pub_fns(AstImportNode* imp, Script* dependency) {
+    if (!dependency) dependency = imp ? imp->script : NULL;
+    if (!imp || !dependency || !dependency->jit_context) {
+        log_error("mir cache: import '%.*s' has no compiled dependency context "
+                  "dependency=%p jit=%p cache-template=%p imports=%d",
+                  imp ? (int)imp->module.length : 0,
+                  imp ? imp->module.str : "", dependency,
+                  dependency ? dependency->jit_context : NULL,
+                  dependency ? dependency->cache_template : NULL,
+                  dependency && dependency->direct_imports
+                      ? dependency->direct_imports->length : -1);
         assert(false && "MIR Direct import dependency must be compiled before importer");
         return;
     }
-    AstNode* mod_node = imp->script->ast_root;
+    AstNode* mod_node = dependency->ast_root;
     if (!mod_node || mod_node->node_type != AST_SCRIPT) return;
 
     log_info("mir: registering pub symbols from module '%.*s' (index=%d)",
-        (int)imp->module.length, imp->module.str, imp->script->index);
+        (int)imp->module.length, imp->module.str, dependency->index);
 
     AstNode* mod_child = ((AstScript*)mod_node)->child;
     while (mod_child) {
@@ -42630,10 +42720,10 @@ static void register_module_pub_fns(AstImportNode* imp) {
                 // style.ls both have pub fn render at byte 574 → _render_574).
                 StrBuf* fn_name = strbuf_new_cap(64);
                 write_fn_name_ex(fn_name, fn_node, NULL, "_b");
-                void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
+                void* fn_ptr = find_func(dependency->jit_context, fn_name->str);
                 if (fn_ptr) {
                     StrBuf* reg_name = strbuf_new_cap(64);
-                    write_fn_name_ex(reg_name, fn_node, imp, "_b");
+                    write_fn_name_for_script_ex(reg_name, fn_node, dependency, "_b");
                     register_dynamic_import(raw_strdup(reg_name->str), fn_ptr); // RAWALLOC_OK: MIR manages param name lifetime
                     log_debug("mir: registered import wrapper fn: %s -> %p", reg_name->str, fn_ptr);
                     strbuf_free(reg_name);
@@ -42655,9 +42745,9 @@ static void register_module_pub_fns(AstImportNode* imp) {
                     // MIR Direct BSS name: "_gvar_<rawname>"
                     char gvar[200];
                     snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);
-                    MIR_item_t bss_item = find_import(imp->script->jit_context, gvar);
+                    MIR_item_t bss_item = find_import(dependency->jit_context, gvar);
                     if (!bss_item || !bss_item->addr) {
-                        bss_item = find_import(imp->script->jit_context, import_key->str);
+                        bss_item = find_import(dependency->jit_context, import_key->str);
                     }
                     if (bss_item && bss_item->addr) {
                         register_dynamic_import(raw_strdup(import_key->str), bss_item->addr); // RAWALLOC_OK: MIR manages param name lifetime
@@ -42810,6 +42900,7 @@ typedef struct LambdaMirLinkPassContext {
     MIR_context_t ctx;
     Transpiler* tp;
     uint64_t mir_instruction_count;
+    uint64_t mir_largest_function_instruction_count;
     bool use_mir_interp_for_script;
     main_func_t main_func;
 } LambdaMirLinkPassContext;
@@ -42819,32 +42910,31 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
     if (!pass || !pass->ctx || !pass->tp) return 0;
     unsigned int opt_level = pass->tp->runtime ? pass->tp->runtime->optimize_level : 2;
     bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
-    bool auto_interp = !explicit_interp && opt_level == 0 &&
+    bool auto_interp = !pass->tp->requires_native_mir_exports &&
+        !explicit_interp && opt_level == 0 &&
         mir_large_interp_enabled() && pass->tp->source &&
         strlen(pass->tp->source) >= mir_large_source_interp_threshold();
     bool use_interp = explicit_interp || auto_interp;
-    bool large_interp_enabled = mir_large_interp_enabled();
     bool document_context = pass->tp->runtime && pass->tp->runtime->dom_doc != nullptr;
-    if (!use_interp && large_interp_enabled &&
-            (pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD ||
-             (document_context && (g_js_force_document_interp ||
-                 pass->mir_instruction_count > MIR_RADIANT_INTERP_INSN_THRESHOLD)))) {
+    MirLinkSelection selection = mir_select_link_interface(
+        pass->mir_instruction_count, pass->mir_largest_function_instruction_count,
+        document_context || g_js_force_document_interp, opt_level,
+        lambda_mir_lazy_enabled());
+    if (!use_interp && !pass->tp->requires_native_mir_exports &&
+            selection.interface_kind == MIR_LINK_INTERP) {
         use_interp = true;
-        log_info("lambda-mir: %s module (%llu insns)%s -> MIR interpreter (skip JIT codegen)",
-            pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD
-                ? "large" : "cold-document",
+        log_info("lambda-mir: policy selected interpreter for %llu instructions%s",
             (unsigned long long)pass->mir_instruction_count,
             document_context ? " [document]" : "");
     }
-    if (!use_interp && !large_interp_enabled && opt_level >= 2 &&
-            pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD) {
-        log_info("lambda-mir: large module (%llu insns) -> opt=0 (was %u)",
-            (unsigned long long)pass->mir_instruction_count, opt_level);
-        MIR_gen_set_optimize_level(pass->ctx, 0);
+    if (!use_interp && selection.optimize_level != opt_level) {
+        log_info("lambda-mir: policy selected opt=%u for large function (was %u)",
+            selection.optimize_level, opt_level);
+        MIR_gen_set_optimize_level(pass->ctx, selection.optimize_level);
     }
     MIR_link(pass->ctx, use_interp ? MIR_set_interp_interface :
-        (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface :
-            MIR_set_gen_interface), import_resolver);
+        (selection.interface_kind == MIR_LINK_LAZY_NATIVE
+            ? MIR_set_lazy_gen_interface : MIR_set_gen_interface), import_resolver);
     pass->use_mir_interp_for_script = use_interp;
     pass->main_func = (main_func_t)(use_interp ? find_func(pass->ctx, "main")
         : jit_gen_func(pass->ctx, "main"));
@@ -42884,10 +42974,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     clear_dynamic_imports();
 
     AstScript* ast_root = (AstScript*)tp->ast_root;
-    if (tp->direct_imports) {
-        arraylist_free(tp->direct_imports);
-        tp->direct_imports = NULL;
-    }
+    transpiler_clear_direct_imports(tp, script);
     tp->cache_cross_lang_tainted = false;
     AstNode* child = ast_root->child;
     while (child) {
@@ -42897,14 +42984,18 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                 tp->cache_cross_lang_tainted = true;
                 register_cross_lang_pub_fns(tp->runtime, imp);
             } else {
+                // D8.5.1v7: parser-owned import ASTs belong to the immutable
+                // cache template, while this compilation must link the current
+                // Runtime's cloned dependency and its module-state slab.
+                Script* dependency = lambda_ast_overlay_import_script(script, imp);
                 if (!tp->direct_imports) tp->direct_imports = arraylist_new(4);
-                if (imp->script) {
-                    arraylist_append(tp->direct_imports, imp->script);
-                    if (imp->script->cache_cross_lang_tainted) {
+                if (dependency) {
+                    arraylist_append(tp->direct_imports, dependency);
+                    if (dependency->cache_cross_lang_tainted) {
                         tp->cache_cross_lang_tainted = true;
                     }
                 }
-                register_module_pub_fns(imp);
+                register_module_pub_fns(imp, dependency);
             }
         }
         child = child->next;
@@ -42924,7 +43015,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     // that early decision while retaining the explicit --mir-interp/env mode.
     unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
     bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
-    bool auto_interp_for_large_source = !explicit_interp && opt_level == 0 &&
+    bool auto_interp_for_large_source = !tp->requires_native_mir_exports &&
+        !explicit_interp && opt_level == 0 &&
         mir_large_interp_enabled() && tp->source &&
         strlen(tp->source) >= mir_large_source_interp_threshold();
     bool force_interp_init = !g_mir_interp_mode &&
@@ -42943,15 +43035,20 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 #endif
 
     ArrayList* property_keys = NULL;
-    LambdaMirLinkPassContext link_context = {ctx, tp, 0, false, NULL};
+    LambdaMirLinkPassContext link_context = {ctx, tp, 0, 0, false, NULL};
     LambdaMirPipelinePassContext mir_context = {};
     mir_context.ctx = ctx;
     mir_context.tp = tp;
     mir_context.script = script;
     mir_context.property_keys = &property_keys;
     mir_context.link_instruction_count = &link_context.mir_instruction_count;
+    mir_context.link_largest_function_instruction_count =
+        &link_context.mir_largest_function_instruction_count;
     // Direct MIR resumes parser work; retained ASTs begin a fresh unit.
     CompilerPassManager* pass_manager = &tp->pass_manager;
+    // D8.5.1v7: an AST-cache shell borrows the template's index. MIR fallback
+    // may use the facts but cannot destroy them when it adopts its own image.
+    if (script->cache_template) tp->preserve_ast_index = true;
     if (pass_manager->pass_count == 0) {
         compiler_pass_manager_init(pass_manager, COMPILER_FACT_FRONTEND |
             (tp->ast_index.graph_published ? COMPILER_FACT_INDEXED : 0));

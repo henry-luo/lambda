@@ -214,13 +214,16 @@ bool network_download_resource(NetworkResource* res) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, RADIANT_HTTP_CLIENT_USER_AGENT);
+    if (res->referrer_url && res->referrer_url[0]) {
+        curl_easy_setopt(curl, CURLOPT_REFERER, res->referrer_url);
+    }
     
     // SSL verification (always enabled for production)
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     
     // Compression support
-    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     
     // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);

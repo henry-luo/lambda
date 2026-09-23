@@ -19,6 +19,28 @@
 #include <pthread.h>
 #include <sched.h>
 
+// Cache assertions target a specific execution tier; restore the caller's
+// selection so the suite can also exercise the shipped AUTO default.
+struct JsExecutionBackendScope {
+    char saved[32] = {};
+    bool had_saved = false;
+
+    explicit JsExecutionBackendScope(const char* selected) {
+        const char* current = getenv("JS_EXECUTION_BACKEND");
+        if (current) {
+            str_copy(saved, sizeof(saved), current, strlen(current));
+            had_saved = true;
+        }
+        if (selected) setenv("JS_EXECUTION_BACKEND", selected, 1);
+        else unsetenv("JS_EXECUTION_BACKEND");
+    }
+
+    ~JsExecutionBackendScope() {
+        if (had_saved) setenv("JS_EXECUTION_BACKEND", saved, 1);
+        else unsetenv("JS_EXECUTION_BACKEND");
+    }
+};
+
 TEST(JsModuleResolution, ResolvesHttpModuleSpecifiersAsUrls) {
     char resolved[256];
     const char* base = "https://docs.example.test/vite/assets/main.js";
@@ -455,6 +477,129 @@ TEST(JsScriptOwnership, IndexesFunctionParentsStructurallyInTopLevelAwaitModule)
     strbuf_free(source);
 }
 
+TEST(JsScriptOwnership, PublishesRangeAndReverseQueryFacts) {
+    const char source[] =
+        "function increment(value) { return ({ value: value }).value; } "
+        "increment(1);";
+    JsTranspiler* tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source, sizeof(source) - 1,
+        JS_PARSE_SCRIPT));
+
+    AstIndex* index = &tp->ast_index;
+    JsFunctionNode* function = NULL;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        AstNode* node = index->nodes[node_id];
+        if (node && node->node_type == AST_NODE_FUNC) {
+            function = (JsFunctionNode*)node;
+        }
+    }
+    ASSERT_NE(function, nullptr);
+
+    AstNodeId function_id = ast_index_find(index, (AstNode*)function);
+    ASSERT_NE(function_id, AST_NODE_ID_INVALID);
+    AstFunctionId owner = index->owner_functions[function_id];
+    ASSERT_LT(owner, index->function_count);
+    EXPECT_EQ(index->functions[owner].first_node, function_id);
+    EXPECT_GT(index->functions[owner].end_node, function_id);
+
+    AstBindingId binding = AST_BINDING_ID_INVALID;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        AstNode* node = index->nodes[node_id];
+        if (!node || node->node_type != AST_NODE_IDENT ||
+                ((JsIdentifierNode*)node)->entry != function->entry) continue;
+        binding = ast_index_binding_id(index, node);
+        if (binding != AST_BINDING_ID_INVALID) break;
+    }
+    ASSERT_NE(binding, AST_BINDING_ID_INVALID);
+    uint32_t call_count = 0;
+    const AstNodeId* calls = ast_index_callee_calls(index, binding, &call_count);
+    ASSERT_NE(calls, nullptr);
+    EXPECT_GE(call_count, 1u);
+
+    uint32_t member_count = 0;
+    const AstNodeId* members = NULL;
+    for (uint32_t node_id = 0; node_id < index->count; node_id++) {
+        AstNode* node = index->nodes[node_id];
+        if (!node || node->node_type != AST_NODE_MAP) continue;
+        members = ast_index_object_member_uses(index, node_id, &member_count);
+        if (member_count > 0) break;
+    }
+    ASSERT_NE(members, nullptr);
+    EXPECT_GE(member_count, 1u);
+
+    uint32_t top_level_count = 0;
+    const AstFunctionId* top_level = ast_index_function_children(index,
+        AST_FUNCTION_ID_INVALID, &top_level_count);
+    ASSERT_NE(top_level, nullptr);
+    EXPECT_GE(top_level_count, 1u);
+    js_transpiler_destroy(tp);
+}
+
+static AstIndexProfileSupport count_index_profile_nodes(const AstIndex* index,
+        AstNodeId node_id, void* context) {
+    (void)index;
+    (void)node_id;
+    int* count = (int*)context;
+    (*count)++;
+    return AST_INDEX_PROFILE_ACCEPT;
+}
+
+TEST(JsScriptOwnership, PublishesFreeReadWriteFactsAndCachesProfileSupport) {
+    const char source[] =
+        "function outer() { let value = 1; "
+        "function inner() { value = 2; return value; } return inner; }";
+    JsTranspiler* tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source, sizeof(source) - 1,
+        JS_PARSE_SCRIPT));
+
+    AstIndex* index = &tp->ast_index;
+    AstFunctionId inner = AST_FUNCTION_ID_INVALID;
+    for (AstFunctionId function_id = 0; function_id < index->function_count;
+            function_id++) {
+        if (index->functions[function_id].parent != AST_FUNCTION_ID_INVALID) {
+            inner = function_id;
+            break;
+        }
+    }
+    ASSERT_NE(inner, AST_FUNCTION_ID_INVALID);
+    uint32_t reference_count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index,
+        inner, &reference_count);
+    ASSERT_NE(references, nullptr);
+    bool found_free_read = false;
+    bool found_free_write = false;
+    for (uint32_t i = 0; i < reference_count; i++) {
+        if (!(references[i].flags & AST_FUNCTION_REF_FREE)) continue;
+        if (references[i].flags & AST_FUNCTION_REF_READ) found_free_read = true;
+        if (references[i].flags & AST_FUNCTION_REF_WRITE) found_free_write = true;
+    }
+    EXPECT_TRUE(found_free_read);
+    EXPECT_TRUE(found_free_write);
+
+    int profile_visits = 0;
+    EXPECT_TRUE(ast_index_scan_profile_support(index,
+        count_index_profile_nodes, &profile_visits));
+    EXPECT_EQ(profile_visits, (int)index->count);
+    EXPECT_TRUE(ast_index_scan_profile_support(index,
+        count_index_profile_nodes, &profile_visits));
+    EXPECT_EQ(profile_visits, (int)index->count);
+    ASSERT_NE(index->profile_support, nullptr);
+    EXPECT_TRUE(index->profile_supported);
+    js_transpiler_destroy(tp);
+
+    const char no_function_source[] = "let answer = 42;";
+    tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, no_function_source,
+        sizeof(no_function_source) - 1, JS_PARSE_SCRIPT));
+    EXPECT_EQ(tp->ast_index.function_count, 0u);
+    ASSERT_NE(tp->ast_index.function_reference_offsets, nullptr);
+    EXPECT_EQ(tp->ast_index.function_reference_offsets[0], 0u);
+    js_transpiler_destroy(tp);
+}
+
 TEST(JsInterpreter, ExecutesThroughSharedRuntimeAndModuleState) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -555,6 +700,74 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     ASSERT_EQ(runtime.scripts->length, 1);
     EXPECT_EQ(((Script*)runtime.scripts->data[0])->profile, &js_profile);
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsScriptOwnership, PreservesClassFieldInitializerCaptureOverlay) {
+    JsExecutionBackendScope backend("mir");
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "const captured = 40; class Answer { value = captured + 2; } "
+        "globalThis.__lambdaFieldOverlayResult = (new Answer()).value;";
+    Item result = transpile_js_to_mir(&runtime, source, "field-overlay.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item field_result = js_get_key_default(js_get_global_this(),
+        js_make_string("__lambdaFieldOverlayResult"));
+    EXPECT_EQ(field_result.item, flt2it(42.0).item);
+    runtime_cleanup(&runtime);
+
+    Runtime index_runtime = {};
+    runtime_init(&index_runtime);
+    JsScript* script = js_interp_prepare_script(&index_runtime, source,
+        sizeof(source) - 1, "field-overlay-index.js", false);
+    ASSERT_NE(script, nullptr);
+    JsProgramNode* program = (JsProgramNode*)script->ast_root;
+    ASSERT_NE(program, nullptr);
+    ASSERT_NE(program->body, nullptr);
+    ASSERT_NE(program->body->next, nullptr);
+    ASSERT_EQ(program->body->next->node_type, AST_NODE_CLASS);
+    JsClassNode* answer = (JsClassNode*)program->body->next;
+    ASSERT_NE(answer->body, nullptr);
+    JsBlockNode* class_body = (JsBlockNode*)answer->body;
+    ASSERT_NE(class_body->statements, nullptr);
+    ASSERT_EQ(class_body->statements->node_type, AST_NODE_FIELD);
+    ASSERT_NE(js_script_field_initializer_ensure(script,
+        (JsFieldDefinitionNode*)class_body->statements), nullptr);
+
+    bool found_overlay = false;
+    for (AstFunctionId function_id = 0;
+            function_id < script->ast_index.function_count; function_id++) {
+        uint32_t overlay_count = 0;
+        const AstNodeId* overlay = ast_index_function_overlay_nodes(
+            &script->ast_index, function_id, &overlay_count);
+        if (!overlay_count) continue;
+        ASSERT_NE(overlay, nullptr);
+        found_overlay = true;
+    }
+    EXPECT_TRUE(found_overlay);
+
+    runtime_cleanup(&index_runtime);
+}
+
+TEST(JsInterpreter, UnsetBackendSelectsAutoAstForSupportedScript) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    const char* previous = getenv("JS_EXECUTION_BACKEND");
+    char saved_backend[32] = {};
+    if (previous) str_copy(saved_backend, sizeof(saved_backend), previous,
+        strlen(previous));
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    const char source[] = "var answer = 6 * 7; answer;";
+    Item result = transpile_js_to_mir(&runtime, source, "unset-auto.js", NULL);
+
+    if (saved_backend[0]) ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", saved_backend, 1), 0);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_TRUE(runtime.js_ast_backend);
+    EXPECT_EQ(result.item, flt2it(42.0).item);
     runtime_cleanup(&runtime);
 }
 
@@ -1001,6 +1214,7 @@ static void* js_common_mir_build_waiter_main(void* opaque) {
 }
 
 TEST(JsInterpreter, SingleFlightsCommonMirLeaseBuild) {
+    JsExecutionBackendScope backend("mir");
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);
     JsMirLeaseSession* session = js_mir_lease_session_create();
@@ -1147,6 +1361,7 @@ TEST(JsInterpreter, SingleFlightsClosedModuleMirBuild) {
 }
 
 TEST(JsInterpreter, ReusesClosedModuleMirArtifactAcrossFreshRuntimes) {
+    JsExecutionBackendScope backend("mir");
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);
     InputScriptCacheStats before = {};
@@ -1177,6 +1392,7 @@ TEST(JsInterpreter, ReusesClosedModuleMirArtifactAcrossFreshRuntimes) {
 }
 
 TEST(JsInterpreter, ReusesSynchronousStaticImportModuleMirAcrossFreshRuntimes) {
+    JsExecutionBackendScope backend("mir");
     InputScriptCache* cache = input_manager_global_script_cache();
     ASSERT_NE(cache, nullptr);
     InputScriptCacheStats before = {};
@@ -1209,6 +1425,7 @@ TEST(JsInterpreter, ReusesSynchronousStaticImportModuleMirAcrossFreshRuntimes) {
 }
 
 TEST(JsInterpreter, RetiresStaticImportModuleMirConeWhenDependencyChanges) {
+    JsExecutionBackendScope backend("mir");
     ASSERT_EQ(file_ensure_dir("temp"), 0);
     static int cache_generation = 0;
     char root_path[128];

@@ -396,6 +396,8 @@ CookieJar* cookie_jar_create(struct RadiantStateStore* state_store) {
     jar->capacity = 0;
     pthread_mutex_init(&jar->lock, NULL);
     jar->state_store = state_store;
+    jar->reference_count = 1;
+    jar->closing = false;
 
     if (jar->state_store && !radiant_state_store_load_cookies(jar->state_store,
                                                                cookie_jar_load_state_entry, jar)) {
@@ -408,24 +410,54 @@ CookieJar* cookie_jar_create(struct RadiantStateStore* state_store) {
     return jar;
 }
 
-void cookie_jar_destroy(CookieJar* jar) {
-    if (!jar) return;
-
-    pthread_mutex_lock(&jar->lock);
-    for (int i = 0; i < jar->count; i++) {
-        cookie_entry_free(jar->entries[i]);
-    }
-    mem_free(jar->entries);
-    jar->count = 0;
-    jar->capacity = 0;
-    pthread_mutex_unlock(&jar->lock);
-
+static void cookie_jar_free(CookieJar* jar) {
     pthread_mutex_destroy(&jar->lock);
     mem_free(jar);
 }
 
+void cookie_jar_destroy(CookieJar* jar) {
+    if (!jar) return;
+
+    pthread_mutex_lock(&jar->lock);
+    jar->closing = true;
+    jar->state_store = NULL;
+    for (int i = 0; i < jar->count; i++) {
+        cookie_entry_free(jar->entries[i]);
+    }
+    mem_free(jar->entries);
+    jar->entries = NULL;
+    jar->count = 0;
+    jar->capacity = 0;
+    bool free_jar = --jar->reference_count == 0;
+    pthread_mutex_unlock(&jar->lock);
+
+    if (free_jar) cookie_jar_free(jar);
+}
+
+bool cookie_jar_retain(CookieJar* jar) {
+    if (!jar) return false;
+    pthread_mutex_lock(&jar->lock);
+    bool retained = !jar->closing;
+    if (retained) jar->reference_count++;
+    pthread_mutex_unlock(&jar->lock);
+    return retained;
+}
+
+void cookie_jar_release(CookieJar* jar) {
+    if (!jar) return;
+    pthread_mutex_lock(&jar->lock);
+    bool free_jar = --jar->reference_count == 0;
+    pthread_mutex_unlock(&jar->lock);
+    if (free_jar) cookie_jar_free(jar);
+}
+
 bool cookie_jar_flush(CookieJar* jar) {
-    return !jar || !jar->state_store || radiant_state_store_flush(jar->state_store);
+    if (!jar) return true;
+    pthread_mutex_lock(&jar->lock);
+    bool ok = jar->closing || !jar->state_store ||
+        radiant_state_store_flush(jar->state_store);
+    pthread_mutex_unlock(&jar->lock);
+    return ok;
 }
 
 void cookie_jar_import_curl(CookieJar* jar, void* curl_handle) {
@@ -433,6 +465,10 @@ void cookie_jar_import_curl(CookieJar* jar, void* curl_handle) {
     if (!jar || !curl) return;
     curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
     pthread_mutex_lock(&jar->lock);
+    if (jar->closing) {
+        pthread_mutex_unlock(&jar->lock);
+        return;
+    }
     time_t now = time(NULL);
     for (int i = 0; i < jar->count; i++) {
         CookieEntry* entry = jar->entries[i];
@@ -496,6 +532,11 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
     if (entry->expires > 0 && entry->expires <= time(NULL)) {
         // expired cookie — remove existing with same name/domain/path
         pthread_mutex_lock(&jar->lock);
+        if (jar->closing) {
+            pthread_mutex_unlock(&jar->lock);
+            cookie_entry_free(entry);
+            return;
+        }
         for (int i = 0; i < jar->count; i++) {
             CookieEntry* e = jar->entries[i];
             if (strcmp(e->name, entry->name) == 0 &&
@@ -513,6 +554,11 @@ void cookie_jar_store(CookieJar* jar, const char* request_url,
     }
 
     pthread_mutex_lock(&jar->lock);
+    if (jar->closing) {
+        pthread_mutex_unlock(&jar->lock);
+        cookie_entry_free(entry);
+        return;
+    }
 
     // replace existing cookie with same name/domain/path
     for (int i = 0; i < jar->count; i++) {
@@ -561,6 +607,12 @@ static char* cookie_jar_build_document_header(CookieJar* jar, const char* reques
 
     // collect matching cookies
     pthread_mutex_lock(&jar->lock);
+    if (jar->closing) {
+        pthread_mutex_unlock(&jar->lock);
+        mem_free(req_host);
+        mem_free(req_path);
+        return NULL;
+    }
 
     // upper bound: all cookies could match
     size_t buf_size = 0;
@@ -634,6 +686,10 @@ void cookie_jar_clear_expired(CookieJar* jar) {
     time_t now = time(NULL);
 
     pthread_mutex_lock(&jar->lock);
+    if (jar->closing) {
+        pthread_mutex_unlock(&jar->lock);
+        return;
+    }
     int removed = 0;
     for (int i = jar->count - 1; i >= 0; i--) {
         if (jar->entries[i]->expires > 0 && jar->entries[i]->expires <= now) {
@@ -654,6 +710,10 @@ void cookie_jar_clear_session(CookieJar* jar) {
     if (!jar) return;
 
     pthread_mutex_lock(&jar->lock);
+    if (jar->closing) {
+        pthread_mutex_unlock(&jar->lock);
+        return;
+    }
     int removed = 0;
     for (int i = jar->count - 1; i >= 0; i--) {
         if (jar->entries[i]->expires == 0) {  // session cookie
@@ -674,6 +734,10 @@ void cookie_jar_clear_all(CookieJar* jar) {
     if (!jar) return;
 
     pthread_mutex_lock(&jar->lock);
+    if (jar->closing) {
+        pthread_mutex_unlock(&jar->lock);
+        return;
+    }
     for (int i = 0; i < jar->count; i++) {
         cookie_state_queue_delete(jar, jar->entries[i]);
         cookie_entry_free(jar->entries[i]);
@@ -687,7 +751,7 @@ void cookie_jar_clear_all(CookieJar* jar) {
 int cookie_jar_count(CookieJar* jar) {
     if (!jar) return 0;
     pthread_mutex_lock(&jar->lock);
-    int c = jar->count;
+    int c = jar->closing ? 0 : jar->count;
     pthread_mutex_unlock(&jar->lock);
     return c;
 }

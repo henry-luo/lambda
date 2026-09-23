@@ -741,5 +741,5 @@ assert(type(config) == 'path')
 ## See Also
 
 - [Lambda_Sysinfo.md](Lambda_Sysinfo.md) - API design and reference
-- [Lambda_Path_Impl.md](Lambda_Expr_Path_Impl.md) - Path resolution implementation
+- [Lambda_Impl_Path (done).md](impl/Lambda_Impl_Path%20(done).md) - Path resolution implementation
 - [input_sysinfo.cpp](../lambda/input/input_sysinfo.cpp) - Existing implementation to refactor

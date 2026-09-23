@@ -11,6 +11,7 @@
 #include "../lib/str.h"
 #include "../lib/file.h"
 #include "../lib/shell.h"
+#include "../lib/time_util.h"
 #include "../lib/uv_loop.h"
 #include "layout.hpp"
 #include "view.hpp"
@@ -38,7 +39,6 @@ extern "C" {
 }
 
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
-void radiant_run_behavior_init(DomDocument* doc);
 extern "C" void js_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
 extern __thread EvalContext* context;
@@ -282,12 +282,15 @@ static DocFormat detect_doc_format(const char* filename) {
 // Load document based on detected format
 static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height,
                                        Pool* pool, const DocumentJsHostConfig* js_host_config,
-                                       CookieJar* top_level_cookie_jar) {
+                                       CookieJar* top_level_cookie_jar,
+                                       HtmlLoadPhaseTiming* timing,
+                                       DocumentScriptPhaseTiming* script_timing) {
     // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
     if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
         log_debug("Loading as remote HTML document (HTTP/HTTPS)");
-        return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                             top_level_cookie_jar);
+        return load_html_doc_profiled(base_url, (char*)filename, width, height,
+                                      js_host_config, top_level_cookie_jar,
+                                      timing, script_timing);
     }
 
     if (graph_path_is_graph(filename)) {
@@ -989,27 +992,79 @@ static int window_finish_event_sim(EventSimContext* sim_ctx) {
     return fail_count;
 }
 
+struct ViewPhaseTiming {
+    uint64_t total_start_ns;
+    HtmlLoadPhaseTiming html;
+    DocumentScriptPhaseTiming script;
+    double document_load_ms;
+    double font_faces_ms;
+    double resource_discovery_ms;
+    double render_blocking_wait_ms;
+    double layout_ms;
+    double behavior_init_ms;
+    BehaviorInitPhaseTiming behavior;
+    double autofocus_ms;
+    double render_ms;
+    double event_loop_ms;
+    double cleanup_js_ms;
+    double cleanup_network_ms;
+    double cleanup_session_ms;
+    double cleanup_thread_pool_ms;
+    double cleanup_cache_ms;
+    double cleanup_shared_network_ms;
+    double cleanup_ui_ms;
+    double cleanup_uv_ms;
+    double cleanup_ms;
+};
+
+static double view_phase_elapsed_ms(uint64_t start_ns, uint64_t end_ns) {
+    return time_elapsed_ms_f(start_ns, end_ns);
+}
+
 static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
                                         EnhancedFileCache* file_cache,
-                                        bool log_memory) {
+                                        bool log_memory, ViewPhaseTiming* timing) {
     window_request_document_satellite_cancel();
+    uint64_t phase_start = time_now_ns();
     view_cleanup_js_batch_state();
+    if (timing) timing->cleanup_js_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
     if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
+    if (timing) timing->cleanup_network_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
     if (ui_context.browsing_session) {
         session_destroy(ui_context.browsing_session);
         ui_context.browsing_session = nullptr;
     }
+    if (timing) timing->cleanup_session_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
     if (thread_pool) thread_pool_destroy(thread_pool);
+    if (timing) timing->cleanup_thread_pool_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
     if (file_cache) enhanced_cache_destroy(file_cache);
+    if (timing) timing->cleanup_cache_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
     network_downloader_cleanup_shared();
+    if (timing) timing->cleanup_shared_network_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
     view_close_event_log();
     view_close_state_dump();
     dom_set_ui_context(nullptr);
     // ui_context is stack-backed; JS must drop the host loop reference before teardown.
     dom_set_host_driven_loop(false);
+
+    phase_start = time_now_ns();
     ui_context_cleanup(&ui_context);
     view_cleanup_input_manager();
+    if (timing) timing->cleanup_ui_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
+
+    phase_start = time_now_ns();
     lambda_uv_cleanup();
+    if (timing) timing->cleanup_uv_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
     js_event_loop_set_virtual_clock(false, 0.0);
     if (log_memory) log_mem_stage("after-cleanup");
     // CLI teardown owns the logger so it can record the view completion result.
@@ -1021,6 +1076,90 @@ static void window_write_memory_profile(DomDocument* doc, const char* input_file
     if (!view_memory_profile_write(doc, input_file, output_path)) {
         log_error("view memory profile: failed to write %s", output_path);
     }
+}
+
+static void window_write_phase_timing(const ViewPhaseTiming* timing, int exit_code) {
+    const char* output_path = shell_getenv("RADIANT_VIEW_TIMING_PATH");
+    if (!output_path || !output_path[0] || !timing) return;
+
+    FILE* file = fopen(output_path, "w");
+    if (!file) {
+        log_error("view timing: failed to open %s", output_path);
+        return;
+    }
+    double total_ms = view_phase_elapsed_ms(timing->total_start_ns, time_now_ns());
+    fprintf(file, "metric\tmilliseconds\n");
+    fprintf(file, "total\t%.3f\n", total_ms);
+    // Read covers the top-level HTML transfer (or local read) plus charset detection.
+    fprintf(file, "html_download_read\t%.3f\n", timing->html.read_ms);
+    fprintf(file, "html_parse\t%.3f\n", timing->html.html_parse_ms);
+    fprintf(file, "dom_build\t%.3f\n", timing->html.dom_build_ms);
+    fprintf(file, "css_parse\t%.3f\n", timing->html.css_parse_ms);
+    fprintf(file, "stylesheet_setup\t%.3f\n", timing->html.stylesheet_setup_ms);
+    fprintf(file, "inline_style\t%.3f\n", timing->html.inline_style_ms);
+    fprintf(file, "initial_cascade\t%.3f\n", timing->html.initial_cascade_ms);
+    fprintf(file, "html_script_exec\t%.3f\n", timing->html.script_exec_ms);
+    fprintf(file, "post_script\t%.3f\n", timing->html.post_script_ms);
+    fprintf(file, "post_script_recascade\t%.3f\n", timing->html.post_script_recascade_ms);
+    fprintf(file, "post_script_handler_install\t%.3f\n",
+            timing->html.post_script_handler_install_ms);
+    fprintf(file, "final_cascade\t%.3f\n", timing->html.final_cascade_ms);
+    fprintf(file, "document_finalize\t%.3f\n", timing->html.finalize_ms);
+    fprintf(file, "script_collect\t%.3f\n", timing->script.collect_us / 1000.0);
+    fprintf(file, "script_source_prefetch\t%.3f\n",
+            timing->script.source_prefetch_us / 1000.0);
+    fprintf(file, "script_network_wait\t%.3f\n", timing->script.source_wait_us / 1000.0);
+    fprintf(file, "script_source_read\t%.3f\n", timing->script.source_read_us / 1000.0);
+    fprintf(file, "script_runtime_setup\t%.3f\n", timing->script.runtime_setup_us / 1000.0);
+    fprintf(file, "script_postdom\t%.3f\n", timing->script.postdom_total_us / 1000.0);
+    fprintf(file, "script_preamble\t%.3f\n", timing->script.preamble_us / 1000.0);
+    fprintf(file, "script_scheduler\t%.3f\n", timing->script.scheduler_us / 1000.0);
+    fprintf(file, "script_user\t%.3f\n", timing->script.user_scripts_us / 1000.0);
+    fprintf(file, "script_interactive\t%.3f\n", timing->script.interactive_us / 1000.0);
+    fprintf(file, "script_dom_content_loaded\t%.3f\n",
+            timing->script.dom_content_loaded_us / 1000.0);
+    fprintf(file, "script_async\t%.3f\n", timing->script.async_scripts_us / 1000.0);
+    fprintf(file, "script_load_blockers\t%.3f\n", timing->script.load_blockers_us / 1000.0);
+    fprintf(file, "script_complete\t%.3f\n", timing->script.complete_us / 1000.0);
+    fprintf(file, "script_body_onload\t%.3f\n", timing->script.body_onload_us / 1000.0);
+    fprintf(file, "script_window_load\t%.3f\n", timing->script.window_load_us / 1000.0);
+    fprintf(file, "script_event_loop\t%.3f\n", timing->script.event_loop_us / 1000.0);
+    fprintf(file, "script_runtime_cleanup\t%.3f\n",
+            timing->script.runtime_cleanup_us / 1000.0);
+    fprintf(file, "script_source_cleanup\t%.3f\n",
+            timing->script.source_cleanup_us / 1000.0);
+    fprintf(file, "document_load\t%.3f\n", timing->document_load_ms);
+    fprintf(file, "font_faces\t%.3f\n", timing->font_faces_ms);
+    fprintf(file, "resource_discovery\t%.3f\n", timing->resource_discovery_ms);
+    fprintf(file, "render_blocking_wait\t%.3f\n", timing->render_blocking_wait_ms);
+    fprintf(file, "layout\t%.3f\n", timing->layout_ms);
+    fprintf(file, "behavior_init\t%.3f\n", timing->behavior_init_ms);
+    fprintf(file, "behavior_queue_sort\t%.3f\n", timing->behavior.queue_sort_ms);
+    fprintf(file, "behavior_evaluator\t%.3f\n", timing->behavior.evaluator_ms);
+    fprintf(file, "behavior_handler_dispatch\t%.3f\n",
+            timing->behavior.handler_dispatch_ms);
+    fprintf(file, "behavior_pseudo_state_begin\t%.3f\n",
+            timing->behavior.pseudo_state_begin_ms);
+    fprintf(file, "behavior_pseudo_state_end\t%.3f\n",
+            timing->behavior.pseudo_state_end_ms);
+    fprintf(file, "behavior_candidate_controls_count\t%llu\n",
+            (unsigned long long)timing->behavior.candidate_control_count);
+    fprintf(file, "behavior_initialized_controls_count\t%llu\n",
+            (unsigned long long)timing->behavior.initialized_control_count);
+    fprintf(file, "autofocus\t%.3f\n", timing->autofocus_ms);
+    fprintf(file, "render\t%.3f\n", timing->render_ms);
+    fprintf(file, "event_loop\t%.3f\n", timing->event_loop_ms);
+    fprintf(file, "cleanup_js\t%.3f\n", timing->cleanup_js_ms);
+    fprintf(file, "cleanup_network\t%.3f\n", timing->cleanup_network_ms);
+    fprintf(file, "cleanup_session\t%.3f\n", timing->cleanup_session_ms);
+    fprintf(file, "cleanup_thread_pool\t%.3f\n", timing->cleanup_thread_pool_ms);
+    fprintf(file, "cleanup_cache\t%.3f\n", timing->cleanup_cache_ms);
+    fprintf(file, "cleanup_shared_network\t%.3f\n", timing->cleanup_shared_network_ms);
+    fprintf(file, "cleanup_ui\t%.3f\n", timing->cleanup_ui_ms);
+    fprintf(file, "cleanup_uv\t%.3f\n", timing->cleanup_uv_ms);
+    fprintf(file, "cleanup\t%.3f\n", timing->cleanup_ms);
+    fprintf(file, "exit_code\t%d\n", exit_code);
+    fclose(file);
 }
 
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
@@ -1035,6 +1174,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    bool enable_event_log,
                                                    bool enable_state_dump) {
     log_init_wrapper();
+    ViewPhaseTiming phase_timing = {};
+    phase_timing.total_start_ns = time_now_ns();
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
 
@@ -1193,7 +1334,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         DocumentJsHostConfig js_host_config = {
             &ui_context,
             host_driven_loop,
-            false,
+            // A static headless view is a first-render snapshot. It has no
+            // later host turn, so close post-load background handles here.
+            headless && sim_ctx == nullptr,
             headless && sim_ctx != nullptr,
             0.0,
             0.0,
@@ -1201,6 +1344,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             false
         };
         DomDocument* doc = nullptr;
+        uint64_t document_load_start = time_now_ns();
         if (transform) {
             Url* document_url = url_parse_with_base(file_to_load, cwd);
             if (!document_url) {
@@ -1218,8 +1362,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
         } else {
             doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
-                &js_host_config, session_cookie_jar(ui_context.browsing_session));
+                &js_host_config, session_cookie_jar(ui_context.browsing_session),
+                &phase_timing.html, &phase_timing.script);
         }
+        phase_timing.document_load_ms = view_phase_elapsed_ms(
+            document_load_start, time_now_ns());
         // The document's evaluator is created on demand, at the post-render
         // behavior-attach drain, and only for a document that owns a control
         // the dom package governs — a thread holds one Runtime, so creating one
@@ -1281,13 +1428,18 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         radiant_document_ensure_state(doc, "view_doc_in_window");
         view_attach_event_log(doc, file_to_load);
 
-        // Process @font-face rules before layout
+        // Process @font-face rules before layout.
+        uint64_t font_faces_start = time_now_ns();
         process_document_font_faces(&ui_context, doc);
+        phase_timing.font_faces_ms = view_phase_elapsed_ms(font_faces_start, time_now_ns());
 
         // Discover and queue network resources BEFORE layout
         // This starts async downloads for CSS, images, fonts early
         if (doc->resource_manager) {
+            uint64_t resource_discovery_start = time_now_ns();
             radiant_discover_document_resources(doc);
+            phase_timing.resource_discovery_ms = view_phase_elapsed_ms(
+                resource_discovery_start, time_now_ns());
             log_notice("view: network resource discovery complete");
 
             // Wait only for render-blocking CSS (up to 5 seconds); images,
@@ -1306,6 +1458,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 glfwWaitEventsTimeout(0.05);  // 50ms poll
             }
             double wait_time = glfwGetTime() - wait_start;
+            phase_timing.render_blocking_wait_ms = wait_time * 1000.0;
             if (wait_time > 0.01) {
                 log_info("view: waited %.2fs for render-blocking stylesheets before layout", wait_time);
             }
@@ -1325,16 +1478,24 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         // Layout document when it has an HTML/CSS DOM; pre-built view trees skip this
         if (doc->root) {
             log_mem_stage("before-layout");
+            uint64_t layout_start = time_now_ns();
             layout_html_doc(&ui_context, doc, false);
+            phase_timing.layout_ms = view_phase_elapsed_ms(layout_start, time_now_ns());
             log_mem_stage("after-layout");
         }
         log_notice("view: layout complete, rendering...");
         // Render document
-        radiant_run_behavior_init(doc);   // ES19: layout -> init -> render
+        uint64_t behavior_init_start = time_now_ns();
+        radiant_run_behavior_init(doc, &phase_timing.behavior);   // ES19: layout -> init -> render
+        phase_timing.behavior_init_ms = view_phase_elapsed_ms(behavior_init_start, time_now_ns());
+        uint64_t autofocus_start = time_now_ns();
         radiant_run_autofocus(doc);       // ES30: package policy -> native focus
+        phase_timing.autofocus_ms = view_phase_elapsed_ms(autofocus_start, time_now_ns());
         if (doc && doc->view_tree) {
             log_mem_stage("before-render");
+            uint64_t render_start = time_now_ns();
             render_html_doc(&ui_context, doc->view_tree, NULL);
+            phase_timing.render_ms = view_phase_elapsed_ms(render_start, time_now_ns());
             log_mem_stage("after-render");
         }
         window_write_memory_profile(doc, file_to_load);
@@ -1363,6 +1524,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 
     // --- Headless mode: run events synchronously without a window ---
     if (headless) {
+        uint64_t event_loop_start = time_now_ns();
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running) {
@@ -1398,9 +1560,14 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
         }
         int sim_fail_count = window_finish_event_sim(sim_ctx);
+        phase_timing.event_loop_ms = view_phase_elapsed_ms(event_loop_start, time_now_ns());
         log_info("End of headless document viewer");
-        window_cleanup_view_runtime(thread_pool, file_cache, true);
-        return sim_fail_count > 0 ? 1 : 0;
+        uint64_t cleanup_start = time_now_ns();
+        window_cleanup_view_runtime(thread_pool, file_cache, true, &phase_timing);
+        phase_timing.cleanup_ms = view_phase_elapsed_ms(cleanup_start, time_now_ns());
+        int exit_code = sim_fail_count > 0 ? 1 : 0;
+        window_write_phase_timing(&phase_timing, exit_code);
+        return exit_code;
     }
 
     // --- GUI mode: full window event loop ---
@@ -1556,7 +1723,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     int sim_fail_count = window_finish_event_sim(sim_ctx);
 
     log_info("End of document viewer");
-    window_cleanup_view_runtime(thread_pool, file_cache, false);
+    window_cleanup_view_runtime(thread_pool, file_cache, false, nullptr);
 
     // Return non-zero if simulation had failures
     return sim_fail_count > 0 ? 1 : 0;

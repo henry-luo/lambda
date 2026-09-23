@@ -50,6 +50,7 @@ typedef enum {
 // Network resource structure
 typedef struct NetworkResource {
     char* url;                      // Absolute URL
+    char* referrer_url;             // Owning document URL for browser subresource requests
     char* local_path;               // Cache file path (if cached)
     ResourceType type;
     ResourceState state;

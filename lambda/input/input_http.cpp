@@ -45,16 +45,25 @@ static void http_set_request_body(CURL* curl, const FetchConfig* config) {
 }
 
 static struct curl_slist* http_document_navigation_headers() {
-    struct curl_slist* headers =
-        curl_slist_append(NULL, RADIANT_HTTP_DOCUMENT_ACCEPT_HEADER);
-    if (!headers) return NULL;
-    struct curl_slist* with_language =
-        curl_slist_append(headers, RADIANT_HTTP_DOCUMENT_LANGUAGE_HEADER);
-    if (!with_language) {
-        curl_slist_free_all(headers);
-        return NULL;
+    static const char* const navigation_headers[] = {
+        RADIANT_HTTP_DOCUMENT_ACCEPT_HEADER,
+        RADIANT_HTTP_DOCUMENT_LANGUAGE_HEADER,
+        RADIANT_HTTP_DOCUMENT_FETCH_DEST_HEADER,
+        RADIANT_HTTP_DOCUMENT_FETCH_MODE_HEADER,
+        RADIANT_HTTP_DOCUMENT_FETCH_SITE_HEADER,
+        RADIANT_HTTP_DOCUMENT_FETCH_USER_HEADER,
+        RADIANT_HTTP_DOCUMENT_UPGRADE_HEADER
+    };
+    struct curl_slist* headers = NULL;
+    for (size_t i = 0; i < sizeof(navigation_headers) / sizeof(navigation_headers[0]); i++) {
+        struct curl_slist* appended = curl_slist_append(headers, navigation_headers[i]);
+        if (!appended) {
+            curl_slist_free_all(headers);
+            return NULL;
+        }
+        headers = appended;
     }
-    return with_language;
+    return headers;
 }
 
 // Maximum response size (50 MB) — prevents unbounded memory growth from large pages
@@ -174,7 +183,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     // Compression support
     if (config ? config->enable_compression : default_http_config.enable_compression) {
-        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     }
 
     // Prefer HTTP/2 over HTTPS (falls back to HTTP/1.1 if unsupported)
@@ -574,7 +583,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     // Compression support
     bool enable_compression = config ? config->enable_compression : default_http_config.enable_compression;
     if (enable_compression) {
-        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     }
 
     // Perform the request

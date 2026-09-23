@@ -271,13 +271,8 @@ extern "C" Item js_blob_array_buffer(void) {
     Item self = dom_realm_receiver();
     size_t n = 0;
     const char* t = str_prop_get(self, "_text", &n);
-    // Build a real ArrayBuffer (native typed-array module) and copy bytes in.
-    Item buf = js_arraybuffer_new((int)n);
-    if (t && n > 0 && get_type_id(buf) == LMD_TYPE_MAP) {
-        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(buf);
-        uint8_t* data = js_arraybuffer_prepare_write(ab);
-        if (data) memcpy(data, t, n);
-    }
+    // Blob and Response body bytes share the typed-array ownership path.
+    Item buf = js_arraybuffer_from_bytes(t, (int)n);
     return dom_realm_promise_resolve(buf);
 }
 

@@ -742,7 +742,11 @@ static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
         }
     } else if (doc->root && dom_engine_document_ensure_state(
                    doc, "dom_geometry_flush")) {
+        // First-layout geometry is renderer work required for the initial
+        // paint; a page's CSSOM read must not consume its JS CPU budget.
+        script_runner_suspend_js_watchdog();
         layout_html_doc(uicon, doc, false);
+        script_runner_resume_js_watchdog();
     }
 
     dom_geometry_flush_in_progress = false;
@@ -1458,7 +1462,10 @@ static void dom_compile_event_attr_to_expando(DomElement* elem,
 }
 
 static void dom_initialize_event_attrs(DomElement* elem) {
-    if (!elem) return;
+    // D5.3.3: compiling an inline handler allocates a function and expando in
+    // the current JS realm. A realm retained after script recovery may have no
+    // live Input, so wrapper construction must defer this JS-only work.
+    if (!elem || !dom_realm_active()) return;
     int attr_count = 0;
     const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {

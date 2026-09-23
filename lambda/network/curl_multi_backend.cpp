@@ -281,9 +281,12 @@ static bool configure_transfer(CurlMultiTransfer* transfer) {
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(easy, CURLOPT_USERAGENT, RADIANT_HTTP_CLIENT_USER_AGENT);
+    if (res->referrer_url && res->referrer_url[0]) {
+        curl_easy_setopt(easy, CURLOPT_REFERER, res->referrer_url);
+    }
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     curl_easy_setopt(easy, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(easy, CURLOPT_MAXCONNECTS, 6L);
     curl_easy_setopt(easy, CURLOPT_PRIVATE, transfer);

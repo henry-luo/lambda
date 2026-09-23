@@ -17,17 +17,6 @@
 
 static void js_script_destroy_extension(Script* base_script);
 
-struct JsScopeBindingIndexEntry {
-    JsScope* scope;
-    String* name;
-    NameEntry* binding;
-};
-
-typedef TypedHashMap<JsScopeBindingIndexEntry,
-    HashMapIdentity2MemberKeyOps<JsScopeBindingIndexEntry,
-        &JsScopeBindingIndexEntry::scope,
-        &JsScopeBindingIndexEntry::name>> JsScopeBindingIndex;
-
 // The shared indexer sees JavaScript's extension nodes through this immutable
 // profile. Worker parsers may therefore share it without a first-use race.
 LangProfile js_profile = { "js", js_ast_publish_extension_facts,
@@ -275,40 +264,8 @@ void js_scope_pop(JsTranspiler* tp) {
     }
 }
 
-static NameEntry* js_scope_find_entry_linear(JsScope* scope, String* name) {
-    if (!scope || !name) return NULL;
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (entry->name->len == name->len &&
-            memcmp(entry->name->chars, name->chars, name->len) == 0) {
-            return entry;
-        }
-    }
-    return NULL;
-}
-
-static NameEntry* js_scope_find_entry(JsTranspiler* tp, JsScope* scope,
-        String* name) {
-    if (!scope || !name) return NULL;
-    if (tp && tp->scope_binding_index &&
-            !JsScopeBindingIndex::oom(tp->scope_binding_index)) {
-        JsScopeBindingIndexEntry key = {scope, name, NULL};
-        const JsScopeBindingIndexEntry* indexed = JsScopeBindingIndex::get(
-            tp->scope_binding_index, key);
-        return indexed ? indexed->binding : NULL;
-    }
-    return js_scope_find_entry_linear(scope, name);
-}
-
-static void js_scope_index_binding(JsTranspiler* tp, JsScope* scope,
-        NameEntry* binding) {
-    if (!tp || !scope || !binding || !binding->name) return;
-    if (!tp->scope_binding_index) {
-        tp->scope_binding_index = JsScopeBindingIndex::create(32);
-    }
-    if (!tp->scope_binding_index ||
-            JsScopeBindingIndex::oom(tp->scope_binding_index)) return;
-    JsScopeBindingIndexEntry entry = {scope, binding->name, binding};
-    JsScopeBindingIndex::set(tp->scope_binding_index, entry);
+static NameEntry* js_scope_find_entry(JsScope* scope, String* name) {
+    return name_scope_lookup_name(scope, name);
 }
 
 static bool js_scope_entry_matches_node(const NameEntry* entry,
@@ -330,28 +287,18 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     // consumes binding IDs, so no mutable cache can outlive scope mutation.
     for (JsScope* scope = tp ? tp->current_scope : NULL; scope;
             scope = scope->parent) {
-        NameEntry* entry = js_scope_find_entry(tp, scope, name);
+        NameEntry* entry = js_scope_find_entry(scope, name);
         if (entry) return entry;
     }
     return NULL;
 }
 
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
-    return tp ? js_scope_find_entry(tp, tp->current_scope, name) : NULL;
+    return tp ? js_scope_find_entry(tp->current_scope, name) : NULL;
 }
 
 bool js_scope_plan_binding_slots(JsScope* scope) {
-    if (!scope) return true;
-    if (scope->binding_slots_planned) return true;
-    uint32_t count = 0;
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (count >= (uint32_t)INT32_MAX) return false;
-        entry->slot = (int32_t)count++;
-        entry->storage_assigned = true;
-    }
-    scope->binding_slot_count = count;
-    scope->binding_slots_planned = true;
-    return true;
+    return name_scope_plan_binding_slots(scope);
 }
 
 NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
@@ -360,7 +307,7 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
         target_scope = tp->global_scope;
     }
 
-    NameEntry* existing = js_scope_find_entry(tp, target_scope, name);
+    NameEntry* existing = js_scope_find_entry(target_scope, name);
 
     // Function-scoped var declarations are one hoisted binding even when the
     // source contains several declarations or a declaration is pre-scanned.
@@ -423,7 +370,11 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
         target_scope->last->next = entry;
     }
     target_scope->last = entry;
-    js_scope_index_binding(tp, target_scope, entry);
+    if (!name_scope_index_add(tp->pool, target_scope, entry)) {
+        log_error("js-scope: failed to index lexical binding");
+        if (tp) tp->has_errors = true;
+        return NULL;
+    }
     log_debug("Defined JavaScript variable '%.*s' in scope type %d",
              (int)name->len, name->chars, target_scope->kind);
     return entry;
@@ -439,7 +390,7 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
         // region, so a nested function still starts a new var scope.
         for (JsScope* scope = target_scope; scope; scope = scope->parent) {
             if (scope->allows_legacy_var_redeclaration) {
-                NameEntry* entry = js_scope_find_entry(tp, scope, name);
+                NameEntry* entry = js_scope_find_entry(scope, name);
                 if (entry && entry->is_lexical) return entry;
             }
             if (scope->kind != SCOPE_KIND_BLOCK) break;
@@ -550,10 +501,6 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
 
 static void js_transpiler_destroy_tail(JsTranspiler* tp) {
     if (!tp) return;
-    if (tp->scope_binding_index) {
-        hashmap_free(tp->scope_binding_index);
-        tp->scope_binding_index = NULL;
-    }
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);
     }

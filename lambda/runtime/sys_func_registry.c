@@ -975,10 +975,10 @@ SysFuncInfo sys_func_defs[] = {
     // Procedural functions — not method-eligible (side effects)
     // ========================================================================
     {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "pn_now", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_DTIME, NULL, "pn_now", FPTR(pn_now), NULL, NULL, false, 0},
 
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false,
-     C_RET_DTIME, NULL, "pn_today", NULL, NULL, NULL, false, 0},  // unimplemented
+     C_RET_DTIME, NULL, "pn_today", FPTR(pn_today), NULL, NULL, false, 0},
 
     {SYSPROC_PRINT, "print", -1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "pn_print", FPTR(pn_print), NULL, NULL, false, 0},

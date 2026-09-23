@@ -11,6 +11,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/file.h"
 #include "../lib/mem.h"
+#include "../lib/url.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -119,7 +120,9 @@ TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
     ASSERT_NE(stored_path, nullptr);
     mem_free(stored_path);
 
-    DomDocument document;
+    DomDocument document = {};
+    document.url = url_parse("https://docs.example.test/guide");
+    ASSERT_NE(document.url, nullptr);
     NetworkResourceManager* manager = resource_manager_create(&document, NULL, cache);
     ASSERT_NE(manager, nullptr);
 
@@ -129,6 +132,7 @@ TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
         manager, url, RESOURCE_SCRIPT, PRIORITY_NORMAL, NULL);
     EXPECT_EQ(script_consumer, prefetched);
     EXPECT_EQ(prefetched->type, RESOURCE_PREFETCH);
+    EXPECT_STREQ(prefetched->referrer_url, "https://docs.example.test/guide");
     EXPECT_TRUE(resource_manager_wait_for_resource(manager, prefetched));
 
     size_t copied_size = 0;
@@ -140,6 +144,7 @@ TEST(NetworkResourceManager, PrefetchAndTypedConsumerShareOneCachedResource) {
     mem_free(copied);
 
     resource_manager_destroy(manager);
+    url_destroy(document.url);
     enhanced_cache_destroy(cache);
 }
 
@@ -155,7 +160,7 @@ TEST(NetworkResourceManager, PreservesParserBlockingPriorityAcrossConsumers) {
     ASSERT_NE(stored_path, nullptr);
     mem_free(stored_path);
 
-    DomDocument document;
+    DomDocument document = {};
     NetworkResourceManager* manager = resource_manager_create(&document, NULL, cache);
     ASSERT_NE(manager, nullptr);
 

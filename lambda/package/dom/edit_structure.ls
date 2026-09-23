@@ -1,6 +1,7 @@
 // Package-owned structural editing policy (D7.2.5).  Native code receives
 // only explicit containers/tags and performs generic Range and node mechanics.
 import dom
+import history: lambda.dom.edit_history
 
 fn same(a, b) {
     if (a == null or b == null) false else dom.same_node(a, b)
@@ -40,7 +41,7 @@ pub fn ancestor_with_tag(host, node, tag) {
 fn selection_offset(node, codepoint_offset) {
     let value = dom.node_value(node);
     if (value == null) codepoint_offset
-    else utf16_from_codepoint(value, codepoint_offset, 0, 0)
+    else history.utf16_from_codepoint(value, codepoint_offset, 0, 0)
 }
 
 // Moving a selected node through ordinary DOM removal maps a live Range to its

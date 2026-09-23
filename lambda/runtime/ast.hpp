@@ -1018,6 +1018,10 @@ typedef struct Transpiler : Script {
     // Mark the full-image POC lowering so non-admitted local callees stay on
     // the normal dynamic tier boundary while admitted recursion remains direct.
     bool whole_script_poc;
+    // A native importer resolves public entries through generated addresses.
+    // Automatic MIR interpretation has no such ABI, so imported modules retain
+    // native code generation (D8.5.1v7).
+    bool requires_native_mir_exports;
 
     // Compiler unit resumes indexing into MIR; retained ASTs restart it.
     CompilerPassManager pass_manager;

@@ -1,6 +1,7 @@
 #include "js_mir_internal.hpp"
 #include "js_interp.hpp"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/time_util.h"
 #include "../input/input-script-cache.h"
 
 #include <limits.h>
@@ -1276,15 +1277,23 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
     return true;
 }
 
-static int js_mir_analyze_and_plan(void* opaque) {
-    JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
+typedef enum JsMirAnalysisStage {
+    JS_MIR_ANALYSIS_COLLECT,
+    JS_MIR_ANALYSIS_CAPTURES,
+    JS_MIR_ANALYSIS_ENV_LAYOUT,
+    JS_MIR_ANALYSIS_INFER,
+    JS_MIR_ANALYSIS_FORWARD_DECLARE,
+} JsMirAnalysisStage;
+
+static int js_mir_analyze_and_plan(JsMirTranspiler* mt,
+        JsMirAnalysisStage stage) {
     JsAstNode* root = mt && mt->tp ? (JsAstNode*)mt->tp->ast_root : NULL;
     if (!root || root->node_type != AST_SCRIPT) {
         log_error("js-mir: expected program node");
         return 0;
     }
     JsProgramNode* program = (JsProgramNode*)root;
-
+    if (stage == JS_MIR_ANALYSIS_COLLECT) {
     // v20: Detect program-level "use strict" directive
     mt->is_global_strict = (mt->tp && mt->tp->strict_mode) || program->has_use_strict_directive;
 
@@ -1517,8 +1526,13 @@ static int js_mir_analyze_and_plan(void* opaque) {
             if (!fn || !fn->name || !fn->body) continue;
             bool binding_written = false;
             AstIndex* index = &mt->tp->ast_index;
-            for (uint32_t node_id = 0; node_id < index->count; node_id++) {
-                JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+            AstBindingId binding_id = fn->entry && fn->entry->node
+                ? ast_index_binding_id(index, fn->entry->node) : AST_BINDING_ID_INVALID;
+            uint32_t use_count = 0;
+            const AstNodeId* use_ids = ast_index_binding_uses(index, binding_id,
+                &use_count);
+            for (uint32_t use_index = 0; use_index < use_count; use_index++) {
+                JsAstNode* node = (JsAstNode*)index->nodes[use_ids[use_index]];
                 if (!node) continue;
                 if (node->node_type == AST_NODE_ASSIGN) {
                     JsAssignmentNode* assignment = (JsAssignmentNode*)node;
@@ -1961,8 +1975,12 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
     }
 
-    // Phase 1.5: Capture analysis
-    // Direct scope resolution assigns each identifier its exact binding.
+    return 1;
+    }
+
+    if (stage == JS_MIR_ANALYSIS_CAPTURES) {
+    // Phase 1.5: Capture analysis. Direct scope resolution assigns each
+    // identifier its exact binding before this manager stage runs.
     {
         // Analyze each collected function for captures.
         for (int i = 0; i < mt->func_count; i++) {
@@ -2085,6 +2103,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
     }
 
+    return 1;
+    }
+
+    if (stage == JS_MIR_ANALYSIS_ENV_LAYOUT) {
     // Phase 1.7: Compute shared scope envs for parent functions.
     // For each function F, the scope env contains the union of all variables
     // captured by F's direct child closures. All child closures share the same
@@ -2586,9 +2608,12 @@ static int js_mir_analyze_and_plan(void* opaque) {
 
         bool needs_immediate_parent_link = false;
         if (parent_link_uses_grandparent) {
-            for (int ci = 0; ci < mt->func_count && !needs_immediate_parent_link; ci++) {
-                JsFuncCollected* child = &mt->func_entries[ci];
-                if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
+            uint32_t child_count = 0;
+            const AstFunctionId* child_ids = ast_index_function_children(
+                &mt->tp->ast_index, parent_fc->function_id, &child_count);
+            for (uint32_t ci = 0; ci < child_count && !needs_immediate_parent_link; ci++) {
+                JsFuncCollected* child = jm_collected_func_by_id(mt, child_ids[ci]);
+                if (!child) continue;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child) && !needs_immediate_parent_link; k++) {
                     for (int pc = 0; pc < JM_CAPTURE_COUNT(parent_fc); pc++) {
                         FnCapture* parent_cap = &JM_CAPTURE_ARRAY(parent_fc)[pc];
@@ -2799,6 +2824,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
             fc->name, parent_env_link_slot, parent_fc->name);
     }
 
+    return 1;
+    }
+
+    if (stage == JS_MIR_ANALYSIS_INFER) {
     // Phase 1.75: infer source contracts before Number-only admission. The
     // bounded return pass below consumes resolved bindings, not spellings.
     for (int i = 0; i < mt->func_count; i++) {
@@ -2857,6 +2886,10 @@ static int js_mir_analyze_and_plan(void* opaque) {
         }
     }
 
+    return 1;
+    }
+
+    if (stage != JS_MIR_ANALYSIS_FORWARD_DECLARE) return 0;
     // Phase 1.9: Create forward declarations for all functions.
     // This ensures func_item is set for all functions before any body is compiled,
     // so forward references (e.g., a class method calling a free function declared
@@ -3008,6 +3041,39 @@ static int js_mir_analyze_and_plan(void* opaque) {
     jm_plan_literal_field_shapes(mt);
 
     return 1;
+}
+
+static int js_mir_collect_compiler_pass(void* opaque) {
+    return js_mir_analyze_and_plan((JsMirTranspiler*)opaque,
+        JS_MIR_ANALYSIS_COLLECT);
+}
+
+static int js_mir_captures_compiler_pass(void* opaque) {
+    return js_mir_analyze_and_plan((JsMirTranspiler*)opaque,
+        JS_MIR_ANALYSIS_CAPTURES);
+}
+
+static int js_mir_env_layout_compiler_pass(void* opaque) {
+    return js_mir_analyze_and_plan((JsMirTranspiler*)opaque,
+        JS_MIR_ANALYSIS_ENV_LAYOUT);
+}
+
+static int js_mir_infer_compiler_pass(void* opaque) {
+    return js_mir_analyze_and_plan((JsMirTranspiler*)opaque,
+        JS_MIR_ANALYSIS_INFER);
+}
+
+static int js_mir_forward_declare_compiler_pass(void* opaque) {
+    return js_mir_analyze_and_plan((JsMirTranspiler*)opaque,
+        JS_MIR_ANALYSIS_FORWARD_DECLARE);
+}
+
+static bool js_mir_run_analysis_plan(JsMirTranspiler* mt) {
+    return js_mir_collect_compiler_pass(mt) &&
+        js_mir_captures_compiler_pass(mt) &&
+        js_mir_env_layout_compiler_pass(mt) &&
+        js_mir_infer_compiler_pass(mt) &&
+        js_mir_forward_declare_compiler_pass(mt);
 }
 
 static int js_mir_lower(void* opaque) {
@@ -3792,15 +3858,30 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt) {
     uint32_t indexed_facts = COMPILER_FACT_FRONTEND | COMPILER_FACT_INDEXED;
     if ((pass_manager->facts & indexed_facts) != indexed_facts ||
             pass_manager->next_pass != pass_manager->pass_count) return false;
-    CompilerPassSpec analyze_plan_pass = {"analyze-plan", COMPILER_FACT_INDEXED,
-        COMPILER_FACT_ANALYZED | COMPILER_FACT_PLANNED, js_mir_analyze_and_plan, mt};
+    CompilerPassSpec collect_pass = {"collect", COMPILER_FACT_INDEXED,
+        COMPILER_FACT_COLLECTED, js_mir_collect_compiler_pass, mt};
+    CompilerPassSpec captures_pass = {"captures", COMPILER_FACT_COLLECTED,
+        COMPILER_FACT_CAPTURES | COMPILER_FACT_ANALYZED,
+        js_mir_captures_compiler_pass, mt};
+    CompilerPassSpec env_layout_pass = {"env-layout", COMPILER_FACT_CAPTURES,
+        COMPILER_FACT_ENV_LAYOUT, js_mir_env_layout_compiler_pass, mt};
+    CompilerPassSpec infer_pass = {"infer", COMPILER_FACT_ENV_LAYOUT,
+        COMPILER_FACT_INFERRED, js_mir_infer_compiler_pass, mt};
+    CompilerPassSpec forward_declare_pass = {"forward-declare",
+        COMPILER_FACT_INFERRED, COMPILER_FACT_FORWARD_DECLARED |
+        COMPILER_FACT_PLANNED, js_mir_forward_declare_compiler_pass, mt};
     CompilerPassSpec lower_pass = {"mir-lower", COMPILER_FACT_ANALYZED |
-        COMPILER_FACT_PLANNED, COMPILER_FACT_MIR_LOWERED, js_mir_lower, mt};
+        COMPILER_FACT_PLANNED | COMPILER_FACT_FORWARD_DECLARED,
+        COMPILER_FACT_MIR_LOWERED, js_mir_lower, mt};
     CompilerPassSpec finalize_pass = {"mir-finalize-load", COMPILER_FACT_MIR_LOWERED,
         COMPILER_FACT_FINALIZED, js_mir_finalize, mt};
     CompilerPassSpec prelink_pass = {"prelink", COMPILER_FACT_FINALIZED,
         COMPILER_FACT_PRELINKED, js_mir_prelink, mt};
-    bool completed = compiler_pass_manager_add(pass_manager, &analyze_plan_pass) &&
+    bool completed = compiler_pass_manager_add(pass_manager, &collect_pass) &&
+        compiler_pass_manager_add(pass_manager, &captures_pass) &&
+        compiler_pass_manager_add(pass_manager, &env_layout_pass) &&
+        compiler_pass_manager_add(pass_manager, &infer_pass) &&
+        compiler_pass_manager_add(pass_manager, &forward_declare_pass) &&
         compiler_pass_manager_add(pass_manager, &lower_pass) &&
         compiler_pass_manager_add(pass_manager, &finalize_pass) &&
         compiler_pass_manager_add(pass_manager, &prelink_pass) &&
@@ -3818,7 +3899,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt) {
 // does not need module slots, captures, or another source function body.
 static bool js_mir_lower_function_satellite(JsMirTranspiler* mt,
         AstFunctionId function_id, const char** out_name) {
-    if (!mt || !out_name || !js_mir_analyze_and_plan(mt)) return false;
+    if (!mt || !out_name || !js_mir_run_analysis_plan(mt)) return false;
     JsFuncCollected* function = jm_collected_func_by_id(mt, function_id);
     if (!function || !function->node || JM_CAPTURE_COUNT(function) != 0) {
         log_error("js-p2: selected definition lacks a closed MIR plan");

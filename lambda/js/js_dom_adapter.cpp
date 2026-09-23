@@ -80,7 +80,9 @@ extern "C" bool dom_realm_active(void) {
     // built on demand out of js_input's pool, so a script with a global but no
     // realm input still faults there -- which is exactly what a Lambda-only
     // document has.
-    if (!js_input) return false;
+    // `js_input` is a state-backed macro, so test the active state before
+    // expanding it after an iframe releases its realm.
+    if (!js_active_runtime_state || !js_input) return false;
     return get_type_id(js_get_global_this()) == LMD_TYPE_MAP;
 }
 

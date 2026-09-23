@@ -1956,6 +1956,9 @@ void css_transition_finish(AnimationInstance* anim) {
 static void css_transition_cancel(AnimationInstance* anim) {
     CssTransitionState* st = (CssTransitionState*)anim->state;
     if (!st || !st->element) return;
+    // Document teardown invalidates DOM wrappers before scheduler entries are
+    // reclaimed; no transitioncancel event can target that retired document.
+    if (anim->suppress_cancel_event) return;
     double now = anim->start_time;
     if (st->ui_context && st->ui_context->document) {
         DocState* doc_state = (DocState*)st->ui_context->document->state;

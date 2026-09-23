@@ -517,6 +517,27 @@ static void profile_record_phase(const PhaseProfile* profile) {
 #endif
 }
 
+void lambda_profile_record_js_compilation(const char* script_path,
+        const JsMirPhaseTiming* timing) {
+    if (!timing || !is_profile_enabled()) return;
+    PhaseProfile profile = {};
+    profile_set_script_path(&profile, script_path);
+    // Preserve the established TSV columns while keeping each JS compiler
+    // stage visible in the same lifecycle as the Lambda front end.
+    profile.parse_ms = (double)timing->parse_build_us / 1000.0;
+    profile.ast_ms = (double)(timing->bind_us + timing->validate_us +
+        timing->index_us) / 1000.0;
+    profile.inline_analysis_ms = (double)(timing->collect_us +
+        timing->captures_us + timing->env_layout_us + timing->infer_us +
+        timing->forward_declare_us) / 1000.0;
+    profile.transpile_ms = (double)timing->mir_lower_us / 1000.0;
+    profile.jit_init_ms = (double)timing->finalize_us / 1000.0;
+    profile.mir_gen_ms = (double)(timing->prelink_us + timing->link_us) / 1000.0;
+    profile.worker_thread = 0;
+    profile.thread_id = profile_current_thread_id();
+    profile_record_phase(&profile);
+}
+
 void profile_dump_to_file() {
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");
@@ -1203,12 +1224,29 @@ static Pool* runner_path_pool_provider(void) {
 
 
 
+void transpiler_clear_direct_imports(Transpiler* tp, const Script* script) {
+    if (!tp) return;
+    ArrayList* direct_imports = tp->direct_imports;
+    tp->direct_imports = NULL;
+    // D8.5.1v7: a copied Transpiler can alias the executing Script's runtime
+    // dependency graph. Keep that graph alive while cache overlays rebuild it.
+    if (direct_imports && (!script || direct_imports != script->direct_imports)) {
+        arraylist_free(direct_imports);
+    }
+}
+
 // Both tiers finish a load the same way: the Script-sized prefix of the
 // Transpiler carries the AST, const/type lists and whichever artifact the tier
 // produced (a linked MIR context, or a frame plan and nothing else).
 void script_adopt_transpiler(Script* script, Transpiler* tp) {
     if (!script || !tp) return;
+    ArrayList* replaced_direct_imports = script->direct_imports;
+    ArrayList* adopted_direct_imports = tp->direct_imports;
     memcpy(script, tp, sizeof(Script));
+    if (replaced_direct_imports &&
+            replaced_direct_imports != adopted_direct_imports) {
+        arraylist_free(replaced_direct_imports);
+    }
 }
 
 // a parent that falls back to MIR cannot link a dependency that was already
@@ -1239,6 +1277,7 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime) {
     Transpiler tp = {};
     memcpy(&tp, script, sizeof(Script));
     tp.runtime = runtime;
+    tp.requires_native_mir_exports = true;
     script->interp_supported = false;
     script->interp_planned = false;
     compile_script_as_mir_direct(&tp, script, script->reference, NULL, NULL,
@@ -1266,10 +1305,7 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
 static bool lambda_prepare_ast_interpreter(Transpiler* tp) {
     if (!tp || !tp->ast_root) return false;
     AstScript* interp_root = (AstScript*)tp->ast_root;
-    if (tp->direct_imports) {
-        arraylist_free(tp->direct_imports);
-        tp->direct_imports = NULL;
-    }
+    transpiler_clear_direct_imports(tp, tp->script_owner);
     for (AstNode* child = interp_root->child; child; child = child->next) {
         if (child->node_type != AST_NODE_IMPORT) continue;
         AstImportNode* import_node = (AstImportNode*)child;
@@ -1305,6 +1341,7 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
     memcpy(&transpiler, script, sizeof(Script));
     transpiler.script_owner = script;
     transpiler.runtime = runtime;
+    transpiler.requires_native_mir_exports = !script->is_main;
     script->ast_frontend_only = false;
     transpiler.ast_frontend_only = false;
     if (lambda_prepare_ast_interpreter(&transpiler)) {
@@ -1419,7 +1456,12 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     get_time(&start);
     tp->source = script->source;
-    tp->defer_ast_index_columns = lambda_tier_selected() != LAMBDA_TIER_JIT;
+    // A non-main Script can be linked from a native parent. Keep its exports
+    // callable even when automatic document policy prefers interpretation.
+    tp->requires_native_mir_exports = !script->is_main;
+    // Capture, support, and call-site passes share the published graph in
+    // every tier; delaying its columns for T0 would reintroduce tree scans.
+    tp->defer_ast_index_columns = false;
     LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
     compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
     CompilerPassSpec parse_pass = {"parse", COMPILER_FACT_NONE,
@@ -1457,9 +1499,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         arraylist_free(front_end.functions);
         if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
-    }
-    if (tp->defer_ast_index_columns) {
-        tp->pass_manager.facts &= ~COMPILER_FACT_INDEXED;
     }
     if (profiling || compiler_timing) profile_get_time(&p3);
     get_time(&end);

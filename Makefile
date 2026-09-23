@@ -2460,11 +2460,14 @@ test-css-cascade-memory: build-radiant-baseline
 	@echo "Running CSS cascade memory regression with the baseline host build..."
 	./test/test_css_cascade_memory_gtest.exe
 
-test-radiant-online: build-test
+test-radiant-online:
+	@$(MAKE) --no-print-directory release
+	@$(MAKE) --no-print-directory build-test
+	# Keep the debug gtest launcher, but time the packaged release renderer.
 	@echo "Running Radiant online URL smoke test suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_radiant_online_view_gtest.exe" ]; then \
-		./test/test_radiant_online_view_gtest.exe; \
+		LAMBDA_RADIANT_ONLINE_VIEW_EXE=./release/lambda ./test/test_radiant_online_view_gtest.exe; \
 	else \
 		echo "Error: test/test_radiant_online_view_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \

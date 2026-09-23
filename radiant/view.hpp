@@ -220,6 +220,7 @@ struct AnimationInstance {
     AnimTickFn tick;
     AnimFinishFn on_finish;
     AnimCancelFn on_cancel;
+    bool suppress_cancel_event;
 
     float bounds[4];
     double pause_time;
@@ -3925,9 +3926,39 @@ typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS D
 struct CookieJar;
 struct LambdaDocumentTransformConfig;
 struct LambdaDocumentTransformOption;
+// Per-document loader phases, shared by the CLI layout and headless-view
+// profilers so both report the same network/read and parse boundaries.
+typedef struct HtmlLoadPhaseTiming {
+    double loader_total_ms;
+    double read_ms;
+    double html_parse_ms;
+    double dom_build_ms;
+    double css_parse_ms;
+    double stylesheet_setup_ms;
+    double inline_style_ms;
+    double initial_cascade_ms;
+    double script_exec_ms;
+    double post_script_ms;
+    double post_script_recascade_ms;
+    double post_script_handler_install_ms;
+    uint64_t post_script_mutation_count;
+    uint64_t post_script_mutation_kind_mask;
+    bool post_script_mutation_overflow;
+    bool post_script_full_recascade;
+    bool post_script_incremental_recascade;
+    double final_cascade_ms;
+    double finalize_ms;
+} HtmlLoadPhaseTiming;
+
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr);
+DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_width,
+                                    int viewport_height,
+                                    const DocumentJsHostConfig* js_host_config,
+                                    struct CookieJar* top_level_cookie_jar,
+                                    HtmlLoadPhaseTiming* timing,
+                                    struct DocumentScriptPhaseTiming* script_timing);
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,

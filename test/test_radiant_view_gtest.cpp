@@ -5,6 +5,8 @@
 #include <cstring>
 #include <cstddef>
 
+#include "../radiant/script_timeout.hpp"
+
 extern "C" {
 #include "../lib/shell.h"
 }
@@ -257,8 +259,9 @@ static bool test_radiant_view_profile_has_intrinsic_measurement(const char* path
 
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
-                                                         const ShellEnvEntry* env) {
-    const char* args[7] = {};
+                                                         const ShellEnvEntry* env,
+                                                         const char* optimization = nullptr) {
+    const char* args[8] = {};
     int arg_count = 0;
     args[arg_count++] = "./lambda.exe";
     args[arg_count++] = "view";
@@ -268,6 +271,7 @@ static ShellResult test_radiant_view_run_logged_headless(const char* page,
         args[arg_count++] = event_path;
     }
     args[arg_count++] = "--headless";
+    if (optimization) args[arg_count++] = optimization;
     args[arg_count] = NULL;
     ShellOptions options = {0};
     options.env = env;
@@ -530,6 +534,43 @@ TEST(RadiantViewTest, CullsLargeOffscreenRegistryTableWithoutRepeatedBoundsWalks
     remove(view_log);
 }
 
+TEST(RadiantViewTest, InitialGeometryFlushDoesNotConsumeScriptCpuBudget) {
+    const char* page = "./temp/test_radiant_view_initial_geometry_flush.html";
+    const char* view_log = "./temp/test_radiant_view_initial_geometry_flush.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    bool page_written = test_radiant_view_write_large_registry_table(page_file, 5000);
+    const char* geometry_read =
+        "<script>document.addEventListener('DOMContentLoaded',function(){"
+        "if(document.body.offsetTop<0)throw Error('invalid geometry');});</script>";
+    ASSERT_EQ(strlen(geometry_read), fwrite(geometry_read, 1, strlen(geometry_read), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+    ASSERT_TRUE(page_written);
+
+    const char* args[] = {"./lambda.exe", "view", page, "--headless", NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"LAMBDA_JS_EXEC_TIMEOUT_SECONDS", "6"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.merge_stderr = true;
+    options.timeout_ms = 60000;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(shell_result.timed_out);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: JS execution timed out"));
+    shell_result_free(&shell_result);
+    remove(page);
+    remove(view_log);
+}
+
 TEST(RadiantViewTest, LaysOutInlineFlexWithInlineSiblingAndAbsoluteChild) {
     const char* page = "./temp/test_radiant_view_inline_flex_absolute.html";
     test_radiant_view_ensure_temp_dir();
@@ -581,6 +622,94 @@ TEST(RadiantViewTest, RestoresDocumentRealmAfterScriptException) {
     EXPECT_FALSE(test_radiant_view_file_contains(view_log,
         "dom_set_document: could not restore the active JS Input"));
     remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, WindowScrollOnlyEmitsForPositionChanges) {
+    const char* page = "./temp/test_radiant_view_window_scroll_events.html";
+    const char* view_log = "./temp/test_radiant_view_window_scroll_events.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><script>"
+        "var scroll_events = 0;"
+        "window.addEventListener('scroll', function(){ scroll_events++; });"
+        "window.scrollTo(0, 0);"
+        "if (scroll_events !== 0) throw Error('no-op scroll dispatched an event');"
+        "window.scrollTo({left: 0, top: 12});"
+        "if (scroll_events !== 1) throw Error('position-changing scroll event count');"
+        "window.scroll(0, 12);"
+        "if (scroll_events !== 1) throw Error('aliased no-op scroll dispatched an event');"
+        "</script>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+    remove(page);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, RestoresDocumentRealmBeforeAutofocusBehavior) {
+    const char* page = "test/ui/js_autofocus_realm_recovery.html";
+    const char* view_log = "./temp/test_radiant_view_autofocus_realm.log";
+    test_radiant_view_ensure_temp_dir();
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "no js_input context"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "mir cache: import"));
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, KeepsNativeExportsForAutomaticInterpreterPolicy) {
+    const char* page = "test/ui/ce/editable-dom-blocks.html";
+    const char* events = "test/ui/test_editing_contenteditable_blocks.json";
+    const char* view_log = "./temp/test_radiant_view_native_imports.log";
+    test_radiant_view_ensure_temp_dir();
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+
+    // Exercise the automatic large-source branch without treating it as an
+    // explicit interpreter request: imported package exports remain native.
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"LAMBDA_JS_LARGE_INTERP_BYTES", "1"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(
+        page, events, env, "--optimize=0");
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "failed to resolve native fn/pn"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "import of undefined item"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "mir: undefined variable"));
     remove(view_log);
 }
 
@@ -895,6 +1024,96 @@ TEST(RadiantViewTest, SchedulesIdleCallbackWithDeadline) {
     remove(view_log);
 }
 
+TEST(RadiantViewTest, ExposesBinaryFetchWithoutUnsupportedWorker) {
+    const char* page = "./temp/test_radiant_view_binary_fetch.html";
+    const char* payload = "./temp/test_radiant_view_binary_fetch.bin";
+    const char* output = "./temp/test_radiant_view_binary_fetch.svg";
+    const char* view_log = "./temp/test_radiant_view_binary_fetch.log";
+    test_radiant_view_ensure_temp_dir();
+
+    static const unsigned char response_bytes[] = {0x4c, 0x61, 0x6d, 0x62, 0x64, 0x61};
+    FILE* payload_file = fopen(payload, "wb");
+    ASSERT_NE(nullptr, payload_file);
+    ASSERT_EQ(sizeof(response_bytes), fwrite(response_bytes, 1, sizeof(response_bytes), payload_file));
+    ASSERT_EQ(0, fclose(payload_file));
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><body><script>"
+        "if(typeof Worker!=='undefined')throw Error('unsupported Worker advertised');"
+        "fetch('temp/test_radiant_view_binary_fetch.bin').then(function(response){"
+        "return response.arrayBuffer();}).then(function(buffer){"
+        "var bytes=new Uint8Array(buffer);"
+        "if(!(buffer instanceof ArrayBuffer)||bytes.length!==6||bytes[0]!==76||"
+        "bytes[5]!==97)throw Error('binary response mismatch');"
+        "document.body.appendChild(document.createTextNode('response-binary-ready'));"
+        "}).catch(function(error){throw error;});"
+        "</script></body>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const char* args[] = {
+        "./lambda.exe", "render", page, "-o", output, "--no-log", NULL,
+    };
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(output, "response-binary-ready"));
+    EXPECT_FALSE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: post-dom exception"));
+
+    remove(page);
+    remove(payload);
+    remove(output);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
+    const char* page = "./temp/test_radiant_view_recursive_timer.html";
+    const char* view_log = "./temp/test_radiant_view_recursive_timer.log";
+    test_radiant_view_ensure_temp_dir();
+
+    FILE* page_file = fopen(page, "wb");
+    ASSERT_NE(nullptr, page_file);
+    const char* document =
+        "<!doctype html><body>first-render-ready<script>"
+        "(function tick(){setTimeout(tick,0);})();"
+        "</script></body>";
+    ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
+    ASSERT_EQ(0, fclose(page_file));
+
+    const char* args[] = {"./lambda.exe", "view", page, "--headless", NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "INFO"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 10000;
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(shell_result.timed_out);
+    EXPECT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+    EXPECT_TRUE(test_radiant_view_file_contains(view_log,
+        "execute_document_scripts: timer queue drained"));
+
+    remove(page);
+    remove(view_log);
+}
+
 TEST(RadiantViewTest, RendersObjectBoundingBoxPatternWithoutUserUnitTiling) {
     const char* page = "./temp/test_radiant_view_object_bounding_box_pattern.html";
     const char* view_log = "./temp/test_radiant_view_object_bounding_box_pattern.log";
@@ -1188,6 +1407,14 @@ TEST(RadiantViewTest, ContinuesLayoutBatchAfterTimedOutLoadScript) {
     EXPECT_EQ(0, shell_result.exit_code)
         << "the watchdog must not terminate the batch before its next document";
     shell_result_free(&shell_result);
+}
+
+TEST(RadiantViewTest, ScalesWatchdogForDenseProductionBundles) {
+    EXPECT_EQ(RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS,
+              radiant_script_exec_timeout_source_seconds(8192));
+    EXPECT_EQ(58, radiant_script_exec_timeout_source_seconds(49152));
+    EXPECT_EQ(RADIANT_SCRIPT_EXEC_TIMEOUT_MAX_SECONDS,
+              radiant_script_exec_timeout_source_seconds(114688));
 }
 
 TEST(RadiantViewTest, SkipsDefaultCumulativeBrowserScriptBudget) {

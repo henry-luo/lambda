@@ -11,13 +11,16 @@
 #include "realm/dom_realm.h"
 #include "../input/css/dom_element.hpp"
 #include "../network/cookie_jar.h"
+#include "../network/http_client.h"
 #include "../js/js_runtime_state.hpp"
 #include "../js/js_event_loop.h"
+#include "../js/js_typed_array.h"
 #include "../jube/jube_node_permission.h"
 #include "../lambda-data.hpp"
 #include "../runtime/async.h"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/atomic.h"
 #include "../../lib/str.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/byte_builder.h"
@@ -65,10 +68,12 @@ typedef struct JsFetchWork {
     char*              body;     // owned, NULL → no body
     size_t             body_len;
     struct curl_slist* req_headers; // owned
-    CookieJar*          cookie_jar; // borrowed from the owning browsing session
+    CookieJar*          cookie_jar; // retained until the async transfer finishes
 
     // response data (filled by worker thread)
     ByteBuilder response;
+    char** response_headers;
+    int    response_header_count;
     long   status_code;
     int    curl_error;
     char   error_msg[CURL_ERROR_SIZE];
@@ -83,6 +88,7 @@ typedef struct JsFetchWork {
     void* owner_document;
     uint32_t resource_id;
     bool queued;
+    atomic_int32 cancelled;
 } JsFetchWork;
 
 // Response bodies, relative-path policy, and the executor handoff are realm
@@ -172,6 +178,7 @@ extern "C" void js_fetch_apply_bootstrap_base_path(void) {
 
 static size_t fetch_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
     JsFetchWork* fw = (JsFetchWork*)userdata;
+    if (!fw || atomic_load32(&fw->cancelled) != 0) return 0;
     size_t bytes = size * nmemb;
     return byte_builder_append(&fw->response, ptr, bytes) ? bytes : 0;
 }
@@ -179,18 +186,48 @@ static size_t fetch_write_cb(char* ptr, size_t size, size_t nmemb, void* userdat
 static size_t fetch_header_cb(char* buffer, size_t size, size_t nmemb, void* userdata) {
     size_t total = size * nmemb;
     JsFetchWork* fw = (JsFetchWork*)userdata;
-    if (!fw || !fw->cookie_jar || !str_istarts_with(buffer, total, "Set-Cookie:", 11)) {
-        return total;
-    }
-    const char* effective_url = fw->url;
-    char* curl_url = NULL;
-    if (fw->easy) curl_easy_getinfo(fw->easy, CURLINFO_EFFECTIVE_URL, &curl_url);
-    if (curl_url && curl_url[0]) effective_url = curl_url;
-    char* header = mem_dup_n(buffer, total, MEM_CAT_NETWORK);
+    if (!fw) return total;
+    if (atomic_load32(&fw->cancelled) != 0) return 0;
+
+    // XHR consumes these exact response header lines after the shared fetch
+    // transport returns to the document thread.
+    char* header = mem_dup_n(buffer, total, MEM_CAT_JS_RUNTIME);
     if (!header) return 0;
-    cookie_jar_store(fw->cookie_jar, effective_url, header);
-    mem_free(header);
+    size_t header_len = total;
+    while (header_len > 0 && (header[header_len - 1] == '\r' ||
+                              header[header_len - 1] == '\n')) {
+        header[--header_len] = '\0';
+    }
+    char** headers = (char**)mem_realloc(fw->response_headers,
+        (size_t)(fw->response_header_count + 1) * sizeof(char*), MEM_CAT_JS_RUNTIME);
+    if (!headers) {
+        mem_free(header);
+        return 0;
+    }
+    fw->response_headers = headers;
+    fw->response_headers[fw->response_header_count++] = header;
+
+    if (fw->cookie_jar && str_istarts_with(buffer, total, "Set-Cookie:", 11)) {
+        const char* effective_url = fw->url;
+        char* curl_url = NULL;
+        if (fw->easy) curl_easy_getinfo(fw->easy, CURLINFO_EFFECTIVE_URL, &curl_url);
+        if (curl_url && curl_url[0]) effective_url = curl_url;
+        cookie_jar_store(fw->cookie_jar, effective_url, header);
+    }
     return total;
+}
+
+static int fetch_progress_cb(void* user, curl_off_t download_total,
+                             curl_off_t download_now, curl_off_t upload_total,
+                             curl_off_t upload_now) {
+    (void)download_total;
+    (void)download_now;
+    (void)upload_total;
+    (void)upload_now;
+    JsFetchWork* fw = (JsFetchWork*)user;
+    // Resource-table teardown runs on the document thread; curl observes this
+    // atomic flag on its worker and returns without retaining a dead realm.
+    return fw && atomic_load32(&fw->cancelled) != 0;
 }
 
 static CookieJar* fetch_profile_cookie_jar(void) {
@@ -201,9 +238,14 @@ static CookieJar* fetch_profile_cookie_jar(void) {
 
 static void fetch_work_destroy(JsFetchWork* fw) {
     if (!fw) return;
+    cookie_jar_release(fw->cookie_jar);
     if (fw->method) mem_free(fw->method);
     if (fw->body) mem_free(fw->body);
     if (fw->req_headers) curl_slist_free_all(fw->req_headers);
+    for (int i = 0; i < fw->response_header_count; i++) {
+        if (fw->response_headers[i]) mem_free(fw->response_headers[i]);
+    }
+    if (fw->response_headers) mem_free(fw->response_headers);
     byte_builder_destroy(&fw->response);
     mem_free(fw);
 }
@@ -217,6 +259,7 @@ static void fetch_resource_close(void* user) {
     fw->owner_runtime = NULL;
     fw->owner_context = NULL;
     fw->owner_document = NULL;
+    atomic_store32(&fw->cancelled, 1);
     if (fw->queued) (void)uv_cancel((uv_req_t*)&fw->work);
 }
 
@@ -226,6 +269,8 @@ static void fetch_resource_close(void* user) {
 
 static void fetch_work_cb(uv_work_t* req) {
     JsFetchWork* fw = (JsFetchWork*)req->data;
+
+    if (!fw || atomic_load32(&fw->cancelled) != 0) return;
 
     fw->easy = curl_easy_init();
     if (!fw->easy) {
@@ -239,10 +284,14 @@ static void fetch_work_cb(uv_work_t* req) {
     curl_easy_setopt(fw->easy, CURLOPT_WRITEDATA, fw);
     curl_easy_setopt(fw->easy, CURLOPT_HEADERFUNCTION, fetch_header_cb);
     curl_easy_setopt(fw->easy, CURLOPT_HEADERDATA, fw);
+    curl_easy_setopt(fw->easy, CURLOPT_XFERINFOFUNCTION, fetch_progress_cb);
+    curl_easy_setopt(fw->easy, CURLOPT_XFERINFODATA, fw);
+    curl_easy_setopt(fw->easy, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(fw->easy, CURLOPT_ERRORBUFFER, fw->error_msg);
     curl_easy_setopt(fw->easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(fw->easy, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(fw->easy, CURLOPT_NOSIGNAL, 1L);  // thread-safe
+    curl_easy_setopt(fw->easy, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
     if (fw->cookie_jar) cookie_jar_import_curl(fw->cookie_jar, fw->easy);
 
     if (fw->method) {
@@ -256,7 +305,8 @@ static void fetch_work_cb(uv_work_t* req) {
         curl_easy_setopt(fw->easy, CURLOPT_HTTPHEADER, fw->req_headers);
     }
 
-    CURLcode res = curl_easy_perform(fw->easy);
+    CURLcode res = atomic_load32(&fw->cancelled) != 0
+        ? CURLE_ABORTED_BY_CALLBACK : curl_easy_perform(fw->easy);
     fw->curl_error = (int)res;
 
     if (res == CURLE_OK) {
@@ -325,6 +375,26 @@ static Item js_response_json() {
     Item body_str = make_string_item(response_bodies[idx], response_body_lens[idx]);
     Item parsed = js_json_parse(body_str);
     return dom_realm_promise_resolve(parsed);
+}
+
+static Item js_response_array_buffer() {
+    if (!js_fetch_runtime_state_get()) return dom_realm_promise_resolve(ItemNull);
+    Item this_resp = dom_realm_receiver();
+    String* key = heap_create_name("__body_idx", 10);
+    Item idx_item = dom_realm_get(this_resp, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return dom_realm_promise_resolve(ItemNull);
+
+    int idx = (int)it2i(idx_item);
+    if (idx < 0 || idx >= response_body_count || !response_bodies[idx])
+        return dom_realm_promise_resolve(ItemNull);
+
+    // Fetch exposes its retained bytes as a fresh ArrayBuffer, never a String.
+    Item body = js_arraybuffer_from_bytes(response_bodies[idx], response_body_lens[idx]);
+    if (item_is_error(body)) {
+        return dom_realm_promise_reject(dom_realm_new_error(make_string_item(
+            "fetch: could not allocate response ArrayBuffer")));
+    }
+    return dom_realm_promise_resolve(body);
 }
 
 // Synthesise a Blob-shaped JS object whose `text()` / `arrayBuffer()` / `slice()`
@@ -408,6 +478,27 @@ static Item build_response_object(JsFetchWork* fw) {
     Item body_idx_key = make_string_item("__body_idx");
     dom_realm_set(resp, body_idx_key, (Item){.item = i2it(body_idx)});
 
+    // XMLHttpRequest reuses fetch's worker transport. Preserve the response
+    // headers in its response handoff without exposing another curl path.
+    size_t headers_len = 0;
+    for (int i = 0; i < fw->response_header_count; i++) {
+        headers_len += strlen(fw->response_headers[i]) + 2;
+    }
+    char* headers_text = (char*)mem_calloc(1, headers_len + 1, MEM_CAT_JS_RUNTIME);
+    if (headers_text) {
+        char* cursor = headers_text;
+        for (int i = 0; i < fw->response_header_count; i++) {
+            size_t line_len = strlen(fw->response_headers[i]);
+            memcpy(cursor, fw->response_headers[i], line_len);
+            cursor += line_len;
+            *cursor++ = '\r';
+            *cursor++ = '\n';
+        }
+        dom_realm_set_cstr(resp, "__xhr_response_headers",
+                           make_string_item(headers_text, headers_len));
+        mem_free(headers_text);
+    }
+
     // text() method
     Item text_key = make_string_item("text");
     Item text_fn = dom_realm_new_function(js_response_text);
@@ -417,6 +508,11 @@ static Item build_response_object(JsFetchWork* fw) {
     Item json_key = make_string_item("json");
     Item json_fn = dom_realm_new_function(js_response_json);
     dom_realm_set(resp, json_key, json_fn);
+
+    // `arrayBuffer()` preserves binary response bodies for WASM and media loaders.
+    Item array_buffer_key = make_string_item("arrayBuffer");
+    Item array_buffer_fn = dom_realm_new_function(js_response_array_buffer);
+    dom_realm_set(resp, array_buffer_key, array_buffer_fn);
 
     // blob() method — returns Promise<Blob-like object> with .type/.size/.text()
     dom_realm_set_native(resp, make_string_item("blob"), js_response_blob);
@@ -705,6 +801,9 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
 
     snprintf(fw->url, sizeof(fw->url), "%s", url);
     fw->cookie_jar = fetch_profile_cookie_jar();
+    if (fw->cookie_jar && !cookie_jar_retain(fw->cookie_jar)) {
+        fw->cookie_jar = NULL;
+    }
     fw->work.data = fw;
 
     // parse options (method, headers, body)

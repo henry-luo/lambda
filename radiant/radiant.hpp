@@ -206,6 +206,10 @@ void collect_and_compile_event_handlers(DomDocument* dom_doc);
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
 void script_runner_cleanup_heap(void);
 bool script_runner_js_batch_cleanup_unsafe(void);
+// Initial CSSOM geometry reads may synchronously establish the first layout
+// snapshot; exclude that renderer pass from the page-JS CPU watchdog.
+void script_runner_suspend_js_watchdog(void);
+void script_runner_resume_js_watchdog(void);
 
 // ===== webview =====
 

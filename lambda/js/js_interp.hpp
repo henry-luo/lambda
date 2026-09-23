@@ -28,7 +28,10 @@ static inline bool js_ast_interpreter_requested(void) {
 // fallback rather than publishing a mixed-tier realm.
 static inline bool js_execution_auto_requested(void) {
     const char* backend = getenv("JS_EXECUTION_BACKEND");
-    return backend && strcmp(backend, "auto") == 0;
+    // D8.1.3v19: a supported unit starts in the retained AST tier. `mir`
+    // remains the explicit opt-in, while unsupported AST surface falls back
+    // to the whole-module MIR lane at the ordinary admission gate.
+    return !backend || !backend[0] || strcmp(backend, "auto") == 0;
 }
 // Parse, bind, and retain a classic Script without evaluating it. Batch hosts
 // use this to keep a harness AST across fresh per-test realms.

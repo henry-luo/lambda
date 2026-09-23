@@ -16,6 +16,25 @@ typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
 struct hashmap;
 
+// Named compiler-stage timings are retained by the transient builder only.
+// They make the JS pipeline observable at the same pass granularity as Lambda.
+typedef struct JsCompilerPassTiming {
+    uint64_t parse_build_us;
+    uint64_t bind_us;
+    uint64_t validate_us;
+    uint64_t index_us;
+    uint64_t collect_us;
+    uint64_t captures_us;
+    uint64_t env_layout_us;
+    uint64_t infer_us;
+    uint64_t forward_declare_us;
+    uint64_t mir_lower_us;
+    uint64_t finalize_us;
+    uint64_t prelink_us;
+    uint64_t link_us;
+    bool enabled;
+} JsCompilerPassTiming;
+
 // Import/export plans retain only AST/name-pool data. The actual namespace
 // Items stay rooted by the single runtime module registry.
 typedef enum JsInterpModuleBindingKind {
@@ -109,6 +128,7 @@ struct JsTranspiler : JsScript {
     // reason catalog so both lanes report against one vocabulary.
     int any_census[ANY_REASON_COUNT];
     CompilerPassManager pass_manager;
+    JsCompilerPassTiming pass_timing;
 
     // Error handling
     bool has_errors;                // Error flag
@@ -127,10 +147,6 @@ struct JsTranspiler : JsScript {
     // outlives its builder in preamble and hot-reload batch mode.
     uint32_t const_unit_id;
     LambdaConstPool* const_pool;
-    // Direct scope construction retains its ordered binding list for durable
-    // slot planning. This builder-only index makes name resolution linear in
-    // lexical depth rather than in every preceding binding in the scope.
-    struct hashmap* scope_binding_index;
 };
 
 // JavaScript type mapping functions

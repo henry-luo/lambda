@@ -15,6 +15,7 @@
 #include "../../dom/dom.h"
 #include "../../js/js_runtime.h"
 #include "../../../radiant/view.hpp"
+#include "../../../radiant/radiant.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
@@ -2680,11 +2681,19 @@ static void radiant_dom_commit_geometry_layout(DomDocument* doc) {
     s_radiant_dom_geometry_layout_active = true;
     DomDocument* saved_document = uicon->document;
     uicon->document = doc;
-    process_document_font_faces(uicon, doc);
-    if (doc->js.mutation_count > 0) {
-        radiant_reconcile_dom_mutations(uicon, doc);
-    } else if (!doc->view_tree || !doc->view_tree->root) {
-        layout_html_doc(uicon, doc, false);
+    bool establishing_first_snapshot = !doc->view_tree || !doc->view_tree->root;
+    bool needs_geometry_commit = doc->js.mutation_count > 0 || establishing_first_snapshot;
+    if (needs_geometry_commit) {
+        // Only the first geometry commit is unavoidable first-paint work; later
+        // mutation/reflow requests remain charged to page-script CPU.
+        if (establishing_first_snapshot) script_runner_suspend_js_watchdog();
+        process_document_font_faces(uicon, doc);
+        if (doc->js.mutation_count > 0) {
+            radiant_reconcile_dom_mutations(uicon, doc);
+        } else {
+            layout_html_doc(uicon, doc, false);
+        }
+        if (establishing_first_snapshot) script_runner_resume_js_watchdog();
     }
     uicon->document = saved_document;
     s_radiant_dom_geometry_layout_active = false;

@@ -112,16 +112,50 @@ Item js_mir_execute_compiled_entry(void* entry_func) {
 
 JsMirMainFunc js_mir_link_main(MIR_context_t ctx,
         void (*gen_interface)(MIR_context_t, MIR_item_t)) {
-    // D8.1.3v11: the AST walker is LambdaJS's interpreter; a JS MIR unit
-    // always links to generated native code.
-    MIR_link(ctx, gen_interface, import_resolver);
+    uint64_t total_insns = 0;
+    uint64_t largest_function_insns = 0;
+    mir_count_module_volume(ctx, NULL, NULL, &total_insns,
+        &largest_function_insns);
+    return js_mir_link_main_with_policy(ctx, gen_interface, total_insns,
+        largest_function_insns, false, 2,
+        gen_interface == MIR_set_lazy_gen_interface);
+}
+
+JsMirMainFunc js_mir_link_main_with_policy(MIR_context_t ctx,
+        void (*native_interface)(MIR_context_t, MIR_item_t), uint64_t total_insns,
+        uint64_t largest_function_insns, bool document_attached,
+        unsigned int optimize_level, bool lazy_native_allowed) {
+    if (!ctx) return NULL;
+    MirLinkSelection selection = mir_select_link_interface(total_insns,
+        largest_function_insns, document_attached, optimize_level,
+        lazy_native_allowed);
+    if (selection.optimize_level != optimize_level) {
+        MIR_gen_set_optimize_level(ctx, selection.optimize_level);
+    }
+    void (*interface_fn)(MIR_context_t, MIR_item_t) = selection.interface_kind ==
+        MIR_LINK_INTERP ? MIR_set_interp_interface :
+        selection.interface_kind == MIR_LINK_LAZY_NATIVE ?
+            MIR_set_lazy_gen_interface : native_interface;
+    MIR_link(ctx, interface_fn, import_resolver);
     return (JsMirMainFunc)find_func(ctx, (char*)"js_main");
 }
 
 void* js_mir_link_function(MIR_context_t ctx, const char* function_name,
         void (*gen_interface)(MIR_context_t, MIR_item_t)) {
     if (!ctx || !function_name) return NULL;
-    MIR_link(ctx, gen_interface, import_resolver);
+    uint64_t total_insns = 0;
+    uint64_t largest_function_insns = 0;
+    mir_count_module_volume(ctx, NULL, NULL, &total_insns,
+        &largest_function_insns);
+    MirLinkSelection selection = mir_select_link_interface(total_insns,
+        largest_function_insns, false, 2,
+        gen_interface == MIR_set_lazy_gen_interface);
+    if (selection.optimize_level != 2) {
+        MIR_gen_set_optimize_level(ctx, selection.optimize_level);
+    }
+    MIR_link(ctx, selection.interface_kind == MIR_LINK_INTERP ?
+        MIR_set_interp_interface : selection.interface_kind == MIR_LINK_LAZY_NATIVE ?
+            MIR_set_lazy_gen_interface : gen_interface, import_resolver);
     return find_func(ctx, (char*)function_name);
 }
 
@@ -221,13 +255,26 @@ static Item js_mir_execute_ast_script(Runtime* runtime, JsTranspiler* tp,
 
 Item js_mir_execute_ast_module(Runtime* runtime, JsTranspiler* tp,
         const char* filename) {
-    // Module imports are a nested turn, so do not run the outer script-turn
-    // lifecycle while selecting the AST executor for a large document module.
     if (!runtime || !tp) return ItemError;
     jm_clear_active_js_transpile(tp, NULL, NULL);
     JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
     if (!script) return ItemError;
-    return js_interp_execute_es_module_script(runtime, script, NULL);
+    RuntimeExecutionScope module_execution_scope;
+    bool owns_host_turn = module_execution_scope.is_outermost() &&
+        js_dynamic_import_suppress_module_drain <= 0;
+    if (owns_host_turn && !js_runtime_state.event_loop->callback_running) {
+        js_event_loop_init();
+    }
+    Item result = js_interp_execute_es_module_script(runtime, script, NULL);
+    if (owns_host_turn) {
+        // Direct module admission has no source-wrapper owner. Drain its
+        // queued Promise jobs before returning the namespace (D8.1.3v19).
+        js_microtask_flush();
+        js_event_loop_drain_script_turn(runtime->dom_doc != NULL, true);
+        Item evaluation_error = js_interp_es_module_evaluation_error(runtime, script);
+        if (item_is_error(evaluation_error)) result = evaluation_error;
+    }
+    return result;
 }
 
 bool js_activate_runtime_name_pool(void) {
@@ -366,6 +413,24 @@ static long js_mir_phase_now_us(void) {
     return (long)time_now_us();
 }
 
+static void js_mir_publish_compiler_pass_timing(const JsTranspiler* tp) {
+    if (!tp || !tp->pass_timing.enabled) return;
+    const JsCompilerPassTiming* timing = &tp->pass_timing;
+    g_last_js_mir_phase_timing.parse_build_us = (long)timing->parse_build_us;
+    g_last_js_mir_phase_timing.bind_us = (long)timing->bind_us;
+    g_last_js_mir_phase_timing.validate_us = (long)timing->validate_us;
+    g_last_js_mir_phase_timing.index_us = (long)timing->index_us;
+    g_last_js_mir_phase_timing.collect_us = (long)timing->collect_us;
+    g_last_js_mir_phase_timing.captures_us = (long)timing->captures_us;
+    g_last_js_mir_phase_timing.env_layout_us = (long)timing->env_layout_us;
+    g_last_js_mir_phase_timing.infer_us = (long)timing->infer_us;
+    g_last_js_mir_phase_timing.forward_declare_us =
+        (long)timing->forward_declare_us;
+    g_last_js_mir_phase_timing.mir_lower_us = (long)timing->mir_lower_us;
+    g_last_js_mir_phase_timing.finalize_us = (long)timing->finalize_us;
+    g_last_js_mir_phase_timing.prelink_us = (long)timing->prelink_us;
+}
+
 extern "C" void js_mir_reset_last_phase_timing(void) {
     memset(&g_last_js_mir_phase_timing, 0, sizeof(g_last_js_mir_phase_timing));
 }
@@ -394,6 +459,18 @@ extern "C" void js_mir_accumulate_last_phase_timing(bool is_preamble) {
     g_document_js_mir_phase_timing.cleanup_us += g_last_js_mir_phase_timing.cleanup_us;
     g_document_js_mir_phase_timing.realm_us += g_last_js_mir_phase_timing.realm_us;
     g_document_js_mir_phase_timing.total_us += g_last_js_mir_phase_timing.total_us;
+    g_document_js_mir_phase_timing.parse_build_us += g_last_js_mir_phase_timing.parse_build_us;
+    g_document_js_mir_phase_timing.bind_us += g_last_js_mir_phase_timing.bind_us;
+    g_document_js_mir_phase_timing.validate_us += g_last_js_mir_phase_timing.validate_us;
+    g_document_js_mir_phase_timing.index_us += g_last_js_mir_phase_timing.index_us;
+    g_document_js_mir_phase_timing.collect_us += g_last_js_mir_phase_timing.collect_us;
+    g_document_js_mir_phase_timing.captures_us += g_last_js_mir_phase_timing.captures_us;
+    g_document_js_mir_phase_timing.env_layout_us += g_last_js_mir_phase_timing.env_layout_us;
+    g_document_js_mir_phase_timing.infer_us += g_last_js_mir_phase_timing.infer_us;
+    g_document_js_mir_phase_timing.forward_declare_us += g_last_js_mir_phase_timing.forward_declare_us;
+    g_document_js_mir_phase_timing.mir_lower_us += g_last_js_mir_phase_timing.mir_lower_us;
+    g_document_js_mir_phase_timing.finalize_us += g_last_js_mir_phase_timing.finalize_us;
+    g_document_js_mir_phase_timing.prelink_us += g_last_js_mir_phase_timing.prelink_us;
     if (is_preamble) {
         g_document_js_mir_phase_timing.preamble_us += g_last_js_mir_phase_timing.total_us;
     }
@@ -867,6 +944,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             runtime, NULL, true);
     }
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
+    js_mir_publish_compiler_pass_timing(tp);
     log_mem_stage("js-core: ts_parsed");
 
     // Build JavaScript AST
@@ -890,7 +968,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     bool ast_executor_supported = js_interp_script_is_supported((JsScript*)tp);
     bool auto_ast_selected = js_execution_auto_requested() &&
-        ast_closure_ready && ast_executor_supported;
+        ast_executor_supported;
     if (ast_executor_forced ||
             (runtime->js_ast_backend && ast_executor_supported) ||
             auto_ast_selected) {
@@ -958,6 +1036,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     phase_start = js_mir_phase_now_us();
     bool transpile_ok = transpile_js_mir_ast(mt);
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
+    js_mir_publish_compiler_pass_timing(tp);
     log_mem_stage("js-core: ast_to_mir");
     if (!transpile_ok) {
         log_error("js-mir: collection/allocation failed for '%s'",
@@ -1011,7 +1090,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // counter used by test_mir_ratchet_gtest.
     uint64_t total_functions = 0;
     uint64_t total_insns = 0;
-    mir_count_module_volume(ctx, NULL, &total_functions, &total_insns);
+    uint64_t largest_function_insns = 0;
+    mir_count_module_volume(ctx, NULL, &total_functions, &total_insns,
+        &largest_function_insns);
     js_mir_volume_counters_set((long)total_functions, (long)total_insns);
     // Tune6: JS_LAZY_MIR=1 selects MIR's native per-function lazy codegen
     // (MIR_set_lazy_gen_interface) instead of eager generation. Lazy gen installs
@@ -1035,8 +1116,12 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;
 
     phase_start = js_mir_phase_now_us();
-    JsMirMainFunc linked_main = js_mir_link_main(ctx, gen_interface);
+    unsigned int optimize_level = runtime ? runtime->optimize_level : 2;
+    JsMirMainFunc linked_main = js_mir_link_main_with_policy(ctx, gen_interface,
+        total_insns, largest_function_insns, runtime && runtime->dom_doc != NULL,
+        optimize_level, js_lazy_mir_cached != 0);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
+    js_mir_publish_compiler_pass_timing(tp);
     log_mem_stage("js-core: mir_linked");
     void* js_debug_info = jm_build_js_debug_info(mt, filename);
     context->debug_info = (ArrayList*)js_debug_info;

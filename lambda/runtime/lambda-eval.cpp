@@ -8151,6 +8151,18 @@ DateTime fn_justnow() {
     return dt;
 }
 
+// now() - current datetime in UTC; keep the procedural spelling separate so
+// the effect checker can distinguish clock reads from pure constructors.
+DateTime pn_now() {
+    return fn_datetime0();
+}
+
+// today() - current date in UTC; reuse date() so both names share precision
+// and midnight normalization.
+DateTime pn_today() {
+    return fn_date0();
+}
+
 // Set current variadic arguments (called before variadic function body)
 // Returns the previous vargs pointer so it can be restored after the call
 List* set_vargs(List* vargs) {
