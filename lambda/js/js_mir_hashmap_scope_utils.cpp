@@ -407,6 +407,10 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
     if (mt) {
         arraylist_free(mt->literal_shape_plans);
         mt->literal_shape_plans = NULL;
+        if (mt->literal_shape_by_node) {
+            hashmap_free(mt->literal_shape_by_node);
+            mt->literal_shape_by_node = NULL;
+        }
         if (mt->last_closure.captures) mem_free(mt->last_closure.captures);
         if (mt->last_closure.journal) mem_free(mt->last_closure.journal);
         if (mt->tdz_closure_captures) mem_free(mt->tdz_closure_captures);

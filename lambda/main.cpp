@@ -2810,27 +2810,47 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             }
 
+            // JS participates in the same profile-file lifecycle as Lambda;
+            // the record stays separate from optional stdout diagnostics.
+            JsMirPhaseTiming js_phase_profile = {};
+            js_mir_get_last_phase_timing(&js_phase_profile);
+            lambda_profile_record_js_compilation(js_file, &js_phase_profile);
+
             if (tune6_timing) {
                 JsMirPhaseTiming t; js_mir_get_last_phase_timing(&t);
-                printf("JS_TRANSPILE_TIMING file=%s bytes=%zu "
+                printf("JS_TRANSPILE_TIMING schema=2 file=%s bytes=%zu "
                        "parse_ms=%.3f ast_ms=%.3f early_ms=%.3f imports_ms=%.3f "
-                       "mir_ms=%.3f link_ms=%.3f exec_ms=%.3f cleanup_ms=%.3f total_ms=%.3f realm_ms=%.3f\n",
+                       "mir_ms=%.3f link_ms=%.3f exec_ms=%.3f cleanup_ms=%.3f total_ms=%.3f realm_ms=%.3f "
+                       "parse_build_ms=%.3f bind_ms=%.3f validate_ms=%.3f index_ms=%.3f "
+                       "collect_ms=%.3f captures_ms=%.3f env_layout_ms=%.3f infer_ms=%.3f "
+                       "forward_declare_ms=%.3f mir_lower_ms=%.3f finalize_ms=%.3f prelink_ms=%.3f\n",
                        js_file, js_source_len,
                        t.parse_us / 1000.0, t.ast_us / 1000.0, t.early_us / 1000.0,
                        t.imports_us / 1000.0, t.mir_us / 1000.0, t.link_us / 1000.0,
                        t.execute_us / 1000.0, t.cleanup_us / 1000.0, t.total_us / 1000.0,
-                       t.realm_us / 1000.0);
+                       t.realm_us / 1000.0,
+                       t.parse_build_us / 1000.0, t.bind_us / 1000.0,
+                       t.validate_us / 1000.0, t.index_us / 1000.0,
+                       t.collect_us / 1000.0, t.captures_us / 1000.0,
+                       t.env_layout_us / 1000.0, t.infer_us / 1000.0,
+                       t.forward_declare_us / 1000.0, t.mir_lower_us / 1000.0,
+                       t.finalize_us / 1000.0, t.prelink_us / 1000.0);
                 JsMirVolumeCounters vc; js_mir_volume_counters_get(&vc);
                 printf("JS_MIR_VOLUME file=%s functions=%ld mir_insns=%ld\n",
                        js_file, vc.functions_discovered, vc.mir_insns_emitted);
                 if (compiler_timing) {
                     long build_transpile_us = t.parse_us + t.ast_us + t.early_us +
                         t.imports_us + t.mir_us + t.link_us;
-                    printf("\x01" "COMPILER_TIMING schema=1 parse_us=%ld ast_build_us=%ld "
-                           "validate_us=%ld imports_us=%ld mir_lower_us=%ld link_us=%ld "
+                    printf("\x01" "COMPILER_TIMING schema=2 parse_us=%ld ast_build_us=%ld "
+                           "bind_us=%ld validate_us=%ld index_us=%ld imports_us=%ld "
+                           "collect_us=%ld captures_us=%ld env_layout_us=%ld infer_us=%ld "
+                           "forward_declare_us=%ld mir_lower_us=%ld finalize_us=%ld prelink_us=%ld link_us=%ld "
                            "build_transpile_us=%ld\n",
-                           t.parse_us, t.ast_us, t.early_us, t.imports_us,
-                           t.mir_us, t.link_us, build_transpile_us);
+                           t.parse_us, t.ast_us, t.bind_us, t.validate_us,
+                           t.index_us, t.imports_us, t.collect_us, t.captures_us,
+                           t.env_layout_us, t.infer_us, t.forward_declare_us,
+                           t.mir_lower_us, t.finalize_us, t.prelink_us,
+                           t.link_us, build_transpile_us);
                     const char* sample_name = strrchr(js_file, '/');
                     sample_name = sample_name ? sample_name + 1 : js_file;
                     printf("\x01" "MIR_VOLUME schema=1 sample_id=%s test_name=%s modules=1 functions=%ld insns=%ld\n",
@@ -4878,12 +4898,19 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 long build_transpile_us = phase_timing.parse_us + phase_timing.ast_us +
                     phase_timing.early_us + phase_timing.imports_us +
                     phase_timing.mir_us + phase_timing.link_us;
-                printf("\x01" "COMPILER_TIMING schema=1 parse_us=%ld ast_build_us=%ld "
-                       "validate_us=%ld imports_us=%ld mir_lower_us=%ld link_us=%ld "
+                printf("\x01" "COMPILER_TIMING schema=2 parse_us=%ld ast_build_us=%ld "
+                       "bind_us=%ld validate_us=%ld index_us=%ld imports_us=%ld "
+                       "collect_us=%ld captures_us=%ld env_layout_us=%ld infer_us=%ld "
+                       "forward_declare_us=%ld mir_lower_us=%ld finalize_us=%ld prelink_us=%ld link_us=%ld "
                        "build_transpile_us=%ld\n",
                        phase_timing.parse_us, phase_timing.ast_us,
-                       phase_timing.early_us, phase_timing.imports_us,
-                       phase_timing.mir_us, phase_timing.link_us,
+                       phase_timing.bind_us, phase_timing.validate_us,
+                       phase_timing.index_us, phase_timing.imports_us,
+                       phase_timing.collect_us, phase_timing.captures_us,
+                       phase_timing.env_layout_us, phase_timing.infer_us,
+                       phase_timing.forward_declare_us,
+                       phase_timing.mir_lower_us, phase_timing.finalize_us,
+                       phase_timing.prelink_us, phase_timing.link_us,
                        build_transpile_us);
                 const char* sample_name = strrchr(script_path, '/');
                 sample_name = sample_name ? sample_name + 1 : script_path;

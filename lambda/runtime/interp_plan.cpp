@@ -283,6 +283,11 @@ const char* interp_node_kind_name(AstNodeType kind) {
 typedef struct ScanCtx {
     bool ok;
     AstNodeType reject;
+    // The index mode checks each published node once. Recursive mode remains
+    // for the satellite-local admission scan below.
+    bool indexed;
+    const AstIndex* index;
+    AstNodeId skip_end;
 } ScanCtx;
 
 // An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
@@ -538,19 +543,21 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             sc->reject = AST_NODE_VIEW;
             return;
         }
-        if (view->pattern) interp_scan_visit(view->pattern, ctx);
-        for (AstNode* param = (AstNode*)view->param; param; param = param->next) {
-            interp_scan_visit(param, ctx);
-        }
-        if (sc->ok && view->body) interp_scan_visit(view->body, ctx);
-        for (AstStateEntry* state = view->state; sc->ok && state;
-                state = state->next_state) {
-            if (state->value) interp_scan_visit(state->value, ctx);
-        }
-        for (AstEventHandler* handler = view->handler; sc->ok && handler;
-                handler = handler->next_handler) {
-            if (handler->param) interp_scan_visit((AstNode*)handler->param, ctx);
-            if (handler->body) interp_scan_visit(handler->body, ctx);
+        if (!sc->indexed) {
+            if (view->pattern) interp_scan_visit(view->pattern, ctx);
+            for (AstNode* param = (AstNode*)view->param; param; param = param->next) {
+                interp_scan_visit(param, ctx);
+            }
+            if (sc->ok && view->body) interp_scan_visit(view->body, ctx);
+            for (AstStateEntry* state = view->state; sc->ok && state;
+                    state = state->next_state) {
+                if (state->value) interp_scan_visit(state->value, ctx);
+            }
+            for (AstEventHandler* handler = view->handler; sc->ok && handler;
+                    handler = handler->next_handler) {
+                if (handler->param) interp_scan_visit((AstNode*)handler->param, ctx);
+                if (handler->body) interp_scan_visit(handler->body, ctx);
+            }
         }
         return;
     }
@@ -696,7 +703,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             sc->reject = node->node_type;
             return;
         }
-        if (task_backed && async_satellite) return;
+        if (task_backed && async_satellite) {
+            if (sc->indexed && sc->index) {
+                AstNodeId function_id = ast_index_find(sc->index, node);
+                sc->skip_end = ast_index_subtree_end(sc->index, function_id);
+            }
+            return;
+        }
     }
     // `a[i] = v`, `a.f = v`, and nested paths through a plain binding root use
     // cow_path_set: it owns every detach/relink decision (S9.1.2), while T0
@@ -849,14 +862,14 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // Item-level wrapper policy. It preserves the static all-int fast path
         // while the existing runtime helpers retain sized/full/bigint lanes.
         if (interp_native_sys_item_supported(info)) {
-            interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
         // `print` is the one Lambda-variadic entry the walker implements
         // directly (one pn_print per argument, as lowering emits); the other
         // variadic rows still have no generic dispatch to mirror.
         if (info && info->fn == SYSPROC_PRINT && info->func_ptr) {
-            interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
         // Math entries carrying a native lane (floor/ceil/round/trunc/abs …)
@@ -881,11 +894,11 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // VMap creation and `set` have no boxed entry (func_ptr is NULL by
         // design); the walker mirrors their direct lowering paths instead.
         if (info && info->fn == SYSFUNC_VMAP_NEW && info->arg_count <= 1) {
-            interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
         if (info && info->fn == SYSPROC_VMAP_SET) {
-            interp_visit_children(node, interp_scan_visit, ctx);
+            if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
         // The boxed caller in interp.cpp handles up to five Item arguments; the
@@ -905,13 +918,34 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             return;
         }
     }
-    interp_visit_children(node, interp_scan_visit, ctx);
+    if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
+}
+
+static AstIndexProfileSupport interp_profile_support_node(
+        const AstIndex* index, AstNodeId node_id, void* context) {
+    ScanCtx* sc = (ScanCtx*)context;
+    if (!index || !sc || node_id >= index->count) {
+        return AST_INDEX_PROFILE_REJECT;
+    }
+    sc->skip_end = AST_NODE_ID_INVALID;
+    interp_scan_visit(index->nodes[node_id], sc);
+    if (!sc->ok) return AST_INDEX_PROFILE_REJECT;
+    return sc->skip_end > node_id && sc->skip_end <= index->count
+        ? AST_INDEX_PROFILE_SKIP_SUBTREE : AST_INDEX_PROFILE_ACCEPT;
 }
 
 bool interp_scan_supported(Script* script, AstNodeType* reject) {
     if (!script || !script->ast_root) return false;
     ScanCtx sc = {true, AST_NODE_NULL};
-    interp_scan_visit(script->ast_root, &sc);
+    AstIndex* index = &script->ast_index;
+    if (index->graph_published) {
+        sc.indexed = true;
+        sc.index = index;
+        sc.ok = ast_index_scan_profile_support(index,
+            interp_profile_support_node, &sc);
+    } else {
+        interp_scan_visit(script->ast_root, &sc);
+    }
     if (reject) *reject = sc.reject;
     return sc.ok;
 }

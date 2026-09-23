@@ -535,6 +535,7 @@ struct JsMirTranspiler {
     // recipe. The plans are discarded with lowering; emitted shape recipes
     // belong to the realm input because generated code retains their address.
     ArrayList* literal_shape_plans;
+    struct hashmap* literal_shape_by_node;
     int scope_depth;
     int var_hoist_depth;  // >=0: redirect jm_set_var to this depth for 'var' hoisting; -1 = normal
     // Active generator/async local reservations, keyed by NameEntry*. These
@@ -746,6 +747,38 @@ static inline JsFuncCollected* jm_collected_func_by_id(JsMirTranspiler* mt,
             !mt->func_entries_by_id) return NULL;
     return mt->func_entries_by_id[function_id];
 }
+
+typedef struct JsFuncChildIterator {
+    const AstFunctionId* ids;
+    uint32_t count;
+    uint32_t next;
+} JsFuncChildIterator;
+
+static inline JsFuncChildIterator jm_func_child_iterator_begin(
+        const JsMirTranspiler* mt, AstFunctionId parent_id) {
+    JsFuncChildIterator iterator = {};
+    if (!mt || !mt->tp) return iterator;
+    iterator.ids = ast_index_function_children(&mt->tp->ast_index, parent_id,
+        &iterator.count);
+    return iterator;
+}
+
+static inline JsFuncCollected* jm_func_child_iterator_next(JsMirTranspiler* mt,
+        JsFuncChildIterator* iterator) {
+    if (!mt || !iterator) return NULL;
+    while (iterator->next < iterator->count) {
+        JsFuncCollected* child = jm_collected_func_by_id(mt,
+            iterator->ids[iterator->next++]);
+        if (child) return child;
+    }
+    return NULL;
+}
+
+// Iterate direct lexical children through the common FunctionId index.
+#define JM_FOR_EACH_CHILD_FUNC(mt, idx, child, parent_id) \
+    for (JsFuncChildIterator idx##_iterator = jm_func_child_iterator_begin(\
+             (mt), (parent_id)); \
+         JsFuncCollected* child = jm_func_child_iterator_next((mt), &idx##_iterator); )
 
 static inline AstFunctionId jm_function_id_for_node(const JsMirTranspiler* mt,
         const JsFunctionNode* function) {

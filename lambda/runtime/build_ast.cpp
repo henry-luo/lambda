@@ -1957,120 +1957,76 @@ void mark_capture_mutable(FnCapture** captures, String* name) {
     }
 }
 
-typedef struct CaptureWalk {
-    Transpiler* tp;
-    NameScope* fn_scope;
-    NameScope* global_scope;
-    FnCapture** captures;
-} CaptureWalk;
-
-// Records `entry` when it binds in an enclosing function: not local to this
-// function, not global, not an import.
-static void capture_outer_binding(CaptureWalk* walk, String* name, NameEntry* entry,
-                                  bool is_mutable) {
-    if (!entry || entry->import || is_local_to_scope(entry, walk->fn_scope) ||
-            is_global_entry(entry, walk->global_scope)) return;
-    add_capture(walk->tp, walk->captures, name, entry);
-    if (is_mutable) mark_capture_mutable(walk->captures, name);
+// Records an indexed external binding unless Lambda owns it locally, globally,
+// or as an implicit object field. The index has already resolved its identity.
+static void capture_indexed_outer_binding(Transpiler* tp, AstFuncNode* fn_node,
+        NameScope* global_scope, String* name, NameEntry* entry, bool is_mutable) {
+    if (!entry || entry->import || is_object_field_entry(entry) ||
+            is_local_to_scope(entry, fn_node->vars) ||
+            is_global_entry(entry, global_scope)) return;
+    add_capture(tp, &fn_node->captures, name, entry);
+    if (is_mutable) mark_capture_mutable(&fn_node->captures, name);
 }
 
-// Child edges come from walk_lambda_ast, the shared Lambda traversal, so every
-// node kind it knows is covered; the hand-written per-kind walk this replaced
-// skipped named arguments, parameter defaults, pipes, for-clauses, match
-// patterns and other kinds, dropping captures used only there.
-static bool capture_visit(AstNode* node, void* data) {
-    CaptureWalk* walk = (CaptureWalk*)data;
-    switch (node->node_type) {
-    case AST_NODE_IDENT: {
-        AstIdentNode* ident = (AstIdentNode*)node;
-        // Object fields in method scope are implicit receiver slots, not
-        // closure captures; method write-back owns their mutation rules.
-        if (ident->entry && ident->entry->node && !is_object_field_entry(ident->entry)) {
-            capture_outer_binding(walk, ident->name, ident->entry, false);
-        }
-        return false;
-    }
-    case AST_NODE_ASSIGN_STAM: {
-        AstAssignStamNode* assign = (AstAssignStamNode*)node;
-        if (!is_object_field_entry(assign->target_entry)) {
-            capture_outer_binding(walk, assign->target, assign->target_entry, true);
-        }
-        return true;
-    }
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM: {
-        // A write through a captured container root mutates the capture.
-        AstIdentNode* root = compound_root_ident(((AstCompoundAssignNode*)node)->object);
-        if (root && !is_object_field_entry(root->entry)) {
-            capture_outer_binding(walk, root->name, root->entry, true);
-        }
-        return true;
-    }
-    case AST_NODE_FUNC:
-    case AST_NODE_FUNC_EXPR:
-    case AST_NODE_PROC: {
-        // A nested function's captures from scopes above this function must
-        // also be captured here, so this closure can build the nested
-        // function's environment. Its body is analyzed separately.
-        for (FnCapture* cap = ((AstFuncNode*)node)->captures; cap; cap = cap->next) {
-            capture_outer_binding(walk, cap->lambda_name, cap->entry, false);
-        }
-        return false;
-    }
-    case AST_NODE_FOR_EXPR:
-        // join keys are the only for-clause edges walk_lambda_ast omits.
-        for (AstNode* clause = ((AstForNode*)node)->loop; clause; clause = clause->next) {
-            if (clause->node_type != AST_NODE_FOR_CLAUSE) continue;
-            for (AstJoinKey* key = ((AstLoopNode*)clause)->join_keys; key;
-                    key = (AstJoinKey*)key->next) {
-                walk_lambda_ast(key->prior_expr, capture_visit, walk, false);
-                walk_lambda_ast(key->new_expr, capture_visit, walk, false);
-            }
-        }
-        return true;
-    default:
-        return true;
-    }
-}
-
-// Analyze captures for a function node
-void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_scope) {
-    fn_node->captures = nullptr;
-    CaptureWalk walk = {tp, fn_node->vars, global_scope, &fn_node->captures};
-    // Parameter defaults are evaluated in this function and can read outer bindings.
-    for (AstNode* param = (AstNode*)fn_node->param; param; param = param->next) {
-        walk_lambda_ast(param, capture_visit, &walk, false);
-    }
-    walk_lambda_ast(fn_node->body, capture_visit, &walk, false);
+static void finish_capture_analysis(Transpiler* tp, AstFuncNode* fn_node) {
     if (!fn_node->analysis) {
         fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
     }
     fn_node->analysis->captures = fn_node->captures;
     fn_node->analysis->capture_count = 0;
 
-    if (fn_node->captures) {
-        FnCapture* c = fn_node->captures;
-        while (c) {
-            fn_node->analysis->capture_count++;
-            String* capture_name = c->lambda_name;
-            // A mutable capture is an explicit cross-frame write only when the
-            // outer binding itself is a `var`; immutable captures remain pure.
-            if (c->is_mutable && (!c->entry || !c->entry->is_mutable)) {
-                record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
-                    "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
-                    (int)capture_name->len, capture_name->chars);
-            }
-            c = c->next;
+    for (FnCapture* capture = fn_node->captures; capture; capture = capture->next) {
+        fn_node->analysis->capture_count++;
+        // A mutable capture is an explicit cross-frame write only when the
+        // outer binding itself is a `var`; immutable captures remain pure.
+        if (capture->is_mutable && (!capture->entry || !capture->entry->is_mutable)) {
+            record_semantic_error_span(tp, fn_node->source_span, ERR_IMMUTABLE_ASSIGNMENT,
+                "cannot mutate captured binding '%.*s'. pass it as `var` to a pn or return a new value.",
+                (int)capture->lambda_name->len, capture->lambda_name->chars);
         }
     }
 }
 
-// Find the global scope by walking up the parent chain
-NameScope* find_global_scope(NameScope* scope) {
-    while (scope && scope->parent) {
-        scope = scope->parent;
+// Analyze one closure from the shared owner-grouped reference table. Callers
+// process functions from inner to outer so direct child captures propagate
+// without walking a function body again (D8.2.4).
+static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
+        NameScope* global_scope) {
+    if (!tp || !fn_node || !global_scope || !tp->ast_index.graph_published) return false;
+    fn_node->captures = nullptr;
+    AstIndex* index = &tp->ast_index;
+    AstNodeId function_node_id = ast_index_find(index, (AstNode*)fn_node);
+    if (function_node_id == AST_NODE_ID_INVALID) return false;
+    AstFunctionId function_id = index->owner_functions[function_node_id];
+    uint32_t reference_count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index,
+        function_id, &reference_count);
+    for (uint32_t i = 0; references && i < reference_count; i++) {
+        const AstFunctionReference* reference = &references[i];
+        if (!(reference->flags & AST_FUNCTION_REF_FREE)) continue;
+        NameEntry* entry = ast_index_binding(index, reference->binding_id);
+        capture_indexed_outer_binding(tp, fn_node, global_scope,
+            entry ? entry->name : NULL, entry,
+            (reference->flags & AST_FUNCTION_REF_WRITE) != 0);
     }
-    return scope;
+    uint32_t child_count = 0;
+    const AstFunctionId* children = ast_index_function_children(index, function_id,
+        &child_count);
+    for (uint32_t i = 0; children && i < child_count; i++) {
+        AstFunctionId child_id = children[i];
+        AstNode* child_node = child_id < index->function_count
+            ? index->functions[child_id].node : NULL;
+        if (!child_node || (child_node->node_type != AST_NODE_FUNC &&
+                child_node->node_type != AST_NODE_FUNC_EXPR &&
+                child_node->node_type != AST_NODE_PROC)) continue;
+        for (FnCapture* capture = ((AstFuncNode*)child_node)->captures;
+                capture; capture = capture->next) {
+            capture_indexed_outer_binding(tp, fn_node, global_scope,
+                capture->lambda_name, capture->entry, false);
+        }
+    }
+    finish_capture_analysis(tp, fn_node);
+    return tp->error_count == 0;
 }
 
 // str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
@@ -2082,8 +2038,8 @@ AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
     ast_node->node_type = node_type;
     ast_node->source_span = span;
     if (!ast_index_note_allocation(&tp->ast_index, ast_node)) {
-        // A partially indexed unit must not reach the pass manager: the index
-        // is an allocation-time compiler fact under D8.2.4.
+        // Reserve index capacity while building; binding publishes preorder
+        // identities once this bottom-up reduction has a structural graph.
         tp->build_allocation_failed = true;
         return NULL;
     }
@@ -2137,104 +2093,9 @@ static bool ast_node_declares_binding(AstNode* node) {
     return node && node->node_type != AST_NODE_KEY_EXPR;
 }
 
-// lookup a name in the current scope only (not in parent scopes)
-// returns the existing entry if found, NULL otherwise
-static uint32_t name_scope_pointer_hash(const String* name) {
-    uintptr_t value = (uintptr_t)name;
-    value ^= value >> 33;
-    value *= UINT64_C(0xff51afd7ed558ccd);
-    value ^= value >> 33;
-    return (uint32_t)value;
-}
-
-static NameEntry* name_scope_lookup(const NameScope* scope,
-        const String* name) {
-    if (!scope || !name) return NULL;
-    if (scope->name_index && scope->name_index_capacity) {
-        uint32_t slot = name_scope_pointer_hash(name) &
-            (scope->name_index_capacity - 1);
-        for (;;) {
-            NameEntry* entry = scope->name_index[slot];
-            if (!entry) return NULL;
-            if (entry->name == name) return entry;
-            slot = (slot + 1) & (scope->name_index_capacity - 1);
-        }
-    }
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (entry->name == name) return entry;
-    }
-    return NULL;
-}
-
-static bool name_scope_index_insert(NameScope* scope, NameEntry* entry) {
-    if (!scope || !entry || !entry->name || !scope->name_index ||
-            !scope->name_index_capacity) return true;
-    uint32_t slot = name_scope_pointer_hash(entry->name) &
-        (scope->name_index_capacity - 1);
-    for (;;) {
-        NameEntry* current = scope->name_index[slot];
-        if (!current) {
-            scope->name_index[slot] = entry;
-            scope->name_index_count++;
-            return true;
-        }
-        // Duplicate declarations still remain in source order for diagnostic
-        // recovery; name resolution has always selected the first declaration.
-        if (current->name == entry->name) return true;
-        slot = (slot + 1) & (scope->name_index_capacity - 1);
-    }
-}
-
-static bool name_scope_index_prepare(Transpiler* tp, NameScope* scope,
-        uint32_t capacity) {
-    if (!tp || !tp->pool || !scope || capacity < 16 ||
-            (capacity & (capacity - 1))) return false;
-    NameEntry** index = (NameEntry**)pool_calloc(tp->pool,
-        (size_t)capacity * sizeof(NameEntry*));
-    if (!index) return false;
-    scope->name_index = index;
-    scope->name_index_capacity = capacity;
-    scope->name_index_count = 0;
-    return true;
-}
-
-static uint32_t name_scope_index_capacity_for_entries(uint32_t entry_count) {
-    uint32_t capacity = 16;
-    while (entry_count * 4 >= capacity * 3) capacity *= 2;
-    return capacity;
-}
-
-static bool name_scope_index_rebuild(Transpiler* tp, NameScope* scope,
-        uint32_t capacity) {
-    if (!name_scope_index_prepare(tp, scope, capacity)) return false;
-    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
-        if (!name_scope_index_insert(scope, entry)) return false;
-    }
-    return true;
-}
-
-static void name_scope_index_note_entry(Transpiler* tp, NameScope* scope,
-        NameEntry* entry) {
-    if (!scope || !entry) return;
-    scope->entry_count++;
-    if (!scope->name_index && scope->entry_count > 8) {
-        // Keep small parameter and block scopes list-only; wide module scopes
-        // build one fixed table and grow before the load factor reaches 0.75.
-        if (!name_scope_index_rebuild(tp, scope,
-                name_scope_index_capacity_for_entries(scope->entry_count))) return;
-    }
-    if (scope->name_index &&
-            (scope->name_index_count + 1) * 4 >=
-                scope->name_index_capacity * 3) {
-        if (!name_scope_index_rebuild(tp, scope,
-                scope->name_index_capacity * 2)) return;
-    }
-    (void)name_scope_index_insert(scope, entry);
-}
-
 NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
     if (!tp || !tp->current_scope || !name) return NULL;
-    return name_scope_lookup(tp->current_scope, name);
+    return name_scope_lookup_name(tp->current_scope, name);
 }
 
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
@@ -2330,7 +2191,7 @@ static void push_name_with_spelling(Transpiler* tp, AstNode* node,
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
-    name_scope_index_note_entry(tp, tp->current_scope, entry);
+    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
     // An import publishes a local view of a declaration owned by another
     // script. The source AST is shared with that provider, so never rewrite
     // its declaration edge: doing so would redirect both its closure identity
@@ -3093,7 +2954,7 @@ NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     if (!name) return NULL;
     NameScope* scope = tp->current_scope;
     FIND_VAR_NAME:
-    NameEntry* entry = name_scope_lookup(scope, name);
+    NameEntry* entry = name_scope_lookup_name(scope, name);
     if (!entry) {
         if (scope->parent) {
             // Defensive check: prevent infinite loop if parent pointer is circular
@@ -6472,7 +6333,7 @@ static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* im
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
-    name_scope_index_note_entry(tp, tp->current_scope, entry);
+    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
 }
 
 static void register_imported_object_type(Transpiler* tp, AstObjectTypeNode* obj_node) {
@@ -6909,11 +6770,6 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
     rebound->name_index_capacity = 0;
     rebound->name_index_count = 0;
     rebound->entry_count = 0;
-    if (source->entry_count > 8 && !name_scope_index_prepare(bind->tp,
-            rebound, name_scope_index_capacity_for_entries(source->entry_count))) {
-        bind->failed = true;
-        return NULL;
-    }
     DirectBindScopeMap map = {.source = source, .rebound = rebound};
     hashmap_set(bind->scopes, &map);
     if (hashmap_oom(bind->scopes)) {
@@ -6942,7 +6798,10 @@ static NameScope* direct_bind_clone_scope(DirectBindContext* bind,
         if (rebound->last) rebound->last->next = copy;
         else rebound->first = copy;
         rebound->last = copy;
-        name_scope_index_note_entry(bind->tp, rebound, copy);
+        if (!name_scope_index_add(bind->tp->pool, rebound, copy)) {
+            bind->failed = true;
+            return NULL;
+        }
     }
     return rebound;
 }
@@ -7250,6 +7109,26 @@ static bool direct_bind_collect_function(AstNode* node, void* opaque) {
     return true;
 }
 
+static ArrayList* lambda_ast_indexed_functions(const AstIndex* index) {
+    if (!index || !index->graph_published) return NULL;
+    ArrayList* functions = arraylist_new((int)index->function_count);
+    if (!functions) return NULL;
+    for (AstFunctionId function_id = 0;
+            function_id < index->function_count; function_id++) {
+        AstNode* node = index->functions[function_id].node;
+        if (!node || (node->node_type != AST_NODE_FUNC &&
+                node->node_type != AST_NODE_FUNC_EXPR &&
+                node->node_type != AST_NODE_PROC)) {
+            continue;
+        }
+        if (!arraylist_append(functions, node)) {
+            arraylist_free(functions);
+            return NULL;
+        }
+    }
+    return functions;
+}
+
 bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
         AstScript* script, ArrayList** functions_out) {
     if (functions_out) *functions_out = NULL;
@@ -7269,8 +7148,15 @@ bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
     if (!tp->defer_ast_index_columns) ast_index_mark_published(&tp->ast_index);
     tp->current_scope = script->global_vars;
     if (functions_out) {
-        *functions_out = bind.functions;
-        bind.functions = NULL;
+        ArrayList* indexed = lambda_ast_indexed_functions(&tp->ast_index);
+        // AST-tier rebinding defers index publication, so it retains the
+        // construction list until its own retained-unit index pass runs.
+        if (indexed) {
+            *functions_out = indexed;
+        } else {
+            *functions_out = bind.functions;
+            bind.functions = NULL;
+        }
     }
     direct_bind_destroy(&bind);
     return true;
@@ -8020,9 +7906,25 @@ static bool colour_walk_visit(AstNode* node, void* data) {
     return true;
 }
 
+static bool lambda_ast_analyze_indexed_captures(Transpiler* tp, AstScript* script) {
+    AstIndex* index = tp ? &tp->ast_index : NULL;
+    if (!index || !script || !script->global_vars || !index->graph_published) return false;
+    // Function IDs are structural preorder, so reverse order finalizes every
+    // child closure before its parent imports the child's outer captures.
+    for (AstFunctionId function_id = index->function_count; function_id-- > 0;) {
+        AstNode* node = index->functions[function_id].node;
+        if (!node || (node->node_type != AST_NODE_FUNC &&
+                node->node_type != AST_NODE_FUNC_EXPR &&
+                node->node_type != AST_NODE_PROC)) continue;
+        if (!analyze_captures(tp, (AstFuncNode*)node, script->global_vars)) return false;
+    }
+    return true;
+}
+
 bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         AstScript* script, ArrayList* functions) {
     if (!tp || !script || tp->error_count != 0) return false;
+    if (!lambda_ast_analyze_indexed_captures(tp, script)) return false;
     // A pn member is bound by the runtime member lane so calls can lower it,
     // but S12.3.3v2/D2.6.7 forbid retaining that bound closure as a value.
     walk_lambda_ast((AstNode*)script, reject_proc_method_value, tp, true);
@@ -9149,7 +9051,7 @@ static void direct_append_binder_name(Transpiler* tp, NameEntry* entry) {
     if (!tp->current_scope->first) tp->current_scope->first = entry;
     else tp->current_scope->last->next = entry;
     tp->current_scope->last = entry;
-    name_scope_index_note_entry(tp, tp->current_scope, entry);
+    (void)name_scope_index_add(tp->pool, tp->current_scope, entry);
 }
 
 typedef struct DirectBinderForwardRef {
@@ -14347,15 +14249,11 @@ static LambdaParseValue direct_ast_reduce(void* context,
             AstFuncNode* fn = sink->function_nodes[slot];
             NameScope* function_scope = sink->function_scopes[slot];
             lambda_ast_leave_scope(tp, function_scope);
-            // Capture analysis must run after the body and nested functions
-            // are complete; otherwise an outer closure loses transitive
-            // captures and MIR sees those names as undefined variables.
             uint64_t inline_analysis_started = 0;
             if (lambda_compiler_timing_collecting()) {
                 inline_analysis_started = time_now_ns();
             }
             if (fn) {
-                analyze_captures(tp, fn, find_global_scope(function_scope->parent));
                 validate_cross_frame_binding_reads(tp, fn);
             }
             // CW24: the body is complete, so every write-back that could

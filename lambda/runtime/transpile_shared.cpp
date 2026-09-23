@@ -12,10 +12,12 @@ extern Type TYPE_ANY, TYPE_INT;
 
 void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
                              uint64_t* out_function_count,
-                             uint64_t* out_instruction_count) {
+                             uint64_t* out_instruction_count,
+                             uint64_t* out_largest_function_instruction_count) {
     uint64_t module_count = 0;
     uint64_t function_count = 0;
     uint64_t instruction_count = 0;
+    uint64_t largest_function_instruction_count = 0;
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
             module; module = DLIST_NEXT(MIR_module_t, module)) {
         module_count++;
@@ -23,15 +25,24 @@ void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
                 item; item = DLIST_NEXT(MIR_item_t, item)) {
             if (item->item_type != MIR_func_item) continue;
             function_count++;
+            uint64_t function_instruction_count = 0;
             for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
                     insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
-                if (insn->code != MIR_LABEL) instruction_count++;
+                if (insn->code != MIR_LABEL) {
+                    instruction_count++;
+                    function_instruction_count++;
+                }
             }
+            if (largest_function_instruction_count < function_instruction_count)
+                largest_function_instruction_count = function_instruction_count;
         }
     }
     if (out_module_count) *out_module_count = module_count;
     if (out_function_count) *out_function_count = function_count;
     if (out_instruction_count) *out_instruction_count = instruction_count;
+    if (out_largest_function_instruction_count) {
+        *out_largest_function_instruction_count = largest_function_instruction_count;
+    }
 }
 
 bool has_typed_params(AstFuncNode* fn_node) {

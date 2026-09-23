@@ -1,6 +1,6 @@
 # LambdaJS — Compilation Pipeline & Phase Model
 
-> **Last verified against tree:** 2026-09-19
+> **Last verified against tree:** 2026-09-23
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the default MIR lane from JavaScript source to native code or interpreted MIR, plus its boundary with the explicit AST backend: entry points, per-compile state, multi-phase lowering, MIR-interpreter-vs-JIT policy, and symbol resolution.
 >
@@ -11,7 +11,7 @@
 
 ## 1. Purpose & scope
 
-LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry, event-loop host, shared AST substrate, compiler-fact scaffolding, `MirEmitter`, and MIR JIT under **D1.2–D1.3** and **D8.1.3v18**. It retains its own JavaScript front end and semantic lowering. Under **D8.2.2** and **D8.2.4**, P1b reserves shared `AST_NODE_ASSIGN` for its single `AstAssignNode {op, left, right}` contract and moves Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`; P1c extends that physical assignment record to Lambda's procedural assignment tags, with the common visitor owning every assignment's `left/right` children; P1d publishes `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` for while/do-while/JS C-style for, while iterator clauses use `AST_NODE_FOR_CLAUSE`. A `.js` source reaches this lane through the explicit `js` / `js-test-batch` CLI subcommands, through `require`/`import` and `load_js_module`, or through the explicit AST backend. This document maps the MIR compilation lane; the lowering *mechanics* are in [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md), and the front end is in [JS_02 — Parsing, AST & Front-End](JS_02_Parsing_AST.md).
+LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry, event-loop host, shared AST substrate, compiler-fact scaffolding, `MirEmitter`, and MIR JIT under **D1.2–D1.3**, **D8.1.3v19**, **D8.2.4v2**, and **D8.2.5v3**. It retains its own JavaScript front end and semantic lowering. Under **D8.2.2** and **D8.2.4v2**, P1b reserves shared `AST_NODE_ASSIGN` for its single `AstAssignNode {op, left, right}` contract and moves Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`; P1c extends that physical assignment record to Lambda's procedural assignment tags, with the common visitor owning every assignment's `left/right` children; P1d publishes `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` for while/do-while/JS C-style for, while iterator clauses use `AST_NODE_FOR_CLAUSE`. A `.js` source reaches this lane through the explicit `js` / `js-test-batch` CLI subcommands, through `require`/`import` and `load_js_module`, or through the explicit AST backend. This document maps the MIR compilation lane; the lowering *mechanics* are in [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md), and the front end is in [JS_02 — Parsing, AST & Front-End](JS_02_Parsing_AST.md).
 
 ---
 
@@ -21,20 +21,20 @@ LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry
 
 Source bytes flow through parse → AST/build-time binding → early-error validation pass → shared AST index → context setup → import resolution → compile-unit opening → multi-phase lowering → link → execution of `js_main` → event-loop drain → result. The ordinary MIR implementation is `transpile_js_to_mir_core_profile_len`; wrappers delegate through `transpile_js_to_mir_core_len`. Ordinary source, pre-built-AST, ES-module, direct-eval, and new-Function entries share `js_mir_open_compile_unit` for MIR context/transpiler/module ownership. Eval-preamble publication and batch/preamble declaration snapshots share `js_preamble_entries_from_module_consts` for the owned map-to-array copy, while finalized MIR volume accounting uses the cross-language `mir_count_module_volume` walk; mode-specific registry/TLA, lexical/global preamble, and eval module-scope policy remain active consolidation residue under **D8.2.5**.
 
-`JS_EXECUTION_BACKEND=ast` is the explicit fail-closed AST lane under **D8.1.3v18**. `JS_EXECUTION_BACKEND=auto` explicitly selects retained AST execution for interpreter-supported units and their static import closure, whose independent leaves are prebuilt as AST-only `InputScriptCache` templates under **D8.5.1v4**. Unsupported AUTO units retain whole-module MIR; the unset default remains MIR. AUTO additionally promotes an admitted closed, synchronous classic top-level function declaration or expression to a boxed MIR satellite at `JS_JIT_THRESHOLD` calls (default five). The local-data slice admits non-spread arrays, data objects with static or local computed keys, static named member chains, and computed members whose receiver/key satisfy the same local scan; MIR object/Reference lowering preserves source order and `ToPropertyKey` before the existing property kernel. It never transfers an active AST frame and pins unsupported definitions to AST.
+`JS_EXECUTION_BACKEND=ast` is the explicit fail-closed AST lane under **D8.1.3v19**. The unset selector and `JS_EXECUTION_BACKEND=auto` select retained AST execution for interpreter-supported units and their static import closure, whose independent leaves are prebuilt as AST-only `InputScriptCache` templates under **D8.5.1v7**. Unsupported AUTO units fall back to whole-module MIR; `JS_EXECUTION_BACKEND=mir` remains the explicit MIR selector. AUTO additionally promotes an admitted closed, synchronous classic top-level function declaration or expression to a boxed MIR satellite at `JS_JIT_THRESHOLD` calls (default five). The local-data slice admits non-spread arrays, data objects with static or local computed keys, static named member chains, and computed members whose receiver/key satisfy the same local scan; MIR object/Reference lowering preserves source order and `ToPropertyKey` before the existing property kernel. It never transfers an active AST frame and pins unsupported definitions to AST.
 
 The control/data flow, step by step (CLI `lambda js script.js`):
 
 1. `main.cpp:1699` → `transpile_js_to_mir_len` → `transpile_js_to_mir_core_len`.
 2. Copy source into an owned buffer; for a real file lacking an explicit `var __filename`, compute the realpath and **inject `var __filename` / `var __dirname`** after the directive prologue (CommonJS ergonomics) (`js_mir_entrypoints_require.cpp:374`).
 3. Resolve interpreter env flags once and cache them (`:421`).
-4. `js_transpiler_create` → `js_transpiler_parse` (first-party C parser) → direct `JsAstNode` publication, scope reconstruction, validation, and index passes, each timed. The pass manager produces `VALIDATED` only after `js_check_early_errors` succeeds; the remaining schedule is residue under **D8.2.5**.
+4. `js_transpiler_create` → `js_transpiler_parse` (first-party C parser) → direct `JsAstNode` publication, scope reconstruction, validation, and index passes. The manager and planning slices record parse-build, bind, validate, index, collect, captures, environment layout, infer, forward declaration, lowering, finalize, and prelink timings under **D8.2.5v3**.
 5. Set up or **reuse** the `EvalContext` + GC heap + name pool + `Input` (reuse is the batch hot-reload fast path); set the `_lambda_rt` runtime pointer (`:483`–`:519`).
 6. In AUTO, discover the static import closure with the first-party parser and prebuild only its independent AST cache templates; ordinary linking and module initialization remain serial on the receiving runtime. MIR units use the established `jm_load_imports` path.
 7. `js_mir_open_compile_unit` performs `jit_init`, installs the optional batch error handler, calls `jm_create_mir_transpiler`, tracks the active owner, publishes the selected name base, and opens a script or ES-module MIR module (see [§4](#4-the-transpiler-context-jsmirtranspiler)).
 8. The unit's mode-specific preamble/import policy is applied before lowering; module registry/TLA and eval/new-Function scope policies remain in their semantic callers.
 9. **`transpile_js_mir_ast`** count-walks functions/classes, allocates exact metadata, fill-walks them, runs the remaining numbered analysis/lowering phases, and finishes/loads the MIR module (see [§5](#5-compilation-phases)).
-10. Count `total_insns`; apply the interpreter/JIT policy and any opt-downgrade; validate MIR labels; then call **`MIR_link(ctx, interface, import_resolver)`** for eager codegen or MIR-interpreter installation.
+10. Count `total_insns`; apply shared `mir_select_link_interface` policy (native/lazy-native/interpreter plus large-function O1); validate MIR labels; then call **`MIR_link(ctx, interface, import_resolver)`** for codegen or MIR-interpreter installation.
 11. `find_func(ctx, "js_main")` → typed `Item (*)(Context*)` (`:747`).
 12. Initialize the event loop, attach the document if any, allocate module-var storage, arm the stack-overflow `sigsetjmp` guard, and **call `js_main`** (`:813`).
 13. `js_event_loop_drain` and (document mode) animation-frame drain run **before** `MIR_finish` so JIT'd callbacks remain valid (`:820`).
@@ -83,23 +83,22 @@ The companion `JsTranspiler` (`js_transpiler.hpp:40`) holds the parse/AST contex
 ## 5. Compilation phases
 
 `transpile_js_mir_ast` is the manager-owned analysis/lower/finalize entry;
-workers live across the split `js_mir_*` files. The numbered workers remain a
-composite pass until each phase can migrate with its own retirement under
-**D8.2.5**.
+workers live across the split `js_mir_*` files. `collect`, `captures`,
+`env-layout`, `infer`, and `forward-declare` are individual pass-manager
+entries with required/produced facts; this makes a failed or timed stage
+unambiguous under **D8.2.5v3**.
 
 <img alt="Compilation phases" src="diagram/compile_phases.svg" width="346">
 
 | Phase | Worker | Responsibility |
 |---|---|---|
-| 1.0 count | `jm_collect_functions` | Post-order count-only walk for functions, classes, synthetic field initializers, and exact class-member capacities. |
-| 1.0 allocate/fill | `transpile_js_mir_ast` + `jm_collect_functions` | Allocate exact `func_entries`/`class_entries`; repeat the walk to fill records, parent links, and class members; reject count/fill mismatch; build the separate function-pointer index. |
+| collect | `js_mir_collect_compiler_pass` | Allocate exact indexed function/class metadata, collect source and synthetic field-initializer entries, build module constants, and reject count/fill mismatch. |
 | 1.0b | (inline `:2070`) | Resolve strict mode per function (own directive / global / class body / parent). |
 | 1.1 | (inline `:2111`) | Build `module_consts`; pre-seed from preamble; assign `js_module_vars[]` indices to top-level decls. |
-| 1.5 | `jm_analyze_captures` (`:3027`) | Free-variable detection: `free = refs − params − locals − module_consts`. |
-| 1.6 | (inline `:3235`) | Transitive capture propagation (fixed-point) for multi-level closures. |
-| 1.7 / 1.7.5 / 1.7b / 1.7c | (inline `:3445`–`:3861`) | Compute shared scope-env layouts; module-level scope env (Js57 Track A); parent-env reuse/link. |
-| 1.75 | `jm_infer_param_types` (`:3984`) | Evidence-based param + return type inference; native-version eligibility. |
-| 1.76 | `jm_callsite_propagate` (`:4036`) | Widen params contradicted by call-site literals (revokes native eligibility). |
+| captures | `js_mir_captures_compiler_pass` / `jm_analyze_captures` | Free-variable detection plus transitive capture propagation over the indexed parent table. |
+| env-layout | `js_mir_env_layout_compiler_pass` | Compute shared scope-env layouts, module scope env, and parent-env reuse/link through indexed child adjacency. |
+| infer | `js_mir_infer_compiler_pass` / `jm_infer_param_types` | Evidence-based parameter/return inference and native-version eligibility. |
+| forward-declare | `js_mir_forward_declare_compiler_pass` | Widen params contradicted by call-site literals, publish variants and forwards, and plan literal shapes. |
 | 1.77 | (inline `:4041`) | P6: narrow still-`ANY` params to INT/FLOAT when all call sites agree. |
 | 1.78 | (inline `:4119`) | P4b: constructor field-type propagation from `new C(...)` call sites. |
 | 1.9 | (inline `:4175`) | `MIR_new_forward` for every function (+ `<name>_n` native forwards) — enables mutual recursion. |
@@ -112,15 +111,15 @@ Detail of capture analysis (1.5–1.7) belongs to [JS_05 — Functions, Closures
 
 ## 6. MIR interpreter vs JIT selection
 
-LambdaJS can link a module either to native code (`MIR_set_gen_interface`) or to the MIR interpreter (`MIR_set_interp_interface`). The decision is made inline in `transpile_js_to_mir_core_len`, not in a dedicated function. Thresholds are defined in `js_mir_internal.hpp:22` (and duplicated in `transpile_js_mir.cpp:59`).
+LambdaJS can link a module either to native code (`MIR_set_gen_interface`), lazy native code, or the MIR interpreter (`MIR_set_interp_interface`). The shared `mir_select_link_interface` policy makes this decision for both Lambda and LambdaJS under **D8.1.3v19**.
 
 <img alt="Interpreter vs JIT selection" src="diagram/interp_jit_selection.svg" width="685">
 
 - **Base mode** — `--mir-interp` CLI or `JS_MIR_INTERP=1` sets `g_mir_interp_mode` (pure interpreter).
 - **Large-source-at-O0 pre-check** — if O0 and `source_len ≥ LAMBDA_JS_LARGE_INTERP_BYTES` (default **15000**), temporarily flips interpreter on around `jit_init`.
-- **Document AST safety gate** — before a DOM realm's preamble runs, the script scheduler preflights any source large enough to exceed `MIR_RADIANT_AST_NODE_THRESHOLD` (**50000**) indexed AST nodes. A qualifying source selects the existing AST executor for the entire realm, before any script can create a closure. The AST/MIR closure ABIs are not generally shared, so the realm-wide gate prevents unsafe mixed-tier callbacks; the restricted local-data P2 satellite is the only admitted exception (**D8.1.3v18**, **D8.2.4**). The flowchart starts after this gate. Explicit `--mir-interp` and `LAMBDA_JS_LARGE_INTERP=0` retain their MIR behavior.
-- **Post-MIR instruction policy** — interpret if `total_insns > JM_LARGE_MODULE_INSN_THRESHOLD` (**100000**), or if a document is attached and (`g_js_force_document_interp` or `total_insns > JM_RADIANT_INTERP_INSN_THRESHOLD`, **20000**). `document_context = (runtime->dom_doc != NULL)`.
-- **Opt-downgrade fallback** — if still JIT and opt ≥ 2 and insns > 100k, `MIR_gen_set_optimize_level(ctx, 0)`.
+- **Document AST safety gate** — before a DOM realm's preamble runs, the script scheduler preflights any source large enough to exceed `MIR_RADIANT_AST_NODE_THRESHOLD` (**25000**) indexed AST nodes. A qualifying source selects the existing AST executor for the entire realm, before any script can create a closure. The AST/MIR closure ABIs are not generally shared, so the realm-wide gate prevents unsafe mixed-tier callbacks; the restricted local-data P2 satellite is the only admitted exception (**D8.1.3v19**, **D8.2.4v2**). The flowchart starts after this gate. Explicit `--mir-interp` and `LAMBDA_JS_LARGE_INTERP=0` retain their MIR behavior.
+- **Post-MIR instruction policy** — interpret if `total_insns > MIR_LARGE_MODULE_INSN_THRESHOLD` (**100000**), or if a document is attached and `total_insns > MIR_RADIANT_INTERP_INSN_THRESHOLD` (**20000**). `document_context = (runtime->dom_doc != NULL)`.
+- **Opt-downgrade fallback** — a function above `MIR_LARGE_FUNCTION_O1_THRESHOLD` (**20000**) lowers only generator optimization from O2 to O1.
 - **Lazy** — `JS_LAZY_MIR≠0` selects `MIR_set_lazy_gen_interface`; its optimization-level caveats and measurements are recorded in [JS_15](JS_15_Performance.md).
 
 **"Link-interface interp" vs "pure interp":** size/document-driven interpretation leaves `g_mir_interp_mode = 0`, so `jit_init` still calls `MIR_gen_init` and only the `MIR_link` *interface* differs. Pure interpreter (`g_mir_interp_mode≠0`) skips `MIR_gen_init` entirely. The rationale (link cost dominates for large/cold modules; the interpreter sidesteps codegen) is covered with measurements in [JS_15 — Performance](JS_15_Performance.md). No backend performs tail-call optimization (JC24), so interpreter and JIT differ only in how deep recursion can go before the JC23 stack guard raises `RangeError`.
@@ -153,8 +152,8 @@ A **bare `.js` path as `argv[1]` does not** enter the JS pipeline — the defaul
 
 The fixed function/class arrays and fixed scope/loop/try stacks described by the 2026-07-15 version of this document are retired. The current implementation boundary is:
 
-- `AstIndex` supplies dense node/function/scope/binding/class identity, parent/owner links, a structural parent `FunctionId` for each function root, index-owned child adjacency, structural-descendant queries, and nearest-class lookup. P2a–P2b removed the duplicate JS pointer index and synthetic fallback; P2c publishes common and JavaScript extension scopes, resolved `NameEntry` bindings, node-to-binding use edges, and definition lookup, and MIR consumes those facts without compiler-time `js_scope_lookup()` or stale-scope repair. JS collection resolves parent/strictness and class/subtree ancestry through the index; source-span owner recovery is not treated as lexical ancestry. Count/fill collection, duplicate `JsFuncCollected::analysis`, and full expression contracts remain open residue. **D8.2.4** requires one stable ID authority.
-- `CompilerPassManager` and fact bits now cover JavaScript validate→index plus manager-owned analysis→lower→finalize/load→static-prelink. Runtime module-state linking remains after execution-context activation, so it is not falsely published as a compiler fact. The full build→bind→validate→index→analysis→lower→link schedule shared with Lambda remains incomplete. **D8.2.5** requires truthful produced facts and one schedule.
+- `AstIndex` supplies dense node/function/scope/binding/class identity, parent/owner links, preorder subtree and per-function ranges, uses-by-binding, calls-by-callee-binding, member-uses-by-object, function-child adjacency, and structural-descendant queries. Synthetic field initializers retain their source-value descendants in a per-function overlay slice, so range density is never weakened. Its source-span recovery runs only for an orphaned structural edge; sanctioned extension rebuilds the derived tables before use. **D8.2.4v2** requires one stable ID authority.
+- `CompilerPassManager` and fact bits cover JavaScript parse/build→bind→validate→index→collect→captures→env-layout→infer→forward-declare→lower→finalize/load→static-prelink. Each planning stage is a separately timed, fact-producing manager pass; runtime module-state linking remains after execution-context activation, so it is not falsely published as a compiler fact. **D8.2.5v3** requires truthful produced facts and one schedule.
 - `MirValue`, demands, provenance, representation conversion, and emitter-owned rooting exist. Lambda literal primaries now publish their exact `MirValue` directly; `jm_transpile_expression` and Lambda's identifier, call, control, and extension producers still return `MIR_reg_t` through the remaining legacy boundary. **D2.4.1–D2.4.3** and **D8.2.6** require the full contract at every core expression boundary.
 - Dynamic `ArrayList` control stacks and exact function/class/member allocation remove the old silent limits. Remaining explicit semantic/optimization capacities include 64 generator resume labels, 512 closure read-back/TDZ entries, and 16 constructor-shape evidence slots; callers fail closed, fall back, or clamp according to the owning feature.
 - Ordinary source, pre-built AST, module, eval/new-Function, and batch/preamble paths now share compile-unit opening and declaration-snapshot materialization, but still duplicate parts of build/validate/link/cleanup orchestration. Their JavaScript policy differs, but **D8.2.5** requires one lifecycle driver with mode policy as data.

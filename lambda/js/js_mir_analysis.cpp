@@ -217,15 +217,16 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index, (AstNode*)root);
     if (root_id == AST_NODE_ID_INVALID) return 0;
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return 0;
     AstFunctionId owner = index->owner_functions[root_id];
     int count = 0;
     int async_for_await_count = 0;
     int abrupt_completion_count = 0;
-    for (uint32_t i = 0; i < index->count; i++) {
+    for (uint32_t i = root_id; i < root_end; i++) {
         AstNode* node = index->nodes[i];
         if (!node) continue;
-        bool owned_here = index->owner_functions[i] == owner &&
-            ast_index_node_descends(index, i, root_id);
+        bool owned_here = index->owner_functions[i] == owner;
         if (!owned_here && !jm_suspension_is_lowered_here(index, i, root_id)) continue;
         bool is_suspension =
             (kind == JS_SUSPENSION_YIELD &&
@@ -440,11 +441,12 @@ void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* root,
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index, (AstNode*)root);
     if (root_id == AST_NODE_ID_INVALID) return;
+    AstNodeId root_end = ast_index_subtree_end(index, root_id);
+    if (root_end == AST_NODE_ID_INVALID) return;
     AstFunctionId owner = index->owner_functions[root_id];
-    for (uint32_t i = 0; i < index->count; i++) {
+    for (uint32_t i = root_id; i < root_end; i++) {
         AstNode* node = index->nodes[i];
-        if (!node || index->owner_functions[i] != owner ||
-                !ast_index_node_descends(index, i, root_id)) continue;
+        if (!node || index->owner_functions[i] != owner) continue;
         bool in_with = false;
         AstNodeId parent_id = i;
         while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
@@ -813,8 +815,38 @@ static bool jm_index_identifier_is_property_key(AstNode* parent, AstNode* node) 
     return false;
 }
 
+static void jm_collect_indexed_body_ref_node(JsMirTranspiler* mt,
+        JsFunctionNode* fn, struct hashmap* refs, AstFunctionId owner,
+        AstNodeId node_id, uint32_t body_start, uint32_t body_end) {
+    AstIndex* index = &mt->tp->ast_index;
+    AstNode* node = index->nodes[node_id];
+    if (!node || index->owner_functions[node_id] != owner ||
+            node->node_type != AST_NODE_IDENT) return;
+    if (fn->source_span.end_byte > fn->source_span.start_byte &&
+            (node->source_span.start_byte < fn->source_span.start_byte ||
+             node->source_span.end_byte > fn->source_span.end_byte)) {
+        // The index can retain an owner label from a shared list edge;
+        // source containment keeps a sibling's reference out of this closure.
+        return;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)node;
+    bool is_binding = jm_index_identifier_is_binding(index, node_id, id);
+    AstNodeId parent_id = ast_index_parent_id(index, node_id);
+    AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
+    bool is_property_key = jm_index_identifier_is_property_key(parent, node);
+    if (!id->name || is_binding || is_property_key) return;
+    if (parent && parent->node_type == AST_NODE_MEMBER_EXPR &&
+            ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
+            memcmp(id->name->chars, "super", 5) == 0) return;
+    if (parent && (parent->node_type == AST_NODE_CALL_EXPR ||
+            parent->node_type == AST_NODE_NEW_EXPR) &&
+            ((JsCallNode*)parent)->callee == node && id->name->len == 5 &&
+            memcmp(id->name->chars, "super", 5) == 0) return;
+    jm_name_set_add_ref(refs, jm_var_name(id->name), id, body_start, body_end);
+}
+
 void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
-        struct hashmap* refs) {
+        struct hashmap* refs, bool free_only) {
     if (!mt || !fn || !refs || !mt->tp) return;
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fn);
@@ -823,31 +855,17 @@ void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
     if (owner == AST_FUNCTION_ID_INVALID) return;
     uint32_t body_start = fn->body ? fn->body->source_span.start_byte : 0;
     uint32_t body_end = fn->body ? fn->body->source_span.end_byte : 0;
-    for (uint32_t i = 0; i < index->count; i++) {
-        AstNode* node = index->nodes[i];
-        if (!node || index->owner_functions[i] != owner ||
-                node->node_type != AST_NODE_IDENT) continue;
-        if (fn->source_span.end_byte > fn->source_span.start_byte &&
-                (node->source_span.start_byte < fn->source_span.start_byte ||
-                 node->source_span.end_byte > fn->source_span.end_byte)) {
-            // The index can retain an owner label from a shared list edge;
-            // source containment keeps a sibling's reference out of this closure.
-            continue;
-        }
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        bool is_binding = jm_index_identifier_is_binding(index, i, id);
-        AstNodeId parent_id = ast_index_parent_id(index, i);
-        AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
-        bool is_property_key = jm_index_identifier_is_property_key(parent, node);
-        if (!id->name || is_binding || is_property_key) continue;
-        if (parent && parent->node_type == AST_NODE_MEMBER_EXPR &&
-                ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
-                memcmp(id->name->chars, "super", 5) == 0) continue;
-        if (parent && (parent->node_type == AST_NODE_CALL_EXPR ||
-                parent->node_type == AST_NODE_NEW_EXPR) &&
-                ((JsCallNode*)parent)->callee == node && id->name->len == 5 &&
-                memcmp(id->name->chars, "super", 5) == 0) continue;
-        jm_name_set_add_ref(refs, jm_var_name(id->name), id, body_start, body_end);
+    // The index owns function membership, including non-contiguous synthetic
+    // fragments. This avoids a range scan and gives capture analysis the same
+    // resolved binding facts consumed by Lambda (D8.2.4).
+    uint32_t reference_count = 0;
+    const AstFunctionReference* references = ast_index_function_references(index,
+        owner, &reference_count);
+    for (uint32_t i = 0; references && i < reference_count; i++) {
+        if (!(references[i].flags & AST_FUNCTION_REF_READ)) continue;
+        if (free_only && !(references[i].flags & AST_FUNCTION_REF_FREE)) continue;
+        jm_collect_indexed_body_ref_node(mt, fn, refs, owner, references[i].node_id,
+            body_start, body_end);
     }
 }
 
@@ -916,7 +934,12 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // Collect all identifier references in the body
     struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_indexed_body_refs(mt, fn, refs);
+    struct hashmap* all_refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_binding_cmp, NULL, NULL);
+    // Capture candidates come only from the shared free-reference fact. The
+    // complete set remains for recursive self-name detection below.
+    jm_collect_indexed_body_refs(mt, fn, refs, true);
+    jm_collect_indexed_body_refs(mt, fn, all_refs);
 
     // Default initializers execute in the function environment and can read
     // this/new.target before the body; classify them before stamping call ABI
@@ -933,7 +956,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus
     // becomes a closure), it also needs to capture itself for recursive calls.
-    bool has_self_ref = false;
+    bool has_self_ref = jm_binding_set_has(all_refs, fn->entry);
     const char* self_name = fn->name ? jm_var_name(fn->name) : NULL;
     bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);
     bool is_func_expr = fn->node_type == AST_NODE_FUNC_EXPR;
@@ -952,7 +975,6 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         // but MIR still represents recursion through the closure environment.
         if (!JM_JS_FACT(fc, is_class_method) && !is_method_syntax &&
             ref->entry == fn->entry && !local_binding) {
-            has_self_ref = true;
             continue;
         }
         if (local_binding) continue;
@@ -1069,4 +1091,5 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     analysis->capture_count = JM_CAPTURE_COUNT(fc);
 
     hashmap_free(refs);
+    hashmap_free(all_refs);
 }

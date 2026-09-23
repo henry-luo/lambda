@@ -71,9 +71,12 @@ const std::vector<Fixture>& fixtures() {
     return f;
 }
 
-// Run `lambda.exe js <path>` with JS_TRANSPILE_TIMING=1 and capture stdout+stderr.
+// Run the explicit MIR lane with JS_TRANSPILE_TIMING=1 and capture stdout+stderr.
 std::string run_with_timing(const char* path) {
     setenv("JS_TRANSPILE_TIMING", "1", 1);
+    // D8.1.3v19 makes unset/AUTO intentionally bypass whole-module MIR.
+    // This suite measures the explicit MIR pipeline, not selector policy.
+    setenv("JS_EXECUTION_BACKEND", "mir", 1);
 
     char command[1024];
 #ifdef _WIN32
