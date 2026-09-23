@@ -593,6 +593,10 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
 MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
         MIR_reg_t cls_obj, MIR_reg_t proto_obj, JsClassEntry* static_superclass);
+// Link the class prototype object to a heritage value's prototype parent
+// (ClassDefinitionEvaluation 8.e-8.g, `null` included).
+void jm_link_class_super_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+        MIR_reg_t proto_obj, MIR_reg_t super_val);
 MIR_reg_t jm_emit_current_class_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t fallback_proto);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);

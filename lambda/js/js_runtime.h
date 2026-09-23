@@ -311,6 +311,10 @@ void js_set_class_instance_prototype(Item class_function, Item prototype);
 void js_set_class_instance_shape(Item class_function, struct TypeMap* shape);
 void js_set_function_instance_shape(Item function, struct TypeMap* shape);
 void js_set_class_superclass(Item class_function, Item superclass);
+// ClassDefinitionEvaluation heritage links shared by both tiers: the prototype
+// object's parent (null for `extends null`), then the constructor's parent.
+Item js_class_heritage_prototype_parent(Item superclass);
+void js_set_class_constructor_parent(Item class_function, Item superclass);
 Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);
 // Shared numeric property-key materialization for JS element/descriptor code.

@@ -3586,6 +3586,16 @@ static Item js_construct_entry_class_function(Item callee, Item* args, int argc,
         // (primitive wrapper / exotic Array) with the subclass prototype — instead
         // of a plain object (Boolean/String) or an empty array that drops args.
         if (ctor_root.get().item == ItemNull.item || get_type_id(ctor_root.get()) != LMD_TYPE_FUNC) {
+            if (super_own && !js_is_constructor_internal(super_root.get())) {
+                // `extends null`: the implicit `super(...args)` resolves
+                // GetSuperConstructor, the class's live [[Prototype]]. That is
+                // %Function.prototype% unless rebound, so it fails IsConstructor
+                // exactly as an explicit super() does.
+                super_root.set(js_get_prototype_of(callee_root.get()));
+                if (!js_is_constructor_internal(super_root.get())) {
+                    return js_throw_type_error("Super constructor is not a constructor");
+                }
+            }
             if (super_own && js_is_constructor_internal(super_root.get())) {
                 result_root.set(js_construct_value(super_root.get(), args, argc,
                     new_target_root.get(), result_home, args_prerooted));
@@ -14051,6 +14061,25 @@ extern "C" Item js_check_class_prototype_parent(Item prototype) {
     return js_throw_type_error("Class extends value has invalid prototype property");
 }
 
+// ClassDefinitionEvaluation steps 8.e-8.g (ES §15.7.14): a `null` heritage
+// gives the prototype object a null parent; any other heritage must be a
+// constructor whose `prototype` is an Object or null. Both tiers link the
+// prototype chain through this one decision.
+extern "C" Item js_class_heritage_prototype_parent(Item superclass) {
+    if (get_type_id(superclass) == LMD_TYPE_NULL) return ItemNull;
+    JS_RETURN_IF_ERROR(js_check_class_heritage_constructor(superclass));
+    JS_ASSIGN_OR_RETURN(parent, js_get_key_cstr(superclass, "prototype"));
+    JS_RETURN_IF_ERROR(js_check_class_prototype_parent(parent));
+    return parent;
+}
+
+// Step 8.h: a `null` heritage leaves the constructor's [[Prototype]] at
+// %Function.prototype%; a constructor heritage becomes that parent.
+extern "C" void js_set_class_constructor_parent(Item class_function, Item superclass) {
+    if (get_type_id(superclass) == LMD_TYPE_NULL) return;
+    js_set_prototype(class_function, superclass);
+}
+
 
 
 // JSCU44: a `with` scope must not leak into a called function. The callee's
@@ -14111,7 +14140,13 @@ static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
             bool derived = superclass.item != ItemNull.item &&
                 get_type_id(superclass) != LMD_TYPE_NULL &&
                 get_type_id(superclass) != LMD_TYPE_UNDEFINED;
-            if (!derived) {
+            // A recorded `extends null` is still a derived class, so its fields
+            // wait for a super() its implicit constructor cannot complete. No
+            // `extends` clause leaves the raw zero lane, which also decodes as
+            // NULL, so the recorded value must be tested by its nonzero bits.
+            bool null_heritage = superclass.item != 0 &&
+                get_type_id(superclass) == LMD_TYPE_NULL;
+            if (!derived && !null_heritage) {
                 JS_RETURN_IF_ERROR(js_init_class_instance_fields(callee, this_val));
             }
             if (get_type_id(constructor) == LMD_TYPE_FUNC) {
@@ -14121,6 +14156,15 @@ static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
             if (derived && js_is_constructor_internal(superclass)) {
                 return js_super_call_class_impl(superclass, this_val, args, argc,
                     result_home);
+            }
+            if (null_heritage) {
+                // the implicit super(...args) targets the live [[Prototype]]
+                Item live_super = js_get_prototype_of(callee);
+                if (js_is_constructor_internal(live_super)) {
+                    return js_super_call_class_impl(live_super, this_val, args,
+                        argc, result_home);
+                }
+                return js_throw_type_error("Super constructor is not a constructor");
             }
             return this_val;
         }

@@ -1642,7 +1642,7 @@ void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, J
     MIR_reg_t ctor_super_val) {
     // static initializers temporarily run with the class as this and restore the ambient binding afterward.
     if (ctor_super_val) {
-        jm_callr_void_2(mt, "js_set_prototype", cls_obj, ctor_super_val);
+        jm_callr_void_2(mt, "js_set_class_constructor_parent", cls_obj, ctor_super_val);
     }
     MIR_reg_t prev_static_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
     MIR_reg_t prev_static_new_target = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
@@ -1658,7 +1658,7 @@ void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, J
     jm_callr_void_1(mt, "js_set_direct_new_target", prev_static_new_target);
     jm_call_void_0(mt, "js_private_field_init_end");
     if (ctor_super_val) {
-        jm_callr_void_2(mt, "js_set_prototype", cls_obj, ctor_super_val);
+        jm_callr_void_2(mt, "js_set_class_constructor_parent", cls_obj, ctor_super_val);
     }
 }
 
@@ -1685,11 +1685,12 @@ MIR_reg_t jm_emit_current_class_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj
     return current;
 }
 
-static void jm_link_class_super_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+void jm_link_class_super_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t proto_obj, MIR_reg_t super_val) {
-    MIR_reg_t sp_key = jm_box_property_name_literal(mt, "prototype", 9);
-    MIR_reg_t sp_proto = jm_callr_2(mt, "js_get_key_default", MIR_T_I64, super_val, sp_key);
-    jm_callr_1(mt, "js_check_class_prototype_parent", MIR_T_I64, sp_proto);
+    // The runtime decision also checks IsConstructor, so a heritage held in a
+    // binding (a generator function, or null) needs no separate MIR test.
+    MIR_reg_t sp_proto = jm_callr_1(mt, "js_class_heritage_prototype_parent",
+        MIR_T_I64, super_val);
     jm_emit_error_lane_propagate_check(mt);
     MIR_reg_t current_proto = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
     jm_callr_void_2(mt, "js_set_prototype", current_proto, sp_proto);
@@ -1719,10 +1720,6 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
                 ctor_super_val = super_ctor;
             } else {
                 MIR_reg_t super_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
-                // ClassDefinitionEvaluation step 8.e: a runtime binding may hold
-                // a non-constructor such as a generator function
-                jm_callr_1(mt, "js_check_class_heritage_constructor", MIR_T_I64, super_val);
-                jm_emit_error_lane_propagate_check(mt);
                 jm_link_class_super_prototype(mt, cls_obj, proto_obj, super_val);
                 ctor_super_val = super_val;
             }
@@ -1735,10 +1732,6 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
           ((JsLiteralNode*)ce->node->superclass)->literal_type == AST_LITERAL_NULL)) {
         MIR_reg_t super_val = checked_heritage_val ? checked_heritage_val :
             jm_transpile_box_item(mt, ce->node->superclass);
-        if (!checked_heritage_val) {
-            jm_callr_1(mt, "js_check_class_heritage_constructor", MIR_T_I64, super_val);
-            jm_emit_error_lane_propagate_check(mt);
-        }
         jm_link_class_super_prototype(mt, cls_obj, proto_obj, super_val);
         ctor_super_val = super_val;
     }
@@ -1753,6 +1746,9 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
     if (heritage_is_null) {
         MIR_reg_t null_proto = jm_emit_null(mt);
         jm_callr_void_2(mt, "js_set_prototype", proto_obj, null_proto);
+        // `extends null` is a real heritage value: record it like the AST tier
+        // so construction treats the class as derived.
+        if (!ctor_super_val) ctor_super_val = null_proto;
     }
     if (heritage_is_null_out) *heritage_is_null_out = heritage_is_null;
     return ctor_super_val;
