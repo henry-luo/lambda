@@ -8,6 +8,10 @@ type Grid = int[2][3]
 type Rows = int[][3]
 fn third(g: int[2][3]) { g[2] }
 fn shape(v) { match v { case int[2][3]: "3 x 2" case int[3][2]: "2 x 3" default: "other" } }
+fn dyn(v) => v
+fn ok3(x: int[3]) { x }
+fn any_len(x: int[]) { len(x) }
+fn rows(g: int[2][3]) { [len(g), len(g[0])] }
 
 let m = [[1, 2], [3, 4], [5, 6]]
 
@@ -30,3 +34,26 @@ let m = [[1, 2], [3, 4], [5, 6]]
 let g: int[2][3] = [[1, 2], [3, 4], [5, 6]]
 "4.1"; [g, third(m), third([[7, 8], [9, 10], [11, 12]])]
 "4.2"; [shape(m), shape([[1, 2, 3], [4, 5, 6]]), shape([1, 2])]
+
+'5. typed boundaries admit exactly what `is` accepts'
+// A dynamic source leaves every count to the runtime check. Its lane, rank
+// and certificate fast paths once proved `int[3]` from the leaf lane alone;
+// the wrong-length cases are the negative array_count_* fixtures.
+let a3: int[3] = dyn([1, 2, 3])
+let f2: float[2] = dyn([1.5, 2.5])
+let s2: string[2] = dyn(["a", "b"])
+let n2: int?[2] = dyn([1, null])
+let y2: any[2] = dyn([1, "x"])
+let b1: bool[1] = dyn([true])
+let r3: int[3] = dyn(1 to 3)
+let e0: int[0] = dyn([])
+"5.1"; [a3, f2, s2, n2, y2, b1, r3, e0]
+let gd: int[2][3] = dyn([[1, 2], [3, 4], [5, 6]])
+let nd: int[2][3] = dyn(reshape([1, 2, 3, 4, 5, 6], [3, 2]))
+let open_rows: int[][3] = dyn([[1], [2, 3], []])
+let open_count: int[2][] = dyn([[1, 2], [3, 4], [5, 6], [7, 8]])
+"5.2"; [gd, nd, open_rows, open_count]
+// a certificate for `int[]` never proves `int[3]`, nor the reverse: each
+// crossing re-checks the length it needs
+let u: int[] = dyn([7, 8, 9])
+"5.3"; [ok3(a3), ok3(u), any_len(a3), rows(gd), rows(nd)]

@@ -11591,9 +11591,11 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
 // A plain unary `T[]` -- spelled as the array operator or as the homogeneous
 // TypeArray carrier (`nested`, no per-slot tuple patterns) -- constrains only
 // its elements: the validator checks a TypeArray's length for tuple patterns
-// alone, and a refined contract keeps its constrained wrapper here. Once every
-// element is admitted under T, the whole-array validator walk only repeats
-// that proof, deeply, through every nested element graph (T27-1). Missing the
+// alone, and a refined contract keeps its constrained wrapper here. A counted
+// `T[n]` qualifies too: admission checks its lengths up front
+// (lambda_array_value_meets_counts). Once every element is admitted under T,
+// the whole-array validator walk only repeats that proof, deeply, through
+// every nested element graph (T27-1). Missing the
 // TypeArray spelling sent every empty `[]` bound to a declared `int[]` or
 // `Node[]` field through a full validator setup.
 static bool runtime_array_contract_is_plain(Type* expected) {
@@ -11625,6 +11627,25 @@ static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
         else if (type_id == LMD_TYPE_ARRAY_NUM) converted->array_num->is_spreadable = 1;
     }
     return true;
+}
+
+// The candidate the element-wise admission below checks and may rewrite: its
+// elements, in a container the source does not share. An owned rank-one
+// ArrayNum is its own flat lane, so a one-level copy presents them. A view's
+// lane aliases its base -- a copy never taken, since the clone returns a view
+// as is -- and an N-D carrier's elements are its leading-axis rows while its
+// `length` counts leaves (S11.1.1v3), so both present their elements, scalars
+// or rows, as a fresh boxed sequence. Copying a view here is observably right:
+// a view in value position is a snapshot (S9.2.2), and a `var` parameter, the
+// one borrow position, never crosses a contract it would re-represent -- E207
+// demands an exact argument type there.
+static Item runtime_array_admission_candidate(Item value) {
+    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM && value.array_num &&
+            (value.array_num->is_view || value.array_num->is_ndim)) {
+        void* boxed = ensure_typed_array(value, LMD_TYPE_ANY);
+        return boxed ? (Item){.array = (Array*)boxed} : ItemNull;
+    }
+    return cow_clone_one_level(value);
 }
 
 static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type** env,
@@ -11702,6 +11723,18 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     if (!binder_dependent && runtime_array_admit_primitive_contract(value, expected,
             converted)) return true;
 
+    // Every path below certifies through this one interned certificate.
+    // S11.1.1v3: `T[n]` is `T[]` with a fixed length, per axis -- `int[2][3]`
+    // is three arrays of two. The two certificate paths above check a counted
+    // contract's lengths through ARRAY_REP_CERT_COUNTED; the paths below prove
+    // elements only, so each counted axis is checked here, once, and the flag
+    // spares an uncounted contract the walk. A range or an `any[]` packed
+    // source re-enters admission, reaching this.
+    ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+    if (!cert) return false;
+    if ((cert->flags & ARRAY_REP_CERT_COUNTED) &&
+            !lambda_array_value_meets_counts(value, expected)) return false;
+
     LambdaArrayContractInfo contract_info = {};
     ArrayNumElemType compact_type = ELEM_INT;
     bool target_has_numeric_lane = lambda_array_num_elem_type_for_contract(
@@ -11723,8 +11756,6 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
         // an ArrayNum element tag. The explicit crossing installs the full
         // contract certificate without cloning and rescanning every element
         // (D3.3.3v3, D3.3.4).
-        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-        if (!cert) return false;
         lambda_array_install_rep_cert(value, cert);
         *converted = value;
         return true;
@@ -11764,8 +11795,6 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
                     !lambda_type_matches(rooted_value.get(), expected)) {
                 return false;
             }
-            ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-            if (!cert) return false;
             lambda_array_install_rep_cert(rooted_value.get(), cert);
             *converted = rooted_value.get();
             return true;
@@ -11799,8 +11828,6 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
                 return false;
             }
         }
-        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-        if (!cert) return false;
         lambda_array_install_rep_cert(rooted_value.get(), cert);
         *converted = rooted_value.get();
         return true;
@@ -11812,7 +11839,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     // deep-cloned the whole element graph instead -- every admission of an
     // uncertified `Doc[]` copied the entire document subtree (prettier_ast2).
     RootFrame roots(4);
-    Rooted<Item> rooted_candidate(roots, cow_clone_one_level(value));
+    Rooted<Item> rooted_candidate(roots, runtime_array_admission_candidate(value));
     Rooted<Item> rooted_element(roots, ItemNull);
     Rooted<Item> rooted_converted(roots, ItemNull);
     Rooted<ArrayNum*> rooted_packed(roots, (ArrayNum*)NULL);
@@ -11878,8 +11905,6 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     // whole-array constraint for the validator to check (T27-1)
     if (!runtime_array_contract_is_plain(expected) &&
             !lambda_type_matches(rooted_candidate.get(), expected)) return false;
-    ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-    if (!cert) return false;
     lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     *converted = rooted_candidate.get();
     return true;

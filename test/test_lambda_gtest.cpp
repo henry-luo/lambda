@@ -356,6 +356,16 @@ static const TierParityFixture kTune27TierParity[] = {
     // the null sentinel's bits, which only a compiling tier shows.
     {"test/lambda/proc/null_numeric_propagation.ls",
      "test/lambda/proc/null_numeric_propagation.txt"},
+    // S11.1.1v3: views and N-D arrays cross contracts with no exact packed
+    // lane on both tiers, and the JIT's `len` of an annotated N-D binding
+    // read the cached leaf count, which only a compiling tier shows.
+    {"test/lambda/proc/array_view_admission.ls",
+     "test/lambda/proc/array_view_admission.txt"},
+    // S11.1.6v2/D2.5.1: `bool?`/`string?` call results and null pointer lanes
+    // bound by `let`/`var`. The JIT stored a call's raw lane as an Item and
+    // re-tagged a binding's ItemNull, which only a compiling tier shows.
+    {"test/lambda/proc/nullable_lane_bindings.ls",
+     "test/lambda/proc/nullable_lane_bindings.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

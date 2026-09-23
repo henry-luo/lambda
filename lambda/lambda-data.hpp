@@ -1002,8 +1002,10 @@ typedef struct TypeUnary : Type {
     Type* operand;
     Operator op;  // operator
     int type_index;  // index of the type in the type list
-    int min_count;   // occurrence bounds (for OPERATOR_REPEAT only)
-    int max_count;   // maximum occurrence count (-1 for unbounded)
+    // occurrence bounds for OPERATOR_REPEAT; for OPERATOR_ARRAY, `T[n]` fixes
+    // the length (min = max = n) and `T[]` is (0, -1) (S11.1.1v3)
+    int min_count;
+    int max_count;   // maximum count (-1 for unbounded)
 } TypeUnary;
 
 // Constrained type: base_type where (constraint)

@@ -1,0 +1,9 @@
+true
+[true, false, null, null, true, null, type.null, bool]
+["n", true, true, true]
+["hi", null, null, "far", null, 2, true, string, type.null]
+[null, true, { value: null}]
+[null, null, null, true, type.null, false, "x", [null, true], ["r", false]]
+[null, null, null, null, null, null, null, null, true, true, true]
+['sym', 2.5, b'\xDEAD', 2, t'2025-01-02', 2025, true]
+

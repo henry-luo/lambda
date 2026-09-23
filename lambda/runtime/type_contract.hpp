@@ -51,9 +51,20 @@ struct LambdaArrayContractInfo {
     LaneStorageDesc leaf_lane;
     uint8_t rank;
     uint8_t has_leaf_lane;
+    // bit i: axis i (0 = outermost) has a fixed length, `T[n]` (S11.1.1v3)
+    uint32_t counted_axes;
 };
 
 bool lambda_array_contract_info(Type* contract, LambdaArrayContractInfo* out);
+// S11.1.1v3: every counted axis of the contract (`int[2][3]` is three arrays
+// of two) holds for `value`. True for a contract without counts; lane, rank
+// and element checks stay with the caller.
+bool lambda_array_value_meets_counts(Item value, Type* contract);
+// The contract fixes some array length where a boundary checks it: on an
+// array layer (`T[n]`, `T[n][]`) or under `?` and the set operators. A push
+// or splice changes such a length without crossing a boundary, so a counted
+// contract is never proven by the static type of a binding alone.
+bool lambda_type_counts_array_length(Type* contract);
 // Resolve just the outer layer without deriving an unused leaf storage lane.
 Type* lambda_array_contract_element(Type* contract);
 // Return the resolver's canonical outer array node for an exact certificate

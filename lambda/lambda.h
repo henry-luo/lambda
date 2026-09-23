@@ -1170,6 +1170,9 @@ enum ArrayRepCertFlags {
     ARRAY_REP_CERT_EXACT = 1u << 0,
     ARRAY_REP_CERT_REIFIED = 1u << 1,
     ARRAY_REP_CERT_ERROR_FREE = 1u << 2,
+    // some axis has a fixed length (`T[n]`): lengths are not a carrier fact,
+    // so every reuse re-checks them against the live value
+    ARRAY_REP_CERT_COUNTED = 1u << 3,
 };
 
 struct ArrayRepCert {
