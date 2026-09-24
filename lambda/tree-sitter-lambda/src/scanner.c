@@ -57,8 +57,8 @@ enum TokenType {
     CALL_LPAREN,
     INDEX_LBRACKET,
     // S11.1.6v2: `{` opens a counted occurrence (`int{2,4}`) and also starts a
-    // map type and a block, so it carries the same same-line guard as the
-    // index bracket.
+    // map type and a block. Zero-width, emitted before a `{` bound tight to a
+    // type and holding an integer -- the C parser's test.
     OCCURRENCE_LBRACE,
     MEMBER_DOT,
     POSTFIX_CARET,
@@ -88,6 +88,9 @@ enum TokenType {
     // Withholding it makes `/b` -- the retired `/a` spelling -- an error instead
     // of the root plus a silently juxtaposed statement `b`.
     ROOT_BOUNDARY,
+    // Never emitted: grammar.js `_misplaced_let` uses it as the dead end that
+    // makes a `let` outside a parenthesized list an error.
+    LET_OUTSIDE_LIST,
     // Never emitted. Tree-sitter marks every external token valid during error
     // recovery; this sentinel is valid nowhere in the grammar, so seeing it
     // means recovery is running and the scanner should decline.
@@ -143,6 +146,55 @@ static bool is_digit(int32_t ch) {
     return ch >= '0' && ch <= '9';
 }
 
+static bool is_hex_digit(int32_t ch) {
+    return is_digit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+}
+
+// S11.1.6v2: true when the text after a `{` begins with an INTEGER token, the
+// C parser's `parser_at_counted_run` test, read with the C lexer's number
+// rules: digits (`_` only between two) or `0x` hex, not continued into a
+// fraction, an exponent, or an imaginary, decimal or sized suffix. Pure
+// inspection past the token end, so the caller keeps its own mark.
+static bool brace_holds_integer(TSLexer *lexer) {
+    while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+    if (!is_digit(lexer->lookahead)) { return false; }
+    bool hex = false;
+    if (lexer->lookahead == '0') {
+        lexer->advance(lexer, false);
+        if (lexer->lookahead == 'x' || lexer->lookahead == 'X') {
+            hex = true;
+            lexer->advance(lexer, false);
+        }
+    }
+    for (;;) {
+        if (hex ? is_hex_digit(lexer->lookahead) : is_digit(lexer->lookahead)) {
+            lexer->advance(lexer, false);
+        } else if (lexer->lookahead == '_') {
+            lexer->advance(lexer, false);
+            // C ends the literal before a `_` no digit follows: still INTEGER
+            if (!(hex ? is_hex_digit(lexer->lookahead) : is_digit(lexer->lookahead))) {
+                return true;
+            }
+        } else {
+            break;
+        }
+    }
+    int32_t c = lexer->lookahead;
+    if (c == 'j' || c == 'n' || c == 'm') { return false; }
+    // A fraction or exponent (decimal digits only), or a sized suffix, followed
+    // by a digit makes the number a different token.
+    bool fraction = !hex && (c == '.' || c == 'e' || c == 'E');
+    if (fraction || c == 'i' || c == 'u' || c == 'f') {
+        lexer->advance(lexer, false);
+        if ((c == 'e' || c == 'E') &&
+                (lexer->lookahead == '+' || lexer->lookahead == '-')) {
+            lexer->advance(lexer, false);
+        }
+        return !is_digit(lexer->lookahead);
+    }
+    return true;
+}
+
 // S16.2.2 continuation words: they cannot begin a statement, so a line may
 // start with one and the expression simply continues. `else`, `case`, and
 // `default` join the operator words because they continue their enclosing
@@ -171,6 +223,47 @@ static bool is_continuation_word(const char *w, unsigned n) {
             return !strcmp(w, "default");
         default:
             return false;
+    }
+}
+
+// S16.1.3: no statement begins with a return type and `=>`; that text only
+// ends an arrow head (`() int => 1`), where the empty list `()` shares the
+// arrow's parse state, so a boundary here would cut the arrow off. The name is
+// already consumed: read the rest of a return-type run -- suffixes, `|` `&`
+// `!` alternatives, a `^` error arm -- and report whether `=>` closes it, the
+// probe C's `arrow_head_candidate` makes. Pure inspection past the mark.
+static bool name_opens_arrow_return(TSLexer *lexer) {
+    for (;;) {
+        for (;;) {
+            int32_t c = lexer->lookahead;
+            if (c == '?' || c == '+' || c == '*') {
+                lexer->advance(lexer, false);
+            } else if (c == '[') {
+                lexer->advance(lexer, false);
+                while (is_digit(lexer->lookahead) || is_space(lexer->lookahead)) {
+                    lexer->advance(lexer, false);
+                }
+                if (lexer->lookahead != ']') { return false; }
+                lexer->advance(lexer, false);
+            } else {
+                break;
+            }
+        }
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        int32_t c = lexer->lookahead;
+        if (c == '=') {
+            lexer->advance(lexer, false);
+            return lexer->lookahead == '>';
+        }
+        if (c != '|' && c != '&' && c != '!' && c != '^') { return false; }
+        lexer->advance(lexer, false);
+        while (is_space(lexer->lookahead)) { lexer->advance(lexer, false); }
+        if (c == '^' && lexer->lookahead == '=') {  // `T^ =>`: any error
+            lexer->advance(lexer, false);
+            return lexer->lookahead == '>';
+        }
+        if (!is_identifier_start(lexer->lookahead)) { return false; }
+        while (is_identifier_continue(lexer->lookahead)) { lexer->advance(lexer, false); }
     }
 }
 
@@ -216,9 +309,11 @@ static bool classify_start(TSLexer *lexer, bool element_scope) {
             n++;
             lexer->advance(lexer, false);
         }
-        if (n >= sizeof(word)) { return true; }  // too long to be a keyword
-        word[n] = '\0';
-        return !is_continuation_word(word, n);
+        if (n < sizeof(word)) {  // longer words are never keywords
+            word[n] = '\0';
+            if (is_continuation_word(word, n)) { return false; }
+        }
+        return !name_opens_arrow_return(lexer);
     }
 
     return true;
@@ -277,10 +372,14 @@ bool tree_sitter_lambda_external_scanner_scan(
     // Skip whitespace and comments, remembering whether a line break was
     // crossed. This is the one thing grammar rules cannot see for themselves.
     bool saw_newline = false;
+    // Whether the byte right before the token is whitespace: the C parser's
+    // test for a `{` bound tight to a type (S11.1.6v2).
+    bool space_before = false;
     bool slash_pending = false;
     for (;;) {
         while (is_space(lexer->lookahead)) {
             if (lexer->lookahead == '\n') { saw_newline = true; }
+            space_before = true;
             lexer->advance(lexer, true);
         }
         // Mark the zero-width position BEFORE inspecting further, so a `/` that
@@ -312,6 +411,7 @@ bool tree_sitter_lambda_external_scanner_scan(
                 prev = lexer->lookahead;
                 lexer->advance(lexer, true);
             }
+            space_before = false;  // the byte before the token is the `/`
             if (closed) { continue; }
             return false;  // unterminated block comment
         }
@@ -398,7 +498,29 @@ bool tree_sitter_lambda_external_scanner_scan(
                 if (valid_symbols[INDEX_LBRACKET]) { return emit_op(lexer, INDEX_LBRACKET, 0, 0); }
                 break;
             case '{':
-                if (valid_symbols[OCCURRENCE_LBRACE]) { return emit_op(lexer, OCCURRENCE_LBRACE, 0, 0); }
+                // S11.1.6v2: a count binds tight and holds an integer
+                // (`int{2}`), exactly as C's `parser_at_counted_run` reads it.
+                // Any other brace after a type opens a body, a block or a map
+                // (`if x is int { … }`, `type T = int {2}`), so it takes the
+                // statement boundary a `{` start token would otherwise get.
+                // Both answers need the text past the `{`, so each is
+                // zero-width: the mark stays in front of the brace.
+                if (valid_symbols[OCCURRENCE_LBRACE]) {
+                    lexer->advance(lexer, false);
+                    if (!space_before && brace_holds_integer(lexer)) {
+                        lexer->result_symbol = OCCURRENCE_LBRACE;
+                        return true;
+                    }
+                    if (valid_symbols[ELEM_STMT_BOUNDARY]) {
+                        lexer->result_symbol = ELEM_STMT_BOUNDARY;
+                        return true;
+                    }
+                    if (valid_symbols[STMT_BOUNDARY]) {
+                        lexer->result_symbol = STMT_BOUNDARY;
+                        return true;
+                    }
+                    return false;
+                }
                 break;
             case '^':
                 // §3.6: `^` is followed either by nothing (propagate) or by a

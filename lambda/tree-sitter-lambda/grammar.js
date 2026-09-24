@@ -94,8 +94,8 @@ function binary_rules($, in_element) {
     ? choice($.primary_expr, $.unary_expr, $.not_expr,
         alias($.element_binary_expr, $.binary_expr))
     : $._expr;
-  const mk = (operator, precedence, assoc) => wrap(assoc)(precedence, seq(
-    field('left', operand), field('operator', operator), field('right', operand),
+  const mk = (operator, precedence, assoc, right = operand) => wrap(assoc)(precedence, seq(
+    field('left', operand), field('operator', operator), field('right', right),
   ));
   const wrap = assoc => (assoc === 'right' ? prec.right : prec.left);
   const rules = [
@@ -120,7 +120,12 @@ function binary_rules($, in_element) {
     // §7.1 removed unary `!` from value expressions, so infix `!` (set
     // exclusion) is unguarded: it can only continue.
     mk('!', 'set_exclude', 'left'),
-    mk('is', 'is_in', 'left'),
+    // S11.1.6v2: the right side of `is` is a boundary TYPE, as a `match` arm
+    // is, so `x is int?` and `x is int[]` keep their suffixes instead of
+    // reading as a query and a keyless index. As in the C parser's type slot,
+    // every suffix binds to that type: a same-line `+` or `*` after it is an
+    // occurrence, never arithmetic on the `is` result.
+    mk('is', 'is_in', 'left', $._type_pattern),
     mk('<:', 'is_in', 'left'),
     mk('in', 'is_in', 'left'),
     mk($._at, 'is_in', 'left'),
@@ -136,10 +141,13 @@ function binary_rules($, in_element) {
   return rules;
 }
 
-function type_operators(type_expr) {
+function type_operators($, type_expr) {
   return [
     ['|', 'set_union'],
-    ['&', 'set_intersect'],
+    // Where a type ends an expression (`x is int & number`) the scanner offers
+    // the guarded `&` first, so the type takes it too. A line-start `&` stays
+    // the plain token: in type space it can only continue, as in C.
+    [choice('&', alias($._bin_amp, '&')), 'set_intersect'],
     ['!', 'set_exclude'],
   ].map(([operator, precedence]) => prec.left(precedence, seq(
     field('left', type_expr),
@@ -147,6 +155,80 @@ function type_operators(type_expr) {
     field('right', type_expr),
   )));
 }
+
+// S11.1.1v3 / S11.1.6v2: a type's suffix chain, the grammar's counterpart of
+// the C parser's `apply_occurrence`. A lone occurrence takes any suffix
+// `single` admits. Array suffixes compose left to right after a `?` or another
+// array suffix (`int?[]`, `int[2][3]`), and a `?` after an array suffix is the
+// nullable array (`int[]?`). Nothing else chains: `int??` and `int[]??` are
+// errors, and so is `int+[]` -- the Type_Pattern §1.3 no-chaining rule, under
+// which an array of runs is grouped, `(int+)[]`. The chain is instantiated per
+// operand; `names` lists one instantiation's rules, each shown in the tree as
+// the general type's node.
+const TYPE_CHAIN = {
+  occurrence: 'occurrence_type', array: 'nullable_array_type',
+  nullable: 'optional_array_type', array_head: '_array_occurrence_type',
+  nullable_head: '_nullable_occurrence_type',
+};
+const RETURN_CHAIN = {
+  occurrence: '_return_occurrence_type', array: '_return_nullable_array_type',
+  nullable: '_return_optional_array_type', array_head: '_return_array_head',
+  nullable_head: '_return_nullable_head',
+};
+
+function suffix_chain(names, head, single) {
+  const shown = {
+    occurrence: 'occurrence_type', array: 'nullable_array_type',
+    nullable: 'optional_array_type', array_head: 'occurrence_type',
+    nullable_head: 'occurrence_type',
+  };
+  const link = ($, key) => names[key] === shown[key]
+    ? $[names[key]] : alias($[names[key]], $[shown[key]]);
+  return {
+    [names.occurrence]: $ => prec.dynamic(1, prec.right(seq(
+      field('operand', head($)), field('operator', single($)),
+    ))),
+    [names.array]: $ => prec.dynamic(2, prec.right(seq(
+      field('operand', choice(link($, 'nullable_head'), link($, 'array_head'),
+        link($, 'array'), link($, 'nullable'))),
+      field('operator', $.array_count),
+    ))),
+    [names.nullable]: $ => prec.dynamic(2, prec.right(seq(
+      field('operand', choice(link($, 'array_head'), link($, 'array'))),
+      field('operator', '?'),
+    ))),
+    // The two heads a chain continues from, each the occurrence type it is,
+    // spelled as its own symbol so no other lone suffix can continue.
+    [names.array_head]: $ => seq(field('operand', head($)),
+      field('operator', alias($._array_occurrence, $.occurrence))),
+    [names.nullable_head]: $ => seq(field('operand', head($)),
+      field('operator', alias($._nullable_occurrence, $.occurrence))),
+  };
+}
+
+// Every callable signature's parameter list, as C's `parse_parameter_items`
+// reads it: named parameters, then at most one rest parameter `...`, which
+// comes last, arrows included (S16.9.7); `,` is a strict separator
+// (S16.1.2v2), so `(, a)` and `(..., a)` are errors.
+function parameter_list($) {
+  const named = field('declare', alias($._named_parameter, $.parameter));
+  const rest = field('declare', alias($._rest_parameter, $.parameter));
+  return seq('(', optional(choice(
+    seq(named, repeat(seq(',', named)), optional(seq(',', rest))),
+    rest,
+  )), ')');
+}
+
+// A return contract: alternatives joined by `|`, `&` or `!`, then an optional
+// `^` error arm (`T^` any error, `T^E` a named one).
+const return_contract = pattern => $ => prec.right(seq(
+  field('ok', pattern($)),
+  optional(seq('^', optional(field('error', pattern($))))),
+));
+const return_alternatives = atom => $ => prec.left(seq(
+  field('type', atom($)),
+  repeat(seq(choice('|', '&', '!'), field('type', atom($)))),
+));
 
 module.exports = grammar({
   name: "lambda",
@@ -172,8 +254,9 @@ module.exports = grammar({
     $._bin_amp,
     $._call_lparen,
     $._index_lbracket,
-    // S11.1.6v2: the counted-occurrence opener, guarded exactly like the index
-    // bracket — a line-start `{` is a new statement, never a type suffix.
+    // S11.1.6v2: zero-width, in front of the `{` of a counted occurrence. Like
+    // the index bracket it is same-line only -- a line-start `{` is a new
+    // statement, never a type suffix -- and it also needs the brace bound tight.
     $._occurrence_lbrace,
     // Same line, or across a break for the S16.2.4 `.ident(` member-call form.
     $._member_dot,
@@ -195,6 +278,10 @@ module.exports = grammar({
     // a step or the end of the path follows, so `/b` (the retired `/a`
     // spelling) is an error rather than `/` plus a juxtaposed statement `b`.
     $._root_boundary,
+    // Never emitted: the dead end after a `let` outside a list (`_misplaced_let`).
+    // Visible, so the recovery prints `(MISSING let_outside_list)` -- a hidden
+    // missing token leaves no trace in the CLI output the S16 script reads.
+    $.let_outside_list,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -218,6 +305,13 @@ module.exports = grammar({
     // shape as the `_field_name` forks above.
     [$._key, $._stam_seq],
     [$._key, $.primary_expr],
+    // S2.5.1v2: `(x, y)` is a list and `(x, y) => …` an arrow head, so a bare
+    // name in a group is a parameter and an item at once until the `=>` (or
+    // its absence) decides. Parsing them side by side, rather than reading
+    // the head as expressions, keeps the head a plain parameter list. `...`
+    // forks the same way: an item, or the arrow's rest parameter.
+    [$._named_parameter, $.primary_expr],
+    [$._rest_parameter, $.primary_expr],
   ],
 
   supertypes: $ => [],
@@ -225,6 +319,7 @@ module.exports = grammar({
   inline: $ => [
     $._non_null_literal,
     $._parenthesized_expr,
+    $._list_item,
     $._number,
     $._key,
     // S16.6.6: inlined so the guard+expression pair never becomes a reduction
@@ -573,14 +668,15 @@ module.exports = grammar({
 
     // ============================ Expressions =============================
 
-    _parenthesized_expr: $ => seq(
-      '(',
-      choice(
-        $._expr,
-        seq(repeat1(prec(1, seq($.let_expr, ','))), $._expr),
-      ),
-      ')',
-    ),
+    // S2.5.1v2 / S2.5.5v2: a parenthesized comma list is a list literal. A
+    // group of one item is that item (`(x)` ≡ `x`) and `()` is the empty list,
+    // `null`. S2.5.4: a `let` item declares and contributes nothing, and each
+    // binding takes its own `let` (Design_Syntax §7.18), so `(let a = 1, b, c)`
+    // has one reading. `,` is a strict separator (S16.1.2v2).
+    _parenthesized_expr: $ => choice(seq('(', $._list_item, ')'), $.list),
+    list: $ => seq('(',
+      optional(seq($._list_item, repeat1(seq(',', $._list_item)))), ')'),
+    _list_item: $ => choice($.let_expr, $._expr),
 
     _expr: $ => choice(
       $.primary_expr,
@@ -638,7 +734,17 @@ module.exports = grammar({
       $.current_parent_expr,
       $.current_error_expr,
       $.variadic,
+      $._misplaced_let,
     )),
+
+    // S2.5.4v2 (USER 2026-09-24): `let` binds as an expression only as an item
+    // of a parenthesized list. It is a keyword, never a name, but tree-sitter
+    // lexes a keyword as an identifier wherever the parse state has no action
+    // for it, so `let a = let b = 2` read as `let a = let` and then `b = 2`.
+    // This dead end gives every expression position an action for `let`, and
+    // `let_outside_list` is never emitted, so a `let` there is an error, as
+    // in C.
+    _misplaced_let: $ => seq('let', $.let_outside_list),
 
     // Every postfix form below opens with a dual-role token, so each takes the
     // `_join` guard: on its own line, `(`, `[`, `.`, and `^` are S16.2.3
@@ -780,19 +886,26 @@ module.exports = grammar({
 
     // ============================= Functions ==============================
 
-    parameter: $ => choice(
-      seq(
-        optional(field('var', $.var_param_marker)),
-        field('name', choice($.identifier, $.symbol)),
-        optional(field('optional', '?')),
-        optional(seq(':', field('type', $._parameter_annotation_type))),
-        optional(seq('=', field('default', $._expr))),
-      ),
-      field('variadic', $.variadic),
-    ),
-
-    named_argument: $ => seq(
+    // A signature's lists go through `parameter_list`, which places the rest
+    // parameter; an event handler takes one parameter of either kind.
+    parameter: $ => choice($._named_parameter, $._rest_parameter),
+    // `primary_expr`'s precedence, so that a bare name or `...` in a group is
+    // a real GLR fork between parameter and item (see `conflicts`), not a
+    // reduction precedence settles before `=>` is seen.
+    _named_parameter: $ => prec(50, seq(
+      optional(field('var', $.var_param_marker)),
       field('name', choice($.identifier, $.symbol)),
+      optional(field('optional', '?')),
+      optional(seq(':', field('type', $._parameter_annotation_type))),
+      optional(seq('=', field('default', $._expr))),
+    )),
+    _rest_parameter: $ => prec(50, field('variadic', $.variadic)),
+
+    // `let` is a keyword wherever an expression may start (`_misplaced_let`),
+    // so it names an argument only by being admitted here, as C's `token_is_key`
+    // admits it: `f(let: 1)`.
+    named_argument: $ => seq(
+      field('name', choice($.identifier, $.symbol, alias('let', $.identifier))),
       ':',
       field('value', $._expr),
     ),
@@ -807,8 +920,7 @@ module.exports = grammar({
       optional(field('pub', 'pub')),
       field('kind', choice('fn', 'pn', 'function')),
       field('name', choice($.identifier, $.symbol)),
-      '(', optional(field('declare', $.parameter)),
-      repeat(seq(',', field('declare', $.parameter))), ')',
+      parameter_list($),
       optional(field('type', $.return_type)),
       field('body', $._body_block),
     ),
@@ -816,8 +928,7 @@ module.exports = grammar({
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')),
       field('kind', choice('fn', 'function')), field('name', choice($.identifier, $.symbol)),
-      '(', optional(seq(field('declare', $.parameter),
-        repeat(seq(',', field('declare', $.parameter))))), ')',
+      parameter_list($),
       optional(field('type', $.return_type)),
       '=>', field('body', $._expr_body),
     ),
@@ -825,18 +936,12 @@ module.exports = grammar({
     // The arrow body is an ordinary expression, and since `{...}` is now
     // interior-differentiated (§5.9v3) that covers both block bodies
     // (`(x) => { let y = x + 1 y }`) and map results (`(x) => {a: x}`).
-    fn_expr: $ => prec.right(choice(
-      prec.dynamic(1, seq(
-        '(', field('declare', $.parameter),
-        repeat(seq(',', field('declare', $.parameter))), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
-      )),
-      seq(
-        '(', $._expr, repeat(seq(',', $._expr)), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
-      ),
-      seq('(', ')', optional(field('type', $.return_type)),
-        '=>', field('body', $._expr_body)),
+    // The head is a parameter list and nothing else, as in C's
+    // `arrow_head_candidate`: `(x, y)` reads equally as parameters and as a
+    // list (see `conflicts`), and only `=>` or a return type settles it.
+    fn_expr: $ => prec.right(seq(
+      parameter_list($),
+      optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
     )),
 
     // ======================= Declarations and control =====================
@@ -1054,11 +1159,7 @@ module.exports = grammar({
       field('kind', token(prec(1, choice('view', 'edit')))),
       optional(seq(field('name', $.identifier), ':')),
       field('pattern', $.view_pattern),
-      optional(seq(
-        '(', optional(seq(field('declare', $.parameter),
-          repeat(seq(',', field('declare', $.parameter))))), ')',
-        optional(field('type', $.return_type)),
-      )),
+      optional(seq(parameter_list($), optional(field('type', $.return_type)))),
       optional(field('state', $.state_decl)),
       field('body', $._body_block),
       repeat(field('handler', $.event_handler)),
@@ -1099,38 +1200,65 @@ module.exports = grammar({
     ))),
     base_type: $ => choice($._base_type_kw, 'type'),
 
-    occurrence: $ => choice('?', '+', '*', $.occurrence_count, $.array_count),
+    occurrence: $ => choice($._uncounted_occurrence, $.occurrence_count),
+    // Every suffix but the `{n}` count, which a declaration's return type never
+    // takes. `+` and `*` are dual-role (S16.2.3), so as suffixes they carry the
+    // same-line guard their binary readings carry: `type T = int` ⏎ `+ 1` is an
+    // error, as in C, never `int+`. The guard is also what lets an `is` type
+    // keep its suffix, since the scanner offers the guarded token first.
+    _uncounted_occurrence: $ => choice('?', alias($._bin_plus, '+'),
+      alias($._bin_star, '*'), $.array_count),
     // S11.1.6v2/S16.8.6v3: a count on a *run* is the occurrence family —
     // `T{n}` exactly, `T{n,m}` between, `T{n+}` at least, the open form
     // echoing the bare `+` rather than regex's trailing comma; the brackets
     // are the array family (`T[]`, `T[n]`). `T[n+]` and `T[n, m]` are gone.
-    // Both openers take the same same-line guard as an index: `[` and `{` are
-    // dual-role in TYPE space too, so `type T = int` ⏎ `[3]` — or ⏎ `{a: 1}` —
-    // must be the S16.2.3 error rather than a silent continuation. This is
-    // O3's rule applied on the grammar side: type space shares the S16.2.2
-    // continuation set instead of keeping its own.
+    // Both openers take the same same-line guard as an index: `[` is dual-role
+    // in TYPE space too, so `type T = int` ⏎ `[3]` must be the S16.2.3 error
+    // rather than a silent continuation, and a line-start `{` is a new
+    // statement, never a count. This is O3's rule applied on the grammar side:
+    // type space shares the S16.2.2 continuation set instead of keeping its
+    // own. The `{` guard is zero-width: C counts a brace only when it touches
+    // the type and holds an integer (`int{2}`; `int {2}` is the type and a
+    // block), and the scanner must see past the brace to tell.
     occurrence_count: $ => prec(2, choice(
-      seq(alias($._occurrence_lbrace, '{'), $.integer, '}'),
-      seq(alias($._occurrence_lbrace, '{'), $.integer, '+', '}'),
-      seq(alias($._occurrence_lbrace, '{'), $.integer, ',', $.integer, '}'),
+      seq($._occurrence_lbrace, '{', $.integer, '}'),
+      seq($._occurrence_lbrace, '{', $.integer, '+', '}'),
+      seq($._occurrence_lbrace, '{', $.integer, ',', $.integer, '}'),
     )),
     array_count: $ => prec(2, choice(
       seq(alias($._index_lbracket, '['), ']'),
       seq(alias($._index_lbracket, '['), $.integer, ']'),
     )),
 
-    return_occurrence_type: $ => seq(
-      field('operand', choice($.base_type, $.identifier)),
-      optional(field('operator', $.occurrence)),
-    ),
-    return_type_pattern: $ => prec.left(seq(
-      field('type', $.return_occurrence_type),
-      repeat(seq(choice('|', '&', '!'), field('type', $.return_occurrence_type))),
-    )),
-    return_type: $ => prec.right(seq(
-      field('ok', $.return_type_pattern),
-      optional(seq('^', optional(field('error', $.return_type_pattern)))),
-    )),
+    // S11.1.1v3 / S11.1.6v2: a declaration's return type is a name with the
+    // suffix chain any type takes (`int[][]`, `int?[]`, `int[]?`) except the
+    // `{n}` count: after it a brace is always the body, spaced or tight, so a
+    // counted return type goes through a type alias (the S11.1.6v2
+    // conformance note; the C parser's LAMBDA_REDUCTION_FLAG_RETURN_TYPE).
+    // Right-associative like `unary_type`: where the type ends an `is`
+    // expression, a same-line `+` or `*` is the suffix, never arithmetic.
+    return_occurrence_type: $ => prec.right(choice($._return_name,
+      alias($._return_occurrence_type, $.occurrence_type),
+      alias($._return_nullable_array_type, $.nullable_array_type),
+      alias($._return_optional_array_type, $.optional_array_type))),
+    _return_name: $ => choice($.base_type, $.identifier),
+    ...suffix_chain(RETURN_CHAIN, $ => $._return_name,
+      $ => alias($._uncounted_occurrence, $.occurrence)),
+    return_type_pattern: return_alternatives($ => $.return_occurrence_type),
+    return_type: return_contract($ => $.return_type_pattern),
+    // A function TYPE has no body for the brace to open, so its return type
+    // takes the count too, as C's type slot does (`fn (x: int) int{2}`). A
+    // count never chains, so the counted name is one more alternative.
+    _fn_return_type: return_contract(
+      $ => alias($._fn_return_type_pattern, $.return_type_pattern)),
+    _fn_return_type_pattern: return_alternatives($ => choice(
+      $.return_occurrence_type,
+      alias($._counted_return_type, $.return_occurrence_type))),
+    _counted_return_type: $ => alias(seq(
+      field('operand', $._return_name),
+      field('operator', alias($._count_occurrence, $.occurrence)),
+    ), $.occurrence_type),
+    _count_occurrence: $ => $.occurrence_count,
 
     list_type: $ => prec.dynamic(2, seq(
       '(', seq($._binder_capable_type,
@@ -1170,13 +1298,16 @@ module.exports = grammar({
       field('name', $.identifier), seq(':', field('type', $._type_pattern)),
     ),
     // `fn` and `pn` function types are disjoint by colour; `function` is
-    // their union (S11.1.5).
-    fn_type: $ => seq(
+    // their union (S11.1.5). Alone, `fn` and `pn` are the colours themselves
+    // (`f is fn`), as in C's type slot; a signature carries a return type.
+    fn_type: $ => prec.right(seq(
       field('kind', choice('fn', 'pn')),
-      optional(seq('(', optional(field('declare', $.fn_param)),
-        repeat(seq(',', field('declare', $.fn_param))), ')')),
-      field('type', $.return_type),
-    ),
+      optional(seq(
+        optional(seq('(', optional(field('declare', $.fn_param)),
+          repeat(seq(',', field('declare', $.fn_param))), ')')),
+        field('type', alias($._fn_return_type, $.return_type)),
+      )),
+    )),
 
     range_type: $ => prec.left('range_to', seq(
       field('start', $._non_null_literal), 'to', field('end', $._non_null_literal),
@@ -1194,32 +1325,15 @@ module.exports = grammar({
       $.char_pattern_island,
     ),
 
-    occurrence_type: $ => prec.dynamic(1, prec.right(seq(
-      field('operand', $.primary_type), field('operator', $.occurrence),
-    ))),
-    // S11.1.1v3: array suffixes compose left to right, so an array suffix may
-    // follow any number of array suffixes (`int[2][3]` is three arrays of two)
-    // or a `?` (`int?[]` is an array of nullable ints).
-    nullable_array_type: $ => prec.dynamic(2, prec.right(seq(
-      field('operand', choice($.occurrence_type, $.nullable_array_type,
-        $.optional_array_type)),
-      field('operator', $.array_count),
-    ))),
-    // S11.1.6v2: `T?` is `T | null`, so a `?` after an array suffix is the
-    // nullable array (`int[]?`). Only an array suffix takes it, as in the C
-    // parser: `int??` and `int[]??` stay errors.
-    optional_array_type: $ => prec.dynamic(2, prec.right(seq(
-      field('operand', choice(alias($._array_occurrence_type, $.occurrence_type),
-        $.nullable_array_type)),
-      field('operator', '?'),
-    ))),
-    // `T[..]` as the head of `T[..]?`: the occurrence type it is, spelled as
-    // its own symbol so that no other single suffix can take the `?`.
-    _array_occurrence_type: $ => seq(
-      field('operand', $.primary_type),
-      field('operator', alias($._array_occurrence, $.occurrence)),
-    ),
-    _array_occurrence: $ => $.array_count,
+    // occurrence_type, nullable_array_type (`int[2][3]` is three arrays of
+    // two; `int?[]` an array of nullable ints) and optional_array_type (the
+    // nullable array `int[]?`, S11.1.6v2's `T | null`): see `suffix_chain`.
+    ...suffix_chain(TYPE_CHAIN, $ => $.primary_type, $ => $.occurrence),
+    // A chain head outranks the lone suffix it also spells: where an `is` type
+    // ends an arrow body, the next `[` or `?` continues the type, as in C's
+    // greedy type slot, rather than indexing or querying the arrow.
+    _array_occurrence: $ => prec(1, $.array_count),
+    _nullable_occurrence: _ => prec(1, '?'),
     negation_type: $ => prec.right(seq('!', field('operand', $.primary_type))),
 
     unary_type: $ => prec.right(choice(
@@ -1229,7 +1343,7 @@ module.exports = grammar({
       $.negation_type,
       $.primary_type,
     )),
-    binary_type: $ => choice(...type_operators($._type_pattern)),
+    binary_type: $ => choice(...type_operators($, $._type_pattern)),
 
     _type_pattern: $ => choice($.unary_type, $.binary_type, $.fn_type),
 
@@ -1326,7 +1440,7 @@ module.exports = grammar({
       choice($.char_unary_type, $.char_grouped_type),
       repeat1(choice($.char_unary_type, $.char_grouped_type)),
     )),
-    char_binary_type: $ => choice(...type_operators($._char_pattern_expr)),
+    char_binary_type: $ => choice(...type_operators($, $._char_pattern_expr)),
     char_unary_type: $ => prec.right(choice(
       $.char_occurrence_type,
       $.char_negation_type,

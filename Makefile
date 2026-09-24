@@ -205,7 +205,8 @@ TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 
 # Generate the reference parser outputs once. The generated parser is used only
 # by the isolated lambda-cst verifier; normal Lambda builds use the C parser.
-$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS) $(GRAMMAR_SCANNER_C)
+# `tree-sitter generate` never reads scanner.c; the archive rule below owns it.
+$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Tree-sitter library targets
@@ -302,8 +303,10 @@ $(TREE_SITTER_LIB):
 	rm -f tree_sitter.o
 	@echo "✅ tree-sitter library built: lambda/tree-sitter/libtree-sitter.a"
 
-# Build tree-sitter-lambda library (depends on parser generation)
-$(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
+# Build tree-sitter-lambda library (depends on parser generation). The external
+# scanner is compiled into the same archive, so a scanner-only edit rebuilds it
+# directly instead of through a no-op regeneration of parser.c.
+$(TREE_SITTER_LAMBDA_LIB): $(PARSER_C) $(GRAMMAR_SCANNER_C)
 	# pass the pinned CLI because the sub-make otherwise falls back to an unqualified tree-sitter
 	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_CLI)")
 
@@ -1125,7 +1128,7 @@ test-node-module-architecture-checker:
 	@python3 utils/check_node_module_architecture.py --require-module-binary
 
 test-premake-generator:
-	@python3 utils/test_premake_generator.py
+	@PREMAKE5_BIN="$(PREMAKE5_BIN)" python3 utils/test_premake_generator.py
 
 # Node module coverage must stay independent from JavaScript runtime coverage.
 .PHONY: test-js-node-test-separation

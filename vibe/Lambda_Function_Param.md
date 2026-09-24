@@ -409,6 +409,14 @@ fn printf(fmt, ...) {
 
 **Note**: `arg()` for full argument introspection is reserved for future.
 
+**Anonymous arrows (USER, 2026-09-24; S16.9.7).** An arrow takes a rest
+parameter as a named function does — `(...) => len(varg())`,
+`(x, ...) => x + len(varg())` — and `varg()` reads the innermost callable's
+own rest arguments, never an enclosing function's. `...` closes the list: one
+at most, nothing after it, in every parameter list. The C parser had parsed
+arrow heads with `allow_variadic = false`; fixture
+`test/lambda/arrow_variadic.ls`.
+
 ---
 
 ## 4. Named Arguments

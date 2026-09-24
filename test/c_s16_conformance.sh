@@ -277,6 +277,93 @@ run A "rank chain in an annotation"        'let g: int[2][3] = [[1, 2], [3, 4], 
 run R "two ? never meet"                   'type G = int??\n'
 run R "no ? after a nullable array"        'type G = int[]??\n'
 run R "no run count after an array"        'type G = int[]+\n'
+# Type_Pattern §1.3 no-chaining rule (USER 2026-09-24): only `?` or an array
+# suffix may precede an array suffix; an array of runs is grouped.
+run R "no array after a run"               'type G = int+[]\n'
+run R "no array after a star run"          'type G = int*[]\n'
+run R "no array after a counted run"       'type G = int{2}[]\n'
+run A "a grouped run takes an array"       'type G = (int+)[]\n'
+# S11.1.6v2 conformance note: a count binds tight and holds an integer, as in
+# C's parser_at_counted_run; any other brace after a type is a new statement.
+run A "spaced map after a type alias"      'type T = int {a: 1}\n1\n'
+run A "tight map after a type alias"       'type T = int{a: 1}\n1\n'
+# S16.2.3: `+` and `*` are dual-role in type space too.
+run R "line-start + ends a type"           'type T = int\n+ 1\n'
+run R "line-start * ends a type"           'type T = int\n* 1\n'
+
+echo "--- S11.1.6v2 / S11.1.5 the right side of is is a type ---"
+run A "is takes a nullable type"           'let a = 1 is int?\n'
+run A "is takes a nullable type in parens" 'let a = (1 is int?)\na\n'
+run A "is takes an array type"             'let a = [1] is int[]\n'
+run A "is takes a rank chain"              'let a = [[1]] is int[][]\n'
+run A "is takes a nullable array"          'let a = null is int[]?\n'
+run A "is takes an array of nullables"     'let a = [1] is int?[]\n'
+run A "is takes a counted run"             'let a = [1, 2] is int{2}\n'
+run A "is takes a negated type"            'let a = 1 is !int\n'
+run A "is takes the type keyword"          'let a = 1 is type\n'
+run A "is takes a bare fn colour"          'let f = (x) => x\nlet a = f is fn\n'
+run A "match arm takes a bare fn colour"   'let f = (x) => x\nmatch f { case fn: 1 default: 0 }\n'
+run A "a bare pn colour is a type"         'type P = pn\n1\n'
+run R "is rejects a negative value"        'let a = 1 is -1\n'
+run R "is rejects a call"                  'let x = 3\nlet a = x is type(x)\n'
+run A "spaced brace after an is type: body" 'let x = 3\nif x is int { 1 }\n'
+
+echo "--- S11.1.1v3 / S11.1.6v2 return types ---"
+run A "pn return type then body"           'pn f(k: int) int { return k }\npn main() { f(1) }\n'
+run A "fn return type then body"           'fn f(k: int) int { k }\nf(1)\n'
+run A "tight brace after a return: body"   'fn f() int{1}\nf()\n'
+run A "fn type return takes a count"       'fn h(f: fn (x: int) int{2}) { 1 }\nh\n'
+run A "return type rank chain"             'fn f() int[][] { [[1]] }\nf()\n'
+run A "return type array of nullables"     'fn g() int?[] { [1] }\ng()\n'
+run A "return type nullable array"         'fn h() int[]? { null }\nh()\n'
+run A "error arm after a chained return"   'fn e() int[]? ^ error { null }\ne()\n'
+run R "no run suffix after a return array" 'fn f() int[]+ { [1] }\nf()\n'
+
+echo "--- S2.5.1v2 / S2.5.4 / S2.5.5v2 list literals (LR02-18) ---"
+run A "list literal"                       'let a = (1, 2)\na\n'
+run A "list literal statement"             '(1, 2)\n'
+run A "empty list is null"                 'let a = ()\na\n'
+run A "let-group keeps every item"         'let a = (let x = 1, x, 2)\na\n'
+run A "let item after an item"             'let a = (1, let x = 2, x)\na\n'
+run A "declaration-only group"             'let a = (let x = 1, let y = 2)\na\n'
+run A "decomposition in a list"            'let a = (let p, q = [1, 2], p + q)\na\n'
+run R "each binding takes its own let"     'let a = (let p = 1, q = 2, p + q)\na\n'
+run R "trailing , banned (list)"           'let a = (1, 2,)\na\n'
+run R "empty , slot banned (list)"         'let a = (1, , 2)\na\n'
+run A "lists in lists"                     'let a = ((1, 2), (3, 4))\na\n'
+run A "list spans lines"                   'let a = (\n1,\n2\n)\na\n'
+run R "line-start ( list is dual-role"     'let a = 1\n(2, 3)\n'
+run A "closed: fn body then list line"     'fn g() { 1 }\n(1, 2)\n'
+run A "arrow body is a list"               'let f = (x) => (x, x)\nf(1)\n'
+
+echo "--- arrow heads are parameter lists ---"
+run A "untyped head with return type"      'let f = (x) int => x\nf(1)\n'
+run A "two-name head with return type"     'let f = (a, b) int => a\nf(1, 2)\n'
+run A "empty head with return type"        'let f = () int => 1\nf()\n'
+run A "mixed head with return type"        'let f = (x, y: int) int => x\nf(1, 2)\n'
+run A "return type opens the next line"    'let f = (x)\nint => x\nf(1)\n'
+run R "head of values is no arrow"         'let f = (1, 2) => 3\n'
+run R "head of a member is no arrow"       'let f = (a.b) => 1\n'
+
+echo "--- S2.5.4v2 let binds only as a list item ---"
+run R "no let in an array literal"         'let a = [let x = 1, x]\na\n'
+run R "no let as an argument"              'let f = (x) => x\nlet a = f(let x = 1)\na\n'
+run R "no let as a binding value"          'let a = let b = 2\na\n'
+run R "no let as an operand"               'let a = 1 + let x = 2\na\n'
+run R "no let as an if condition"          'let a = if (let x = 1) 2 else 3\na\n'
+run R "let is never a name"                'let a = let\n'
+run A "let still names an argument"        'let f = (x) => x\nlet a = f(let: 1)\na\n'
+run A "let clause in a for head"           'let a = [for (x in [1, 2], let y = x * 2) y]\na\n'
+
+echo "--- S16.9.7 a rest parameter closes a parameter list ---"
+run A "rest-only arrow head"               'let f = (...) => len(varg())\nf(1, 2)\n'
+run A "arrow head ends with a rest"        'let f = (a, ...) => a\nf(1, 2)\n'
+run A "rest head with a return type"       'let f = (...) int => 1\nf()\n'
+run A "a bare ... is still an item"        'let a = (...)\na\n'
+run R "rest parameter comes last"          'let f = (..., a) => a\n'
+run R "one rest parameter"                 'let f = (..., ...) => 1\n'
+run R "rest last in a declaration"         'fn f(..., a) { 1 }\n'
+run R "no leading , in parameters"         'fn f(, a) { 1 }\n'
 
 echo
 echo "pass=$pass fail=$fail"

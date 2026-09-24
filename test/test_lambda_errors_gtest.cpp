@@ -1768,6 +1768,12 @@ TEST_F(NegativeScriptTest, SyntaxError_PathRetiredRooted) {
     ExpectErrorCode("test/lambda/negative/syntax/path_retired_rooted.ls", "error[E100]");
 }
 
+TEST_F(NegativeScriptTest, SyntaxError_LetOutsideList) {
+    ExpectErrorCode("test/lambda/negative/syntax/let_outside_list.ls", "error[E100]");
+    ExpectErrorMessage("test/lambda/negative/syntax/let_outside_list.ls",
+        "'let' binds as an expression only inside a parenthesized list");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_ImportSlashSeparator) {
     ExpectErrorMessage("test/lambda/negative/syntax/import_slash_separator.ls",
         "import paths separate names with '.'");

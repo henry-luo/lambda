@@ -30,12 +30,20 @@ SEMANTIC_CAMPAIGNS = {
 }
 
 
+def strip_c_comments(source: str) -> str:
+    # one alternation, so whichever comment opens first wins, as in C
+    return re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.DOTALL)
+
+
 def enum_values(path: Path, declaration: str, prefix: str) -> list[str]:
     source = path.read_text(encoding="utf-8")
     start = source.find(declaration)
     if start < 0:
         raise ValueError(f"missing declaration {declaration} in {path}")
-    block = source[start:]
+    # Comments are not declarations: a `}` inside one (`open t = doc { ... }`
+    # in LambdaReductionForm) cut the block short, and a name inside one
+    # (`AST_FOR` in AstNodeType) counted as a value.
+    block = strip_c_comments(source[start:])
     end = block.find("}")
     if end < 0:
         raise ValueError(f"unterminated declaration {declaration} in {path}")

@@ -412,7 +412,7 @@ change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
 
-<a id="lr02-18"></a>**LR02-18 · The Tree-sitter reference grammar has no list literal (S2.5.1v2, S2.5.5v2) · OPEN (found 2026-09-22)**
+<a id="lr02-18"></a>**LR02-18 · The Tree-sitter reference grammar has no list literal (S2.5.1v2, S2.5.5v2) · FIXED 2026-09-24**
 `grammar.js` `_parenthesized_expr` admits one expression, optionally after
 `let` bindings, so `(1, 2)` parses as `ERROR` in the `lambda-cst` verifier's
 grammar (checked with `tree-sitter parse`, 2026-09-22); `()` is rejected with
@@ -422,6 +422,14 @@ it. The C parser accepts both (`()` since P1 of
 so the divergence is unguarded. Fix belongs with the grammar work of P5
 (`make generate-grammar`), with accept cases for `()`, `(a, b)` and
 `(let x = 1, x, 2)` in both scripts.
+*Fixed 2026-09-24 (grammar side; C unchanged):* a `list` node takes `()` and
+two or more items, each a `let` or an expression in any order; `(x)` stays
+the item. An arrow head is now a parameter list only (a GLR fork against the
+group, as C's `arrow_head_candidate`), and the scanner no longer starts a
+statement at a return type closed by `=>`, since `()` and `(a, b)` share the
+arrow's state. That also fixed `(x) int => x` and `(x, y: int) int => x`
+(rejected before) and `(1, 2) => 3` (accepted before). Pinned in both scripts'
+"list literals (LR02-18)" and "arrow heads are parameter lists" sections.
 
 <a id="lr02-19"></a>**LR02-19 · A let-group kept only its last item; a lone declaration was a value (S2.5.4, S2.5.5v2) · FIXED 2026-09-22**
 `direct_let_group` (`build_ast.cpp`) kept one non-declaration item — the
@@ -437,6 +445,39 @@ block is `null` and splices nothing in an item position. No script or
 package in the corpus used a multi-item let-group or a lone-declaration
 group (instrumented scan, 2026-09-22). Fixture:
 `test/lambda/list_declarations.ls`.
+
+<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.2v3) · OPEN (found 2026-09-24)**
+`lambda_parser.c` gathers the children of a flat reduction in fixed
+proof-of-concept stack buffers, so it rejects valid source the reference
+grammar accepts. `parse_group_or_arrow` (`children[64]`, :1127) fails a
+65-item list literal `(0, 1, …, 64)` with E100 "too many grouped expressions
+in parser POC"; `parse_element` (`children[64]`, :943) caps attributes plus
+the content child (:970, :1010); `parser_parse_postfix_delimited`
+(`children[65]`, :1625) caps call arguments and index dimensions (:1631); and
+`parse_assignment_clause` (`LambdaToken names[64]`, :1467) caps decomposition
+names (:1484). A 65-item array parses, because `parse_array` builds its items
+as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.2v3
+the C side is wrong; `lambda-cst` reports such a list as `missing` (grammar
+accepts, RD rejects). It surfaced once LR02-18 gave the grammar list
+literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
+`parse_crud_statement` caps comma-joined `put`/`del` edits at
+`LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
+confirm it is unintended before lifting it.
+*Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
+`children` by pointer and count to a synchronous sink, `direct_tape_reduce`
+(`build_ast.cpp:8074`) copies children and name tokens into the arena sized
+by count, and the GROUP/ELEMENT/POSTFIX/LET tape handlers walk `child_count`.
+A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
+(rest parameters exempt), whose `binder_env`/`resolved` arrays are
+bounds-checked. A growable buffer with inline storage keeps every reduction
+byte-identical; switching to `parser_list_append` chains would change the
+GROUP/ELEMENT/CALL shapes that `build_ast` and the `child_count` assertions in
+`test/test_lambda_parser_poc_gtest.cpp` rely on. The parser links only libc
+(`lambda-cst` and the parser POC gtest build the parser sources alone), and a
+heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
+`children[65]` (:1674) only ever uses slot 0. Pin the fix with mirrored accept
+cases (a 65-item list literal, 65 call arguments) in both S16 conformance
+scripts.
 
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
