@@ -2051,19 +2051,33 @@ static Item js_bigint_to_index(Item value, int64_t* out_bits) {
 static Item js_bigint_as_n(Item bits_item, Item bigint_item, bool signed_result) {
     int64_t bits = 0;
     JS_ASSIGN_OR_RETURN(index_status, js_bigint_to_index(bits_item, &bits));
+    // Every BigInt below is a fresh heap value that a later allocating step
+    // still reads; unrooted, a collection freed them and the result read as 0.
+    JS_ROOTS(roots,
+        value_root, ItemNull,
+        two_root, ItemNull,
+        exp_root, ItemNull,
+        modulus_root, ItemNull,
+        mod_root, ItemNull,
+        zero_root, ItemNull);
     JS_ASSIGN_OR_RETURN(bigint_val, js_to_bigint_for_bigint_op(bigint_item));
+    value_root.set(bigint_val);
     if (bits == 0) return bigint_from_int64(0);
-    Item two = bigint_from_int64(2);
-    Item exp = bigint_from_int64(bits);
-    Item modulus = bigint_pow(two, exp);
-    Item mod = bigint_mod(bigint_val, modulus);
-    if (bigint_cmp(mod, bigint_from_int64(0)) < 0)
-        mod = bigint_add(mod, modulus);
+    two_root.set(bigint_from_int64(2));
+    exp_root.set(bigint_from_int64(bits));
+    modulus_root.set(bigint_pow(two_root.get(), exp_root.get()));
+    mod_root.set(bigint_mod(value_root.get(), modulus_root.get()));
+    zero_root.set(bigint_from_int64(0));
+    if (bigint_cmp(mod_root.get(), zero_root.get()) < 0)
+        mod_root.set(bigint_add(mod_root.get(), modulus_root.get()));
     if (signed_result) {
-        Item half = bigint_pow(two, bigint_from_int64(bits - 1));
-        if (bigint_cmp(mod, half) >= 0) return bigint_sub(mod, modulus);
+        exp_root.set(bigint_from_int64(bits - 1));
+        Item half = bigint_pow(two_root.get(), exp_root.get());
+        if (bigint_cmp(mod_root.get(), half) >= 0) {
+            return bigint_sub(mod_root.get(), modulus_root.get());
+        }
     }
-    return mod;
+    return mod_root.get();
 }
 
 // BigInt.asIntN applies the sign bit after mathematical modulo.

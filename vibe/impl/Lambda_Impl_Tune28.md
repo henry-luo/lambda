@@ -984,6 +984,23 @@ of noise on a 7 ms row, not of the change. hyphen and base64 are not
 and is not the lever. Part (c), borrowed substring views, changes string
 representation and needs its own round.
 
+**Follow-up (2026-09-24): `replace()` and `find()` join the kernel.** Their literal paths still ran the pre-T28-5 loop — a count pass, then a copy (or collect) pass, each calling `memcmp` at every byte position. revcomp's complement is a chain of 18 one-character `replace()` calls, and that chain was 0.79 of revcomp2's 0.99 ms; regexredux's IUPAC expansion is 11 more. The kernel is now `literal_find`: it takes `ignore_case` (ASCII folding probes every position, since `memchr` cannot fold case) and serves `split`, `replace` and `find` (rule 13). `count_literal_matches` absorbs `split_literal_match_count` and counts a one-byte needle with the SWAR `str_count_byte`, because a dense needle ("A" in DNA) would otherwise pay a `memchr` call per match. A one-byte-for-one-byte `replace()` of every match skips the search altogether: `translate_byte` is a branch-free select that clang vectorizes (NEON `cmeq.16b`/`bit.16b`, 64 bytes per iteration in the release binary).
+
+**Correctness.** A 4,000-case differential fuzz of `replace`/`find`/`split` — a dense six-letter alphabet that includes a two-byte UTF-8 letter, one- to three-letter needles, every option kind, and the keep-delimiter split — is byte-identical to the control. `test/lambda/find_replace_options.ls` gains overlapping, near-miss, translate, symbol, window and UTF-8 cases. The regression pin now names `literal_find` and also asserts that `fn_replace_impl` and `fn_find_impl` call it.
+
+**Measured** against the same HEAD built without the change: release, `LAMBDA_TIER=jit`, median of 7 runs (5 for the last two rows):
+
+| Row | before (ms) | after (ms) | speedup |
+|---|---:|---:|---:|
+| beng/revcomp2 | 1.284 | 0.201 | 6.39x |
+| beng/revcomp | 1.263 | 0.305 | 4.14x |
+| beng/regexredux2 | 1.181 | 0.607 | 1.95x |
+| beng/regexredux | 1.435 | 0.664 | 2.16x |
+| text/three_way_merge2 | 1976 | 1846 | 1.07x |
+| text/prettier_ast2 | 518.7 | 493.0 | 1.05x |
+
+knucleotide2 and log_pipeline2 read 0.98x on interleaved runs with overlapping ranges; log_pipeline2 calls none of the three builtins, so that is noise. What remains of regexredux is mostly its nine case-insensitive pattern `find()`s, which run in RE2.
+
 
 ### 9.11 T28-4 follow-on — inlining the module-state lookup: built, measured, REVERTED
 

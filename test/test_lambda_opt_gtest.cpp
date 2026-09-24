@@ -385,16 +385,25 @@ TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
     // non-bytewise implementation pinned beside its semantic fixture: scan to
     // the next first-byte hit, skip memcmp for one-byte delimiters, and compare
     // only the remaining candidate suffix.
-    size_t kernel_start = runtime_source.find("static size_t split_literal_find(");
+    size_t kernel_start = runtime_source.find("static size_t literal_find(");
     ASSERT_NE(kernel_start, std::string::npos);
-    size_t kernel_end = runtime_source.find("\n}\n\nstatic int64_t split_literal_match_count",
-        kernel_start);
+    size_t kernel_end = runtime_source.find("\n}\n", kernel_start);
     ASSERT_NE(kernel_end, std::string::npos);
     std::string kernel = runtime_source.substr(kernel_start, kernel_end - kernel_start);
     EXPECT_NE(kernel.find("memchr(chars + from, first"), std::string::npos);
-    EXPECT_NE(kernel.find("if (separator_len == 1 ||"), std::string::npos);
-    EXPECT_NE(kernel.find("memcmp(hit + 1, separator + 1, separator_len - 1)"),
+    EXPECT_NE(kernel.find("if (needle_len == 1 ||"), std::string::npos);
+    EXPECT_NE(kernel.find("memcmp(hit + 1, needle + 1, needle_len - 1)"),
         std::string::npos);
+    // The literal replace() and find() paths share the kernel; before they did,
+    // both called memcmp at every byte (four fifths of revcomp).
+    size_t replace_start = runtime_source.find("static Item fn_replace_impl(");
+    size_t find_start = runtime_source.find("static Item fn_find_impl(");
+    ASSERT_NE(replace_start, std::string::npos);
+    ASSERT_NE(find_start, std::string::npos);
+    size_t replace_end = runtime_source.find("\n}\n", replace_start);
+    size_t find_end = runtime_source.find("\n}\n", find_start);
+    EXPECT_LT(runtime_source.find("literal_find(", replace_start), replace_end);
+    EXPECT_LT(runtime_source.find("literal_find(", find_start), find_end);
 }
 
 // A self-referential record contract with a typed recursive traversal. The

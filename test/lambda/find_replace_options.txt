@@ -57,3 +57,38 @@
 "Y--Y--aB"
 12
 "ab--AB--Y"
+'Test 5: Literal Scan Paths'
+13
+"bb"
+14
+"ba"
+15
+[{
+    value: "aa",
+    index: 0
+  }, {
+    value: "aa",
+    index: 2
+  }]
+16
+"aX"
+17
+"TCGTTGCT"
+18
+"the quick br0wn f0x jumps 0ver the lazy d0g, the quick br0wn f0x jumps!"
+19
+'a-b-c'
+20
+"x-x-X-"
+21
+"a.bcd"
+22
+"naïve cafe"
+23
+[{
+    value: "-",
+    index: 3
+  }, {
+    value: "-",
+    index: 4
+  }]

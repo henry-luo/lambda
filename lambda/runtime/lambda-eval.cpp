@@ -6890,31 +6890,47 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
     return part;
 }
 
-// T28-5 (N5): the one literal-separator scan kernel. Returns the index of the
-// leftmost occurrence of `separator` starting at or after `from`, or SIZE_MAX.
-// `memchr` locates the separator's first byte -- libc vectorizes it -- so each
-// candidate costs one `memcmp` over the remaining bytes, and a one-byte
-// separator costs none. The byte-at-a-time loops this replaces called `memcmp`
-// at EVERY position, so splitting on a single character paid a library call
-// per source byte, and paid it twice (the count pass, then the split pass):
-// on three_way_merge that was a quarter of the whole run.
-// Leftmost-first like the loops it replaces; callers step past a match by
-// `separator_len`, which keeps matches non-overlapping.
-static size_t split_literal_find(const char* chars, size_t chars_len,
-        size_t from, const char* separator, size_t separator_len) {
-    if (!chars || !separator || separator_len == 0 ||
-            separator_len > chars_len) {
+static unsigned char ascii_case_fold(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
+}
+
+// T28-5 (N5): the one literal scan kernel, shared by split(), replace() and
+// find(). Returns the index of the leftmost occurrence of `needle` starting at
+// or after `from`, or SIZE_MAX. `memchr` locates the needle's first byte --
+// libc vectorizes it -- so each candidate costs one `memcmp` over the
+// remaining bytes, and a one-byte needle costs none. The byte-at-a-time loops
+// this replaces called `memcmp` at EVERY position, so a one-character search
+// paid a library call per source byte, and paid it twice (the count pass,
+// then the split/replace pass): a quarter of three_way_merge, and four fifths
+// of revcomp, whose complement is a chain of replace() calls.
+// memchr cannot fold case, so `ignore_case` (ASCII folding) probes every
+// position. Leftmost-first like the loops it replaces; callers step past a
+// match by `needle_len`, which keeps matches non-overlapping.
+static size_t literal_find(const char* chars, size_t chars_len, size_t from,
+        const char* needle, size_t needle_len, bool ignore_case) {
+    if (!chars || !needle || needle_len == 0 || needle_len > chars_len) {
         return SIZE_MAX;
     }
-    size_t last = chars_len - separator_len;   // last index a match may start at
-    const unsigned char first = (unsigned char)separator[0];
+    size_t last = chars_len - needle_len;   // last index a match may start at
+    if (ignore_case) {
+        for (; from <= last; from++) {
+            size_t i = 0;
+            while (i < needle_len && ascii_case_fold((unsigned char)chars[from + i]) ==
+                    ascii_case_fold((unsigned char)needle[i])) {
+                i++;
+            }
+            if (i == needle_len) return from;
+        }
+        return SIZE_MAX;
+    }
+    const unsigned char first = (unsigned char)needle[0];
     while (from <= last) {
         const char* hit = (const char*)memchr(chars + from, first,
             last - from + 1);
         if (!hit) return SIZE_MAX;
         size_t at = (size_t)(hit - chars);
-        if (separator_len == 1 ||
-                memcmp(hit + 1, separator + 1, separator_len - 1) == 0) {
+        if (needle_len == 1 ||
+                memcmp(hit + 1, needle + 1, needle_len - 1) == 0) {
             return at;
         }
         from = at + 1;
@@ -6922,19 +6938,24 @@ static size_t split_literal_find(const char* chars, size_t chars_len,
     return SIZE_MAX;
 }
 
-static int64_t split_literal_match_count(const char* chars, size_t chars_len,
-        const char* separator, size_t separator_len) {
-    if (!chars || !separator || separator_len == 0) return 0;
+// Non-overlapping match count: split()'s part count, replace()'s output size
+// and find()'s window total. A one-byte needle goes to the SWAR byte counter,
+// because a dense one ("A" in DNA) would pay a memchr call per match.
+static int64_t count_literal_matches(const char* chars, size_t chars_len,
+        const char* needle, size_t needle_len, bool ignore_case) {
+    if (!chars || !needle || needle_len == 0 || needle_len > chars_len) return 0;
+    if (needle_len == 1 && !ignore_case) {
+        return (int64_t)str_count_byte(chars, chars_len, needle[0]);
+    }
     int64_t count = 0;
     size_t pos = 0;
     for (;;) {
-        size_t at = split_literal_find(chars, chars_len, pos, separator,
-            separator_len);
-        if (at == SIZE_MAX) break;
+        size_t at = literal_find(chars, chars_len, pos, needle, needle_len,
+            ignore_case);
+        if (at == SIZE_MAX) return count;
         count++;
-        pos = at + separator_len;
+        pos = at + needle_len;
     }
-    return count;
 }
 
 static int64_t split_whitespace_part_count(const char* chars, size_t chars_len) {
@@ -7128,8 +7149,8 @@ Item fn_split(Item str_item, Item sep_item) {
     // split by separator
     const char* source_chars = rooted_str.get().get_chars();
     const char* separator_chars = rooted_sep.get().get_chars();
-    int64_t part_count = split_literal_match_count(source_chars, str_len,
-        separator_chars, sep_len) + 1;
+    int64_t part_count = count_literal_matches(source_chars, str_len,
+        separator_chars, sep_len, false) + 1;
     (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
     size_t start = 0;
     size_t p = 0;
@@ -7140,7 +7161,7 @@ Item fn_split(Item str_item, Item sep_item) {
         // in indices.
         const char* str_chars = rooted_str.get().get_chars();
         const char* sep_chars = rooted_sep.get().get_chars();
-        size_t at = split_literal_find(str_chars, str_len, p, sep_chars, sep_len);
+        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len, false);
         if (at == SIZE_MAX) break;
         String* part = split_heap_string_slice(rooted_str, start, at - start,
             source_is_ascii);
@@ -7236,8 +7257,8 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
     bool source_is_ascii = text_item_is_ascii(rooted_str.get());
     bool separator_is_ascii = text_item_is_ascii(rooted_sep.get());
-    int64_t match_count = split_literal_match_count(rooted_str.get().get_chars(), str_len,
-        rooted_sep.get().get_chars(), sep_len);
+    int64_t match_count = count_literal_matches(rooted_str.get().get_chars(), str_len,
+        rooted_sep.get().get_chars(), sep_len, false);
     (void)array_reserve_append_slots((Array*)rooted_result.get(),
         match_count * 2 + 1);
     size_t start = 0;
@@ -7247,7 +7268,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         // re-read after every allocating round, as in fn_split
         const char* str_chars = rooted_str.get().get_chars();
         const char* sep_chars = rooted_sep.get().get_chars();
-        size_t at = split_literal_find(str_chars, str_len, p, sep_chars, sep_len);
+        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len, false);
         if (at == SIZE_MAX) break;
         // push part before separator
         String* part = split_heap_string_slice(rooted_str, start, at - start,
@@ -7510,20 +7531,6 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     return true;
 }
 
-static unsigned char ascii_case_fold(unsigned char c) {
-    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
-}
-
-static bool literal_match_at(const char* src, const char* needle, size_t len, bool ignore_case) {
-    if (!ignore_case) return memcmp(src, needle, len) == 0;
-    for (size_t i = 0; i < len; i++) {
-        if (ascii_case_fold((unsigned char)src[i]) != ascii_case_fold((unsigned char)needle[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 static int64_t options_legacy_pattern_limit(FindReplaceOptions options) {
     if (options.has_last) return options.last == 0 ? 0 : -options.last;
     if (options.has_limit) return options.limit;
@@ -7555,24 +7562,6 @@ static void select_match_window(int64_t total, FindReplaceOptions options, int64
     }
 }
 
-static int64_t count_literal_matches(const char* str_chars, size_t str_len,
-                                     const char* needle, size_t needle_len,
-                                     bool ignore_case) {
-    if (!str_chars || !needle || str_len == 0 || needle_len == 0 || needle_len > str_len) return 0;
-    int64_t count = 0;
-    const char* p = str_chars;
-    const char* end = str_chars + str_len;
-    while (p <= end - needle_len) {
-        if (literal_match_at(p, needle, needle_len, ignore_case)) {
-            count++;
-            p += needle_len;
-        } else {
-            p++;
-        }
-    }
-    return count;
-}
-
 static bool item_string_is_ascii(Item item, TypeId item_type) {
     if (item_type == LMD_TYPE_NULL || item_type == LMD_TYPE_SYMBOL) return true;
     if (item_type != LMD_TYPE_STRING) return false;
@@ -7602,6 +7591,14 @@ static TypePattern* runtime_pattern_from_type(Type* type) {
     const char* error_msg = nullptr;
     return compile_literal_type_pattern(context ? context->pool : nullptr,
         type, false, &error_msg);
+}
+
+// replace() of one byte by one byte at every match: a branch-free select over
+// the whole source, which the compiler vectorizes (NEON/SSE2), instead of a
+// search per match -- DNA complement chains match every third or fourth byte.
+static void translate_byte(char* __restrict dest, const char* __restrict src,
+        size_t len, char from, char to) {
+    for (size_t i = 0; i < len; i++) dest[i] = src[i] == from ? to : src[i];
 }
 
 static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindReplaceOptions options) {
@@ -7706,30 +7703,37 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         dest = result->chars;
     }
 
-    const char* p = str_chars;
-    const char* end = str_chars + str_len;
-    int64_t ordinal = 0;
-    int64_t replaced = 0;
-    while (p <= end - old_len) {
-        if (literal_match_at(p, old_chars, old_len, options.ignore_case)) {
-            bool selected = ordinal >= first && replaced < replace_count;
-            if (selected) {
+    if (old_len == 1 && replacement_len == 1 && !options.ignore_case &&
+            replace_count == total) {
+        translate_byte(dest, str_chars, str_len, old_chars[0], new_chars[0]);
+        dest += str_len;
+    } else {
+        // Copy the span before each selected match, then its replacement;
+        // matches outside the window stay inside the copied spans.
+        size_t copied = 0;
+        size_t pos = 0;
+        int64_t ordinal = 0;
+        int64_t replaced = 0;
+        while (replaced < replace_count) {
+            size_t at = literal_find(str_chars, str_len, pos, old_chars,
+                old_len, options.ignore_case);
+            if (at == SIZE_MAX) break;
+            if (ordinal >= first) {
+                memcpy(dest, str_chars + copied, at - copied);
+                dest += at - copied;
                 if (replacement_len > 0) {
                     memcpy(dest, new_chars, replacement_len);
                     dest += replacement_len;
                 }
+                copied = at + old_len;
                 replaced++;
-            } else {
-                memcpy(dest, p, old_len);
-                dest += old_len;
             }
             ordinal++;
-            p += old_len;
-        } else {
-            *dest++ = *p++;
+            pos = at + old_len;
         }
+        memcpy(dest, str_chars + copied, str_len - copied);
+        dest += str_len - copied;
     }
-    while (p < end) *dest++ = *p++;
     *dest = '\0';
 
     if (str_type == LMD_TYPE_SYMBOL) return {.item = y2it(heap_create_symbol(symbol_buf, new_len))};
@@ -7818,29 +7822,25 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     select_match_window(total, options, &first, &selected_count);
     if (selected_count == 0) return {.array = rooted_result.get()};
 
-    const char* p = str_chars;
-    const char* end = str_chars + str_len;
     int64_t ordinal = 0;
     int64_t pushed = 0;
-    while (p <= end - needle_len) {
-        if (literal_match_at(p, needle, needle_len, options.ignore_case)) {
-            if (ordinal >= first && pushed < selected_count) {
-                int64_t index = (int64_t)(p - str_chars);
-                Map* m = create_match_map_ext(p, needle_len, index);
-                // The match is not reachable from the result until list_push
-                // finishes, and that push may grow the list and collect.
-                rooted_match.set(m);
-                // find() builds an array of matches: the verbatim append
-                array_push_verbatim((Array*)rooted_result.get(), {.map = rooted_match.get()});
-                rooted_match.set((Map*)NULL);
-                pushed++;
-            }
-            ordinal++;
-            p += needle_len;
-            if (pushed >= selected_count) break;
-        } else {
-            p++;
+    size_t pos = 0;
+    while (pushed < selected_count) {
+        size_t at = literal_find(str_chars, str_len, pos, needle, needle_len,
+            options.ignore_case);
+        if (at == SIZE_MAX) break;
+        if (ordinal >= first) {
+            Map* m = create_match_map_ext(str_chars + at, needle_len, (int64_t)at);
+            // The match is not reachable from the result until list_push
+            // finishes, and that push may grow the list and collect.
+            rooted_match.set(m);
+            // find() builds an array of matches: the verbatim append
+            array_push_verbatim((Array*)rooted_result.get(), {.map = rooted_match.get()});
+            rooted_match.set((Map*)NULL);
+            pushed++;
         }
+        ordinal++;
+        pos = at + needle_len;
     }
 
     return {.array = rooted_result.get()};
