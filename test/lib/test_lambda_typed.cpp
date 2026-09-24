@@ -294,13 +294,21 @@ TEST(LambdaTypedItem, ShapeRefBorrowsAndAdvancesShapeEntries) {
     EXPECT_FALSE((bool)shape);
 }
 
-TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
-    TypeMap tm = {};
-    ShapeEntry entries[TYPEMAP_HASH_CAPACITY + 1] = {};
-    StrView names[TYPEMAP_HASH_CAPACITY + 1] = {};
-    char key_storage[TYPEMAP_HASH_CAPACITY + 1][4] = {};
+// A1v2: tables live out of line; a table prepared for a few fields and then
+// filled past its capacity (typemap_hash_insert never grows it) saturates.
+enum { kSaturatedFields = TYPEMAP_HASH_MIN_CAPACITY + 1 };
 
-    for (int i = 0; i <= TYPEMAP_HASH_CAPACITY; i++) {
+TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    TypeMap tm = {};
+    typemap_hash_prepare(&tm, pool, 1);
+    ASSERT_EQ(typemap_hash_capacity(&tm), TYPEMAP_HASH_MIN_CAPACITY);
+    ShapeEntry entries[kSaturatedFields] = {};
+    StrView names[kSaturatedFields] = {};
+    char key_storage[kSaturatedFields][4] = {};
+
+    for (int i = 0; i < kSaturatedFields; i++) {
         set_test_shape_name(key_storage[i], i);
         names[i].str = key_storage[i];
         names[i].length = 3;
@@ -310,15 +318,20 @@ TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
         typemap_hash_insert(&tm, &entries[i]);
     }
     tm.shape = &entries[0];
-    tm.last = &entries[TYPEMAP_HASH_CAPACITY];
+    tm.last = &entries[kSaturatedFields - 1];
 
-    EXPECT_EQ(tm.field_count, TYPEMAP_HASH_CAPACITY);
-    EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[TYPEMAP_HASH_CAPACITY], 3),
-              &entries[TYPEMAP_HASH_CAPACITY]);
+    // the last entry did not fit: the lookup finds it on the shape chain
+    EXPECT_EQ(tm.field_count, TYPEMAP_HASH_MIN_CAPACITY);
+    EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[kSaturatedFields - 1], 3),
+              &entries[kSaturatedFields - 1]);
+    pool_destroy(pool);
 }
 
 TEST(LambdaTypedItem, TypeMapHashLookupByNameIdUsesCachedHash) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
     TypeMap tm = {};
+    typemap_hash_prepare(&tm, pool, 4);
     ShapeEntry entries[4] = {};
     StrView names[4] = {};
     char key_storage[4][4] = {};
@@ -337,17 +350,22 @@ TEST(LambdaTypedItem, TypeMapHashLookupByNameIdUsesCachedHash) {
         typemap_hash_insert(&tm, &entries[i]);
     }
 
+    EXPECT_EQ(tm.field_count, 4);
     EXPECT_EQ(typemap_hash_lookup_by_name_id(&tm, entries[2].name_id,
         entries[2].name_hash), &entries[2]);
+    pool_destroy(pool);
 }
 
 TEST(LambdaTypedItem, TypeMapHashLookupByNameIdFallsBackWhenTableIsFull) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
     TypeMap tm = {};
-    ShapeEntry entries[TYPEMAP_HASH_CAPACITY + 1] = {};
-    StrView names[TYPEMAP_HASH_CAPACITY + 1] = {};
-    char key_storage[TYPEMAP_HASH_CAPACITY + 1][4] = {};
+    typemap_hash_prepare(&tm, pool, 1);
+    ShapeEntry entries[kSaturatedFields] = {};
+    StrView names[kSaturatedFields] = {};
+    char key_storage[kSaturatedFields][4] = {};
 
-    for (int i = 0; i <= TYPEMAP_HASH_CAPACITY; i++) {
+    for (int i = 0; i < kSaturatedFields; i++) {
         set_test_shape_name(key_storage[i], i);
         names[i].str = key_storage[i];
         names[i].length = 3;
@@ -361,16 +379,35 @@ TEST(LambdaTypedItem, TypeMapHashLookupByNameIdFallsBackWhenTableIsFull) {
     }
 
     EXPECT_EQ(typemap_hash_lookup_by_name_id(&tm,
-        entries[TYPEMAP_HASH_CAPACITY].name_id,
-        entries[TYPEMAP_HASH_CAPACITY].name_hash),
-        &entries[TYPEMAP_HASH_CAPACITY]);
+        entries[kSaturatedFields - 1].name_id,
+        entries[kSaturatedFields - 1].name_hash),
+        &entries[kSaturatedFields - 1]);
+    pool_destroy(pool);
 }
 
-TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsPastInlineTable) {
+TEST(LambdaTypedItem, TypeMapHashIsAbsentUntilPopulated) {
+    TypeMap tm = {};
+    ShapeEntry entry = {};
+    StrView name = {};
+    name.str = "key";
+    name.length = 3;
+    entry.name = &name;
+    tm.shape = &entry;
+    tm.last = &entry;
+    tm.length = 1;
+
+    // without a pool nothing is allocated; lookups use the shape chain
+    typemap_hash_insert_owned(&tm, &entry, nullptr);
+    EXPECT_EQ(tm.field_index, nullptr);
+    EXPECT_EQ(tm.field_count, 0);
+    EXPECT_EQ(typemap_hash_lookup(&tm, "key", 3), &entry);
+}
+
+TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsWithTheShape) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
 
-    enum { count = TYPEMAP_HASH_CAPACITY + 1 };
+    enum { count = 33 };
     TypeMap tm = {};
     ShapeEntry entries[count] = {};
     StrView names[count] = {};
@@ -387,13 +424,16 @@ TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsPastInlineTable) {
         tm.last = &entries[i];
         tm.length++;
         typemap_hash_insert_owned(&tm, &entries[i], pool);
+        // the table always holds every field at no more than half load
+        ASSERT_EQ(tm.field_count, i + 1);
+        ASSERT_GE(typemap_hash_capacity(&tm), 2 * (i + 1));
     }
 
-    EXPECT_NE(tm.field_index_dynamic, nullptr);
-    EXPECT_GT(typemap_hash_capacity(&tm), TYPEMAP_HASH_CAPACITY);
-    EXPECT_EQ(tm.field_count, count);
-    EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[count - 1], 3),
-              &entries[count - 1]);
+    EXPECT_NE(tm.field_index, nullptr);
+    EXPECT_EQ(typemap_hash_capacity(&tm), 128);
+    for (int i = 0; i < count; i++) {
+        EXPECT_EQ(typemap_hash_lookup(&tm, key_storage[i], 3), &entries[i]);
+    }
 
     pool_destroy(pool);
 }

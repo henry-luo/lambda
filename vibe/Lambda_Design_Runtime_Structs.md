@@ -353,9 +353,10 @@ byte (`JSPD_NON_WRITABLE`, `JSPD_NON_ENUMERABLE`, `JSPD_NON_CONFIGURABLE`,
 `JSPD_IS_ACCESSOR`, `JSPD_DELETED`), zero-defaulting to the JS-conformant data
 property.
 
-`TypeMap` carries, beyond the GC-visible prefix: the inline
-`field_index[TYPEMAP_HASH_CAPACITY]` lookup table plus an optional
-`field_index_dynamic`, the `slot_entries`/`slot_count` fixed-slot index, the
+`TypeMap` carries, beyond the GC-visible prefix: the `field_index` lookup
+table (A1v2: pool-owned and out of line, allocated when first populated and
+sized to the shape; NULL until then, and a struct copy must rebuild its own
+before inserting), the `slot_entries`/`slot_count` fixed-slot index, the
 sharing flags `is_private_clone` / `is_shared_constructor_shape` /
 `is_transition_shared_shape`, the `TypeMapTransition* transitions` chain, the
 immutable `const JsClassMeta* js_meta` (§9.5), `has_array_index_shape`, a lazily

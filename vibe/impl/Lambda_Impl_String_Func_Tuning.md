@@ -18,7 +18,8 @@
 | P4 | formatter loops, plus the escape sink (§5.3-7) planned for P2 | done |
 | P5a | HTML parser tag classes by id (§5.2-7) | done |
 | P5b | pool bin index by leading-zero count (part of §5.2-6) | done |
-| P5c | HTML parse memory and the §5.2-6 allocator round | done; the per-element type decision is open |
+| P5c | HTML parse memory and the §5.2-6 allocator round | done |
+| P5d | `TypeMap` hash table out of line (A1v2) | done |
 | P5 | the rest of structural: LambdaJS `+=`, UTF-8 position cache, hash choice | not started |
 
 ## P0 — correctness
@@ -326,9 +327,41 @@ Tokens, their strings and their attribute maps are garbage once the tree builder
 - `test_mempool_gtest` passes 55/55 and `test_arena_gtest` 91/91. Lambda passes 5,867/5,867, Radiant all suites, and test262 40,261/40,261.
 - One pool test changed: `SplitAndCoalesceAdjacentFreeBlocks` requested exactly the merged span of two 64-byte-header blocks. It now requests 256 bytes, which only the merge can serve at either header size.
 
-**Open decision: the per-element `TypeElmt`.** It is now 146 MB, 46% of the remaining peak, and the same cost applies to XML (457 MB peak for 19 MB of input). Every Input element gets a private 424-byte type, and 256 bytes of that is the A1 inline hash table, which is sized for shared JS shapes. The fixes change a deliberate design, so they wait for the user:
-1. Move `TypeMap`'s inline table out of line, allocated when first populated. This saves about 248 B per element (~79 MB here) and on every private map type. It revises A1 and adds a pointer load to hashed JS property lookups, so it needs JS benchmarks.
-2. Share element types across elements with the same tag and attribute shape, the way maps share shapes through transitions. That means moving the per-element `content_length` (194 uses) off the type. This is a data-model change; it saves most of the 146 MB on repetitive markup.
+**The per-element `TypeElmt`** was 146 MB, 46% of the remaining peak; the user chose option 1 (P5d below).
+
+## P5d — `TypeMap` hash table out of line (A1v2)
+
+Branch `claude/typemap-hash-out-of-line` from master `cec71a8f4`; user-approved revision of A1.
+
+**Change.**
+- `TypeMap`'s open-addressing property table was 32 inline slots, 256 bytes in every map, element and object type. It is now a pool-owned `ShapeEntry** field_index`, allocated when first populated.
+- The table is sized to the shape: a power of two at least twice the fields, at least 8 slots. A table used to fill up past 32 fields and fall back to the chain until the next rebuild; now it grows with the shape.
+- `field_index_dynamic` is gone.
+- A struct copy shares the pointer, so every copy path rebuilds through `typemap_hash_prepare`, which resets it first. The audit found that all of them already do.
+- `typemap_hash_prepare` leaves the previous table to the pool rather than freeing it, since a copy may still use it.
+
+**Why:** JS shapes are shared by many objects, so they amortized the inline table. Every element of a parsed document has a private type, so each paid the full 256 bytes.
+
+**Results** (decimal MB, peak RSS):
+
+| Parse | Before P5c | After P5c | After P5d |
+|---|---:|---:|---:|
+| HTML, 13 MiB | 562 MB | 315 MB | 233 MB |
+| XML, 19 MiB | 505 MB | 480 MB | 351 MB |
+| Markdown | 315 MB | 300 MB | 224 MB |
+| JSON | 199 MB | 191 MB | 191 MB |
+
+The P5c section above labels MiB values as MB. The first column here was re-measured as MB.
+
+- **Parse speed:** HTML 1.03×, XML 1.10×, Markdown 1.04×; JSON and YAML unchanged (21 runs).
+- **LambdaJS:** the AWFY bundles (deltablue, json, richards, bounce, towers, storage) are within ±3%. `bench_property.js` gets and sets are about 1% slower: one more pointer load per hashed lookup.
+- **Lambda AWFY:** richards 295.5 → 293.3 ms and deltablue 1.06×, over 21 runs.
+
+**Checks:**
+- All 21,602 HTML files, the 10 corpora, 99 inputs and 108 formatter outputs are identical.
+- Lambda passes 5,868/5,868, Radiant all suites, and test262 40,261/40,261.
+- The four `TypeMapHash*` unit tests assumed a stack `TypeMap` had slots without a pool. They now prepare their table through a pool. They are joined by `TypeMapHashIsAbsentUntilPopulated` and `TypeMapHashOwnedInsertGrowsWithTheShape`.
+- The design descriptions were updated in `doc/dev/lambda/LR_03_Value_and_Type_Model.md` and `vibe/Lambda_Design_Runtime_Structs.md`. No `D#` ruling covered the inline table.
 
 ## Findings not yet filed
 
