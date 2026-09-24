@@ -497,6 +497,7 @@ test/lambda/graph/structurizr/stage4d.ls	direct
 test/lambda/graph/structurizr/this_relationships.ls	direct
 test/lambda/proc/abstract_numeric_field.ls	run
 test/lambda/proc/array_view_admission.ls	run
+test/lambda/proc/array_view_strides.ls	run
 test/lambda/proc/bool_lane_and_chain.ls	run
 test/lambda/proc/boundary_deferred_checks.ls	run
 test/lambda/proc/clock.ls	run
@@ -667,6 +668,7 @@ test/lambda/proc/recursive_record_contract.ls	run
 test/lambda/proc/recursive_record_links.ls	run
 test/lambda/proc/return_relative_path.ls	run
 test/lambda/proc/shr_literal_native_lane.ls	run
+test/lambda/proc/sysfunc_bool_error_lane.ls	run
 test/lambda/proc/tail_call_proc.ls	run
 test/lambda/proc/test_io_module.ls	run
 test/lambda/proc/test_pipe_file.ls	run

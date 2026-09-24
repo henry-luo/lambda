@@ -577,7 +577,8 @@ void list_push_spread(List* list, Item item) {
             for (int64_t i = 0; i < arr->length; i++) {
                 list = rooted_list.get();
                 arr = rooted_source.get().array_num;
-                list_push(list, array_num_read_borrowed_item(arr, i));
+                list_push(list, array_num_read_borrowed_item(arr,
+                    array_num_element_offset(arr, i)));
             }
             return;
         }

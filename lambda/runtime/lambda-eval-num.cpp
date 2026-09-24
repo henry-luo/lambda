@@ -1369,16 +1369,18 @@ Item fn_neg(Item item) {
             if (t == LMD_TYPE_ARRAY_NUM) {
                 ArrayNum* arr = item.array_num;
                 ArrayNumElemType et = arr->get_elem_type();
+                // a strided view's position `i` sits at its stride
+                int64_t slot = array_num_element_offset(arr, i);
                 if (et == ELEM_FLOAT64) {
-                    result->float_items[i] = -arr->float_items[i]; continue;
+                    result->float_items[i] = -arr->float_items[slot]; continue;
                 }
                 if (et == ELEM_INT) {
                     // ELEM_INT owns raw v5 lanes, so reading float_items would
                     // reinterpret their bits instead of converting the int value.
-                    result->float_items[i] = -lambda_int_lane_to_double(arr->items[i]); continue;
+                    result->float_items[i] = -lambda_int_lane_to_double(arr->items[slot]); continue;
                 }
                 if (et == ELEM_INT64) {
-                    result->float_items[i] = -(double)arr->items[i]; continue;
+                    result->float_items[i] = -(double)arr->items[slot]; continue;
                 }
                 // compact elements: fall through to generic via array_num_get
                 elem = array_num_get(arr, i);

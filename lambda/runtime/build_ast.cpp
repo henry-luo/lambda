@@ -988,6 +988,51 @@ static bool sys_split_text_call_cannot_return_error(AstNode* arguments,
         is_text_type_id(separator->type->type_id);
 }
 
+// Operand proofs for the `bool` rows below (any/all/is_view/contains/
+// starts_with/ends_with), whose functions return an error for an error
+// operand or one outside their domain (S7.9.3). Each proof must be exact: a
+// call proven total publishes a native bool lane, which cannot hold an error.
+static bool sys_operand_excludes_error(AstNode* operand) {
+    return operand && operand->type && !lambda_type_accepts_error(operand->type);
+}
+
+// The payload of a clean operand; a nullable `T?` answers as T, since every
+// row here handles null. NULL when unproven or a wider union.
+static Type* sys_clean_operand_base(AstNode* operand) {
+    if (!sys_operand_excludes_error(operand)) return NULL;
+    bool nullable = false;
+    return lambda_type_nullable_lane_base(operand->type, &nullable);
+}
+
+// Null, a string, or (when `symbol_ok`) a symbol: never the BOOL_ERROR branch
+// of starts_with/ends_with (either text kind) or string contains (strings).
+static bool sys_operand_is_clean_text_or_null(AstNode* operand, bool symbol_ok) {
+    Type* base = sys_clean_operand_base(operand);
+    if (!base) return false;
+    TypeId type_id = base->type_id;
+    return type_id == LMD_TYPE_NULL || type_id == LMD_TYPE_STRING ||
+        (symbol_ok && type_id == LMD_TYPE_SYMBOL);
+}
+
+// A materialized sequence: a bracket literal or comprehension (a fresh
+// array), an ArrayNum, or a lane-typed array contract. A plain `array` is no
+// proof -- a virtual sequence (VARRAY) shares its public type, and
+// vector_length and fn_contains reject it.
+static bool sys_operand_is_materialized_sequence(AstNode* operand) {
+    AstNode* root = ast_unwrap_primary(operand);
+    if (root && root->node_type == AST_NODE_ARRAY) return true;
+    Type* base = sys_clean_operand_base(operand);
+    if (!base) return false;
+    if (base->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(base, &info) && info.has_leaf_lane;
+}
+
+static bool sys_operand_base_is(AstNode* operand, TypeId type_id) {
+    Type* base = sys_clean_operand_base(operand);
+    return base && base->type_id == type_id;
+}
+
 static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
         AstNode* arguments, AstNode* injected_argument) {
     if (!info || !info->may_return_error) return false;
@@ -1016,6 +1061,30 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
     case SYSFUNC_SPLIT:
     case SYSFUNC_SPLIT3:
         return !sys_split_text_call_cannot_return_error(arguments, injected_argument);
+    case SYSFUNC_ANY:
+    case SYSFUNC_ALL:
+        // every sequence vector_length walks, and null, answers
+        return !(sys_operand_is_materialized_sequence(first_arg) ||
+            sys_operand_base_is(first_arg, LMD_TYPE_RANGE) ||
+            sys_operand_base_is(first_arg, LMD_TYPE_NULL));
+    case SYSFUNC_IS_VIEW:
+        return !sys_operand_excludes_error(first_arg);
+    case SYSFUNC_STARTS_WITH:
+    case SYSFUNC_ENDS_WITH:
+        return !sys_operand_is_clean_text_or_null(first_arg, true) ||
+            !sys_operand_is_clean_text_or_null(
+                sys_func_argument_at(arguments, injected_argument, 1), true);
+    case SYSFUNC_CONTAINS: {
+        // string contains takes strings only; a materialized sequence or
+        // null receiver answers for any clean needle (a range, or a static
+        // map/element that may be virtual, takes the rejection branch)
+        AstNode* needle = sys_func_argument_at(arguments, injected_argument, 1);
+        if (sys_operand_is_clean_text_or_null(first_arg, false) &&
+                sys_operand_is_clean_text_or_null(needle, false)) return false;
+        return !(sys_operand_excludes_error(needle) &&
+            (sys_operand_is_materialized_sequence(first_arg) ||
+             sys_operand_base_is(first_arg, LMD_TYPE_NULL)));
+    }
     default:
         return true;
     }

@@ -512,8 +512,12 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
             size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
             result->data = heap_data_alloc(total * elem_size);
             result = rooted_result.get();
-            memcpy(result->data, la->data, elem_size*la->length);
-            memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
+            // copy positions, not bytes: a strided view (a row of a transposed
+            // matrix) is not the next `length` elements of its base
+            if (!array_num_copy_same_type_bytes(result, 0, la, 0, la->length) ||
+                    !array_num_copy_same_type_bytes(result, la->length, ra, 0, ra->length)) {
+                return ItemError;
+            }
             return array_concat_inherit_cert({.array_num = result}, left, right);
         }
         // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
@@ -2444,12 +2448,17 @@ static Bool array_num_eq(ArrayNum* a, ArrayNum* b, int depth, EqualityMode mode)
         // n-D arrays expose their shape as structure; equal flat storage alone is insufficient.
         return BOOL_FALSE;
     }
-    if (a->get_elem_type() != b->get_elem_type()) {
-        if (mode == EQUALITY_STRICT) return BOOL_FALSE;
-        // different elem types compare as values; double promotion loses high int64/u64 bits.
+    if (a->get_elem_type() != b->get_elem_type() && mode == EQUALITY_STRICT) {
+        return BOOL_FALSE;
+    }
+    if (a->get_elem_type() != b->get_elem_type() ||
+            !array_num_is_dense(a) || !array_num_is_dense(b)) {
+        // different elem types compare as values; double promotion loses high
+        // int64/u64 bits. A strided view (a transposed matrix or its row) is
+        // compared position by position, never by its base's storage order.
         for (int64_t i = 0; i < a->length; i++) {
-            Item val_a = array_num_read_item(a, i);
-            Item val_b = array_num_read_item(b, i);
+            Item val_a = array_num_read_item(a, array_num_element_offset(a, i));
+            Item val_b = array_num_read_item(b, array_num_element_offset(b, i));
             Bool r = fn_eq_depth(val_a, val_b, depth + 1, mode);
             if (r != BOOL_TRUE) return r;
         }
@@ -8470,10 +8479,19 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     }
     // A borrowing view aliases someone else's buffer. `content(e)` is read-only
     // for now (LR09-9), so refuse rather than write through — the ARRAY_NUM arm
-    // below makes the same check for its own views.
-    if (arr->is_view && !arr->is_mutable_view && arr_type != LMD_TYPE_ARRAY_NUM) {
-        log_error("fn_array_set: cannot mutate a read-only view; copy() first");
-        return ItemError;
+    // below makes the same check for its own views. An ArrayNum view's element
+    // `index` sits at its strides from `data` (a row of a transposed matrix
+    // steps by its base's row length); mapped on this branch, which only views
+    // take, so an owned array's write pays nothing for it.
+    int64_t slot = index;
+    if (arr->is_view) {
+        if (!arr->is_mutable_view && arr_type != LMD_TYPE_ARRAY_NUM) {
+            log_error("fn_array_set: cannot mutate a read-only view; copy() first");
+            return ItemError;
+        }
+        if (arr_type == LMD_TYPE_ARRAY_NUM) {
+            slot = array_num_element_offset((ArrayNum*)arr, index);
+        }
     }
 
     int64_t len = arr->length;
@@ -8518,10 +8536,11 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     }
     case LMD_TYPE_ARRAY_NUM: {
         ArrayNum* num_arr = (ArrayNum*)arr;
+        // `slot` is `index` mapped through a view's strides (above).
         // A source-language typed boundary has already admitted this value.
         // The exact-width store covers every ArrayNum element kind; falling
         // through to the legacy int-only arm corrupts compact buffers.
-        if (array_num_store_admitted(num_arr, index, value)) break;
+        if (array_num_store_admitted(num_arr, slot, value)) break;
         if (num_arr->is_view) {
             if (!num_arr->is_mutable_view) {
                 log_error("fn_array_set: cannot mutate a read-only view; copy() first");
@@ -8529,8 +8548,8 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
             }
             // mutable view: write through via the element setter, which coerces to
             // the element type, handles every compact type, and never detaches the
-            // view's aliased storage (data is pre-offset, so data[index] hits base).
-            array_num_set_item(num_arr, index, value);
+            // view's aliased storage (data is pre-offset, so data[slot] hits base).
+            array_num_set_item(num_arr, slot, value);
             break;
         }
         TypeId val_type = get_type_id(value);
@@ -11807,9 +11826,12 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     // leading-axis views, but every leaf lives in one flat, exact scalar
     // lane: validate that lane directly and certify the same array without
     // breaking its reshape/write-through semantics. A rank mismatch falls
-    // through and is rejected below, as `[[1]] is int[]` is false.
+    // through and is rejected below, as `[[1]] is int[]` is false. Only a
+    // dense array is its flat lane: a strided view (a transposed matrix or
+    // its row) is copied below into the lane a typed read assumes.
     ArrayNumElemType leaf_type = ELEM_INT;
     if (source_type == LMD_TYPE_ARRAY_NUM && value.array_num &&
+            array_num_is_dense(value.array_num) &&
             lambda_array_contract_info(expected, &contract_info) &&
             contract_info.rank == array_num_rank(value.array_num) &&
             lambda_array_num_elem_type_for_contract(contract_info.leaf_element,

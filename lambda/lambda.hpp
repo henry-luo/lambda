@@ -742,6 +742,35 @@ static inline int array_num_rank(const ArrayNum* array) {
     return shape->ndim >= 1 ? shape->ndim : 1;
 }
 
+// A view aliases its base: `data` points at the view's first element and the
+// shape's strides reach the rest (Typed Array 4 Scope 3). An owned array, and
+// a C-contiguous view, hold their elements densely from `data`; a transposed
+// view does not, nor does a row of one -- a row of `transpose(m)` for a 2 x 3
+// `m` steps by 3.
+static inline bool array_num_is_dense(const ArrayNum* array) {
+    if (!array->is_ndim || !array->extra) return true;
+    return ((const ArrayNumShape*)(uintptr_t)array->extra)->is_c_contig;
+}
+
+// The strided walk behind array_num_element_offset, with C linkage (defined
+// in lambda-data.cpp, like typeditem_to_item above). Kept out of line so the
+// dense check below inlines as a flag test: with LTO folding this loop into
+// it, the release build outlined the check and every dense access paid a call.
+extern "C" __attribute__((noinline)) int64_t array_num_strided_offset(
+    const ArrayNum* array, int64_t position);
+
+// The offset from `data` of the element at C-order position `position`: a
+// rank-one array's element or an N-D array's leaf. A reader that walks
+// positions instead of the shape must map them through this, or a view reads
+// the elements its base stores beside its own. Strides decide, so this is
+// exact for any valid shape; density only skips the arithmetic. Forced
+// inline for the same reason as above.
+static inline __attribute__((always_inline)) int64_t array_num_element_offset(
+        const ArrayNum* array, int64_t position) {
+    if (array_num_is_dense(array)) return position;
+    return array_num_strided_offset(array, position);
+}
+
 // Tune5 P5 gate: a List and ArrayNum share the same managed header and tail
 // offsets, but their element buffers still have different semantic contracts.
 // Retagging is legal only after this physical proof is true on every build.

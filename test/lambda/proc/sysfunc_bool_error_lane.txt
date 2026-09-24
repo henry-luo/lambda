@@ -1,0 +1,9 @@
+[error, error, error, error, error, error]
+[error, error, error, error, error, error]
+["f", "f", "f", "f"]
+[true, true, "rescued", "rescued"]
+[error, error, true, true, true]
+[true, true, true, true, true, false, true]
+[true, false, false, true, true]
+[true, true, false, true, "handled", "handled"]
+

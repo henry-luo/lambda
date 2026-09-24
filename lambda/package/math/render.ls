@@ -457,7 +457,8 @@ fn render_command(node, context) {
 fn is_sized_delimiter_error_name(name_str) {
     // A control word that starts with a valid size delimiter but has an
     // unrecognized suffix follows MathLive's delimiter-recovery spelling.
-    starts_with(name_str, "big") or starts_with(name_str, "Big")
+    // A non-text name's error (S7.9.3) answers false.
+    starts_with(name_str, "big") or starts_with(name_str, "Big") or false
 }
 
 fn render_unknown_command_node(node, name_str, context) {
@@ -521,7 +522,9 @@ fn box_with_serial_boundary(bx, atom_type) => {
 }
 
 fn is_ascii_latin_letter(text) {
-    len(text) == 1 and contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", text)
+    // a non-string operand's error (S7.9.3) answers false
+    len(text) == 1 and
+        (contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", text) or false)
 }
 
 fn render_limit_operator_symbol(text, context) {
@@ -691,7 +694,8 @@ fn normalize_data_attr_name_at(text, i, acc) {
 }
 
 fn is_data_attr_char(ch) {
-    contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:", ch)
+    // a non-string operand's error (S7.9.3) answers false
+    contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:", ch) or false
 }
 
 fn strip_attr_quotes(value) {

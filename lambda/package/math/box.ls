@@ -334,6 +334,7 @@ fn italic_corrected_font(cls) {
 }
 
 fn text_has_tall_delim(text) {
+    // a non-text value has no delimiter: its error (S7.9.3) answers false
     contains(text, "(") or contains(text, ")") or
     contains(text, "[") or contains(text, "]") or
     contains(text, "{") or contains(text, "}") or
@@ -345,7 +346,7 @@ fn text_has_tall_delim(text) {
     contains(text, "⌊") or contains(text, "⌋") or  // lfloor/rfloor
     contains(text, "⌈") or contains(text, "⌉") or  // lceil/rceil
     contains(text, "∅") or                          // emptyset
-    contains(text, "∖")                             // setminus
+    contains(text, "∖") or false                    // setminus
 }
 
 fn text_height(text) {

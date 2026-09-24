@@ -411,8 +411,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_subview", FPTR(fn_subview), NULL, NULL, false, 0},
 
+    // an error operand returns the error (S7.9.3): `bool | error`, as any/all
     {SYSFUNC_IS_VIEW, "is_view", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_is_view", FPTR(fn_is_view), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_is_view", FPTR(fn_is_view), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
 
     {SYSFUNC_RESHAPE, "reshape", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_reshape", FPTR(fn_reshape), NULL, NULL, false, 0},
@@ -475,8 +477,10 @@ SysFuncInfo sys_func_defs[] = {
     // image I/O bridge
     {SYSFUNC_LOAD_IMAGE, "load", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_load", FPTR(fn_load), NULL, NULL, false, 0},
+    // a bad image, path, or write fails with an ordinary error, as any/all
     {SYSFUNC_SAVE_IMAGE, "save", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_BOOL, false,
-     C_RET_ITEM, NULL, "fn_save", FPTR(fn_save), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_save", FPTR(fn_save), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
     {SYSFUNC_AS_FLOAT, "as_float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_as_float", FPTR(fn_as_float), NULL, NULL, false, 0},
     {SYSFUNC_AS_UBYTE, "as_ubyte", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -512,11 +516,19 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_AFFINE_WARP, "affine_warp", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_affine_warp", FPTR(fn_affine_warp), NULL, NULL, false, 0},
 
+    // `bool` is only the success shape (D6.4.1): an error operand or a
+    // non-sequence returns an ordinary error (S7.9.3, S7.10.4). Declaring
+    // the effect types the call `bool | error`, which stays boxed (S7.8.1)
+    // unless the builder proves the operand total
+    // (sys_func_call_may_return_error); narrowing it into the bool lane read
+    // the error as `false` on the JIT tier only.
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_all", FPTR(fn_all), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_all", FPTR(fn_all), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
 
     {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_any", FPTR(fn_any), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_any", FPTR(fn_any), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
 
     // min/max — 1-arg is method-eligible, 2-arg is not
     {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
@@ -611,14 +623,20 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_normalize2", FPTR(fn_normalize), NULL, NULL, false, 0},
 
+    // An error or unsupported operand returns BOOL_ERROR (S7.9.3), so these
+    // are `bool | error` like any/all: the raw Bool then boxes before a
+    // branch or `not` could read BOOL_ERROR as truth.
     {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_BOOL, NULL, "fn_contains", FPTR(fn_contains), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_contains", FPTR(fn_contains), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
 
     {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_BOOL, NULL, "fn_starts_with", FPTR(fn_starts_with), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_starts_with", FPTR(fn_starts_with), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
 
     {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false,
-     C_RET_BOOL, NULL, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0},
+     C_RET_BOOL, NULL, "fn_ends_with", FPTR(fn_ends_with), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_BOOL, /* may_error */ true},
 
     {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT, false, false, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_index_of", FPTR(fn_index_of), NULL, NULL, false, 0},

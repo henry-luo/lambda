@@ -812,7 +812,9 @@ Item array_num_get(ArrayNum *array, int64_t index) {
     if (index < 0 || index >= array->length) {
         return ItemNull;
     }
-    return array_num_read_item(array, index);
+    // a rank-one view steps by its stride: a row of a transposed matrix
+    // reads every row-length-th element of the base
+    return array_num_read_item(array, array_num_element_offset(array, index));
 }
 
 ArrayNum* array_int() {
@@ -1088,7 +1090,7 @@ extern "C" Item coerce_uint64(Item value) {
 
 double array_num_get_number_value(ArrayNum *arr, int64_t index) {
     if (!arr || index < 0 || index >= arr->length) return 0.0;
-    return array_num_read_double(arr, index);
+    return array_num_read_double(arr, array_num_element_offset(arr, index));
 }
 
 void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
@@ -1180,6 +1182,29 @@ static bool array_num_can_copy_bytes(ArrayNum *arr, int64_t index, int64_t count
     return elem_size > 0;
 }
 
+// The byte copies below address positions [index, index + count), which are
+// one contiguous run only for a dense array. A strided view (a row of a
+// transposed matrix) is copied element by element through
+// array_num_element_offset, staged so an overlapping view reads its old values.
+static bool array_num_copy_positions(ArrayNum* dst, int64_t dst_index, ArrayNum* src,
+        int64_t src_index, int64_t count, uint8_t elem_size, bool reversed) {
+    char* staged = (char*)mem_alloc((size_t)count * elem_size, MEM_CAT_TEMP);
+    if (!staged) return false;
+    const char* src_data = (const char*)src->data;
+    for (int64_t i = 0; i < count; i++) {
+        int64_t from = reversed ? src_index + count - 1 - i : src_index + i;
+        memcpy(staged + (size_t)i * elem_size,
+            src_data + (size_t)array_num_element_offset(src, from) * elem_size, elem_size);
+    }
+    char* dst_data = (char*)dst->data;
+    for (int64_t i = 0; i < count; i++) {
+        memcpy(dst_data + (size_t)array_num_element_offset(dst, dst_index + i) * elem_size,
+            staged + (size_t)i * elem_size, elem_size);
+    }
+    mem_free(staged);
+    return true;
+}
+
 bool array_num_copy_same_type_bytes(ArrayNum *dst, int64_t dst_index,
                                     ArrayNum *src, int64_t src_index, int64_t count) {
     if (!dst || !src || dst->get_elem_type() != src->get_elem_type()) return false;
@@ -1192,6 +1217,10 @@ bool array_num_copy_same_type_bytes(ArrayNum *dst, int64_t dst_index,
         return false;
     }
     uint8_t elem_size = ELEM_TYPE_SIZE[dst->get_elem_type() >> 4];
+    if (!array_num_is_dense(dst) || !array_num_is_dense(src)) {
+        return array_num_copy_positions(dst, dst_index, src, src_index, count,
+            elem_size, false);
+    }
     char* dst_ptr = (char*)dst->data + (size_t)dst_index * elem_size;
     char* src_ptr = (char*)src->data + (size_t)src_index * elem_size;
     memmove(dst_ptr, src_ptr, (size_t)count * elem_size);
@@ -1212,6 +1241,10 @@ bool array_num_copy_equal_size_bytes(ArrayNum *dst, int64_t dst_index,
     uint8_t src_elem_size = ELEM_TYPE_SIZE[src->get_elem_type() >> 4];
     uint8_t dst_elem_size = ELEM_TYPE_SIZE[dst->get_elem_type() >> 4];
     if (src_elem_size == 0 || dst_elem_size == 0 || src_elem_size != dst_elem_size) return false;
+    if (!array_num_is_dense(dst) || !array_num_is_dense(src)) {
+        return array_num_copy_positions(dst, dst_index, src, src_index, count,
+            src_elem_size, false);
+    }
     char* dst_ptr = (char*)dst->data + (size_t)dst_index * dst_elem_size;
     char* src_ptr = (char*)src->data + (size_t)src_index * src_elem_size;
     memmove(dst_ptr, src_ptr, (size_t)count * src_elem_size);
@@ -1232,9 +1265,10 @@ bool array_num_reverse_bytes(ArrayNum *arr) {
     if (elem_size == 0 || elem_size > 16) return false;
     char temp[16];
     char* data = (char*)arr->data;
+    // positions map through a strided view's stride (array_num_element_offset)
     for (int64_t i = 0, j = len - 1; i < j; i++, j--) {
-        char* left = data + (size_t)i * elem_size;
-        char* right = data + (size_t)j * elem_size;
+        char* left = data + (size_t)array_num_element_offset(arr, i) * elem_size;
+        char* right = data + (size_t)array_num_element_offset(arr, j) * elem_size;
         memcpy(temp, left, elem_size);
         memcpy(left, right, elem_size);
         memcpy(right, temp, elem_size);
@@ -1256,6 +1290,9 @@ bool array_num_copy_reversed_bytes(ArrayNum *dst, ArrayNum *src) {
     }
     uint8_t elem_size = ELEM_TYPE_SIZE[src->get_elem_type() >> 4];
     if (elem_size == 0) return false;
+    if (!array_num_is_dense(dst) || !array_num_is_dense(src)) {
+        return array_num_copy_positions(dst, 0, src, 0, len, elem_size, true);
+    }
     char* dst_data = (char*)dst->data;
     char* src_data = (char*)src->data;
     for (int64_t i = 0, j = len - 1; i < len; i++, j--) {
@@ -1308,7 +1345,11 @@ bool array_num_admits_value(ArrayNum *arr, Item value) {
 }
 
 bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value) {
-    if (!arr || index < 0 || index >= arr->capacity) return false;
+    // `index` is an offset from `data`: `capacity` bounds a dense array's,
+    // while a strided view's come from its shape and may pass it. The bound
+    // is tested first so an in-bounds write never reads the shape.
+    if (!arr || index < 0 ||
+            (index >= arr->capacity && array_num_is_dense(arr))) return false;
     if (arr->is_view && !arr->is_mutable_view) return false;
     if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return false;
     if (!array_num_admits_value(arr, value)) return false;
@@ -1366,7 +1407,9 @@ bool array_num_store_admitted(ArrayNum *arr, int64_t index, Item value) {
 // This remains the explicit legacy coercion path for open arrays and internal
 // builders; typed source boundaries call array_num_store_admitted instead.
 void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
-    if (!arr || index < 0 || index >= arr->capacity) return;
+    // an offset from `data`, bounded like array_num_store_admitted's
+    if (!arr || index < 0 ||
+            (index >= arr->capacity && array_num_is_dense(arr))) return;
     if (arr->is_view && !arr->is_mutable_view) {
         log_error("array_num_set_item: cannot mutate a read-only view; copy() first");
         return;
@@ -1669,10 +1712,9 @@ static void write_row_into_ndim(ArrayNum* dst, ArrayNumElemType etype, int64_t f
     if (tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* src = src_item.array_num;
         if (src->get_elem_type() == etype) {
-            // same elem_type — byte-copy is safe
-            int elem_size = ELEM_TYPE_SIZE[etype >> 4];
-            memcpy((char*)dst->data + flat_idx * elem_size, src->data,
-                   (size_t)src->length * elem_size);
+            // same elem_type -- a byte copy, by position: a strided row (of a
+            // transposed matrix) is not the next `length` elements of its base
+            array_num_copy_same_type_bytes(dst, flat_idx, src, 0, src->length);
         } else {
             // type mismatch (e.g. int row into float tensor): convert per element
             for (int64_t j = 0; j < src->length; j++) {
