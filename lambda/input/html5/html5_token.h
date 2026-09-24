@@ -35,7 +35,7 @@ typedef struct Html5Token {
     // For start/end tag tokens
     String* tag_name;
     Html5Attr* attrs;       // start tag attributes in source order, first of each name
-                            // (pool-owned, capacity 4 then powers of two)
+                            // (in the token's arena, capacity 4 then powers of two)
     bool self_closing;
     // markup name id of tag_name, cached by html5_token_tag_id. It sits in
     // the padding after self_closing: a token is allocated per character run,
@@ -49,25 +49,18 @@ typedef struct Html5Token {
     // Source line number (1-based) of the opening '<' for start/end tag tokens
     int source_line;
 
-    // Memory context
-    Pool* pool;
+    // the arena holding the token, its attribute array and its strings
     Arena* arena;
 } Html5Token;
 
-// Token creation functions
-Html5Token* html5_token_create_doctype(Pool* pool, Arena* arena);
-Html5Token* html5_token_create_start_tag(Pool* pool, Arena* arena, String* tag_name);
-Html5Token* html5_token_create_end_tag(Pool* pool, Arena* arena, String* tag_name);
-Html5Token* html5_token_create_comment(Pool* pool, Arena* arena, String* data);
-Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c);
-Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const char* chars, int len);
-Html5Token* html5_token_create_eof(Pool* pool, Arena* arena);
-
-// Returns a processed token to its pool. The tree builder copies what it keeps
-// (text, attribute values' Items, names), so a token is garbage once
-// html5_process_token returns; kept, the token structs alone were 30% of the
-// memory a large HTML parse touched.
-void html5_token_release(Html5Token* token);
+// Token creation functions (see html5_token_new for the arena)
+Html5Token* html5_token_create_doctype(Arena* arena);
+Html5Token* html5_token_create_start_tag(Arena* arena, String* tag_name);
+Html5Token* html5_token_create_end_tag(Arena* arena, String* tag_name);
+Html5Token* html5_token_create_comment(Arena* arena, String* data);
+Html5Token* html5_token_create_character(Arena* arena, char c);
+Html5Token* html5_token_create_character_string(Arena* arena, const char* chars, int len);
+Html5Token* html5_token_create_eof(Arena* arena);
 
 // Token helper functions
 // Renames a tag token; the cached markup id (html5_token_tag_id) follows.
