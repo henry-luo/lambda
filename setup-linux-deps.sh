@@ -234,8 +234,8 @@ fi
 
 # Verify npx can access tree-sitter CLI
 echo "Verifying tree-sitter CLI access via npx..."
-if timeout 10 npx tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
-    echo "✅ Tree-sitter CLI 0.24.7 accessible via npx"
+if timeout 10 npx tree-sitter-cli@0.25.10 --version >/dev/null 2>&1; then
+    echo "✅ Tree-sitter CLI 0.25.10 accessible via npx"
 else
     echo "Warning: tree-sitter CLI may need to be downloaded on first use"
 fi
@@ -946,7 +946,6 @@ if ! is_elf_archive "lambda/tree-sitter-lambda/libtree-sitter-lambda.a"; then
         echo "Building tree-sitter-lambda for Linux..."
         cd lambda/tree-sitter-lambda
         make clean || true
-        # the Lambda grammar reserves its keywords, which needs the ABI-15 CLI
         make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-lambda.a
         cd - > /dev/null
         echo "Tree-sitter-lambda built successfully"
@@ -968,13 +967,13 @@ if ! is_elf_archive "lambda/tree-sitter-javascript/libtree-sitter-javascript.a";
         if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
             echo "Generating tree-sitter-javascript parser..."
             if command -v npx >/dev/null 2>&1; then
-                npx tree-sitter-cli@0.24.7 generate
+                npx tree-sitter-cli@0.25.10 generate --abi 14
             else
                 echo "Warning: npx not available, assuming parser files are already generated"
             fi
         fi
 
-        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-javascript.a
+        make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-javascript.a
         cd - > /dev/null
         echo "Tree-sitter-javascript built successfully"
     else
@@ -995,13 +994,13 @@ if ! is_elf_archive "lambda/tree-sitter-latex/libtree-sitter-latex.a"; then
         if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
             echo "Generating tree-sitter-latex parser..."
             if command -v npx >/dev/null 2>&1; then
-                npx tree-sitter-cli@0.24.7 generate
+                npx tree-sitter-cli@0.25.10 generate --abi 14
             else
                 echo "Warning: npx not available, assuming parser files are already generated"
             fi
         fi
 
-        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-latex.a
+        make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-latex.a
         cd - > /dev/null
         echo "Tree-sitter-latex built successfully"
     else
@@ -1018,7 +1017,7 @@ if ! is_elf_archive "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a";
         cd lambda/tree-sitter-latex-math
         make clean || true
 
-        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-latex-math.a
+        make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-latex-math.a
         cd - > /dev/null
         echo "Tree-sitter-latex-math built successfully"
     else

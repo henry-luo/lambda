@@ -6,9 +6,8 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 G="$ROOT/lambda/tree-sitter-lambda"
 WORK="$ROOT/temp/tsx"
-# The Lambda grammar is ABI 15 (reserved words), so it takes its own CLI; the
-# shared `tree-sitter` bin stays on the vendored grammars' pinned version.
-TS_CLI="$ROOT/node_modules/tree-sitter-cli-lambda/cli.js"
+# The project-pinned CLI, as the Makefile runs it; `npx` may query the registry.
+TS_CLI="$ROOT/node_modules/.bin/tree-sitter"
 # The CLI caches compiled grammars by language name, so a cache shared with
 # another checkout could serve that checkout's parser.
 export TREE_SITTER_LIBDIR="$ROOT/temp/tree-sitter-lib"
@@ -17,7 +16,7 @@ pass=0; fail=0
 run() {
   local exp="$1" name="$2" src="$3"
   printf '%b' "$src" > "$WORK/case.ls"
-  out=$(cd "$G" && node "$TS_CLI" parse "$WORK/case.ls" 2>&1)
+  out=$(cd "$G" && "$TS_CLI" parse "$WORK/case.ls" 2>&1)
   if echo "$out" | grep -qE 'ERROR|MISSING|Unexpected'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi

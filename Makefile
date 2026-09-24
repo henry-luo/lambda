@@ -200,19 +200,18 @@ GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
 # Use the exact project-pinned CLI directly. `npx package@version` may query
 # npm after a clean even when this dependency is installed, making release
-# builds fail offline before compilation begins.
+# builds fail offline before compilation begins. The Lambda grammar needs 0.25+
+# for its reserved words (S16.10.1v2), which also makes it ABI 15. The vendored
+# grammar rules pass `--abi 14`, at which 0.25 emits the parse tables 0.24.7
+# did, so their checked-in outputs change only cosmetically. Python's own
+# Makefile takes no flag, so it is ABI 15; all of its outputs are untracked.
 TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
-# The Lambda reference grammar reserves its keywords (S16.10.1v2), which needs
-# ABI 15, so it has its own CLI: package.json's `tree-sitter-cli-lambda` alias.
-# The vendored grammars stay on the CLI above, because regenerating them with
-# 0.25 rewrites their checked-in grammar.json, node-types.json and headers.
-TREE_SITTER_LAMBDA_CLI = node $(CURDIR)/node_modules/tree-sitter-cli-lambda/cli.js
 
 # Generate the reference parser outputs once. The generated parser is used only
 # by the isolated lambda-cst verifier; normal Lambda builds use the C parser.
 # `tree-sitter generate` never reads scanner.c; the archive rule below owns it.
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_LAMBDA_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Tree-sitter library targets
 # Build from source on all platforms
@@ -312,8 +311,8 @@ $(TREE_SITTER_LIB):
 # scanner is compiled into the same archive, so a scanner-only edit rebuilds it
 # directly instead of through a no-op regeneration of parser.c.
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C) $(GRAMMAR_SCANNER_C)
-	# pass the Lambda CLI because the sub-make otherwise falls back to an unqualified tree-sitter
-	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_LAMBDA_CLI)")
+	# pass the pinned CLI because the sub-make otherwise falls back to an unqualified tree-sitter
+	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_CLI)")
 
 # Build tree-sitter-javascript library (depends on grammar and scanner source)
 # Generate with the project CLI directly; the sub-make only compiles the result.
@@ -343,7 +342,7 @@ $(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
 	@out=$$(cd lambda/tree-sitter-typescript && \
 		{ [ -d node_modules/tree-sitter-javascript ] || npm install --save tree-sitter-javascript@file:../tree-sitter-javascript; } && \
-		$(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+		$(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-typescript library (depends on parser generation + scanner)
 $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
@@ -356,14 +355,14 @@ $(TREE_SITTER_RUBY_LIB): $(RUBY_GRAMMAR_JS) $(RUBY_SCANNER_C)
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-latex && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-latex library (depends on parser generation)
 $(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
 	$(call ts_lib_build,latex,)
 
 # Generate LaTeX Math parser from grammar.js when it changes.
-# Keep the generated source at ABI 14 so it matches the checked-in header.
+# ABI 14, like the other vendored grammars (see TREE_SITTER_CLI).
 $(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
 	@out=$$(cd lambda/tree-sitter-latex-math && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
