@@ -154,6 +154,25 @@ Migration: ~55 keyword-named bindings in `test/` + `lambda/` (offset 12,
 group 9, state 8, to 5, by 4, …; breakdown in §7.24); 0 keyword import
 aliases.
 
+*Reference-grammar half, 2026-09-24.* Item 5 had landed in C only. The grammar
+still took any keyword wherever its parse state had no action for it, so
+`let if = 1` and `let a = let b = 2` (as `let a = let`) parsed, and it refused
+a data name whose keyword could also start a statement (`{while: 1}`,
+`<div if: 1>`). It now declares a tree-sitter `reserved` set (CLI 0.25.10,
+ABI 15) holding every capture-real word of Appendix K.1. A reserved word lexes
+as its keyword wherever an identifier is expected, so a binding position
+rejects it, and `_keyword_name` admits it back in the data-name positions C's
+`token_is_key` reads. That retired three per-keyword patches: `_misplaced_let`
+with its never-emitted `let_outside_list` external, `_tier3_kw`, and the
+S16.6.6 `_expr_body_start` guard (LR02-R8). Corpus differential over 1934
+files: 7 files newly rejected, all negative tests. C rejects five of them
+(three with E201, two keyword import aliases at parse time). The other two
+are runtime tests built on the unnamed `fn (x) { … }`, which C misparses into
+a runtime error (LR02-21). 2 files are newly accepted (`keyword_data_names.ls`,
+`validator/schema_xml_basic.ls`). The trees of every file both grammars accept
+change only in node names, plus comments the retired guard used to swallow. The
+work surfaced LR02-21 to LR02-23.
+
 
 <a id="lr02-15"></a>**LR02-15 · Sys-func shadowing; S12.3.7 rules it user-first · RESOLVED 2026-08-27**
 Probes 2026-08-27 (debug build): `fn sum(a) => 99` then `sum([1,2,3])`
@@ -1395,6 +1414,13 @@ keyword-prefixed identifier `returnValue` and an arrow body with a binary tail).
 Full 700-file `.ls` corpus cross-check: **zero movement** — the same 76
 pre-existing failures before and after, measured by regenerating both ways.
 `make test-lambda-baseline` 3868/3868.
+
+*Superseded 2026-09-24.* The grammar moved to tree-sitter 0.25's `reserved`
+sets (see LR02-14), which reserve `return`, `break` and `continue` everywhere
+an identifier is expected. They have no action in an expression, so the four
+body positions reject them without a guard, and `_expr_body_start` retired.
+The guard had also swallowed any comment in front of an unbraced body into its
+padding, so those comments now appear in the tree.
 
 <a id="lr02-r9"></a>**LR02-R9 · `for (k, v at c)` bound both names to the key · RESOLVED 2026-08-24**
 *Was LR02-8, found during the verification pass; closed once S8.1.3 settled what the form means.*

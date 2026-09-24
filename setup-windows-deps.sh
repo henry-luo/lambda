@@ -387,7 +387,8 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     # Generate parser.c if it doesn't exist
     if [ ! -f "src/parser.c" ]; then
         echo "Generating parser.c for tree-sitter-lambda..."
-        npx tree-sitter-cli@0.24.7 generate
+        # the Lambda grammar reserves its keywords, which needs the ABI-15 CLI
+        npx tree-sitter-cli@0.25.10 generate
     fi
 
     # Compile .c files directly to avoid Makefile OS guard and regeneration rules

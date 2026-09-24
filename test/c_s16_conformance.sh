@@ -20,7 +20,9 @@ run() {
   # error": a script can parse and analyse fine and still fail at run time — an
   # unresolved import, say — which must not read as a rejection. E103 is the
   # type-pattern parser's syntax error (`int??`), the type sublanguage's E100.
-  if echo "$out" | grep -qE 'error\[E(100|103|312)\]'; then got=R; else got=A; fi
+  # E201 is S16.10.1v2's keyword-binding bar, which the reference grammar
+  # enforces as a syntax error through its reserved words.
+  if echo "$out" | grep -qE 'error\[E(100|103|201|312)\]'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
 }
@@ -384,6 +386,51 @@ run R "a signature takes no suffix"        'type F = fn (x: int)?\n1\n'
 run R "a bare fn takes no suffix"          'type F = fn[]\n1\n'
 run A "a grouped signature takes a suffix" 'type F = (fn (x: int))?\n1\n'
 run A "the return type keeps its suffix"   'type F = fn () int?\n1\n'
+
+echo "--- S16.10 keywords: bindings never, data names yes ---"
+run R "no var as a value"                  'let a = var\n'
+run R "no pub as a value"                  'let a = pub\n'
+run R "no put as a value"                  'let a = put\n'
+run R "no while as a value"                'let a = while\n'
+run R "no pn as a value"                   'let a = pn\n'
+run R "no var as an array item"            'let a = [var, 1]\n'
+run R "an arrow body cannot break"         'let f = (x) => break\n'
+# ts_s16_conformance.sh also rejects `fn`, `view`, `state` and `apply` as
+# values; C still reads them (Lambda_Issue_Ledger LR02-21).
+run R "keyword let name"                   'let if = 1\n'
+run R "type-word let name"                 'let type = 1\n'
+run R "base-type let name"                 'let int = 1\n'
+run R "named-value let name"               'let true = 1\n'
+run R "Tier-3 let name"                    'let put = 1\n'
+run R "reserved state let name"            'let state = 1\n'
+run R "keyword fn name"                    'fn if() { 1 }\n'
+run R "keyword parameter"                  'fn f(x: int, while) { 1 }\n'
+run R "keyword type name"                  'type if = int\n'
+run R "keyword loop name"                  'let a = [1]\nlet z = for (if in a) 1\n'
+run R "keyword import alias"               'import if: .lib.x\n'
+run R "keyword event name"                 'view <div> { 1 }\non commit(e) { 1 }\n'
+run A "clause-word binding reads"          'let offset = 5\nlet z = offset + 1\nz\n'
+run A "continuation-word binding reads"    'let default = 4\nlet z = default + 1\nz\n'
+run A "statement keywords as map keys"     'let m = {if: 1, while: 2, return: 3}\nm\n'
+run A "type words as map keys"             'let m = {int: 1, type: 2}\nm\n'
+run A "let and Tier-3 words as map keys"   'let m = {let: 1, put: 2, commit: 3}\nm\n'
+run A "view, state, last as map keys"      'let m = {view: 1, state: 2, last: 3}\nm\n'
+run A "apply, import as map keys"          'let m = {apply: 1, import: 2}\nm\n'
+run R "no named-value map key"             'let m = {true: 1}\n'
+run R "no not map key"                     'let m = {not: 1}\n'
+run A "keyword element tag"                'let e = <if a: 1>\ne\n'
+run A "base-type element tag"              'let e = <int a: 1>\ne\n'
+run A "keyword attribute names"            'let e = <div let: 1, if: 2, while: 3>\ne\n'
+run A "keywords in dotted names"           'let e = <svg.if xml.if: 1>\ne\n'
+run A "keyword member steps"               'let m = {a: 1}\nlet z = [m.if, m.type, m.let, m.int, m.last]\nz\n'
+run A "keyword fluent member"              'let m = {a: 1}\nlet z = m\n.if\nz\n'
+run A "keyword named argument"             'fn f(x) { x }\nlet z = f(type: 1)\nz\n'
+run A "keyword object fields"              'type T { if: int, let: int, type?: int }\n1\n'
+run A "keyword element-type tag"           'type E = <if a: int>\n1\n'
+run A "keyword map-type field"             'type M = {if: int}\n1\n'
+run A "keyword method names"               'type T { a: int, fn if() => 1, fn state() => a, pn open() { 1 } }\n1\n'
+run A "keyword module segment"             'import .lib.string\n1\n'
+run A "base-type loop index type"          'let a = [1]\nlet z = for (i: int, x in a) x\nz\n'
 
 echo
 echo "pass=$pass fail=$fail"

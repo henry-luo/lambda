@@ -202,12 +202,17 @@ NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
 # npm after a clean even when this dependency is installed, making release
 # builds fail offline before compilation begins.
 TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
+# The Lambda reference grammar reserves its keywords (S16.10.1v2), which needs
+# ABI 15, so it has its own CLI: package.json's `tree-sitter-cli-lambda` alias.
+# The vendored grammars stay on the CLI above, because regenerating them with
+# 0.25 rewrites their checked-in grammar.json, node-types.json and headers.
+TREE_SITTER_LAMBDA_CLI = node $(CURDIR)/node_modules/tree-sitter-cli-lambda/cli.js
 
 # Generate the reference parser outputs once. The generated parser is used only
 # by the isolated lambda-cst verifier; normal Lambda builds use the C parser.
 # `tree-sitter generate` never reads scanner.c; the archive rule below owns it.
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_LAMBDA_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Tree-sitter library targets
 # Build from source on all platforms
@@ -307,8 +312,8 @@ $(TREE_SITTER_LIB):
 # scanner is compiled into the same archive, so a scanner-only edit rebuilds it
 # directly instead of through a no-op regeneration of parser.c.
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C) $(GRAMMAR_SCANNER_C)
-	# pass the pinned CLI because the sub-make otherwise falls back to an unqualified tree-sitter
-	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_CLI)")
+	# pass the Lambda CLI because the sub-make otherwise falls back to an unqualified tree-sitter
+	$(call ts_lib_build,lambda,TS="$(TREE_SITTER_LAMBDA_CLI)")
 
 # Build tree-sitter-javascript library (depends on grammar and scanner source)
 # Generate with the project CLI directly; the sub-make only compiles the result.

@@ -963,8 +963,10 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     # Clean previous builds
     make clean || true
 
-    # Build static library for Mac (creates libtree-sitter-lambda.a)
-    make TS="npx --yes tree-sitter-cli@0.24.7" libtree-sitter-lambda.a
+    # Build static library for Mac (creates libtree-sitter-lambda.a). The Lambda
+    # grammar reserves its keywords, which needs the ABI-15 CLI (Makefile
+    # TREE_SITTER_LAMBDA_CLI); the vendored grammars below stay on 0.24.7.
+    make TS="npx --yes tree-sitter-cli@0.25.10" libtree-sitter-lambda.a
 
     cd - > /dev/null
     echo "Tree-sitter-lambda built successfully"

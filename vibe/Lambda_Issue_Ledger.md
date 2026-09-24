@@ -479,6 +479,57 @@ heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
 cases (a 65-item list literal, 65 call arguments) in both S16 conformance
 scripts.
 
+<a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · OPEN (found 2026-09-24)**
+`token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
+`apply`, `view` and `edit` as identifiers since the parser's first version
+(2026-08-20), a week before S16.10.1v2 barred all four as binding names, and
+`parse_prefix` (:1579) reduces `fn` as an atom. So `let a = view`,
+`let a = state`, `let a = apply` and `let a = fn` parse and compile, although
+no binding of those names can exist, so the read can never resolve. The
+reference grammar rejects all of them since it reserves its keywords
+(`test/ts_s16_conformance.sh`, "no fn as a value" and its three siblings); the
+C script omits those four cases until this is fixed. Fixing it means moving
+the four words from `token_is_identifier_like` into `token_is_name_word`
+explicitly, since they stay data names (S16.10.2), and keeping `apply(...)`
+callable through `token_is_literal`.
+The `fn` atom also hides an unruled form. `doc/Lambda_Func.md` documents an
+unnamed `fn (x: int, y: int) { x + y }`, which no `S#` covers and the
+reference grammar has no rule for. C parses it as the `fn` atom, a call with
+named arguments and a juxtaposed block, and it fails at run time with
+`fn_call2: cannot call non-function value`. The negative runtime fixtures
+`test_closure_call_stack.ls` and `negative/test_stack_deep.ls` get their
+`error` lines from that misparse, and `test/std/core/statements/higher_order.ls`
+passes the arrow-bodied variant `fn(x) => x * 2`. Both forms need a ruling
+(legal, or dropped from `Lambda_Func.md`) before either parser changes.
+
+<a id="lr02-22"></a>**LR02-22 · The reference grammar never reads a force-step fragment (PTH33) · OPEN (found 2026-09-24)**
+`force_expr` takes an optional fragment after `#`, but the operand-only form
+can also end the statement there, so `_stmt_boundary` is valid, and the
+scanner emits it before any start word. `p#name` therefore parses as the force
+`p#` plus a juxtaposed statement `name`, a silent misparse, and `p#if` is an
+error. The rule's comment still says `token(seq(...))` keeps the fragment
+tight to the `#`, but the rule no longer does. C reads the fragment exactly
+when it abuts the `#` (`lambda_parser.c:1750`). It predates the reserved-word
+change: the 0.24.7 grammar parses `p#name` the same way. The fix is a scanner
+rule that withholds the boundary when a name abuts the `#`, with mirrored
+cases (`p#name`, `p#if`, `p# name`) in both S16 scripts.
+
+<a id="lr02-23"></a>**LR02-23 · S16.10.2 is silent on named-argument names, `not`, and the named values · OBSERVATION (2026-09-24)**
+Two data-name questions surfaced while the reference grammar took over C's
+keyword behaviour. Both parsers now agree on each, so nothing diverges, but
+neither behaviour is ruled.
+- **Named arguments.** C's `parse_call_argument` (:1666) takes any
+  `token_is_key` word before `:`, so `f(if: 1)` and `f(type: 1)` parse. The
+  grammar now does the same through `_data_name`; it used to admit `let` alone
+  and to take or refuse the other keywords by accident of parse state. A
+  keyword can never name the parameter (S16.10.1v2), so such an argument can
+  only ever reach a builtin. Rule whether a named-argument name is a data name.
+- **`not` and the named values.** S16.10.2 says container names admit
+  keywords, yet both parsers refuse `not`, `true`, `false`, `inf` and `nan` as
+  data names (`{true: 1}`, `m.not`). `token_is_name_word` omits `NOT` and
+  `NAMED_VALUE`, and the grammar reserves the five words without admitting
+  them as data names. Rule whether S16.10.2's "keywords" covers them.
+
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
 first from the whole keyword table to *capture-real* words only (the full ban

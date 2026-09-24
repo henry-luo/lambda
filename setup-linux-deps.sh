@@ -946,7 +946,8 @@ if ! is_elf_archive "lambda/tree-sitter-lambda/libtree-sitter-lambda.a"; then
         echo "Building tree-sitter-lambda for Linux..."
         cd lambda/tree-sitter-lambda
         make clean || true
-        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-lambda.a
+        # the Lambda grammar reserves its keywords, which needs the ABI-15 CLI
+        make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-lambda.a
         cd - > /dev/null
         echo "Tree-sitter-lambda built successfully"
     else
