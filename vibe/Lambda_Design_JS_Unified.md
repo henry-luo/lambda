@@ -2486,7 +2486,10 @@ or scope mutation. `build` replays it into private construction scopes for
 bottom-up type assembly; the physical `bind` pass then creates the canonical
 scope/`NameEntry` graph and rewrites every declaration, use, and capture edge
 before `BOUND`. An allocation failure marks the replay failed and cannot
-publish a partial root. That closes the Lambda **D8.2.5** build→bind split;
+publish a partial root. (2026-09-24: the tape is retired. `parse` now
+allocates syntax nodes with names unbound and `build` is a resolve pass over
+them; the split into private construction scopes and a canonical `bind` is
+unchanged — `Lambda_Design_Compiling_Pipeline.md` LC3.9.) That closes the Lambda **D8.2.5** build→bind split;
 the retained construction lookup is not a published binding authority.
 `JsFuncCollected` remains a backend artifact payload, but `func_entries_by_id`
 is now the only source-to-artifact edge; the source-owned backend pointer and

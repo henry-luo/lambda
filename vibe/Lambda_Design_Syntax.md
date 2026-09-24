@@ -698,8 +698,8 @@ implemented in both.
 **The C parser is production.** `lambda/runtime/parser/` — a hand-written
 lexer (`lambda_lexer.c`) plus recursive-descent/Pratt parser
 (`lambda_parser.c`) behind a C ABI — parses source **directly to AST**
-through a reduction sink (`lambda_rd_parse_source` →
-`direct_ast_reduce` in `build_ast.cpp`), with no CST in between. It is the
+through a reduction sink (`lambda_rd_parse_source` → the syntax sink and
+resolve pass in `build_ast.cpp`), with no CST in between. It is the
 default path; every script the shipped binary runs goes through it.
 
 **The Tree-sitter grammar is the official grammar and reference
@@ -3296,9 +3296,9 @@ binding is a syntax error rather than E201.
 
 The Tier-3 row joined with PTH55–PTH80 (2026-09-18); the five stay data names
 (S16.10.2). `entity` left the base-type row on 2026-09-03 (S2.1.1v2, OB1): it
-never named a type, and `object` is the one nominal kind. The C lexer, the
-reference grammar and `is_type_keyword` have all dropped it, so
-`let entity = 1` is legal (verified 2026-09-24).
+never named a type, and `object` is the one nominal kind. The C lexer and the
+reference grammar have both dropped it (the third table, `is_type_keyword`,
+is itself retired), so `let entity = 1` is legal (verified 2026-09-24).
 
 **`int64` is not on this list and is not a type.** `i64` is the one surface
 spelling (S2.1.1); `int64` is a concept name that the parser answers with

@@ -1,7 +1,7 @@
 # Lambda Grammar Parser: Hybrid Recursive-Descent + Pratt Design
 
 - **Date:** 2026-08-20
-- **Last updated:** 2026-09-14
+- **Last updated:** 2026-09-24
 - **Status:** **PRODUCTION CUTOVER COMPLETE FOR NORMAL LAMBDA FILES/MODULES.** P2.1 source spans, P2.2 shared construction seams, P2.3 direct AST reduction, and the normal-runner P2.4 selector are landed. With `LAMBDA_PARSER` unset (or `c`), the first-party C hybrid recursive-descent + Pratt parser builds the existing typed AST directly. `LAMBDA_PARSER=tree`/`tree-sitter` is an explicit reference/rollback mode; `compare` records Tree-sitter syntax acceptance after the C AST is built and routes disagreements to D8.1.2v3 review. The REPL and a few legacy inspection paths still retain Tree-sitter fragment trees because their append-only source/span transaction is separate from the file cutover.
 - **Formal authority:** **D8.1.1v10** (first-party C parser → shared typed AST pipeline), **D8.1.2v3** (`grammar.js` as the best first-cut structural reference, C as the final production implementation, disagreements manually reviewed), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D4.1.1v2** (AST/const-pool ownership). The accepted language and S2.4.3v3/S7.6.3v2 syntax rulings are unchanged.
 - **Surface-syntax authority:** the formal syntax rulings win. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut verifier, but it misses reviewed corner cases; the production C parser is the shipped implementation and can also be wrong. A disagreement is therefore a manual-review case, not an automatic verdict for either parser. S2.4.3v3 governs greedy namespace-qualified names, and S7.6.3v2 governs query at the postfix/member tier.
@@ -119,10 +119,10 @@ source → C lexer → RD + Pratt parser → direct AST sink
 There is one parser core and a small output-sink interface:
 
 - the **Phase 1 sink** validates reduction order and computes a stable structural fingerprint without retaining a tree;
-- the **Phase 2 sink** returns `AstNode*`-backed values and invokes the shared production constructors;
+- the **Phase 2 sink** returns `AstNode*`-backed values: it allocates each retained node as its production completes, with names unbound and typed `any`, and a separate resolve pass then runs the shared production construction (binding, typing, registration, diagnostics) over that tree (P2.3 revision, LC3.9);
 - an error or abandoned lookahead never publishes semantic side effects.
 
-The sink is not an intermediate representation. Each completed production is reduced immediately, and child values are released from the parser stack once the parent reduction returns. No syntax-node graph survives parsing.
+The sink is not an intermediate representation. Each completed production is reduced immediately, and child values are released from the parser stack once the parent reduction returns. The nodes it builds are the AST itself: there is no second tree, only a resolve pass over the nodes parsing built.
 
 ### 5.1 Source and parser API
 
@@ -612,6 +612,25 @@ token spans + child values
 ```
 
 The direct path must preserve wrapper nodes that downstream code observes, including `AST_NODE_PRIMARY`, rather than “cleaning up” the tree during migration. D8.2.2 forbids syntax migration through tree rewriting. Any later AST simplification is a separate design and baseline campaign.
+
+#### P2.3 revision (2026-09-24): syntax sink and resolve pass
+
+The reduction tape that stood between the parser and the builder (a
+post-order record array replayed by `direct_ast_reduce`) is retired
+(`Lambda_Design_Compiling_Pipeline.md` LC3.9). The parser now drives a syntax
+sink that allocates every retained node as its production completes; names
+are interned with no `entry` and read as `any`, and nothing semantic is
+published. The resolve pass walks the finished tree in production order,
+replaying each construction scope at the BEGIN/END contexts the parser
+reported, and performs name binding, typing, constant/type registration and
+diagnostics exactly where the reducer did. Resolution-dependent node kinds
+morph in place (static asserts guard every fit), so no parent link is
+rewritten and D8.2.2's no-rewriting rule holds. Three parser reductions now
+pass the parts they used to drop as children, so those parts still resolve
+in order: the halves of a `T to e` range annotation
+(`LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE`), a view's written return types,
+and the later clauses of `pub a = 1, b = 2`. A syntax error leaves the nodes
+built so far in the pool, never published.
 
 The direct sink starts from the P2.2 shared scalar, atom, collection,
 named-argument, scope, declaration, and call-validation seams, then composes

@@ -1,10 +1,12 @@
 #pragma once
 
-// Parser-neutral AST construction seams.
+// Lambda AST construction seams.
 //
-// The first-party recursive-descent parser commits operator spelling and child
-// AST nodes before semantic construction. Keep that construction here so the
-// parser and semantic layer do not grow independent inference or diagnostics.
+// The first-party recursive-descent parser drives a syntax sink that builds
+// the retained nodes as productions complete; a separate resolve pass then
+// binds names, assigns types, registers constants and types, and reports
+// diagnostics (D8.2.5v3). Both halves live in build_ast.cpp so the parser and
+// the semantic layer never grow independent inference or diagnostics.
 
 #include "ast.hpp"
 #include "parser/lambda_rd_parser.h"
@@ -13,6 +15,130 @@
 // use.
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size);
+
+// How the syntax phase built a node, stored in AstNode::syntax_form so the
+// resolve pass can perform the semantic construction the parser defers:
+// name binding, typing, constant/type registration and diagnostics, in the
+// order the productions completed. LSF_NONE marks a resolved node, or one
+// whose syntax already fixes everything (a `null` literal, a path root).
+typedef enum LambdaSyntaxForm : uint8_t {
+    LSF_NONE = 0,
+    // `T as name`: an AST_NODE_TYPE allocated as AstNamedNode so it can carry
+    // its base pattern (`as`) and binder `name` until resolution.
+    LSF_BINDER,
+    // ---- type-pattern sub-language (parse_type_pattern.cpp) ----
+    LSF_TP_FIRST,
+    LSF_TP_LIT_STRING = LSF_TP_FIRST, // PRIMARY; flag symbol; literal_value = String*
+    LSF_TP_LIT_NUMBER,        // PRIMARY; flag float; literal_value = value bits
+    LSF_TP_LIT_BOOL,          // PRIMARY
+    LSF_TP_ANY,               // PRIMARY: the `any` operand of a type `!T`
+    LSF_TP_BASE,              // AST_NODE_TYPE; aux = base-type table index
+    LSF_TP_NAME,              // IDENT; a binder reference morphs to AST_NODE_TYPE
+    LSF_TP_CHAR_CLASS,        // PATTERN_CHAR_CLASS
+    LSF_TP_PATTERN_REF,       // IDENT naming a pattern inside an island
+    LSF_TP_PATTERN_RANGE,     // PATTERN_RANGE of two string literals
+    LSF_TP_ISLAND_GROUP,      // LIST_TYPE: a parenthesized island body
+    LSF_TP_ISLAND_UNARY,      // UNARY_TYPE: island negation or occurrence
+    LSF_TP_ISLAND_SEQ,        // PATTERN_SEQ
+    LSF_TP_ISLAND,            // PATTERN_ISLAND
+    LSF_TP_BINARY,            // BINARY_TYPE over wrapped operand types
+    LSF_TP_REGISTERED_BINARY, // BINARY_TYPE over unwrapped operand types
+    LSF_TP_RANGE,             // BINARY `lo to hi`
+    LSF_TP_OCCURRENCE,        // UNARY_TYPE occurrence or array suffix
+    LSF_TP_OPTIONAL_FIELD,    // UNARY_TYPE for a `name?:` field
+    LSF_TP_ARRAY,             // ARRAY_TYPE
+    LSF_TP_FIELD,             // KEY_EXPR: map field or element attribute
+    LSF_TP_MAP,               // MAP_TYPE
+    LSF_TP_TUPLE,             // LIST_TYPE
+    LSF_TP_CONTENT,           // CONTENT_TYPE of an element type
+    LSF_TP_ELEMENT,           // ELMT_TYPE
+    LSF_TP_FN_PARAM,          // KEY_EXPR: one fn-type parameter
+    LSF_TP_FN,                // FUNC_TYPE
+    LSF_TP_LAST = LSF_TP_FN,
+    // ---- main grammar (build_ast.cpp) ----
+    LSF_LITERAL,              // PRIMARY; aux = LambdaAstLiteralKind
+    LSF_BASE_TYPE,            // TYPE (ident-sized): may resolve to a system function
+    LSF_IDENT,                // IDENT: a name read (morphs by what it resolves to)
+    LSF_MEMBER_NAME,          // IDENT: a member key spelling, never looked up
+    LSF_WRAPPER,              // PRIMARY around one expression
+    LSF_CURRENT_ITEM,         // CURRENT_ITEM / CURRENT_INDEX
+    LSF_CURRENT_ERROR,        // CURRENT_ERROR
+    LSF_NAVIGATION,           // NAVIGATION_EXPR
+    LSF_PATH_INDEX,           // PATH_INDEX_EXPR
+    LSF_SPREAD,               // SPREAD
+    LSF_RAISE,                // RAISE_EXPR
+    LSF_TYPE_NEGATION,        // BINARY_TYPE of a value-position `!T`
+    LSF_ADDRESS_OF,           // UNARY `&`
+    LSF_UNARY,                // UNARY `not` / `-` / `+`
+    LSF_FORCE,                // UNARY `#`
+    LSF_PROPAGATE,            // UNARY `^`; becomes its call operand when it has one
+    LSF_GROUP_WRAPPER,        // PRIMARY of a one-item parenthesized group
+    LSF_GROUP_LIST,           // LIST of any other parenthesized group
+    LSF_ARRAY,                // ARRAY
+    LSF_MAP,                  // MAP
+    LSF_ELEMENT,              // ELEMENT; may resolve to an OBJECT_LITERAL
+    LSF_DECOMPOSE,            // DECOMPOSE
+    LSF_DECLARATOR,           // VARIABLE_DECLARATOR of a `let`/`var`/`pub` binding
+    LSF_FUNCTION,             // FUNC / FUNC_EXPR / PROC
+    LSF_PARAM,                // PARAM
+    LSF_IF,                   // IF_EXPR
+    LSF_MATCH,                // MATCH_EXPR
+    LSF_MATCH_ARM,            // MATCH_ARM
+    LSF_FOR,                  // FOR_EXPR
+    LSF_WHILE,                // LOOP
+    LSF_FOR_BINDING,          // FOR_CLAUSE
+    LSF_FOR_LET,              // VARIABLE_DECLARATOR of a for-header `let`
+    LSF_ORDER_SPEC,           // ORDER_SPEC
+    LSF_GROUP_KEY,            // GROUP_KEY
+    LSF_GROUP_CLAUSE,         // GROUP_CLAUSE
+    LSF_BINARY,               // BINARY (PIPE for `|>` / `that`)
+    LSF_MEMBER,               // MEMBER_EXPR; may resolve to a constant or import
+    LSF_INDEX,                // INDEX_EXPR
+    LSF_QUERY,                // QUERY_EXPR
+    LSF_HANDLER,              // HANDLER_EXPR / HANDLER_STAM
+    LSF_CALL,                 // CALL_EXPR; may resolve to START
+    LSF_CONSTRAINED,          // CONSTRAINED_TYPE
+    LSF_IMPORT,               // IMPORT; may resolve to a NULL marker
+    LSF_TYPE_STAM,            // TYPE_STAM / PUB_STAM of a type alias
+    LSF_PATTERN_DEF,          // STRING_PATTERN / SYMBOL_PATTERN
+    LSF_TYPE_ALIAS,           // VARIABLE_DECLARATOR of `type Name = T`
+    LSF_OBJECT_TYPE,          // OBJECT_TYPE
+    LSF_OBJECT_FIELD,         // KEY_EXPR field of an object type
+    LSF_OBJECT_CONTENT,       // CONTENT_TYPE of an object type
+    LSF_PUB_STAM,             // PUB_STAM of a `pub` binding
+    LSF_ASSIGN,               // assignment; kind chosen when resolved
+    LSF_RETURN,               // RETURN_STAM
+    LSF_BREAK,                // BREAK_STAM / CONTINUE_STAM
+    LSF_CRUD,                 // CRUD_STAM `put` / `del`; aux = write op
+    LSF_CRUD_MARK,            // CRUD_STAM sequence / `commit` / `rollback`
+    LSF_OPEN,                 // OPEN_STAM
+    LSF_VAR_STAM,             // VAR_STAM
+    LSF_LET_STAM,             // LET_STAM
+    LSF_NAMED_ARG,            // NAMED_ARG
+    LSF_KEY_ITEM,             // KEY_EXPR of a map item or element attribute
+    LSF_CONTENT,              // CONTENT
+    LSF_VIEW,                 // VIEW
+    LSF_VIEW_STATE,           // STATE_ENTRY
+    LSF_EVENT_HANDLER,        // EVENT_HANDLER
+    LSF_SCRIPT,               // AST_SCRIPT
+} LambdaSyntaxForm;
+
+static inline bool lambda_syntax_form_is_type_pattern(uint8_t form) {
+    return form >= LSF_TP_FIRST && form <= LSF_TP_LAST;
+}
+
+// Base-type spellings are lexical, so the syntax phase classifies them with no
+// side effects; resolution then yields the Type (and counts an explicit
+// `any`). A negative index means the word is not a base type.
+int lambda_base_type_index(StrView name);
+Type* lambda_base_type_from_index(Transpiler* tp, int index);
+
+// `T as name` binder sites. The syntax half only records base and name; the
+// resolve half performs the collision checks and registers the binder in the
+// current scope, morphing the node into the error type on rejection.
+AstNode* build_binder_type_syntax(Transpiler* tp, SourceSpan span,
+        AstNode* base, StrView name);
+void resolve_binder_type(Transpiler* tp, AstNode* node);
 
 // Move a direct-parser fragment's byte ranges into an append-only REPL source
 // buffer. The parser receives only the new fragment, so its local offsets must
@@ -41,20 +167,15 @@ typedef enum LambdaAstLiteralKind {
     LAMBDA_AST_LITERAL_IMAGINARY,
 } LambdaAstLiteralKind;
 
-// Builds the retained primary literal and its constant/type payload from the
-// original source span. No literal parser may require a synthetic parser node.
-AstNode* build_literal_from_span(Transpiler* tp, SourceSpan span,
-        LambdaAstLiteralKind kind);
-
 // Maps an already-committed Lambda operator spelling to the retained AST
 // operator. Prefix and infix spellings intentionally use separate entry
 // points: `+`, `-`, `*`, and `!` have different retained meanings by form.
 bool lambda_unary_operator_from_spelling(StrView spelling, Operator* op_out);
 bool lambda_binary_operator_from_spelling(StrView spelling, Operator* op_out);
 
-// Resolves an identifier after the parser has committed its spelling. Name
-// lookup, imported-value handling, and `that`-clause rewriting stay in this
-// shared constructor rather than being reimplemented by the direct sink.
+// Builds and binds a name read at resolve time (a callee spelled as a type
+// word). Name lookup, imported-value handling, and `that`-clause rewriting
+// stay in this one constructor.
 AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span);
 
 // Scope mutation is semantic state, not parser lookahead state. A committed
@@ -65,44 +186,10 @@ NameScope* lambda_ast_enter_scope_with_parent(Transpiler* tp,
         NameScope* parent, bool is_proc);
 void lambda_ast_leave_scope(Transpiler* tp, NameScope* scope);
 
-// Register an already-built declaration only after its grammar branch has
-// committed. Forward placeholders use the same NameEntry path as their final
-// declarations, so recursive references keep a single binding identity.
+// Register a declaration once it has resolved. Forward placeholders use the
+// same NameEntry path as their final declarations, so recursive references
+// keep a single binding identity.
 void lambda_ast_register_name(Transpiler* tp, AstNode* node);
-AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
-        SourceSpan span, StrView name, bool is_proc);
-
-// Contextual atoms are semantic rather than lexical: `~#` is the current
-// index and `^` is valid only while a handler body is being constructed.
-AstNode* build_current_item_from_span(Transpiler* tp, SourceSpan span,
-        bool is_index);
-AstNode* build_current_error_from_span(Transpiler* tp, SourceSpan span);
-AstNode* build_current_parent_navigation_from_span(Transpiler* tp,
-        SourceSpan span);
-
-// A parenthesized Lambda expression remains an observable AST_NODE_PRIMARY;
-// the direct front end must retain this wrapper instead of flattening it.
-AstNode* build_primary_wrapper_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* expr);
-
-// Assemble already-constructed collection children. The direct sink supplies
-// the ordered child list; shape/type inference remains here rather than being
-// copied into the parser.
-AstNode* build_array_from_items(Transpiler* tp, SourceSpan span,
-        AstNode* items);
-AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
-        AstNode* items);
-
-// Build a named call argument after the parser has committed its key/value.
-AstNamedNode* build_named_argument_from_parts(Transpiler* tp,
-        SourceSpan span, StrView name, AstNode* value);
-
-AstDeclaratorNode* build_declarator_from_parts(Transpiler* tp, SourceSpan span,
-        StrView name, AstNode* type_expr, AstNode* value);
-AstNode* build_decompose_from_parts(Transpiler* tp, SourceSpan span,
-        String** names, int name_count, AstNode* value, bool is_named);
-AstNode* build_assignment_statement_from_parts(Transpiler* tp,
-        SourceSpan span, AstNode* target, AstNode* value);
 
 // Call-boundary validation belongs to semantic construction. The parser only
 // supplies a committed source span and already-built callee/argument nodes.
@@ -115,94 +202,39 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
 bool lambda_ast_collect_static_binder_env(AstCallNode* call,
         Type** env_out, uint16_t env_count);
 
-// Builds the ordinary unary semantic node after parsing has committed its
-// operator and operand. The special spread/type-negation forms intentionally
-// remain owned by their dedicated constructors.
-AstNode* build_unary_node_from_parts(Transpiler* tp, SourceSpan span,
-        StrView op_spelling, AstNode* operand);
-
-AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
-        StrView op_spelling, AstNode* left, AstNode* right);
-AstNode* build_field_node_from_parts(Transpiler* tp, SourceSpan span,
-        AstNodeType node_type, AstNode* object, AstNode* field);
 Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
     const char** destination_label);
-AstNode* build_navigation_node_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* object, bool root);
-AstNode* build_query_node_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* object, AstNode* query, bool direct);
+// Builds and resolves a call at resolve time (a bare pipe system function
+// promoted to a call), under the pipe state its caller set.
 AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* function, AstNode* arguments, int arg_count);
-AstNode* build_raise_node_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* value, bool statement_form);
-AstNode* build_spread_node_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* operand);
-AstNode* build_type_negation_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* operand);
-AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
-        SourceSpan tag_span, AstNode* children);
-AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
-        StrView name, AstNode* type_expr, AstNode* default_value,
-        bool optional, bool is_var);
-AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* base, StrView name);
-AstNode* build_function_from_parts(Transpiler* tp, SourceSpan span,
-        StrView name, AstNode* params, AstNode* returned, AstNode* error_type,
-        AstNode* body, bool is_proc, bool variadic, bool raised);
-AstNode* build_if_node_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* condition, AstNode* then_branch, AstNode* else_branch);
-AstNode* build_match_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* scrutinee, AstNode* arms);
-AstNode* build_handler_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* operand, AstNode* body, AstNode* value_body);
-AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
-    LambdaToken name_token, LambdaToken index_token, uint32_t flags,
-    AstNode* index_type, AstNode* source, AstNode* join);
-AstNode* build_for_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* clauses, AstNode* body, NameScope* loop_scope,
-    bool statement_form);
-AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* condition, AstNode* body, NameScope* loop_scope);
-AstNode* build_propagate_node_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* operand);
-// PTH32/PTH40: the one-operand reference forms. Both reuse AstUnaryNode so the
-// existing unary plumbing (rooting, dumps, const folding) carries them.
-AstNode* build_force_node_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* operand);
-AstNode* build_address_of_node_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* operand);
-// Tier 3 (PTH60v3, PTH68v3).
-AstNode* build_crud_statement_from_parts(Transpiler* tp, SourceSpan span,
-    uint8_t write_op, AstNode* target, AstNode* value);
-AstNode* build_open_statement_from_parts(Transpiler* tp, SourceSpan span,
-    AstNode* target, AstNode* body, String* alias, AstNode* alias_decl);
 
-// The parser publishes a reduction tape without AST allocation or scope
-// mutation. The builder replays it into the binding-bearing AST; validation
-// remains a later pass.
-typedef struct LambdaReductionTape LambdaReductionTape;
-LambdaParseStatus lambda_rd_parse_reductions(const char* source, size_t length,
-        LambdaReductionTape** tape_out, LambdaParseError* error);
-LambdaParseStatus lambda_rd_build_reductions(Transpiler* tp, const char* source,
-        size_t length, const LambdaReductionTape* tape, AstScript** root_out,
-        LambdaParseError* error);
-void lambda_rd_destroy_reductions(LambdaReductionTape* tape);
+// The two front-end phases. Parsing drives the syntax sink, which allocates
+// every retained node as its production completes, with names unbound and
+// typed `any`; a syntax error leaves the nodes built so far in the pool,
+// never published. Resolving walks that tree in production order and binds,
+// types and validates it into the AST the bind pass consumes.
+typedef struct LambdaSyntaxUnit LambdaSyntaxUnit;
+LambdaParseStatus lambda_rd_parse_syntax(Transpiler* tp, const char* source,
+        size_t length, LambdaSyntaxUnit** unit_out, LambdaParseError* error);
+LambdaParseStatus lambda_rd_resolve_syntax(Transpiler* tp,
+        LambdaSyntaxUnit* unit, AstScript** root_out, LambdaParseError* error);
+void lambda_rd_destroy_syntax(LambdaSyntaxUnit* unit);
 
 // Resolve a Lambda source import through the same package/relative rules used
 // by AST construction. The returned `.ls` path is caller-owned.
 char* lambda_resolve_import_module_path(const char* base_directory,
     StrView module);
 
-// Compatibility composition for callers that require the direct build result.
+// Both phases back to back, for callers that need only the resolved tree.
 LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
         size_t length, AstScript** root_out, LambdaParseError* error);
 
-// The direct reduction replay uses short-lived construction scopes for
-// bottom-up type assembly. Rebuild the canonical lexical graph from the
-// retained AST before validation or lowering publishes any of those edges.
-bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script);
-// The bind pass collects every function while it rewrites AST edges. Later
-// validation analyses share this list instead of rescanning the whole unit.
+// The resolve pass uses short-lived construction scopes for bottom-up type
+// assembly. Rebuild the canonical lexical graph from the retained AST before
+// validation or lowering publishes any of those edges. The bind pass collects
+// every function while it rewrites AST edges; later validation analyses share
+// that list instead of rescanning the whole unit.
 bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
     AstScript* script, ArrayList** functions_out);
 

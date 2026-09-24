@@ -19,7 +19,7 @@
 > cache, AST-template prebuild), D8.6.1 (MT7 emission ratchet),
 > D8.6.4v2 (fail-closed consolidation gates).
 > **Ledger**: extends the compiling area's **LC#** series
-> (`Lambda_Design_Compiling.md`, LC1–LC2): decisions **LC3.1–LC3.8**, open
+> (`Lambda_Design_Compiling.md`, LC1–LC2): decisions **LC3.1–LC3.9**, open
 > issues **LCO1–LCO6**. No new series.
 > **Companion**: `doc/dev/lambda/LR_01_Compilation_Pipeline.md` (orchestration
 > detail), `LR_02_Parsing_AST.md`, `LR_07_MIR_Transpiler_JIT.md`;
@@ -40,7 +40,7 @@ after `index` and hands the unit to the frame planner; in the `jit` tier
 to the same manager.
 
 ```
-source ──lex+parse──▶ reduction tape ──replay──▶ typed AST (+ provisional scopes)
+source ──lex+parse──▶ syntax tree (unbound) ──resolve──▶ typed AST (+ provisional scopes)
                                                      │
                                                    bind   (clone scopes, rewrite edges, captures)
                                                      │
@@ -55,8 +55,8 @@ source ──lex+parse──▶ reduction tape ──replay──▶ typed AST (
 
 | # | Pass (fact) | Owner | What it does | Tree walks |
 |---|---|---|---|---|
-| 1 | `parse` (PARSED) | `parser/lambda_lexer.c`, `parser/lambda_parser.c`, sink `direct_tape_reduce` in `build_ast.cpp` | Lex + recursive-descent/Pratt parse. The parser never builds nodes; it emits a **reduction tape** (§1.2). | source ×1 |
-| 2 | `build` (AST) | `lambda_rd_build_reductions`, `direct_ast_reduce` | Replays the tape bottom-up into typed `AstNode`s and predeclares top-level `fn`/`pn` names from parser `FUNCTION_HEADER` reductions. Scope entry/exit, `push_name`, `lookup_name`, type inference and source-ordered validators run **inline** in the reducer. | tape ×1, plus required per-body analysis |
+| 1 | `parse` (PARSED) | `parser/lambda_lexer.c`, `parser/lambda_parser.c`, `lambda_rd_parse_syntax` (sink `syntax_sink_reduce` in `build_ast.cpp`) | Lex + recursive-descent/Pratt parse. The syntax sink allocates each retained node as its production completes, with names unbound and typed `any` (§1.2). | source ×1 |
+| 2 | `build` (AST) | `lambda_rd_resolve_syntax`, `resolve_walk` | The resolve pass: predeclares top-level `fn`/`pn` names collected from parser `FUNCTION_HEADER` contexts, then walks the syntax tree in production order. Scope entry/exit, `push_name`, `lookup_name`, type inference and source-ordered validators run at each node. | tree ×1, plus required per-body analysis |
 | 3 | `bind` (BOUND) | `lambda_ast_rebind_direct_scope_graph` | Clones every `NameScope`/`NameEntry` reachable from the tree into fresh pool objects, rewrites AST edges by bind epoch, remaps entry links and existing captures, and collects the one function list. | ×1 full |
 | 4 | `validate` (VALIDATED) | `lambda_ast_finalize_script` | Proc-method-as-value reject walk; call-colour walk (per function); enforcing-call and cross-frame checks; COW and concurrency consume bind's function list. One concurrency body visitor gathers facts before its call-graph fixed point. | bounded full + per fn |
 | 5 | `index` (INDEXED) | bind and `ast_index_compiler_pass` (`ast-core.cpp`) | Allocation reserves dense node IDs. Bind publishes graph columns for JIT; AUTO/interp defer JIT-only graph columns until an index consumer needs them (D8.2.4). | no T0 walk; one deferred JIT walk when needed |
@@ -79,17 +79,36 @@ Three structural facts matter for cost:
 - **Profile phases record own time.** Import compilation and prebuild-worker
   waits are subtracted from the importer so its row represents its own work.
 
-### 1.2 The reduction tape
+### 1.2 The syntax tree and the resolve pass (LC3.9)
 
-`LambdaReductionTape` (`build_ast.cpp`) is a flat array of
-`LambdaReductionRecord`: reduction kind/form, span, a copied child-index
-array and copied name tokens. Children are one-based indices of earlier
-records, so the tape is a post-order serialization of the parse tree. The
-build pass replays it forward with a `values[]` array of node pointers. The
-split keeps the parser a pure recognizer with no `Transpiler` knowledge and
-lets a comparison sink verify the C parser against the reference grammar
-(D8.1.2v3). Record payloads come from one tape-owned arena, so destruction is
-one arena release rather than per-record frees.
+The parser reports each committed production to a `LambdaParseSink`; its
+reduction values are the sink's node pointers. The syntax sink allocates the
+retained node for each production as it completes and records only what the
+source spells: a name is interned but its `entry` stays null and it reads as
+`any`; no scope, constant, type, or diagnostic is published. Each node's
+`syntax_form` (in former `AstNode` header padding) names the production that
+built it, `syntax_flags`/`syntax_aux` hold its small syntactic facts, and a
+few forms keep child links the retained AST does not (a declarator's
+annotation, a function's signature and body) in pointer slots past the
+struct. Scope-owning productions (`fn`, `for`, views, object types, type
+aliases) allocate their node at their BEGIN context so the productions
+inside can attach to it. A syntax error leaves the nodes built so far in the
+pool, never published.
+
+The resolve pass walks the tree in the order its productions completed: each
+form lists its children in source order and re-enters the construction scope
+its BEGIN/END contexts delimited. A node whose kind depends on resolution — a
+name that reads a field, constant or builtin, an element whose tag names an
+object type, `start(...)`, a rejected assignment — is morphed in place at a
+size its syntax form reserved (static asserts guard each fit), so parents
+keep their links. Parts the parser reduces but the tree drops (the halves of
+a `T to e` range annotation, a scheme word under a path, the later clauses of
+`import a, b`, and a path step's syntax diagnostic) are *attachments*
+resolved at their host, so constants, types and diagnostics keep the order
+the old reducer produced. `bind` rejects any node still carrying a syntax
+form. The parser remains a recognizer with no `Transpiler` knowledge, and
+the comparison sink still verifies it against the reference grammar
+(D8.1.2v3).
 
 ### 1.3 Where the time goes (measured)
 
@@ -318,6 +337,10 @@ from its closure's, and the `jit` tier's `ast` column reads 731 ms for a
 
 ### LC3.6 — Tape records are arena-allocated; predeclaration comes from the parser
 
+> **Superseded (2026-09-24) by LC3.9**: the tape is gone. Predeclaration
+> still comes from the parser's `FUNCTION_HEADER` contexts, collected by the
+> syntax sink.
+
 **Decision.** `LambdaReductionTape` allocates child-index arrays and name
 tokens from one bump arena freed with the tape, replacing two `mem_alloc`
 per record. The parser emits a `FUNCTION_HEADER` reduction as soon as it has
@@ -392,10 +415,35 @@ per-node arms emit no per-call `log_debug`. Diagnostics that matter stay at
 and run 3× slower than `--no-log`; every developer iteration on the front
 end pays it, and the timing numbers it produces are misleading.
 
+### LC3.9 — The parser builds syntax nodes; binding and typing are a resolve pass
+
+**Decision.** The reduction tape and its replay are retired. The parser's
+sink allocates retained nodes as productions complete (§1.2), with names
+unbound and typed `any`; a separate resolve pass (`build`) walks the tree in
+production order and performs name binding, typing, constant/type
+registration and diagnostics. Resolution-dependent node kinds are morphed in
+place; no parent link is ever rewritten.
+
+**Why.** The tape was a second, post-order copy of the parse tree that the
+builder immediately turned into the tree; building the nodes directly removes
+it and makes name resolution and typing an AST analysis rather than a parser
+side effect, as in the JavaScript front end. Output is unchanged: the walk
+reproduces the reducer's order, so constant indices, type-list order and
+diagnostic order are identical (verified by AST-dump identity over every
+`.ls` in the tree and run-output identity over `test/lambda`).
+
+**Measured (2026-09-24).** Release builds, `utils/compile_phase_bench.sh
+interp 5`, the 19 compiling scripts of the default corpus, sum of per-script
+minima: parse 93.9 → 78.8 ms (−16%), build+bind+validate+index 77.3 →
+52.2 ms (−33%), together 171.3 → 131.0 ms (−24%). Parse now pays for node
+allocation but no longer copies every reduction onto the tape;
+`oracle_poc.ls` goes 31.7 → 24.2 ms and `complex_iot_report_html.ls`
+73.1 → 55.0 ms.
+
 ### 3.9 Non-goals
 
-- No bytecode, no second IR, no change to the tape/AST split (D8.1.1v13,
-  AI22).
+- No bytecode, no second IR, no change to the syntax/resolve split
+  (D8.1.1v13, AI22).
 - No change to fact placement: inferred types stay on `AstNode.type`,
   declared annotations on the declaring node (D8.2.5v2). LC3.3's index
   columns are the D8.2.4 identities, not a fact table.
@@ -411,9 +459,10 @@ end pays it, and the timing numbers it produces are misleading.
 | LC3.3 fused walks | T0 critical | ≈30 → ≈22 ms | constant factor, all rows |
 | LC3.4 single-home analyses | T0 critical | small | correctness of the walk budget |
 | LC3.5 accounting | measurement | — | makes §4 honest |
-| LC3.6 tape arena | T0 critical | ≈1–2 ms | all rows, small |
+| LC3.6 tape arena (superseded by LC3.9) | T0 critical | ≈1–2 ms | all rows, small |
 | LC3.7 JIT liveness/tables | jit + satellites | — | `lets_1000` 73 s → sub-second; jit tier −40–50% |
 | LC3.8 log gating | dev loop | — | debug-build compile 3× faster |
+| LC3.9 syntax/resolve split | T0 critical | parse+ast 31.7 → 24.2 ms (release) | corpus parse+ast −24% |
 
 ### 3.11 Implementation record (2026-09-22)
 
@@ -544,9 +593,9 @@ rows separately in `temp/phase_profile.txt`.
 
 | Site | Walks | Note |
 |---|---|---|
-| `direct_predeclare_top_level_functions` (`build_ast.cpp`) | tape ×1 | parser-owned `FUNCTION_HEADER` records; no second lex |
-| `lambda_rd_build_reductions` | tape ×1 | `values[]` replay |
-| `FUNCTION_END` arm of `direct_ast_reduce` | per fn: `analyze_captures` (params + body), `validate_cross_frame_binding_reads`, `lambda_ast_note_param_cow_effects` | inline analyses |
+| `resolver_predeclare_functions` (`build_ast.cpp`) | header list ×1 | `FUNCTION_HEADER` nodes the syntax sink collected; no second lex |
+| `lambda_rd_resolve_syntax` → `resolve_walk` | tree ×1 | production-order resolve walk |
+| `resolver_function_end` | per fn: `analyze_captures` (params + body), `validate_cross_frame_binding_reads`, `lambda_ast_note_param_cow_effects` | inline analyses |
 | `lambda_ast_rebind_direct_scope_graph` | full ×1 | epoch mark, capture-entry remap, and one returned function list |
 | `lambda_ast_finalize_script` | `reject_proc_method_value` ×1, `colour_walk_visit` ×1 (+ per fn), per top-level item ×2 | |
 | `lambda_ast_decide_cow_borrows` | returned function list; per-function facts only | no independent function collector |

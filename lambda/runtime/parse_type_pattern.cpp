@@ -1,9 +1,11 @@
 #include "parse_type_pattern.hpp"
+#include "ast_build.hpp"
 #include "type_build.hpp"
 #include "transpiler.hpp"
 #include "lambda-error.h"
-#include "parse_lex.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
+#include "../../lib/strview.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -23,8 +25,21 @@
 // wrapping, and type_list/const_list registration expected by downstream
 // consumers — that fidelity is the contract (see the header). The shared
 // Type-construction pieces live in type_build.hpp rather than being copied.
+//
+// The parse builds only nodes (each tagged with its LSF_TP_* form) and the
+// lexical payload of literals; resolve_type_pattern() then does everything a
+// name, a constant slot, a type index, or a diagnostic depends on. Those
+// effects are order-sensitive, so resolution visits children before their
+// parent: the order in which the productions complete.
 
 namespace {
+
+// syntax facts a type-pattern node carries until it resolves
+enum : uint8_t {
+    TP_FLAG_FN_PROC = 1u << 0,       // LSF_TP_FN: the `pn (...)` colour
+    TP_FLAG_RAISES = 1u << 1,        // a `^` follows the return type
+    TP_FLAG_ERROR_NODE = 1u << 2,    // the raised channel names its type
+};
 
 struct Lexer {
     Transpiler* tp;
@@ -32,34 +47,57 @@ struct Lexer {
     const char* end;
     SourceSpan origin;
     bool failed;
+    TypePatternFailure failure;
 };
 
 bool is_ident_start(char c) {
-    return lambda_lex_ident_start(c);
+    return c == '_' || c == '$' || (c >= 'A' && c <= 'Z') ||
+        (c >= 'a' && c <= 'z') || (unsigned char)c >= 0x80;
 }
 
-bool is_ident_continue(char c) { return lambda_lex_ident_continue(c); }
-bool is_digit(char c) { return lambda_lex_digit(c); }
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+bool is_ident_continue(char c) { return is_ident_start(c) || is_digit(c); }
 
-void fail(Lexer* lx, const char* what) {
-    if (lx->failed) { return; }  // keep the first diagnostic, which is the useful one
+// Keep the first diagnostic, which is the useful one. It is reported when the
+// slot resolves, so a syntax error keeps its place among semantic errors.
+void record_failure(Lexer* lx, LambdaErrorCode code, const char* what,
+        const char* message) {
+    if (lx->failed) { return; }
     lx->failed = true;
     size_t left = (size_t)(lx->end - lx->p);
     log_error("type-pattern: %s at '%.*s'", what, (int)(left > 24 ? 24 : left), lx->p);
-    record_semantic_error_span(lx->tp, lx->origin, ERR_INVALID_LITERAL,
-        "invalid type pattern");
+    lx->failure.code = code;
+    lx->failure.message = message;
+}
+
+void fail(Lexer* lx, const char* what) {
+    record_failure(lx, ERR_INVALID_LITERAL, what, "invalid type pattern");
 }
 
 void fail_code(Lexer* lx, LambdaErrorCode code, const char* what) {
-    if (lx->failed) return;
-    lx->failed = true;
-    size_t left = (size_t)(lx->end - lx->p);
-    log_error("type-pattern: %s at '%.*s'", what, (int)(left > 24 ? 24 : left), lx->p);
-    record_semantic_error_span(lx->tp, lx->origin, code, "%s", what);
+    record_failure(lx, code, what, what);
+}
+
+// Pattern text may carry `//` and `/* */` comments between its tokens.
+static const char* skip_space_from(const char* p, const char* end) {
+    for (;;) {
+        p = strn_skip_ascii_space(p, end);
+        if (p + 1 < end && p[0] == '/' && p[1] == '/') {
+            while (p < end && *p != '\n') p++;
+            continue;
+        }
+        if (p + 1 < end && p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
+            p = p + 2 < end ? p + 2 : end;
+            continue;
+        }
+        return p;
+    }
 }
 
 void skip_space(Lexer* lx) {
-    lambda_lex_skip_space(&lx->p, lx->end);
+    if (lx->p) lx->p = skip_space_from(lx->p, lx->end);
 }
 
 bool at(Lexer* lx, char c) { skip_space(lx); return lx->p < lx->end && *lx->p == c; }
@@ -72,11 +110,20 @@ bool eat(Lexer* lx, char c) {
 
 // Read an identifier/keyword without consuming it on failure.
 StrView peek_word(Lexer* lx) {
-    return lambda_lex_peek_word(&lx->p, lx->end);
+    if (!lx->p) return (StrView){lx->end, 0};
+    skip_space(lx);
+    StrView word = {lx->p, 0};
+    if (lx->p >= lx->end || !is_ident_start(*lx->p)) return word;
+    const char* q = lx->p;
+    while (q < lx->end && is_ident_continue(*q)) q++;
+    word.length = (size_t)(q - lx->p);
+    return word;
 }
 
 StrView take_word(Lexer* lx) {
-    return lambda_lex_take_word(&lx->p, lx->end);
+    StrView word = peek_word(lx);
+    if (lx->p) lx->p += word.length;
+    return word;
 }
 
 // Namespace-qualified element tags are dotted (`<soap.Fault>`; the `html:div`
@@ -120,7 +167,9 @@ static StrView take_qualified_tag(Lexer* lx) {
 }
 
 bool word_is(StrView w, const char* s) {
-    return lambda_lex_word_is(w, s);
+    size_t length = s ? strlen(s) : 0;
+    return w.length == length && (!length ||
+        (w.str && s && memcmp(w.str, s, length) == 0));
 }
 
 // the characters that open a type suffix (see apply_occurrence)
@@ -138,44 +187,34 @@ AstNode* parse_element_type(Lexer* lx);
 AstNode* parse_fn_type(Lexer* lx, bool is_proc);
 AstNode* parse_island(Lexer* lx);
 AstNode* parse_island_body(Lexer* lx);
-AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right,
-        Operator op, const char* op_text, size_t op_len);
-
-AstNode* new_node(Lexer* lx, AstNodeType kind, size_t size) {
-    return alloc_ast_node_from_span(lx->tp, kind, lx->origin, size);
-}
 
 // Every hand node shares the type-slot source span, so nothing downstream may
 // re-read source through it expecting a sub-span. The one consumer that does is the
 // literal emitter for `&LIT_INT` / `&LIT_BOOL` typed nodes — which is why
 // numeric literals here always carry value-bearing types instead (see below).
-Type* wrap_type(Lexer* lx, Type* inner) {
-    TypeType* tt = (TypeType*)alloc_type(lx->tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    tt->type = inner;
-    return (Type*)tt;
+AstNode* new_node(Lexer* lx, AstNodeType kind, size_t size, LambdaSyntaxForm form) {
+    AstNode* node = alloc_ast_node_from_span(lx->tp, kind, lx->origin, size);
+    node->syntax_form = form;
+    return node;
 }
 
-// Containers and binaries register the WRAPPER in type_list; occurrence and
-// range register the raw type — the split required by downstream consumers.
-Type* register_wrapped(Lexer* lx, Type* inner, int* index_out) {
-    Type* wrapper = wrap_type(lx, inner);
-    arraylist_append(lx->tp->type_list, wrapper);
-    *index_out = lx->tp->type_list->length - 1;
-    return wrapper;
+AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right, Operator op,
+        const char* op_text, size_t op_len, LambdaSyntaxForm form) {
+    AstBinaryNode* ast_node = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY_TYPE,
+        sizeof(AstBinaryNode), form);
+    ast_node->op = op;
+    ast_node->op_str = {.str = op_text, .length = op_len};
+    ast_node->left = left;
+    ast_node->right = right;
+    return (AstNode*)ast_node;
 }
 
 // --- literals ---------------------------------------------------------------
-// Value-bearing literal types, registered through the shared literal/type lanes:
-// strings/ints/floats go to const_list, and the transpiler emits them from the
-// type payload or the const pool — never from the node's source span.
+// Value-bearing literal types. The payload is lexical, so it is decoded while
+// parsing; the const_list slot the transpiler emits it from is claimed when
+// the literal resolves, never from the node's source span.
 
-AstNode* literal_node(Lexer* lx, Type* literal_type) {
-    AstPrimaryNode* pri = (AstPrimaryNode*)new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode));
-    pri->type = literal_type;
-    return (AstNode*)pri;
-}
-
-Type* parse_string_literal_type(Lexer* lx, char quote) {
+AstNode* parse_string_literal(Lexer* lx, char quote) {
     lx->p++;  // opening quote
     // two passes: measure the unescaped length, then fill the pooled String
     const char* scan = lx->p;
@@ -228,13 +267,13 @@ Type* parse_string_literal_type(Lexer* lx, char quote) {
         quote == '"' ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(TypeString));
     ts->is_const = 1;  ts->is_literal = 1;
     ts->string = str;
-    // the transpiler emits string/symbol literals as const-pool loads
-    arraylist_append(lx->tp->const_list, str);
-    ts->const_index = lx->tp->const_list->length - 1;
-    return (Type*)ts;
+    AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
+        LSF_TP_LIT_STRING);
+    node->type = (Type*)ts;
+    return node;
 }
 
-Type* parse_number_literal_type(Lexer* lx) {
+AstNode* parse_number_literal(Lexer* lx) {
     const char* start = lx->p;
     if (lx->p < lx->end && (*lx->p == '-' || *lx->p == '+')) { lx->p++; }
     bool is_float = false;
@@ -248,24 +287,26 @@ Type* parse_number_literal_type(Lexer* lx) {
     if (n >= sizeof(buf)) { fail(lx, "numeric literal too long"); return NULL; }
     memcpy(buf, start, n);  buf[n] = '\0';
 
+    Type* type;
     if (is_float) {
         // the float emitter reads double_val straight off the type
         TypeFloat* ft = (TypeFloat*)alloc_type(lx->tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
         ft->double_val = strtod(buf, NULL);
         ft->is_const = 1;  ft->is_literal = 1;
-        arraylist_append(lx->tp->const_list, &ft->double_val);
-        ft->const_index = lx->tp->const_list->length - 1;
-        return (Type*)ft;
+        type = (Type*)ft;
+    } else {
+        // NOT &LIT_INT: that shared type makes the emitter re-parse the value
+        // from the node's source span, and every hand node spans the whole
+        // token. A pooled int is value-bearing, so the span never matters.
+        TypeInt64* it = (TypeInt64*)alloc_type(lx->tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
+        it->int64_val = strtoll(buf, NULL, 10);
+        it->is_const = 1;  it->is_literal = 1;
+        type = (Type*)it;
     }
-    // NOT &LIT_INT: that shared type makes the emitter re-parse the value from
-// the node's source span, and every hand node spans the whole token. A
-    // pooled int is value-bearing, so the span never matters.
-    TypeInt64* it = (TypeInt64*)alloc_type(lx->tp->pool, LMD_TYPE_INT, sizeof(TypeInt64));
-    it->int64_val = strtoll(buf, NULL, 10);
-    it->is_const = 1;  it->is_literal = 1;
-    arraylist_append(lx->tp->const_list, &it->int64_val);
-    it->const_index = lx->tp->const_list->length - 1;
-    return (Type*)it;
+    AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
+        LSF_TP_LIT_NUMBER);
+    node->type = type;
+    return node;
 }
 
 // --- string/symbol pattern islands (S11.1.2) --------------------------------
@@ -288,6 +329,17 @@ bool island_char_class(StrView w, PatternCharClass* out) {
     }
 }
 
+// the reserved word a word-spelled class came from; NULL for `.` and `...`
+const char* island_char_class_word(PatternCharClass klass) {
+    switch (klass) {
+    case PATTERN_DIGIT: return "d";
+    case PATTERN_WORD:  return "w";
+    case PATTERN_SPACE: return "s";
+    case PATTERN_ALPHA: return "a";
+    default: return NULL;
+    }
+}
+
 AstNode* parse_island_primary(Lexer* lx) {
     skip_space(lx);
     if (lx->p >= lx->end) { fail(lx, "expected a pattern"); return NULL; }
@@ -299,7 +351,8 @@ AstNode* parse_island_primary(Lexer* lx) {
         if (!inner) { return NULL; }
         if (!eat(lx, ')')) { fail(lx, "expected ')' in pattern"); return NULL; }
         // a group is a single-item list, which the regex compiler renders as (?:…)
-        AstListNode* list = (AstListNode*)new_node(lx, AST_NODE_LIST_TYPE, sizeof(AstListNode));
+        AstListNode* list = (AstListNode*)new_node(lx, AST_NODE_LIST_TYPE,
+            sizeof(AstListNode), LSF_TP_ISLAND_GROUP);
         list->item = inner;
         return (AstNode*)list;
     }
@@ -307,15 +360,14 @@ AstNode* parse_island_primary(Lexer* lx) {
         bool any_string = (lx->p + 2 < lx->end && lx->p[1] == '.' && lx->p[2] == '.');
         lx->p += any_string ? 3 : 1;
         AstPatternCharClassNode* cc = (AstPatternCharClassNode*)new_node(lx,
-            AST_NODE_PATTERN_CHAR_CLASS, sizeof(AstPatternCharClassNode));
+            AST_NODE_PATTERN_CHAR_CLASS, sizeof(AstPatternCharClassNode),
+            LSF_TP_CHAR_CLASS);
         cc->char_class = any_string ? PATTERN_ANY_STRING : PATTERN_ANY;
-        cc->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         return (AstNode*)cc;
     }
     if (c == '"' || c == '\'') {
-        Type* lit = parse_string_literal_type(lx, c);
-        if (!lit) { return NULL; }
-        AstNode* left = literal_node(lx, lit);
+        AstNode* left = parse_string_literal(lx, c);
+        if (!left) { return NULL; }
         // `"a" to "z"` — a character range
         StrView w = peek_word(lx);
         if (word_is(w, "to")) {
@@ -324,13 +376,13 @@ AstNode* parse_island_primary(Lexer* lx) {
             if (lx->p >= lx->end || (*lx->p != '"' && *lx->p != '\'')) {
                 fail(lx, "expected a string literal after 'to'"); return NULL;
             }
-            Type* upper = parse_string_literal_type(lx, *lx->p);
+            AstNode* upper = parse_string_literal(lx, *lx->p);
             if (!upper) { return NULL; }
             AstPatternRangeNode* range = (AstPatternRangeNode*)new_node(lx,
-                AST_NODE_PATTERN_RANGE, sizeof(AstPatternRangeNode));
+                AST_NODE_PATTERN_RANGE, sizeof(AstPatternRangeNode),
+                LSF_TP_PATTERN_RANGE);
             range->start = left;
-            range->end = literal_node(lx, upper);
-            range->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+            range->end = upper;
             return (AstNode*)range;
         }
         return left;
@@ -340,26 +392,17 @@ AstNode* parse_island_primary(Lexer* lx) {
     if (!w.length) { fail(lx, "expected a pattern"); return NULL; }
     PatternCharClass klass;
     if (island_char_class(w, &klass)) {
-        // the reserved atoms shadow nothing: a surrounding `let d = ...` makes
-        // `d` inside an island ambiguous, which is also invalid
-        NameEntry* shadowed = lookup_name(lx->tp, w);
-        if (shadowed) {
-            record_semantic_error_span(lx->tp, lx->origin, ERR_SEMANTIC_ERROR,
-                "pattern class '%.*s' is reserved inside pattern islands; rename the surrounding binding",
-                (int)w.length, w.str);
-        }
         AstPatternCharClassNode* cc = (AstPatternCharClassNode*)new_node(lx,
-            AST_NODE_PATTERN_CHAR_CLASS, sizeof(AstPatternCharClassNode));
+            AST_NODE_PATTERN_CHAR_CLASS, sizeof(AstPatternCharClassNode),
+            LSF_TP_CHAR_CLASS);
         cc->char_class = klass;
-        cc->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         return (AstNode*)cc;
     }
     // otherwise a reference to a named pattern; the regex compiler follows the
     // NameEntry to the definition's AST
-    AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT, sizeof(AstIdentNode));
+    AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT,
+        sizeof(AstIdentNode), LSF_TP_PATTERN_REF);
     ident->name = name_pool_create_strview(lx->tp->name_pool, w);
-    ident->entry = lookup_name(lx->tp, w);
-    if (ident->entry && ident->entry->node) { ident->type = ident->entry->node->type; }
     return (AstNode*)ident;
 }
 
@@ -372,11 +415,11 @@ AstNode* parse_island_unary(Lexer* lx) {
     if (!operand) { return NULL; }
 
     if (negated) {
-        AstUnaryNode* un = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
+        AstUnaryNode* un = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE,
+            sizeof(AstUnaryNode), LSF_TP_ISLAND_UNARY);
         un->op = OPERATOR_NOT;
         un->op_str = {.str = "!", .length = 1};
         un->operand = operand;
-        un->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         operand = (AstNode*)un;
     }
 
@@ -384,7 +427,8 @@ AstNode* parse_island_unary(Lexer* lx) {
     // S11.1.2v2/S16.8.6v3: an island counts with the regex spelling `{n,m}`,
     // the same one the type families use; `[n]` there was retired with them.
     if (lx->p < lx->end && (*lx->p == '?' || *lx->p == '+' || *lx->p == '*' || *lx->p == '{')) {
-        AstUnaryNode* un = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
+        AstUnaryNode* un = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE,
+            sizeof(AstUnaryNode), LSF_TP_ISLAND_UNARY);
         un->operand = operand;
         const char* op_start = lx->p;
         char c = *lx->p;
@@ -404,7 +448,6 @@ AstNode* parse_island_unary(Lexer* lx) {
         // the regex compiler re-reads the occurrence spelling for REPEAT
         un->op_str.str = op_start;
         un->op_str.length = (size_t)(lx->p - op_start);
-        un->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         operand = (AstNode*)un;
     }
     return operand;
@@ -431,9 +474,8 @@ AstNode* parse_island_concat(Lexer* lx) {
     if (count == 1) { return first; }
 
     AstPatternSeqNode* seq = (AstPatternSeqNode*)new_node(lx,
-        AST_NODE_PATTERN_SEQ, sizeof(AstPatternSeqNode));
+        AST_NODE_PATTERN_SEQ, sizeof(AstPatternSeqNode), LSF_TP_ISLAND_SEQ);
     seq->first = first;
-    seq->type = alloc_type_kind(lx->tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     return (AstNode*)seq;
 }
 
@@ -448,19 +490,11 @@ AstNode* parse_island_body(Lexer* lx) {
         lx->p++;
         AstNode* right = parse_island_concat(lx);
         if (!right) { return NULL; }
-        AstBinaryNode* bin = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY_TYPE, sizeof(AstBinaryNode));
-        bin->op = (c == '|') ? OPERATOR_UNION : OPERATOR_INTERSECT;
-        bin->op_str = (c == '|') ? StrView{.str = "|", .length = 1} : StrView{.str = "&", .length = 1};
-        bin->left = left;
-        bin->right = right;
         // a real union type, not a pattern placeholder: a literal-only island is
         // returned as this very AST, so its ->type becomes the annotation's type
-        TypeBinary* bt = (TypeBinary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
-        bt->op = bin->op;
-        bt->left = left->type;
-        bt->right = right->type;
-        bin->type = register_wrapped(lx, (Type*)bt, &bt->type_index);
-        left = (AstNode*)bin;
+        left = c == '|'
+            ? make_binary_node(lx, left, right, OPERATOR_UNION, "|", 1, LSF_TP_BINARY)
+            : make_binary_node(lx, left, right, OPERATOR_INTERSECT, "&", 1, LSF_TP_BINARY);
     }
 }
 
@@ -477,87 +511,46 @@ AstNode* parse_island(Lexer* lx) {
     if (!eat(lx, '(')) { fail(lx, "expected '(' after a pattern island tag"); return NULL; }
 
     AstPatternIslandNode* node = (AstPatternIslandNode*)new_node(lx,
-        AST_NODE_PATTERN_ISLAND, sizeof(AstPatternIslandNode));
+        AST_NODE_PATTERN_ISLAND, sizeof(AstPatternIslandNode), LSF_TP_ISLAND);
     node->is_symbol = is_symbol;
     node->pattern_index = -1;
     node->pattern = parse_island_body(lx);
     if (!node->pattern) { return NULL; }
     if (!eat(lx, ')')) { fail(lx, "expected ')' closing the pattern island"); return NULL; }
 
-    // Pattern bodies are content-only: the domain is the island's tag, so a
-    // symbol literal inside one is a mistake (S11.1.2).
-    if (pattern_ast_has_symbol_literal(node->pattern)) {
-        record_semantic_error_span(lx->tp, lx->origin, ERR_INVALID_LITERAL,
-            "pattern bodies are content-only; use \\symbol(...) for the symbol domain and string literals for content");
-        node->type = &TYPE_ERROR;
-        return (AstNode*)node;
-    }
-
-    if (!is_symbol && pattern_ast_literal_set(node->pattern)) {
-        // Literal-only islands ARE ordinary literal unions; keeping that
-        // representation preserves the existing matching path by returning the
-        // body AST for this case.
+    // A body with a symbol literal keeps its island node so resolution can
+    // report it (S11.1.2). Otherwise a literal-only island IS an ordinary
+    // literal union; keeping that representation preserves the existing
+    // matching path by returning the body AST. Literal types are lexical, so
+    // both tests run before resolution.
+    if (!pattern_ast_has_symbol_literal(node->pattern) && !is_symbol &&
+            pattern_ast_literal_set(node->pattern)) {
         return node->pattern;
     }
-
-    TypePattern* pattern_type = (TypePattern*)alloc_type_kind(lx->tp->pool,
-        TYPE_KIND_PATTERN, sizeof(TypePattern));
-    pattern_type->pattern_index = -1;
-    pattern_type->is_symbol = is_symbol;
-    pattern_type->re2 = nullptr;
-    pattern_type->re2_unanchored = nullptr;
-    pattern_type->source = nullptr;
-    pattern_type->regex_source = nullptr;
-    node->type = (Type*)pattern_type;
     return (AstNode*)node;
 }
 
 // --- containers -------------------------------------------------------------
 
-// `[T]`, `[T, U]` — a bracket type is a positional pattern (S11.1.1). Mirrors
-// build_array_type: a type-valued position is a pattern; a literal position is
-// stored as its Item.
+// `[T]`, `[T, U]` — a bracket type is a positional pattern (S11.1.1): a
+// type-valued position is a pattern; a literal position is stored as its Item.
 AstNode* parse_array_type(Lexer* lx) {
-    AstArrayNode* ast_node = (AstArrayNode*)new_node(lx, AST_NODE_ARRAY_TYPE, sizeof(AstArrayNode));
-    TypeArray* type = (TypeArray*)alloc_type(lx->tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
-
-    AstNode* items[64];
+    AstArrayNode* ast_node = (AstArrayNode*)new_node(lx, AST_NODE_ARRAY_TYPE,
+        sizeof(AstArrayNode), LSF_TP_ARRAY);
+    AstNode* prev = NULL;
     int count = 0;
     if (!at(lx, ']')) {
         do {
             if (count >= 64) { fail(lx, "too many bracket-type positions"); return NULL; }
-        AstNode* item = parse_binder(lx);
+            AstNode* item = parse_binder(lx);
             if (!item) { return NULL; }
-            if (count) { items[count - 1]->next = item; }
+            if (prev) { prev->next = item; }
             else { ast_node->item = item; }
-            items[count++] = item;
+            prev = item;
+            count++;
         } while (eat(lx, ','));
     }
     if (!eat(lx, ']')) { fail(lx, "expected ']'"); return NULL; }
-
-    if (count > 0) {
-        type->item_patterns = (Item*)pool_calloc(lx->tp->pool, sizeof(Item) * (size_t)count);
-        type->item_is_type_pattern = (uint8_t*)pool_calloc(lx->tp->pool, sizeof(uint8_t) * (size_t)count);
-        Type* nested = items[0]->type;
-        for (int i = 0; i < count; i++) {
-            if (items[i]->type && items[i]->type->type_id == LMD_TYPE_TYPE) {
-                type->item_patterns[i].type = items[i]->type;
-                type->item_is_type_pattern[i] = 1;
-            } else {
-                Item literal = ItemNull;
-                if (ast_static_literal_item(lx->tp, items[i], &literal)) {
-                    type->item_patterns[i] = literal;
-                }
-            }
-            if (nested && items[i]->type && items[i]->type->type_id != nested->type_id) { nested = NULL; }
-        }
-        type->length = count;
-        type->nested = nested;
-        if (count == 1 && type->item_is_type_pattern[0]) {
-            log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
-        }
-    }
-    ast_node->type = register_wrapped(lx, (Type*)type, &type->type_index);
     return (AstNode*)ast_node;
 }
 
@@ -581,23 +574,15 @@ static bool eat_optional_field_marker(Lexer* lx) {
 
 static AstNode* make_optional_field_type(Lexer* lx, AstNode* operand) {
     if (!operand) { return NULL; }
-    AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
-    TypeUnary* type = (TypeUnary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+    AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE,
+        sizeof(AstUnaryNode), LSF_TP_OPTIONAL_FIELD);
     ast_node->operand = operand;
     ast_node->op = OPERATOR_OPTIONAL;
-    type->operand = operand->type;
-    type->min_count = 0;
-    type->max_count = 1;
-    // `type->op` is the field consumers read — validator is_type_optional()
-    // checks the TypeUnary, not the AST node. apply_occurrence sets both; a
-    // wrapper that sets only the AST side parses but is invisible downstream.
-    type->op = OPERATOR_OPTIONAL;
-    ast_node->type = wrap_type(lx, (Type*)type);
     return (AstNode*)ast_node;
 }
 
-// One `name: T` field, shaped like build_key_expr's output so shape entries and
-// downstream walks see the same node.
+// One `name: T` field: a KEY_EXPR like a map literal's field, so shape entries
+// and downstream walks see the same node.
 AstNamedNode* parse_field(Lexer* lx) {
     skip_space(lx);
     StrView field;
@@ -620,21 +605,18 @@ AstNamedNode* parse_field(Lexer* lx) {
         if (!field_type) { return NULL; }
     }
 
-    AstNamedNode* named = (AstNamedNode*)new_node(lx, AST_NODE_KEY_EXPR, sizeof(AstNamedNode));
+    AstNamedNode* named = (AstNamedNode*)new_node(lx, AST_NODE_KEY_EXPR,
+        sizeof(AstNamedNode), LSF_TP_FIELD);
     named->name = name_pool_create_strview(lx->tp->name_pool, field);
     named->as = field_type;
-    named->type = field_type->type;
     return named;
 }
 
 // `{a: int, b: [string]}` — field types are pattern-only (CT8v2), no `that`.
 AstNode* parse_map_type(Lexer* lx) {
-    AstMapNode* ast_node = (AstMapNode*)new_node(lx, AST_NODE_MAP_TYPE, sizeof(AstMapNode));
-    TypeMap* type = (TypeMap*)alloc_type(lx->tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-
+    AstMapNode* ast_node = (AstMapNode*)new_node(lx, AST_NODE_MAP_TYPE,
+        sizeof(AstMapNode), LSF_TP_MAP);
     AstNode* prev_item = NULL;
-    ShapeEntry* prev_entry = NULL;
-    int byte_offset = 0;
     if (!at(lx, '}')) {
         do {
             AstNamedNode* item = parse_field(lx);
@@ -642,71 +624,48 @@ AstNode* parse_map_type(Lexer* lx) {
             if (!prev_item) { ast_node->item = (AstNode*)item; }
             else { prev_item->next = (AstNode*)item; }
             prev_item = (AstNode*)item;
-            append_shape_entry_typed(lx->tp, item->name, item->type, &type->shape, &prev_entry, byte_offset);
-            type->length++;
-            // Stride by the field's STORAGE class, not a flat pointer width.
-            // A field whose contract does not name one concrete carrier
-            // (`integer`, `number`, a union) is stored self-describing, and
-            // sizeof(TypedItem) is 9 -- so a flat 8 laid the NEXT field one byte
-            // inside it. `{n: integer, label: string}` put `label` at offset 8
-            // over a TypedItem spanning 0..8, and byte_size came out 16 for 17
-            // bytes of fields: reads returned the wrong type, writes clobbered a
-            // payload byte, and the shape failed its own
-            // shape_entry_storage_fits_data (Lambda_Design_Compiling_Lane.md
-            // §10.4b G3).
-            byte_offset += lambda_lane_storage_size(item->type);
         } while (eat(lx, ','));
     }
     if (!eat(lx, '}')) { fail(lx, "expected '}'"); return NULL; }
-    type->byte_size = byte_offset;
-    ast_node->type = register_wrapped(lx, (Type*)type, &type->type_index);
     return (AstNode*)ast_node;
 }
 
-// `(T)` groups (unwrapped, as build_list_type does); `(T, U)` is a tuple type.
+// `(T)` groups (a single element unwraps); `(T, U)` is a tuple type.
 AstNode* parse_paren_type(Lexer* lx) {
     AstNode* first = parse_binder(lx);
     if (!first) { return NULL; }
     if (eat(lx, ')')) { return first; }  // grouping — single element unwraps
 
-    AstListNode* ast_node = (AstListNode*)new_node(lx, AST_NODE_LIST_TYPE, sizeof(AstListNode));
-    TypeType* node_type = (TypeType*)alloc_type(lx->tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeList* type = (TypeList*)alloc_type(lx->tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
-    node_type->type = (Type*)type;
-    ast_node->type = (Type*)node_type;
-    ast_node->list_type = type;
+    AstListNode* ast_node = (AstListNode*)new_node(lx, AST_NODE_LIST_TYPE,
+        sizeof(AstListNode), LSF_TP_TUPLE);
     ast_node->item = first;
-    type->length = 1;
-
     AstNode* prev = first;
     while (eat(lx, ',')) {
         AstNode* next = parse_binder(lx);
         if (!next) { return NULL; }
         prev->next = next;
         prev = next;
-        type->length++;
     }
     if (!eat(lx, ')')) { fail(lx, "expected ')'"); return NULL; }
-    arraylist_append(lx->tp->type_list, ast_node->type);
-    type->type_index = lx->tp->type_list->length - 1;
     return (AstNode*)ast_node;
 }
 
 // `<tag attr: T, attr2: U; content, content2>` — attribute defaults are
 // literal-only inside a pattern (CT8v2).
 AstNode* parse_element_type(Lexer* lx) {
-    AstElementNode* ast_node = (AstElementNode*)new_node(lx, AST_NODE_ELMT_TYPE, sizeof(AstElementNode));
-    TypeElmt* type = (TypeElmt*)alloc_type(lx->tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-
+    AstElementNode* ast_node = (AstElementNode*)new_node(lx, AST_NODE_ELMT_TYPE,
+        sizeof(AstElementNode), LSF_TP_ELEMENT);
     StrView tag = take_qualified_tag(lx);
     if (!tag.length) { fail(lx, "expected an element tag"); return NULL; }
+    // the tag is lexical; the element type carries it until resolution
+    // completes the shape and registers the type
+    TypeElmt* type = (TypeElmt*)alloc_type(lx->tp->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     String* pooled = name_pool_create_strview(lx->tp->name_pool, tag);
     type->name.str = pooled->chars;
     type->name.length = pooled->len;
+    ast_node->type = (Type*)type;
 
     AstNode* prev_item = NULL;
-    ShapeEntry* prev_entry = NULL;
-    int byte_offset = 0;
     bool saw_content_sep = false;
 
     // attributes: only while the next item is `name :`
@@ -722,34 +681,33 @@ AstNode* parse_element_type(Lexer* lx) {
             field_type = make_optional_field_type(lx, field_type);
             if (!field_type) { return NULL; }
         }
-        if (at(lx, '=')) {  // literal-only default (CT8v2); the value is not part of the type
+        // A literal-only default (CT8v2) is not part of the type, but it still
+        // resolves like any literal. It rides in `key` until then.
+        AstNode* default_value = NULL;
+        if (at(lx, '=')) {
             lx->p++;
-            if (!parse_primary(lx)) { return NULL; }
+            default_value = parse_primary(lx);
+            if (!default_value) { return NULL; }
         }
-        AstNamedNode* named = (AstNamedNode*)new_node(lx, AST_NODE_KEY_EXPR, sizeof(AstNamedNode));
+        AstNamedNode* named = (AstNamedNode*)new_node(lx, AST_NODE_KEY_EXPR,
+            sizeof(AstNamedNode), LSF_TP_FIELD);
         named->name = name_pool_create_strview(lx->tp->name_pool, field);
         named->as = field_type;
-        named->type = field_type->type;
+        named->key = default_value;
         if (!prev_item) { ast_node->item = (AstNode*)named; }
         else { prev_item->next = (AstNode*)named; }
         prev_item = (AstNode*)named;
-        append_shape_entry_typed(lx->tp, named->name, named->type, &type->shape, &prev_entry, byte_offset);
-        type->length++;
-        byte_offset += lambda_lane_storage_size(named->type);
         if (eat(lx, ',')) { continue; }
         if (eat(lx, ';')) { saw_content_sep = true; }
         break;
     }
-    type->byte_size = byte_offset;
 
-    // content schema: a comma-separated pattern list held as a content node,
-    // like build_content_type produced (TypeList carried raw, not registered)
+    // content schema: a comma-separated pattern list held as a content node
+    // whose TypeList is carried raw, not registered
     if (!at(lx, '>') && lx->p < lx->end) {
         if (!saw_content_sep) { eat(lx, ';'); }
-        AstListNode* content = (AstListNode*)new_node(lx, AST_NODE_CONTENT_TYPE, sizeof(AstListNode));
-        TypeList* content_type = (TypeList*)alloc_type(lx->tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
-        content->type = (Type*)content_type;
-        content->list_type = content_type;
+        AstListNode* content = (AstListNode*)new_node(lx, AST_NODE_CONTENT_TYPE,
+            sizeof(AstListNode), LSF_TP_CONTENT);
         AstNode* prev = NULL;
         do {
             if (at(lx, '>')) { break; }
@@ -758,14 +716,11 @@ AstNode* parse_element_type(Lexer* lx) {
             if (!prev) { content->item = item; }
             else { prev->next = item; }
             prev = item;
-            content_type->length++;
         } while (eat(lx, ','));
         ast_node->content = (AstNode*)content;
-        type->content_length = content_type->length;
     }
 
     if (!eat(lx, '>')) { fail(lx, "expected '>'"); return NULL; }
-    ast_node->type = register_wrapped(lx, (Type*)type, &type->type_index);
     return (AstNode*)ast_node;
 }
 
@@ -775,15 +730,19 @@ AstNode* parse_element_type(Lexer* lx) {
 // ->type from a FUNC_TYPE node, and the TypeFunc carries the full contract.
 // `pn (...)` spells the same contract with the procedure colour; `fn` and `pn`
 // types are disjoint, `function` is their union (S11.1.5).
+//
+// Until resolution the TypeFunc holds the parameter list (each TypeParam's
+// `type_expr` is its declared pattern), `body` holds the return pattern, and
+// `params` the raised channel's named type.
 AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
-    AstFuncNode* ast_node = (AstFuncNode*)new_node(lx, AST_NODE_FUNC_TYPE, sizeof(AstFuncNode));
+    AstFuncNode* ast_node = (AstFuncNode*)new_node(lx, AST_NODE_FUNC_TYPE,
+        sizeof(AstFuncNode), LSF_TP_FN);
     TypeFunc* fn_type = (TypeFunc*)alloc_type(lx->tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     fn_type->is_proc = is_proc;
-    set_fn_return_contract(fn_type, &TYPE_ANY_NO_ERROR, false);
+    ast_node->type = (Type*)fn_type;
+    if (is_proc) ast_node->syntax_flags |= TP_FLAG_FN_PROC;
 
     TypeParam* prev_param = NULL;
-    int param_count = 0;
-    int required_count = 0;
     bool has_signature = false;
     if (eat(lx, '(')) {
         while (!at(lx, ')') && lx->p < lx->end) {
@@ -795,13 +754,11 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
             if (eat(lx, ':')) {
                 AstNode* declared = parse_binder(lx);
                 if (!declared) { return NULL; }
-                apply_declared_param_type(lx->tp, param, declared->type);
+                param->type_expr = declared;
             }
-            if (!param->is_optional) { required_count++; }
             if (!prev_param) { fn_type->param = param; }
             else { prev_param->next = param; }
             prev_param = param;
-            param_count++;
             if (!eat(lx, ',')) { break; }
             // S16.1.2v2: `,` separates, so `fn (x: int,)` has an empty slot
             if (at(lx, ')')) {
@@ -812,8 +769,6 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
         if (!eat(lx, ')')) { fail(lx, "expected ')'"); return NULL; }
         has_signature = true;
     }
-    fn_type->param_count = param_count;
-    fn_type->required_param_count = required_count;
 
     // S11.1.5v2: only a signature takes a return type, and it is optional --
     // `fn`, `fn ()`, `fn () int`; never `fn int`. It starts with a name on the
@@ -828,40 +783,29 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
         }
         AstNode* returned = parse_binder(lx);
         if (!returned) { return NULL; }
-        // The contract is the type a returned value has, not the type value
-        // that spells it -- as a declaration's return is (build_ast.cpp's
-        // direct_function_contract). Left wrapped, a call through the signature
-        // types as a type value, and calling that result reads as a conversion
-        // to the wrapped type: `mk(2)(3)` typed `fn (y: int) int`, so a map
-        // literal laid out an int as a function pointer.
-        Type* contract = unwrap_simple_type_type(returned->type);
-        set_fn_return_contract(fn_type, contract, true);
-        fn_type->returned = contract;
+        ast_node->body = returned;
         if (eat(lx, '^')) {
             // `T^` is any error; `T^E` names one. The error arm is a simple
             // type pattern, never a whole annotation.
+            ast_node->syntax_flags |= TP_FLAG_RAISES;
             skip_space(lx);
             if (lx->p < lx->end && is_ident_start(*lx->p)) {
                 AstNode* err = parse_primary(lx);
                 if (!err) { return NULL; }
-                fn_type->error_type = err->type;
-            } else {
-                fn_type->error_type = (Type*)&LIT_TYPE_ERROR;
+                ast_node->params = err;
+                ast_node->syntax_flags |= TP_FLAG_ERROR_NODE;
             }
         }
     }
     // A return type takes its own suffix (`fn () int?` returns `int?`), so one
     // left over would bind to the function type -- `fn ()?` against
     // `fn () int?`. The function type takes none; grouping spells it.
-    const char* next = lx->p;
-    lambda_lex_skip_space(&next, lx->end);
+    const char* next = skip_space_from(lx->p, lx->end);
     if (next < lx->end && is_suffix_start(*next)) {
         fail_code(lx, ERR_INVALID_LITERAL,
             "a function type takes no suffix: group it, as in `(fn (x: int))?`");
         return NULL;
     }
-
-    ast_node->type = register_wrapped(lx, (Type*)fn_type, &fn_type->type_index);
     return (AstNode*)ast_node;
 }
 
@@ -877,13 +821,9 @@ AstNode* parse_primary(Lexer* lx) {
     if (c == '{') { lx->p++; return parse_map_type(lx); }
     if (c == '<') { lx->p++; return parse_element_type(lx); }
     if (c == '\\') { return parse_island(lx); }
-    if (c == '"' || c == '\'') {
-        Type* lit = parse_string_literal_type(lx, c);
-        return lit ? literal_node(lx, lit) : NULL;
-    }
+    if (c == '"' || c == '\'') { return parse_string_literal(lx, c); }
     if (is_digit(c) || (c == '-' && lx->p + 1 < lx->end && is_digit(lx->p[1]))) {
-        Type* lit = parse_number_literal_type(lx);
-        return lit ? literal_node(lx, lit) : NULL;
+        return parse_number_literal(lx);
     }
 
     StrView w = peek_word(lx);
@@ -897,62 +837,24 @@ AstNode* parse_primary(Lexer* lx) {
         // which is the whole token. A lone `case true:` token reads correctly;
         // a bool inside a larger pattern would not — no corpus use exists, and
         // the parse is still exact, only the emitted literal VALUE can drift.
-        return literal_node(lx, (Type*)&LIT_BOOL);
+        AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
+            LSF_TP_LIT_BOOL);
+        node->type = (Type*)&LIT_BOOL;
+        return node;
     }
-    Type* base = lookup_base_type_name(lx->tp, w);
-    if (base) {
-        AstTypeNode* node = (AstTypeNode*)new_node(lx, AST_NODE_TYPE, sizeof(AstTypeNode));
-        node->type = base;
-        return (AstNode*)node;
-    }
-
-    NameEntry* entry = lookup_name(lx->tp, w);
-    if (entry && entry->is_binder && entry->binder) {
-        TypeBoundRef* ref = (TypeBoundRef*)alloc_type_kind(lx->tp->pool,
-            TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
-        ref->slot = entry->binder_slot;
-        ref->bound = entry->binder->bound;
+    int base_index = lambda_base_type_index(w);
+    if (base_index >= 0) {
         AstTypeNode* node = (AstTypeNode*)new_node(lx, AST_NODE_TYPE,
-            sizeof(AstTypeNode));
-        node->type = (Type*)ref;
+            sizeof(AstTypeNode), LSF_TP_BASE);
+        node->syntax_aux = (uint16_t)base_index;
         return (AstNode*)node;
     }
-
-    // a name in type position is a reference to a declared type, shaped like
-    // build_identifier's resolved path so the transpiler's alias handling works
-    AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT, sizeof(AstIdentNode));
+    // a name in type position is a reference to a declared type, an IDENT
+    // like a resolved value-position name so the transpiler's alias handling
+    // works; a binder reference becomes an AST_NODE_TYPE when it resolves
+    AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT,
+        sizeof(AstIdentNode), LSF_TP_NAME);
     ident->name = name_pool_create_strview(lx->tp->name_pool, w);
-    ident->entry = entry;
-    if (ident->entry && ident->entry->node && ident->entry->node->type) {
-        AstNode* def = ident->entry->node;
-        ident->type = def->type;
-        // Type and pattern definitions are referenced through a plain TypeType
-        // wrapper, exactly as build_identifier does. The wrap is load-bearing:
-        // match_arm_is_error_handler blind-casts an arm's type as (TypeType*),
-        // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
-        if (def->node_type == AST_NODE_TYPE_STAM ||
-                (def->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                 ((AstDeclaratorNode*)def)->is_type_definition) ||
-                def->node_type == AST_NODE_STRING_PATTERN ||
-                def->node_type == AST_NODE_SYMBOL_PATTERN) {
-            // direct aliases for literals/ranges already carry the first-class
-            // TypeType wrapper; wrapping that carrier again hides the payload
-            // from the matcher and makes `is Alias` fail (D2.2.2).
-            ident->type = def->type && def->type->type_id == LMD_TYPE_TYPE
-                ? def->type : wrap_type(lx, def->type);
-        }
-    } else if (base_type_alias_suggestion(w)) {
-        // conceptual base-type spellings (int64, float32) get the canonical
-        // suggestion and fail the annotation, exactly as build_base_type did
-        record_unknown_base_type_span(lx->tp, lx->origin, w);
-        ident->type = (Type*)&LIT_TYPE_ERROR;
-    } else {
-        // stay lenient like build_identifier: an unresolved name defers to ANY
-        // so runtime paths (e.g. `?unknown` queries) degrade gracefully instead
-        // of failing the whole compilation
-        log_warn("type-pattern: unresolved type name '%.*s', using ANY", (int)w.length, w.str);
-        ident->type = set_type_any(lx->tp, ANY_LEGACY_UNCLASSIFIED);
-    }
     return (AstNode*)ident;
 }
 
@@ -977,17 +879,14 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     char c = *lx->p;
     if (!is_suffix_start(c)) { return operand; }
 
-    AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
-    TypeUnary* type = (TypeUnary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+    AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE,
+        sizeof(AstUnaryNode), LSF_TP_OCCURRENCE);
     ast_node->operand = operand;
-    type->operand = operand->type;
-    type->min_count = 0;
-    type->max_count = -1;
 
     const char* op_start = lx->p;
-    if (c == '?')      { lx->p++; ast_node->op = OPERATOR_OPTIONAL;  type->min_count = 0; type->max_count = 1; }
-    else if (c == '+') { lx->p++; ast_node->op = OPERATOR_ONE_MORE;  type->min_count = 1; type->max_count = -1; }
-    else if (c == '*') { lx->p++; ast_node->op = OPERATOR_ZERO_MORE; type->min_count = 0; type->max_count = -1; }
+    if (c == '?')      { lx->p++; ast_node->op = OPERATOR_OPTIONAL; }
+    else if (c == '+') { lx->p++; ast_node->op = OPERATOR_ONE_MORE; }
+    else if (c == '*') { lx->p++; ast_node->op = OPERATOR_ZERO_MORE; }
     else if (c == '{') {
         // S16.8.6v3: the counted repetition is `{n}`, `{n,m}` and `{n+}`. A
         // line-start `{` never arrives here -- the statement parser ends the
@@ -1008,7 +907,6 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
             return NULL;
         }
         ast_node->op = OPERATOR_REPEAT;
-        parse_occurrence_count(op, &type->min_count, &type->max_count);
     }
     else {
         int depth = 0;
@@ -1024,26 +922,18 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
         // family, so `T[n+]` and `T[n, m]` are retired and name their
         // replacement instead of silently changing meaning.
         ast_node->op = OPERATOR_ARRAY;
-        if (op.length > 2) {
-            if (memchr(op.str, '+', op.length) || memchr(op.str, ',', op.length)) {
-                // fail_code carries the teaching text into the diagnostic;
-                // plain fail() would report only "invalid type pattern"
-                fail_code(lx, ERR_INVALID_LITERAL,
-                    "`T[n+]` and `T[n, m]` are retired: write `T{n+}` or "
-                    "`T{n,m}` for a run of T, or `[T{n,m}]` for an array of one");
-                return NULL;
-            }
-            parse_occurrence_count(op, &type->min_count, &type->max_count);
+        if (op.length > 2 &&
+                (memchr(op.str, '+', op.length) || memchr(op.str, ',', op.length))) {
+            // fail_code carries the teaching text into the diagnostic;
+            // plain fail() would report only "invalid type pattern"
+            fail_code(lx, ERR_INVALID_LITERAL,
+                "`T[n+]` and `T[n, m]` are retired: write `T{n+}` or "
+                "`T{n,m}` for a run of T, or `[T{n,m}]` for an array of one");
+            return NULL;
         }
     }
     ast_node->op_str.str = op_start;
     ast_node->op_str.length = (size_t)(lx->p - op_start);
-    type->op = ast_node->op;
-
-    // occurrence registers the RAW type, per build_occurrence_type
-    arraylist_append(lx->tp->type_list, type);
-    type->type_index = lx->tp->type_list->length - 1;
-    ast_node->type = wrap_type(lx, (Type*)type);
 
     // The chains above. Any bracket suffix may follow an array suffix -- a
     // retired `T[n+]` or `T[n, m]` still fails in the recursive call, and a
@@ -1062,67 +952,35 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
 AstNode* parse_unary(Lexer* lx) {
     skip_space(lx);
     if (lx->p < lx->end && *lx->p == '!') {
-        // prefix negation: !T is `any ! T` — mirrors build_negation_type
+        // prefix negation: !T is `any ! T`
         lx->p++;
         AstNode* operand = parse_unary(lx);
         if (!operand) { return NULL; }
-        AstPrimaryNode* any_node = (AstPrimaryNode*)new_node(lx,
-            AST_NODE_PRIMARY, sizeof(AstPrimaryNode));
-        any_node->type = wrap_type(lx, set_type_any(lx->tp, ANY_EXPLICIT));
-        return make_binary_node(lx, (AstNode*)any_node, operand,
-            OPERATOR_EXCLUDE, "!", 1);
+        AstNode* any_node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
+            LSF_TP_ANY);
+        return make_binary_node(lx, any_node, operand, OPERATOR_EXCLUDE, "!", 1,
+            LSF_TP_BINARY);
     }
 
     AstNode* primary = parse_primary(lx);
     if (!primary) { return NULL; }
 
-    // range type: `1 to 10`, `"a" to "z"` — mirrors build_range_type
+    // range type: `1 to 10`, `"a" to "z"`
     StrView w = peek_word(lx);
     if (word_is(w, "to")) {
         lx->p += w.length;
         AstNode* upper = parse_primary(lx);
         if (!upper) { return NULL; }
-        AstBinaryNode* ast_node = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY, sizeof(AstBinaryNode));
+        AstBinaryNode* ast_node = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY,
+            sizeof(AstBinaryNode), LSF_TP_RANGE);
         ast_node->op = OPERATOR_TO;
         ast_node->op_str = {.str = "to", .length = 2};
         ast_node->left = primary;
         ast_node->right = upper;
-
-        TypeRange* range_type = (TypeRange*)alloc_type(lx->tp->pool, LMD_TYPE_RANGE, sizeof(TypeRange));
-        range_type->kind = TYPE_KIND_RANGE;
-        range_type->start = ItemNull;
-        range_type->end = ItemNull;
-        range_type->is_char = false;
-        Item start_item = ItemNull;
-        Item end_item = ItemNull;
-        if (ast_static_literal_item(lx->tp, ast_node->left, &start_item) &&
-                ast_static_literal_item(lx->tp, ast_node->right, &end_item)) {
-            range_type->start = start_item;
-            range_type->end = end_item;
-            range_type->is_char = get_type_id(start_item) == LMD_TYPE_STRING &&
-                get_type_id(end_item) == LMD_TYPE_STRING;
-        }
-        ast_node->type = (Type*)range_type;
-        arraylist_append(lx->tp->type_list, (Type*)range_type);
         return (AstNode*)ast_node;
     }
     skip_space(lx);
     return apply_occurrence(lx, primary);
-}
-
-AstNode* make_binary_node(Lexer* lx, AstNode* left, AstNode* right, Operator op,
-        const char* op_text, size_t op_len) {
-    AstBinaryNode* ast_node = (AstBinaryNode*)new_node(lx, AST_NODE_BINARY_TYPE, sizeof(AstBinaryNode));
-    ast_node->op = op;
-    ast_node->op_str = {.str = op_text, .length = op_len};
-    ast_node->left = left;
-    ast_node->right = right;
-    TypeBinary* type = (TypeBinary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
-    type->op = op;
-    type->left = left->type;
-    type->right = right->type;
-    ast_node->type = register_wrapped(lx, (Type*)type, &type->type_index);
-    return (AstNode*)ast_node;
 }
 
 // Type operators, loosest to tightest: `|` union, `!` exclusion, `&`
@@ -1135,12 +993,13 @@ AstNode* parse_intersect(Lexer* lx) {
         AstNode* right = parse_unary(lx);
         if (!right) { return NULL; }
         // A type-level `&` is OPERATOR_INTERSECT, matching expression space
-        // (build_ast.cpp) and line ~460 in this file. It used to be lowered to
+        // (build_ast.cpp) and the island body above. It used to be lowered to
         // OPERATOR_OR here, which is why an `int & string` annotation was
         // rejected while `x is (int & string)` worked (LR02-9): the boundary
         // checker keys on the set operators, and OPERATOR_OR is not one.
         // Consumers that still recognise the old spelling accept both.
-        left = make_binary_node(lx, left, right, OPERATOR_INTERSECT, "&", 1);
+        left = make_binary_node(lx, left, right, OPERATOR_INTERSECT, "&", 1,
+            LSF_TP_BINARY);
     }
     return left;
 }
@@ -1152,7 +1011,8 @@ AstNode* parse_exclude(Lexer* lx) {
         lx->p++;
         AstNode* right = parse_intersect(lx);
         if (!right) { return NULL; }
-        left = make_binary_node(lx, left, right, OPERATOR_EXCLUDE, "!", 1);
+        left = make_binary_node(lx, left, right, OPERATOR_EXCLUDE, "!", 1,
+            LSF_TP_BINARY);
     }
     return left;
 }
@@ -1164,7 +1024,8 @@ AstNode* parse_union(Lexer* lx) {
         lx->p++;
         AstNode* right = parse_exclude(lx);
         if (!right) { return NULL; }
-        left = make_binary_node(lx, left, right, OPERATOR_UNION, "|", 1);
+        left = make_binary_node(lx, left, right, OPERATOR_UNION, "|", 1,
+            LSF_TP_BINARY);
     }
     return left;
 }
@@ -1185,7 +1046,7 @@ AstNode* parse_binder(Lexer* lx) {
         fail(lx, "expected a binder name after 'as'");
         return NULL;
     }
-    return build_binder_type_from_parts(lx->tp, lx->origin, base, name);
+    return build_binder_type_syntax(lx->tp, lx->origin, base, name);
 }
 
 // Declaration return types deliberately admit only named/base atoms plus one
@@ -1206,15 +1067,6 @@ AstNode* parse_return_pattern_atom(Lexer* lx) {
     return apply_occurrence(lx, atom);
 }
 
-Type* return_contract_type(AstNode* node) {
-    if (!node || !node->type) { return &TYPE_ERROR; }
-    if (node->type->type_id == LMD_TYPE_TYPE) {
-        Type* inner = ((TypeType*)node->type)->type;
-        return inner ? inner : &TYPE_ERROR;
-    }
-    return node->type;
-}
-
 AstNode* parse_return_type_pattern(Lexer* lx) {
     AstNode* left = parse_return_pattern_atom(lx);
     if (!left) { return NULL; }
@@ -1229,8 +1081,8 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
         if (!right) { return NULL; }
         Operator op = *op_text == '|' ? OPERATOR_UNION :
             (*op_text == '&' ? OPERATOR_INTERSECT : OPERATOR_EXCLUDE);
-        left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
-            left, right, left->type, right->type, op, {op_text, 1});
+        left = make_binary_node(lx, left, right, op, op_text, 1,
+            LSF_TP_REGISTERED_BINARY);
     }
     skip_space(lx);
     if (word_is(peek_word(lx), "as")) {
@@ -1240,100 +1092,458 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
     return left;
 }
 
-AstNode* parse_view_pattern_primary(Lexer* lx) {
-    skip_space(lx);
-    if (lx->p < lx->end && *lx->p == '<') {
-        lx->p++;
-        return parse_element_type(lx);
-    }
-    StrView word = peek_word(lx);
-    if (!word.length || word_is(word, "fn") || word_is(word, "pn") ||
-            word_is(word, "true") ||
-            word_is(word, "false")) {
-        fail(lx, "expected a view pattern primary");
-        return NULL;
-    }
-    return parse_primary(lx);
+// ---- resolution --------------------------------------------------------------
+
+Type* wrap_type(Transpiler* tp, Type* inner) {
+    TypeType* tt = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    tt->type = inner;
+    return (Type*)tt;
 }
 
-AstNode* parse_view_pattern(Lexer* lx) {
-    AstNode* left = parse_view_pattern_primary(lx);
-    if (!left) { return NULL; }
-    while (at(lx, '|')) {
-        const char* op_text = lx->p++;
-        AstNode* right = parse_view_pattern_primary(lx);
-        if (!right) { return NULL; }
-        left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
-            left, right, left->type, right->type, OPERATOR_UNION,
-            {op_text, 1});
+// Containers and binaries register the WRAPPER in type_list; occurrence and
+// range register the raw type — the split required by downstream consumers.
+Type* register_wrapped(Transpiler* tp, Type* inner, int* index_out) {
+    Type* wrapper = wrap_type(tp, inner);
+    arraylist_append(tp->type_list, wrapper);
+    *index_out = tp->type_list->length - 1;
+    return wrapper;
+}
+
+// the transpiler emits literal payloads as const-pool loads
+void resolve_literal_constant(Transpiler* tp, AstNode* node) {
+    Type* type = node->type;
+    if (type->type_id == LMD_TYPE_STRING || type->type_id == LMD_TYPE_SYMBOL) {
+        TypeString* ts = (TypeString*)type;
+        arraylist_append(tp->const_list, ts->string);
+        ts->const_index = tp->const_list->length - 1;
+    } else if (type->type_id == LMD_TYPE_FLOAT) {
+        TypeFloat* ft = (TypeFloat*)type;
+        arraylist_append(tp->const_list, &ft->double_val);
+        ft->const_index = tp->const_list->length - 1;
+    } else {
+        TypeInt64* it = (TypeInt64*)type;
+        arraylist_append(tp->const_list, &it->int64_val);
+        it->const_index = tp->const_list->length - 1;
     }
-    return left;
+}
+
+void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
+    StrView w = {ident->name->chars, ident->name->len};
+    NameEntry* entry = lookup_name(tp, w);
+    if (entry && entry->is_binder && entry->binder) {
+        TypeBoundRef* ref = (TypeBoundRef*)alloc_type_kind(tp->pool,
+            TYPE_KIND_BOUND_REF, sizeof(TypeBoundRef));
+        ref->slot = entry->binder_slot;
+        ref->bound = entry->binder->bound;
+        // a binder reference is a type node, not a name: morph in place so
+        // the parent keeps its child pointer
+        static_assert(sizeof(AstTypeNode) <= sizeof(AstIdentNode),
+            "a type-name node must be able to hold its bound-reference form");
+        memset((char*)ident + sizeof(AstNode), 0,
+            sizeof(AstIdentNode) - sizeof(AstNode));
+        ident->node_type = AST_NODE_TYPE;
+        ident->type = (Type*)ref;
+        return;
+    }
+    ident->entry = entry;
+    if (ident->entry && ident->entry->node && ident->entry->node->type) {
+        AstNode* def = ident->entry->node;
+        ident->type = def->type;
+        // Type and pattern definitions are referenced through a plain TypeType
+        // wrapper, exactly as resolve_identifier does. The wrap is load-bearing:
+        // match_arm_is_error_handler blind-casts an arm's type as (TypeType*),
+        // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
+        if (def->node_type == AST_NODE_TYPE_STAM ||
+                (def->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                 ((AstDeclaratorNode*)def)->is_type_definition) ||
+                def->node_type == AST_NODE_STRING_PATTERN ||
+                def->node_type == AST_NODE_SYMBOL_PATTERN) {
+            // direct aliases for literals/ranges already carry the first-class
+            // TypeType wrapper; wrapping that carrier again hides the payload
+            // from the matcher and makes `is Alias` fail (D2.2.2).
+            ident->type = def->type && def->type->type_id == LMD_TYPE_TYPE
+                ? def->type : wrap_type(tp, def->type);
+        }
+    } else if (base_type_alias_suggestion(w)) {
+        // conceptual base-type spellings (int64, float32) get the canonical
+        // suggestion and fail the annotation, as an unknown base-type word does
+        record_unknown_base_type_span(tp, ident->source_span, w);
+        ident->type = (Type*)&LIT_TYPE_ERROR;
+    } else {
+        // stay lenient like resolve_identifier: an unresolved name defers to ANY
+        // so runtime paths (e.g. `?unknown` queries) degrade gracefully instead
+        // of failing the whole compilation
+        log_warn("type-pattern: unresolved type name '%.*s', using ANY", (int)w.length, w.str);
+        ident->type = set_type_any(tp, ANY_LEGACY_UNCLASSIFIED);
+    }
+}
+
+void resolve_array_type(Transpiler* tp, AstArrayNode* ast_node) {
+    TypeArray* type = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    int count = 0;
+    for (AstNode* item = ast_node->item; item; item = item->next) {
+        resolve_type_pattern(tp, item);
+        count++;
+    }
+    if (count > 0) {
+        type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * (size_t)count);
+        type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * (size_t)count);
+        Type* nested = ast_node->item->type;
+        int i = 0;
+        for (AstNode* item = ast_node->item; item; item = item->next, i++) {
+            if (item->type && item->type->type_id == LMD_TYPE_TYPE) {
+                type->item_patterns[i].type = item->type;
+                type->item_is_type_pattern[i] = 1;
+            } else {
+                Item literal = ItemNull;
+                if (ast_static_literal_item(tp, item, &literal)) {
+                    type->item_patterns[i] = literal;
+                }
+            }
+            if (nested && item->type && item->type->type_id != nested->type_id) { nested = NULL; }
+        }
+        type->length = count;
+        type->nested = nested;
+        if (count == 1 && type->item_is_type_pattern[0]) {
+            log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
+        }
+    }
+    ast_node->type = register_wrapped(tp, (Type*)type, &type->type_index);
+}
+
+// Map fields and element attributes share one layout: shape entries in
+// source order, each strided by its field's storage class.
+void resolve_field_shape(Transpiler* tp, AstNode* first_field,
+        ShapeEntry** shape, int64_t* length, int64_t* byte_size) {
+    ShapeEntry* prev_entry = NULL;
+    int byte_offset = 0;
+    for (AstNode* item = first_field; item; item = item->next) {
+        resolve_type_pattern(tp, item);
+        AstNamedNode* named = (AstNamedNode*)item;
+        append_shape_entry_typed(tp, named->name, named->type, shape, &prev_entry, byte_offset);
+        (*length)++;
+        // Stride by the field's STORAGE class, not a flat pointer width.
+        // A field whose contract does not name one concrete carrier
+        // (`integer`, `number`, a union) is stored self-describing, and
+        // sizeof(TypedItem) is 9 -- so a flat 8 laid the NEXT field one byte
+        // inside it. `{n: integer, label: string}` put `label` at offset 8
+        // over a TypedItem spanning 0..8, and byte_size came out 16 for 17
+        // bytes of fields: reads returned the wrong type, writes clobbered a
+        // payload byte, and the shape failed its own
+        // shape_entry_storage_fits_data (Lambda_Design_Compiling_Lane.md
+        // §10.4b G3).
+        byte_offset += lambda_lane_storage_size(named->type);
+    }
+    *byte_size = byte_offset;
+}
+
+void resolve_fn_type(Transpiler* tp, AstFuncNode* ast_node) {
+    TypeFunc* fn_type = (TypeFunc*)ast_node->type;
+    set_fn_return_contract(fn_type, &TYPE_ANY_NO_ERROR, false);
+    int param_count = 0;
+    int required_count = 0;
+    for (TypeParam* param = fn_type->param; param; param = param->next) {
+        AstNode* declared = param->type_expr;
+        if (declared) {
+            resolve_type_pattern(tp, declared);
+            apply_declared_param_type(tp, param, declared->type);
+            param->type_expr = NULL;
+        }
+        if (!param->is_optional) { required_count++; }
+        param_count++;
+    }
+    fn_type->param_count = param_count;
+    fn_type->required_param_count = required_count;
+
+    AstNode* returned = ast_node->body;
+    if (returned) {
+        resolve_type_pattern(tp, returned);
+        // The contract is the type a returned value has, not the type value
+        // that spells it -- as a declaration's return is (build_ast.cpp's
+        // direct_function_contract). Left wrapped, a call through the signature
+        // types as a type value, and calling that result reads as a conversion
+        // to the wrapped type: `mk(2)(3)` typed `fn (y: int) int`, so a map
+        // literal laid out an int as a function pointer.
+        Type* contract = unwrap_simple_type_type(returned->type);
+        set_fn_return_contract(fn_type, contract, true);
+        fn_type->returned = contract;
+        if (ast_node->syntax_flags & TP_FLAG_RAISES) {
+            if (ast_node->syntax_flags & TP_FLAG_ERROR_NODE) {
+                resolve_type_pattern(tp, ast_node->params);
+                fn_type->error_type = ast_node->params->type;
+            } else {
+                fn_type->error_type = (Type*)&LIT_TYPE_ERROR;
+            }
+        }
+    }
+    ast_node->body = NULL;
+    ast_node->params = NULL;
+    ast_node->type = register_wrapped(tp, (Type*)fn_type, &fn_type->type_index);
+}
+
+void resolve_occurrence(Transpiler* tp, AstUnaryNode* ast_node) {
+    resolve_type_pattern(tp, ast_node->operand);
+    TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+    type->operand = ast_node->operand->type;
+    type->min_count = 0;
+    type->max_count = -1;
+    switch (ast_node->op) {
+    case OPERATOR_OPTIONAL:  type->min_count = 0; type->max_count = 1; break;
+    case OPERATOR_ONE_MORE:  type->min_count = 1; type->max_count = -1; break;
+    case OPERATOR_ZERO_MORE: type->min_count = 0; type->max_count = -1; break;
+    case OPERATOR_REPEAT:
+        parse_occurrence_count(ast_node->op_str, &type->min_count, &type->max_count);
+        break;
+    default:  // OPERATOR_ARRAY: `T[]` stays open, `T[n]` fixes the length
+        if (ast_node->op_str.length > 2) {
+            parse_occurrence_count(ast_node->op_str, &type->min_count, &type->max_count);
+        }
+        break;
+    }
+    type->op = ast_node->op;
+    // occurrence registers the RAW type, not its TypeType wrapper
+    arraylist_append(tp->type_list, type);
+    type->type_index = tp->type_list->length - 1;
+    ast_node->type = wrap_type(tp, (Type*)type);
 }
 
 }  // namespace
 
-AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    Lexer lx = {tp, begin, end, span, false};
-    AstNode* node = parse_binder(&lx);
-    if (!node || lx.failed) { return NULL; }
-    skip_space(&lx);
-    if (lx.p != lx.end) { fail(&lx, "trailing input"); return NULL; }
-    return node;
-}
-
-AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    Lexer lx = {tp, begin, end, span, false};
-    AstNode* node = parse_primary(&lx);
-    if (!node || lx.failed) { return NULL; }
-    return node;
-}
-
-AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    Lexer lx = {tp, begin, end, span, false};
-    AstNode* ok = parse_return_type_pattern(&lx);
-    if (!ok || lx.failed) { return NULL; }
-
-    skip_space(&lx);
-    bool can_raise = eat(&lx, '^');
-    Type* error_type = NULL;
-    if (can_raise) {
-        skip_space(&lx);
-        if (lx.p < lx.end) {
-            AstNode* error = parse_return_type_pattern(&lx);
-            if (!error || lx.failed) { return NULL; }
-            error_type = return_contract_type(error);
-        } else {
-            error_type = &TYPE_ERROR;
+void resolve_type_pattern(Transpiler* tp, AstNode* node) {
+    if (!node) return;
+    uint8_t form = node->syntax_form;
+    if (!lambda_syntax_form_is_type_pattern(form) && form != LSF_BINDER) return;
+    node->syntax_form = LSF_NONE;
+    switch (form) {
+    case LSF_BINDER:
+        resolve_type_pattern(tp, ((AstNamedNode*)node)->as);
+        resolve_binder_type(tp, node);
+        break;
+    case LSF_TP_LIT_STRING:
+    case LSF_TP_LIT_NUMBER:
+        resolve_literal_constant(tp, node);
+        break;
+    case LSF_TP_LIT_BOOL:
+        break;
+    case LSF_TP_ANY:
+        node->type = wrap_type(tp, set_type_any(tp, ANY_EXPLICIT));
+        break;
+    case LSF_TP_BASE:
+        node->type = lambda_base_type_from_index(tp, node->syntax_aux);
+        break;
+    case LSF_TP_NAME:
+        resolve_type_name(tp, (AstIdentNode*)node);
+        break;
+    case LSF_TP_CHAR_CLASS: {
+        AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
+        const char* word = island_char_class_word(cc->char_class);
+        // the reserved atoms shadow nothing: a surrounding `let d = ...` makes
+        // `d` inside an island ambiguous, which is also invalid
+        if (word && lookup_name(tp, (StrView){word, 1})) {
+            record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
+                "pattern class '%.*s' is reserved inside pattern islands; rename the surrounding binding",
+                1, word);
         }
+        cc->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        break;
     }
-    skip_space(&lx);
-    if (lx.p != lx.end) { fail(&lx, "trailing return contract input"); return NULL; }
-    return build_function_return_contract_node_from_span(tp, span,
-        return_contract_type(ok), error_type, can_raise);
+    case LSF_TP_PATTERN_REF: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        ident->entry = lookup_name(tp, (StrView){ident->name->chars, ident->name->len});
+        if (ident->entry && ident->entry->node) { ident->type = ident->entry->node->type; }
+        break;
+    }
+    case LSF_TP_PATTERN_RANGE: {
+        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
+        resolve_type_pattern(tp, range->start);
+        resolve_type_pattern(tp, range->end);
+        range->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        break;
+    }
+    case LSF_TP_ISLAND_GROUP:
+        resolve_type_pattern(tp, ((AstListNode*)node)->item);
+        break;
+    case LSF_TP_ISLAND_UNARY:
+        resolve_type_pattern(tp, ((AstUnaryNode*)node)->operand);
+        node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        break;
+    case LSF_TP_ISLAND_SEQ:
+        for (AstNode* child = ((AstPatternSeqNode*)node)->first; child; child = child->next) {
+            resolve_type_pattern(tp, child);
+        }
+        node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        break;
+    case LSF_TP_ISLAND: {
+        AstPatternIslandNode* island = (AstPatternIslandNode*)node;
+        resolve_type_pattern(tp, island->pattern);
+        // Pattern bodies are content-only: the domain is the island's tag, so a
+        // symbol literal inside one is a mistake (S11.1.2).
+        if (pattern_ast_has_symbol_literal(island->pattern)) {
+            record_semantic_error_span(tp, node->source_span, ERR_INVALID_LITERAL,
+                "pattern bodies are content-only; use \\symbol(...) for the symbol domain and string literals for content");
+            island->type = &TYPE_ERROR;
+            break;
+        }
+        TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool,
+            TYPE_KIND_PATTERN, sizeof(TypePattern));
+        pattern_type->pattern_index = -1;
+        pattern_type->is_symbol = island->is_symbol;
+        pattern_type->re2 = nullptr;
+        pattern_type->re2_unanchored = nullptr;
+        pattern_type->source = nullptr;
+        pattern_type->regex_source = nullptr;
+        island->type = (Type*)pattern_type;
+        break;
+    }
+    case LSF_TP_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        resolve_type_pattern(tp, binary->left);
+        resolve_type_pattern(tp, binary->right);
+        TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
+        type->op = binary->op;
+        type->left = binary->left->type;
+        type->right = binary->right->type;
+        binary->type = register_wrapped(tp, (Type*)type, &type->type_index);
+        break;
+    }
+    case LSF_TP_REGISTERED_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        resolve_type_pattern(tp, binary->left);
+        resolve_type_pattern(tp, binary->right);
+        register_binary_type(tp, binary);
+        break;
+    }
+    case LSF_TP_RANGE: {
+        AstBinaryNode* ast_node = (AstBinaryNode*)node;
+        resolve_type_pattern(tp, ast_node->left);
+        resolve_type_pattern(tp, ast_node->right);
+        TypeRange* range_type = (TypeRange*)alloc_type(tp->pool, LMD_TYPE_RANGE, sizeof(TypeRange));
+        range_type->kind = TYPE_KIND_RANGE;
+        range_type->start = ItemNull;
+        range_type->end = ItemNull;
+        range_type->is_char = false;
+        Item start_item = ItemNull;
+        Item end_item = ItemNull;
+        if (ast_static_literal_item(tp, ast_node->left, &start_item) &&
+                ast_static_literal_item(tp, ast_node->right, &end_item)) {
+            range_type->start = start_item;
+            range_type->end = end_item;
+            range_type->is_char = get_type_id(start_item) == LMD_TYPE_STRING &&
+                get_type_id(end_item) == LMD_TYPE_STRING;
+        }
+        ast_node->type = (Type*)range_type;
+        arraylist_append(tp->type_list, (Type*)range_type);
+        break;
+    }
+    case LSF_TP_OCCURRENCE:
+        resolve_occurrence(tp, (AstUnaryNode*)node);
+        break;
+    case LSF_TP_OPTIONAL_FIELD: {
+        AstUnaryNode* ast_node = (AstUnaryNode*)node;
+        resolve_type_pattern(tp, ast_node->operand);
+        TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+        type->operand = ast_node->operand->type;
+        type->min_count = 0;
+        type->max_count = 1;
+        // `type->op` is the field consumers read — validator is_type_optional()
+        // checks the TypeUnary, not the AST node. apply_occurrence sets both; a
+        // wrapper that sets only the AST side parses but is invisible downstream.
+        type->op = OPERATOR_OPTIONAL;
+        ast_node->type = wrap_type(tp, (Type*)type);
+        break;
+    }
+    case LSF_TP_ARRAY:
+        resolve_array_type(tp, (AstArrayNode*)node);
+        break;
+    case LSF_TP_FIELD: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        resolve_type_pattern(tp, named->as);
+        named->type = named->as->type;
+        if (named->key) {
+            // an attribute default resolves after its field type, and then
+            // leaves the node: it is not part of the type
+            resolve_type_pattern(tp, named->key);
+            named->key = NULL;
+        }
+        break;
+    }
+    case LSF_TP_MAP: {
+        AstMapNode* ast_node = (AstMapNode*)node;
+        TypeMap* type = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        resolve_field_shape(tp, ast_node->item, &type->shape, &type->length,
+            &type->byte_size);
+        ast_node->type = register_wrapped(tp, (Type*)type, &type->type_index);
+        break;
+    }
+    case LSF_TP_TUPLE: {
+        AstListNode* ast_node = (AstListNode*)node;
+        TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+        TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+        node_type->type = (Type*)type;
+        ast_node->type = (Type*)node_type;
+        ast_node->list_type = type;
+        for (AstNode* item = ast_node->item; item; item = item->next) {
+            resolve_type_pattern(tp, item);
+            type->length++;
+        }
+        arraylist_append(tp->type_list, ast_node->type);
+        type->type_index = tp->type_list->length - 1;
+        break;
+    }
+    case LSF_TP_CONTENT: {
+        AstListNode* content = (AstListNode*)node;
+        TypeList* content_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+        content->type = (Type*)content_type;
+        content->list_type = content_type;
+        for (AstNode* item = content->item; item; item = item->next) {
+            resolve_type_pattern(tp, item);
+            content_type->length++;
+        }
+        break;
+    }
+    case LSF_TP_ELEMENT: {
+        AstElementNode* ast_node = (AstElementNode*)node;
+        TypeElmt* type = (TypeElmt*)ast_node->type;
+        resolve_field_shape(tp, ast_node->item, &type->shape, &type->length,
+            &type->byte_size);
+        if (ast_node->content) {
+            resolve_type_pattern(tp, ast_node->content);
+            type->content_length = ((AstListNode*)ast_node->content)->list_type->length;
+        }
+        ast_node->type = register_wrapped(tp, (Type*)type, &type->type_index);
+        break;
+    }
+    case LSF_TP_FN:
+        resolve_fn_type(tp, (AstFuncNode*)node);
+        break;
+    default:
+        break;
+    }
 }
 
-AstNode* parse_return_value_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    Lexer lx = {tp, begin, end, span, false};
-    AstNode* node = parse_return_type_pattern(&lx);
-    if (!node || lx.failed) return NULL;
-    skip_space(&lx);
-    if (lx.p != lx.end) {
-        fail(&lx, "trailing return contract input");
+AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
+        const char* end, SourceSpan span, TypePatternMode mode,
+        TypePatternFailure* failure) {
+    Lexer lx = {tp, begin, end, span, false, {ERR_INVALID_LITERAL, NULL}};
+    AstNode* node = NULL;
+    const char* trailing = NULL;
+    switch (mode) {
+    case TYPE_PATTERN_FULL:
+        node = parse_binder(&lx);
+        trailing = "trailing input";
+        break;
+    case TYPE_PATTERN_RETURN_VALUE:
+        node = parse_return_type_pattern(&lx);
+        trailing = "trailing return contract input";
+        break;
+    }
+    if (node && !lx.failed && trailing) {
+        skip_space(&lx);
+        if (lx.p != lx.end) fail(&lx, trailing);
+    }
+    if (!node || lx.failed) {
+        if (failure) *failure = lx.failure;
         return NULL;
     }
     return node;
-}
-
-AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    Lexer lx = {tp, begin, end, span, false};
-    AstNode* pattern = parse_view_pattern(&lx);
-    if (!pattern || lx.failed) { return NULL; }
-    skip_space(&lx);
-    if (lx.p != lx.end) { fail(&lx, "trailing view pattern input"); return NULL; }
-    return pattern;
 }

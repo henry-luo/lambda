@@ -2040,22 +2040,31 @@ module-state activation. Lambda's active `Transpiler` now starts that same
 compiler unit with `parse` → `build` → `bind` → `validate` → `index`, then
 carries it through const-fold, planning, MIR lowering, finalization/load, and
 entry link; retained-AST fallback starts a fresh manager from its already
-indexed unit. The `parse` pass emits a reduction tape with no AST-node
-allocation or scope mutation. `build` replays it into a retained AST and its
-private construction scopes; `bind` rebuilds the canonical scope/`NameEntry`
-graph from those retained AST-facing facts, rewrites declaration/use and
-capture edges to that graph, and only then publishes `BOUND`. Post-reduction
-semantic validation remains manager-owned and a rejected validation cannot
-publish `INDEXED`. The compiler-time record now measures physical parse,
-build, bind, validate, and index stages; `bind_us` is no longer fabricated as
-zero. Construction scopes and their declaration lookup are private build-time
-support for bottom-up type assembly: the physical binder replaces every
-published scope, declaration, use, and capture edge with the canonical graph
-before `BOUND`; allocation failure rejects the replay without publishing a
-partial root. They are not a second binding schedule or lowering authority, so
-the **D8.2.5** pass-manager requirement is complete. This is an
-implementation-only status update; merely renaming a pass would not satisfy
-**D8.2.5**.
+indexed unit. The `parse` pass drives a syntax sink that allocates each
+retained AST node as its production completes and records only source facts:
+names are interned but unbound and read as `any`, and no scope, constant,
+type or diagnostic is published. A syntax error leaves the nodes built so far
+in the unit's pool, unpublished. `build` is the resolve pass: it walks that
+tree in the order its productions completed, entering and leaving each
+construction scope where the parser reported it, and binds names, assigns
+types, registers constants and types, and reports diagnostics in source
+order. A node whose kind depends on resolution (a name that reads a field,
+constant or builtin; an element tag that names an object type) is morphed in
+place at a size its syntax form reserved, so every parent keeps its link.
+`bind` rebuilds the canonical scope/`NameEntry` graph from those retained
+AST-facing facts, rejects any node the resolve pass did not reach, rewrites
+declaration/use and capture edges to that graph, and only then publishes
+`BOUND`. Post-reduction semantic validation remains manager-owned and a
+rejected validation cannot publish `INDEXED`. The compiler-time record now
+measures physical parse, build, bind, validate, and index stages; `bind_us`
+is no longer fabricated as zero. Construction scopes and their declaration
+lookup are private resolve-time support for bottom-up type assembly: the
+physical binder replaces every published scope, declaration, use, and capture
+edge with the canonical graph before `BOUND`; allocation failure rejects the
+resolve pass without publishing a partial root. They are not a second binding
+schedule or lowering authority, so the **D8.2.5** pass-manager requirement is
+complete. This is an implementation-only status update; merely renaming a
+pass would not satisfy **D8.2.5**.
 
 Current end-to-end evidence for this status slice is `make test-lambda-baseline`
 at `4,098/4,098`, including MIR emission/ratchet and forced-GC suites, and the
