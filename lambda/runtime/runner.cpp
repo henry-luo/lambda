@@ -1205,15 +1205,12 @@ void preserve_context_last_error(Item result) {
     ctx->last_error = NULL;
 }
 
-// Helper functions for C code to access EvalContext members (used by path.c)
+// C-linkage accessor for the current EvalContext's heap pool; path.c reaches it
+// through runner_path_pool_provider.
 extern "C" {
 Pool* eval_context_get_pool() {
     if (!context || !context->heap) return nullptr;
     return context->heap->pool;
-}
-
-NamePool* eval_context_get_name_pool() {
-    return context ? context->name_pool : nullptr;
 }
 }
 
