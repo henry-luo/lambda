@@ -5,6 +5,7 @@
 #include "log.h"
 #include "math_checked.hpp"
 #include "str.h"
+#include "math_utils.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -222,13 +223,13 @@ static bool pool_block_is_free(const PoolBlock* block) {
     return block && (block->flags & POOL_BLOCK_ALLOCATED) == 0;
 }
 
+// floor(log2(span)) capped at the last bin, 0 below 2. Counting leading zeros
+// replaces a shift loop that ran three times per allocation (the request, the
+// taken block and the split remainder, about 20 steps each for a large tail).
 static unsigned pool_bin_index(size_t span) {
-    unsigned index = 0;
-    while (span > 1 && index + 1 < POOL_BIN_COUNT) {
-        span >>= 1;
-        index++;
-    }
-    return index;
+    if (span < 2) return 0;
+    unsigned floor_log2 = (unsigned)(63 - math_clz64((uint64_t)span));
+    return floor_log2 < POOL_BIN_COUNT - 1 ? floor_log2 : POOL_BIN_COUNT - 1;
 }
 
 static bool pool_block_range_valid(const PoolBlock* block,

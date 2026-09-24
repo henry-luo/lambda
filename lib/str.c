@@ -14,6 +14,7 @@
 
 #include "str.h"
 #include "hash.h"
+#include "math_utils.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -45,22 +46,6 @@ static inline uint64_t _load_u64(const void* p) {
     uint64_t v;
     memcpy(&v, p, 8);
     return v;
-}
-
-/* count leading zeros */
-static inline int _clz64(uint64_t v) {
-#if defined(__GNUC__) || defined(__clang__)
-    return v ? __builtin_clzll(v) : 64;
-#else
-    int n = 0;
-    if (!(v & 0xFFFFFFFF00000000ULL)) { n += 32; v <<= 32; }
-    if (!(v & 0xFFFF000000000000ULL)) { n += 16; v <<= 16; }
-    if (!(v & 0xFF00000000000000ULL)) { n += 8;  v <<= 8;  }
-    if (!(v & 0xF000000000000000ULL)) { n += 4;  v <<= 4;  }
-    if (!(v & 0xC000000000000000ULL)) { n += 2;  v <<= 2;  }
-    if (!(v & 0x8000000000000000ULL)) { n += 1; }
-    return n;
-#endif
 }
 
 /* ── static LUT for tolower / toupper ─────────────────────────────── */
@@ -237,7 +222,7 @@ size_t str_rfind_byte(const char* s, size_t len, char c) {
         uint64_t mask = _swar_has_byte_exact(_load_u64(s + i), (uint8_t)c);
         if (mask) {
             /* highest set bit position → last matching byte */
-            return i + 7 - _clz64(mask) / 8;
+            return i + 7 - math_clz64(mask) / 8;
         }
     }
     return STR_NPOS;

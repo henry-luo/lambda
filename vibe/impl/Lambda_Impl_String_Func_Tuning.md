@@ -17,7 +17,8 @@
 | P3 | parser inner loops | done |
 | P4 | formatter loops, plus the escape sink (§5.3-7) planned for P2 | done |
 | P5a | HTML parser tag classes by id (§5.2-7) | done |
-| P5 | the rest of structural: allocator (§5.2-6), LambdaJS `+=`, UTF-8 position cache, hash choice | next; the allocator needs a design round |
+| P5b | pool bin index by leading-zero count (part of §5.2-6) | done |
+| P5 | the rest of structural: allocator redesign (§5.2-6), LambdaJS `+=`, UTF-8 position cache, hash choice | next; the allocator needs a design round |
 
 ## P0 — correctness
 
@@ -259,6 +260,25 @@ Node's `JSON.stringify` takes 180 ms on the same workload, so the LambdaJS gap t
 - **Baselines:**
   - Lambda: 5,862/5,862. Radiant: all suites pass.
   - One Radiant run failed the page snapshot (`zengarden`, `nojs`) while other sessions kept the load average near 7. The suite settles 200 ms after load. The same binary passed the suite on its own, and the release view trees of both pages are byte-identical between P4 and P5a.
+
+## P5b — pool bin index by leading-zero count (part of §5.2-6)
+
+**Change.**
+- `pool_bin_index` (`lib/mempool.c`) was a shift loop computing `min(floor(log2(span)), 31)`. It ran three times per allocation: for the request, the taken block and the split remainder, about 20 steps each for the large tail block.
+- It now counts leading zeros with `math_clz64`: the same bins, so the allocator picks exactly the same blocks.
+- `math_clz64` is `lib/str.c`'s private `_clz64` promoted to `lib/math_utils.h` (rule 13). Its portable fallback returned 63 for 0; it now returns 64. A new `MathUtilsTest.Clz64` covers it.
+
+**Results** (release, interleaved medians of 7, P5a → P5b):
+
+| Parse | P5a (ms) | P5b (ms) | Speedup |
+|---|---:|---:|---:|
+| HTML, 13 MiB | 169.2 | 148.8 | 1.14× |
+| XML, 19 MiB | 133.0 | 123.6 | 1.08× |
+| Markdown | 120.7 | 117.1 | 1.03× |
+| CSV | 133.8 | 130.4 | 1.03× |
+| JSON, YAML | — | — | 1.01× |
+
+**Semantics unchanged:** the 10 corpora and all 21,602 HTML files parse identically. `test_mempool_gtest` passes 55/55 and `test_arena_gtest` 91/91. Lambda passes 5,862/5,862, Radiant all suites, and test262 40,261/40,261.
 
 ## Findings not yet filed
 
