@@ -9999,6 +9999,10 @@
                   },
                   "named": true,
                   "value": "return_occurrence_type"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "fn_type"
                 }
               ]
             }
@@ -10043,6 +10047,10 @@
                         },
                         "named": true,
                         "value": "return_occurrence_type"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "fn_type"
                       }
                     ]
                   }
@@ -10517,30 +10525,22 @@
                 "type": "SEQ",
                 "members": [
                   {
+                    "type": "STRING",
+                    "value": "("
+                  },
+                  {
                     "type": "CHOICE",
                     "members": [
                       {
                         "type": "SEQ",
                         "members": [
                           {
-                            "type": "STRING",
-                            "value": "("
-                          },
-                          {
-                            "type": "CHOICE",
-                            "members": [
-                              {
-                                "type": "FIELD",
-                                "name": "declare",
-                                "content": {
-                                  "type": "SYMBOL",
-                                  "name": "fn_param"
-                                }
-                              },
-                              {
-                                "type": "BLANK"
-                              }
-                            ]
+                            "type": "FIELD",
+                            "name": "declare",
+                            "content": {
+                              "type": "SYMBOL",
+                              "name": "fn_param"
+                            }
                           },
                           {
                             "type": "REPEAT",
@@ -10561,10 +10561,6 @@
                                 }
                               ]
                             }
-                          },
-                          {
-                            "type": "STRING",
-                            "value": ")"
                           }
                         ]
                       },
@@ -10574,17 +10570,38 @@
                     ]
                   },
                   {
-                    "type": "FIELD",
-                    "name": "type",
-                    "content": {
-                      "type": "ALIAS",
-                      "content": {
-                        "type": "SYMBOL",
-                        "name": "_fn_return_type"
+                    "type": "STRING",
+                    "value": ")"
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SEQ",
+                        "members": [
+                          {
+                            "type": "SYMBOL",
+                            "name": "_fn_return"
+                          },
+                          {
+                            "type": "FIELD",
+                            "name": "type",
+                            "content": {
+                              "type": "ALIAS",
+                              "content": {
+                                "type": "SYMBOL",
+                                "name": "_fn_return_type"
+                              },
+                              "named": true,
+                              "value": "return_type"
+                            }
+                          }
+                        ]
                       },
-                      "named": true,
-                      "value": "return_type"
-                    }
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
                   }
                 ]
               },
@@ -12362,6 +12379,10 @@
     {
       "type": "SYMBOL",
       "name": "_root_boundary"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_fn_return"
     },
     {
       "type": "SYMBOL",

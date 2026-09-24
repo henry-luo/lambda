@@ -5321,6 +5321,10 @@
         "required": true,
         "types": [
           {
+            "type": "fn_type",
+            "named": true
+          },
+          {
             "type": "return_occurrence_type",
             "named": true
           }

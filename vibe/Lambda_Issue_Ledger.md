@@ -515,6 +515,22 @@ A sized boundary wraps where **S11.4.5** requires value-aware admission and
 literal-union contract is not checked at all (a string literal union such as
 `"a" | "b"` is).
 
+<a id="lr03-13"></a>**LR03-13 · A function contract's return type is trusted, never checked · OPEN (found 2026-09-24)**
+`let h: fn (y: int) int = (y) => "s"` is admitted, and so is a function
+declared `string`: admission tests the colour (**S11.1.5v2**), not the return.
+A call through `h` is still typed `int`, so on the JIT `{v: h(3)}` is
+`{ v: 0 }` (the result passes through `lambda_item_to_int_lane_c`), `h(3) + 1`
+is `1`, and `let z: int = h(3)` binds `0` where the interpreter raises E201;
+the interpreter's map lays out an int field and prints the string's pointer.
+**S7.4.1** (*interfaces enforce*) and **S7.7.1** (declared returns are
+boundaries) point at a check, but no ruling places it: on the call through the
+contract where the callee is unresolved (failing as **S7.7.3**'s call-site
+contagion does), at admission where the admitted function's return is known,
+or both. Since 2026-09-24 a signature's return contract is the value type, as
+a declaration's is (`test/lambda/fn_type_curried_call.ls`), so curried
+contracts now behave the same way; before, a curried call typed as a
+function and crashed a map literal instead.
+
 ---
 
 

@@ -123,6 +123,11 @@ bool word_is(StrView w, const char* s) {
     return lambda_lex_word_is(w, s);
 }
 
+// the characters that open a type suffix (see apply_occurrence)
+bool is_suffix_start(char c) {
+    return c == '?' || c == '+' || c == '*' || c == '[' || c == '{';
+}
+
 AstNode* parse_union(Lexer* lx);
 AstNode* parse_binder(Lexer* lx);
 AstNode* parse_exclude(Lexer* lx);
@@ -779,6 +784,7 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
     TypeParam* prev_param = NULL;
     int param_count = 0;
     int required_count = 0;
+    bool has_signature = false;
     if (eat(lx, '(')) {
         while (!at(lx, ')') && lx->p < lx->end) {
             StrView pname = take_word(lx);
@@ -797,20 +803,40 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
             prev_param = param;
             param_count++;
             if (!eat(lx, ',')) { break; }
+            // S16.1.2v2: `,` separates, so `fn (x: int,)` has an empty slot
+            if (at(lx, ')')) {
+                fail_code(lx, ERR_INVALID_LITERAL, "a trailing ',' is not a separator");
+                return NULL;
+            }
         }
         if (!eat(lx, ')')) { fail(lx, "expected ')'"); return NULL; }
+        has_signature = true;
     }
     fn_type->param_count = param_count;
     fn_type->required_param_count = required_count;
 
-    // return type, if the annotation spells one
-    skip_space(lx);
-    if (lx->p < lx->end && *lx->p != ',' && *lx->p != ')' && *lx->p != ']' &&
-            *lx->p != '}' && *lx->p != '>' && *lx->p != '|' && *lx->p != '&') {
+    // S11.1.5v2: only a signature takes a return type, and it is optional --
+    // `fn`, `fn ()`, `fn () int`; never `fn int`. It starts with a name on the
+    // `)` line (S16.2.3v3); an `as` there is the parameter's binder.
+    const char* after_close = lx->p;
+    StrView return_word = has_signature ? peek_word(lx) : StrView{NULL, 0};
+    if (return_word.length && !word_is(return_word, "as")) {
+        if (memchr(after_close, '\n', (size_t)(lx->p - after_close))) {
+            fail_code(lx, ERR_INVALID_LITERAL,
+                "a function type's return type starts on the line of its ')'");
+            return NULL;
+        }
         AstNode* returned = parse_binder(lx);
         if (!returned) { return NULL; }
-        set_fn_return_contract(fn_type, returned->type, true);
-        fn_type->returned = returned->type;
+        // The contract is the type a returned value has, not the type value
+        // that spells it -- as a declaration's return is (build_ast.cpp's
+        // direct_function_contract). Left wrapped, a call through the signature
+        // types as a type value, and calling that result reads as a conversion
+        // to the wrapped type: `mk(2)(3)` typed `fn (y: int) int`, so a map
+        // literal laid out an int as a function pointer.
+        Type* contract = unwrap_simple_type_type(returned->type);
+        set_fn_return_contract(fn_type, contract, true);
+        fn_type->returned = contract;
         if (eat(lx, '^')) {
             // `T^` is any error; `T^E` names one. The error arm is a simple
             // type pattern, never a whole annotation.
@@ -823,6 +849,16 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
                 fn_type->error_type = (Type*)&LIT_TYPE_ERROR;
             }
         }
+    }
+    // A return type takes its own suffix (`fn () int?` returns `int?`), so one
+    // left over would bind to the function type -- `fn ()?` against
+    // `fn () int?`. The function type takes none; grouping spells it.
+    const char* next = lx->p;
+    lambda_lex_skip_space(&next, lx->end);
+    if (next < lx->end && is_suffix_start(*next)) {
+        fail_code(lx, ERR_INVALID_LITERAL,
+            "a function type takes no suffix: group it, as in `(fn (x: int))?`");
+        return NULL;
     }
 
     ast_node->type = register_wrapped(lx, (Type*)fn_type, &fn_type->type_index);
@@ -939,7 +975,7 @@ static bool occurrence_count_is_open_comma(StrView op) {
 AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     if (lx->p >= lx->end) { return operand; }
     char c = *lx->p;
-    if (c != '?' && c != '+' && c != '*' && c != '[' && c != '{') { return operand; }
+    if (!is_suffix_start(c)) { return operand; }
 
     AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
     TypeUnary* type = (TypeUnary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));

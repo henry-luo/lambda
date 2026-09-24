@@ -278,6 +278,9 @@ module.exports = grammar({
     // a step or the end of the path follows, so `/b` (the retired `/a`
     // spelling) is an error rather than `/` plus a juxtaposed statement `b`.
     $._root_boundary,
+    // S11.1.5v2: zero-width, in front of a signature's return type, which must
+    // start on the `)` line; a name opening the next line gets no token at all.
+    $._fn_return,
     // Never emitted: the dead end after a `let` outside a list (`_misplaced_let`).
     // Visible, so the recovery prints `(MISSING let_outside_list)` -- a hidden
     // missing token leaves no trace in the CLI output the S16 script reads.
@@ -1251,9 +1254,11 @@ module.exports = grammar({
     // count never chains, so the counted name is one more alternative.
     _fn_return_type: return_contract(
       $ => alias($._fn_return_type_pattern, $.return_type_pattern)),
+    // ... and, like C's type slot, a function type: `fn (x: int) fn (y: int) int`.
     _fn_return_type_pattern: return_alternatives($ => choice(
       $.return_occurrence_type,
-      alias($._counted_return_type, $.return_occurrence_type))),
+      alias($._counted_return_type, $.return_occurrence_type),
+      $.fn_type)),
     _counted_return_type: $ => alias(seq(
       field('operand', $._return_name),
       field('operator', alias($._count_occurrence, $.occurrence)),
@@ -1298,14 +1303,18 @@ module.exports = grammar({
       field('name', $.identifier), seq(':', field('type', $._type_pattern)),
     ),
     // `fn` and `pn` function types are disjoint by colour; `function` is
-    // their union (S11.1.5). Alone, `fn` and `pn` are the colours themselves
-    // (`f is fn`), as in C's type slot; a signature carries a return type.
+    // their union (S11.1.5v2). Alone, `fn` and `pn` are the colours themselves
+    // (`f is fn`); a signature always spells its parameter list and may add a
+    // return type -- `fn ()`, `fn () int`, never `fn int`. The return type
+    // starts on the `)` line: `_fn_return` is emitted only there, and a name
+    // opening the next line is an error (S16.2.3v3).
     fn_type: $ => prec.right(seq(
       field('kind', choice('fn', 'pn')),
       optional(seq(
-        optional(seq('(', optional(field('declare', $.fn_param)),
-          repeat(seq(',', field('declare', $.fn_param))), ')')),
-        field('type', alias($._fn_return_type, $.return_type)),
+        '(', optional(seq(field('declare', $.fn_param),
+          repeat(seq(',', field('declare', $.fn_param))))), ')',
+        optional(seq($._fn_return,
+          field('type', alias($._fn_return_type, $.return_type)))),
       )),
     )),
 

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 35.0.0 (2026-09-24)
+**Spec version:** 36.0.0 (2026-09-24)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1480,7 +1480,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   nominal-base admission. Function-type variance is pending; until ruled,
   function-type operands are rejected. [S1.7, S6.1.1, S11.3.1v2, D3.2.1,
   D3.2.5v2]
-- **S11.1.5*** **Three function types: `fn`, `pn`, and their union
+- **S11.1.5v2*** **Three function types: `fn`, `pn`, and their union
   `function`.** `fn` and `pn` types are **disjoint** by effect bit;
   `function` is the base type of both. `f is fn` and `f is pn` test the bit,
   and `f is function` holds for every function value. A contract
@@ -1489,8 +1489,15 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   while `function` or `function (...)` admits either. Since `fn` and `pn`
   are strictly narrower than `function`, a binder over a function value
   (S11.4.8v2) selects a coloured type, and the join of `fn` with `pn` is
-  `function`. The `<:` relation over function-type operands stays pending
-  under S11.1.4v2. [C20-1, C20.2]
+  `function`. **A function type's signature always spells its parameter
+  list**, empty or not: `fn () int`, `fn (x: int) int` — the shorthand
+  `fn int` is retired. The return type is **optional**: `fn ()` and
+  `fn (x: int)` constrain the parameters and leave the return `any`. When
+  present, the return type starts on the line of the signature's `)`
+  (S16.2.3v3), and it may itself be a signature:
+  `fn (x: int) fn (y: int) int`. The `<:` relation over function-type
+  operands stays pending under S11.1.4v2. [C20-1, C20.2; signature:
+  USER 2026-09-24]
 - **S11.1.6v2** **Two type families, split by concept: a run and an array.**
   The *occurrence* family — `T?`, `T*`, `T+`, `T{n,m}` (`T{n}` exactly,
   `T{n+}` at least) — describes a run of `T`s, which is
@@ -2009,15 +2016,20 @@ below by its section.
   lt le ge gt`, plus `else case default`. These are unambiguous in any
   position and need no separator. `!` is here, not below: it is a pure
   infix token (S16.8.1). [Design_Syntax §3.3, §7.1]
-- **S16.2.3v2*** After an **open-tail** statement (S16.1.3v2), a line-start
+- **S16.2.3v3*** After an **open-tail** statement (S16.1.3v2), a line-start
   **dual-role** token — one that could either continue the expression or
   start a new one — is a **syntax error**. The set is final:
   `( [ - + * ^ / < .` — the whole arithmetic family `- + * /` is banned
-  uniformly rather than freeing `+` alone (S16.8.5). Neither reading wins by
+  uniformly rather than freeing `+` alone (S16.8.5). One position adds a
+  name: after a function-type signature with no return type on its line
+  (`type F = fn (x: int)`), a line-start **name** could be the return type
+  or begin the next statement, so it too is an error. A keyword that cannot
+  begin a return type — a statement keyword, or a declaration head such as
+  `fn f` — starts the next statement as usual. Neither reading wins by
   default; the repair is explicit (`;` to separate, or move the token to the
   end of the previous line to continue). This is what makes S16.1.1 hold:
   the parser never guesses, so a line break can never silently split or
-  merge. [Design_Syntax §3.1, §3.3]
+  merge. [Design_Syntax §3.1, §3.3, §7.29]
 - **S16.2.4v3*** One carve-out: `.` followed by a step other than a digit
   — a name, `'sym'`, `*`, `**`, `~~`, or `/` — at line start is **member or
   path continuation**, sanctioning full leading-dot fluent chains and
@@ -2428,7 +2440,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S9.3.1 | **UNCONDITIONAL since 2026-08-29** — insertion capture is applied at the specified container insertion points on both tiers, and `LAMBDA_COW_CAPTURE` is no longer consulted. The implementation marks named values at capture sites; freshly produced containers are not marked because they have no second observer at that insertion point. Plain-parameter snapshots under **S9.1.3** are unconditional as well, with `var` remaining the sole write-through construct. Full implementation record: [LR12-R9](<../vibe/Lambda_Issue_Ledger (fixed).md#lr12-r9>). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
 | S11.1.1v3 (v2 core) | `T[]` and nested `T[][]` contracts are implemented at annotation and parameter boundaries, including scalar, sized-scalar, pointer, string, named-map, and nested lanes. Since 2026-09-23 (both tiers) ArrayNum views and N-D arrays also cross contracts with no exact packed lane (`number[]`, `float[][]`, `int?[]`, unions): admission presents their elements -- scalars, or leading-axis rows -- as a snapshot copy (S9.2.2), where it had rejected everything `is` accepted; and the JIT's `len` of an annotated N-D binding counts rows, not leaves. Fixture `proc/array_view_admission.ls`. **Counted axes enforced at typed boundaries since 2026-09-23 (both tiers):** once P5 made `T[n]` an array layer, the admission fast paths (lane, rank and certificate reuse) proved it from the leaf lane and rank alone, so `int[3]` admitted `[1, 2]` and `int[2][3]` any row count or row length. Admission now checks every counted axis first; a counted certificate re-checks the live lengths on every reuse (D3.3.3v3), since a push or splice changes them without a boundary, and the JIT no longer elides a counted contract's boundary on the strength of a binding's or record field's declared type. Fixtures `negative/runtime/array_count_*.ls`, `type_counted_rank.ls` §5. **Residue:** a record whose field is counted keeps its trusted shape across a push through that field, so a later record boundary admits the stale length (both tiers); whether such a push should itself raise (S7.8.1) is unruled. General structural array-pattern composition and the `is [T]` inline parse crash remain open. |
-| S11.1.5 | **Colour half conformant as of 2026-09-18.** `pn`/`pn (...)` parse in type position (C parser, type-pattern parser, Tree-sitter); `is fn`/`is pn`, `match` arms and parameter admission test the colour through one runtime rule, and the static boundary rejects a known wrong colour (E207) while deferring a `function`-typed source to the runtime check; system procedure references carry their signature on both tiers. Fixtures `test/lambda/proc/fn_pn_function_types.ls`, `negative/semantic/fn_pn_colour_mismatch.ls`, `negative/runtime/fn_pn_colour_mismatch.ls`. **Residue:** a binder over a function value still selects `function` (blocked on SO44); hosted (JS) function values read as `fn`. |
+| S11.1.5v2 | **Colour half conformant as of 2026-09-18; the v2 signature syntax as of 2026-09-24.** `pn`/`pn (...)` parse in type position (C parser, type-pattern parser, Tree-sitter); `is fn`/`is pn`, `match` arms and parameter admission test the colour through one runtime rule, and the static boundary rejects a known wrong colour (E207) while deferring a `function`-typed source to the runtime check; system procedure references carry their signature on both tiers. Fixtures `test/lambda/proc/fn_pn_function_types.ls`, `negative/semantic/fn_pn_colour_mismatch.ls`, `negative/runtime/fn_pn_colour_mismatch.ls`. The v2 signature landed in the C statement parser, the type-pattern parser and Tree-sitter: `fn int` is rejected, `fn ()` and `fn (x: int)` parse with an `any` return, a signature may return a signature, and a line-start name after a return-less signature is E100 (S16.2.3v3). No corpus file used the retired shorthand. **Residue:** a binder over a function value still selects `function` (blocked on SO44); hosted (JS) function values read as `fn`; `function (...)` does not parse in type position in either front end; a declaration cannot spell a signature as its return type (`fn make() fn (y: int) int {…}` is rejected by both front ends — an alias works); a suffix on a function type is SO45. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
 | S11.4.5 | **Conformant (verified 2026-09-23, both tiers):** an ANY-held `3.0` crossing an `int` boundary is admitted as `3`, and `3.5` fails with E201. The type-directional reject this row used to record is gone. |
@@ -2441,7 +2453,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
-| S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24** (C 123/123, Tree-sitter 118/118). S16.2.4v3 was verified on 2026-09-21 in both front ends, with S16.1.1 checked by joining each broken path line: C 197/197, Tree-sitter 180/180. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Residue: O3 (sibling Tree-sitter scanners), §7.17 (comment vs line-start guard, benign), and the O4 doc sweep — all in [Design_Syntax §4.5/§6](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
+| S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24** (C 123/123, Tree-sitter 118/118). S16.2.4v3 was verified on 2026-09-21 in both front ends, with S16.1.1 checked by joining each broken path line: C 197/197, Tree-sitter 180/180. S16.2.3v3's signature case landed on 2026-09-24 in both front ends (C `error_signature_return_line_start`, Tree-sitter's zero-width `_fn_return` guard): C 302/302, Tree-sitter 285/285. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Residue: O3 (sibling Tree-sitter scanners), §7.17 (comment vs line-start guard, benign), and the O4 doc sweep — all in [Design_Syntax §4.5/§6](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S16.4.1v4 | **v2 core conformant as of 2026-08-22; the v3 computed-key head (one balanced `[…]` group before the colon) is not implemented — tracked with S16.8.9.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
 | S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. |
@@ -2553,6 +2565,14 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   argument and cost survey live in
   [Design_Syntax §6 O5](../vibe/Lambda_Design_Syntax.md). An S12
   effect-boundary question. [S12.1]
+- **SO45** Whether a function type takes a suffix directly: `fn?`,
+  `fn (x: int)?`, `fn ()[]`. S11.1.5v2 makes the return type optional, so
+  after a return-less signature the suffix could only bind to the function
+  type — while in `fn () int?` the same `?` belongs to the return type.
+  Until ruled, both front ends reject the direct suffix (C had accepted
+  only `fn[]`) and grouping spells it: `(fn (x: int))?`, `(fn)[]`. `function?` is
+  unaffected, since `function` is a base type name. [S11.1.5v2,
+  S11.1.6v2]
 
 ## Appendix C — Decision-Record Index
 

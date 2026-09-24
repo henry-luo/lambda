@@ -365,5 +365,25 @@ run R "one rest parameter"                 'let f = (..., ...) => 1\n'
 run R "rest last in a declaration"         'fn f(..., a) { 1 }\n'
 run R "no leading , in parameters"         'fn f(, a) { 1 }\n'
 
+echo "--- S11.1.5v2 / S16.2.3v3 function-type signatures ---"
+run R "fn type spells its parameters"      'fn h(f: fn int) { 1 }\n'
+run R "no fn T shorthand in a bracket"     'type T = [fn int]\n'
+run A "empty signature with a return"      'fn h(f: fn () int) { 1 }\nh\n'
+run A "signature without a return type"    'fn h(f: fn ()) { 1 }\nh\n'
+run A "parameters without a return type"   'fn h(f: fn (x: int)) { 1 }\nh\n'
+run A "a signature returns a signature"    'type F = fn (x: int) fn (y: int) int\n1\n'
+run R "return type only on the ) line"     'type F = fn ()\nint\n'
+run A "; ends a bare signature"            'let x = 1\ntype F = fn ();\nx\n'
+run A "a declaration follows a signature"  'type F = fn ()\nfn g() { 1 }\n'
+run A "a brace after a signature: body"    'let f = (x) => x\nif f is fn () { 1 }\n'
+run R "no trailing , in a signature"       'type F = fn (x: int,) int\n'
+run R "no leading , in a signature"        'type F = fn (, x: int) int\n'
+run A "fn type in a union after a type"    'type T = int | fn (x: int) int\n1\n'
+run A "a statement keyword ends a signature" 'type F = fn ()\nlet y = 2\ny\n'
+run R "a signature takes no suffix"        'type F = fn (x: int)?\n1\n'
+run R "a bare fn takes no suffix"          'type F = fn[]\n1\n'
+run A "a grouped signature takes a suffix" 'type F = (fn (x: int))?\n1\n'
+run A "the return type keeps its suffix"   'type F = fn () int?\n1\n'
+
 echo
 echo "pass=$pass fail=$fail"

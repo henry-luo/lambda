@@ -88,6 +88,10 @@ static const char* const error_expected_parameter_name = "expected a parameter n
 static const char* const error_expected_parameter_close = "expected ')' after parameters";
 static const char* const error_arrow_body_expression =
     "'return', 'break', and 'continue' are statements; an arrow '=>' body is an expression";
+static const char* const error_signature_return_line_start =
+    "a function type's return type starts on the line of its ')'; a name at "
+    "the start of the next line could as well begin a new statement, so write "
+    "';' to end the type";
 static const char* const error_let_outside_list =
     "'let' binds as an expression only inside a parenthesized list; "
     "write '(let x = 1, x + 1)' or a 'let' statement";
@@ -469,6 +473,12 @@ static bool token_starts_return_type(LambdaTokenKind kind) {
     return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE;
 }
 
+// A function type's return type (S11.1.5v2) is a declaration's, or another
+// function type: `fn (x: int) fn (y: int) int`.
+static bool token_starts_signature_return(LambdaTokenKind kind) {
+    return token_starts_return_type(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN;
+}
+
 // PATH_REL must be here: without it `return \.a` parsed as a bare `return`
 // followed by a separate `\.a` statement, so the procedure returned null.
 static bool token_starts_expression(LambdaTokenKind kind) {
@@ -525,6 +535,7 @@ static void parser_leave(LambdaRdParser* parser) {
 
 static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp);
 static LambdaParseValue parse_let_expression(LambdaRdParser* parser);
+static bool parser_at_declaration_head(LambdaRdParser* parser);
 static LambdaParseValue parse_if_expression(LambdaRdParser* parser);
 static LambdaParseValue parse_if_statement(LambdaRdParser* parser);
 static bool if_starts_block_statement(const LambdaRdParser* parser);
@@ -644,8 +655,13 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
     LambdaTokenKind closing_stack[128];
     uint32_t nesting = 0;
     bool need_atom = true;
-    // `fn (...)` and `pn (...)` are the two coloured function types (S11.1.5)
-    bool function_type = first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_PN;
+    // S11.1.5v2: `fn` and `pn` alone are the two colours. Right after either,
+    // `(` opens a signature; once its parameters close, a return type may
+    // follow, starting on the `)` line (S16.2.3v3) -- `fn () int`, never
+    // `fn int`.
+    bool params_may_open = false;
+    bool in_params = false;
+    bool return_may_follow = false;
     bool counted_run_is_ambiguous =
         (reduction_flags & LAMBDA_REDUCTION_FLAG_RETURN_TYPE) != 0;
     while (parser->status == LAMBDA_PARSE_OK) {
@@ -653,12 +669,24 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         if (kind == LAMBDA_TOK_EOF && nesting) {
             return parser_fail(parser, error_incomplete_type_pattern, closing_stack[nesting - 1]);
         }
+        if (return_may_follow) {
+            return_may_follow = false;
+            if (token_starts_signature_return(kind) && !parser_at_declaration_head(parser)) {
+                // a line-start name could as well begin a new statement
+                if (parser->current.nl_before) {
+                    return parser_fail(parser, error_signature_return_line_start,
+                        LAMBDA_TOK_SEMICOLON);
+                }
+                need_atom = true;
+            }
+        }
         if (parser->current.nl_before && !nesting && !need_atom) {
             if (kind != LAMBDA_TOK_PIPE && kind != LAMBDA_TOK_AMPERSAND && kind != LAMBDA_TOK_BANG) {
                 break;
             }
         }
-        bool function_arguments = !need_atom && !nesting && function_type && kind == LAMBDA_TOK_LPAREN;
+        bool function_arguments = !need_atom && !nesting && params_may_open && kind == LAMBDA_TOK_LPAREN;
+        params_may_open = false;
         if (need_atom || function_arguments) {
             if (need_atom && kind == LAMBDA_TOK_BANG) {
                 parser_advance(parser);
@@ -666,6 +694,9 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
             }
             if (!function_arguments && !token_starts_type(kind)) break;
             if (!parser_push_type_delimiter(parser, closing_stack, &nesting, kind)) return 0;
+            in_params = function_arguments;
+            params_may_open = !function_arguments &&
+                (kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN);
             parser_advance(parser);
             need_atom = false;
             continue;
@@ -673,7 +704,10 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
         if (nesting && kind == closing_stack[nesting - 1]) {
             nesting--;
             parser_advance(parser);
-            if (function_type && !nesting) need_atom = true;
+            if (!nesting && in_params) {
+                in_params = false;
+                return_may_follow = true;
+            }
             continue;
         }
         if (nesting) {
@@ -1856,6 +1890,15 @@ static bool parser_at_colour_poly_declaration(LambdaRdParser* parser) {
         word.span.end_byte - word.span.start_byte == length &&
         memcmp(parser->lexer.source + word.span.start_byte, keyword, length) == 0 &&
         token_is_key(parser->next.kind) && !parser->next.nl_before;
+}
+
+// `fn name`, `pn name` and `function name` open declarations and can never
+// continue a type, since a function type is `fn` or `fn (` (S11.1.5v2): after
+// a signature they start the next statement rather than its return type.
+static bool parser_at_declaration_head(LambdaRdParser* parser) {
+    LambdaTokenKind kind = parser->current.kind;
+    if (kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN) return token_is_key(parser->next.kind);
+    return parser_at_colour_poly_declaration(parser);
 }
 
 static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool is_public) {

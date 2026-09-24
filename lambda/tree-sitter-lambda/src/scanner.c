@@ -88,6 +88,9 @@ enum TokenType {
     // Withholding it makes `/b` -- the retired `/a` spelling -- an error instead
     // of the root plus a silently juxtaposed statement `b`.
     ROOT_BOUNDARY,
+    // S11.1.5v2 / S16.2.3v3: zero-width, emitted right after a signature's `)`
+    // when its return type opens on the same line.
+    FN_RETURN,
     // Never emitted: grammar.js `_misplaced_let` uses it as the dead end that
     // makes a `let` outside a parenthesized list an error.
     LET_OUTSIDE_LIST,
@@ -226,6 +229,36 @@ static bool is_continuation_word(const char *w, unsigned n) {
     }
 }
 
+// The rest of the C lexer's keyword table (lambda_lexer.c) that names no type,
+// plus the named values. With the continuation and control words and `as`,
+// these are the words a signature's return type cannot open with; `type`,
+// `fn`, `pn` and the base-type names can (S11.1.5v2).
+static bool is_statement_keyword(const char *w, unsigned n) {
+    static const char *const words[] = {
+        "let", "pub", "var", "view", "edit", "state", "if", "match", "for",
+        "while", "raise", "import", "put", "del", "commit", "rollback", "open",
+        "apply", "not", "last", "true", "false", "inf", "nan",
+    };
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
+        if (strlen(words[i]) == n && memcmp(words[i], w, n) == 0) { return true; }
+    }
+    return false;
+}
+
+// Reads the word at the lookahead into `word`, NUL-terminated when it fits
+// (longer words are never keywords), and returns its full length. Pure
+// inspection past the caller's mark.
+static unsigned read_word(TSLexer *lexer, char word[16]) {
+    unsigned n = 0;
+    while (is_identifier_continue(lexer->lookahead)) {
+        if (n + 1 < 16) { word[n] = (char)lexer->lookahead; }
+        n++;
+        lexer->advance(lexer, false);
+    }
+    if (n < 16) { word[n] = '\0'; }
+    return n;
+}
+
 // S16.1.3: no statement begins with a return type and `=>`; that text only
 // ends an arrow head (`() int => 1`), where the empty list `()` shares the
 // arrow's parse state, so a boundary here would cut the arrow off. The name is
@@ -303,20 +336,26 @@ static bool classify_start(TSLexer *lexer, bool element_scope) {
 
     if (is_identifier_start(c)) {
         char word[16];
-        unsigned n = 0;
-        while (is_identifier_continue(lexer->lookahead)) {
-            if (n + 1 < sizeof(word)) { word[n] = (char)lexer->lookahead; }
-            n++;
-            lexer->advance(lexer, false);
-        }
-        if (n < sizeof(word)) {  // longer words are never keywords
-            word[n] = '\0';
-            if (is_continuation_word(word, n)) { return false; }
-        }
+        unsigned n = read_word(lexer, word);
+        if (n < sizeof(word) && is_continuation_word(word, n)) { return false; }
         return !name_opens_arrow_return(lexer);
     }
 
     return true;
+}
+
+// A statement starts at the mark: emit whichever boundary the state allows,
+// for a caller that has already read past the start token.
+static bool emit_statement_boundary(TSLexer *lexer, const bool *valid_symbols) {
+    if (valid_symbols[ELEM_STMT_BOUNDARY]) {
+        lexer->result_symbol = ELEM_STMT_BOUNDARY;
+        return true;
+    }
+    if (valid_symbols[STMT_BOUNDARY]) {
+        lexer->result_symbol = STMT_BOUNDARY;
+        return true;
+    }
+    return false;
 }
 
 // Emit a guarded operator token, consuming its lexeme. A rejected following
@@ -431,16 +470,8 @@ bool tree_sitter_lambda_external_scanner_scan(
     if (valid_symbols[EXPR_BODY_START] && !slash_pending) {
         if (is_identifier_start(lexer->lookahead)) {
             char word[16];
-            unsigned n = 0;
-            while (is_identifier_continue(lexer->lookahead)) {
-                if (n + 1 < sizeof(word)) { word[n] = (char)lexer->lookahead; }
-                n++;
-                lexer->advance(lexer, false);
-            }
-            if (n < sizeof(word)) {
-                word[n] = '\0';
-                if (is_control_statement_word(word, n)) { return false; }
-            }
+            unsigned n = read_word(lexer, word);
+            if (n < sizeof(word) && is_control_statement_word(word, n)) { return false; }
         }
         lexer->result_symbol = EXPR_BODY_START;
         return true;
@@ -457,6 +488,39 @@ bool tree_sitter_lambda_external_scanner_scan(
     // A `(` here means NOT_PAREN does not apply — but the state may still want
     // a call guard (`apply(x)` is an ordinary call, `apply` alone is the bare
     // statement), so fall through rather than declining outright.
+
+    // S11.1.5v2 / S16.2.3v3: right after a signature's `)`, a name -- or
+    // `fn`/`pn` -- opens its optional return type, on the same line. Opening
+    // the next line it could as well begin a new statement, so neither reading
+    // is taken: no token, and the parse fails. A keyword that names no type
+    // keeps its own reading (`as` is the parameter's binder).
+    if (valid_symbols[FN_RETURN] && !slash_pending &&
+            is_identifier_start(lexer->lookahead)) {
+        char word[16];
+        unsigned n = read_word(lexer, word);
+        bool continues = n < sizeof(word) &&
+            (is_continuation_word(word, n) || !strcmp(word, "as"));
+        bool keyword = continues || (n < sizeof(word) &&
+            (is_control_statement_word(word, n) || is_statement_keyword(word, n)));
+        // `fn name`, `pn name` and `function name` are declaration heads, never
+        // a type (C's `parser_at_declaration_head`); `function` needs its name
+        // on the same line
+        if (!keyword && n < sizeof(word) &&
+                (!strcmp(word, "fn") || !strcmp(word, "pn") || !strcmp(word, "function"))) {
+            bool same_line = !strcmp(word, "function");
+            while (is_space(lexer->lookahead) && !(same_line && lexer->lookahead == '\n')) {
+                lexer->advance(lexer, false);
+            }
+            keyword = is_identifier_start(lexer->lookahead) || lexer->lookahead == '\'';
+        }
+        if (!keyword) {
+            if (saw_newline) { return false; }
+            lexer->result_symbol = FN_RETURN;
+            return true;
+        }
+        // a statement keyword starts the next statement, as classify_start says
+        return continues ? false : emit_statement_boundary(lexer, valid_symbols);
+    }
 
     if (slash_pending) {
         // `/` is dual-role: division (continuation) or a rooted path step
@@ -511,15 +575,7 @@ bool tree_sitter_lambda_external_scanner_scan(
                         lexer->result_symbol = OCCURRENCE_LBRACE;
                         return true;
                     }
-                    if (valid_symbols[ELEM_STMT_BOUNDARY]) {
-                        lexer->result_symbol = ELEM_STMT_BOUNDARY;
-                        return true;
-                    }
-                    if (valid_symbols[STMT_BOUNDARY]) {
-                        lexer->result_symbol = STMT_BOUNDARY;
-                        return true;
-                    }
-                    return false;
+                    return emit_statement_boundary(lexer, valid_symbols);
                 }
                 break;
             case '^':

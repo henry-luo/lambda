@@ -1774,6 +1774,13 @@ TEST_F(NegativeScriptTest, SyntaxError_LetOutsideList) {
         "'let' binds as an expression only inside a parenthesized list");
 }
 
+TEST_F(NegativeScriptTest, SyntaxError_SignatureReturnLineStart) {
+    ExpectErrorCode("test/lambda/negative/syntax/fn_signature_return_line_start.ls",
+        "error[E100]");
+    ExpectErrorMessage("test/lambda/negative/syntax/fn_signature_return_line_start.ls",
+        "a function type's return type starts on the line of its ')'");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_ImportSlashSeparator) {
     ExpectErrorMessage("test/lambda/negative/syntax/import_slash_separator.ls",
         "import paths separate names with '.'");

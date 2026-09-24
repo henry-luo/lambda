@@ -366,6 +366,11 @@ static const TierParityFixture kTune27TierParity[] = {
     // re-tagged a binding's ItemNull, which only a compiling tier shows.
     {"test/lambda/proc/nullable_lane_bindings.ls",
      "test/lambda/proc/nullable_lane_bindings.txt"},
+    // S11.1.5v2: a call through a function-type contract yields the signature's
+    // return type, curried calls included. The JIT unboxes such a call result
+    // by that type and a map literal lays out its field by it, so a result
+    // typed as the wrong kind segfaulted on both tiers.
+    {"test/lambda/fn_type_curried_call.ls", "test/lambda/fn_type_curried_call.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
