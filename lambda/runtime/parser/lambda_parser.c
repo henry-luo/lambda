@@ -1873,9 +1873,9 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool 
     uint32_t function_flags = is_proc ? LAMBDA_REDUCTION_FLAG_PROC : 0u;
     if (is_colour_poly) function_flags |= LAMBDA_REDUCTION_FLAG_COLOUR_POLY;
     if (is_public) function_flags |= LAMBDA_REDUCTION_FLAG_PUBLIC;
-    // Publish the declaration header before parsing the signature/body. The
-    // reduction tape can predeclare later module functions without a second
-    // lexer pass, while nested/function-expression contexts remain unmarked.
+    // Publish the declaration header before parsing the signature/body, so
+    // the sink can collect top-level functions for predeclaration without a
+    // second lexer pass; nested/function-expression contexts remain unmarked.
     parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN,
         (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name,
         function_flags | LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER, NULL, 0);

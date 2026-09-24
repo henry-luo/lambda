@@ -203,8 +203,8 @@ typedef struct LambdaParseMetrics {
     uint64_t structural_hash;
 } LambdaParseMetrics;
 
-// These are intentionally syntax-level reductions. Phase 1 fingerprints
-// them; Phase 2 maps the same committed reductions to the shared AST helpers.
+// These are intentionally syntax-level reductions. The AST sink builds a
+// syntax node for each; a sink-less parse only fingerprints them.
 typedef enum LambdaReductionKind {
     LAMBDA_REDUCE_ATOM = 1,
     LAMBDA_REDUCE_PREFIX,
@@ -396,7 +396,6 @@ LambdaToken lambda_lexer_rescan_dot_step(LambdaLexer* lexer, LambdaToken number)
 // a base-type name, or a named value. Clause words and infix word operators
 // are capture-safe and return false. See S16.10.1v2.
 bool lambda_lexer_word_bars_binding(const char* text, size_t length);
-const char* lambda_token_kind_name(LambdaTokenKind kind);
 
 // This entry point is implemented by the recursive-descent/Pratt core and is
 // consumed by the direct AST sink.

@@ -54,8 +54,7 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_TP_ELEMENT,           // ELMT_TYPE
     LSF_TP_FN_PARAM,          // KEY_EXPR: one fn-type parameter
     LSF_TP_FN,                // FUNC_TYPE
-    LSF_TP_RETURN_CONTRACT,   // FUNC_TYPE wrapper of a declaration return contract
-    LSF_TP_LAST = LSF_TP_RETURN_CONTRACT,
+    LSF_TP_LAST = LSF_TP_FN,
     // ---- main grammar (build_ast.cpp) ----
     LSF_LITERAL,              // PRIMARY; aux = LambdaAstLiteralKind
     LSF_BASE_TYPE,            // TYPE (ident-sized): may resolve to a system function
@@ -233,10 +232,9 @@ LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
 
 // The resolve pass uses short-lived construction scopes for bottom-up type
 // assembly. Rebuild the canonical lexical graph from the retained AST before
-// validation or lowering publishes any of those edges.
-bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script);
-// The bind pass collects every function while it rewrites AST edges. Later
-// validation analyses share this list instead of rescanning the whole unit.
+// validation or lowering publishes any of those edges. The bind pass collects
+// every function while it rewrites AST edges; later validation analyses share
+// that list instead of rescanning the whole unit.
 bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
     AstScript* script, ArrayList** functions_out);
 

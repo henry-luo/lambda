@@ -1060,11 +1060,6 @@ typedef struct Transpiler : Script {
     int warning_count;         // accumulated downgraded-warning count
     ArrayList* warnings;       // list of LambdaError* (downgraded diagnostics)
 
-    // AST build recursion-depth guard — caps reduction nesting so a pathologically
-    // deep source (thousands of nested parens/brackets) reports an error instead of
-    // overflowing the stack. Zeroed by the memset that initializes the Transpiler.
-    int build_depth;
-
     // ANY-census: per-reason counts of expressions whose static type fell back
     // to `any` [Type_Infer TI3]. Read by the compile-time report and the AST
     // dump; carries no semantics, so an unrecorded site is a bookkeeping bug,
@@ -1074,29 +1069,8 @@ typedef struct Transpiler : Script {
     // Namespace declarations (file-local)
     NamespaceEntry* namespaces;  // linked list of declared namespaces
 
-    // Closure transpilation context
-    AstFuncNode* current_closure;  // non-null when transpiling inside a closure body
-
-    // Assignment name context (for naming anonymous closures)
-    String* current_assign_name;  // name of variable being assigned (e.g., "level1" for let level1 = fn...)
-
-    // Tail Call Optimization context
-    AstFuncNode* tco_func;     // non-null when transpiling body of a TCO-enabled function
-    bool in_tail_position;     // true when current expression is in tail position
-
     // Pipe injection context (for data | func(args) -> func(data, args))
     int pipe_inject_args;      // extra args to add when looking up sys_func (0 normally, 1 in pipe context)
-
-    // Current function being transpiled (for proc return type checking)
-    AstFuncNode* current_func_node;
-
-    // MIR JIT workaround: track while loop nesting depth
-    // When > 0, native variable assignments use *(&x)=v pattern to prevent
-    // MIR optimizer from mishandling SSA destruction of swap patterns
-    int while_depth;
-
-    // unique counter for temporary variables (e.g., error propagation temps)
-    int temp_var_counter;
 
     // A bare `^`/`^.`/`^[...]` is valid only while building a handler body.
     bool building_handler_body;
@@ -1104,25 +1078,6 @@ typedef struct Transpiler : Script {
     // 'that' clause context: when true, bare identifiers not found in scope
     // are rewritten to ~.name (member access on current item)
     bool in_that_clause;
-
-    // `last` is legal only while building a subscript field; lowering uses the
-    // current object to turn it into len(object) - 1.
-    int subscript_depth;
-    AstNode* last_index_object;
-
-    // Object method transpilation context
-    AstObjectTypeNode* method_owner;  // non-null when transpiling a method body
-    struct TypeObject* pn_method_obj_type;  // non-null inside pn method body (for field write-back)
-
-    // While-loop cross-dependency analysis tracks cross-variable read
-    // dependencies so swap-pattern assignments retain their source order.
-    // Variables only reading themselves (self-update like q = q + 1) are safe for
-    // direct assignment; variables read by other assignments (swap patterns) are unsafe.
-    String** loop_unsafe_vars;  // array of cross-dependent variable names
-    int loop_unsafe_count;      // number of unsafe variables
-
-    // Variadic function body context: when true, return/raise must emit restore_vargs
-    bool in_variadic_body;
 
     // Built-in module global imports: when true, functions from this module
     // can be called without prefix (e.g., `import math;` allows `sqrt(x)`)
@@ -1138,9 +1093,6 @@ typedef struct Transpiler : Script {
     // `import r:radiant;`). The compiler resolves these through JubeModuleDef.
     JubeModuleImport* jube_module_imports;
 } Transpiler;
-
-// Helper to check if arg_type is compatible with param_type
-bool types_compatible(Type* arg_type, Type* param_type);
 
 void format_binary_literal(StrBuf* strbuf, Binary* bin);
 void print_root_item(StrBuf *strbuf, Item item, const char* indent="  ");

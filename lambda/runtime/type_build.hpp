@@ -29,14 +29,9 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
 // Declare a fn type's return contract.
 void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit);
 
-// Attach the declaration-level return contract to its AST_NODE_FUNC_TYPE
-// wrapper, as the type-pattern parser resolves it.
-void fill_function_return_contract_node(Transpiler* tp, AstNode* wrapper,
-        Type* returned, Type* error_type, bool can_raise);
-
 // Register a binary type with raw TypeBinary operands over the node's already
-// resolved operands. Return contracts use this rather than the general
-// pattern binary constructor.
+// resolved operands. Declaration return types use this rather than the
+// general pattern binary constructor.
 void register_binary_type(Transpiler* tp, AstBinaryNode* binary);
 
 // Allocate an AST node. Defined in build_ast.cpp; promoted because pattern

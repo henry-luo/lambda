@@ -684,8 +684,6 @@ static bool typed_array_argument_compatible(AstNode* arg, Type* param_type) {
     return true;
 }
 
-
-
 bool is_global_simple_type(const Type* type) {
     return type_is_global_meta_type(type) || type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
         type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_COMPLEX || type == &TYPE_DECIMAL ||
@@ -1033,8 +1031,6 @@ static inline bool is_param_full_type_id(TypeId type_id) {
            type_id == LMD_TYPE_ELEMENT;
 }
 
-
-
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
@@ -1255,11 +1251,6 @@ static bool constant_fits_sized_integer(NumSizedType num_type, int64_t value) {
     }
 }
 
-// check if arg_type is compatible with param_type for function calls
-bool types_compatible(Type* arg_type, Type* param_type) {
-    return types_compatible_with_full(arg_type, param_type, NULL);
-}
-
 static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* second_arg) {
     Type* left = first_arg ? first_arg->type : NULL;
     Type* right = second_arg ? second_arg->type : NULL;
@@ -1420,8 +1411,6 @@ static void record_semantic_error_message(Transpiler* tp, SourceSpan span,
 }
 
 // Record a semantic error against a source span.
-
-
 void record_semantic_error_span(Transpiler* tp, SourceSpan span,
         LambdaErrorCode code, const char* format, ...) {
     char error_msg[512];
@@ -1940,8 +1929,6 @@ static bool type_exact_match(Type* left, TypeParam* right) {
     return true;
 }
 
-
-
 // Add a capture to the list if not already present
 void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* entry) {
     // Check if already captured
@@ -2055,8 +2042,6 @@ static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
     return tp->error_count == 0;
 }
 
-// str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
-
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size) {
     AstNode* ast_node = (AstNode*)pool_alloc(tp->pool, size);
@@ -2087,35 +2072,10 @@ static inline void** syntax_tail(AstNode* node, size_t size) {
     return (void**)((char*)node + size);
 }
 
-
-
 void* alloc_const(Transpiler* tp, size_t size) {
     void* bytes = pool_alloc(tp->pool, size);
     memset(bytes, 0, size);
     return bytes;
-}
-
-// extract name text from an identifier or symbol node
-// for identifiers, returns the source text as-is
-// for symbols, strips the surrounding single quotes
-
-
-
-
-// check if a name is a reserved type keyword
-bool is_type_keyword(StrView name) {
-    static const char* type_keywords[] = {
-        "null", "any", "error", "bool", "int", "int64", "float", "f64", "decimal", "integer", "number",
-        "date", "time", "datetime", "symbol", "string", "binary",
-        "list", "array", "map", "element", "object", "type", "function",
-        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64"
-    };
-    for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
-        if (strview_equal(&name, type_keywords[i])) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool is_reserved_identifier_keyword(StrView name) {
@@ -2149,7 +2109,7 @@ static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
     } else if (node->node_type == AST_NODE_PARAM ||
             node->node_type == AST_NODE_KEY_EXPR ||
             node->node_type == AST_NODE_FOR_INDEX) {
-        // KEY_EXPR is an object type's field scope-helper (direct_object_add_field
+        // KEY_EXPR is an object type's field scope-helper (resolve_object_field
         // and the base-inheritance copy). Without the back-pointer its
         // `ShapeEntry::binding` stayed NULL, and MIR's method prologue — which
         // publishes that binding for the field locals it loads from self —
@@ -2323,9 +2283,6 @@ void init_function_placeholder(Transpiler* tp, AstFuncNode* fn_node) {
         is_proc ? &TYPE_ANY : &TYPE_ANY_NO_ERROR, false);
 }
 
-// Parenthesized lets: (let x = a, let y = b, expr) — sequential bindings returning the last expr.
-
-
 // An array node holds its item list from the syntax phase.
 static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
     AstNode* items = ast_node->item;
@@ -2358,12 +2315,6 @@ static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
     type->nested = nested_type;
 }
 
-
-
-// check if an identifier is a path scheme keyword
-// returns the PathScheme if it is, or -1 if not
-
-
 // Add a namespace binding to the transpiler context
 static void add_namespace(Transpiler* tp, String* prefix, Target* target) {
     NamespaceEntry* entry = (NamespaceEntry*)pool_calloc(tp->pool, sizeof(NamespaceEntry));
@@ -2386,16 +2337,6 @@ static NamespaceEntry* lookup_namespace(Transpiler* tp, String* prefix) {
     }
     return NULL;
 }
-
-// Lookup a namespace by prefix StrView
-
-
-// check if a member_expr chain starts with a path scheme (file, http, https, sys)
-// and collect all segment names if so
-// returns the PathScheme if it's a path, or -1 if it's a regular member expression
-
-
-
 
 // The qualified symbol a namespace prefix denotes; its node is the member
 // expression that spelled it, resolved in place.
@@ -2678,8 +2619,6 @@ static void validate_start_parts(Transpiler* tp, AstStartNode* start,
         }
     }
 }
-
-
 
 static bool validate_lambda_argument_limit(Transpiler* tp,
         SourceSpan span,
@@ -2985,10 +2924,6 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     return true;
 }
 
-
-
-
-
 NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     if (!tp || !tp->current_scope || !tp->name_pool) return NULL;
     // Name bindings are interned, so each scope probe is pointer-only. This
@@ -3205,8 +3140,6 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
     resolve_identifier(tp, (AstIdentNode*)node);
     return node;
 }
-
-
 
 // RC6/RC17v2: an expression-position string literal's value is a const-pool
 // entry, so equal literals should share one `String` and one slot rather than
@@ -3510,8 +3443,6 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
     return (Type*)str_type;
 }
 
-
-
 static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
     TypeDateTime* dt_type = (TypeDateTime*)alloc_type(tp->pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
     dt_type->is_const = 1;  dt_type->is_literal = 1;
@@ -3545,10 +3476,6 @@ static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
     dt_type->const_index = tp->const_list->length - 1;
     return (Type*)dt_type;
 }
-
-
-
-
 
 static bool n_literal_is_integer(const char* str);
 
@@ -3596,8 +3523,6 @@ static Type* build_lit_float_from_span(Transpiler* tp, SourceSpan span) {
     return (Type*)item_type;
 }
 
-
-
 static Type* build_lit_decimal_poison_from_span(Transpiler* tp,
         SourceSpan span) {
     StrView source = source_span_text(tp, span);
@@ -3627,8 +3552,6 @@ static Type* build_lit_named_value_from_span(Transpiler* tp,
     return build_lit_float_from_span(tp, span);
 }
 
-
-
 static Type* build_lit_imaginary_from_span(Transpiler* tp,
         SourceSpan span) {
     StrView source = source_span_text(tp, span);
@@ -3649,8 +3572,6 @@ static Type* build_lit_imaginary_from_span(Transpiler* tp,
     item_type->is_literal = 1;
     return (Type*)item_type;
 }
-
-
 
 static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
@@ -3712,8 +3633,6 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
     mem_free(num_str);
     return (Type*)item_type;
 }
-
-
 
 // Parse a sized integer suffix and return the NumSizedType and suffix length
 // Returns -1 if no valid suffix found
@@ -3854,8 +3773,6 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
     return (Type*)item_type;
 }
 
-
-
 // Build AST type for sized float literal (e.g., 3.14f32, 0.5f16)
 static Type* build_lit_sized_float_from_span(Transpiler* tp,
         SourceSpan span) {
@@ -3903,8 +3820,6 @@ static Type* build_lit_sized_float_from_span(Transpiler* tp,
     item_type->is_const = 1;  item_type->is_literal = 1;
     return (Type*)item_type;
 }
-
-
 
 static Type* build_literal_type_from_span(Transpiler* tp,
         SourceSpan span, LambdaAstLiteralKind kind, AstPrimaryNode* literal) {
@@ -4006,18 +3921,6 @@ void record_unknown_base_type_span(Transpiler* tp, SourceSpan span,
         "unknown type '%.*s'", (int)type_name.length, type_name.str);
 }
 
-
-
-// helper: returns Type* for base_type node (used in primary_expr context)
-
-
-
-
-
-// Build type negation expression: !T → any ! T (exclude type)
-// Creates a TypeBinary(OPERATOR_EXCLUDE, any, T) so that `x is !string` works
-
-
 bool lambda_unary_operator_from_spelling(StrView op, Operator* op_out) {
     if (!op_out) return false;
     if (strview_equal(&op, "not")) { *op_out = OPERATOR_NOT; }
@@ -4117,11 +4020,6 @@ static void resolve_unary(Transpiler* tp, AstUnaryNode* ast_node) {
     return;
 }
 
-
-
-// build spread expression: *expr
-
-
 // Helper: check if operator is a relational comparison (<, <=, >, >=)
 static inline bool is_relational_op(Operator op) {
     return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
@@ -4162,8 +4060,6 @@ static void lint_condition_at_line(Transpiler* tp, int line, AstNode* cond,
     }
 }
 
-
-
 static void lint_condition_span(Transpiler* tp, SourceSpan span,
         AstNode* cond, const char* context) {
     lint_condition_at_line(tp,
@@ -4197,8 +4093,6 @@ static bool known_magnitude_comparable_type_set(Type* left, Type* right) {
     }
     return known_magnitude_comparable(left->type_id, right->type_id);
 }
-
-
 
 static Type* known_array_element_type(Type* type) {
     LambdaArrayContractInfo info = {};
@@ -4237,10 +4131,6 @@ static Type* alloc_array_num_result_type(Transpiler* tp, AstBinaryNode* ast_node
     type->type_index = -1;
     return (Type*)type;
 }
-
-
-
-
 
 static bool ast_is_explicit_type_value(AstNode* node) {
     node = boundary_unwrap_primary(node);
@@ -4321,10 +4211,6 @@ static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
     type->type_index = tp->type_list->length - 1;
     return true;
 }
-
-
-
-
 
 // check if expression contains ~ or ~# references (pipe context references)
 bool has_current_item_ref(AstNode* node) {
@@ -4481,10 +4367,6 @@ static void resolve_current_error(Transpiler* tp, AstNode* ast_node) {
     }
 }
 
-
-
-
-
 // Does this branch leave the expression rather than produce a value? Only
 // `raise` qualifies today. A block diverges when its LAST item does, which is
 // the only position whose value the block would yield.
@@ -4554,13 +4436,6 @@ static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
     return then_contrib;
 }
 
-// Unified build_if_expr: handles both expression and block forms
-// When a branch is a content block, creates a new scope for variable shadowing
-
-
-// build a match expression from committed reduction parts
-
-
 // S16.6.8/S16.6.9 for `match`. A `:` arm is a value arm and may not hold a
 // procedural block; a braced arm is a control arm when its interior is
 // procedural. The form must then be all-value or all-control — a mixture would
@@ -4628,8 +4503,6 @@ static void resolve_match(Transpiler* tp, AstMatchNode* node) {
         }
     }
 }
-
-
 
 static AstDeclaratorNode* build_declarator_syntax(Transpiler* tp,
         SourceSpan span, String* name, LambdaSyntaxForm form, int tail_slots) {
@@ -4728,21 +4601,6 @@ static void resolve_decompose(Transpiler* tp, AstDecomposeNode* ast_node) {
 
 }
 
-// Build decomposition expression: let a, b = expr OR let a, b at expr.
-
-
-
-
-// With the trimmed grammar a type annotation is ONE scanner token, so these
-// questions are answered from the token's text.
-
-
-
-// `type X = \(...)` / `type X = \symbol(...)` declares a pattern.
-
-
-
-
 bool pattern_ast_literal_set(AstNode* node) {
     if (!node) return false;
     if (node->node_type == AST_NODE_PRIMARY) {
@@ -4795,8 +4653,6 @@ bool pattern_ast_has_symbol_literal(AstNode* node) {
     }
 }
 
-
-
 // ==================== Namespace Attribute Desugaring ====================
 // Desugar ns.attr: val → ns: {attr: val} at AST build time (v2 namespace design)
 
@@ -4835,8 +4691,6 @@ static AstNode* build_ns_attr_map_from_parts(Transpiler* tp, StrView attr_name,
 
     return (AstNode*)map_node;
 }
-
-
 
 // Merge two map AST nodes: append src map's items and shape entries to dst map
 // Used when multiple ns.attr attrs share the same ns prefix
@@ -4893,12 +4747,6 @@ static AstNamedNode* find_existing_named_item(AstNode* first_item, String* name)
     return NULL;
 }
 
-
-
-
-
-
-
 // One source of truth for the base-type keywords. A table beats the former
 // 30-branch if/else chain, and the hand parser uses the same mapping.
 typedef struct { const char* name; Type* type; } BaseTypeName;
@@ -4952,25 +4800,7 @@ Type* lookup_base_type_name(Transpiler* tp, StrView name) {
     return lambda_base_type_from_index(tp, lambda_base_type_index(name));
 }
 
-
-
-// ============================================================================
-// Resolve base type for inheritance: returns the parent TypeObject*, or NULL
-// Also copies parent fields into child shape entries (parent fields first).
-// ============================================================================
-
-
-// ============================================================================
-// Push parent fields into scope so child methods can reference them (implicit this)
-// ============================================================================
-
-
-// Build object methods while the object's fields are visible as implicit names.
-
-
-// ============================================================================
-// Object type definition: type Point { x: float, y: float; fn magnitude() => ... }
-// ============================================================================
+// Append one typed field to a shape under construction.
 ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* field_type,
         ShapeEntry** shape, ShapeEntry** prev_entry, int byte_offset) {
     StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
@@ -4986,14 +4816,6 @@ ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* 
     return shape_entry;
 }
 
-
-
-// build range type: start to end (e.g. 1 to 10, 'a' to 'z')
-// constructs as a binary node with OPERATOR_TO and type LMD_TYPE_RANGE
-// build constrained type: base_type where (constraint)
-// e.g. int where (5 < ~ < 10), string where (len(~) > 0)
-
-
 void register_binary_type(Transpiler* tp, AstBinaryNode* binary) {
     binary->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY,
@@ -5005,8 +4827,6 @@ void register_binary_type(Transpiler* tp, AstBinaryNode* binary) {
     arraylist_append(tp->type_list, binary->type);
     type->type_index = tp->type_list->length - 1;
 }
-
-
 
 // S11.1.6v2/S16.8.6v3: the counted occurrence is `T{n}` exactly, `T{n,m}`
 // between, and `T{n+}` at least -- the open form echoes the bare `+` suffix
@@ -5054,25 +4874,6 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     }
     if (has_second) *max_count = second;
 }
-
-void fill_function_return_contract_node(Transpiler* tp, AstNode* wrapper,
-        Type* returned, Type* error_type, bool can_raise) {
-    // Both grammar paths must carry exactly this compact TypeFunc contract;
-    // build_func reads it before replacing the wrapper with the declared fn.
-    wrapper->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
-    ((TypeType*)wrapper->type)->type = (Type*)fn_type_info;
-
-    fn_type_info->returned = returned;
-    fn_type_info->inferred_return = returned;
-    set_function_return_contract(fn_type_info, returned, true);
-    fn_type_info->error_type = error_type;
-    fn_type_info->can_raise = can_raise;
-}
-
-
-
-// todo: build reference type
 
 static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode* item,
                                          bool is_spread, bool normalize_type) {
@@ -5211,8 +5012,6 @@ static void resolve_map(Transpiler* tp, AstMapNode* ast_node) {
     return;
 }
 
-
-
 static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) {
     NameEntry* entry = lookup_name(tp, tag_name);
     if (!entry || !entry->node || !entry->node->type) return NULL;
@@ -5254,8 +5053,6 @@ static void fill_object_literal(Transpiler* tp, AstObjectLiteralNode* object,
         raw = next;
     }
 }
-
-
 
 static bool join_expr_mentions_name(AstNode* node, String* name) {
     if (!node || !name) return false;
@@ -5365,14 +5162,6 @@ static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_
     else append_join_key_spec(tp, loop, bin->left, bin->right);
 }
 
-
-
-// Helper: build order_spec node
-
-
-// Helper: build for_let_clause declarator
-
-
 static String* infer_group_key_alias(Transpiler* tp, AstNode* key_expr) {
     AstNode* scan = key_expr;
     while (scan && scan->node_type == AST_NODE_PRIMARY) {
@@ -5391,8 +5180,6 @@ static String* infer_group_key_alias(Transpiler* tp, AstNode* key_expr) {
     return ((AstIdentNode*)field)->name;
 }
 
-
-
 static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
     NameScope* row_scope = for_node->vars;
     NameScope* parent = row_scope ? row_scope->parent : tp->current_scope;
@@ -5405,64 +5192,6 @@ static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
     lambda_ast_enter_scope_with_parent(tp, parent, is_proc);
 }
 
-// Helper: build group by clause
-
-
-// Helper function to build all for clauses (shared between for_expr and for_stam)
-// Three-pass approach:
-// Pass 1: Process loop declarations to register loop vars in scope
-// Pass 2: Process let clauses (can reference loop vars)
-// Pass 3: Process where, group, order, limit, offset (can reference both)
-
-
-
-
-
-
-// `apply;` (splat) statement: re-dispatch each child of the matched item (~)
-// through the template registry. Equivalent to `for (c in ~) apply(c)`.
-// Synthesizes the for-expr AST so existing MIR codegen handles it.
-
-
-// shared guard for the procedural-only statements (var/assign/while/break/continue/return).
-// Recording a semantic error rather than only logging it is load-bearing: each guard returns
-// NULL, leaving a hole in the AST (a rejected `var` never enters its name into the scope), and
-// runner.cpp:730 only returns before MIR when error_count > 0. With a bare log_error the build
-// looked clean, MIR ran against the holey AST, and the real diagnostic was buried under invented
-// follow-on errors such as "mir: undefined variable 'x'".
-
-
-// while statement (procedural only)
-
-
-// break statement (procedural only)
-
-
-// continue statement (procedural only)
-
-
-// return statement (procedural only)
-
-
-// raise statement - raises an error to the caller
-// Allowed in:
-// 1. Procedural functions (pn) - can always raise
-// 2. Pure functions (fn) with error return type (T^E or T@)
-
-
-
-
-// raise expression (functional) - raises an error in expression context
-
-
-// var statement for mutable variables (procedural only)
-
-
-// assignment statement for mutable variables (procedural only)
-// supports: x = val, arr[i] = val, obj.field = val
-
-
-// returns NULL for variadic marker (...)
 // Fold a declared type into a TypeParam: copy the compact Type prefix, restore
 // the param-only flags, then choose the retained contract and full_type. Shared
 // with the type-pattern hand parser, which builds `fn(a: T)` params from spans.
@@ -5501,8 +5230,6 @@ void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit)
     set_function_return_contract(fn_type, contract, is_explicit);
 }
 
-
-
 static AstNamedNode* build_named_argument_syntax(Transpiler* tp,
         SourceSpan span, StrView name, AstNode* value) {
     AstNamedNode* ast_node = (AstNamedNode*)alloc_syntax_node(tp,
@@ -5511,9 +5238,6 @@ static AstNamedNode* build_named_argument_syntax(Transpiler* tp,
     ast_node->as = value;
     return ast_node;
 }
-
-// build named argument in function call: name: value
-
 
 typedef struct ReturnBoundaryScan {
     Transpiler* tp;
@@ -5869,8 +5593,6 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         return;
     }
 }
-
-
 
 static void validate_top_level_enforcing_calls(Transpiler* tp, AstNode* node) {
     validate_enforcing_calls_in_expression(tp, node, false, false);
@@ -6324,18 +6046,6 @@ static Type* infer_procedural_return_type(Transpiler* tp, AstFuncNode* fn) {
     return scan.result ? scan.result : &TYPE_NULL;
 }
 
-
-
-// for both func expr and stam
-
-
-// Build a view/edit template declaration
-
-
-
-
-
-
 static bool handler_operand_is_proc(AstNode* operand) {
     // the postfix handler tier may wrap a procedure call in primary_expr;
     // classify the effective call so statement handlers keep their context.
@@ -6350,12 +6060,6 @@ static bool handler_operand_is_proc(AstNode* operand) {
     }
     return lambda_type_func_is_proc(callee->type);
 }
-
-
-
-
-
-
 
 static AstHandlerNode* build_handler_syntax(Transpiler* tp, SourceSpan span,
         AstNode* operand, AstNode* body, AstNode* value_body) {
@@ -6387,21 +6091,6 @@ static void resolve_handler(Transpiler* tp, AstHandlerNode* node) {
             : lambda_type_union_normalized(tp->pool, success, body_type);
     }
 }
-
-
-
-// --- external type-pattern tokens -------------------------------------------
-// The scanner hands the whole type sub-language over as one token; the hand
-// parser (parse_type_pattern.cpp) turns the token's source text into the
-// retained AST-node/Type shapes.
-
-
-
-
-
-
-
-
 
 // push a name with a qualified alias prefix (alias.name) for aliased imports
 static void push_qualified_name(Transpiler* tp, AstNode* node, AstImportNode* import, String* alias) {
@@ -6508,30 +6197,6 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
         node = node->next;
     }
 }
-
-#ifndef SIMPLE_SCHEMA_PARSER
-
-
-
-#endif
-
-
-
-
-
-// ==================== String/Symbol Pattern Building ====================
-
-// Build pattern character class (d, w, s, a, ., ...)
-// Build concat_type node — concatenation of type terms (for string/symbol patterns)
-// e.g. \d[3] "-" \d[3] "-" \d[4]
-// With recursive grammar: concat_type -> type_term type_term | concat_type type_term
-// Build grouped_type node — parenthesized string type expr with optional ! prefix and occurrence
-// e.g. ("a" \d[4])?, !("x" | "y"), ("a" to "z")+
-// Build negation_type node — prefix ! operator (for string/symbol patterns)
-// e.g. !\d
-// Build string/symbol pattern definition
-// Pattern bodies use the unified _type_expr reduction path.
-
 
 void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
                             bool descend_functions) {
@@ -6723,7 +6388,7 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     }
 }
 
-// The direct reducer needs provisional scopes while it assembles bottom-up
+// The resolve pass needs provisional scopes while it assembles bottom-up
 // type facts. Do not let those construction-time entries escape as the
 // compiler's published graph: clone the retained scope tree and rewrite every
 // AST edge after the complete tree is available. This makes binding a real
@@ -7258,14 +6923,6 @@ bool lambda_ast_rebind_direct_scope_graph_with_functions(Transpiler* tp,
     }
     direct_bind_destroy(&bind);
     return true;
-}
-
-bool lambda_ast_rebind_direct_scope_graph(Transpiler* tp, AstScript* script) {
-    ArrayList* functions = NULL;
-    bool rebound = lambda_ast_rebind_direct_scope_graph_with_functions(tp,
-        script, &functions);
-    arraylist_free(functions);
-    return rebound;
 }
 
 static bool shift_source_span(AstNode* node, void* data) {
@@ -8057,10 +7714,6 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
 bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
     return lambda_ast_finalize_script_with_functions(tp, script, NULL);
 }
-
-
-
-
 
 // --- direct recursive-descent AST front end: shared state ------------------
 // The syntax sink (below, after the shared constructors) allocates the
@@ -12542,10 +12195,10 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
     if (body && body->node_type == AST_NODE_CONTENT) {
         AstListNode* content = (AstListNode*)body;
         if (content->item && !content->item->next) {
-            // `build_content(..., true, ...)` collapses a one-item function
-            // block. Preserve that AST contract so a
-            // terminal assignment remains a procedure's implicit result
-            // instead of being discarded as a CONTENT side effect (D6.1.2).
+            // A one-item function block is its item. Preserve that AST
+            // contract so a terminal assignment remains a procedure's implicit
+            // result instead of being discarded as a CONTENT side effect
+            // (D6.1.2).
             body = content->item;
         }
     }
@@ -15471,9 +15124,9 @@ static void resolve_script(LambdaResolver* r, AstScript* root) {
     while (tail && tail->next) tail = tail->next;
     AstNode* body = (AstNode*)content;
     if (content_items && !content_items->next) {
-        // `build_content(..., true, true)` unwraps a sole top-level
-        // declaration. Keeping a CONTENT wrapper here makes module MIR
-        // materialize an otherwise absent list before invoking main.
+        // A sole top-level item stands without its CONTENT wrapper. Keeping
+        // the wrapper here makes module MIR materialize an otherwise absent
+        // list before invoking main.
         body = content_items;
     }
     if (tail) tail->next = body;

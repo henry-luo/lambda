@@ -29,16 +29,9 @@
 typedef enum TypePatternMode {
     // unions, occurrences, containers, fn types, islands
     TYPE_PATTERN_FULL,
-    // a single primary type — the `?T` query operand; a following `|` stays a
-    // value union
-    TYPE_PATTERN_PRIMARY,
-    // the restricted declaration return contract `T`, `T | U`, `T^`, `T^E`,
-    // wrapped in the same AST_NODE_FUNC_TYPE as build_return_type
-    TYPE_PATTERN_RETURN_CONTRACT,
-    // the declaration return pattern itself
+    // a declaration return type: named/base atoms with one occurrence suffix,
+    // joined by `|`, `&` or `!`
     TYPE_PATTERN_RETURN_VALUE,
-    // a view/edit model pattern: an element, name/base type, or `|` union
-    TYPE_PATTERN_VIEW,
 } TypePatternMode;
 
 // The first syntax error in a type slot. It is reported when the slot is
@@ -59,16 +52,3 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
 // register constants/types in the order the productions completed. A node
 // that is not an unresolved type-pattern node is left untouched.
 void resolve_type_pattern(Transpiler* tp, AstNode* node);
-
-// Combined entry points: the syntax half then the resolve half, reporting a
-// syntax error immediately and returning NULL for it.
-AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span);
-AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span);
-AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
-    const char* end, SourceSpan span);
-AstNode* parse_return_value_type_text_span(Transpiler* tp, const char* begin,
-    const char* end, SourceSpan span);
-AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span);

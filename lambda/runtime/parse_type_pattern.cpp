@@ -3,8 +3,9 @@
 #include "type_build.hpp"
 #include "transpiler.hpp"
 #include "lambda-error.h"
-#include "parse_lex.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
+#include "../../lib/strview.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -27,9 +28,9 @@
 //
 // The parse builds only nodes (each tagged with its LSF_TP_* form) and the
 // lexical payload of literals; resolve_type_pattern() then does everything a
-// name, a constant slot, a type index, or a diagnostic depends on. Every such
-// side effect of the former one-pass parser happened as a production
-// completed, so resolving children before their parent replays that order.
+// name, a constant slot, a type index, or a diagnostic depends on. Those
+// effects are order-sensitive, so resolution visits children before their
+// parent: the order in which the productions complete.
 
 namespace {
 
@@ -50,11 +51,12 @@ struct Lexer {
 };
 
 bool is_ident_start(char c) {
-    return lambda_lex_ident_start(c);
+    return c == '_' || c == '$' || (c >= 'A' && c <= 'Z') ||
+        (c >= 'a' && c <= 'z') || (unsigned char)c >= 0x80;
 }
 
-bool is_ident_continue(char c) { return lambda_lex_ident_continue(c); }
-bool is_digit(char c) { return lambda_lex_digit(c); }
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+bool is_ident_continue(char c) { return is_ident_start(c) || is_digit(c); }
 
 // Keep the first diagnostic, which is the useful one. It is reported when the
 // slot resolves, so a syntax error keeps its place among semantic errors.
@@ -76,8 +78,23 @@ void fail_code(Lexer* lx, LambdaErrorCode code, const char* what) {
     record_failure(lx, code, what, what);
 }
 
+// Pattern text may carry `//` and `/* */` comments between its tokens.
 void skip_space(Lexer* lx) {
-    lambda_lex_skip_space(&lx->p, lx->end);
+    if (!lx->p) return;
+    for (;;) {
+        lx->p = strn_skip_ascii_space(lx->p, lx->end);
+        if (lx->p + 1 < lx->end && lx->p[0] == '/' && lx->p[1] == '/') {
+            while (lx->p < lx->end && *lx->p != '\n') lx->p++;
+            continue;
+        }
+        if (lx->p + 1 < lx->end && lx->p[0] == '/' && lx->p[1] == '*') {
+            lx->p += 2;
+            while (lx->p + 1 < lx->end && !(lx->p[0] == '*' && lx->p[1] == '/')) lx->p++;
+            lx->p = lx->p + 2 < lx->end ? lx->p + 2 : lx->end;
+            continue;
+        }
+        return;
+    }
 }
 
 bool at(Lexer* lx, char c) { skip_space(lx); return lx->p < lx->end && *lx->p == c; }
@@ -90,11 +107,20 @@ bool eat(Lexer* lx, char c) {
 
 // Read an identifier/keyword without consuming it on failure.
 StrView peek_word(Lexer* lx) {
-    return lambda_lex_peek_word(&lx->p, lx->end);
+    if (!lx->p) return (StrView){lx->end, 0};
+    skip_space(lx);
+    StrView word = {lx->p, 0};
+    if (lx->p >= lx->end || !is_ident_start(*lx->p)) return word;
+    const char* q = lx->p;
+    while (q < lx->end && is_ident_continue(*q)) q++;
+    word.length = (size_t)(q - lx->p);
+    return word;
 }
 
 StrView take_word(Lexer* lx) {
-    return lambda_lex_take_word(&lx->p, lx->end);
+    StrView word = peek_word(lx);
+    if (lx->p) lx->p += word.length;
+    return word;
 }
 
 // Namespace-qualified element tags are dotted (`<soap.Fault>`; the `html:div`
@@ -138,7 +164,9 @@ static StrView take_qualified_tag(Lexer* lx) {
 }
 
 bool word_is(StrView w, const char* s) {
-    return lambda_lex_word_is(w, s);
+    size_t length = s ? strlen(s) : 0;
+    return w.length == length && (!length ||
+        (w.str && s && memcmp(w.str, s, length) == 0));
 }
 
 AstNode* parse_union(Lexer* lx);
@@ -486,7 +514,7 @@ AstNode* parse_island(Lexer* lx) {
     // report it (S11.1.2). Otherwise a literal-only island IS an ordinary
     // literal union; keeping that representation preserves the existing
     // matching path by returning the body AST. Literal types are lexical, so
-    // both tests read the same payloads they did in the one-pass parser.
+    // both tests run before resolution.
     if (!pattern_ast_has_symbol_literal(node->pattern) && !is_symbol &&
             pattern_ast_literal_set(node->pattern)) {
         return node->pattern;
@@ -496,9 +524,8 @@ AstNode* parse_island(Lexer* lx) {
 
 // --- containers -------------------------------------------------------------
 
-// `[T]`, `[T, U]` — a bracket type is a positional pattern (S11.1.1). Mirrors
-// build_array_type: a type-valued position is a pattern; a literal position is
-// stored as its Item.
+// `[T]`, `[T, U]` — a bracket type is a positional pattern (S11.1.1): a
+// type-valued position is a pattern; a literal position is stored as its Item.
 AstNode* parse_array_type(Lexer* lx) {
     AstArrayNode* ast_node = (AstArrayNode*)new_node(lx, AST_NODE_ARRAY_TYPE,
         sizeof(AstArrayNode), LSF_TP_ARRAY);
@@ -546,8 +573,8 @@ static AstNode* make_optional_field_type(Lexer* lx, AstNode* operand) {
     return (AstNode*)ast_node;
 }
 
-// One `name: T` field, shaped like build_key_expr's output so shape entries and
-// downstream walks see the same node.
+// One `name: T` field: a KEY_EXPR like a map literal's field, so shape entries
+// and downstream walks see the same node.
 AstNamedNode* parse_field(Lexer* lx) {
     skip_space(lx);
     StrView field;
@@ -595,7 +622,7 @@ AstNode* parse_map_type(Lexer* lx) {
     return (AstNode*)ast_node;
 }
 
-// `(T)` groups (unwrapped, as build_list_type does); `(T, U)` is a tuple type.
+// `(T)` groups (a single element unwraps); `(T, U)` is a tuple type.
 AstNode* parse_paren_type(Lexer* lx) {
     AstNode* first = parse_binder(lx);
     if (!first) { return NULL; }
@@ -667,8 +694,8 @@ AstNode* parse_element_type(Lexer* lx) {
         break;
     }
 
-    // content schema: a comma-separated pattern list held as a content node,
-    // like build_content_type produced (TypeList carried raw, not registered)
+    // content schema: a comma-separated pattern list held as a content node
+    // whose TypeList is carried raw, not registered
     if (!at(lx, '>') && lx->p < lx->end) {
         if (!saw_content_sep) { eat(lx, ';'); }
         AstListNode* content = (AstListNode*)new_node(lx, AST_NODE_CONTENT_TYPE,
@@ -791,8 +818,8 @@ AstNode* parse_primary(Lexer* lx) {
         node->syntax_aux = (uint16_t)base_index;
         return (AstNode*)node;
     }
-    // a name in type position is a reference to a declared type, shaped like
-    // build_identifier's resolved path so the transpiler's alias handling
+    // a name in type position is a reference to a declared type, an IDENT
+    // like a resolved value-position name so the transpiler's alias handling
     // works; a binder reference becomes an AST_NODE_TYPE when it resolves
     AstIdentNode* ident = (AstIdentNode*)new_node(lx, AST_NODE_IDENT,
         sizeof(AstIdentNode), LSF_TP_NAME);
@@ -894,7 +921,7 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
 AstNode* parse_unary(Lexer* lx) {
     skip_space(lx);
     if (lx->p < lx->end && *lx->p == '!') {
-        // prefix negation: !T is `any ! T` — mirrors build_negation_type
+        // prefix negation: !T is `any ! T`
         lx->p++;
         AstNode* operand = parse_unary(lx);
         if (!operand) { return NULL; }
@@ -907,7 +934,7 @@ AstNode* parse_unary(Lexer* lx) {
     AstNode* primary = parse_primary(lx);
     if (!primary) { return NULL; }
 
-    // range type: `1 to 10`, `"a" to "z"` — mirrors build_range_type
+    // range type: `1 to 10`, `"a" to "z"`
     StrView w = peek_word(lx);
     if (word_is(w, "to")) {
         lx->p += w.length;
@@ -1034,71 +1061,7 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
     return left;
 }
 
-// `T`, `T | U`, `T^`, or `T^E`, wrapped in the declaration-level return
-// contract node. Until resolution `body` holds the success pattern and
-// `params` the named error pattern.
-AstNode* parse_return_contract(Lexer* lx) {
-    AstNode* ok = parse_return_type_pattern(lx);
-    if (!ok || lx->failed) { return NULL; }
-    AstFuncNode* wrapper = (AstFuncNode*)new_node(lx, AST_NODE_FUNC_TYPE,
-        sizeof(AstFuncNode), LSF_TP_RETURN_CONTRACT);
-    wrapper->body = ok;
-
-    skip_space(lx);
-    if (eat(lx, '^')) {
-        wrapper->syntax_flags |= TP_FLAG_RAISES;
-        skip_space(lx);
-        if (lx->p < lx->end) {
-            AstNode* error = parse_return_type_pattern(lx);
-            if (!error || lx->failed) { return NULL; }
-            wrapper->params = error;
-            wrapper->syntax_flags |= TP_FLAG_ERROR_NODE;
-        }
-    }
-    skip_space(lx);
-    if (lx->p != lx->end) { fail(lx, "trailing return contract input"); return NULL; }
-    return (AstNode*)wrapper;
-}
-
-AstNode* parse_view_pattern_primary(Lexer* lx) {
-    skip_space(lx);
-    if (lx->p < lx->end && *lx->p == '<') {
-        lx->p++;
-        return parse_element_type(lx);
-    }
-    StrView word = peek_word(lx);
-    if (!word.length || word_is(word, "fn") || word_is(word, "pn") ||
-            word_is(word, "true") ||
-            word_is(word, "false")) {
-        fail(lx, "expected a view pattern primary");
-        return NULL;
-    }
-    return parse_primary(lx);
-}
-
-AstNode* parse_view_pattern(Lexer* lx) {
-    AstNode* left = parse_view_pattern_primary(lx);
-    if (!left) { return NULL; }
-    while (at(lx, '|')) {
-        const char* op_text = lx->p++;
-        AstNode* right = parse_view_pattern_primary(lx);
-        if (!right) { return NULL; }
-        left = make_binary_node(lx, left, right, OPERATOR_UNION, op_text, 1,
-            LSF_TP_REGISTERED_BINARY);
-    }
-    return left;
-}
-
 // ---- resolution --------------------------------------------------------------
-
-Type* return_contract_type(AstNode* node) {
-    if (!node || !node->type) { return &TYPE_ERROR; }
-    if (node->type->type_id == LMD_TYPE_TYPE) {
-        Type* inner = ((TypeType*)node->type)->type;
-        return inner ? inner : &TYPE_ERROR;
-    }
-    return node->type;
-}
 
 Type* wrap_type(Transpiler* tp, Type* inner) {
     TypeType* tt = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
@@ -1156,7 +1119,7 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
         AstNode* def = ident->entry->node;
         ident->type = def->type;
         // Type and pattern definitions are referenced through a plain TypeType
-        // wrapper, exactly as build_identifier does. The wrap is load-bearing:
+        // wrapper, exactly as resolve_identifier does. The wrap is load-bearing:
         // match_arm_is_error_handler blind-casts an arm's type as (TypeType*),
         // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
         if (def->node_type == AST_NODE_TYPE_STAM ||
@@ -1172,11 +1135,11 @@ void resolve_type_name(Transpiler* tp, AstIdentNode* ident) {
         }
     } else if (base_type_alias_suggestion(w)) {
         // conceptual base-type spellings (int64, float32) get the canonical
-        // suggestion and fail the annotation, exactly as build_base_type did
+        // suggestion and fail the annotation, as an unknown base-type word does
         record_unknown_base_type_span(tp, ident->source_span, w);
         ident->type = (Type*)&LIT_TYPE_ERROR;
     } else {
-        // stay lenient like build_identifier: an unresolved name defers to ANY
+        // stay lenient like resolve_identifier: an unresolved name defers to ANY
         // so runtime paths (e.g. `?unknown` queries) degrade gracefully instead
         // of failing the whole compilation
         log_warn("type-pattern: unresolved type name '%.*s', using ANY", (int)w.length, w.str);
@@ -1300,7 +1263,7 @@ void resolve_occurrence(Transpiler* tp, AstUnaryNode* ast_node) {
         break;
     }
     type->op = ast_node->op;
-    // occurrence registers the RAW type, per build_occurrence_type
+    // occurrence registers the RAW type, not its TypeType wrapper
     arraylist_append(tp->type_list, type);
     type->type_index = tp->type_list->length - 1;
     ast_node->type = wrap_type(tp, (Type*)type);
@@ -1515,26 +1478,6 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     case LSF_TP_FN:
         resolve_fn_type(tp, (AstFuncNode*)node);
         break;
-    case LSF_TP_RETURN_CONTRACT: {
-        AstFuncNode* wrapper = (AstFuncNode*)node;
-        AstNode* ok = wrapper->body;
-        AstNode* error = wrapper->params;
-        resolve_type_pattern(tp, ok);
-        Type* error_type = NULL;
-        if (wrapper->syntax_flags & TP_FLAG_RAISES) {
-            if (error) {
-                resolve_type_pattern(tp, error);
-                error_type = return_contract_type(error);
-            } else {
-                error_type = &TYPE_ERROR;
-            }
-        }
-        wrapper->body = NULL;
-        wrapper->params = NULL;
-        fill_function_return_contract_node(tp, node, return_contract_type(ok),
-            error_type, (wrapper->syntax_flags & TP_FLAG_RAISES) != 0);
-        break;
-    }
     default:
         break;
     }
@@ -1551,19 +1494,9 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
         node = parse_binder(&lx);
         trailing = "trailing input";
         break;
-    case TYPE_PATTERN_PRIMARY:
-        node = parse_primary(&lx);
-        break;
-    case TYPE_PATTERN_RETURN_CONTRACT:
-        node = parse_return_contract(&lx);
-        break;
     case TYPE_PATTERN_RETURN_VALUE:
         node = parse_return_type_pattern(&lx);
         trailing = "trailing return contract input";
-        break;
-    case TYPE_PATTERN_VIEW:
-        node = parse_view_pattern(&lx);
-        trailing = "trailing view pattern input";
         break;
     }
     if (node && !lx.failed && trailing) {
@@ -1575,47 +1508,4 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
         return NULL;
     }
     return node;
-}
-
-// The combined entry points keep the one-pass contract for callers that build
-// and resolve a type slot together.
-static AstNode* parse_and_resolve_type_pattern(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span, TypePatternMode mode) {
-    TypePatternFailure failure = {ERR_INVALID_LITERAL, NULL};
-    AstNode* node = parse_type_pattern_syntax(tp, begin, end, span, mode, &failure);
-    if (!node) {
-        if (failure.message) {
-            record_semantic_error_span(tp, span, failure.code, "%s", failure.message);
-        }
-        return NULL;
-    }
-    resolve_type_pattern(tp, node);
-    return node;
-}
-
-AstNode* parse_type_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    return parse_and_resolve_type_pattern(tp, begin, end, span, TYPE_PATTERN_FULL);
-}
-
-AstNode* parse_primary_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    return parse_and_resolve_type_pattern(tp, begin, end, span, TYPE_PATTERN_PRIMARY);
-}
-
-AstNode* parse_return_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    return parse_and_resolve_type_pattern(tp, begin, end, span,
-        TYPE_PATTERN_RETURN_CONTRACT);
-}
-
-AstNode* parse_return_value_type_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    return parse_and_resolve_type_pattern(tp, begin, end, span,
-        TYPE_PATTERN_RETURN_VALUE);
-}
-
-AstNode* parse_view_pattern_text_span(Transpiler* tp, const char* begin,
-        const char* end, SourceSpan span) {
-    return parse_and_resolve_type_pattern(tp, begin, end, span, TYPE_PATTERN_VIEW);
 }

@@ -362,7 +362,7 @@ typedef struct PhaseProfile {
     char script_path[PROFILE_PATH_MAX];
     double parse_ms;
     double ast_ms;
-    double build_reducer_ms;
+    double build_resolve_ms;
     double inline_analysis_ms;
     // T0 columns: `plan_ms` is the frame-plan pass, `interp_exec_ms` the walk.
     // Both stay 0 on the JIT path so the TSV reads the same for either tier.
@@ -479,7 +479,7 @@ static void lambda_own_timing_leave(LambdaOwnTimingFrame* frame) {
 
 // An import owned by a prebuild worker is not a nested transpile on this
 // thread, but its future wait is still child compilation time rather than the
-// importer's own reducer work. Account for it on the active parent phase.
+// importer's own resolve work. Account for it on the active parent phase.
 static void lambda_own_timing_subtract_active(double elapsed_ms) {
     LambdaOwnTimingFrame* frame = g_lambda_own_timing_frame;
     if (!frame || elapsed_ms <= 0 || frame->active <= LAMBDA_OWN_TIMING_NONE ||
@@ -548,13 +548,13 @@ void profile_dump_to_file() {
     // `plan`, `interp_exec` and `peak_rss_mb` remain the T0 report columns.
     // turnaround/memory report; JIT-tier rows carry 0 in the T0 columns.
     fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1) format=3\n");
-    fprintf(f, "# script | parse | ast | build_reducer | inline_analysis | plan | transpile | jit_init | mir_gen | interp_exec | total | peak_rss_mb | code_len | worker | thread_id\n");
+    fprintf(f, "# script | parse | ast | build_resolve | inline_analysis | plan | transpile | jit_init | mir_gen | interp_exec | total | peak_rss_mb | code_len | worker | thread_id\n");
     for (int i = 0; i < profile_count; i++) {
         PhaseProfile* p = &profile_data[i];
         double total = p->parse_ms + p->ast_ms + p->plan_ms + p->transpile_ms +
                        p->jit_init_ms + p->mir_gen_ms + p->interp_exec_ms;
         fprintf(f, "%s\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%lu\n",
-                p->script_path, p->parse_ms, p->ast_ms, p->build_reducer_ms,
+                p->script_path, p->parse_ms, p->ast_ms, p->build_resolve_ms,
                 p->inline_analysis_ms, p->plan_ms, p->transpile_ms,
                 p->jit_init_ms, p->mir_gen_ms, p->interp_exec_ms,
                 total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
@@ -1581,7 +1581,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                     (double)g_last_lambda_compiler_timing.analysis_us / 1000.0;
                 double build_ms = lambda_own_timing_elapsed(&own_timing,
                     LAMBDA_OWN_TIMING_BUILD, p1, p2);
-                prof.build_reducer_ms = build_ms > prof.inline_analysis_ms
+                prof.build_resolve_ms = build_ms > prof.inline_analysis_ms
                     ? build_ms - prof.inline_analysis_ms : 0;
                 prof.plan_ms = lambda_own_timing_elapsed(&own_timing, LAMBDA_OWN_TIMING_PLAN, plan0, plan1);
                 prof.worker_thread = 0;
@@ -1655,7 +1655,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 (double)g_last_lambda_compiler_timing.analysis_us / 1000.0;
             double build_ms = lambda_own_timing_elapsed(&own_timing,
                 LAMBDA_OWN_TIMING_BUILD, p1, p2);
-            prof.build_reducer_ms = build_ms > prof.inline_analysis_ms
+            prof.build_resolve_ms = build_ms > prof.inline_analysis_ms
                 ? build_ms - prof.inline_analysis_ms : 0;
             prof.transpile_ms = mir_transpile_ms;
             prof.jit_init_ms = mir_jit_init_ms;
