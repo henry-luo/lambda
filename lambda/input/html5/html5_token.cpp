@@ -2,6 +2,7 @@
 #include "../../io/mark_builder.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/string.h"
+#include "../../../lib/str.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -76,28 +77,39 @@ Html5Token* html5_token_create_eof(Pool* pool, Arena* arena) {
     return token;
 }
 
-void html5_token_add_attribute(Html5Token* token, String* name, Item value, Input* input) {
+void html5_token_release(Html5Token* token) {
+    if (!token) return;
+    if (token->attrs) pool_free(token->pool, token->attrs);
+    pool_free(token->pool, token);
+}
+
+void html5_token_add_attribute(Html5Token* token, String* name, Item value) {
     if (token->type != HTML5_TOKEN_START_TAG) {
         log_error("html5_token_add_attribute: token is not a start tag");
         return;
     }
 
-    if (!token->attributes) {
-        token->attributes = map_pooled(token->pool);
-    }
-
-    TypeMap* attribute_type = (TypeMap*)token->attributes->type;
-    for (ShapeEntry* entry = attribute_type ? attribute_type->shape : nullptr;
-            entry; entry = entry->next) {
-        if (shape_field_name_equals(entry, name->chars, name->len)) {
+    for (uint32_t i = 0; i < token->attr_count; i++) {
+        String* existing = token->attrs[i].name;
+        if (str_eq(existing->chars, existing->len, name->chars, name->len)) {
             // HTML LS tokenization: a duplicate attribute is a parse error and
             // the later attribute is ignored, preserving the first value.
             return;
         }
     }
 
-    // Add attribute to map - value is already a tagged Item (ITEM_NULL for empty attrs)
-    map_put(token->attributes, name, value, input);
+    // the capacity is implied by the count: 4, then each power of two
+    uint32_t count = token->attr_count;
+    if (count == 0 || (count >= 4 && (count & (count - 1)) == 0)) {
+        uint32_t capacity = count == 0 ? 4 : count * 2;
+        Html5Attr* grown = (Html5Attr*)pool_realloc(token->pool, token->attrs,
+            (size_t)capacity * sizeof(Html5Attr));
+        if (!grown) return;
+        token->attrs = grown;
+    }
+    token->attrs[count].name = name;
+    token->attrs[count].value = value;
+    token->attr_count = count + 1;
 #ifdef LAMBDA_TRACE_HTML5_TOKEN_ATTRIBUTES
     String* str = value.get_safe_string();
     // Attribute-level tracing is intentionally opt-in; large registry pages

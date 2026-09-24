@@ -318,6 +318,7 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     Html5Parser* parser = (Html5Parser*)pool_calloc(pool, sizeof(Html5Parser));
     parser->pool = pool;
     parser->arena = arena;
+    parser->token_arena = arena;
     parser->input = input;
 
     // initialize stacks
@@ -1063,29 +1064,15 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
 
     ElementBuilder eb = builder.element(tag_name);
 
-    // Copy attributes from token to element
-    if (token->attributes != nullptr) {
-        MapReader reader(token->attributes);
-        MapReader::EntryIterator it = reader.entries();
-        const char* key;
-        ItemReader value;
-        while (it.next(&key, &value)) {
-            if (key) {
-                // Apply SVG attribute name correction if in SVG namespace
-                const char* attr_name = key;
-                if (in_svg) {
-                    attr_name = html5_lookup_svg_attr(key);
-                }
-
-                if (value.isString()) {
-                    String* str_value = value.asString();
-                    eb.attr(attr_name, Item{.item = s2it(str_value)});
-                } else {
-                    // ITEM_NULL for empty attribute values (e.g., content="")
-                    eb.attr(attr_name, Item{.item = ITEM_NULL});
-                }
-            }
+    // Copy attributes from token to element: the element interns each key and
+    // keeps the value Item (ITEM_NULL for empty attribute values, e.g. content="")
+    for (uint32_t i = 0; i < token->attr_count; i++) {
+        const char* attr_name = token->attrs[i].name->chars;
+        // Apply SVG attribute name correction if in SVG namespace
+        if (in_svg) {
+            attr_name = html5_lookup_svg_attr(attr_name);
         }
+        eb.attr(attr_name, token->attrs[i].value);
     }
 
     // Store source line number as internal attribute when tracking is enabled

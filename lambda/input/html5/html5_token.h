@@ -13,6 +13,13 @@ enum Html5TokenType {
     HTML5_TOKEN_EOF
 };
 
+// One start-tag attribute: the name is token scratch (the element interns its
+// own key), the value is the Item the element keeps (ITEM_NULL when empty).
+typedef struct Html5Attr {
+    String* name;
+    Item value;
+} Html5Attr;
+
 // HTML5 token structure
 // Represents a single token emitted by the tokenizer
 typedef struct Html5Token {
@@ -23,10 +30,12 @@ typedef struct Html5Token {
     String* public_identifier;
     String* system_identifier;
     bool force_quirks;
+    uint32_t attr_count;    // entries in attrs; in the padding after force_quirks
 
     // For start/end tag tokens
     String* tag_name;
-    Map* attributes;        // Map of attribute name -> value (both String*)
+    Html5Attr* attrs;       // start tag attributes in source order, first of each name
+                            // (pool-owned, capacity 4 then powers of two)
     bool self_closing;
     // markup name id of tag_name, cached by html5_token_tag_id. It sits in
     // the padding after self_closing: a token is allocated per character run,
@@ -54,13 +63,19 @@ Html5Token* html5_token_create_character(Pool* pool, Arena* arena, char c);
 Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const char* chars, int len);
 Html5Token* html5_token_create_eof(Pool* pool, Arena* arena);
 
+// Returns a processed token to its pool. The tree builder copies what it keeps
+// (text, attribute values' Items, names), so a token is garbage once
+// html5_process_token returns; kept, the token structs alone were 30% of the
+// memory a large HTML parse touched.
+void html5_token_release(Html5Token* token);
+
 // Token helper functions
 // Renames a tag token; the cached markup id (html5_token_tag_id) follows.
 static inline void html5_token_set_tag_name(Html5Token* token, String* tag_name) {
     token->tag_name = tag_name;
     token->tag_id_known = false;
 }
-void html5_token_add_attribute(Html5Token* token, String* name, Item value, Input* input);
+void html5_token_add_attribute(Html5Token* token, String* name, Item value);
 void html5_token_append_to_tag_name(Html5Token* token, char c);
 void html5_token_append_to_data(Html5Token* token, char c);
 
