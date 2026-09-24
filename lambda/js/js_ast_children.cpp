@@ -217,6 +217,9 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
     if (walk.direct_eval_active && js_ast_call_is_direct_eval(node)) {
         walk.facts->has_direct_eval = true;
     }
+    if (walk.observations_active && js_ast_call_is_direct_eval(node)) {
+        walk.facts->observes_direct_eval = true;
+    }
     if (walk.direct_body_active && walk.direct_eval_active &&
             node->node_type == AST_NODE_CALL_EXPR) {
         JsCallNode* call = (JsCallNode*)node;

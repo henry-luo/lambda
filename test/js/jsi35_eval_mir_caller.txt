@@ -1,0 +1,9 @@
+read-top: 60
+write-top-let: 11 11
+shadowed-top: 99
+locals: 3:3
+completion: yes
+strict-const: TypeError
+indirect: number
+function-ctor: number
+global-readers: 31:20

@@ -216,10 +216,6 @@ extern "C" const char* js_item_to_cstr(Item value, char* buf, int buf_size) {
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
-extern "C" Item js_builtin_eval_with_options(Item code_item, int64_t eval_flags,
-                                             Item filename_item,
-                                             int64_t line_offset,
-                                             int64_t column_offset);
 extern "C" Item js_process_emit2(Item event_name, Item arg1, Item arg2);
 
 static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
@@ -714,11 +710,6 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
 static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
 
-extern "C" int64_t js_eval_source_push(Item filename, Item source,
-                                        int64_t line_offset, int64_t column_offset);
-extern "C" int64_t js_eval_source_push_compact(Item filename, Item source,
-                                                int64_t line_offset, int64_t column_offset);
-
 static inline Item js_native_function_source_item() {
     return js_name_item(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN);
 }
@@ -736,16 +727,6 @@ static Item js_named_native_function_source_item(const String* name) {
     return result;
 }
 JS_FORWARD_STATIC_ITEM(js_function_prototype_call_target, (), make_js_undefined, ())
-JS_FORWARD_STATIC_EXPRESSION(bool, js_function_has_vm_stack_source, (JsFunction* fn), (js_fn_eval_origin(fn)->filename && js_fn_eval_origin(fn)->source))
-
-static bool js_function_push_vm_stack_source(JsFunction* fn) {
-    if (!js_function_has_vm_stack_source(fn)) return false;
-    const JsEvalOrigin* origin = js_fn_eval_origin(fn);
-    return js_eval_source_push_compact((Item){.item = s2it(origin->filename)},
-                                       (Item){.item = s2it(origin->source)},
-                                       origin->line_offset,
-                                       origin->column_offset) != 0;
-}
 
 extern "C" Item js_vm_swap_global_this(Item next_global);
 static Item js_262_eval_script(Item code);
@@ -14731,7 +14712,6 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
         get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home_class;
     }
-    bool pushed_vm_stack_source = !ast_direct && js_function_push_vm_stack_source(fn);
     // Body entry (JC14). The prologue above already owns a rooted span for
     // `args`, so the body, native callbacks and `arguments` all borrow it.
     // `arguments` observes the original actual list even when every actual is
@@ -14774,7 +14754,6 @@ static inline __attribute__((always_inline)) Item js_call_kernel(Item func_item,
             js_current_this, args, arg_count, result_home));
     }
     }
-    if (pushed_vm_stack_source) js_eval_source_pop();
     if (derived_ctor_call) {
         result = js_super_this_binding_finish(result);
     }
@@ -14811,7 +14790,6 @@ static bool js_call_mir_light_is_active(Item func_item) {
     JsFunction* fn = (JsFunction*)func_item.function;
     if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_mir_light ||
             !fn->body || js_runtime_state.with_head ||
-            js_function_has_vm_stack_source(fn) ||
             js_fn_runtime_context(fn) != (Context*)context ||
             js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
         return false;
@@ -14830,7 +14808,6 @@ static bool js_call_mir_this_is_active(Item func_item) {
     JsFunction* fn = (JsFunction*)func_item.function;
     if (!js_fn_is_js_layout(fn) || fn->invoke != js_call_entry_mir_this ||
             !fn->body || js_runtime_state.with_head ||
-            js_function_has_vm_stack_source(fn) ||
             js_fn_runtime_context(fn) != (Context*)context ||
             js_runtime_state_for((EvalContext*)context) != js_active_runtime_state) {
         return false;
@@ -14944,8 +14921,7 @@ static inline bool js_call_ast_direct_eligible(Item callee) {
             JS_FUNC_FLAG_ASYNC_GEN | JS_FUNC_FLAG_DERIVED_CTOR |
             JS_FUNC_FLAG_USES_WITH | JS_FUNC_FLAG_HAS_BOUND_THIS |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
-    if (js_fn_eval_initializer_context(fn) || js_function_has_vm_stack_source(fn) ||
-            js_runtime_state.with_head) return false;
+    if (js_fn_eval_initializer_context(fn) || js_runtime_state.with_head) return false;
     uint32_t module_state_id = js_fn_module_state_id(fn);
     if (module_state_id != UINT32_MAX &&
             module_state_id != lambda_active_module_state_id()) return false;

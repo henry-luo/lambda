@@ -61,7 +61,6 @@ static void js_reset_core_module_caches(void) {
 extern "C" void dom_window_dialog_reset(void);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
-extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
 static void js_release_input_resources(void);
 
 static void js_runtime_state_prepare_root_vectors(JsRuntimeState* state);
@@ -342,7 +341,8 @@ void js_global_environment_release_module_bindings(
     int retained = 0;
     for (int i = 0; i < environment->binding_count; i++) {
         JsGlobalBinding* binding = &environment->bindings[i];
-        if (binding->kind == JS_GLOBAL_BINDING_MODULE_VAR &&
+        // Module vars and module-linked lexicals name a released slab.
+        if (binding->module_index >= 0 &&
                 binding->module_state_id >= first_module_state_id) continue;
         environment->bindings[retained++] = *binding;
     }
@@ -683,7 +683,6 @@ void js_runtime_state_destroy_context(void) {
     // instead of eight hand-maintained calls.
     context_capsule_destroy_all(runtime_context);
     js_atomics_destroy_context(state);
-    js_dynfunc_cache_destroy_context(state);
     jm_compile_recovery_state_destroy_context(state);
     js_runtime_prototype_snapshot_destroy_context(state);
     js_runtime_regex_cache_destroy_context(state);
@@ -897,18 +896,6 @@ static void js_root_vector_reset_all(void) {
     js_runtime_state_visit_root_vectors(js_active_runtime_state,
         js_runtime_state_clear_root_vector, NULL);
 }
-#define js_eval_source_values (js_runtime_state.eval.source.values)
-#define js_eval_source_records (js_runtime_state.eval.source.records)
-
-static int js_eval_source_stack_depth(void) {
-    return js_eval_source_records ? js_eval_source_records->length : 0;
-}
-
-static JsEvalSourceRecord* js_eval_source_record_at(int index) {
-    return js_eval_source_records && index >= 0 && index < js_eval_source_records->length
-        ? (JsEvalSourceRecord*)arraylist_get(js_eval_source_records, index) : NULL;
-}
-
 #define JS_EVAL_VECTOR_INIT(vec, label) root_vector_init(vec, owner, label);
 #define JS_EVAL_VECTOR_DESTROY(vec, label) root_vector_destroy(vec);
 #define JS_EVAL_VECTOR_CLEAR(vec, label) root_vector_clear(vec);
@@ -972,11 +959,6 @@ static void js_eval_native_rows_clear(ArrayList** rows) {
     *rows = NULL;
 }
 
-static void js_eval_source_records_clear(JsEvalSourceState* source) {
-    if (!source) return;
-    js_eval_native_rows_clear(&source->records);
-}
-
 static void js_eval_local_frames_clear(JsEvalLocalState* local) {
     if (!local) return;
     js_eval_native_rows_clear(&local->frame_marks);
@@ -1000,7 +982,6 @@ void js_eval_state_vectors_init(JsEvalState* state, Context* owner) {
 
 void js_eval_state_vectors_destroy(JsEvalState* state) {
     if (!state) return;
-    js_eval_source_records_clear(&state->source);
     js_eval_binding_journal_clear(&state->bridge.env);
     js_eval_binding_journal_clear(&state->bridge.global_lexical);
     js_eval_private_journal_clear(&state->bridge.private_names);
@@ -1012,7 +993,6 @@ void js_eval_state_reset(JsEvalState* state) {
     if (!state) return;
     js_runtime_state_prepare_root_vectors(js_active_runtime_state);
     JS_EVAL_STATE_VECTORS(JS_EVAL_VECTOR_CLEAR, state)
-    js_eval_source_records_clear(&state->source);
     js_eval_binding_journal_clear(&state->bridge.env);
     js_eval_binding_journal_clear(&state->bridge.global_lexical);
     js_eval_private_journal_clear(&state->bridge.private_names);
@@ -1022,10 +1002,6 @@ void js_eval_state_reset(JsEvalState* state) {
 void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
     if (!state) return;
     const char* name = reset_name ? reset_name : "reset";
-    int source_depth = state->source.records ? state->source.records->length : 0;
-    if (source_depth != 0) {
-        log_error("js-eval-state: %s left source depth=%d", name, source_depth);
-    }
     int env_frame_depth = state->bridge.env.frames ? state->bridge.env.frames->length : 0;
     int global_lexical_frame_depth = state->bridge.global_lexical.frames
         ? state->bridge.global_lexical.frames->length : 0;
@@ -1040,97 +1016,6 @@ void js_eval_state_assert_clear(JsEvalState* state, const char* reset_name) {
     if (local_frame_depth != 0) {
         log_error("js-eval-state: %s left local frame depth=%d", name, local_frame_depth);
     }
-}
-
-static bool js_eval_source_push_mode(Item filename, Item source,
-                                     int64_t line_offset, int64_t column_offset,
-                                     bool compact_stack) {
-    if (!js_eval_source_records) js_eval_source_records = arraylist_new(8);
-    JsEvalSourceRecord* record = (JsEvalSourceRecord*)mem_calloc(1,
-        sizeof(JsEvalSourceRecord), MEM_CAT_JS_RUNTIME);
-    if (!record || !js_eval_source_records) {
-        mem_free(record);
-        return false;
-    }
-    record->filename_slot = (int64_t)root_vector_count(&js_eval_source_values);
-    if (!root_vector_push(&js_eval_source_values, filename)) {
-        mem_free(record);
-        return false;
-    }
-    record->source_slot = (int64_t)root_vector_count(&js_eval_source_values);
-    if (!root_vector_push(&js_eval_source_values, source)) {
-        root_vector_shrink(&js_eval_source_values, (int)record->filename_slot);
-        mem_free(record);
-        return false;
-    }
-    record->line_offset = line_offset;
-    record->column_offset = column_offset;
-    record->compact_stack = compact_stack;
-    if (!arraylist_append(js_eval_source_records, record)) {
-        root_vector_shrink(&js_eval_source_values, (int)record->filename_slot);
-        mem_free(record);
-        return false;
-    }
-    return true;
-}
-JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push, (Item filename, Item source,                                          int64_t line_offset, int64_t column_offset), (js_eval_source_push_mode(filename, source, line_offset, column_offset, false) ? 1 : 0))
-JS_FORWARD_EXPRESSION(int64_t, js_eval_source_push_compact, (Item filename, Item source,                                                  int64_t line_offset, int64_t column_offset), (js_eval_source_push_mode(filename, source, line_offset, column_offset, true) ? 1 : 0))
-
-extern "C" void js_eval_source_pop(void) {
-    int depth = js_eval_source_stack_depth();
-    if (depth <= 0) return;
-    JsEvalSourceRecord* record = js_eval_source_record_at(depth - 1);
-    if (record) {
-        root_vector_shrink(&js_eval_source_values, (int)record->filename_slot);
-        mem_free(record);
-    }
-    arraylist_remove(js_eval_source_records, depth - 1);
-}
-
-static bool js_eval_source_current(Item* out_filename, Item* out_source,
-                                   int64_t* out_line_offset, int64_t* out_column_offset,
-                                   bool* out_compact_stack) {
-    int depth = js_eval_source_stack_depth();
-    if (depth <= 0) return false;
-    JsEvalSourceRecord* record = js_eval_source_record_at(depth - 1);
-    if (!record) return false;
-    Item filename = *root_vector_at(&js_eval_source_values, (int)record->filename_slot);
-    Item source = *root_vector_at(&js_eval_source_values, (int)record->source_slot);
-    if (get_type_id(filename) != LMD_TYPE_STRING || get_type_id(source) != LMD_TYPE_STRING) {
-        return false;
-    }
-    if (out_filename) *out_filename = filename;
-    if (out_source) *out_source = source;
-    if (out_line_offset) *out_line_offset = record->line_offset;
-    if (out_column_offset) *out_column_offset = record->column_offset;
-    if (out_compact_stack) *out_compact_stack = record->compact_stack;
-    return true;
-}
-
-static int js_eval_source_first_line(String* source, const char** out_line) {
-    if (!source || !out_line) return 0;
-    const char* s = source->chars;
-    int len = (int)source->len;
-    int start = 0;
-    while (start < len && (s[start] == '\n' || s[start] == '\r')) start++;
-    int end = start;
-    while (end < len && s[end] != '\n' && s[end] != '\r') end++;
-    *out_line = s + start;
-    return end - start;
-}
-
-static int js_eval_source_display_column(String* source) {
-    const char* line = NULL;
-    int line_len = js_eval_source_first_line(source, &line);
-    if (!line || line_len <= 0) return 1;
-    int pos = 0;
-    while (pos < line_len && (line[pos] == ' ' || line[pos] == '\t')) pos++;
-    if (pos + 5 <= line_len && memcmp(line + pos, "throw", 5) == 0 &&
-        (pos + 5 == line_len || line[pos + 5] == ' ' || line[pos + 5] == '\t')) {
-        pos += 5;
-        while (pos < line_len && (line[pos] == ' ' || line[pos] == '\t')) pos++;
-    }
-    return pos + 1;
 }
 
 struct JsErrorTextParts {
@@ -1157,84 +1042,6 @@ static JsErrorTextParts js_error_text_parts(Item error_name, Item message) {
         }
     }
     return parts;
-}
-
-static Item js_eval_source_stack_string(Item error_name, Item message) {
-    Item filename_item = ItemNull;
-    Item source_item = ItemNull;
-    int64_t line_offset = 0;
-    int64_t column_offset = 0;
-    bool compact_stack = false;
-    if (!js_eval_source_current(&filename_item, &source_item, &line_offset, &column_offset,
-                                &compact_stack)) {
-        return (Item){.item = ITEM_JS_UNDEFINED};
-    }
-    String* filename = it2s(filename_item);
-    String* source = it2s(source_item);
-    if (!filename || !source) return (Item){.item = ITEM_JS_UNDEFINED};
-
-    const char* line = NULL;
-    int line_len = js_eval_source_first_line(source, &line);
-    int display_line = (int)line_offset + 1;
-    if (display_line < 1) display_line = 1;
-    int display_col = js_eval_source_display_column(source) + (int)column_offset;
-    if (display_col < 1) display_col = 1;
-
-    JsErrorTextParts text = js_error_text_parts(error_name, message);
-    const char* name_str = text.name;
-    int name_len = text.name_len;
-    const char* msg_str = text.message;
-    int msg_len = text.message_len;
-
-    if (compact_stack) {
-        int total = name_len + msg_len + (int)filename->len + 64;
-        char* buf = (char*)mem_alloc((size_t)total + 1, MEM_CAT_JS_RUNTIME);
-        if (!buf) return (Item){.item = ITEM_JS_UNDEFINED};
-        int pos = 0;
-        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "%.*s",
-                        name_len, name_str);
-        if (msg_len > 0) {
-            pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, ": %.*s",
-                            msg_len, msg_str);
-        }
-        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos,
-                        "\n    at %.*s:%d:%d",
-                        (int)filename->len, filename->chars, display_line, display_col);
-        if (pos < 0) pos = 0;
-        if (pos > total) pos = total;
-        Item result = js_name_item(buf, pos);
-        mem_free(buf);
-        return result;
-    }
-
-    int caret_spaces = display_col - 1;
-    int total = (int)filename->len + 32 + line_len + caret_spaces +
-        name_len + msg_len + (int)filename->len + 64;
-    char* buf = (char*)mem_alloc((size_t)total + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return (Item){.item = ITEM_JS_UNDEFINED};
-    int pos = 0;
-    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "%.*s:%d\n",
-                    (int)filename->len, filename->chars, display_line);
-    if (line_len > 0) {
-        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "%.*s", line_len, line);
-    }
-    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "\n");
-    for (int i = 0; i < caret_spaces && pos < total; i++) buf[pos++] = ' ';
-    if (pos < total) buf[pos++] = '^';
-    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, "\n\n%.*s",
-                    name_len, name_str);
-    if (msg_len > 0) {
-        pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos, ": %.*s",
-                        msg_len, msg_str);
-    }
-    pos += snprintf(buf + pos, (size_t)total + 1 - (size_t)pos,
-                    "\n    at %.*s:%d:%d",
-                    (int)filename->len, filename->chars, display_line, display_col);
-    if (pos < 0) pos = 0;
-    if (pos > total) pos = total;
-    Item result = js_name_item(buf, pos);
-    mem_free(buf);
-    return result;
 }
 
 static Item* js_ensure_active_module_vars(void) {
@@ -1551,7 +1358,6 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_strict_mode = false;
     js_reset_core_module_caches();
     if (full_reset) js_eval_preamble_cache_reset();
-    js_dynfunc_cache_reset();
     if (full_reset) {
         js_array_runtime_items_cleanup_all();
         js_array_immortal_props_cleanup_all();
@@ -1737,11 +1543,6 @@ static void js_stack_display_name(const char* raw, const char** out_name, int* o
 static String* js_stack_current_filename(void) {
     if (context && context->current_file) {
         return heap_create_name(context->current_file, strlen(context->current_file));
-    }
-    Item filename_item = ItemNull;
-    if (js_eval_source_current(&filename_item, NULL, NULL, NULL, NULL) &&
-        get_type_id(filename_item) == LMD_TYPE_STRING) {
-        return it2s(filename_item);
     }
     return NULL;
 }
@@ -1932,7 +1733,7 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     if (!error) return make_js_undefined();
     if (error->js_stack_item) return (Item){.item = error->js_stack_item};
 
-    RootFrame roots(7);
+    RootFrame roots(6);
     Rooted<Item> error_root(roots, error_obj);
     // Error property reads can allocate and move the unified carrier; read
     // through the rooted object so the raw-stack owner is never invalidated.
@@ -1940,7 +1741,6 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
     Rooted<Item> message_root(roots, js_get_key_cstr(error_root.get(), "message"));
     Rooted<Item> prepared_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> native_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
-    Rooted<Item> eval_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     Rooted<Item> stack_root(roots, (Item){.item = ITEM_JS_UNDEFINED});
     if (item_is_error(name_root.get())) return name_root.get();
     if (item_is_error(message_root.get())) return message_root.get();
@@ -1958,10 +1758,8 @@ extern "C" Item js_error_materialize_stack(Item error_obj) {
         prepared_root.set(js_error_prepare_stack_trace_with_trace(error_root.get(), trace));
         native_root.set(js_error_stack_string_from_trace(name_root.get(), message_root.get(), trace));
     }
-    eval_root.set(js_eval_source_stack_string(name_root.get(), message_root.get()));
     stack_root.set(prepared_root.get().item != ITEM_JS_UNDEFINED ? prepared_root.get() :
         native_root.get().item != ITEM_JS_UNDEFINED ? native_root.get() :
-        eval_root.get().item != ITEM_JS_UNDEFINED ? eval_root.get() :
         js_error_default_stack_string(name_root.get(), message_root.get()));
     if (item_is_error(stack_root.get())) return stack_root.get();
 

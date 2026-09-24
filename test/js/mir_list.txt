@@ -18,3 +18,4 @@ tune6_intrinsic_reflect_define
 typed_arrays
 type_infer_ip6
 regression_mir_native_return_completion
+jsi35_eval_mir_caller

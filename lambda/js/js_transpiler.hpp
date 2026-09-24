@@ -92,6 +92,12 @@ struct JsScript : Script {
     // Eval code uses configurable global var bindings and inherits any
     // pre-existing global property during declaration instantiation.
     bool is_eval_script;
+    // Direct eval code (JSI35). A MIR caller projects its bindings through the
+    // EvalContext bridge; an interpreted caller links its live environments.
+    bool is_direct_eval;
+    // The Script of the interpreted frame whose environments this direct eval
+    // execution links to (D8.1.3v21); null for every other execution.
+    JsScript* eval_caller_script;
     // Module top levels use a private module slab. CJS remains non-strict,
     // while ES modules set both this bit and strict_mode.
     bool is_module;

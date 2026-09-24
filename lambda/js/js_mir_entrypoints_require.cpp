@@ -32,6 +32,96 @@ extern "C" int js_process_current_exit_code(void);
 extern "C" void js_async_hooks_drain_destroy_queue(void);
 extern "C" Item js_module_get_builtin(Item specifier);
 
+// Owned declaration snapshots for preamble consumers. The last executed
+// script's snapshot also feeds Radiant's shared document preamble.
+JsModuleConstEntry* g_eval_preamble_entries = NULL;
+int g_eval_preamble_entry_count = 0;
+int g_eval_preamble_var_count = 0;
+
+bool js_preamble_entry_copy(const JsModuleConstEntry* source,
+                            JsModuleConstEntry* target) {
+    if (!source || !target) return false;
+
+    *target = *source;
+    target->name = NULL;
+    target->live_binding_specifier = NULL;
+    target->name = source->name ? mem_strdup(source->name, MEM_CAT_JS_RUNTIME) : NULL;
+    target->live_binding_specifier = source->live_binding_specifier
+        ? mem_strdup(source->live_binding_specifier, MEM_CAT_JS_RUNTIME) : NULL;
+    if ((source->name && !target->name) ||
+            (source->live_binding_specifier && !target->live_binding_specifier)) {
+        mem_free((void*)target->name);
+        mem_free((void*)target->live_binding_specifier);
+        target->name = NULL;
+        target->live_binding_specifier = NULL;
+        return false;
+    }
+    return true;
+}
+
+void js_preamble_entries_free(JsModuleConstEntry* entries, int count) {
+    if (!entries) return;
+    for (int i = 0; i < count; i++) {
+        mem_free((void*)entries[i].name);
+        mem_free((void*)entries[i].live_binding_specifier);
+    }
+    mem_free(entries);
+}
+
+bool js_preamble_entries_copy(const JsModuleConstEntry* source, int count,
+                              JsModuleConstEntry** out_entries) {
+    if (!out_entries || count < 0) return false;
+    *out_entries = NULL;
+    if (count == 0) return true;
+    if (!source) return false;
+
+    JsModuleConstEntry* entries = (JsModuleConstEntry*)mem_calloc(
+        (size_t)count, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+    if (!entries) return false;
+    for (int i = 0; i < count; i++) {
+        if (!js_preamble_entry_copy(&source[i], &entries[i])) {
+            js_preamble_entries_free(entries, count);
+            return false;
+        }
+    }
+    *out_entries = entries;
+    return true;
+}
+
+bool js_preamble_entries_from_module_consts(struct hashmap* module_consts,
+        int* out_count, JsModuleConstEntry** out_entries) {
+    if (!out_count || !out_entries) return false;
+    *out_count = 0; *out_entries = NULL;
+    int count = module_consts ? (int)hashmap_count(module_consts) : 0;
+    if (count == 0) return true;
+    JsModuleConstEntry* entries = (JsModuleConstEntry*)mem_calloc((size_t)count,
+        sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+    if (!entries) return false;
+    bool copy_succeeded = true; int entry_count = 0;
+    size_t iter = 0; void* item = NULL;
+    while (copy_succeeded && hashmap_iter(module_consts, &iter, &item)) {
+        copy_succeeded = js_preamble_entry_copy(
+            (JsModuleConstEntry*)item, &entries[entry_count]);
+        if (copy_succeeded) entry_count++;
+    }
+    if (!copy_succeeded) {
+        js_preamble_entries_free(entries, count); return false;
+    }
+    *out_count = entry_count; *out_entries = entries;
+    return true;
+}
+
+void js_eval_preamble_entries_free(void) {
+    js_preamble_entries_free(g_eval_preamble_entries, g_eval_preamble_entry_count);
+    g_eval_preamble_entries = NULL;
+    g_eval_preamble_entry_count = 0;
+    g_eval_preamble_var_count = 0;
+}
+
+extern "C" void js_eval_preamble_cache_reset(void) {
+    js_eval_preamble_entries_free();
+}
+
 static Item js_mir_finalize_result(Item result, bool reusing_context,
         uint64_t* result_home) {
     if (reusing_context || get_type_id(result) != LMD_TYPE_FLOAT) return result;
@@ -196,6 +286,7 @@ static Item js_mir_execute_retained_ast_script(Runtime* runtime, JsScript* scrip
     script->is_module = false;
     script->is_es_module = false;
     script->is_eval_script = false;
+    script->is_direct_eval = false;
     script->test262_native_harness = test262_native_harness;
     script->test262_native_build_string =
         js_test262_source_has_build_string_helper(js_source, js_source_len, filename);
@@ -973,7 +1064,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             (runtime->js_ast_backend && ast_executor_supported) ||
             auto_ast_selected) {
         if (auto_ast_selected) runtime->js_ast_backend = true;
-        // nested eval compiles through the same counters; retain this source's
+        // a nested compile reuses the same counters; retain this source's
         // record and separate realm construction from AST execution.
         JsMirPhaseTiming timing = g_last_js_mir_phase_timing;
         uint64_t realm_start = js_realm_init_time_us();
@@ -1203,9 +1294,10 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Execute
     log_debug("js-mir: executing JIT compiled code");
 
-    // Save module_consts as eval preamble BEFORE execution so that
-    // eval()/new Function() called during js_main can resolve outer-scope
-    // var declarations via the active context-owned module slab.
+    // Snapshot module_consts for Radiant's shared document preamble
+    // (preamble_state_update_from_eval_snapshot), so a later classic script
+    // on the page sees this unit's top-level declarations. Dynamic source no
+    // longer reads it; it runs in the AST interpreter (D8.1.3v20).
     if (mt->module_consts && !g_jm_preamble_mode) {
         JsModuleConstEntry* next_entries = NULL;
         int next_entry_count = 0;

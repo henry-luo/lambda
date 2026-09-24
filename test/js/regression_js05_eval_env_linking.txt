@@ -1,0 +1,25 @@
+l5-param-closure: 7
+l5-after-return: 2
+l5-write-through: 5
+l5-block-let: block
+l6-arguments: 2:2
+l6-arrow-arguments: x
+l6-new-target: function
+l6-call-new-target: undefined
+l7-redeclare: 1
+l7-assign: 2
+l7-outer: undefined/1
+tdz: THROWS ReferenceError
+const-sloppy: THROWS TypeError
+const-strict: THROWS TypeError
+lexical-conflict: THROWS SyntaxError
+catch-var: 5
+with-captured: param
+delete-eval-var: true
+nested-eval: b
+annexb-skip: number
+annexb-param: function
+super: A
+super-call: 3
+private: 5
+async-param: SyntaxError

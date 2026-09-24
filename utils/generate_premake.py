@@ -988,6 +988,19 @@ class PremakeGenerator:
                 if link_type in ['dynamic', 'static'] and 'sources' not in lib:
                     continue
 
+    def _static_lib_rebuild_lines(self, kind: str) -> List[str]:
+        """`ar -rcs` only adds or replaces members, so an object whose source
+        was deleted or renamed survives in an archive and can duplicate a moved
+        symbol at link time. Rebuild every static archive from scratch."""
+        if kind != "StaticLib":
+            return []
+        return [
+            '    prelinkcommands {',
+            '        \'{DELETE} "%{cfg.buildtarget.abspath}"\',',
+            '    }',
+            '    ',
+        ]
+
     def _generate_lib_project(self, lib_project: Dict[str, Any]) -> None:
         """Generate a static library project from lib_project configuration"""
         name = lib_project.get('name', 'library')
@@ -1005,6 +1018,7 @@ class PremakeGenerator:
             f'    objdir "build/obj/%{{prj.name}}"',
             '    ',
         ])
+        self.premake_content.extend(self._static_lib_rebuild_lines(kind))
 
         # Add source files
         if files:
@@ -1280,6 +1294,7 @@ class PremakeGenerator:
             '    objdir "build/obj/%{prj.name}"',
             '    ',
         ])
+        self.premake_content.extend(self._static_lib_rebuild_lines(kind))
         if link_type == 'executable':
             self.premake_content.append('    targetextension ".exe"')
             self.premake_content.append('    ')
@@ -1905,6 +1920,7 @@ class PremakeGenerator:
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
             '    ',
+            *self._static_lib_rebuild_lines(kind),
             '    -- Wrapper library with empty source file',
             '    files {',
             '        "utils/empty.cpp",',
@@ -1937,6 +1953,7 @@ class PremakeGenerator:
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
             '    ',
+            *self._static_lib_rebuild_lines(kind),
             '    -- Meta-library: combines source files from dependencies',
             '    files {',
         ])

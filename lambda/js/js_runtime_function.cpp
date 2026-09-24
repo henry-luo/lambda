@@ -385,10 +385,6 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
         gc_mark_object_ptr(gc, p->with->env);
         for (int i = 0; i < p->with->depth; i++) gc_mark_item(gc, p->with->env[i].item);
     }
-    if (p->eval_origin) {
-        gc_mark_object_ptr(gc, p->eval_origin->filename);
-        gc_mark_object_ptr(gc, p->eval_origin->source);
-    }
     if (p->klass) {
         gc_mark_item(gc, p->klass->constructor.item);
         gc_mark_item(gc, p->klass->instance_prototype.item);
@@ -575,14 +571,11 @@ JsClassData* js_fn_class_ensure(JsFunction* fn) {
 JsWithData* js_fn_with_ensure(JsFunction* fn) {
     JS_FN_PAYLOAD_ENSURE(fn, with, JsWithData)
 }
-JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn) {
-    JS_FN_PAYLOAD_ENSURE(fn, eval_origin, JsEvalOrigin)
-}
 
 // A GC-backed value reaches the payload's Items through its tracer. A
 // pool-backed one is not traced at all, and its one-shot root registration may
 // already have run before this payload existed, so root the payload's own slots
-// here rather than re-entering that path (same contract as the eval origin).
+// here rather than re-entering that path.
 static bool js_function_payload_needs_own_roots(const JsFunction* fn) {
     return js_function_is_pool_backed(fn);
 }
@@ -602,7 +595,6 @@ extern "C" void js_function_gc_destroy(void* data) {
     // payloads; a pool-backed value's payload dies with its pool instead
     JsFunctionPayload* p = fn->payload;
     if (p) {
-        if (p->eval_origin) mem_free(p->eval_origin);
         if (p->bound) mem_free(p->bound);
         if (p->klass) mem_free(p->klass);
         if (p->with) mem_free(p->with);

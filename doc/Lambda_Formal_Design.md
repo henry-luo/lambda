@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 12.1.0 (2026-09-23)
+**Spec version:** 12.3.0 (2026-09-24)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1584,7 +1584,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   Generated `parser.c` remains a reference artifact regenerated from
   `grammar.js` (never hand-edit `parser.c`). Build config generates the build
   files (never hand-edit the Lua). [CGP5v2, rules 5, 7]
-- **D8.1.3v19*** LambdaJS uses its first-party C lexer and hybrid
+- **D8.1.3v21*** LambdaJS uses its first-party C lexer and hybrid
   recursive-descent/Pratt parser for normal JavaScript and TypeScript
   source admission. It reduces directly into the retained `JsAstNode` graph;
   the vendored JavaScript and TypeScript Tree-sitter grammars are linked only
@@ -1615,16 +1615,19 @@ loosely across the corpus — context disambiguates, and we live with it.
   environment; member bodies, field initializers, static blocks, and nested
   closures retain it. Instance private methods publish the existing metadata
   brand record before field initializers; every get/set/in operation routes to
-  the existing private property and brand kernels. Direct eval projects each
-  retained source-name/identity-key pair into the existing eval-private frame
-  for parse/lowering, then removes that frame with the ordinary eval bridge.
-  Direct eval enters the existing dynamic-code compilation service as a
-  deliberate language boundary, after the AST caller has installed the same
-  `EvalContext` bridge: interpreted function cells are projected and written
-  back, eval-created `var` bindings live in that activation's shared journal,
-  and script-global lexical changes are synchronized from the realm table to
-  the script slab. This is neither an unsupported-unit fallback nor a replay
-  of the enclosing script. `JS_EXECUTION_BACKEND=ast` forces this backend.
+  the existing private property and brand kernels.
+  A MIR caller's direct eval projects each retained source-name/identity-key pair into the existing eval-private frame for evaluation, then removes that frame with the ordinary eval bridge; an interpreted caller projects them only while the eval source is parsed.
+  *(v20, 2026-09-24)* Dynamic source is interpreted. Direct and indirect
+  `eval`, the `Function`, `GeneratorFunction`, `AsyncFunction`, and
+  `AsyncGeneratorFunction` constructors, string timer handlers, and
+  `$262.evalScript` parse into a retained `JsScript` and execute in the AST
+  interpreter. This holds whatever the caller's tier or the unit selector;
+  MIR never lowers dynamic source. Script top-level lexicals resolve through
+  realm records linked to their module slots. This is a deliberate language
+  boundary. It is neither an unsupported-unit fallback nor a replay of the
+  enclosing script.
+  *(v21, 2026-09-24)* A direct eval from interpreted code links its activation to the caller frame's live environment chain; nothing is projected or written back. The eval's own declarative record holds its lexical declarations, and a strict eval's vars; its outer record is the caller's current one. Eval code, and every closure it creates, resolves a free name through that chain — each record's declarations, its `arguments`, and the vars direct eval added to it — then through the outermost caller script's top-level bindings and the realm. A sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment and reuse a binding it already has (EvalDeclarationInstantiation with Annex B.3.2.3 and B.3.4). `this`, `new.target`, and the home object are the caller frame's own. Only a MIR caller installs the `EvalContext` bridge, until P4 shared environment cells: its registers are projected and written back, a projected binding outranks a global lexical of the same name, and eval-created `var` bindings live in that activation's shared journal.
+  `JS_EXECUTION_BACKEND=ast` forces this backend.
   *(v12, 2026-09-19)* `JS_EXECUTION_BACKEND=auto` is an explicit AST-first
   policy: an interpreter-supported JS unit consumes the same static-import AST
   closure prebuilt under D8.1.1v13/D8.5.1v7, while an unsupported unit keeps
@@ -1699,6 +1702,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   native, or the MIR-interpreter interface from unit volume, document
   attachment, and the largest finalized function. A selected MIR unit is not
   silently redirected to AST; compilation failure is reported without replay.
+  Its dynamic source still executes in AST under v20.
   An AST ordinary function materializes the existing runtime `arguments`
   object in its precisely traced activation environment before evaluating
   parameter defaults. Sloppy functions with simple identifier parameters use
@@ -1716,7 +1720,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   selector takes the same interpreter-supported AST-first path as explicit
   `auto`; unsupported units retain the established whole-module MIR fallback.
   [D1.3v3, D1.5v2, D1.7, D5.4.1, D6.2.2v2, D6.2.3v2,
-  D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13, JSI16v2]
+  D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13, JSI16v2, JSI35, JSI36]
 
 ### D8.2 Unified AST
 
@@ -2247,6 +2251,8 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXECUTION_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
+| D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
+| D8.1.3v21 | Revised 2026-09-24 (USER): a direct eval from interpreted code links its activation to the caller frame's live `JsInterpEnv` chain through one boundary record (`JsInterpEnv::eval_script`). Free names in eval code and in its closures resolve by name through that chain (`js_interp_lookup_name`); EvalDeclarationInstantiation targets the caller's nearest function variable environment (`js_interp_instantiate_linked_eval`); the eval frame borrows the caller's `this`, `new.target`, and home-object homes. A function whose body or nested arrow contains a direct eval materializes `arguments`. The interpreted side of the bridge (projection, write-back, per-activation journal frames) is deleted; MIR callers keep it, with the source scan for strict writes to bridged consts. Strict `eval`/`arguments` targets in every assignment form are parser early errors on both tiers, and the eval-source stack and function eval-origin payload that only the deleted MIR eval unit fed are removed. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3756/3756 (incl. `test_js_gtest` 481/481); ad-hoc `test/language/eval-code` interpreter 214 → 312 of 343, MIR 217 → 218. Residue: MIR callers keep the bridge until P4 shared environment cells, so JS05-L5–L7 persist there; the interpreter keeps parameters and body vars in one function record (the `arrow-fn-body-cntns-arguments-*` eval-code cases); PerformEval's caller-dependent `new.target`/`super` early errors are not enforced. Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI36; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
 | D8.2.4–D8.2.6 | P1–P4 establish the shared indexed compiler substrate described above. P5 (2026-08-30) completes the planned structural semantic-family consolidation: `MirValue` demand/profile lowering now owns shared sequence, condition, module-slot, destination, call/result, return/completion, function-publication, and module-finalization boundaries in Lambda and JS, while profile callbacks retain language semantics and boxed fallback. P6 moves shared context/owner binding, result publication, execution/current-file/module-state scopes, and active-module handles into `runtime-state`; the semantic walkers and their frames remain distinct under **D8.1.3v11**. The 2026-09-05 FunctionId follow-up retires `FnAnalysis::js_mir_backend`: JS MIR artifacts are reached only through the `func_entries_by_id` table keyed by the shared `FunctionId`; post-order storage remains a backend detail. The 2026-09-23 LC4 closeout adds preorder ranges, reverse query tables, function-child adjacency, synthetic-fragment overlays, named JS collection/capture/environment/inference/forward passes, and the shared MIR link policy. Current verification is 4,098 Lambda/Input and 40,261 Test262 baseline cases, with Lambda 0.512534 and JS 0.690065 release compiler-time ratios. This is an implementation status for **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6**, not a new ruling. Focused gates: `vibe/Lambda_Design_JS_Unified.md` P5–P6. **D8.2.5v2 (2026-09-11) is historical and superseded operationally by D8.2.5v3**: `AstNode.type` is the effective-type authority, declared annotations live on their declaring node, and the implemented v3 manager records named pass facts/timings without an ID-keyed per-node fact table. Rationale and the superseded U30 text: `vibe/Lambda_Design_Unified_AST.md` §13; plan: `vibe/Lambda_Proposal_JS_Unify_P7.md` U-D. |
 | D8.3.1v2–D8.3.3, D8.3.4v2 | **Binder TG8 direct-edge procedure slice implemented 2026-09-16.** Eligible fixed-arity `fn` and task-free synchronous `pn` binder functions with immutable parameters and exact scalar, normalized `array`/`map`/`range`, named/nominal map, or concrete element keys admit at most four immutable `__rawN` bodies in source order. `_b` shares one exact-key matcher: scalar tags, selected type-value identity, normalized container kinds, and descriptor-pointer identity for shape-bearing maps/elements. It retains the complete generic boxed fallback; later, partial, dynamic, capped, or ineligible keys consume no slot. A statically exact local call selects its predeclared `__rawN` body directly; a shape literal is exact when its AST descriptor is the raw key, while declared base-shape and other unproven edges retain `_b`. `var` parameters, task-context procedures, and may-await procedures retain `_b`. Fixtures: `test/lambda/type_binder_raw_variants.ls`, `test/lambda/proc/type_binder_proc_raw.ls`. [S1.6, D8.3.1v2–D8.3.4v2] |
@@ -2508,7 +2514,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13, JSI16v2; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |

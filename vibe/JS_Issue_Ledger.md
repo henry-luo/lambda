@@ -293,3 +293,53 @@ specific to a generator capturing a with-chain, is open.
 `test_js_gtest` fail, so it lives in the ledger rather than as a known-failing
 test. The generator half of the JSCU44 async regression was trimmed for the
 same reason; the case is recorded here instead.
+
+
+### JS05-L5 — a closure created by direct eval loses projected caller locals — **RESOLVED**
+
+**Found:** 2026-09-24 during the JSI35 move of dynamic code to the AST interpreter (**D8.1.3v20**). **Pre-existing:** the MIR eval unit behaved the same way. Both tiers fail it.
+
+```js
+function f(a) { return eval("() => a"); }
+f(7)();                  // ReferenceError: a is not defined (Node: 7)
+```
+
+A direct eval sees its caller's bindings only through the `EvalContext` bridge. The bridge projects caller cells as temporary global properties and writes them back when the eval returns (`JsInterpEvalBridge` in `lambda/js/js_interp.cpp`; `jm_emit_intrinsic_direct_eval` for MIR callers). A closure created inside eval code resolves `a` as a free name. Once the bridge frame pops, that name is gone. Closures over variables the eval itself declares are unaffected; they keep the eval script's own slot.
+
+**Retirement path:** link a T0 caller's live environment records to the eval activation (`vibe/Lambda_Design_JS_Interpreter.md` §5.6 residual and §16 item 13). MIR callers keep the bridge until P4 shared environment cells.
+
+**Fixed:** 2026-09-24 for interpreted callers (**D8.1.3v21 / JSI36**, `vibe/Lambda_Design_JS_Interpreter.md` §16 item 13). Regression: `test/js/regression_js05_eval_env_linking.js`. A direct eval from AST code no longer installs the bridge. Its activation gets a boundary record (`JsInterpEnv::eval_script`) holding the eval's lexical declarations, and that record's `outer` is the caller frame's live environment. Free names in eval code — and in closures it creates — resolve by name through that chain (`js_interp_lookup_name`), so `f(7)()` above reads the caller's `a` after the eval returns. The `JsInterpEvalBridge` projection, its write-back, and the per-activation journal frames on T0 functions are deleted. A MIR caller still uses the bridge, so a closure made by its eval code still loses the local; that is the P4 residual of §16 item 13.
+
+### JS05-L6 — `arguments` and `new.target` are unavailable inside direct eval — **RESOLVED**
+
+**Found:** 2026-09-24 (JSI35). **Pre-existing** in both tiers.
+
+- `function f() { return eval("arguments.length"); } f(1, 2)` → ReferenceError. `arguments` is not a bridged binding, and a MIR function does not materialize it for a direct eval.
+- `function F() { this.t = eval("typeof new.target"); } new F().t` → `"undefined"` (Node: `"function"`). Direct eval code always runs with an undefined `new.target`. Field initializers rely on that; ordinary functions should see their own `new.target`.
+
+Both fall out of the same environment-linking work as JS05-L5.
+
+**Fixed:** 2026-09-24 for interpreted callers, with JS05-L5. The eval frame borrows the caller frame's `this`, new.target, and home-object homes, so `new F().t` is `"function"` and a `super()` in eval code initializes the caller's `this`. `arguments` resolves through the caller's function record. A function whose body or nested arrow contains a direct eval now materializes it (`JsAstFunctionFacts::observes_direct_eval` feeds `JsCallableCode::uses_arguments` and blocks environment elision). MIR callers are unchanged (P4 residual).
+
+### JS05-L7 — `var x` in direct eval reads `undefined` over the caller's own `x` — **RESOLVED**
+
+**Found:** 2026-09-24 (JSI35). **Pre-existing** (MIR eval unit parity).
+
+```js
+function f() { var x = 1; return eval("var x; x"); }   // undefined (spec: 1)
+```
+
+The bridge flattens every enclosing scope into one namespace. EvalDeclaration- Instantiation must not alias an *outer* function's `x` (test262 `S11.13.1_A6_T1` pins that down), and the bridge cannot tell the caller's own `x` from an outer one. So an eval `var` starts from the activation journal or `undefined`. Assignments still reach the caller: `var x = 2` updates the journal, which the caller reads first. Environment linking resolves it.
+
+**Fixed:** 2026-09-24 for interpreted callers, with JS05-L5. EvalDeclarationInstantiation now targets the caller's nearest function variable environment (`js_interp_instantiate_linked_eval`). A name that record already binds is reused, so `var x; x` reads 1. A new name becomes a deletable eval binding on that record. An outer function's `x` is never aliased, because only the variable environment itself is consulted, and a Reference resolved before its right-hand side keeps its binding (`S11.13.1_A6_T1`). The same instantiation rejects a var that a caller block or parameter record already binds, except a catch parameter (Annex B.3.4). It skips an Annex-B block function whose name such a record binds (B.3.2.3). MIR callers keep the journal rule (P4 residual).
+
+### JS05-L8 — a lexical binding declared inside a `with` body loses to the with object — **OPEN**
+
+**Found:** 2026-09-24 while checking name-resolution order for JS05-L5. **Pre-existing** in the interpreter; MIR returns 2.
+
+```js
+function f() { var o = { x: 1 }; with (o) { let x = 2; return x; } }
+f();                      // AST: 1 (MIR and Node: 2)
+```
+
+The block record holding `let x` is inside the object environment, so it answers first. The interpreter instead probes the `with` stack before any static binding. The only exception is a binding that precedes the function's *captured* `with` depth (`js_interp_with_minimum_depth`). Nothing records where a `with` statement sits relative to the block records opened inside its body, so the probe cannot stop at them.

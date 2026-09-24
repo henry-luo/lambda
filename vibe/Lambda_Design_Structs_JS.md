@@ -792,6 +792,8 @@ another ABI change.
 > which each hold exactly one record, pays one 48 B container apiece, once per
 > realm.
 >
+> **Update 2026-09-24 — `eval_origin` removed.** Its only setter, `js_function_set_eval_origin`, was deleted as uncalled on 2026-09-22, and its only reader pushed the eval-source stack that the MIR eval unit fed before JSI35. The payload now holds five records (`bound`, `klass`, `with`, `ast`, `native`), a 40 B container.
+>
 > **JSCUO9 RESOLVED 2026-09-08 — the ratchet is restated as ≤ 128 B and met.**
 > `sizeof(JsFunction)` is now **exactly 128 B** and the record allocates from
 > the 128 B GC slot. Three changes got the last 48 B:

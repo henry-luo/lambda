@@ -49,7 +49,6 @@ extern const JsPreambleState* g_jm_preamble_in;
 static inline Runtime* js_current_runtime(void) {
     return context ? context->runtime : NULL;
 }
-#define js_dynamic_func_counter (js_runtime_state.dynamic_func_counter)
 
 typedef struct ActiveJsTranspileOwner {
     JsTranspiler* tp;

@@ -117,14 +117,6 @@ struct JsAstBody {
     Item lexical_new_target;
 };
 
-// Source origin of a dynamically compiled function.
-struct JsEvalOrigin {
-    String* filename;
-    String* source;
-    int64_t line_offset;
-    int64_t column_offset;
-};
-
 // One JS code record is shared by AST closures and MIR-interned values. Keep
 // definition facts and realm code facts directly on that owner: neither has an
 // independent allocation or identity (D6.2.1, D8.2.3; JSCU52).
@@ -153,7 +145,6 @@ struct JsCallableCode {
     uint8_t typed_array_element_type_plus_one;
     bool eval_initializer_context;
     uint8_t body_kind;
-    bool has_direct_eval;
     bool uses_arguments;
     // Parser-owned parameter shape is fixed for every closure of an AST
     // definition; activations must not rediscover it by walking the list.
@@ -194,7 +185,6 @@ struct JsFunctionPayload {
     JsWithData*   with;
     JsAstBody*    ast;
     JsNativeCode* native;
-    JsEvalOrigin* eval_origin;
 };
 
 struct JsFunction : Function {
@@ -243,7 +233,6 @@ inline const JsBoundData js_fn_bound_absent{};
 inline const JsClassData js_fn_class_absent{};
 inline const JsWithData js_fn_with_absent{};
 
-inline const JsEvalOrigin js_fn_eval_origin_absent{};
 inline const JsCallableCode js_fn_code_absent{};
 
 #define JS_FN_PAYLOAD_READ(fn, field) \
@@ -311,10 +300,6 @@ static inline JsScript* js_fn_ast_script(const JsFunction* fn) {
     const JsCallableCode* definition = js_fn_ast_definition(fn);
     return definition ? (JsScript*)definition->definition_module : NULL;
 }
-static inline bool js_fn_ast_has_direct_eval(const JsFunction* fn) {
-    const JsCallableCode* definition = js_fn_ast_definition(fn);
-    return definition && definition->has_direct_eval;
-}
 static inline bool js_fn_ast_uses_arguments(const JsFunction* fn) {
     const JsCallableCode* definition = js_fn_ast_definition(fn);
     return definition && definition->uses_arguments;
@@ -329,9 +314,6 @@ static inline const JsBoundData* js_fn_bound(const JsFunction* fn) {
 static inline const JsWithData* js_fn_with(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, with);
 }
-static inline const JsEvalOrigin* js_fn_eval_origin(const JsFunction* fn) {
-    return JS_FN_PAYLOAD_READ(fn, eval_origin);
-}
 static inline const JsClassData* js_fn_class(const JsFunction* fn) {
     return fn && fn->payload && fn->payload->klass ? fn->payload->klass
                                                    : &js_fn_class_absent;
@@ -342,7 +324,6 @@ JsAstBody* js_fn_ast_ensure(JsFunction* fn);
 JsBoundData* js_fn_bound_ensure(JsFunction* fn);
 JsClassData* js_fn_class_ensure(JsFunction* fn);
 JsWithData* js_fn_with_ensure(JsFunction* fn);
-JsEvalOrigin* js_fn_eval_origin_ensure(JsFunction* fn);
 JsCallableCode* js_fn_code_ensure(JsFunction* fn);
 JsCallableCode* js_callable_code_intern_mir(JsFunction* fn, void* func_ptr,
         Context* runtime_context, int param_count, uint32_t module_state_id);

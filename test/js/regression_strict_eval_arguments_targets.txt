@@ -1,0 +1,14 @@
+simple: SyntaxError
+compound: SyntaxError
+logical: SyntaxError
+update: SyntaxError
+array-pattern: SyntaxError
+object-pattern: SyntaxError
+shorthand-pattern: SyntaxError
+default-pattern: SyntaxError
+for-of-head: SyntaxError
+for-in-pattern: SyntaxError
+member-targets: accepted
+direct-compound: SyntaxError
+direct-pattern: SyntaxError
+direct-member: accepted
