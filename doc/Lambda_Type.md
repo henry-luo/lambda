@@ -404,14 +404,20 @@ type Article = <article title: string, author: string;
 | `fn (int) int` | Takes int, returns int |
 | `fn (int, int) int` | Takes two ints, returns int |
 | `fn (string, bool) string` | Takes string and bool, returns string |
-| `fn int` | No params, returns int (shorthand for `fn () int`) |
-| `fn ()` | No params, no meaningful return |
+| `fn () int` | No params, returns int |
+| `fn ()` | No params, any return (the return type is optional) |
 | `fn (a: int, b: int) int` | Named parameters (documentation only) |
 | `fn (name: string) string` | Named parameter (documentation only) |
 | `fn (fn (int) int) int` | Takes a function, returns int |
 | `fn (int) fn (int) int` | Returns a function |
 | `pn (int) int` | A procedure taking int, returning int |
 | `function` | Any function value, `fn` or `pn` |
+
+A signature always spells its parameter list, even an empty one: `fn () int`,
+never `fn int`. Its return type is optional and starts on the line of the `)`.
+A name opening the next line could equally begin a new statement, so it is an
+error: end a return-less signature with `;` when the next line starts with a
+name (S11.1.5v2, S16.2.3v3).
 
 ### Function Colours
 

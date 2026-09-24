@@ -272,8 +272,9 @@ pub fn element_ids(elements, relationships, expression) {
   else atomic_ids(elements, value)
 }
 
+// a reference list that is no sequence errors (S7.9.3): no match
 fn endpoint_matches(elements, endpoint, expression) =>
-  expression == "*" or contains(reference_ids(elements, expression), string(endpoint))
+  expression == "*" or contains(reference_ids(elements, expression), string(endpoint)) or false
 
 fn relation_atomic_matches(elements, relation, expression) {
   let value = trim(if (starts_with(expression, "relationship=="))

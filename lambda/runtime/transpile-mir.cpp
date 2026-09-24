@@ -4969,6 +4969,20 @@ static MIR_reg_t emit_box_bool(MirTranspiler* mt, MIR_reg_t val_reg) {
     return result;
 }
 
+// A raw Bool ABI result (BOOL_FALSE/TRUE/ERROR) keeps its native lane only
+// when the call is typed plain `bool`. A row that may return error types the
+// call `bool | error`, and an error-capable source never enters a native lane
+// (S7.8.1): box it, so BOOL_ERROR becomes the error Item that `if`, `not`,
+// and `or` read by Lambda truthiness (S7.9.2) rather than as C truth. Postfix
+// `^` also takes the Item: transpile_propagated_result tests its error tag
+// before unboxing, and a raw lane there was read as an Item pointer.
+static MIR_reg_t emit_sys_bool_result(MirTranspiler* mt, AstCallNode* call_node,
+        MIR_reg_t raw) {
+    return !call_node->propagate &&
+            mir_expr_carrier_type(mt, (AstNode*)call_node) == LMD_TYPE_BOOL
+        ? emit_uext8(mt, raw) : emit_box_bool(mt, raw);
+}
+
 static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg) {
     MIR_reg_t is_zero = new_reg(mt, "is_null_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_zero),
@@ -27849,7 +27863,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t result = emit_call_2(mt, "fn_starts_with_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
-                RETURN_CALL_VALUE(emit_uext8(mt, result));
+                RETURN_CALL_VALUE(emit_sys_bool_result(mt, call_node, result));
             }
         }
         if (info->fn == SYSFUNC_ENDS_WITH && arg_count == 2) {
@@ -27865,7 +27879,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t result = emit_call_2(mt, "fn_ends_with_str", MIR_T_I64,
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
                     MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
-                RETURN_CALL_VALUE(emit_uext8(mt, result));
+                RETURN_CALL_VALUE(emit_sys_bool_result(mt, call_node, result));
             }
         }
 
@@ -28209,7 +28223,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             if (c_ret_tid == LMD_TYPE_DTIME) { result = emit_box_dtime_value(mt, result); }
 
         #define POST_PROCESS_BOOL(result) \
-            if (c_ret_tid == LMD_TYPE_BOOL) { result = emit_uext8(mt, result); }
+            if (c_ret_tid == LMD_TYPE_BOOL) { \
+                result = emit_sys_bool_result(mt, call_node, result); \
+            }
 
 
         // Helper: when a sys func returns a boxed Item (c_ret_tid=ANY) but the

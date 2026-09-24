@@ -29,13 +29,13 @@ expression continuation in Lambda surface syntax.
 **Spec linkage**: This document is the decision record; **`S16` is the
 authority.** Cite `S16.#` in discussion and downstream docs, not this
 document's section numbers. Map: §3.1 → S16.1.1, §3.2 → S16.1.2–S16.1.3v2 +
-S16.2.1, §3.3 → S16.2.2v2–S16.2.3v2 + S16.2.5, §3.4/§7.15 → S16.2.4v3, §3.6 →
+S16.2.1, §3.3 → S16.2.2v2–S16.2.3v3 + S16.2.5, §3.4/§7.15 → S16.2.4v3, §3.6 →
 S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 §5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
-S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7 (v2: now points to S2.6),
-§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6v2 + S16.8.6v3.
+S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v3, §7.23 → S16.7 (v2: now points to S2.6),
+§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6v2 + S16.8.6v3, §7.29 → S11.1.5v2 + S16.2.3v3.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -3128,6 +3128,47 @@ in string islands too (`\(d{3})`).
 **Syntax note.** Postfix `{` in type position is a new production; S16.4's
 brace rules govern braces as *expressions*, so no conflict, but a line break
 before the `{` starts a statement under S16.2.2v2.
+
+### 7.29 Function-type signatures spell the parameter list (decided 2026-09-24 — ratified as S11.1.5v2, S16.2.3v3)
+
+> **Implemented 2026-09-24** in both front ends: the C statement parser's type
+> slot and `parse_fn_type` in `parse_type_pattern.cpp`; the Tree-sitter
+> `fn_type` rule and the scanner's zero-width `_fn_return` guard. S16 harness
+> C 302/302, Tree-sitter 285/285; no corpus file used the retired shorthand.
+
+**Question.** `fn int` was documented as shorthand for `fn () int`. With bare
+`fn` also a type — the colour test of S11.1.5 — the shorthand read either as
+a no-parameter function returning `int` or as `fn` followed by a name, and
+nothing in the spelling marked where a return type starts. Should a function
+type always spell its parameters?
+
+**Ruling (USER).** Yes. A signature is `fn (params)` followed by an optional
+return type: `fn () int`, `fn (x: int) int`, and `fn int` is retired. Without
+a return type, `fn ()` and `fn (x: int)` constrain only the parameters and
+return `any`. Bare `fn`, `pn` and `function` stay the colour types. A return
+type may itself be a signature, `fn (x: int) fn (y: int) int`, which is how
+the C type slot already read a curried type.
+
+**Line breaks (USER: error at line start).** An optional return type creates
+a new dual-role position. After `type F = fn (x: int)`, a line-start `int`
+could be the return type or a new statement, so by S16.2.3 it is an error
+and neither reading is guessed. The return type starts on the line of the
+`)`, and `;` ends a return-less signature. A keyword that cannot begin a
+return type (a statement keyword, or a declaration head such as `fn f`)
+starts the next statement as usual. Ratified as S16.2.3v3.
+
+**`{` is never a return type.** A brace after a signature is a body or a
+block (`if f is fn () { 1 }`), as it is after every return type (§7.28).
+
+**Left open: a suffix after a signature (SO45).** With the return type
+optional, the `?` in `fn (x: int)?` could only bind to the function type,
+while in `fn () int?` it binds to the return type. Until that is ruled, both
+front ends reject a suffix directly on a function type — bare `fn?` and
+`fn[]` included — and grouping spells it: `(fn (x: int))?`.
+
+**Not decided here.** Lambda_Type.md's positional form `fn (int) int` (types
+without parameter names) is a separate, older disagreement: the C parser
+reads `int` as a parameter *name*, and Tree-sitter rejects the form.
 
 ## Appendix S — Superseded Rulings
 

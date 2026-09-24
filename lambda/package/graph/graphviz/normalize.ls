@@ -193,8 +193,9 @@ fn expand_segments(groups, i, st, statement, defaults, direct, directed, strict)
   }
 }
 
+// a non-text compass lowers to an error (S7.9.3): not a valid compass
 pub fn valid_compass(value) => value == null or
-  contains(["n", "ne", "e", "se", "s", "sw", "w", "nw", "c", "_"], lower(value))
+  contains(["n", "ne", "e", "se", "s", "sw", "w", "nw", "c", "_"], lower(value)) or false
 
 fn endpoint_compass_diagnostic(st, endpoint) {
   if (valid_compass(endpoint.compass)) st

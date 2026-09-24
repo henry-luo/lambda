@@ -62,7 +62,8 @@ pub fn value_is_email(text) {
 }
 
 pub fn value_is_url(text) {
-    starts_with(text, "http://") or starts_with(text, "https://")
+    // a non-text value is no URL: its error (S7.9.3) answers false
+    starts_with(text, "http://") or starts_with(text, "https://") or false
 }
 
 // --- the constraint pass ---------------------------------------------------

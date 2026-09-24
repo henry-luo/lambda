@@ -48,7 +48,7 @@ Type Operators:
 | `[int*]` | Bracket form: array of 0+ ints |
 | `[int+]` | Bracket form: array of 1+ ints |
 | `fn (a: int, b: string) bool` | Function type |
-| `fn int` | Same as fn () int |
+| `fn () int` | Function type with no parameters |
 | `{a: int, b: bool}` | Map type |
 | `<div id:symbol; <br>>` | Element type |
 

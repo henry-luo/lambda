@@ -753,8 +753,27 @@ Item scalar_storage_read(Item item, bool immortal) {
 #endif
 }
 
+// array_num_element_offset's strided case: the view's shape maps a C-order
+// position to its offset from `data`, the last axis varying fastest.
+extern "C" __attribute__((noinline)) int64_t array_num_strided_offset(
+        const ArrayNum* array, int64_t position) {
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
+    const int64_t* dims = array_num_shape_dims(shape);
+    const int64_t* strides = array_num_shape_strides(shape);
+    int64_t offset = 0;
+    for (int axis = shape->ndim - 1; axis >= 0; axis--) {
+        if (dims[axis] <= 0) return 0;
+        offset += (position % dims[axis]) * strides[axis];
+        position /= dims[axis];
+    }
+    return offset;
+}
+
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
-    if (!array || offset < 0 || offset >= array->length) return ItemNull;
+    // `length` bounds a dense array's offsets; a strided view's offsets come
+    // from its shape and may pass it (offset 3 of a transposed 2 x 3 row)
+    if (!array || offset < 0 ||
+            (offset >= array->length && array_num_is_dense(array))) return ItemNull;
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = lambda_int_box_lane(array->items[offset])};
         case ELEM_INT64:

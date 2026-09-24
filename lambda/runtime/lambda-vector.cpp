@@ -80,7 +80,9 @@ Item vector_get(Item item, int64_t index) {
     TypeId type = get_type_id(item);
     switch (type) {
         case LMD_TYPE_ARRAY_NUM: {
-            return array_num_read_item(item.array_num, index);
+            // `index` is a C-order leaf position; a strided view maps it
+            return array_num_read_item(item.array_num,
+                array_num_element_offset(item.array_num, index));
         }
         case LMD_TYPE_ARRAY:
             // Transforms and generic vector fallbacks consume semantic Items.
@@ -2443,7 +2445,10 @@ Item fn_all(Item item) {
         return ItemError;
     }
     // ELEM_BOOL fast path
-    if (type == LMD_TYPE_ARRAY_NUM && item.array_num->get_elem_type() == ELEM_BOOL) {
+    // a dense bool lane scans its bytes; a strided view (a row of a
+    // transposed mask) walks its positions through vector_get below
+    if (type == LMD_TYPE_ARRAY_NUM && item.array_num->get_elem_type() == ELEM_BOOL &&
+            array_num_is_dense(item.array_num)) {
         uint8_t* data = (uint8_t*)item.array_num->data;
         for (int64_t i = 0; i < len; i++) {
             if (!data[i]) return (Item){ .item = b2it(BOOL_FALSE) };
@@ -2467,7 +2472,10 @@ Item fn_any(Item item) {
         return ItemError;
     }
     // ELEM_BOOL fast path
-    if (type == LMD_TYPE_ARRAY_NUM && item.array_num->get_elem_type() == ELEM_BOOL) {
+    // a dense bool lane scans its bytes; a strided view (a row of a
+    // transposed mask) walks its positions through vector_get below
+    if (type == LMD_TYPE_ARRAY_NUM && item.array_num->get_elem_type() == ELEM_BOOL &&
+            array_num_is_dense(item.array_num)) {
         uint8_t* data = (uint8_t*)item.array_num->data;
         for (int64_t i = 0; i < len; i++) {
             if (data[i]) return (Item){ .item = b2it(BOOL_TRUE) };
@@ -3155,6 +3163,16 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     // negative offsets clamp, they do not wrap from the end
     lambda_clamp_slice_range(len, &start, &end);
     int64_t view_len = end - start;
+    // A strided rank-one source (a row of a transposed matrix) keeps its
+    // stride. A non-contiguous N-D source has no one stride over its leaves.
+    int64_t stride = 1;
+    if (!array_num_is_dense(base)) {
+        if (array_num_rank(base) != 1) {
+            log_error("fn_view: cannot view a non-contiguous N-D array; copy() first");
+            return ItemError;
+        }
+        stride = array_num_shape_strides((ArrayNumShape*)(uintptr_t)base->extra)[0];
+    }
 
     ArrayNumElemType etype = base->get_elem_type();
 
@@ -3175,18 +3193,18 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     view->length = view_len;
     view->capacity = view_len;
 
-    // allocate shape side-table: ndim=1, base ref, offset for diagnostics, shape[0]=len, strides[0]=1
+    // allocate shape side-table: ndim=1, base ref, offset for diagnostics, shape[0]=len, strides[0]
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return ItemError;
     view = rooted_view.get();
     base = rooted_base.get();
     shape->ndim = 1;
-    shape->is_c_contig = 1;
-    shape->is_f_contig = 1;
-    if (!array_num_init_derived_view(view, shape, base, start)) return ItemError;
+    shape->is_c_contig = stride == 1;
+    shape->is_f_contig = stride == 1;
+    if (!array_num_init_derived_view(view, shape, base, start * stride)) return ItemError;
     shape->data[0] = view_len;  // shape[0]
-    shape->data[1] = 1;          // strides[0] in elements
+    shape->data[1] = stride;     // strides[0] in elements
     view->extra = (int64_t)(uintptr_t)shape;
 
     return { .array_num = view };

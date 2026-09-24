@@ -366,6 +366,21 @@ static const TierParityFixture kTune27TierParity[] = {
     // re-tagged a binding's ItemNull, which only a compiling tier shows.
     {"test/lambda/proc/nullable_lane_bindings.ls",
      "test/lambda/proc/nullable_lane_bindings.txt"},
+    // S11.1.5v2: a call through a function-type contract yields the signature's
+    // return type, curried calls included. The JIT unboxes such a call result
+    // by that type and a map literal lays out its field by it, so a result
+    // typed as the wrong kind segfaulted on both tiers.
+    {"test/lambda/fn_type_curried_call.ls", "test/lambda/fn_type_curried_call.txt"},
+    // Typed Array 4 Scope 3: a view reads and writes through its strides. A
+    // row of a transposed matrix read and wrote its base's next elements on
+    // both tiers; the JIT's own fast paths must keep bailing for views.
+    {"test/lambda/proc/array_view_strides.ls",
+     "test/lambda/proc/array_view_strides.txt"},
+    // S7.9.3/S1.6: a `bool` system function's error result stays an error.
+    // The JIT narrowed any/all through truthiness (`false`) and branched on
+    // the BOOL_ERROR of contains/starts_with as truth; interp kept the Item.
+    {"test/lambda/proc/sysfunc_bool_error_lane.ls",
+     "test/lambda/proc/sysfunc_bool_error_lane.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

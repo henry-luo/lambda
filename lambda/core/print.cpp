@@ -490,10 +490,11 @@ struct PrintItemVisitor {
         ArrayNum* array = item.ptr();
         ArrayNumElemType et = array->get_elem_type();
 
-        // N-D path: traverse via shape/strides for nested output
+        // N-D path: traverse via shape/strides for nested output. A strided
+        // rank-one view (a row of a transposed matrix) walks its stride too.
         if (array->is_ndim && array->extra) {
             ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
-            if (shape && shape->ndim >= 2) {
+            if (shape && (shape->ndim >= 2 || !array_num_is_dense(array))) {
                 print_array_num_nd(strbuf, array, et,
                                    array_num_shape_dims(shape),
                                    array_num_shape_strides(shape),
@@ -747,21 +748,23 @@ void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
     } else if (type_id == LMD_TYPE_ARRAY_NUM && item.array_num->is_spreadable) {
         ArrayNum *array = item.array_num;
         ArrayNumElemType et = array->get_elem_type();
+        // positions map through the stride of a view (array_num_element_offset)
         if (et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
-                print_double(strbuf, array->float_items[i]);
+                print_double(strbuf, array->float_items[array_num_element_offset(array, i)]);
             }
         } else if (et == ELEM_INT || et == ELEM_INT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
-                print_packed_int_elem(strbuf, et, array, i);
+                print_packed_int_elem(strbuf, et, array, array_num_element_offset(array, i));
             }
         } else {
             // compact sized types
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
-                Item val = array_num_read_borrowed_item(array, i);
+                Item val = array_num_read_borrowed_item(array,
+                    array_num_element_offset(array, i));
                 print_item(strbuf, val, 0, indent);
             }
         }
