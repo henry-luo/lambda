@@ -10,7 +10,10 @@ SourceTracker::SourceTracker(const char* source, size_t len)
     , source_len_(len)
     , current_(source)
     , location_(0, 1, 1)
-    , line_starts_(MEM_CAT_INPUT_OTHER, source_len_ / 40 + 16)
+    , synced_(0)
+    // the line index is built only on demand (error context), so start small
+    // instead of reserving one slot per 40 source bytes up front
+    , line_starts_(MEM_CAT_INPUT_OTHER, 16)
     , line_index_built_(false)
     , line_index_failed_(false)
     , extract_buf_(strbuf_new_cap(256))
@@ -34,16 +37,16 @@ bool SourceTracker::pushLineStart(size_t offset) {
 
 void SourceTracker::buildLineIndex() {
     if (line_index_built_) return;
-
     line_starts_.clear();
     pushLineStart(0);
-
-    for (size_t i = 0; i < source_len_; ++i) {
-        if (source_[i] == '\n') {
-            if (!pushLineStart(i + 1)) break;
-        }
+    const char* p = source_;
+    const char* end = source_ + source_len_;
+    while (p < end) {
+        const char* nl = (const char*)memchr(p, '\n', (size_t)(end - p));
+        if (!nl) break;
+        if (!pushLineStart((size_t)(nl - source_) + 1)) break;
+        p = nl + 1;
     }
-
     line_index_built_ = true;
 }
 
@@ -54,27 +57,34 @@ char SourceTracker::peek(size_t ahead) const {
     return current_[ahead];
 }
 
-bool SourceTracker::advance(size_t count) {
-    for (size_t i = 0; i < count; ++i) {
-        if (atEnd()) return false;
-
-        char c = *current_;
-        current_++;
-        location_.offset++;
-
-        if (c == '\n') {
-            location_.line++;
-            location_.column = 1;
-
-            // Track line start for context extraction
-            if (!line_index_built_) pushLineStart(location_.offset);
-        } else if (!isUtf8Continuation((unsigned char)c)) {
-            // Only increment column for non-continuation bytes
-            location_.column++;
-        }
+// Catch line/column up from synced_ to the current offset: newlines via
+// memchr, then the column counts the non-continuation bytes after the last
+// newline -- the same values the per-byte loop produced. Queries are mostly
+// forward, so the total work stays linear; a backward move (reset, seek)
+// recounts from the start.
+void SourceTracker::sync() const {
+    size_t off = (size_t)(current_ - source_);
+    if (off == synced_) return;
+    if (off < synced_) {
+        location_ = SourceLocation(0, 1, 1);
+        synced_ = 0;
     }
-
-    return true;
+    const char* p = source_ + synced_;
+    const char* end = source_ + off;
+    const char* col_from = p;
+    for (const char* nl = (const char*)memchr(p, '\n', (size_t)(end - p)); nl;
+            nl = (const char*)memchr(nl + 1, '\n', (size_t)(end - nl - 1))) {
+        location_.line++;
+        location_.column = 1;
+        col_from = nl + 1;
+    }
+    size_t lead = 0;
+    for (const char* q = col_from; q < end; q++) {
+        lead += !isUtf8Continuation((unsigned char)*q);
+    }
+    location_.column += lead;
+    location_.offset = off;
+    synced_ = off;
 }
 
 bool SourceTracker::advanceChar() {
@@ -86,7 +96,6 @@ bool SourceTracker::advanceChar() {
     // Skip UTF-8 continuation bytes
     while (!atEnd() && isUtf8Continuation((unsigned char)*current_)) {
         current_++;
-        location_.offset++;
     }
 
     return true;
@@ -148,15 +157,14 @@ const char* SourceTracker::extractLine(size_t line_num) {
 }
 
 const char* SourceTracker::getContextLine() {
-    return extractLine(location_.line);
+    return extractLine(line());
 }
 
 void SourceTracker::reset() {
+    // the line index depends only on the source, so it survives a reset
     current_ = source_;
     location_ = SourceLocation(0, 1, 1);
-    line_starts_.clear();
-    pushLineStart(0);
-    line_index_built_ = false;
+    synced_ = 0;
 }
 
 bool SourceTracker::seek(size_t offset) {

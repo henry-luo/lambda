@@ -37,45 +37,69 @@ static void json_consume_comma_or_recover(InputContext& ctx, const char** json,
     skip_whitespace(json);
 }
 
-static String* parse_string(InputContext& ctx, const char **json) {
+// End of the run of plain string bytes starting at p: the first quote,
+// backslash, or control byte (NUL included, so the scan cannot pass the end).
+static inline const char* json_string_run_end(const char* p) {
+    while ((unsigned char)*p >= 0x20 && *p != '"' && *p != '\\') p++;
+    return p;
+}
+
+// Scan a JSON string and return its decoded bytes as a slice: straight from
+// the source when it has no escapes, otherwise from ctx.sb (valid until the
+// next string). Plain runs are appended and advanced in bulk; the per-byte
+// append and tracker update were two fifths of JSON parse time.
+static bool parse_string_raw(InputContext& ctx, const char **json,
+        const char** out_chars, size_t* out_len) {
     SourceTracker& tracker = ctx.tracker;
 
     if (**json != '"') {
         ctx.addError(tracker.location(), "Expected '\"' to start string");
-        return nullptr;
+        return false;
     }
-
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
 
     (*json)++; // Skip opening quote
     tracker.advance(1);
 
+    // no escapes: the value is a slice of the source, one copy at creation
+    const char* start = *json;
+    const char* run_end = json_string_run_end(start);
+    if (*run_end == '"') {
+        *out_chars = start;
+        *out_len = (size_t)(run_end - start);
+        *json = run_end + 1;
+        tracker.advance(*out_len + 1);
+        return true;
+    }
+
+    StringBuf* sb = ctx.sb;
+    stringbuf_reset(sb);
+
     while (**json && **json != '"') {
+        const char* run = *json;
+        const char* q = json_string_run_end(run);
+        if (q > run) {
+            stringbuf_append_str_n(sb, run, (size_t)(q - run));
+            tracker.advance((size_t)(q - run));
+            *json = q;
+            continue;
+        }
         unsigned char c = (unsigned char)**json;
         // JSON does not allow unescaped control characters U+0000-U+001F
         if (c < 0x20) {
             ctx.addError(tracker.location(), "Unexpected control character in string");
-            return nullptr;
+            return false;
         }
-        if (**json == '\\') {
-            (*json)++;
-            tracker.advance(1);
-
-            if (!**json) {
-                ctx.addError(tracker.location(), "Unexpected end of string after escape");
-                return nullptr;
-            }
-
-            int consumed = parse_escape_char(json, sb);
-            tracker.advance(consumed);
-            continue;
-        } else {
-            stringbuf_append_char(sb, **json);
-        }
+        // a backslash: the only other byte that ends a run
         (*json)++;
         tracker.advance(1);
+
+        if (!**json) {
+            ctx.addError(tracker.location(), "Unexpected end of string after escape");
+            return false;
+        }
+
+        int consumed = parse_escape_char(json, sb);
+        tracker.advance(consumed);
     }
 
     if (**json == '"') {
@@ -83,10 +107,19 @@ static String* parse_string(InputContext& ctx, const char **json) {
         tracker.advance(1);
     } else {
         ctx.addError(tracker.location(), "Unterminated string");
-        return nullptr;
+        return false;
     }
 
-    return builder.createString(sb->str->chars, sb->length);
+    *out_chars = sb->str->chars;
+    *out_len = sb->length;
+    return true;
+}
+
+static String* parse_string(InputContext& ctx, const char **json) {
+    const char* chars = nullptr;
+    size_t len = 0;
+    if (!parse_string_raw(ctx, json, &chars, &len)) return nullptr;
+    return ctx.builder.createString(chars, len);
 }
 
 static Item parse_number(InputContext& ctx, const char **json) {
@@ -182,8 +215,12 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         }
 
         // JSON keys are strings; preserve empty/non-identifier keys instead of symbol spelling.
-        String* key_str = parse_string(ctx, json);
-        String* key = key_str ? ctx.builder.createName(key_str->chars, key_str->len) : nullptr;
+        // keys go straight to the name pool from the scanned slice, without
+        // the throwaway arena String parse_string would build first
+        const char* key_chars = nullptr;
+        size_t key_len = 0;
+        String* key = parse_string_raw(ctx, json, &key_chars, &key_len)
+            ? ctx.builder.createName(key_chars, key_len) : nullptr;
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             if (json_recover_to_separator(ctx, json, '}', true)) continue;

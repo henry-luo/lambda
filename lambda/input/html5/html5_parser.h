@@ -286,6 +286,9 @@ void html5_close_p_element(Html5Parser* parser);
 Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token);
 Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token);
 void html5_insert_character(Html5Parser* parser, char c);
+// Insert a run of text bytes: the same as html5_insert_character for each
+// byte, with one parent lookup and one bulk append.
+void html5_insert_text(Html5Parser* parser, const char* text, size_t len);
 void html5_foster_parent_character(Html5Parser* parser, char c);
 void html5_flush_foster_text(Html5Parser* parser);
 void html5_insert_comment(Html5Parser* parser, Html5Token* token);

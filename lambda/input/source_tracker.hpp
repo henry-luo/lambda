@@ -18,7 +18,14 @@ private:
     size_t source_len_;         // Total length of source
     const char* current_;       // Current position
 
-    SourceLocation location_;   // Current location
+    // Line and column are derived lazily: advance() only moves current_, and
+    // location()/line()/column() catch location_ up from synced_. Eager
+    // per-byte tracking (newline, UTF-8 continuation, offset and column
+    // stores on every byte) was a quarter of JSON parse time (string tuning
+    // P3). The derived values are identical at every query.
+    mutable SourceLocation location_;   // valid at offset synced_
+    mutable size_t synced_;
+    void sync() const;
 
     // Line start positions for fast context extraction. Grown from the
     // document (SCU16): a tracker never embeds a maximum-document table, so
@@ -55,10 +62,10 @@ public:
     SourceTracker& operator=(const SourceTracker&) = delete;
 
     // Current position info
-    const SourceLocation& location() const { return location_; }
-    size_t offset() const { return location_.offset; }
-    size_t line() const { return location_.line; }
-    size_t column() const { return location_.column; }
+    const SourceLocation& location() const { sync(); return location_; }
+    size_t offset() const { return (size_t)(current_ - source_); }
+    size_t line() const { sync(); return location_.line; }
+    size_t column() const { sync(); return location_.column; }
 
     // Current character access
     char current() const { return *current_; }
@@ -66,8 +73,17 @@ public:
     bool atEnd() const { return current_ >= source_ + source_len_; }
     size_t remaining() const { return (source_ + source_len_) - current_; }
 
-    // Movement - returns true if successful
-    bool advance(size_t count = 1);
+    // Movement - returns true if successful. Inline and position-only: a
+    // parser may call it for every character.
+    bool advance(size_t count = 1) {
+        size_t rest = remaining();
+        if (count <= rest) {
+            current_ += count;
+            return true;
+        }
+        current_ += rest;   // stop at the end, as the per-byte loop did
+        return false;
+    }
     bool advanceChar();  // Advance one UTF-8 character
 
     // Skip whitespace, return number of chars skipped

@@ -1084,17 +1084,14 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
     if (token->type == HTML5_TOKEN_CHARACTER) {
         // Insert the character into current element
         if (token->data && token->data->len > 0) {
-            for (uint32_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                // Check if we should skip leading newline (for textarea, pre)
-                if (parser->ignore_next_lf) {
-                    parser->ignore_next_lf = false;
-                    if (c == '\n') {
-                        continue;  // skip this newline
-                    }
-                }
-                html5_insert_character(parser, c);
+            // the leading-newline skip (textarea, pre) applies to the first
+            // character only; the rest goes in as one run
+            uint32_t skip = 0;
+            if (parser->ignore_next_lf) {
+                parser->ignore_next_lf = false;
+                if (token->data->chars[0] == '\n') skip = 1;  // skip this newline
             }
+            html5_insert_text(parser, token->data->chars + skip, token->data->len - skip);
         }
         return;
     }
@@ -1166,21 +1163,24 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             if (has_non_whitespace) {
                 html5_reconstruct_active_formatting_elements(parser);
             }
-            // Insert all characters from the token
-            for (uint32_t i = 0; i < token->data->len; i++) {
-                char c = token->data->chars[i];
-                // Check if we should skip leading newline (for pre, listing)
-                if (parser->ignore_next_lf) {
-                    parser->ignore_next_lf = false;
-                    if (c == '\n') {
-                        continue;  // skip this newline
-                    }
-                }
-                if (c == '\0') {
-                    log_error("html5: null character in body");
-                    continue;  // skip null, process rest
-                }
-                html5_insert_character(parser, c);
+            // Insert the token's text in runs: the leading-newline skip (pre,
+            // listing) applies to the first character only, and each NUL is
+            // skipped with an error. Per-byte insertion re-looked-up the
+            // parent and appended one byte at a time.
+            const char* chars = token->data->chars;
+            uint32_t len = token->data->len;
+            uint32_t i = 0;
+            if (parser->ignore_next_lf) {
+                parser->ignore_next_lf = false;
+                if (chars[0] == '\n') i = 1;  // skip this newline
+            }
+            while (i < len) {
+                const char* nul = (const char*)memchr(chars + i, '\0', len - i);
+                uint32_t run_end = nul ? (uint32_t)(nul - chars) : len;
+                html5_insert_text(parser, chars + i, run_end - i);
+                if (!nul) break;
+                log_error("html5: null character in body");
+                i = run_end + 1;  // skip null, process rest
             }
         }
         return;

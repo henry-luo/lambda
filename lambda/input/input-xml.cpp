@@ -103,6 +103,18 @@ static void append_xml_reference(StringBuf* sb, const char** xml, const char* li
     }
 }
 
+// Position of the first three-byte terminator ("-->", "]]>") at or after p,
+// or of the NUL if there is none -- where the strncmp-at-every-offset loops
+// stopped. strchr jumps to each candidate first byte (libc vectorizes it).
+static const char* xml_find_terminator(const char* p, const char* term) {
+    for (;;) {
+        const char* hit = strchr(p, term[0]);
+        if (!hit) return p + strlen(p);
+        if (hit[1] == term[1] && hit[2] == term[2]) return hit;
+        p = hit + 1;
+    }
+}
+
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char) {
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
@@ -111,10 +123,13 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
     while (**xml && **xml != end_char) {
         if (**xml == '&') {
             append_xml_reference(sb, xml, nullptr, true);
-        } else {
-            stringbuf_append_char(sb, **xml);
-            (*xml)++;
+            continue;
         }
+        // append the plain run up to the quote, '&' or NUL in one call
+        const char* run = *xml;
+        while (*run && *run != end_char && *run != '&') run++;
+        stringbuf_append_str_n(sb, *xml, (size_t)(run - *xml));
+        *xml = run;
     }
 
     return builder.createString(sb->str->chars, sb->length);
@@ -193,9 +208,7 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
     const char* comment_start = *xml;
     const char* comment_end = comment_start;
 
-    while (*comment_end && strncmp(comment_end, "-->", 3) != 0) {
-        comment_end++;
-    }
+    comment_end = xml_find_terminator(comment_start, "-->");
 
     // Create comment element
     ElementBuilder element = builder.element("!--");
@@ -227,9 +240,7 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
     const char* cdata_start = *xml;
 
     // Find CDATA end
-    while (**xml && strncmp(*xml, "]]>", 3) != 0) {
-        (*xml)++;
-    }
+    *xml = xml_find_terminator(*xml, "]]>");
 
     // Create CDATA content string
     StringBuf* sb = ctx.sb;
@@ -615,9 +626,8 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
             } else {
                 // Text content - trim leading/trailing whitespace for better handling
                 const char* text_start = *xml;
-                while (**xml && **xml != '<') {
-                    (*xml)++;
-                }
+                const char* next_tag = strchr(*xml, '<');
+                *xml = next_tag ? next_tag : *xml + strlen(*xml);
 
                 if (*xml > text_start) {
                     // Create text content
@@ -642,10 +652,14 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
                         while (text_start < text_end) {
                             if (*text_start == '&') {
                                 append_xml_reference(sb, &text_start, text_end, false);
-                            } else {
-                                stringbuf_append_char(sb, *text_start);
-                                text_start++;
+                                continue;
                             }
+                            // one append per run between entity references
+                            const char* amp = (const char*)memchr(text_start, '&',
+                                (size_t)(text_end - text_start));
+                            const char* run_end = amp ? amp : text_end;
+                            stringbuf_append_str_n(sb, text_start, (size_t)(run_end - text_start));
+                            text_start = run_end;
                         }
 
                         String* processed_text = builder.createString(sb->str->chars, sb->length);

@@ -14,8 +14,8 @@
 | P0 | LR09-31 (formatter size caps) | waiting on the user (proposal §8-2) |
 | P1 | quadratic paths and few-line fixes: §5.2-1 to §5.2-5, §5.5-1 | done |
 | P2 | shared `lib/` kernels | done |
-| P3 | parser inner loops | next |
-| P4 | formatter loops | planned |
+| P3 | parser inner loops | done |
+| P4 | formatter loops | next |
 | P5 | structural | planned |
 
 ## P0 — correctness
@@ -104,6 +104,55 @@ Everything else was flat. On this machine the SWAR kernels were already close to
 - **LambdaJS:** the literal-regex checks are identical. A new 3,000-case string-method fuzz (`indexOf`/`lastIndexOf`/`includes`/`replace`/`replaceAll`/`split`) matches Node exactly on both the base and P2 binaries.
 - **Unit tests:** the kernels are checked against naive references in 5 new randomized tests (`StrKernelTest.*`), 244/244.
 
+## P3 — parser inner loops
+
+**Changes:**
+- **§5.6 shared: lazy `SourceTracker`.**
+  - `advance()` is inline and only moves the pointer.
+  - `location()`, `line()` and `column()` catch up from the last synced offset. They count newlines with `memchr` and columns as non-continuation bytes, so they return the same values the per-byte loop produced, and a backward move recounts from the start.
+  - The line index is built only on demand (error context), with `memchr`, instead of one push per newline during parsing. The up-front reservation of one slot per 40 source bytes (6.6 MB for a 33 MB file) is gone.
+- **JSON strings.**
+  - `parse_string_raw` returns a slice of the source when the string has no escapes, so there is one copy at creation. Otherwise it appends runs between escapes in bulk.
+  - Object keys go from that slice straight to the name pool, without the throwaway arena `String`.
+- **Markdown.** The inline prefilter is a 256-byte lookup table instead of `strpbrk`: 24% of the parse at P2. macOS `strpbrk` compares every byte with every set member. The same scan also yields the text length.
+- **YAML.** Scalars and keys take their `StrBuf` from a small per-parser stack (acquire/release) instead of a malloc/free pair per scalar (~30% of the parse at P2). The parse guard frees the stack.
+- **HTML.** `html5_insert_text` inserts a character token's text as runs, with one parent lookup and one append. It is used in the two hot paths (in body, and text mode for `script`/`style`/`title`), which keep the first-character newline skip and the per-NUL skip-with-error exactly.
+- **XML.**
+  - Attribute values and element text are appended in runs between entity references.
+  - The next `<` is found with `strchr`.
+  - Comment and CDATA ends use a `strchr` candidate scan for the three-byte terminator (`xml_find_terminator`) instead of `strncmp` at every offset.
+- **CSV.**
+  - Unquoted fields are created straight from the source slice (the scratch-buffer copy is gone).
+  - Quoted fields append runs up to each quote.
+- **PDF.** `endstream` and `endobj` are found with `str_find`, which is binary-safe like the `strncmp`-at-every-byte loops it replaced.
+
+**Results** (release, interleaved medians of 7):
+
+| Parser | P2 (ms) | P3 (ms) | P3 speedup | Since base `4bdafbd8c` |
+|---|---:|---:|---:|---:|
+| JSON, 33 MiB | 176.4 | 102.7 | 1.72× | 1.74× |
+| YAML, 11 MiB | 130.4 | 101.5 | 1.28× | 1.52× |
+| Markdown, 9 MiB | 147.1 | 115.4 | 1.27× | 2.57× |
+| Chinese HTML, 3.1 MiB | 35.7 | 29.9 | 1.19× | 4.11× |
+| CSV, 37 MiB | 151.0 | 129.7 | 1.16× | 1.29× |
+| HTML, 13 MiB | 204.6 | 181.9 | 1.12× | 1.17× |
+| XML, 23 MiB | 142.9 | 128.4 | 1.11× | 1.14× |
+
+JSON now parses at 322 MiB/s. Node's `JSON.parse` does 449 MiB/s on the same file, so the gap has narrowed from 2.5× to 1.4×.
+
+**Semantics unchanged:**
+- **Corpora:** the ten corpora parse to byte-identical trees.
+- **Repo test inputs:** 99 files across 16 formats, including CSV, HTML and subdirectories, produce identical output and diagnostics, Mermaid source spans included.
+- **JSON error reports:** twelve malformed JSON files (errors on later lines, after UTF-8, inside strings and escapes) report identical messages, lines and columns.
+- **Adversarial inputs:** 13 files aimed at the changed branches are identical:
+  - XML comment/CDATA terminator near-misses and unterminated forms;
+  - CSV `""` escapes, unclosed quotes and CRLF;
+  - HTML leading-newline skips;
+  - YAML nested deeper than the scratch stack;
+  - Markdown text with no markup.
+
+**Near-miss.** The scripted swap of `strbuf_free(sb)` for the YAML release call also rewrote the fallback inside the new `yaml_scratch_release`, making it call itself. It would only have fired with more than eight scratch buffers live, which tests would rarely reach. Counting replacements against allocations caught it: five frees against four allocations.
+
 ## Findings not yet filed
 
 These were found while measuring; each predates the branch (the base binary behaves the same). The two bugs go to the LambdaJS ledger once another session's edits to `vibe/JS_Issue_Ledger.md` have landed.
@@ -111,3 +160,6 @@ These were found while measuring; each predates the branch (the base binary beha
 - **LambdaJS `console.log` truncation:** a single call silently truncates its output at 4,095 bytes (`console.log("x".repeat(5000))` prints 4,095 characters). The base binary does the same. It hid most of the first JS fuzz run. To be filed in the LambdaJS ledger.
 - **Regex `split` cost:** LambdaJS regex `split` costs about 2.5 µs per input position (396 ms on 158 KB where Node takes under 1 ms), because it runs `exec` at every position (proposal §5.5-6). The literal-matcher change cannot help it; a bulk split path is needed.
 - **Pre-existing bug:** `"a/b".split(/\//)` does not split in LambdaJS, while Node splits it. The base binary behaves the same, so this predates the branch. To be filed in the LambdaJS ledger.
+- **JSON error messages print a literal `%s`.** `json_consume_comma_or_recover` reports `addError(loc, "%s", expected_message)`, and the output reads `error: %s`.
+- **`input()` stops at the first NUL byte of a file.** It reads the file as a NUL-terminated string, so an HTML document with a NUL in body text loses everything after it.
+- **CSV errors report a position of line 1, column 1.** The CSV parser does not advance the shared tracker.

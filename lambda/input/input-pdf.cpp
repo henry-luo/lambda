@@ -833,12 +833,8 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     const char* endobj_pos = nullptr;
     if (*pdf < ctx.source_end()) {
         size_t remaining = (size_t)(ctx.source_end() - *pdf);
-        for (size_t i = 0; i + 6 <= remaining; i++) {
-            if (strncmp(*pdf + i, "endobj", 6) == 0) {
-                endobj_pos = *pdf + i;
-                break;
-            }
-        }
+        size_t endobj_at = str_find(*pdf, remaining, "endobj", 6);
+        if (endobj_at != STR_NPOS) endobj_pos = *pdf + endobj_at;
     }
     if (endobj_pos) {
         *pdf = endobj_pos + 6; // skip "endobj"
@@ -916,12 +912,10 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
         bytes_remaining = actual_remaining;
     }
     size_t max_search = bytes_remaining;
-    for (size_t i = 0; i + 9 <= max_search; i++) {
-        if (strncmp(search_start + i, "endstream", 9) == 0) {
-            end_stream = search_start + i;
-            break;
-        }
-    }
+    // candidate scan (memchr + memcmp, binary-safe like the strncmp-at-every-
+    // byte loop it replaces: a match needs all nine bytes, so NULs never match)
+    size_t stream_at = str_find(search_start, max_search, "endstream", 9);
+    if (stream_at != STR_NPOS) end_stream = search_start + stream_at;
     
     if (!end_stream) return {.item = ITEM_ERROR};
 

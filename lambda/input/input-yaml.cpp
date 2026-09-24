@@ -70,7 +70,30 @@ struct YamlParser {
     // the first anchor; freed by the parse entry's guard.
     struct hashmap* anchors;
     int tag;
+
+    // Scratch StrBufs reused across scalars and keys: a malloc and free per
+    // scalar was ~30% of YAML parse time (string tuning P3). Used as a stack,
+    // so a scalar parsed inside another still gets a buffer of its own.
+    StrBuf* scratch[8];
+    int scratch_count;
 };
+
+static StrBuf* yaml_scratch_acquire(YamlParser* p, size_t cap) {
+    if (p->scratch_count > 0) {
+        StrBuf* sb = p->scratch[--p->scratch_count];
+        strbuf_reset(sb);
+        return sb;
+    }
+    return strbuf_new_cap(cap);
+}
+
+static void yaml_scratch_release(YamlParser* p, StrBuf* sb) {
+    if (p->scratch_count < (int)(sizeof(p->scratch) / sizeof(p->scratch[0]))) {
+        p->scratch[p->scratch_count++] = sb;
+        return;
+    }
+    strbuf_free(sb);
+}
 
 // SCU16 size budget: no embedded anchor table
 static_assert(sizeof(YamlParser) < 256, "YamlParser must not embed document-sized tables");
@@ -451,7 +474,7 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
 
 static Item parse_double_quoted(YamlParser* p) {
     advance(p); // skip opening "
-    StrBuf* sb = strbuf_new_cap(64);
+    StrBuf* sb = yaml_scratch_acquire(p, 64);
     // safe_length tracks the buffer position after the last escape-produced character.
     // when trimming for line folding, we must not trim past this point to preserve
     // characters produced by escape sequences (e.g., \t should not be trimmed).
@@ -533,7 +556,7 @@ static Item parse_double_quoted(YamlParser* p) {
 
     if (!at_end(p) && peek(p) == '"') advance(p);
     Item result = (sb->length == 0) ? make_empty_string(p) : p->ctx->builder.createStringItem(sb->str);
-    strbuf_free(sb);
+    yaml_scratch_release(p, sb);
     return result;
 }
 
@@ -543,7 +566,7 @@ static Item parse_double_quoted(YamlParser* p) {
 
 static Item parse_single_quoted(YamlParser* p) {
     advance(p); // skip opening '
-    StrBuf* sb = strbuf_new_cap(64);
+    StrBuf* sb = yaml_scratch_acquire(p, 64);
 
     while (!at_end(p)) {
         if (peek(p) == '\'') {
@@ -565,7 +588,7 @@ static Item parse_single_quoted(YamlParser* p) {
     }
 
     Item result = (sb->length == 0) ? make_empty_string(p) : p->ctx->builder.createStringItem(sb->str);
-    strbuf_free(sb);
+    yaml_scratch_release(p, sb);
     return result;
 }
 
@@ -779,7 +802,7 @@ static bool is_block_mapping_key(YamlParser* p, int offset) {
 // ============================================================================
 
 static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
-    StrBuf* sb = strbuf_new_cap(64);
+    StrBuf* sb = yaml_scratch_acquire(p, 64);
 
     while (!at_end(p)) {
         bool got_content = false;
@@ -905,7 +928,7 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
 done_plain:
 
     Item item = make_scalar(p, sb->str, false);
-    strbuf_free(sb);
+    yaml_scratch_release(p, sb);
     return item;
 }
 
@@ -973,7 +996,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
         }
     }
 
-    StrBuf* sb = strbuf_new_cap(64);
+    StrBuf* sb = yaml_scratch_acquire(p, 64);
     int trailing_newlines = 0;
     bool last_content_more = false; // whether last non-empty content line was more-indented
     bool had_content = false; // whether we've had any non-empty content line
@@ -1183,7 +1206,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
     } else {
         result = p->ctx->builder.createStringItem(sb->str);
     }
-    strbuf_free(sb);
+    yaml_scratch_release(p, sb);
     return result;
 }
 
@@ -1516,7 +1539,7 @@ static Item parse_mapping_key(YamlParser* p, int key_tag, int map_indent, bool e
         } else if (!at_end(p) && peek(p) == '*') {
             key_item = parse_alias(p);
         } else {
-            StrBuf* ksb = strbuf_new_cap(32);
+            StrBuf* ksb = yaml_scratch_acquire(p, 32);
             while (!at_end(p) && peek(p) != '\n') {
                 if (is_mapping_indicator(p)) break;
                 if (peek(p) == '#' && ksb->length > 0) {
@@ -1533,7 +1556,7 @@ static Item parse_mapping_key(YamlParser* p, int key_tag, int map_indent, bool e
                 p->tag = TAG_NONE;
                 key_item = make_scalar(p, ksb->str, false);
             }
-            strbuf_free(ksb);
+            yaml_scratch_release(p, ksb);
         }
     }
     return key_item;
@@ -1881,7 +1904,7 @@ static void parse_inline_mapping_tail(YamlParser* p, int parent_indent,
         } else if (peek(p) == '\'') {
             ki = parse_single_quoted(p);
         } else {
-            StrBuf* ksb = strbuf_new_cap(32);
+            StrBuf* ksb = yaml_scratch_acquire(p, 32);
             while (!at_end(p) && peek(p) != '\n') {
                 if (is_mapping_indicator(p)) break;
                 if (trim_scalar_comments && peek(p) == '#' && ksb->length > 0 &&
@@ -1895,7 +1918,7 @@ static void parse_inline_mapping_tail(YamlParser* p, int parent_indent,
             ksb->length = kl;
             ksb->str[kl] = '\0';
             ki = make_scalar(p, ksb->str, false);
-            strbuf_free(ksb);
+            yaml_scratch_release(p, ksb);
         }
         if (ka) store_anchor(p, ka, ki);
         skip_spaces(p);
@@ -2288,7 +2311,10 @@ void parse_yaml(Input *input, const char* yaml_str) {
     // the anchor index is parse-scoped; release it on every exit path
     struct AnchorGuard {
         YamlParser* p;
-        ~AnchorGuard() { AnchorMap::destroy(p->anchors); }
+        ~AnchorGuard() {
+            AnchorMap::destroy(p->anchors);
+            for (int i = 0; i < p->scratch_count; i++) strbuf_free(p->scratch[i]);
+        }
     } anchor_guard{p};
 
     // skip BOM

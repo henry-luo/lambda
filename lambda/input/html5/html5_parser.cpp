@@ -747,6 +747,20 @@ void html5_insert_character(Html5Parser* parser, char c) {
     parser->pending_text_parent = parent;
 }
 
+void html5_insert_text(Html5Parser* parser, const char* text, size_t len) {
+    if (len == 0) return;
+    Element* parent = html5_current_node(parser);
+    if (parent == nullptr) {
+        log_error("html5: cannot insert text, no current node");
+        return;
+    }
+    if (parser->pending_text_parent != nullptr && parser->pending_text_parent != parent) {
+        html5_flush_pending_text(parser);
+    }
+    stringbuf_append_str_n(parser->text_buffer, text, len);
+    parser->pending_text_parent = parent;
+}
+
 // Foster parent: insert text/element before the table element
 // Flush foster parented text buffer - inserts text before the table element
 void html5_flush_foster_text(Html5Parser* parser) {
