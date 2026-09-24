@@ -543,7 +543,8 @@ void profile_dump_to_file() {
     create_dir_recursive("temp");
     FILE* f = fopen("temp/phase_profile.txt", "w");
     if (!f) return;
-    // TSV format v3: build own-time detail separates replay from analyses;
+    // TSV format v3: build own-time detail separates the resolve walk from its
+    // inline analyses;
     // `plan`, `interp_exec` and `peak_rss_mb` remain the T0 report columns.
     // turnaround/memory report; JIT-tier rows carry 0 in the T0 columns.
     fprintf(f, "# Phase-Level Profile (LAMBDA_PROFILE=1) format=3\n");
@@ -1363,15 +1364,16 @@ typedef struct LambdaDirectFrontendPassContext {
     Transpiler* tp;
     const char* script_path;
     LambdaParseError parse_error;
-    LambdaReductionTape* reductions;
+    // the syntax tree `parse` builds and `build` resolves
+    LambdaSyntaxUnit* syntax;
     ArrayList* functions;
 } LambdaDirectFrontendPassContext;
 
 static int lambda_parse_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
-    if (!pass || !pass->tp || lambda_rd_parse_reductions(pass->tp->source,
-                strlen(pass->tp->source), &pass->reductions, &pass->parse_error) !=
+    if (!pass || !pass->tp || lambda_rd_parse_syntax(pass->tp, pass->tp->source,
+                strlen(pass->tp->source), &pass->syntax, &pass->parse_error) !=
                 LAMBDA_PARSE_OK) {
         if (pass && pass->tp) {
             record_direct_parse_diagnostics(pass->tp, pass->script_path,
@@ -1389,8 +1391,7 @@ static int lambda_build_compiler_pass(void* opaque) {
     LambdaDirectFrontendPassContext* pass =
         (LambdaDirectFrontendPassContext*)opaque;
     AstScript* root = NULL;
-    if (!pass || !pass->tp || lambda_rd_build_reductions(pass->tp,
-                pass->tp->source, strlen(pass->tp->source), pass->reductions,
+    if (!pass || !pass->tp || lambda_rd_resolve_syntax(pass->tp, pass->syntax,
                 &root, &pass->parse_error) != LAMBDA_PARSE_OK || !root) {
         if (pass && pass->tp) {
             record_direct_parse_diagnostics(pass->tp, pass->script_path,
@@ -1400,13 +1401,13 @@ static int lambda_build_compiler_pass(void* opaque) {
                 "direct AST construction failed");
         }
         if (pass) {
-            lambda_rd_destroy_reductions(pass->reductions);
-            pass->reductions = NULL;
+            lambda_rd_destroy_syntax(pass->syntax);
+            pass->syntax = NULL;
         }
         return 0;
     }
-    lambda_rd_destroy_reductions(pass->reductions);
-    pass->reductions = NULL;
+    lambda_rd_destroy_syntax(pass->syntax);
+    pass->syntax = NULL;
     pass->tp->ast_root = (AstNode*)root;
     return 1;
 }
@@ -1474,7 +1475,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_PARSE);
     if (!compiler_pass_manager_add(&tp->pass_manager, &parse_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
-        lambda_rd_destroy_reductions(front_end.reductions);
+        lambda_rd_destroy_syntax(front_end.syntax);
         if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }
@@ -1485,7 +1486,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     lambda_own_timing_set_phase(&own_timing, LAMBDA_OWN_TIMING_BUILD);
     if (!compiler_pass_manager_add(&tp->pass_manager, &build_pass) ||
             !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
-        lambda_rd_destroy_reductions(front_end.reductions);
+        lambda_rd_destroy_syntax(front_end.syntax);
         if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
         return;
     }

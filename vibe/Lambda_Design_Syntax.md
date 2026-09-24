@@ -698,8 +698,8 @@ implemented in both.
 **The C parser is production.** `lambda/runtime/parser/` — a hand-written
 lexer (`lambda_lexer.c`) plus recursive-descent/Pratt parser
 (`lambda_parser.c`) behind a C ABI — parses source **directly to AST**
-through a reduction sink (`lambda_rd_parse_source` →
-`direct_ast_reduce` in `build_ast.cpp`), with no CST in between. It is the
+through a reduction sink (`lambda_rd_parse_source` → the syntax sink and
+resolve pass in `build_ast.cpp`), with no CST in between. It is the
 default path; every script the shipped binary runs goes through it.
 
 **The Tree-sitter grammar is the official grammar and reference

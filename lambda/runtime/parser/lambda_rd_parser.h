@@ -349,10 +349,14 @@ enum {
     LAMBDA_REDUCTION_FLAG_PUT_BEFORE = 1u << 18,
     LAMBDA_REDUCTION_FLAG_PUT_AFTER = 1u << 19,
     LAMBDA_REDUCTION_FLAG_PUT_INTO = 1u << 20,
+    // `x: T to e` re-reads its whole span as one range type; the two parts
+    // reduced on the way are its children, which the range type supersedes.
+    LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE = 1u << 21,
 };
 
-// The sink remains deliberately small. Phase 1 uses it for deterministic
-// reduction fingerprints; Phase 2 will supply values backed by AstNode*.
+// A reduction value is whatever the sink returned for it. A sink must never
+// return zero for a reduction the parser may pass on as a child: the parser
+// reads zero as "no value" and substitutes the reduction's structural hash.
 typedef uint64_t LambdaParseValue;
 typedef struct LambdaParseReduction {
     LambdaReductionKind kind;

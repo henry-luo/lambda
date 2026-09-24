@@ -464,9 +464,9 @@ literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
 `LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
 confirm it is unintended before lifting it.
 *Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
-`children` by pointer and count to a synchronous sink, `direct_tape_reduce`
-(`build_ast.cpp:8074`) copies children and name tokens into the arena sized
-by count, and the GROUP/ELEMENT/POSTFIX/LET tape handlers walk `child_count`.
+`children` by pointer and count to a synchronous sink, `syntax_sink_reduce`
+(`build_ast.cpp`), whose GROUP/ELEMENT/POSTFIX/LET handlers walk
+`child_count` (the reduction tape that copied them is retired, LC3.9).
 A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
 (rest parameters exempt), whose `binder_env`/`resolved` arrays are
 bounds-checked. A growable buffer with inline storage keeps every reduction
