@@ -18,7 +18,8 @@
 | P4 | formatter loops, plus the escape sink (§5.3-7) planned for P2 | done |
 | P5a | HTML parser tag classes by id (§5.2-7) | done |
 | P5b | pool bin index by leading-zero count (part of §5.2-6) | done |
-| P5 | the rest of structural: allocator redesign (§5.2-6), LambdaJS `+=`, UTF-8 position cache, hash choice | next; the allocator needs a design round |
+| P5c | HTML parse memory and the §5.2-6 allocator round | done; the per-element type decision is open |
+| P5 | the rest of structural: LambdaJS `+=`, UTF-8 position cache, hash choice | not started |
 
 ## P0 — correctness
 
@@ -282,32 +283,52 @@ Node's `JSON.stringify` takes 180 ms on the same workload, so the LambdaJS gap t
 
 **Semantics unchanged:** the 10 corpora and all 21,602 HTML files parse identically. `test_mempool_gtest` passes 55/55 and `test_arena_gtest` 91/91. Lambda passes 5,862/5,862, Radiant all suites, and test262 40,261/40,261.
 
-## §5.2-6 allocator — design round (open, needs a decision)
+## P5c — HTML parse memory and the §5.2-6 allocator round
 
-**Where HTML parse time goes after P5b** (13 MiB, release profile, top of stack):
-- `pool_take_block` 18%, `pool_append_committed_range` 9%, `mprotect` 8%.
-- `arena_alloc_aligned` 7%, arena teardown 3%.
-- The tokenizer 12%.
+Branch `claude/html-parse-memory` from master `293b7a175`.
 
-**What those costs are:**
-- **First-touch memory.**
-  - Parsing 13 MiB of HTML touches 563 MB: 35,500 page reclaims of 16 KiB pages, about 43 bytes of memory per input byte.
-  - Each new page's zero-fill fault lands on whichever instruction first writes it: the header of the next split remainder (`pool_take_block`) or of the newly committed free range (`pool_append_committed_range`).
-  - memtrack sees only about 95 MB of that (malloc-level). The rest is VM-backed pool and arena memory, and its split by owner is not measured yet.
-- **Page-at-a-time commits.** A VM extent commits `max(4 KiB, request)`, rounded to a page, per growth: one `mprotect` and one free-list re-bin per 16 KiB.
-- **First fit inside a bin.** `pool_take_block` still walks its floor-log2 bin past free blocks too small for the request.
+**Where the 562 MB went** (13 MiB HTML, temporary probe on the Input's pool and arena):
 
-**Options, in the order I would take them:**
-1. **Measure bytes per node first** (instrument pool and arena totals per Input). Fewer bytes per element and text node would cut allocator time and page faults together. That is likely the bigger lever, and it is outside this proposal.
-2. **Geometric commit growth:** commit `max(request, min(committed, cap))` per growth, with a cap such as 1 MiB. That means a few dozen commits per extent instead of one per page.
-   - Committed pages are not resident until touched, so RSS barely moves.
-   - `committed_bytes` would run ahead of use, and any test that asserts commit granularity needs review.
-3. **TLSF good fit:** eight second-level classes per power of two, with bitmaps of non-empty lists.
-   - The search rounds the request up, so the head of the found list always fits: O(1), with no walk.
-   - Free and coalesce are unchanged.
-   - Block choice changes, so addresses change and results do not. It adds about 100 lines.
+| Owner | What | Size |
+|---|---|---:|
+| Pool, tokens | 1.04M `Html5Token`s (320K start, 320K end, 400K text), never freed | 166 MB with headers |
+| Pool, types | 320K `TypeElmt`, one private type per element, 424 B each (256 B of it the A1 inline hash table) | 156 MB with headers |
+| Pool, headers | 64-byte `PoolBlock` on each of 2.2M allocations | 141 MB (overlaps the two rows above) |
+| Arena | token text and names, attribute names, DOM strings | 80 MB |
 
-Questions for the user: whether to take option 2, and with what cap; and whether option 3 is worth its size before option 1's measurement.
+Tokens, their strings and their attribute maps are garbage once the tree builder returns: it copies names and text into the document and keeps only attribute values' Items.
+
+**Changes:**
+- **Tokens.**
+  - A token, its attribute array and its strings come from the parser's scratch arena. The arena is reset once it passes 64 KiB with no token in flight and destroyed when `html5_parse`/`html5_parse_ex` returns.
+  - Attributes are a plain `(name, value)` array instead of a Lambda `Map`.
+  - Fragment parsers and synthesized tokens keep the Input arena.
+- **Pool header, 64 → 32 bytes.** Free-list links move into the free block's payload (`POOL_MIN_PAYLOAD` holds them). `requested` becomes 32 bits (`SIZE_LIMIT` fits) and doubles as the live flag, since `pool_alloc` refuses size 0. Magic, span, prev_span and extent keep the registry-free validation.
+- **Pool search:** a mask of non-empty bins skips the empty ones. Bins and block choice are unchanged.
+- **Pool commits:** a VM extent's step grows with its committed size up to 1 MiB, instead of one `mprotect` per 16 KiB page. Committed pages stay non-resident until touched, so RSS does not move.
+- **Arena:** `arena_alloc` skips the free-list search while the arena holds no free bytes. `free_bytes` is zero exactly when every bin is empty, so this is exact.
+- **Not taken: TLSF second-level classes.** With the mask, the remaining pool time is mostly the first touch of fresh memory, not list walks.
+
+**Results** (release, 15 interleaved runs, base `293b7a175`):
+
+| Workload | Base | After | |
+|---|---:|---:|---:|
+| HTML parse, 13 MiB: peak RSS | 562 MB | 315 MB | −44% |
+| HTML parse: page reclaims | 35.5K | 20.4K | −42% |
+| HTML parse | 156.5 ms | 113.0 ms | 1.39× |
+| Chinese HTML page | 28.2 ms | 20.1 ms | 1.41× |
+| XML parse | 133.6 ms | 109.3 ms | 1.22× |
+| JSON / Markdown / YAML / CSV parse | | | 1.06× / 1.06× / 1.04× / 1.08× |
+| XML / JSON / Markdown / CSV peak RSS | | | −5% / −4% / −5% / −5% |
+
+**Semantics unchanged:**
+- All 21,602 test-data HTML files, the 10 corpora, 99 test inputs and 108 formatter outputs match the base binary.
+- `test_mempool_gtest` passes 55/55 and `test_arena_gtest` 91/91. Lambda passes 5,867/5,867, Radiant all suites, and test262 40,261/40,261.
+- One pool test changed: `SplitAndCoalesceAdjacentFreeBlocks` requested exactly the merged span of two 64-byte-header blocks. It now requests 256 bytes, which only the merge can serve at either header size.
+
+**Open decision: the per-element `TypeElmt`.** It is now 146 MB, 46% of the remaining peak, and the same cost applies to XML (457 MB peak for 19 MB of input). Every Input element gets a private 424-byte type, and 256 bytes of that is the A1 inline hash table, which is sized for shared JS shapes. The fixes change a deliberate design, so they wait for the user:
+1. Move `TypeMap`'s inline table out of line, allocated when first populated. This saves about 248 B per element (~79 MB here) and on every private map type. It revises A1 and adds a pointer load to hashed JS property lookups, so it needs JS benchmarks.
+2. Share element types across elements with the same tag and attribute shape, the way maps share shapes through transitions. That means moving the per-element `content_length` (194 uses) off the type. This is a data-model change; it saves most of the 146 MB on repetitive markup.
 
 ## Findings not yet filed
 
