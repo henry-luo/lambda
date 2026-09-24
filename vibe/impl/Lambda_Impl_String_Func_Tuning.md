@@ -278,7 +278,36 @@ Node's `JSON.stringify` takes 180 ms on the same workload, so the LambdaJS gap t
 | CSV | 133.8 | 130.4 | 1.03× |
 | JSON, YAML | — | — | 1.01× |
 
+**Memory regression from P5a, fixed.** P5a's cached token id grew `Html5Token` from 96 to 104 bytes. A token is allocated per character run and kept until the parse ends, so the larger pool blocks cost 16.5 MB, 2.9% more peak RSS on the 13 MiB HTML parse: 562.7 → 579.3 MB. The id now sits in the padding after `self_closing`. The token is 96 bytes again, RSS and page reclaims match P3 exactly, and HTML parse gained another 1.03×.
+
 **Semantics unchanged:** the 10 corpora and all 21,602 HTML files parse identically. `test_mempool_gtest` passes 55/55 and `test_arena_gtest` 91/91. Lambda passes 5,862/5,862, Radiant all suites, and test262 40,261/40,261.
+
+## §5.2-6 allocator — design round (open, needs a decision)
+
+**Where HTML parse time goes after P5b** (13 MiB, release profile, top of stack):
+- `pool_take_block` 18%, `pool_append_committed_range` 9%, `mprotect` 8%.
+- `arena_alloc_aligned` 7%, arena teardown 3%.
+- The tokenizer 12%.
+
+**What those costs are:**
+- **First-touch memory.**
+  - Parsing 13 MiB of HTML touches 563 MB: 35,500 page reclaims of 16 KiB pages, about 43 bytes of memory per input byte.
+  - Each new page's zero-fill fault lands on whichever instruction first writes it: the header of the next split remainder (`pool_take_block`) or of the newly committed free range (`pool_append_committed_range`).
+  - memtrack sees only about 95 MB of that (malloc-level). The rest is VM-backed pool and arena memory, and its split by owner is not measured yet.
+- **Page-at-a-time commits.** A VM extent commits `max(4 KiB, request)`, rounded to a page, per growth: one `mprotect` and one free-list re-bin per 16 KiB.
+- **First fit inside a bin.** `pool_take_block` still walks its floor-log2 bin past free blocks too small for the request.
+
+**Options, in the order I would take them:**
+1. **Measure bytes per node first** (instrument pool and arena totals per Input). Fewer bytes per element and text node would cut allocator time and page faults together. That is likely the bigger lever, and it is outside this proposal.
+2. **Geometric commit growth:** commit `max(request, min(committed, cap))` per growth, with a cap such as 1 MiB. That means a few dozen commits per extent instead of one per page.
+   - Committed pages are not resident until touched, so RSS barely moves.
+   - `committed_bytes` would run ahead of use, and any test that asserts commit granularity needs review.
+3. **TLSF good fit:** eight second-level classes per power of two, with bitmaps of non-empty lists.
+   - The search rounds the request up, so the head of the found list always fits: O(1), with no walk.
+   - Free and coalesce are unchanged.
+   - Block choice changes, so addresses change and results do not. It adds about 100 lines.
+
+Questions for the user: whether to take option 2, and with what cap; and whether option 3 is worth its size before option 1's measurement.
 
 ## Findings not yet filed
 
