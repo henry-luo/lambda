@@ -35,6 +35,17 @@ static inline uint64_t _swar_has_byte(uint64_t word, uint8_t c) {
     return _swar_has_zero(word ^ _swar_broadcast(c));
 }
 
+/* exact form of _swar_has_byte: the high bit of a byte is set iff that byte
+ * equals `c`. _swar_has_byte's borrow can also flag the byte just above a
+ * real match (when it equals c ^ 0x01), which is harmless when only the
+ * lowest flag is read but wrong for backward scans (LR05-14). Here each
+ * byte's sum stays below 0x100, so no flag crosses into its neighbour. */
+static inline uint64_t _swar_has_byte_exact(uint64_t word, uint8_t c) {
+    uint64_t x = word ^ _swar_broadcast(c);
+    return ~(((x & 0x7F7F7F7F7F7F7F7FULL) + 0x7F7F7F7F7F7F7F7FULL) | x |
+             0x7F7F7F7F7F7F7F7FULL);
+}
+
 /* detect any byte with high bit set (non-ASCII) */
 static inline uint64_t _swar_has_highbit(uint64_t v) {
     return v & 0x8080808080808080ULL;
@@ -273,10 +284,10 @@ size_t str_rfind_byte(const char* s, size_t len, char c) {
         i--;
         if (s[i] == c) return i;
     }
-    /* SWAR scan backwards */
+    /* SWAR scan backwards; the highest flag is read, so it must be exact */
     while (i >= 8) {
         i -= 8;
-        uint64_t mask = _swar_has_byte(_load_u64(s + i), (uint8_t)c);
+        uint64_t mask = _swar_has_byte_exact(_load_u64(s + i), (uint8_t)c);
         if (mask) {
             /* highest set bit position → last matching byte */
             return i + 7 - _clz64(mask) / 8;

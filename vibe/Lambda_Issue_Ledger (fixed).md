@@ -15,8 +15,8 @@
 
 ## Archive index
 
-This archive contains **103 historical records**: 102 RESOLVED entries and one
-CLOSED design decision. The six newest are the list/array kind records closed
+This archive contains **105 historical records**: 104 RESOLVED entries and one
+CLOSED design decision. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The six newest are the list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -419,6 +419,29 @@ types the result open. The content-splicing worry above is answered by the
 run: two or more matches splice by their kind bit, one lands as itself, none
 as `null`, and `*e?T` packages any of them. Argument in
 [Expr_Query §4.1](Lambda_Expr_Query.md). Fixture `test/lambda/query_kind.ls`.
+
+<a id="lr05-14"></a>**LR05-14 · `str_rfind_byte` can return a position past the real last match · FIXED 2026-09-24**
+`str_rfind_byte` (`lib/str.c:266`) scans backwards eight bytes at a time and returns the highest byte flagged by `_swar_has_byte` (`:279`).
+- **Cause:** through borrow propagation, that test can also flag the byte just above a real match when that byte equals `c ^ 0x01`. The caveat is already noted in `str_count_byte` (`:404`). So a backward search can return the position just after the true last match.
+- **Forward search is unaffected:** `str_find_byte` takes the lowest flagged byte, which is always a real match.
+- **Callers:** every one-byte reverse search reaches it through `str_rfind` (`:321`):
+  - Lambda `last_index_of` (`lambda/runtime/lambda-eval.cpp:6524`);
+  - LambdaJS `String.prototype.lastIndexOf` (`js_string_find_position` in `lambda/js/js_runtime.cpp`);
+  - Node-compatible `Buffer.lastIndexOf` (`lambda/module/node_core/node_buffer.cpp:1584`).
+- **Reproduced 2026-09-24 on both tiers:** `last_index_of("dir/.hidden", "/")` is 4 and `last_index_of("abcdefgh", "b")` is 2, where 3 and 1 are right. LambdaJS `lastIndexOf` gives the same 4 and 2; Node gives 3 and 1.
+- **Why tests missed it:** in `test/lib/test_str_gtest.cpp:218`–`221`, every match checked falls in the scalar tail.
+- **Fix:** use an exact zero-byte mask for the backward scan, `~(((x & 0x7F…) + 0x7F…) | x | 0x7F…)`, and add both reproducers as tests.
+
+*Fixed 2026-09-24 (string tuning P0):* the backward scan reads the highest flag, so `str_rfind_byte` now uses `_swar_has_byte_exact` (`lib/str.c`); each byte's sum stays below 0x100 and cannot flag a neighbour. Forward scans keep `_swar_has_byte`. Tests: `RFindByteSwarNeighbour` and `RFindByteMatchesNaive` (2,000 random buffers of every length 0–39 over an alphabet built around `c` and `c ^ 1`) in `test/lib/test_str_gtest.cpp`; golden cases 65–66 in `test/lambda/string_funcs.ls`; two lines in `test/js/string_methods.js`. Record: [string tuning P0](<impl/Lambda_Impl_String_Func_Tuning.md>).
+
+<a id="lr05-15"></a>**LR05-15 · Indexing a non-ASCII symbol splits a character · FIXED 2026-09-24**
+S2.5.8 has indexing and every sequence operation see a symbol as its code points.
+- **Cause:** `item_at` (`lambda/runtime/lambda-data-runtime.cpp`, the `LMD_TYPE_STRING`/`LMD_TYPE_SYMBOL` case) starts from `is_ascii = true` and corrects it only for strings, which carry the flag. A symbol therefore always takes the byte-indexed fast path.
+- **Reproduced 2026-09-24 on both tiers:** `'café'[3]` is the one-byte symbol `'\xC3'`, where `'é'` is right. By contrast, `len('café')` is 4 and `"café"[3]` is `"é"`.
+- **Knock-on:** `reverse`, `sort` and the other text sequence operations read characters through `item_at` (via `vector_text_items`, `lambda/runtime/lambda-vector.cpp:304`). So `reverse('café')` is `'\xC3fac'` and `sort('bé')` is `'b\xC3'`: the byte `0xA9` is lost, and neither result is valid UTF-8.
+- **Fix:** the UTF-8 path below the fast path already handles symbols correctly. Establish ASCII-ness for a symbol before choosing the path, either with `str_is_ascii` over its bytes or with an `is_ascii` bit on `Symbol`.
+
+*Fixed 2026-09-24 (string tuning P0):* `item_at` decides a symbol's ASCII-ness from its bytes (`str_is_ascii`) instead of assuming it, so a non-ASCII symbol takes the UTF-8 path. On both tiers `'café'[3]` is `'é'`, `reverse('café')` is `'éfac'` and `sort('bé')` is `'bé'`. Golden case in the S2.5.8 fixture `test/lambda/text_sequence.ls`. Record: [string tuning P0](<impl/Lambda_Impl_String_Func_Tuning.md>).
 
 ## 6. C transpiler — legacy C2MIR (LR_06)
 

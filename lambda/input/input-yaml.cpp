@@ -243,6 +243,12 @@ static int line_start_pos(YamlParser* p) {
     return ls;
 }
 
+// same answer as p->pos == line_start_pos(p) without walking back: the plain
+// scalar loop asked it for every character, making long lines quadratic
+static inline bool at_line_start(YamlParser* p) {
+    return p->pos == 0 || p->src[p->pos - 1] == '\n';
+}
+
 // ============================================================================
 // Document boundary detection
 // ============================================================================
@@ -257,14 +263,12 @@ static bool is_doc_marker_at(YamlParser* p, int pos, char marker_char) {
 }
 
 static bool is_doc_start(YamlParser* p) {
-    int ls = line_start_pos(p);
-    if (p->pos != ls) return false;
+    if (!at_line_start(p)) return false;
     return is_doc_marker_at(p, p->pos, '-');
 }
 
 static bool is_doc_end(YamlParser* p) {
-    int ls = line_start_pos(p);
-    if (p->pos != ls) return false;
+    if (!at_line_start(p)) return false;
     return is_doc_marker_at(p, p->pos, '.');
 }
 
@@ -785,11 +789,8 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
             if (in_flow ? is_flow_mapping_indicator(p) : is_mapping_indicator(p)) break;
             if (c == '#' && p->pos > 0 && (p->src[p->pos - 1] == ' ' || p->src[p->pos - 1] == '\t')) break;
             // doc boundaries
-            {
-                int lp = line_start_pos(p);
-                if (p->pos == lp) {
-                    if (is_doc_start_at(p, lp) || is_doc_end_at(p, lp)) goto done_plain;
-                }
+            if (at_line_start(p)) {
+                if (is_doc_start_at(p, p->pos) || is_doc_end_at(p, p->pos)) goto done_plain;
             }
             strbuf_append_char(sb, c);
             advance(p);
@@ -979,10 +980,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
 
     while (!at_end(p)) {
         // doc boundary
-        {
-            int lp = line_start_pos(p);
-            if (p->pos == lp && (is_doc_start_at(p, lp) || is_doc_end_at(p, lp))) break;
-        }
+        if (at_line_start(p) && (is_doc_start_at(p, p->pos) || is_doc_end_at(p, p->pos))) break;
 
         int spaces = 0;
         int line_start = p->pos;

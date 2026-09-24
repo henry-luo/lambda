@@ -16719,13 +16719,11 @@ static JsRegexMatchResult js_regex_match_internal(JsRegexData* rd, const char* i
                 found = input + start_pos;
             }
         } else {
-            int max_pos = input_len - pat_len;
-            for (int i = start_pos; i <= max_pos; i++) {
-                if (memcmp(input + i, rd->literal_pattern, pat_len) == 0) {
-                    found = input + i;
-                    break;
-                }
-            }
+            // one candidate scan instead of memcmp at every position (the loop
+            // T28-5 removed from Lambda's split/replace/find)
+            size_t at = str_find(input + start_pos, (size_t)(input_len - start_pos),
+                                 rd->literal_pattern, (size_t)pat_len);
+            if (at != STR_NPOS) found = input + start_pos + at;
         }
         if (!found) return JS_REGEX_MATCH_NO_MATCH;
         if (num_groups > 0) matches[0] = re2::StringPiece(found, pat_len);

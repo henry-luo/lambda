@@ -102,4 +102,8 @@ let sym1 = 'hello_world'
 "63. split all whitespace:"; len(split("   ", null))
 "64. split tabs/newlines:"; len(split("a\tb\nc", null))
 
+// LR05-14: a match followed by the byte c ^ 0x01 in the same 8-byte word
+"65. last_index_of before '.', expect 3:"; last_index_of("dir/.hidden", "/")
+"66. last_index_of before c ^ 1, expect 1:"; last_index_of("abcdefgh", "b")
+
 "===== ALL TESTS PASSED ====="

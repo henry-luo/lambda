@@ -33,9 +33,13 @@ static size_t html5_scan_run(Html5Parser* parser, bool stop_ampersand) {
     const char* end = parser->html + parser->length;
     const char* p = start;
 
+    // Bytes >= 0x80 stay in the run: the per-byte DATA, RCDATA and RAWTEXT
+    // paths emit them unchanged, so stopping there only split non-ASCII text
+    // into one pool-allocated token per byte (3.5x slower, 4.3x the memory
+    // on Chinese text).
     while (p < end) {
         unsigned char c = (unsigned char)*p;
-        if (c == '<' || (stop_ampersand && c == '&') || c == '\0' || c >= 0x80) {
+        if (c == '<' || (stop_ampersand && c == '&') || c == '\0') {
             break;
         }
         p++;
@@ -43,8 +47,8 @@ static size_t html5_scan_run(Html5Parser* parser, bool stop_ampersand) {
     return p - start;
 }
 
-// Scan a run of ASCII text characters that don't need special handling.
-// Stops at: '<', '&', '\0', EOF, or non-ASCII bytes (>= 0x80 for UTF-8).
+// Scan a run of text characters that don't need special handling.
+// Stops at: '<', '&', '\0' or EOF; UTF-8 bytes are part of the run.
 static size_t html5_scan_text_run(Html5Parser* parser) {
     return html5_scan_run(parser, true);
 }

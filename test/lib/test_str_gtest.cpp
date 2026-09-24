@@ -221,6 +221,36 @@ TEST_F(StrSearchTest, RFindByte) {
     EXPECT_EQ(str_rfind_byte(NULL, 0, 'a'), STR_NPOS);
 }
 
+// LR05-14: a match followed by c ^ 0x01 inside an 8-byte word must not
+// report the following byte ('b' then 'c'; '/' then '.').
+TEST_F(StrSearchTest, RFindByteSwarNeighbour) {
+    EXPECT_EQ(str_rfind_byte("abcdefgh", 8, 'b'), 1u);
+    EXPECT_EQ(str_rfind_byte("dir/.hidden", 11, '/'), 3u);
+    EXPECT_EQ(str_rfind("dir/.hidden", 11, "/", 1), 3u);
+    EXPECT_EQ(str_rfind_byte("01234567a`234567", 16, 'a'), 8u);
+}
+
+// every length and alignment over an alphabet built around c and c ^ 1
+TEST_F(StrSearchTest, RFindByteMatchesNaive) {
+    const char alphabet[] = {'b', 'c', 'x', '/', '.'};
+    char buf[40];
+    uint32_t seed = 12345;
+    for (int round = 0; round < 2000; round++) {
+        size_t len = (size_t)(round % 40);
+        for (size_t i = 0; i < len; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            buf[i] = alphabet[(seed >> 24) % 5];
+        }
+        for (char c : {'b', '/'}) {
+            size_t expected = STR_NPOS;
+            for (size_t i = len; i > 0; i--) {
+                if (buf[i - 1] == c) { expected = i - 1; break; }
+            }
+            ASSERT_EQ(str_rfind_byte(buf, len, c), expected) << "round " << round;
+        }
+    }
+}
+
 TEST_F(StrSearchTest, Find) {
     EXPECT_EQ(str_find("hello world", 11, "world", 5), 6u);
     EXPECT_EQ(str_find("hello world", 11, "hello", 5), 0u);

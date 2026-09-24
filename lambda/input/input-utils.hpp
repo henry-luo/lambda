@@ -121,7 +121,9 @@ static inline int parse_escape_char(const char** pos, StringBuf* sb) {
             (*pos)++;  // skip 'u'
             uint32_t cp = 0;
             size_t consumed = 0;
-            if (!escape_decode_utf16_escape(*pos, strlen(*pos), true, &cp, &consumed)) {
+            // the decoder reads at most 10 bytes (a surrogate pair); strlen here
+            // measured the rest of the document per escape, which is quadratic
+            if (!escape_decode_utf16_escape(*pos, strnlen(*pos, 10), true, &cp, &consumed)) {
                 // not enough digits — output replacement char
                 stringbuf_append_utf8(sb, 0xFFFD);
                 break;

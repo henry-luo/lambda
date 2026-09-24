@@ -52,7 +52,8 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
 
             uint32_t codepoint = 0;
             size_t consumed = 0;
-            if (!escape_decode_utf16_escape(*toml, strlen(*toml), false,
+            // bounded like parse_escape_char: the decoder reads at most 10 bytes
+            if (!escape_decode_utf16_escape(*toml, strnlen(*toml, 10), false,
                                             &codepoint, &consumed)) {
                 ctx.addError(esc_loc, "Invalid \\u escape sequence: expected 4 hex digits");
                 return false;

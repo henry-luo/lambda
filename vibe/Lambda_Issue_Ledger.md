@@ -188,11 +188,11 @@ defect.
 ### String function tuning survey — 2026-09-24
 
 A survey of byte-level text processing (the [string function tuning proposal](Lambda_String_Func_Tuning.md), §5.1) found three defects that return a **wrong value with no error**. Each was reproduced on both tiers before filing:
-- [LR05-14](#lr05-14): `last_index_of` and `lastIndexOf` can return a position past the real last match.
-- [LR05-15](#lr05-15): indexing a non-ASCII symbol splits a character.
+- [LR05-14](<Lambda_Issue_Ledger (fixed).md#lr05-14>): `last_index_of` and `lastIndexOf` can return a position past the real last match.
+- [LR05-15](<Lambda_Issue_Ledger (fixed).md#lr05-15>): indexing a non-ASCII symbol splits a character.
 - [LR09-31](#lr09-31): `format()` drops large text in markup output.
 
-The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here.
+The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here. *Later on 2026-09-24:* P0 of [the implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) fixed LR05-14 and LR05-15, and both moved to the fixed archive.
 
 ---
 
@@ -586,25 +586,6 @@ hard-codes 256 bins in a stack `int64_t h[256]` (`:4501`).
 Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
-
-<a id="lr05-14"></a>**LR05-14 · `str_rfind_byte` can return a position past the real last match · OPEN**
-`str_rfind_byte` (`lib/str.c:266`) scans backwards eight bytes at a time and returns the highest byte flagged by `_swar_has_byte` (`:279`).
-- **Cause:** through borrow propagation, that test can also flag the byte just above a real match when that byte equals `c ^ 0x01`. The caveat is already noted in `str_count_byte` (`:404`). So a backward search can return the position just after the true last match.
-- **Forward search is unaffected:** `str_find_byte` takes the lowest flagged byte, which is always a real match.
-- **Callers:** every one-byte reverse search reaches it through `str_rfind` (`:321`):
-  - Lambda `last_index_of` (`lambda/runtime/lambda-eval.cpp:6524`);
-  - LambdaJS `String.prototype.lastIndexOf` (`js_string_find_position` in `lambda/js/js_runtime.cpp`);
-  - Node-compatible `Buffer.lastIndexOf` (`lambda/module/node_core/node_buffer.cpp:1584`).
-- **Reproduced 2026-09-24 on both tiers:** `last_index_of("dir/.hidden", "/")` is 4 and `last_index_of("abcdefgh", "b")` is 2, where 3 and 1 are right. LambdaJS `lastIndexOf` gives the same 4 and 2; Node gives 3 and 1.
-- **Why tests missed it:** in `test/lib/test_str_gtest.cpp:218`–`221`, every match checked falls in the scalar tail.
-- **Fix:** use an exact zero-byte mask for the backward scan, `~(((x & 0x7F…) + 0x7F…) | x | 0x7F…)`, and add both reproducers as tests.
-
-<a id="lr05-15"></a>**LR05-15 · Indexing a non-ASCII symbol splits a character · OPEN**
-S2.5.8 has indexing and every sequence operation see a symbol as its code points.
-- **Cause:** `item_at` (`lambda/runtime/lambda-data-runtime.cpp`, the `LMD_TYPE_STRING`/`LMD_TYPE_SYMBOL` case) starts from `is_ascii = true` and corrects it only for strings, which carry the flag. A symbol therefore always takes the byte-indexed fast path.
-- **Reproduced 2026-09-24 on both tiers:** `'café'[3]` is the one-byte symbol `'\xC3'`, where `'é'` is right. By contrast, `len('café')` is 4 and `"café"[3]` is `"é"`.
-- **Knock-on:** `reverse`, `sort` and the other text sequence operations read characters through `item_at` (via `vector_text_items`, `lambda/runtime/lambda-vector.cpp:304`). So `reverse('café')` is `'\xC3fac'` and `sort('bé')` is `'b\xC3'`: the byte `0xA9` is lost, and neither result is valid UTF-8.
-- **Fix:** the UTF-8 path below the fast path already handles symbols correctly. Establish ASCII-ness for a symbol before choosing the path, either with `str_is_ascii` over its bytes or with an `is_ascii` bit on `Symbol`.
 
 ---
 
