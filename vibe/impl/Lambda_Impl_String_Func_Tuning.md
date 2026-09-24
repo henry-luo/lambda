@@ -16,7 +16,8 @@
 | P2 | shared `lib/` kernels | done |
 | P3 | parser inner loops | done |
 | P4 | formatter loops, plus the escape sink (§5.3-7) planned for P2 | done |
-| P5 | structural | next |
+| P5a | HTML parser tag classes by id (§5.2-7) | done |
+| P5 | the rest of structural: allocator (§5.2-6), LambdaJS `+=`, UTF-8 position cache, hash choice | next; the allocator needs a design round |
 
 ## P0 — correctness
 
@@ -232,6 +233,33 @@ Node's `JSON.stringify` takes 180 ms on the same workload, so the LambdaJS gap t
 - The first version of the `binsearch.h` change called the out-of-line `str_icmp`, but `test_binsearch_gtest` links no library. Moving `str_icmp` inline fixed it and keeps the header self-contained.
 - `print.cpp` never included `print.h`; it got the header through `ast.hpp`, which the `LAMBDA_PRINT_VALUE_ONLY` build of `lambda-boundary-core` leaves out, so the new `PRINT_INT_VALUE_CHARS_CAP` was undeclared there. `print.cpp` now includes its own header.
 
+## P5a — HTML parser tag classes by id (§5.2-7)
+
+**Changes:**
+- **The tag lists of the tree-construction rules become class bits.** Scope markers, implied end tags, formatting, special, head content, headings, list-item walk stops, and SVG entry and exit are each one `Html5TagClass` bit. The lists move verbatim to `html5_parser.cpp`, as the single source.
+- **`html5_tag_classes(tag_id, name)`** answers a well-known markup name id from a table and matches any other name against the lists.
+  - The table is built once by running the list classifier over every markup record, so an id answers exactly what its spelling would.
+  - The builder, `MarkupNameClassTable` in `lambda/core/markup_name_classes.hpp`, is shared with P4's void and raw-text table in `html-defs.cpp`.
+- **Where the ids come from.**
+  - Open elements carry `TypeElmt::name_id`: MarkBuilder takes it from the name pool, which resolves every well-known spelling to its catalog record. D4.6.1v3 says generated names retain catalog IDs.
+  - Tokens cache theirs on first use (`html5_token_tag_id`, one catalog lookup per tag token). `html5_token_set_tag_name` clears the cache.
+- **Equality.** `html5_same_tag` compares ids only when both are markup ids, and spellings otherwise. An element whose type lost its id, as in a MarkEditor copy, still compares by bytes.
+- **Call sites.**
+  - The scope checks, implied-end-tag generation, pop helpers and the li/dd/dt closing walk take `(id, spelling)` targets: `HTML5_TAG(P)` expands to the catalog constant and its spelling, and token targets pass `html5_token_tag_id`.
+  - 270 `strcmp(tag, "…")` tests of a token's tag in the insertion-mode dispatch became `html5_token_is(token, MARKUP_NAME_…)`. A script converted them after two checks: `tag` must be defined from `token->tag_name->chars` in the same function, and the literal must be a catalog spelling exactly. Comparisons on element tags and on `search`, which is not in the catalog, still compare strings.
+
+**Results:**
+- HTML parse, 13 MiB: 188.8 → 167.8 ms (1.12×). English and Chinese pages, 3.1 MiB each: 1.06×.
+- `strcmp` fell from 25% of HTML parse to under 1%.
+- HTML parse is now 54% memory management: `pool_take_block`, committed-range appends and `mprotect` from the pool, plus arena allocation and teardown. That is §5.2-6, which needs its own design round.
+
+**Semantics unchanged:**
+- **Every HTML file in the test data** — 21,602 files, WPT and real pages — produces an identical Mark tree, as do the 10 corpora, 99 test inputs and 13 adversarial files.
+- **Near-miss the file differential caught.** `<image>` becomes `<img>` by assigning the token a new tag name. The first version cached the token id before that rename, so the renamed `<img>` was not treated as void. The corpora and inputs passed; two of the 21,602 files differed. All tag-name writes now go through `html5_token_set_tag_name`.
+- **Baselines:**
+  - Lambda: 5,862/5,862. Radiant: all suites pass.
+  - One Radiant run failed the page snapshot (`zengarden`, `nojs`) while other sessions kept the load average near 7. The suite settles 200 ms after load. The same binary passed the suite on its own, and the release view trees of both pages are byte-identical between P4 and P5a.
+
 ## Findings not yet filed
 
 These were found while measuring; each predates the branch (the base binary behaves the same). The two bugs go to the LambdaJS ledger once another session's edits to `vibe/JS_Issue_Ledger.md` have landed.
@@ -244,4 +272,5 @@ These were found while measuring; each predates the branch (the base binary beha
 - **CSV errors report a position of line 1, column 1.** The CSV parser does not advance the shared tracker.
 - **A failed `format()` is `null` under the JIT but `error` under the interpreter.** `fn_format2` returns a null `String*`. The interpreter's `eval_sys_call` deliberately maps a null `String*` to `ItemError` ("the error carrier"), while the MIR lowering boxes it as `null`. Found while pinning the complex refusal; the golden case uses `or`, which rescues both (S3.1, S7.5.3).
 - **XML output writes each UTF-8 byte of non-ASCII text as its own numeric reference.** `café` becomes `caf&#xc3;&#xa9;`, which any XML reader, Lambda's included, decodes as `cafÃ©`; CJK text is mangled the same way. This is deliberate: the code comment and `test/lambda/pdf/phase28_winansi_encoding.ls` pin the byte-wise form for decoded PDF text. Changing it needs a decision.
+- **The parser's "special" element list lacks `search`,** which WHATWG added; the tree builder's own list-item stop list has it. Kept as is, since changing either list changes tree construction.
 - **YAML output leaves `True`, `TRUE`, `Null` and similar strings unquoted.** YAML 1.2's core schema reads them as booleans and null, so the round trip changes their type. The reserved-word list only has the lower-case spellings.

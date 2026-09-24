@@ -26,6 +26,8 @@ typedef struct Html5Token {
 
     // For start/end tag tokens
     String* tag_name;
+    NameId tag_id;          // markup name id of tag_name (html5_token_tag_id)
+    bool tag_id_known;
     Map* attributes;        // Map of attribute name -> value (both String*)
     bool self_closing;
 
@@ -50,6 +52,11 @@ Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const 
 Html5Token* html5_token_create_eof(Pool* pool, Arena* arena);
 
 // Token helper functions
+// Renames a tag token; the cached markup id (html5_token_tag_id) follows.
+static inline void html5_token_set_tag_name(Html5Token* token, String* tag_name) {
+    token->tag_name = tag_name;
+    token->tag_id_known = false;
+}
 void html5_token_add_attribute(Html5Token* token, String* name, Item value, Input* input);
 void html5_token_append_to_tag_name(Html5Token* token, char c);
 void html5_token_append_to_data(Html5Token* token, char c);

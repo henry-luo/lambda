@@ -2,6 +2,8 @@
 #define HTML5_PARSER_H
 
 #include "../../lambda-data.hpp"
+#include "../../core/well_known_markup_names.h"
+#include <string.h>
 #include "html5_token.h"
 #include "../../../lib/stringbuf.h"
 #include "../line_counter.hpp"
@@ -262,22 +264,83 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html);
 // Get the body element containing parsed fragment content
 Element* html5_fragment_get_body(Html5Parser* parser);
 
+// Tag classes of the tree-construction algorithm, as bits of
+// html5_tag_classes (lists in html5_parser.cpp).
+enum Html5TagClass : uint32_t {
+    HTML5_TAG_SCOPE           = 1u << 0,   // markers of "has an element in scope"
+    HTML5_TAG_BUTTON_SCOPE    = 1u << 1,   // button scope adds these
+    HTML5_TAG_LIST_ITEM_SCOPE = 1u << 2,   // list item scope adds these
+    HTML5_TAG_TABLE_SCOPE     = 1u << 3,   // markers of "in table scope"
+    HTML5_TAG_SELECT_PASS     = 1u << 4,   // select scope passes only these
+    HTML5_TAG_IMPLIED_END     = 1u << 5,   // "generate implied end tags"
+    HTML5_TAG_FORMATTING      = 1u << 6,
+    HTML5_TAG_SPECIAL         = 1u << 7,
+    HTML5_TAG_LIST_STOP       = 1u << 8,   // end the li/dd/dt closing walk
+    HTML5_TAG_LIST_PASS       = 1u << 9,   // the walk passes these special tags
+    HTML5_TAG_HEAD_CONTENT    = 1u << 10,  // in body, processed by the in-head rules
+    HTML5_TAG_HEADING         = 1u << 11,
+    HTML5_TAG_SVG             = 1u << 12,
+    HTML5_TAG_SVG_EXIT        = 1u << 13,  // leave SVG content on the stack walk
+};
+
+// The class bits of a tag name. `tag_id` is its well-known markup name id
+// (an element's TypeElmt::name_id, html5_token_tag_id or html5_tag_id): a
+// markup id is answered by table; any other id matches the lists by string.
+uint32_t html5_tag_classes(NameId tag_id, const char* tag_name);
+// the markup name id of a tag spelling, or NAME_ID_NONE
+NameId html5_tag_id(const char* tag_name);
+// a start/end tag token's markup name id, computed on first use
+NameId html5_token_tag_id_slow(Html5Token* token);
+static inline NameId html5_token_tag_id(Html5Token* token) {
+    return token->tag_id_known ? token->tag_id : html5_token_tag_id_slow(token);
+}
+// whether two tag names are the same spelling: ids decide when both are
+// markup ids, otherwise the spellings are compared
+bool html5_same_tag(NameId a_id, const char* a, NameId b_id, const char* b);
+
+static inline NameId html5_element_tag_id(Element* elem) {
+    return ((TypeElmt*)elem->type)->name_id;
+}
+static inline const char* html5_element_tag(Element* elem) {
+    return ((TypeElmt*)elem->type)->name.str;
+}
+static inline uint32_t html5_element_classes(Element* elem) {
+    return html5_tag_classes(html5_element_tag_id(elem), html5_element_tag(elem));
+}
+
+// A well-known markup tag as the (id, spelling) pair the scope and pop
+// helpers take, from one name: HTML5_TAG(P). A literal spelling would cost a
+// hash lookup per call to find its id.
+#define HTML5_TAG(NAME) MARKUP_NAME_##NAME, html5_markup_tag_name(MARKUP_NAME_##NAME)
+const char* html5_markup_tag_name(NameId tag_id);
+
+// whether a start/end tag token's tag is the well-known markup name `tag_id`:
+// the ids decide when the token has one; otherwise the token's spelling is
+// compared with the name's (a token id is a markup id or NAME_ID_NONE)
+static inline bool html5_token_is(Html5Token* token, NameId tag_id) {
+    NameId token_id = html5_token_tag_id(token);
+    if (token_id != NAME_ID_NONE) return token_id == tag_id;
+    return strcmp(token->tag_name->chars, html5_markup_tag_name(tag_id)) == 0;
+}
+
 // Stack operations (defined in html5_tree_builder.cpp)
 Element* html5_current_node(Html5Parser* parser);
 void html5_push_element(Html5Parser* parser, Element* elem);
 Element* html5_pop_element(Html5Parser* parser);
-bool html5_has_element_in_scope(Html5Parser* parser, const char* tag_name);
-bool html5_has_element_in_button_scope(Html5Parser* parser, const char* tag_name);
-bool html5_has_element_in_table_scope(Html5Parser* parser, const char* tag_name);
-bool html5_has_element_in_list_item_scope(Html5Parser* parser, const char* tag_name);
-bool html5_has_element_in_select_scope(Html5Parser* parser, const char* tag_name);
+// the target tag is an (id, spelling) pair: HTML5_TAG(P), or a token's
+// html5_token_tag_id and tag name
+bool html5_has_element_in_scope(Html5Parser* parser, NameId tag_id, const char* tag_name);
+bool html5_has_element_in_button_scope(Html5Parser* parser, NameId tag_id, const char* tag_name);
+bool html5_has_element_in_table_scope(Html5Parser* parser, NameId tag_id, const char* tag_name);
+bool html5_has_element_in_list_item_scope(Html5Parser* parser, NameId tag_id, const char* tag_name);
+bool html5_has_element_in_select_scope(Html5Parser* parser, NameId tag_id, const char* tag_name);
 
 // Foreign-content namespace check (defined in html5_parser.cpp)
 bool html5_is_in_svg_namespace(Html5Parser* parser);
 
 // Tree construction helpers
 void html5_generate_implied_end_tags(Html5Parser* parser);
-void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* tag_name);
+void html5_generate_implied_end_tags_except(Html5Parser* parser, NameId tag_id, const char* tag_name);
 void html5_reconstruct_active_formatting_elements(Html5Parser* parser);
 void html5_clear_active_formatting_to_marker(Html5Parser* parser);
 void html5_close_p_element(Html5Parser* parser);
@@ -296,8 +359,8 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token);
 // Active formatting elements
 void html5_push_active_formatting_element(Html5Parser* parser, Element* elem, Html5Token* token);
 void html5_push_active_formatting_marker(Html5Parser* parser);
-bool html5_is_formatting_element(const char* tag_name);
-bool html5_is_special_element(const char* tag_name);
+bool html5_is_formatting_element(NameId tag_id, const char* tag_name);
+bool html5_is_special_element(NameId tag_id, const char* tag_name);
 
 // Adoption Agency Algorithm
 void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token);

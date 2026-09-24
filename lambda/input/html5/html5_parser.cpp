@@ -3,8 +3,143 @@
 #include "../../io/mark_builder.hpp"
 #include "../../core/mark_reader.hpp"
 #include "../../io/mark_editor.hpp"
+#include "../../core/markup_name_classes.hpp"
 #include <string.h>
 #include <assert.h>
+
+// ============================================================================
+// TAG CLASSES
+// The tag lists of the tree-construction rules, one class bit each
+// (Html5TagClass). html5_tag_classes answers a well-known markup name id from
+// a table built from these lists (markup_name_classes.hpp); any other name is
+// matched against the lists. Before, each check walked its list with strcmp
+// for every open element it visited -- a quarter of HTML parse time.
+// ============================================================================
+
+static const char* const HTML5_SCOPE_TAGS[] = {
+    "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template"
+};
+static const char* const HTML5_BUTTON_SCOPE_TAGS[] = {"button"};
+static const char* const HTML5_LIST_ITEM_SCOPE_TAGS[] = {"ol", "ul"};
+static const char* const HTML5_TABLE_SCOPE_TAGS[] = {"html", "table", "template"};
+static const char* const HTML5_SELECT_PASS_TAGS[] = {"optgroup", "option"};
+static const char* const HTML5_IMPLIED_END_TAGS[] = {
+    "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"
+};
+static const char* const HTML5_FORMATTING_TAGS[] = {
+    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small",
+    // span is phrasing content, not an active-formatting entry; retaining it
+    // reconstructs an omitted-list-item wrapper that browsers do not create.
+    "strike", "strong", "tt", "u"
+};
+static const char* const HTML5_SPECIAL_TAGS[] = {
+    "address", "applet", "area", "article", "aside", "base", "basefont",
+    "bgsound", "blockquote", "body", "br", "button", "caption", "center",
+    "col", "colgroup", "dd", "details", "dir", "div", "dl", "dt", "embed",
+    "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset",
+    "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr",
+    "html", "iframe", "img", "input", "keygen", "li", "link", "listing",
+    "main", "marquee", "menu", "meta", "nav", "noembed", "noframes",
+    "noscript", "object", "ol", "p", "param", "plaintext", "pre", "script",
+    "section", "select", "source", "style", "summary", "table", "tbody",
+    "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr",
+    "track", "ul", "wbr", "xmp"
+};
+// the li/dd/dt closing walk stops at these (the special tags less address,
+// div and p, which it passes, plus search)
+static const char* const HTML5_LIST_STOP_TAGS[] = {
+    "applet", "area", "article", "aside", "base", "basefont", "bgsound",
+    "blockquote", "body", "br", "button", "caption", "center", "col",
+    "colgroup", "dd", "details", "dir", "dl", "dt", "embed", "fieldset",
+    "figcaption", "figure", "footer", "form", "frame", "frameset", "h1",
+    "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr",
+    "html", "iframe", "img", "input", "keygen", "li", "link", "listing",
+    "main", "marquee", "menu", "meta", "nav", "noembed", "noframes",
+    "noscript", "object", "ol", "param", "plaintext", "pre", "script",
+    "search", "section", "select", "source", "style", "summary", "table",
+    "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "title",
+    "tr", "track", "ul", "wbr", "xmp"
+};
+static const char* const HTML5_LIST_PASS_TAGS[] = {"address", "div", "p"};
+static const char* const HTML5_HEAD_CONTENT_TAGS[] = {
+    "base", "basefont", "bgsound", "link", "meta", "noframes",
+    "script", "style", "template", "title"
+};
+static const char* const HTML5_HEADING_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
+static const char* const HTML5_SVG_TAGS[] = {"svg"};
+static const char* const HTML5_SVG_EXIT_TAGS[] = {"html", "body", "head", "foreignObject"};
+
+#define HTML5_TAG_LIST(list, cls) { list, sizeof(list) / sizeof(list[0]), cls }
+static const struct {
+    const char* const* tags;
+    size_t count;
+    uint32_t cls;
+} HTML5_TAG_LISTS[] = {
+    HTML5_TAG_LIST(HTML5_SCOPE_TAGS, HTML5_TAG_SCOPE),
+    HTML5_TAG_LIST(HTML5_BUTTON_SCOPE_TAGS, HTML5_TAG_BUTTON_SCOPE),
+    HTML5_TAG_LIST(HTML5_LIST_ITEM_SCOPE_TAGS, HTML5_TAG_LIST_ITEM_SCOPE),
+    HTML5_TAG_LIST(HTML5_TABLE_SCOPE_TAGS, HTML5_TAG_TABLE_SCOPE),
+    HTML5_TAG_LIST(HTML5_SELECT_PASS_TAGS, HTML5_TAG_SELECT_PASS),
+    HTML5_TAG_LIST(HTML5_IMPLIED_END_TAGS, HTML5_TAG_IMPLIED_END),
+    HTML5_TAG_LIST(HTML5_FORMATTING_TAGS, HTML5_TAG_FORMATTING),
+    HTML5_TAG_LIST(HTML5_SPECIAL_TAGS, HTML5_TAG_SPECIAL),
+    HTML5_TAG_LIST(HTML5_LIST_STOP_TAGS, HTML5_TAG_LIST_STOP),
+    HTML5_TAG_LIST(HTML5_LIST_PASS_TAGS, HTML5_TAG_LIST_PASS),
+    HTML5_TAG_LIST(HTML5_HEAD_CONTENT_TAGS, HTML5_TAG_HEAD_CONTENT),
+    HTML5_TAG_LIST(HTML5_HEADING_TAGS, HTML5_TAG_HEADING),
+    HTML5_TAG_LIST(HTML5_SVG_TAGS, HTML5_TAG_SVG),
+    HTML5_TAG_LIST(HTML5_SVG_EXIT_TAGS, HTML5_TAG_SVG_EXIT),
+};
+#undef HTML5_TAG_LIST
+
+// the lists' answer for one spelling
+static uint32_t html5_tag_classes_by_name(const char* tag_name, size_t len) {
+    (void)len;  // the lists are compared as C strings, as the checks did
+    uint32_t cls = 0;
+    for (size_t l = 0; l < sizeof(HTML5_TAG_LISTS) / sizeof(HTML5_TAG_LISTS[0]); l++) {
+        for (size_t i = 0; i < HTML5_TAG_LISTS[l].count; i++) {
+            if (strcmp(tag_name, HTML5_TAG_LISTS[l].tags[i]) == 0) {
+                cls |= HTML5_TAG_LISTS[l].cls;
+                break;
+            }
+        }
+    }
+    return cls;
+}
+
+uint32_t html5_tag_classes(NameId tag_id, const char* tag_name) {
+    static const MarkupNameClassTable table(html5_tag_classes_by_name);
+    uint32_t cls;
+    if (table.lookup(tag_id, &cls)) return cls;
+    return tag_name ? html5_tag_classes_by_name(tag_name, strlen(tag_name)) : 0;
+}
+
+NameId html5_tag_id(const char* tag_name) {
+    if (!tag_name) return NAME_ID_NONE;
+    NameId id = well_known_name_id(strview_init(tag_name, strlen(tag_name)));
+    return MarkupNameClassTable::is_markup_id(id) ? id : NAME_ID_NONE;
+}
+
+const char* html5_markup_tag_name(NameId tag_id) {
+    return well_known_name_view(tag_id).str;
+}
+
+NameId html5_token_tag_id_slow(Html5Token* token) {
+    if (!token->tag_id_known) {
+        token->tag_id = token->tag_name ? html5_tag_id(token->tag_name->chars) : NAME_ID_NONE;
+        token->tag_id_known = true;
+    }
+    return token->tag_id;
+}
+
+bool html5_same_tag(NameId a_id, const char* a, NameId b_id, const char* b) {
+    // a markup id names exactly one spelling; an element whose TypeElmt lost
+    // its id (a MarkEditor copy) still compares by its bytes
+    if (MarkupNameClassTable::is_markup_id(a_id) && MarkupNameClassTable::is_markup_id(b_id)) {
+        return a_id == b_id;
+    }
+    return strcmp(a, b) == 0;
+}
 
 // ============================================================================
 // SVG/MathML NAMESPACE HANDLING
@@ -164,15 +299,14 @@ bool html5_is_in_svg_namespace(Html5Parser* parser) {
     // Walk up the stack looking for an SVG element
     for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
         Element* elem = (Element*)parser->open_elements->items[i].element;
-        const char* tag_name = ((TypeElmt*)elem->type)->name.str;
+        uint32_t cls = html5_element_classes(elem);
 
         // Found svg element - we're in SVG namespace
-        if (strcmp(tag_name, "svg") == 0) {
+        if (cls & HTML5_TAG_SVG) {
             return true;
         }
         // Found html element - we've exited SVG namespace
-        if (strcmp(tag_name, "html") == 0 || strcmp(tag_name, "body") == 0 ||
-            strcmp(tag_name, "head") == 0 || strcmp(tag_name, "foreignObject") == 0) {
+        if (cls & HTML5_TAG_SVG_EXIT) {
             return false;
         }
     }
@@ -338,75 +472,60 @@ static Element* html5_find_foster_parent(Html5Parser* parser, Element* table_ele
 }
 
 // scope checking - implements "has an element in scope" algorithms from WHATWG spec
-static bool is_scope_marker(const char* tag_name, const char** scope_list, size_t scope_len) {
-    for (size_t i = 0; i < scope_len; i++) {
-        if (strcmp(tag_name, scope_list[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool has_element_in_scope_generic(Html5Parser* parser, const char* target_tag_name,
-                                          const char** scope_list, size_t scope_len) {
+static bool has_element_in_scope_generic(Html5Parser* parser, NameId target_id,
+                                          const char* target_tag_name, uint32_t scope_markers) {
     // traverse stack from top to bottom
     for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
         Element* elem = (Element*)parser->open_elements->items[i].element;
-        const char* tag_name = ((TypeElmt*)elem->type)->name.str;
+        NameId tag_id = html5_element_tag_id(elem);
+        const char* tag_name = html5_element_tag(elem);
 
-        if (strcmp(tag_name, target_tag_name) == 0) {
+        if (html5_same_tag(tag_id, tag_name, target_id, target_tag_name)) {
             return true;
         }
 
-        if (is_scope_marker(tag_name, scope_list, scope_len)) {
+        if (html5_tag_classes(tag_id, tag_name) & scope_markers) {
             return false;
         }
     }
     return false;
 }
 
-bool html5_has_element_in_scope(Html5Parser* parser, const char* tag_name) {
+bool html5_has_element_in_scope(Html5Parser* parser, NameId tag_id, const char* tag_name) {
     // standard scope markers: applet, caption, html, table, td, th, marquee, object, template,
     // plus MathML mi, mo, mn, ms, mtext, annotation-xml, and SVG foreignObject, desc, title
-    static const char* scope_markers[] = {
-        "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template"
-    };
-    return has_element_in_scope_generic(parser, tag_name, scope_markers, 9);
+    return has_element_in_scope_generic(parser, tag_id, tag_name, HTML5_TAG_SCOPE);
 }
 
-bool html5_has_element_in_button_scope(Html5Parser* parser, const char* tag_name) {
+bool html5_has_element_in_button_scope(Html5Parser* parser, NameId tag_id, const char* tag_name) {
     // button scope = standard scope + button
-    static const char* scope_markers[] = {
-        "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template", "button"
-    };
-    return has_element_in_scope_generic(parser, tag_name, scope_markers, 10);
+    return has_element_in_scope_generic(parser, tag_id, tag_name,
+        HTML5_TAG_SCOPE | HTML5_TAG_BUTTON_SCOPE);
 }
 
-bool html5_has_element_in_table_scope(Html5Parser* parser, const char* tag_name) {
+bool html5_has_element_in_table_scope(Html5Parser* parser, NameId tag_id, const char* tag_name) {
     // table scope = html, table, template
-    static const char* scope_markers[] = {"html", "table", "template"};
-    return has_element_in_scope_generic(parser, tag_name, scope_markers, 3);
+    return has_element_in_scope_generic(parser, tag_id, tag_name, HTML5_TAG_TABLE_SCOPE);
 }
 
-bool html5_has_element_in_list_item_scope(Html5Parser* parser, const char* tag_name) {
+bool html5_has_element_in_list_item_scope(Html5Parser* parser, NameId tag_id, const char* tag_name) {
     // list item scope = standard scope + ol, ul
-    static const char* scope_markers[] = {
-        "applet", "caption", "html", "table", "td", "th", "marquee", "object", "template", "ol", "ul"
-    };
-    return has_element_in_scope_generic(parser, tag_name, scope_markers, 11);
+    return has_element_in_scope_generic(parser, tag_id, tag_name,
+        HTML5_TAG_SCOPE | HTML5_TAG_LIST_ITEM_SCOPE);
 }
 
-bool html5_has_element_in_select_scope(Html5Parser* parser, const char* tag_name) {
+bool html5_has_element_in_select_scope(Html5Parser* parser, NameId target_id, const char* tag_name) {
     // select scope = all elements EXCEPT optgroup and option
     for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
         Element* elem = (Element*)parser->open_elements->items[i].element;
-        const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
+        NameId elem_id = html5_element_tag_id(elem);
+        const char* elem_tag = html5_element_tag(elem);
 
-        if (strcmp(elem_tag, tag_name) == 0) {
+        if (html5_same_tag(elem_id, elem_tag, target_id, tag_name)) {
             return true;
         }
 
-        if (strcmp(elem_tag, "optgroup") != 0 && strcmp(elem_tag, "option") != 0) {
+        if (!(html5_tag_classes(elem_id, elem_tag) & HTML5_TAG_SELECT_PASS)) {
             return false;
         }
     }
@@ -415,55 +534,28 @@ bool html5_has_element_in_select_scope(Html5Parser* parser, const char* tag_name
 
 // implied end tags - implements "generate implied end tags" from WHATWG spec
 void html5_generate_implied_end_tags(Html5Parser* parser) {
-    static const char* implied_tags[] = {
-        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"
-    };
-
     while (parser->open_elements->length > 0) {
         Element* current = html5_current_node(parser);
-        const char* tag_name = ((TypeElmt*)current->type)->name.str;
-
-        bool is_implied = false;
-        for (size_t i = 0; i < 10; i++) {
-            if (strcmp(tag_name, implied_tags[i]) == 0) {
-                is_implied = true;
-                break;
-            }
-        }
-
-        if (!is_implied) {
+        if (!(html5_element_classes(current) & HTML5_TAG_IMPLIED_END)) {
             break;
         }
-
         html5_pop_element(parser);
     }
 }
 
-void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* exception_tag) {
-    static const char* implied_tags[] = {
-        "dd", "dt", "li", "optgroup", "option", "p", "rb", "rp", "rt", "rtc"
-    };
-
+void html5_generate_implied_end_tags_except(Html5Parser* parser, NameId exception_id,
+                                            const char* exception_tag) {
     while (parser->open_elements->length > 0) {
         Element* current = html5_current_node(parser);
-        const char* tag_name = ((TypeElmt*)current->type)->name.str;
+        NameId tag_id = html5_element_tag_id(current);
+        const char* tag_name = html5_element_tag(current);
 
-        if (strcmp(tag_name, exception_tag) == 0) {
+        if (html5_same_tag(tag_id, tag_name, exception_id, exception_tag)) {
             break;
         }
-
-        bool is_implied = false;
-        for (size_t i = 0; i < 10; i++) {
-            if (strcmp(tag_name, implied_tags[i]) == 0) {
-                is_implied = true;
-                break;
-            }
-        }
-
-        if (!is_implied) {
+        if (!(html5_tag_classes(tag_id, tag_name) & HTML5_TAG_IMPLIED_END)) {
             break;
         }
-
         html5_pop_element(parser);
     }
 }
@@ -471,7 +563,7 @@ void html5_generate_implied_end_tags_except(Html5Parser* parser, const char* exc
 // close a <p> element in button scope - implements "close a p element" from WHATWG spec
 void html5_close_p_element(Html5Parser* parser) {
     // generate implied end tags except for p
-    html5_generate_implied_end_tags_except(parser, "p");
+    html5_generate_implied_end_tags_except(parser, HTML5_TAG(P));
     // pop elements until we pop a p element
     while (parser->open_elements->length > 0) {
         Element* current = html5_current_node(parser);
@@ -946,42 +1038,13 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
 // ==================== ADOPTION AGENCY ALGORITHM ====================
 
 // Check if tag name is a formatting element (per WHATWG spec)
-bool html5_is_formatting_element(const char* tag_name) {
-    static const char* formatting_elements[] = {
-        "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small",
-        // span is phrasing content, not an active-formatting entry; retaining it
-        // reconstructs an omitted-list-item wrapper that browsers do not create.
-        "strike", "strong", "tt", "u"
-    };
-    for (size_t i = 0; i < sizeof(formatting_elements)/sizeof(formatting_elements[0]); i++) {
-        if (strcmp(tag_name, formatting_elements[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+bool html5_is_formatting_element(NameId tag_id, const char* tag_name) {
+    return (html5_tag_classes(tag_id, tag_name) & HTML5_TAG_FORMATTING) != 0;
 }
 
 // Check if tag name is a special element (per WHATWG spec)
-bool html5_is_special_element(const char* tag_name) {
-    static const char* special_elements[] = {
-        "address", "applet", "area", "article", "aside", "base", "basefont",
-        "bgsound", "blockquote", "body", "br", "button", "caption", "center",
-        "col", "colgroup", "dd", "details", "dir", "div", "dl", "dt", "embed",
-        "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset",
-        "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr",
-        "html", "iframe", "img", "input", "keygen", "li", "link", "listing",
-        "main", "marquee", "menu", "meta", "nav", "noembed", "noframes",
-        "noscript", "object", "ol", "p", "param", "plaintext", "pre", "script",
-        "section", "select", "source", "style", "summary", "table", "tbody",
-        "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr",
-        "track", "ul", "wbr", "xmp"
-    };
-    for (size_t i = 0; i < sizeof(special_elements)/sizeof(special_elements[0]); i++) {
-        if (strcmp(tag_name, special_elements[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+bool html5_is_special_element(NameId tag_id, const char* tag_name) {
+    return (html5_tag_classes(tag_id, tag_name) & HTML5_TAG_SPECIAL) != 0;
 }
 
 // Create element for token (without inserting into tree)
@@ -1170,14 +1233,14 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
                 if (strcmp(node_tag, subject) == 0) {
                     // Found matching element - flush text and process
                     html5_flush_pending_text(parser);
-                    html5_generate_implied_end_tags_except(parser, subject);
+                    html5_generate_implied_end_tags_except(parser, html5_token_tag_id(token), subject);
                     while ((int)parser->open_elements->length > i) {
                         html5_pop_element(parser);
                     }
                     return;
                 }
 
-                if (html5_is_special_element(node_tag)) {
+                if (html5_is_special_element(html5_element_tag_id(node), node_tag)) {
                     // Hit special element - ignore token, don't flush text
                     return;
                 }
@@ -1197,7 +1260,7 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
         }
 
         // Step 3: If formatting element is not in scope, parse error
-        if (!html5_has_element_in_scope(parser, subject)) {
+        if (!html5_has_element_in_scope(parser, html5_token_tag_id(token), subject)) {
             log_error("html5: AAA - formatting element not in scope");
             return;
         }
@@ -1214,7 +1277,7 @@ void html5_run_adoption_agency(Html5Parser* parser, Html5Token* token) {
         for (int i = fe_stack_idx + 1; i < (int)parser->open_elements->length; i++) {
             Element* node = (Element*)parser->open_elements->items[i].element;
             const char* node_tag = ((TypeElmt*)node->type)->name.str;
-            if (html5_is_special_element(node_tag)) {
+            if (html5_is_special_element(html5_element_tag_id(node), node_tag)) {
                 furthest_block = node;
                 furthest_block_idx = i;
                 break;
