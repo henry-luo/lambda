@@ -237,7 +237,7 @@ T28-5.1 was verified four ways:
 
 | Input | Smaller | Larger (2×) | Growth |
 |---|---:|---:|---:|
-| JSON string of `éx` repeated | 137 KiB: 20.6 ms | 273 KiB: 80.9 ms | 3.9× (quadratic) |
+| JSON string of `\u00e9x` repeated | 137 KiB: 20.6 ms | 273 KiB: 80.9 ms | 3.9× (quadratic) |
 | YAML, 50 lines of long plain scalars | 489 KiB: 570 ms | 977 KiB: 2,266 ms | 4.0× (quadratic) |
 
 HTML, the same document shape in two languages:

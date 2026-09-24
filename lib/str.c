@@ -2,8 +2,11 @@
  * str.c — Safe, convenient, high-performance C string library for Lambda.
  *
  * Implementation notes:
- * - SWAR (SIMD Within A Register) used for hot loops: byte-equality scans and
- *   ASCII checks process 8 bytes per cycle; case transforms keep byte lanes independent.
+ * - Hot scans hand the work to vectorized code: libc memchr finds bytes and
+ *   literal-search candidates (str_find), and block loops written without
+ *   early exits or calls let the compiler vectorize ASCII checks and byte
+ *   counts. Backward byte search uses SWAR (8 bytes per step) with an exact
+ *   per-byte mask; case transforms keep byte lanes independent.
  * - NULL inputs are treated as empty (length 0) — never crash.
  * - All outputs NUL-terminated where applicable.
  */
@@ -25,30 +28,15 @@ static inline uint64_t _swar_broadcast(uint8_t c) {
     return (uint64_t)c * 0x0101010101010101ULL;
 }
 
-/* detect which bytes in a word are zero (have their high bit set in result) */
-static inline uint64_t _swar_has_zero(uint64_t v) {
-    return (v - 0x0101010101010101ULL) & ~v & 0x8080808080808080ULL;
-}
-
-/* detect which bytes in a word equal `c` */
-static inline uint64_t _swar_has_byte(uint64_t word, uint8_t c) {
-    return _swar_has_zero(word ^ _swar_broadcast(c));
-}
-
-/* exact form of _swar_has_byte: the high bit of a byte is set iff that byte
- * equals `c`. _swar_has_byte's borrow can also flag the byte just above a
- * real match (when it equals c ^ 0x01), which is harmless when only the
- * lowest flag is read but wrong for backward scans (LR05-14). Here each
- * byte's sum stays below 0x100, so no flag crosses into its neighbour. */
+/* the high bit of a byte is set iff that byte equals `c`. The classic
+ * (v - 0x01..) & ~v & 0x80.. zero test can also flag the byte just above a
+ * real match (when it equals c ^ 0x01) through its borrow; that is harmless
+ * when only the lowest flag is read but wrong for backward scans (LR05-14).
+ * Here each byte's sum stays below 0x100, so no flag reaches a neighbour. */
 static inline uint64_t _swar_has_byte_exact(uint64_t word, uint8_t c) {
     uint64_t x = word ^ _swar_broadcast(c);
     return ~(((x & 0x7F7F7F7F7F7F7F7FULL) + 0x7F7F7F7F7F7F7F7FULL) | x |
              0x7F7F7F7F7F7F7F7FULL);
-}
-
-/* detect any byte with high bit set (non-ASCII) */
-static inline uint64_t _swar_has_highbit(uint64_t v) {
-    return v & 0x8080808080808080ULL;
 }
 
 /* safe unaligned 64-bit load */
@@ -56,26 +44,6 @@ static inline uint64_t _load_u64(const void* p) {
     uint64_t v;
     memcpy(&v, p, 8);
     return v;
-}
-
-/* count trailing zeros (byte-index of first match) */
-static inline int _ctz64(uint64_t v) {
-#if defined(__GNUC__) || defined(__clang__)
-    return __builtin_ctzll(v);
-#elif defined(_MSC_VER) && defined(_WIN64)
-    unsigned long idx;
-    _BitScanForward64(&idx, v);
-    return (int)idx;
-#else
-    int n = 0;
-    if (!(v & 0xFFFFFFFF)) { n += 32; v >>= 32; }
-    if (!(v & 0xFFFF))     { n += 16; v >>= 16; }
-    if (!(v & 0xFF))       { n += 8;  v >>= 8;  }
-    if (!(v & 0xF))        { n += 4;  v >>= 4;  }
-    if (!(v & 0x3))        { n += 2;  v >>= 2;  }
-    if (!(v & 0x1))        { n += 1; }
-    return n;
-#endif
 }
 
 /* count leading zeros */
@@ -259,19 +227,10 @@ bool str_iends_with_const(const char* s, size_t s_len, const char* suffix) {
 
 size_t str_find_byte(const char* s, size_t len, char c) {
     if (!s || len == 0) return STR_NPOS;
-    /* SWAR scan for the byte */
-    size_t i = 0;
-    if (len >= 8) {
-        uint64_t mask;
-        for (; i + 8 <= len; i += 8) {
-            mask = _swar_has_byte(_load_u64(s + i), (uint8_t)c);
-            if (mask) return i + _ctz64(mask) / 8;
-        }
-    }
-    for (; i < len; i++) {
-        if (s[i] == c) return i;
-    }
-    return STR_NPOS;
+    /* libc memchr is vectorized (NEON / SSE2 / AVX2): as fast as the 8-byte
+     * SWAR scan it replaced on arm64, and wider on x86-64 */
+    const char* hit = (const char*)memchr(s, (unsigned char)c, len);
+    return hit ? (size_t)(hit - s) : STR_NPOS;
 }
 
 size_t str_rfind_byte(const char* s, size_t len, char c) {
@@ -304,21 +263,21 @@ size_t str_find(const char* s, size_t s_len,
     if (needle_len > s_len) return STR_NPOS;
     if (needle_len == 1) return str_find_byte(s, s_len, needle[0]);
 
-    /* two-byte filter + verify: scan for first byte, check second, then full memcmp */
-    char first = needle[0];
-    char second = needle[1];
-    size_t limit = s_len - needle_len;
-
-    for (size_t i = 0; i <= limit; i++) {
-        /* find first byte using SWAR */
-        size_t pos = str_find_byte(s + i, s_len - i, first);
-        if (pos == STR_NPOS || pos + i > limit) return STR_NPOS;
-        i += pos;
-        /* quick check second byte before full compare */
-        if (s[i + 1] == second &&
-            memcmp(s + i + 2, needle + 2, needle_len - 2) == 0) {
-            return i;
+    /* Candidate scan, the one literal-search kernel (T28-5): memchr jumps to
+     * the next first byte among the positions a match can start at, the
+     * second byte filters, and memcmp checks only the rest at a candidate.
+     * The old loops called memcmp at every position. */
+    const unsigned char first = (unsigned char)needle[0];
+    const char second = needle[1];
+    const char* p = s;
+    const char* last = s + (s_len - needle_len);   /* last possible start */
+    while (p <= last) {
+        const char* hit = (const char*)memchr(p, first, (size_t)(last - p) + 1);
+        if (!hit) return STR_NPOS;
+        if (hit[1] == second && memcmp(hit + 2, needle + 2, needle_len - 2) == 0) {
+            return (size_t)(hit - s);
         }
+        p = hit + 1;
     }
     return STR_NPOS;
 }
@@ -331,11 +290,14 @@ size_t str_rfind(const char* s, size_t s_len,
     if (needle_len > s_len) return STR_NPOS;
     if (needle_len == 1) return str_rfind_byte(s, s_len, needle[0]);
 
-    for (size_t i = s_len - needle_len + 1; i > 0; ) {
-        i--;
-        if (s[i] == needle[0] && memcmp(s + i, needle, needle_len) == 0) {
-            return i;
-        }
+    /* backward candidate scan: the (exact) SWAR reverse byte search finds the
+     * last first-byte hit among the possible starts; memcmp checks the rest */
+    size_t end = s_len - needle_len + 1;   /* candidates start in [0, end) */
+    while (end > 0) {
+        size_t at = str_rfind_byte(s, end, needle[0]);
+        if (at == STR_NPOS) return STR_NPOS;
+        if (memcmp(s + at + 1, needle + 1, needle_len - 1) == 0) return at;
+        end = at;
     }
     return STR_NPOS;
 }
@@ -410,26 +372,20 @@ size_t str_count(const char* s, size_t s_len,
 
 size_t str_count_byte(const char* s, size_t s_len, char c) {
     if (!s) return 0;
+    const unsigned char* p = (const unsigned char*)s;
+    const unsigned char b = (unsigned char)c;
     size_t count = 0;
-    /* SWAR: XOR with broadcast(c), then count zero bytes.
-     * Note: _swar_has_byte can have false positives due to borrow propagation
-     * across byte boundaries, so we use an OR-cascade approach instead:
-     * XOR → collapse non-zero bytes to 0x01, zero bytes stay 0x00 →
-     * horizontal sum via multiply → subtract from 8. */
     size_t i = 0;
-    for (; i + 8 <= s_len; i += 8) {
-        uint64_t w = _load_u64(s + i) ^ _swar_broadcast((uint8_t)c);
-        /* collapse each non-zero byte to have at least bit 0 set */
-        w |= (w >> 4);
-        w |= (w >> 2);
-        w |= (w >> 1);
-        w &= 0x0101010101010101ULL; /* each byte is now 0x00 (match) or 0x01 (no match) */
-        /* horizontal sum of the 8 bytes into the top byte via multiply */
-        uint64_t non_matches = (w * 0x0101010101010101ULL) >> 56;
-        count += 8 - (size_t)non_matches;
-    }
-    for (; i < s_len; i++) {
-        if (s[i] == c) count++;
+    /* Count in 8-bit lanes over blocks of at most 255 bytes, then widen: the
+     * compiler turns the block into one compare and one subtract per 16
+     * bytes. A size_t accumulator would widen every compare result to 64
+     * bits instead; this is ~2.3x the SWAR multiply trick it replaced. */
+    while (i < s_len) {
+        size_t n = s_len - i < 255 ? s_len - i : 255;
+        uint8_t block = 0;
+        for (size_t j = 0; j < n; j++) block += (uint8_t)(p[i + j] == b);
+        count += block;
+        i += n;
     }
     return count;
 }
@@ -690,15 +646,19 @@ void str_swapcase_ascii(char* dst, const char* src, size_t len) {
 
 bool str_is_ascii(const char* s, size_t len) {
     if (!s) return true;
+    const unsigned char* p = (const unsigned char*)s;
     size_t i = 0;
-    /* SWAR: check 8 bytes at a time for any high bit */
-    for (; i + 8 <= len; i += 8) {
-        if (_swar_has_highbit(_load_u64(s + i))) return false;
+    /* OR each 32-byte block with no exit inside it, so the compiler vectorizes
+     * the block and tests once: ~1.8x the 8-byte SWAR scan from 64 bytes up,
+     * equal on short strings (every string creation calls this) */
+    for (; i + 32 <= len; i += 32) {
+        unsigned char acc = 0;
+        for (size_t j = 0; j < 32; j++) acc |= p[i + j];
+        if (acc & 0x80) return false;
     }
-    for (; i < len; i++) {
-        if ((unsigned char)s[i] > 127) return false;
-    }
-    return true;
+    unsigned char acc = 0;
+    for (; i < len; i++) acc |= p[i];
+    return (acc & 0x80) == 0;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1487,9 +1447,21 @@ bool str_char_is_ident(char c) {
 
 /* 17.2 — Bounded scanners (the default tier) */
 
+/* The skip/stop set as a bitmap, built once per scan, so each input byte
+ * costs one lookup instead of a loop over the set string (CSV fields and
+ * the kv/vcf/ics/eml/yaml line skips scan through these). NUL is never a
+ * member, as in str_char_in_set. */
+static inline void _byteset_from_chars(StrByteSet* set, const char* chars) {
+    str_byteset_clear(set);
+    if (!chars) return;
+    for (; *chars; chars++) str_byteset_add(set, (unsigned char)*chars);
+}
+
 const char* strn_skip_chars(const char* p, const char* end, const char* chars) {
     if (!p) return p;
-    while (p < end && str_char_in_set(*p, chars)) p++;
+    StrByteSet set;
+    _byteset_from_chars(&set, chars);
+    while (p < end && str_byteset_test(&set, (unsigned char)*p)) p++;
     return p;
 }
 
@@ -1518,8 +1490,14 @@ const char* strn_scan_until_char(const char* p, const char* end, char stop) {
 }
 
 const char* strn_scan_until_any(const char* p, const char* end, const char* stops) {
-    if (!p) return p;
-    while (p < end && !str_char_in_set(*p, stops)) p++;
+    if (!p || p >= end) return p;
+    if (stops && stops[0] && !stops[1]) {   /* one stop byte: memchr */
+        const char* hit = (const char*)memchr(p, (unsigned char)stops[0], (size_t)(end - p));
+        return hit ? hit : end;
+    }
+    StrByteSet set;
+    _byteset_from_chars(&set, stops);
+    while (p < end && !str_byteset_test(&set, (unsigned char)*p)) p++;
     return p;
 }
 
@@ -1643,7 +1621,9 @@ size_t strn_count_run(const char* p, const char* end, char marker) {
 
 const char* str_skip_chars(const char* p, const char* chars) {
     if (!p) return p;
-    while (str_char_in_set(*p, chars)) p++;
+    StrByteSet set;
+    _byteset_from_chars(&set, chars);   /* NUL stays out, so the scan stops there */
+    while (str_byteset_test(&set, (unsigned char)*p)) p++;
     return p;
 }
 
@@ -1673,7 +1653,10 @@ const char* str_scan_until_char(const char* p, char stop) {
 
 const char* str_scan_until_any(const char* p, const char* stops) {
     if (!p) return p;
-    while (*p && !str_char_in_set(*p, stops)) p++;
+    StrByteSet set;
+    _byteset_from_chars(&set, stops);
+    str_byteset_add(&set, 0);           /* the terminator ends the scan too */
+    while (!str_byteset_test(&set, (unsigned char)*p)) p++;
     return p;
 }
 

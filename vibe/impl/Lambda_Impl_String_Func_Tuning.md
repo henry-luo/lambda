@@ -13,15 +13,15 @@
 | P0 | correctness: LR05-14, LR05-15 | done |
 | P0 | LR09-31 (formatter size caps) | waiting on the user (proposal §8-2) |
 | P1 | quadratic paths and few-line fixes: §5.2-1 to §5.2-5, §5.5-1 | done |
-| P2 | shared `lib/` kernels | next |
-| P3 | parser inner loops | planned |
+| P2 | shared `lib/` kernels | done |
+| P3 | parser inner loops | next |
 | P4 | formatter loops | planned |
 | P5 | structural | planned |
 
 ## P0 — correctness
 
 - **LR05-14** (`str_rfind_byte`, `lib/str.c`). Added `_swar_has_byte_exact`, where each byte's sum stays below 0x100, so no flag leaks into a neighbour. The backward scan uses it, since the backward scan reads the highest flag.
-  - Forward scans keep `_swar_has_byte`: they read the lowest flag, which is always a real match.
+  - Forward scans kept `_swar_has_byte`, which is safe because they read the lowest flag. P2 later moved them to `memchr`.
   - New tests in `test/lib/test_str_gtest.cpp`:
     - `RFindByteSwarNeighbour`: the filed reproducers.
     - `RFindByteMatchesNaive`: 2,000 random buffers of every length from 0 to 39, over an alphabet built around `c` and `c ^ 1`, checked against a naive backward scan.
@@ -34,7 +34,7 @@
 
 | Item | Change | Workload | Before (ms) | After (ms) | Speedup |
 |---|---|---|---:|---:|---:|
-| §5.2-1 | `strnlen(p, 10)` for `\u` escapes (`input-utils.hpp`, `input-toml.cpp`, `input-mark.cpp`) | 273 KiB of `éx` in one JSON string | 84.52 | 0.87 | 97× |
+| §5.2-1 | `strnlen(p, 10)` for `\u` escapes (`input-utils.hpp`, `input-toml.cpp`, `input-mark.cpp`) | 273 KiB of `\u00e9x` in one JSON string | 84.52 | 0.87 | 97× |
 | §5.2-2 | `at_line_start()` instead of walking back to the line start (`input-yaml.cpp`, 4 sites) | 50 long plain-scalar lines, 977 KiB | 2366.41 | 2.86 | 826× |
 | §5.2-2 | same | `big.yaml`, 10.6 MiB, short lines | 154.84 | 133.21 | 1.16× |
 | §5.2-3 | `arena_owns` tests `arena->current` first (`lib/arena.c`) | Markdown parse, 9.0 MiB | 296.19 | 143.45 | 2.06× |
@@ -66,6 +66,48 @@ Measurement: `abx.py`, 5 interleaved runs per binary.
 - **Check:** a standalone harness (`temp/perf/floatprobe.c`, scratch) compared the old 1..17 `sscanf` probe with the new one. It ran over 19,970,618 random bit patterns, covering every exponent and about 10k subnormals, plus edge values such as `5e-324`, `DBL_MIN`, `DBL_MAX`, `0.1` and `1/3`. There were zero differences.
 - **Lesson:** a random-value corpus must cover every exponent, not just "typical" values.
 
-**Findings along the way:**
+## P2 — shared `lib/` kernels
+
+**Changes:**
+- **§5.3-1, one search kernel.**
+  - `str_find` is the `memchr` candidate scan, with a second-byte filter, bounded at the last possible start.
+  - `str_find_byte` is a `memchr` wrapper.
+  - `str_rfind` scans backwards for candidates using the exact `str_rfind_byte`.
+  - Lambda's `literal_find` delegates its case-sensitive path to `str_find` (rule 13).
+  - LambdaJS string `replace`, `replaceAll` and replace-first go through `js_str_search` (a `str_find` wrapper) instead of libc `memmem`.
+- **§5.3-2, 3: block kernels.** `str_is_ascii` ORs 32-byte blocks. `str_count_byte` and `utf8_count` count in `uint8_t` lanes over blocks of at most 255 bytes. Both shapes vectorize.
+- **§5.3-4, set scanners.** `str_scan_until_any`, `str_skip_chars` and their `strn_` forms build a `StrByteSet` once per call. A single stop byte uses `memchr`.
+- **Cleanup:** the SWAR helpers that became dead were removed (`_swar_has_byte`, `_swar_has_zero`, `_swar_has_highbit`, `_ctz64`, `_utf_load_u64`).
+- **Pin test:** `LambdaOptStrings.LiteralSplitKernelAvoidsBytewiseComparisons` now checks that `literal_find` calls `str_find` and that `str_find` is the candidate scan.
+
+**Kernel micro-benchmark** (`temp/perf/kbench.c`, ns per call, arm64):
+
+| Kernel | 7–31 B | 64 B | 4 KB | 1 MiB |
+|---|---|---:|---:|---:|
+| `str_is_ascii` (blocks) | ±0.5 ns | 1.4× | 1.8× | 1.8× |
+| `str_count_byte` (u8 lanes) | equal | 2.2× | 2.3× | 2.4× |
+| `utf8_count` (u8 lanes) | equal | 1.1× | 1.2× | 1.5× |
+
+**Workloads** (release, interleaved medians, base `4bdafbd8c` vs P2):
+
+| Workload | Before | After | Speedup |
+|---|---:|---:|---:|
+| split/replace/find/index_of/len micro | 36.1 ms | 33.7 ms | 1.07× |
+| CSV parse (set scanner) | 162.6 ms | 152.0 ms | 1.07× |
+| LambdaJS string `replace`/`replaceAll`/`indexOf` | 118 ms | 113 ms | 1.04× (Node: 61) |
+
+Everything else was flat. On this machine the SWAR kernels were already close to `memchr`. The value of P2 is one kernel, wider scans on x86-64, and less code, more than speed.
+
+**Semantics unchanged:**
+- **Parsers:** the ten corpora parse to byte-identical trees.
+- **Lambda builtins:** the 4,000-case `replace`/`find`/`split` fuzz is identical to the base binary.
+- **LambdaJS:** the literal-regex checks are identical. A new 3,000-case string-method fuzz (`indexOf`/`lastIndexOf`/`includes`/`replace`/`replaceAll`/`split`) matches Node exactly on both the base and P2 binaries.
+- **Unit tests:** the kernels are checked against naive references in 5 new randomized tests (`StrKernelTest.*`), 244/244.
+
+## Findings not yet filed
+
+These were found while measuring; each predates the branch (the base binary behaves the same). The two bugs go to the LambdaJS ledger once another session's edits to `vibe/JS_Issue_Ledger.md` have landed.
+
+- **LambdaJS `console.log` truncation:** a single call silently truncates its output at 4,095 bytes (`console.log("x".repeat(5000))` prints 4,095 characters). The base binary does the same. It hid most of the first JS fuzz run. To be filed in the LambdaJS ledger.
 - **Regex `split` cost:** LambdaJS regex `split` costs about 2.5 µs per input position (396 ms on 158 KB where Node takes under 1 ms), because it runs `exec` at every position (proposal §5.5-6). The literal-matcher change cannot help it; a bulk split path is needed.
 - **Pre-existing bug:** `"a/b".split(/\//)` does not split in LambdaJS, while Node splits it. The base binary behaves the same, so this predates the branch. To be filed in the LambdaJS ledger.

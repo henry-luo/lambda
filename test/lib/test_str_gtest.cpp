@@ -2074,3 +2074,111 @@ TEST_F(StrFmtTest, BinaryPayloadDecodeErrors) {
     EXPECT_EQ(err_off, 5);
     strbuf_free(out);
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// String tuning P2: the rewritten kernels against naive references, over
+// lengths that cross their block boundaries (32 for ASCII, 255 for counts)
+// ══════════════════════════════════════════════════════════════════════
+
+static uint32_t kernel_seed = 2463534242u;
+static uint32_t kernel_rand() {
+    kernel_seed ^= kernel_seed << 13; kernel_seed ^= kernel_seed >> 17; kernel_seed ^= kernel_seed << 5;
+    return kernel_seed;
+}
+static void kernel_fill(char* buf, size_t len, const char* alphabet, size_t alpha_len) {
+    for (size_t i = 0; i < len; i++) buf[i] = alphabet[kernel_rand() % alpha_len];
+}
+
+TEST(StrKernelTest, FindMatchesNaive) {
+    // dense first bytes make many rejected candidates
+    const char alphabet[] = "aab";
+    char hay[80];
+    char needle[5];
+    for (int round = 0; round < 4000; round++) {
+        size_t hay_len = (size_t)(round % 80);
+        size_t needle_len = 1 + (size_t)(kernel_rand() % 4);
+        kernel_fill(hay, hay_len, alphabet, 3);
+        kernel_fill(needle, needle_len, alphabet, 3);
+        size_t expected = STR_NPOS;
+        for (size_t i = 0; i + needle_len <= hay_len; i++) {
+            if (memcmp(hay + i, needle, needle_len) == 0) { expected = i; break; }
+        }
+        ASSERT_EQ(str_find(hay, hay_len, needle, needle_len), expected) << "round " << round;
+        size_t rexpected = STR_NPOS;
+        for (size_t i = hay_len >= needle_len ? hay_len - needle_len + 1 : 0; i > 0; i--) {
+            if (memcmp(hay + i - 1, needle, needle_len) == 0) { rexpected = i - 1; break; }
+        }
+        ASSERT_EQ(str_rfind(hay, hay_len, needle, needle_len), rexpected) << "round " << round;
+    }
+}
+
+TEST(StrKernelTest, CountByteMatchesNaive) {
+    static char buf[700];
+    for (int round = 0; round < 300; round++) {
+        size_t len = (size_t)(kernel_rand() % 700);
+        kernel_fill(buf, len, "abc,", 4);
+        size_t expected = 0;
+        for (size_t i = 0; i < len; i++) expected += buf[i] == ',';
+        ASSERT_EQ(str_count_byte(buf, len, ','), expected) << "len " << len;
+    }
+}
+
+TEST(StrKernelTest, Utf8CountMatchesNaive) {
+    // "é" (2 bytes) and "日" (3 bytes) mixed with ASCII
+    const char* pieces[] = {"a", "\xC3\xA9", "\xE6\x97\xA5", " "};
+    static char buf[800];
+    for (int round = 0; round < 300; round++) {
+        size_t len = 0, expected = 0;
+        size_t target = (size_t)(kernel_rand() % 700);
+        while (len < target) {
+            const char* piece = pieces[kernel_rand() % 4];
+            size_t n = strlen(piece);
+            memcpy(buf + len, piece, n);
+            len += n;
+            expected++;
+        }
+        ASSERT_EQ(utf8_count(buf, len), expected) << "len " << len;
+    }
+}
+
+TEST(StrKernelTest, IsAsciiMatchesNaive) {
+    static char buf[200];
+    for (size_t len = 0; len < 200; len++) {
+        memset(buf, 'a', len);
+        EXPECT_TRUE(str_is_ascii(buf, len)) << "len " << len;
+        for (size_t pos = 0; pos < len; pos += 7) {
+            buf[pos] = (char)0xC3;
+            EXPECT_FALSE(str_is_ascii(buf, len)) << "len " << len << " pos " << pos;
+            buf[pos] = 'a';
+        }
+    }
+}
+
+TEST(StrKernelTest, SetScannersMatchNaive) {
+    // bounded scanners also pass embedded NULs; one-stop-byte sets take memchr
+    const char alphabet[] = {'a', 'b', ',', '\n', ' ', '\0'};
+    const char* sets[] = {",", ",\n", ", \n", "ab", ""};
+    char buf[64];
+    for (int round = 0; round < 3000; round++) {
+        size_t len = (size_t)(round % 64);
+        kernel_fill(buf, len, alphabet, 6);
+        const char* set = sets[kernel_rand() % 5];
+        const char* end = buf + len;
+        const char* naive_until = buf;
+        while (naive_until < end && !str_char_in_set(*naive_until, set)) naive_until++;
+        const char* naive_skip = buf;
+        while (naive_skip < end && str_char_in_set(*naive_skip, set)) naive_skip++;
+        ASSERT_EQ(strn_scan_until_any(buf, end, set), naive_until) << "round " << round;
+        ASSERT_EQ(strn_skip_chars(buf, end, set), naive_skip) << "round " << round;
+        // NUL-terminated forms stop at the first NUL (buf[len] = 0 below)
+        char zbuf[65];
+        memcpy(zbuf, buf, len);
+        zbuf[len] = '\0';
+        const char* z_until = zbuf;
+        while (*z_until && !str_char_in_set(*z_until, set)) z_until++;
+        const char* z_skip = zbuf;
+        while (str_char_in_set(*z_skip, set)) z_skip++;
+        ASSERT_EQ(str_scan_until_any(zbuf, set), z_until) << "round " << round;
+        ASSERT_EQ(str_skip_chars(zbuf, set), z_skip) << "round " << round;
+    }
+}
