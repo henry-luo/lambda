@@ -315,6 +315,9 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
         if (js_scope_entry_matches_node(existing, node)) {
             existing->node = (AstNode*)node;
         }
+        // an ordinary declaration makes an Annex-B companion a real var; the
+        // companion path re-marks only a binding it newly created.
+        existing->is_annex_b_companion = false;
         return existing;
     }
 
@@ -607,7 +610,7 @@ static bool js_callable_elides_function_environment(AstFuncNode* function,
     // A call activation can borrow its closure environment only when it owns
     // no cells and no lexical state that a nested arrow/eval can observe.
     return function && !function->is_async && !function->is_generator &&
-        !facts.has_direct_eval && !facts.has_with &&
+        !facts.has_direct_eval && !facts.observes_direct_eval && !facts.has_with &&
         !facts.has_direct_super_call && !facts.has_lexical_super_call &&
         facts.observations == 0 &&
         (!function->vars || !function->vars->first) &&
@@ -648,9 +651,9 @@ JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
         ? parameter_facts.formal_length : param_count);
     code->module_state_id = module_state_id;
     code->body_kind = JS_FUNCTION_BODY_AST;
-    code->has_direct_eval = facts.has_direct_eval;
-    code->uses_arguments = facts.observations &
-        JS_AST_OBSERVES_ARGUMENTS;
+    // Direct eval code in the body or a nested arrow can name `arguments`.
+    code->uses_arguments = (facts.observations & JS_AST_OBSERVES_ARGUMENTS) ||
+        facts.observes_direct_eval;
     code->has_non_simple_params = parameter_facts.has_non_simple_params;
     // The canonical definition owns this static proof, avoiding repeated
     // scope/fact walks for every closure activation (D8.2.4–D8.2.5v2).

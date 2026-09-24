@@ -695,22 +695,6 @@ bool js_root_vector_ensure_registered(RootVector* roots);
 void js_test262_agent_state_destroy(JsTest262AgentState* state);
 JsTest262AgentState* js_test262_agent_state_ensure(JsRuntimeState* state);
 
-// Source records span a runtime eval or a VM-originated function call. One
-// row owns the complete source-context fact; its Item fields live in the
-// paired RootVector slots so the native metadata remains unscanned.
-struct JsEvalSourceRecord {
-    int64_t filename_slot = -1;
-    int64_t source_slot = -1;
-    int64_t line_offset = 0;
-    int64_t column_offset = 0;
-    bool compact_stack = false;
-};
-
-struct JsEvalSourceState {
-    RootVector values = {};
-    ArrayList* records = NULL;
-};
-
 // A direct-eval bridge exists for one generated eval call.  Item columns are
 // structure-of-arrays so each exact GC range excludes the bool metadata.
 // Each binding row keeps the parallel rooted lanes' non-Item facts; frames
@@ -751,7 +735,7 @@ typedef struct JsEvalLocalFrameMarks {
 } JsEvalLocalFrameMarks;
 
 // Caller-local records survive multiple direct eval calls in one generated
-// function. They deliberately do not share bridge or source depths.
+// function. They deliberately do not share the bridge's depth.
 struct JsEvalLocalState {
     RootVector keys = {};
     RootVector values = {};
@@ -761,14 +745,12 @@ struct JsEvalLocalState {
 };
 
 struct JsEvalState {
-    JsEvalSourceState source = {};
     JsEvalBridgeState bridge = {};
     JsEvalLocalState local = {};
 };
 
 // One catalog of the eval journals' rooted lanes for init/destroy/clear.
 #define JS_EVAL_STATE_VECTORS(M, state) \
-    M(&(state)->source.values, "eval source values") \
     M(&(state)->bridge.env.keys, "eval env keys") \
     M(&(state)->bridge.env.old_values, "eval env old values") \
     M(&(state)->bridge.global_lexical.keys, "eval global lexical keys") \
@@ -882,9 +864,6 @@ struct JsRuntimeState {
     // wrappers while their functions remain live. The table is weak storage;
     // each code record releases itself when its last GC function dies.
     HashMap* callable_code_interned = NULL;
-    // The dynamic-function cache owns only its entry rows, so the existing
-    // pointer list is the realm state; no companion cache wrapper is needed.
-    ArrayList* dynamic_function_cache_entries = NULL;
     // Timeout recovery may interrupt JS compilation before the ordinary
     // teardown path runs.  Its compiler owners stay with this realm, never in
     // process globals; compilation is cold and generated code never reads it.
@@ -917,7 +896,6 @@ struct JsRuntimeState {
     // JSCU10: async activations are GC-owned frames, not a fixed table. The
     // await handoff is its own precise owner.
     JsAsyncAwaitState async_await = {};
-    int dynamic_func_counter = 0;
 
     // Test262 keeps its harness in one module slab while each script needs an
     // isolated copy of that binding prefix. These ids are per-runtime state,

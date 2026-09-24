@@ -65,7 +65,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 | [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) | Entry points, `JsMirTranspiler`, the 14-step phase model, interpreter-vs-JIT selection, MIR import resolution, CLI/batch dispatch. |
 | [JS_02 — Parsing, AST & Front-End Validation](JS_02_Parsing_AST.md) | First-party C parsing, direct `JsAstNode` reduction, lexical scope, the six-phase early-error validator, strict-mode detection, and the isolated Tree-sitter reference lane. |
 | [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) | The tagged `Item`, JS↔`TypeId` mapping, undefined/null/TDZ/symbol/BigInt encodings, GC ownership, execution side stacks, closure environments, call arguments, module-variable storage, `JsRuntimeState`. |
-| [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) | Boxed-Item-by-default emission with native fast paths, boxing/unboxing, condition `_raw` facades, constant folding, call emission, the exception model, `eval`/`Function`. |
+| [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) | Boxed-Item-by-default emission with native fast paths, boxing/unboxing, condition `_raw` facades, constant folding, call emission, the exception model, the direct-`eval` call site (dynamic source is interpreted). |
 
 ### Part II — Language semantics
 
@@ -123,7 +123,7 @@ Each detailed doc ends with a code-grounded **Known Issues & Future Improvements
 - **Benchmark pass rate is not yet 100%** — on the standard performance suites (AWFY, JetStream, R7RS, Larceny, Octane, beng, kostya) the engine runs-and-passes ≈88% of the JS scripts (63/72); three wrong-result correctness bugs found by the audit (bounce, levenshtein, crypto-md5) were since fixed, leaving one wrong-result bug (box2d), two feature-path errors, an Octane driver that is not shipped, and several heavy macro-benchmarks that time out. ([JS_15 §7](JS_15_Performance.md))
 - **Node.js async I/O is the biggest gap** — there is a real libuv event loop, but several `fs` async methods call back synchronously and the stream internals are stubs; crypto lacks asymmetric algorithms. ([JS_14](JS_14_Node_Compat.md))
 - **RegExp semantics** — RE2's leftmost-longest model differs from JS leftmost-greedy-with-backtracking; a backtracking engine covers part of the gap. ([JS_11](JS_11_RegExp.md))
-- **Approximations** — WeakMap/WeakSet have no true weak semantics, per-scope strict mode is approximated by a global flag in eval, and `globalThis` is a snapshot. ([JS_10](JS_10_Builtins.md), [JS_04](JS_04_MIR_Lowering.md))
+- **Approximations** — WeakMap/WeakSet have no true weak semantics, a MIR caller's direct-eval strictness checks partly scan source text, and `globalThis` is a snapshot. ([JS_10](JS_10_Builtins.md), [JS_04](JS_04_MIR_Lowering.md))
 - **Fixed-capacity statics** — generators, promises, modules, the transpiler's collected-function arrays, and several stacks are fixed-size; some lack overflow guards. ([JS_01](JS_01_Compilation_Pipeline.md))
 - **Structure & performance debt** — several source files are very large (`js_runtime.cpp`, `js_globals.cpp`, the expression lowering file); float boxing in hot loops and the lack of destination-passing lowering are the main open performance items; compiled-artifact caching is blocked by realm pointers baked into MIR. ([JS_15](JS_15_Performance.md))
 

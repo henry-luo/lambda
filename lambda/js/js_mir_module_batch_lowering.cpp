@@ -73,43 +73,7 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
     if (pmc && pmc->const_type == MCONST_MODVAR) {
         jm_store_module_var(mt, (uint32_t)pmc->int_val, var_reg);
     }
-    if (mt->is_eval_direct && !mt->is_global_strict) {
-        MIR_reg_t fk = jm_box_property_name_literal(mt, fn->name->chars, fn->name->len);
-        MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
-        MIR_label_t global_export = jm_new_label(mt);
-        MIR_label_t export_done = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, global_export, eval_env_active);
-        jm_callr_void_2(mt, "js_eval_local_export_var", fk, var_reg);
-        MIR_reg_t evalscript_local_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
-        MIR_label_t skip_evalscript_global = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, skip_evalscript_global, evalscript_local_active);
-        // evalScript executes as a Script, so its function binding is global even inside an eval frame.
-        jm_call_void_3(mt, "js_define_global_property_v",
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
-        jm_emit_label(mt, skip_evalscript_global);
-        jm_emit_jmp(mt, export_done);
-        jm_emit_label(mt, global_export);
-        MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
-        MIR_label_t ordinary_eval_export = jm_new_label(mt);
-        MIR_label_t global_define_done = jm_new_label(mt);
-        jm_emit_branch(mt, MIR_BF, ordinary_eval_export, evalscript_active);
-        // $262.evalScript creates non-configurable globals; direct eval keeps configurable bindings.
-        jm_call_void_3(mt, "js_define_global_property_v",
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
-        jm_emit_jmp(mt, global_define_done);
-        jm_emit_label(mt, ordinary_eval_export);
-        jm_call_void_3(mt, "js_set_global_property",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-        jm_emit_label(mt, global_define_done);
-        jm_emit_label(mt, export_done);
-    }
-    if (!mt->is_module && !mt->is_eval_direct) {
+    if (!mt->is_module) {
         MIR_reg_t fk = jm_box_property_name_literal(mt, fn->name->chars, fn->name->len);
         jm_call_void_3(mt, "js_define_global_property_v",
             MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
@@ -121,7 +85,7 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
 static bool jm_is_undefined_module_var_batch_entry(JsMirTranspiler* mt,
         const JsModuleConstEntry* entry, int preamble_var_limit,
         bool define_global_var_properties) {
-    if (!mt || !entry || mt->is_eval_direct ||
+    if (!mt || !entry ||
             entry->const_type != MCONST_MODVAR ||
             entry->var_kind != JS_VAR_VAR ||
             entry->is_iife_func_decl ||
@@ -134,7 +98,7 @@ static bool jm_is_undefined_module_var_batch_entry(JsMirTranspiler* mt,
 
 static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
         int preamble_var_limit, bool define_global_var_properties) {
-    if (!mt || !mt->module_consts || mt->is_eval_direct) return true;
+    if (!mt || !mt->module_consts) return true;
     int count = 0;
     size_t count_iter = 0;
     void* count_item = NULL;
@@ -880,13 +844,12 @@ void jm_cleanup_deferred_mir() {
     // Deferred MIR storage is inside the active JS capsule.  Once its owner
     // has been released there is no remaining per-context entry to finish.
     if (!js_active_runtime_state) return;
-    js_dynfunc_cache_reset();
     JsCodeStore* store = js_module_code_store;
     for (int i = 0; i < js_code_store_count(store); i++) {
         JsCompiledArtifact* artifact = js_code_store_artifact_at(store, i);
         if (!artifact) continue;
-        // Deferred eval units use the same JIT generator as ordinary units;
-        // finishing only MIR leaves the generator arena and native code live.
+        // Deferred units own a JIT generator; finishing only MIR would leave
+        // the generator arena and native code live.
         jit_cleanup_mode((MIR_context_t)artifact->mir_context, 1);
         if (artifact->source_owner) mem_free(artifact->source_owner);
     }
@@ -1104,162 +1067,8 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
     }
 }
 
-static void jm_emit_evalscript_global_decl_check_name(JsMirTranspiler* mt, String* name, bool is_func) {
-    if (!name || name->len <= 0) return;
-    MIR_reg_t key_reg = jm_box_property_name_literal(mt, name->chars, name->len);
-    jm_callr_1(mt, is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl", MIR_T_I64, key_reg);
-    jm_emit_error_lane_propagate_check(mt);
-}
-
-static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, const char* name) {
-    if (!name) return;
-    if (strncmp(name, "_js_", 4) == 0) name += 4;
-    if (!name[0]) return;
-    MIR_reg_t key_reg = jm_box_property_name_literal(mt, name, strlen(name));
-    jm_callr_1(mt, "js_evalscript_check_global_var_decl", MIR_T_I64, key_reg);
-    jm_emit_error_lane_propagate_check(mt);
-}
-
-static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, String* name) {
-    if (!name || name->len <= 0) return;
-    MIR_reg_t key_reg = jm_box_property_name_literal(mt, name->chars, name->len);
-    jm_callr_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64, key_reg);
-    jm_emit_error_lane_propagate_check(mt);
-}
-
-static void jm_emit_evalscript_global_lex_decl_precheck(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!node) return;
-    if (node->node_type == AST_NODE_CLASS) {
-        JsClassNode* cls = (JsClassNode*)node;
-        jm_emit_evalscript_global_lex_decl_check_name(mt, cls->name);
-        return;
-    }
-    if (node->node_type != AST_NODE_VAR_STAM) return;
-    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-    if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
-    for (JsAstNode* d = vd->declarations; d; d = d->next) {
-        if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-        if (!decl->id) continue;
-        if (decl->id->node_type == AST_NODE_IDENT) {
-            jm_emit_evalscript_global_lex_decl_check_name(mt, ((JsIdentifierNode*)decl->id)->name);
-        } else if (decl->id->node_type == AST_NODE_MAP_PATTERN ||
-                   decl->id->node_type == AST_NODE_ARRAY_PATTERN) {
-            struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
-            jm_collect_pattern_names(decl->id, names);
-            size_t iter = 0; void* item;
-            while (hashmap_iter(names, &iter, &item)) {
-                JsNameSetEntry* entry = (JsNameSetEntry*)item;
-                const char* name = entry->name;
-                if (strncmp(name, "_js_", 4) == 0) name += 4;
-                MIR_reg_t key_reg = jm_box_property_name_literal(mt, name, strlen(name));
-                jm_callr_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64, key_reg);
-                jm_emit_error_lane_propagate_check(mt);
-            }
-            hashmap_free(names);
-        }
-    }
-}
-
-static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!node) return;
-    switch (node->node_type) {
-    case AST_NODE_VAR_STAM: {
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-        if (vd->kind != JS_VAR_VAR) return;
-        for (JsAstNode* d = vd->declarations; d; d = d->next) {
-            if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
-            JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-            if (!decl->id) continue;
-            if (decl->id->node_type == AST_NODE_IDENT) {
-                jm_emit_evalscript_global_decl_check_name(mt, ((JsIdentifierNode*)decl->id)->name, false);
-            } else if (decl->id->node_type == AST_NODE_MAP_PATTERN ||
-                       decl->id->node_type == AST_NODE_ARRAY_PATTERN) {
-                struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                jm_collect_pattern_names(decl->id, names);
-                size_t iter = 0; void* item;
-                while (hashmap_iter(names, &iter, &item)) {
-                    JsNameSetEntry* entry = (JsNameSetEntry*)item;
-                    jm_emit_evalscript_global_decl_check_prefixed(mt, entry->name);
-                }
-                hashmap_free(names);
-            }
-        }
-        break;
-    }
-    case AST_NODE_FUNC: {
-        JsFunctionNode* fn = (JsFunctionNode*)node;
-        jm_emit_evalscript_global_decl_check_name(mt, fn->name, true);
-        break;
-    }
-    case AST_NODE_EXPORT: {
-        JsExportNode* exp = (JsExportNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, exp->declaration);
-        break;
-    }
-    case AST_NODE_BLOCK: {
-        JsBlockNode* block = (JsBlockNode*)node;
-        for (JsAstNode* s = block->statements; s; s = s->next)
-            jm_emit_evalscript_global_decl_prechecks(mt, s);
-        break;
-    }
-    case AST_NODE_IF_EXPR: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, ifn->consequent);
-        jm_emit_evalscript_global_decl_prechecks(mt, ifn->alternate);
-        break;
-    }
-    case AST_NODE_MATCH_EXPR: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        for (JsAstNode* c = sw->cases; c; c = c->next)
-            jm_emit_evalscript_global_decl_prechecks(mt, c);
-        break;
-    }
-    case AST_NODE_MATCH_ARM: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        for (JsAstNode* s = sc->consequent; s; s = s->next)
-            jm_emit_evalscript_global_decl_prechecks(mt, s);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, loop->init);
-        jm_emit_evalscript_global_decl_prechecks(mt, loop->body);
-        break;
-    }
-    case AST_NODE_FOR_IN_STAM:
-    case AST_NODE_FOR_OF_STAM: {
-        JsForInNode* for_node = (JsForInNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, for_node->left);
-        jm_emit_evalscript_global_decl_prechecks(mt, for_node->body);
-        break;
-    }
-    case AST_NODE_TRY_STAM: {
-        JsTryNode* try_node = (JsTryNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, try_node->block);
-        jm_emit_evalscript_global_decl_prechecks(mt, try_node->handler);
-        jm_emit_evalscript_global_decl_prechecks(mt, try_node->finalizer);
-        break;
-    }
-    case AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* catch_node = (JsCatchNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, catch_node->body);
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* label = (JsLabeledStatementNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, label->body);
-        break;
-    }
-    default:
-        break;
-    }
-}
-
 static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!mt || !node || mt->is_module || mt->is_eval_direct || !mt->module_consts) return false;
+    if (!mt || !node || mt->is_module || !mt->module_consts) return false;
     if (node->node_type != AST_NODE_VAR_STAM) return false;
     JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
     if (vd->kind != JS_VAR_VAR || !vd->declarations) return false;
@@ -3129,9 +2938,10 @@ static int js_mir_lower(void* opaque) {
     MIR_reg_t result = jm_new_reg(mt, "result", MIR_T_I64);
     jm_emit_reg_op(mt, MIR_MOV, result, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
 
-    // Enable eval completion value tracking: expression statements inside
-    // control flow (for/while/if/switch/try) will update this register,
-    // so eval() returns the last evaluated expression value per ES spec.
+    // Track the Script completion value, js_main's result: expression
+    // statements inside control flow (for/while/if/switch/try) update this
+    // register (UpdateEmpty). Dynamic source computes its own completion in the
+    // AST interpreter (D8.1.3v20).
     mt->eval_completion_reg = result;
     // Js57 Track A: allocate the module-level scope env when any top-level
     // closure captures a non-modvar block-let. Mirrors the function-body path
@@ -3166,7 +2976,7 @@ static int js_mir_lower(void* opaque) {
     }
 
     // v20 TDZ: Initialize let/const module vars to TDZ sentinel
-    // Skip preamble-inherited entries from outer scope (e.g. eval)
+    // Skip preamble-inherited entries from the outer (harness) scope
     int preamble_var_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
         ? mt->preamble_var_count : 0;
     if (mt->module_consts) {
@@ -3176,7 +2986,7 @@ static int js_mir_lower(void* opaque) {
             if (mce->const_type == MCONST_MODVAR &&
                 (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST) &&
                 (int)mce->int_val >= preamble_var_limit) {
-                if (!mt->is_module && !mt->is_eval_direct && !mce->is_iife_var) {
+                if (!mt->is_module && !mce->is_iife_var) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
                     MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
@@ -3185,11 +2995,11 @@ static int js_mir_lower(void* opaque) {
                     // globalThis properties for later evalScript collision checks.
                     jm_callr_1(mt, "js_evalscript_check_global_lex_decl", MIR_T_I64, key_reg);
                     jm_emit_error_lane_propagate_check(mt);
-                    MIR_reg_t undef_lex = jm_new_reg(mt, "global_lex_undef", MIR_T_I64);
-                    jm_emit_reg_op(mt, MIR_MOV, undef_lex, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
-                    jm_call_void_3(mt, "js_global_lexical_declare",
+                    // The realm record links this module slot: interpreted
+                    // readers of the realm see the live value (JSI35).
+                    jm_call_void_3(mt, "js_global_lexical_declare_module_slot",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_lex),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, mce->var_kind == JS_VAR_CONST ? 1 : 0));
                 }
                 MIR_reg_t tdz_val = jm_new_reg(mt, "tdz_init", MIR_T_I64);
@@ -3214,33 +3024,14 @@ static int js_mir_lower(void* opaque) {
             if (mce->const_type == MCONST_MODVAR &&
                 mce->var_kind == JS_VAR_VAR &&
                 (int)mce->int_val >= preamble_var_limit) {
-                bool should_define_global = !mt->is_module && !mt->is_eval_direct &&
-                    !mce->is_iife_var;
+                bool should_define_global = !mt->is_module && !mce->is_iife_var;
                 bool batch_emitted = should_define_global
                     ? global_var_batch_emitted : private_var_batch_emitted;
-                if (!mt->is_eval_direct && batch_emitted) continue;
-                MIR_reg_t init_val = 0;
-                if (mt->is_eval_direct && mce->is_nested_func_hoist) {
-                    const char* js_name = mce->name;
-                    if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                    MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
-                    MIR_reg_t bridged_reg = jm_callr_1(mt, "js_eval_env_has_binding", MIR_T_I64, key_reg);
-                    MIR_label_t use_undef = jm_new_label(mt);
-                    MIR_label_t init_done = jm_new_label(mt);
-                    init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
-                    jm_emit_branch(mt, MIR_BF, use_undef, bridged_reg);
-                    MIR_reg_t bridged_val = jm_callr_1(mt, "js_get_global_property", MIR_T_I64, key_reg);
-                    jm_emit_mov(mt, init_val, bridged_val);
-                    jm_emit_jmp(mt, init_done);
-                    jm_emit_label(mt, use_undef);
-                    jm_emit_reg_op(mt, MIR_MOV, init_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
-                    jm_emit_label(mt, init_done);
-                } else {
-                    init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
-                    jm_emit_reg_op(mt, MIR_MOV, init_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
-                }
+                if (batch_emitted) continue;
+                MIR_reg_t init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
+                jm_emit_reg_op(mt, MIR_MOV, init_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
                 jm_store_module_var(mt, (uint32_t)mce->int_val, init_val);
-                if (!mt->is_module && !mt->is_eval_direct && !mce->is_iife_var) {
+                if (should_define_global) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
                     MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
@@ -3263,15 +3054,6 @@ static int js_mir_lower(void* opaque) {
     jm_call_void_1(mt, "js_set_strict_mode",
         MIR_T_I64, MIR_new_int_op(mt->ctx, (mt->is_global_strict || mt->is_module) ? 1 : 0));
 
-    if (!mt->is_global_strict && !mt->is_module && mt->is_eval_direct) {
-        JsAstNode* precheck_stmt = program->body;
-        while (precheck_stmt) {
-            jm_emit_evalscript_global_lex_decl_precheck(mt, precheck_stmt);
-            jm_emit_evalscript_global_decl_prechecks(mt, precheck_stmt);
-            precheck_stmt = precheck_stmt->next;
-        }
-    }
-
     // AnnexB B.3.3: For sloppy-mode scripts/eval, pre-initialize
     // globalThis.<name> = undefined for nested function declarations that
     // qualify for the web-compat extension. This ensures the binding is
@@ -3286,35 +3068,13 @@ static int js_mir_lower(void* opaque) {
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
             MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
-            MIR_label_t skip_preinit = jm_new_label(mt);
-            if (mt->is_eval_direct) {
-                MIR_reg_t bridged_reg = jm_callr_1(mt, "js_eval_env_has_binding", MIR_T_I64, key_reg);
-                jm_emit_branch(mt, MIR_BT, skip_preinit, bridged_reg);
-            }
             MIR_reg_t undef_reg = jm_new_reg(mt, "annexb_undef", MIR_T_I64);
             jm_emit_reg_op(mt, MIR_MOV, undef_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
-            if (mt->is_eval_direct) {
-                MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
-                MIR_label_t global_preinit = jm_new_label(mt);
-                MIR_label_t preinit_done = jm_new_label(mt);
-                jm_emit_branch(mt, MIR_BF, global_preinit, eval_env_active);
-                jm_callr_void_2(mt, "js_eval_local_export_var", key_reg, undef_reg);
-                jm_emit_jmp(mt, preinit_done);
-                jm_emit_label(mt, global_preinit);
-                jm_callr_void_1(mt, "js_eval_env_track_global_binding", key_reg);
-                jm_call_void_3(mt, "js_define_global_property_v",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
-                jm_emit_label(mt, preinit_done);
-            } else {
-                jm_call_void_3(mt, "js_define_global_property_v",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
-            }
+            jm_call_void_3(mt, "js_define_global_property_v",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
             log_debug("js-mir: AnnexB pre-init globalThis.%s = undefined", js_name);
-            jm_emit_label(mt, skip_preinit);
         }
     }
 
@@ -3592,25 +3352,12 @@ static int js_mir_lower(void* opaque) {
                     if (!mt->is_module) {
                         MIR_reg_t class_key = jm_box_property_name_literal(mt,
                             cls_node->name->chars, cls_node->name->len);
-                        if (mt->is_eval_direct) {
-                            MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
-                            MIR_label_t skip_global_class_lex = jm_new_label(mt);
-                            jm_emit_branch(mt, MIR_BF, skip_global_class_lex, evalscript_active);
-                            // evalScript class declarations are global lexical
-                            // bindings, not globalThis properties.
-                            jm_call_void_3(mt, "js_global_lexical_declare",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, class_key),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-                            jm_emit_label(mt, skip_global_class_lex);
-                        } else {
-                            // Track top-level class declarations for later
-                            // evalScript collision checks and global lexical reads.
-                            jm_call_void_3(mt, "js_global_lexical_declare",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, class_key),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-                        }
+                        // Track top-level class declarations for later
+                        // evalScript collision checks and global lexical reads.
+                        jm_call_void_3(mt, "js_global_lexical_declare",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                     }
                     jm_emit_class_members(mt, cls_obj, ce, (JsAstNode*)cls_node, false);
                 }
@@ -3745,71 +3492,6 @@ static int js_mir_lower(void* opaque) {
         // fulfillment/rejection-order dynamic-import chain works.
 
         stmt = stmt->next;
-    }
-
-    // Sloppy-mode eval: export var/function declarations to globalThis
-    // so they're visible in the calling scope after eval() returns.
-    // Only for global-scope direct eval (not strict mode, not modules).
-    if (mt->is_eval_direct && !mt->is_global_strict && !mt->is_module && mt->module_consts) {
-        int preamble_limit = (mt->preamble_entries && mt->preamble_entry_count > 0)
-            ? mt->preamble_var_count : 0;
-        size_t ev_iter = 0; void* ev_item;
-        while (hashmap_iter(mt->module_consts, &ev_iter, &ev_item)) {
-            JsModuleConstEntry* mce = (JsModuleConstEntry*)ev_item;
-            if (mce->const_type != MCONST_MODVAR) continue;
-            // Skip preamble entries (inherited from outer scope)
-            if ((int)mce->int_val < preamble_limit) continue;
-            log_debug("js-mir: eval export checking '%s' var_kind=%d nested_func=%d preamble_limit=%d idx=%d",
-                mce->name, mce->var_kind, mce->is_nested_func_hoist, preamble_limit, (int)mce->int_val);
-            // Skip let/const (only var declarations leak from eval)
-            if (mce->var_kind == JS_VAR_LET || mce->var_kind == JS_VAR_CONST) continue;
-            // AnnexB B.3.3.3: nested function declarations DO propagate to globalThis
-            // (was previously skipped). The propagation writes the current module_var
-            // value (undefined if function decl never executed, or the function value
-            // otherwise) to globalThis with default EWC descriptor.
-            // Strip _js_ prefix to get the original JS name
-            const char* js_name = mce->name;
-            if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-            MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
-            MIR_reg_t val_reg = jm_load_module_var(mt, (uint32_t)mce->int_val);
-            MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
-            MIR_label_t global_export = jm_new_label(mt);
-            MIR_label_t export_done = jm_new_label(mt);
-            jm_emit_branch(mt, MIR_BF, global_export, eval_env_active);
-            jm_callr_void_2(mt, "js_eval_local_export_var", key_reg, val_reg);
-            MIR_reg_t evalscript_local_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
-            MIR_label_t skip_evalscript_global = jm_new_label(mt);
-            jm_emit_branch(mt, MIR_BF, skip_evalscript_global, evalscript_local_active);
-            // evalScript var declarations use Script global binding semantics
-            // even when the harness has an eval-local frame active.
-            jm_call_void_3(mt, "js_define_global_property_v",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
-            jm_emit_label(mt, skip_evalscript_global);
-            jm_emit_jmp(mt, export_done);
-            jm_emit_label(mt, global_export);
-            MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
-            MIR_label_t ordinary_eval_export = jm_new_label(mt);
-            MIR_label_t global_define_done = jm_new_label(mt);
-            jm_emit_branch(mt, MIR_BF, ordinary_eval_export, evalscript_active);
-            // $262.evalScript runs script-level global declaration instantiation;
-            // var declarations create non-configurable bindings, unlike ordinary eval.
-            jm_call_void_3(mt, "js_define_global_property_v",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
-            jm_emit_jmp(mt, global_define_done);
-            jm_emit_label(mt, ordinary_eval_export);
-            jm_call_void_3(mt, "js_set_global_property",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-            jm_emit_label(mt, global_define_done);
-            jm_callr_void_2(mt, "js_eval_local_export_var", key_reg, val_reg);
-            jm_emit_label(mt, export_done);
-            log_debug("js-mir: eval export var '%s' to globalThis", js_name);
-        }
     }
 
     // Js57 P7d-C: emit the post-await label if we set up the split machinery

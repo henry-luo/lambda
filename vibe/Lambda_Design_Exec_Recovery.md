@@ -154,7 +154,7 @@ Mandatory fields, in the order they were specified:
 1. `Context*` identity and the TLS active-evaluator owner;
 2. `side_root_top` and `side_number_top` with no stale RootFrame slots;
 3. MIR return-lane and scalar-home extent, plus every JIT activation watermark below the frame;
-4. LambdaJS argument-frame, CommonJS/module, and eval-source stack depths;
+4. LambdaJS argument-frame and CommonJS/module stack depths (the eval-source stack was removed on 2026-09-24);
 5. scheduler current-task/async-frame cursor and callback-dispatch state;
 6. hosted-guest activation ownership and module-initialization state.
 

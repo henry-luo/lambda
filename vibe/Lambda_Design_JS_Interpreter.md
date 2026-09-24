@@ -13,6 +13,16 @@ subject to its implementation gates; the formal spec and
 [implementation record](impl/Lambda_Impl_JS_Interpreter.md) describe the already
 landed AST slice.
 
+**Dynamic-code revision (USER, 2026-09-24):** **D8.1.3v20 / JSI35** makes the
+AST interpreter the only executor of dynamic source. Direct and indirect
+`eval`, the `Function`-family constructors, string timer handlers, and
+`$262.evalScript` parse into a retained `JsScript` and run in T0. The caller's
+tier and `JS_EXECUTION_BACKEND` do not change this. MIR never lowers dynamic
+source, and the MIR dynamic-code compilation service is deleted. See §5.6,
+§11.6, §15.18, and Appendix S2.
+
+**Direct-eval linking revision (USER, 2026-09-24):** **D8.1.3v21 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The `EvalContext` bridge now serves MIR callers only, until P4 shared environment cells. See §5.6, §16 item 13, and Appendix S3.
+
 **Static-module prebuild revision (2026-09-19):** `JS_EXECUTION_BACKEND=auto`
 is now an explicit AST-first module policy. The shared prebuild scheduler
 discovers static imports with the direct parser, publishes only AST templates
@@ -28,7 +38,7 @@ governed by **D8.1.3v18** and **D8.5.1v4**.
 
 **Scope:** LambdaJS execution inside the shared Lambda runtime, including page-level coexistence with Lambda behavior/app code. This document specializes the interpreter direction established by **AI21**, the shared-AST rules **D8.2.1–D8.2.5**, and the accepted DOM-state decisions **ES10–ES13**. It does not change either language's observable semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v18**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.10**, **D4.1.1v2**, **D4.1.4v4**, **D4.5.1v3**, **D4.6.1v2–D4.6.2v2**, **D5.1.1–D5.1.4**, **D5.3.2–D5.3.4**, **D5.4.1–D5.4.4**, **D6.2.1–D6.2.4**, **D6.3.1**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v21**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_DOM_State.md`](Lambda_Design_DOM_State.md) (ES10–ES13, EO1–EO6), [`Lambda_Design_Runtime_Globals.md`](Lambda_Design_Runtime_Globals.md) (RG0–RG14), [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -518,16 +528,47 @@ This replaces the current copied-env/read-back workaround for the shared mixed-t
 
 **D6.2.3 clarification required before landing:** its current unqualified snapshot-capture wording describes Lambda semantics through S9.1.4. Under **D1.3**, it cannot govern LambdaJS. The formal design should revise the ruling in place (for example, D6.2.3v2) to state that Lambda captures immutable values while each guest profile owns its closure semantics; LambdaJS captures lexical bindings by reference. The corresponding working design ledger must be updated in the same change.
 
-### 5.6 Direct eval
+### 5.6 Dynamic code and direct eval (JSI35, JSI36)
 
-Direct eval is admitted only after both tiers can materialize the same environment view:
+Dynamic source is interpreted (**D8.1.3v20**). Every source string the realm
+compiles after start-up is parsed into a retained `JsScript` and executed by the
+AST walker. This covers direct eval, indirect eval, the `Function`,
+`GeneratorFunction`, `AsyncFunction`, and `AsyncGeneratorFunction` constructors,
+string timer handlers, and `$262.evalScript`. The rule holds whatever the
+caller's tier or the unit selector. A whole-module MIR unit that calls `eval`
+reaches the same interpreter entry as a T0 caller. MIR opens no lowering session
+for dynamic source.
 
-- T0 passes its active lexical/variable environments directly;
-- T1 functions with syntactic direct eval allocate/materialize every binding that eval may observe;
-- eval binding creation targets the proper variable/global environment under strict/sloppy rules;
-- compiled and interpreted callees read the same cells after eval mutates them.
+The dynamic-code entry is one runtime service with one semantic owner:
 
-Until this bridge is complete, a `JsScript` containing direct eval fails the T0 support scan. Indirect eval and `Function` construction may continue through a separate script compile/execute entry, subject to the same retained-owner rules.
+| Source kind | Code kind | Declaration target |
+|---|---|---|
+| indirect eval, string timer | global eval code | configurable global var/function bindings; eval-private lexical environment |
+| `$262.evalScript` | global Script | GlobalDeclarationInstantiation: non-configurable vars, realm lexical declarations |
+| direct eval, sloppy, global caller | eval code over the caller's script bindings | configurable global var/function bindings |
+| direct eval, sloppy, interpreted function caller | eval code linked to the caller's environments | the caller's nearest function variable environment |
+| direct eval, sloppy, MIR function caller | eval code over the caller's bridge | the activation's variable environment (its eval journal) |
+| direct eval, strict or strict caller | eval code | an eval-private variable environment |
+| `Function` family | a function expression script | none; the completion is the function |
+
+A direct eval from interpreted code links its activation to the caller frame's live environment chain (**D8.1.3v21 / JSI36**). Nothing is projected or written back:
+
+- the eval gets one boundary record. It holds the eval's lexical declarations, and a strict eval's vars, since that record is a strict eval's variable environment. Its outer record is the caller frame's current environment;
+- eval code, and every closure it creates, resolves a free name by name through that chain. Each record answers from its declarations, its materialized `arguments`, then the vars direct eval added to it. Past the last record, the name resolves as code of the outermost caller script would: that script's top-level bindings, then the realm. The record that answers also bounds the `with` probe, so a binding of the activation precedes the Object Environment Records its function captured at creation;
+- a Reference resolved by name keeps that binding for PutValue. TDZ, `const`, and mapped-parameter rules come from the record itself, so no source scan stands in for them;
+- EvalDeclarationInstantiation targets the caller's nearest function variable environment, or the realm when the caller has none. A name that environment already binds is reused; otherwise it becomes a deletable binding there. A var that a record between the eval and that environment binds is an early SyntaxError, except over a catch parameter (Annex B.3.4). An Annex-B block function whose name such a record binds creates no var binding (B.3.2.3). A function declaration instantiates on the variable environment itself, even beneath a like-named catch parameter;
+- `this`, `new.target`, and the home object are the caller frame's own homes, so a SuperCall in eval code initializes the caller's `this`. A function whose body or nested arrow contains a direct eval materializes `arguments` for its eval code.
+
+A MIR caller keeps the `EvalContext` eval bridge:
+
+- the caller installs the bridge before the call and projects its registers. Script top-level lexicals need no projection from function code: their realm records are linked to the script's module slots, so eval code reads and writes them live, including the TDZ;
+- the eval activation resolves a free name through the bridge before the realm global record, and it writes assignments back through the bridge. A projected caller binding outranks a global lexical of the same name;
+- an eval-created `var` or function declaration in function code lands in that activation's shared eval journal, where the caller reads it back;
+- the caller writes projected bindings back after the call and removes the bridge. It does this on every completion, including a throw.
+
+On the bridge path, `this` and `new.target` come from the caller's activation and private names from the eval-private frame the caller installs. An interpreted caller installs that frame only while the eval source is parsed, for private-name early errors; eval code then resolves private names through the linked environments. Strictness is inherited from the caller on both paths.
+
+*Residual.* A projection is a copy, not a binding identity. Eval code of a MIR caller therefore still loses a caller-local binding once the eval returns, and JS05-L5–L7 persist on that tier. A MIR caller keeps the bridge until P4 gives compiled code the shared environment cells.
 
 ---
 
@@ -1237,7 +1278,7 @@ Batch reset must release all per-test environments, callbacks, module states, re
 
 ### 11.6 Modules and nested compilation
 
-Nested `require`, dynamic import, eval, `Function` construction, and Lambda package imports create or retrieve owners through the same runtime script catalog and canonical module registry. They reserve IDs from the same allocator and instantiate entries in the same `ContextModuleState` capsule (initially projecting the existing `EvalContext::module_states` table). The active compiler/transpiler TLS state must distinguish a retained `Script`/`JsScript` owner from an ephemeral MIR-lowering session so recovery cleanup cannot destroy the former twice.
+Nested `require`, dynamic import, eval, `Function` construction, and Lambda package imports create or retrieve owners through the same runtime script catalog and canonical module registry. Dynamic source reuses the common AST template cache keyed by source, filename, and strictness. It never opens a MIR lowering session (**JSI35**). A hot function created by a `Function` constructor can still reach T1 through the ordinary P2 definition-site boundary. They reserve IDs from the same allocator and instantiate entries in the same `ContextModuleState` capsule (initially projecting the existing `EvalContext::module_states` table). The active compiler/transpiler TLS state must distinguish a retained `Script`/`JsScript` owner from an ephemeral MIR-lowering session so recovery cleanup cannot destroy the former twice.
 
 ### 11.7 Teardown order
 
@@ -1610,6 +1651,26 @@ Rejected as incomplete integration. Context ownership fixes cross-isolate global
 
 Rejected by **D5.4.2**. A flat super-context would force Lambda-only runs to carry JS/DOM/Node state, destabilize the JIT-visible layout, obscure teardown order, and recreate the same lifetime ambiguity at a larger scale. Stable lazy capsule pointers provide one context identity without one megastruct.
 
+### 15.18 Keep MIR as the dynamic-code compiler
+
+Rejected by the user on 2026-09-24 (**JSI35**, **D8.1.3v20**). The service
+compiled each eval string and dynamic `Function` body into its own MIR module.
+It used three tiers chosen by scanning the source text: a regex-literal fast
+path, a `return (…)` function-wrapper form, and a whole-script form. Each form
+paid for a MIR context, lowering, and linking. The MIR contexts then had to stay
+alive for the realm's life, because closures created by eval code still pointed
+into them.
+
+Most eval strings run once, and those costs dominate them. The service also
+kept a second implementation of EvalDeclarationInstantiation and
+completion-value tracking. That meant an `is_eval_direct` mode threaded through
+module, statement, expression, and function lowering, plus inherited preambles
+and a dynamic-Function MIR cache. The two implementations drifted apart. On
+2026-09-24, test262 `language/eval-code` failed 25 tests only under the AST
+executor and 24 only under the MIR executor. The AST template cache already
+removes repeated parse cost, and P2 still lets a hot dynamic function reach
+native code at its definition site.
+
 ---
 
 ## 16. Open Implementation Questions
@@ -1628,6 +1689,7 @@ These questions do not reopen the decisions above:
 10. **Scheduling-lane surface.** What is the narrow lane API by which Promise jobs/`nextTick`/timers preserve JS ordering while the common async owner performs liveness, task rooting, cancellation, and teardown?
 11. **Module instance extension.** Which current `ModuleDescriptor` TLA fields form the JS extension of `ContextModuleInstance`, and which dependency facts are immutable runtime-definition data?
 12. **Mixed stack traces.** Define the minimal boundary record needed to stitch generated MIR/native frames to alternating interpreted activations without adding a second semantic call stack.
+13. **Direct-eval environment linking.** *Resolved 2026-09-24 for interpreted callers (**D8.1.3v21 / JSI36**, §5.6).* A linked eval's `var` bindings go on the caller's function record, which a MIR caller's journal never reads, so the two protocols cannot disturb each other. MIR callers keep the bridge until P4.
 
 ---
 
@@ -1669,6 +1731,8 @@ These questions do not reopen the decisions above:
 | **JSI32** | `EvalContext` owns split lazy common capsules; no unified state megastruct | proposed / D5.4.2 alignment |
 | **JSI33** | JS call/module/`this`/`super`/arguments state belongs to the common activation chain, not realm state | proposed |
 | **JSI34** | `context` remains the only TLS execution root; the derived JS-state TLS cache is retired | proposed / D5.4.1 alignment |
+| **JSI35** | Dynamic source (eval, `Function` family, string timers, `$262.evalScript`) executes only in the AST interpreter; MIR never lowers it | ratified USER 2026-09-24 / D8.1.3v20 |
+| **JSI36** | A direct eval from interpreted code links its activation to the caller frame's live environments; the `EvalContext` bridge serves MIR callers only | ratified USER 2026-09-24 / D8.1.3v21 |
 
 ---
 
@@ -1712,3 +1776,39 @@ The user chose the already available AST interpreter for interpretation and
 native execution for every selected MIR unit. This removes the whole-module
 interpreter cliff rather than retuning its threshold. Cold compilation cost is
 addressed by the compiler/helper work in JS Tune13, not an interpreter fallback.
+
+### S2 — §5.6 direct-eval admission and the D8.1.3v19 dynamic-code clause
+
+Superseded by **D8.1.3v20 / JSI35**, USER 2026-09-24. Historical §5.6 text:
+
+> ~~Until this bridge is complete, a `JsScript` containing direct eval fails the
+> T0 support scan. Indirect eval and `Function` construction may continue
+> through a separate script compile/execute entry, subject to the same
+> retained-owner rules.~~
+
+The former formal clause was:
+
+> ~~Direct eval enters the existing dynamic-code compilation service as a
+> deliberate language boundary, after the AST caller has installed the same
+> `EvalContext` bridge~~
+
+That service compiled direct-eval code, and all dynamic code of a MIR-selected
+unit, into per-call MIR modules. The bridge protocol it relied on survives
+unchanged as the caller-side contract (§5.6). Only the MIR executor behind the
+bridge is removed.
+
+### S3 — §5.6 interpreted-caller bridge and the D8.1.3v20 bridge clause
+
+Superseded by **D8.1.3v21 / JSI36**, USER 2026-09-24. Historical §5.6 text:
+
+> ~~A direct eval runs over its caller's bindings through the `EvalContext` eval bridge. That one protocol serves both caller tiers: the caller installs the bridge before the call. A T0 caller projects its interpreter cells; a MIR caller projects its registers.~~
+
+> ~~An eval-created `var` or function declaration in function code lands in that activation's shared eval journal. The caller reads it back from the journal, and closures created later in the caller capture it through the environment's eval-binding record.~~
+
+> ~~The retirement path has two steps. First, a T0 caller links the eval activation to its live environment records, so no projection or write-back is needed. Second, a MIR caller keeps the bridge until P4 gives compiled code the shared environment cells.~~
+
+The former formal clause was:
+
+> ~~A direct eval's caller first installs the `EvalContext` bridge. Interpreted cells or MIR registers are projected and written back, and a projected binding outranks a global lexical of the same name. Eval-created `var` bindings live in that activation's shared journal.~~
+
+The first retirement step is what JSI36 ratifies. Interpreted callers link their environments, and the bridge text now describes MIR callers only. The projection lost bindings after the eval returned (JS05-L5), missed `arguments` and `new.target` (JS05-L6), and could not tell the caller's own `var` from an outer one (JS05-L7). It also needed source scans in place of const and restricted-name write errors.

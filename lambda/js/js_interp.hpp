@@ -15,9 +15,10 @@ static inline bool js_ast_interpreter_forced(void) {
         strcmp(backend, "interpreter") == 0);
 }
 
-// A selected AUTO root keeps nested eval and dynamic functions in the AST
-// executor. This is execution state, not an instruction to suppress AUTO's
-// compatibility check for a new root module.
+// A selected AUTO root keeps nested module loads in the AST executor. This is
+// execution state, not an instruction to suppress AUTO's compatibility check
+// for a new root module. Dynamic source (eval, Function constructors) always
+// runs in the AST executor regardless of this state (JSI35).
 static inline bool js_ast_interpreter_requested(void) {
     return js_ast_interpreter_forced() ||
         (context && context->runtime && context->runtime->js_ast_backend);
@@ -56,6 +57,17 @@ Item js_interp_execute_test262_source(Runtime* runtime, const char* source,
 Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
                                              size_t source_length, const char* filename,
                                              uint64_t* result_home);
+// Execute direct eval code for a MIR caller (JSI35), which has installed the
+// EvalContext bridge; `strict` is the caller's strictness, which the eval code
+// inherits. An interpreted caller links its own environments instead.
+Item js_interp_execute_direct_eval_source(Runtime* runtime, const char* source,
+                                           size_t source_length, const char* filename,
+                                           bool strict, uint64_t* result_home);
+// The eval steps before parsing (js_dynamic_code.cpp): a non-string argument is
+// the result, and a blank source, a V8 native probe, or a lone RegExp literal
+// completes without a script. Returns true when *result holds the completion
+// or the early error that was thrown.
+bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result);
 // Execute source in a module-private slab. `strict` distinguishes the
 // CommonJS wrapper (sloppy) from an ES module (always strict).
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,

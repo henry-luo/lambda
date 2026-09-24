@@ -1,0 +1,21 @@
+cptn-do-while: 2
+cptn-decl-after: H
+cptn-if-empty: undefined
+cptn-finally: 3
+cptn-var: 5
+var-after-throw: number
+mid-eval-closure: number
+outer-ref: undefined/1
+strict-indirect-var: undefined
+indirect-let: 2
+sloppy-indirect-var: true
+blank: undefined
+regexp: true
+unterminated-comment: THROWS SyntaxError
+private-closure: 5
+function-ctor: 5
+function-source: function anonymous(a
+) {
+return a
+}
+generator-ctor: 1,2

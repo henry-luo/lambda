@@ -331,7 +331,7 @@ Still-open performance work, distilled from the logs:
 
 - [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) — phases, interpreter/JIT selection, MIR import resolution, link cost.
 - [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — tagged `Item`, boxed numerics, execution side stacks, args-stack rooting.
-- [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) — native fast paths, dual versions, constant folding, call emission, eval tiers.
+- [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) — native fast paths, dual versions, constant folding, call emission, the direct-eval call site.
 - [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) — direct/static call dispatch, scope-env reload.
 - [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md) — MapKind dispatch, shape caching, fast map lookup, `TypeMap` hash.
 - [JS_07 — Classes](JS_07_Classes.md) — constructor shape scan and the exact-binding-only direct-call boundary.

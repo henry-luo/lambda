@@ -7,6 +7,7 @@
 #include "../runtime/gc_environment.h"
 
 struct NameScope;
+struct JsScript;
 
 typedef struct JsInterpEnv {
     struct JsInterpEnv* outer;
@@ -26,6 +27,10 @@ typedef struct JsInterpEnv {
     // constructors initialize this cell only after their `super()` call.
     uint64_t lexical_this;
     struct AstNode* function_node;
+    // Set on the declarative record of a direct eval linked to an interpreted
+    // caller (D8.1.3v21): its slots hold that eval Script's top-level
+    // declarations, and `outer` continues into the caller frame's environments.
+    struct JsScript* eval_script;
     uint32_t slot_count;
     uint8_t arguments_are_mapped;
     uint8_t has_lexical_this;

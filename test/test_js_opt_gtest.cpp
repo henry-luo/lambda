@@ -55,9 +55,6 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "array_runtime_items_install",
     "array_runtime_items_release",
     "array_gc_items_alloc",
-    "dynamic_function_fastpath",
-    "dynamic_function_cache_hit",
-    "dynamic_function_cache_miss",
     "mir_direct_destination",
     "mir_discard_elision",
     "mir_branch_direct",
@@ -2984,29 +2981,3 @@ TEST(JsOpt, UriErrorCacheRegistersRootAndHits) {
     expect_trace_off_same("uri_error_cache", source, output);
 }
 
-TEST(JsOpt, DynamicFunctionReturnIdentifierFastPath) {
-    const char* source =
-        "var x = 7; var f = new Function('return x');\n"
-        "console.log(f(7)); console.log('OPT_OK');\n";
-    TraceResult trace;
-    char output[4096];
-    ASSERT_TRUE(run_fixture("dynamic_function_fastpath", source, &trace,
-                            output, sizeof(output)));
-    expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_DYNAMIC_FUNCTION_FASTPATH][1], 0u);
-    expect_trace_off_same("dynamic_function_fastpath", source, output);
-}
-
-TEST(JsOpt, DynamicFunctionCacheHit) {
-    const char* source =
-        "var f = new Function('return 7');\n"
-        "var g = new Function('return 7');\n"
-        "console.log(f() + g()); console.log('OPT_OK');\n";
-    TraceResult trace;
-    char output[4096];
-    ASSERT_TRUE(run_fixture("dynamic_function_cache", source, &trace,
-                            output, sizeof(output)));
-    expect_ok_output(output);
-    EXPECT_GT(trace.events[JS_OPT_DYNAMIC_FUNCTION_CACHE_HIT][1], 0u);
-    expect_trace_off_same("dynamic_function_cache", source, output);
-}

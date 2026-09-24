@@ -618,18 +618,7 @@ to an all-zero `js_fn_code_absent` so unguarded call sites keep the shape they
 had when these were inline fields. The realm-owned weak intern table is
 `JsRuntimeState::callable_code_interned`.
 
-`JsFunctionPayload` is one word on the value carrying every optional record:
-`home_class` (an `Item`), `JsBoundData`, `JsClassData`, `JsWithData`,
-`JsAstBody`, `JsNativeCode`, and `JsEvalOrigin`. Their purposes are the bound
-target/receiver/arguments (`this_store` is the bound receiver's owned scalar
-home), class constructor/prototype/superclass plus the custom-element name, a
-captured `with` environment and depth, AST closure state, native-call target and
-policy, and dynamic-function source origin respectively. `JsAstBody` is now
-`{JsAstDefinition* definition, JsInterpEnv* env, Item lexical_this,
-Item lexical_new_target}`; the immutable definition facts (`function`, `script`,
-`code`, `has_direct_eval`, `uses_arguments`, `tail_reuse_safe`) live in the
-`JsScript`-owned `JsAstDefinition`. Native target selection is carried by
-`JsNativeTarget` and `JsNativeCallPolicy`.
+`JsFunctionPayload` is one word on the value carrying every optional record: `home_class` (an `Item`), `JsBoundData`, `JsClassData`, `JsWithData`, `JsAstBody`, and `JsNativeCode`. Their purposes are the bound target/receiver/arguments (`this_store` is the bound receiver's owned scalar home), class constructor/prototype/superclass plus the custom-element name, a captured `with` environment and depth, AST closure state, and native-call target and policy respectively. (`JsEvalOrigin`, a dynamic-function source origin, was removed on 2026-09-24; nothing had set it since 2026-09-22.) `JsAstBody` is now `{JsAstDefinition* definition, JsInterpEnv* env, Item lexical_this, Item lexical_new_target}`; the immutable definition facts (`function`, `script`, `code`, `uses_arguments`, `tail_reuse_safe`) live in the `JsScript`-owned `JsAstDefinition`. Native target selection is carried by `JsNativeTarget` and `JsNativeCallPolicy`.
 
 The complete JS callable layout, the accessor set, and the JSCUO6 reader
 inventory are in [`js_function.hpp`](../lambda/js/js_function.hpp#L173). The
@@ -870,8 +859,7 @@ The JS-specific state records directly relevant to MIR/helper boundaries are:
 `JsRealmIntrinsicSlots`, `JsIntrinsicState`, `JsWithScopeState`,
 `JsEventLoopQueueState`, `JsEventLoopTimerState`, `JsPromiseRuntimeState`,
 `JsModuleRuntimeState`, `JsAsyncHooksState`, `JsAsyncLocalStorageState`,
-`JsAsyncAwaitState`, `JsEvalState` (`JsEvalSourceState`, `JsEvalBridgeState`,
-`JsEvalLocalState`), `JsExecutionState`, `JsCallActivation`, `JsCodeStore`,
+`JsAsyncAwaitState`, `JsEvalState` (`JsEvalBridgeState`, `JsEvalLocalState`), `JsExecutionState`, `JsCallActivation`, `JsCodeStore`,
 `JsProcessState`, and `JsTest262AgentState`. The complete ownership record is in
 [`js_runtime_state.hpp`](../lambda/js/js_runtime_state.hpp#L993).
 
@@ -1001,7 +989,6 @@ layout-specific access.
 | `JsWithData` | JavaScript | Captured raw environment plus `with` depth | helper |
 | `JsNativeCode` | JavaScript | Native call/construct target, arity, and policy | helper |
 | `JsAstBody` | JavaScript | Per-value AST closure state (definition, env, lexical `this`) | helper |
-| `JsEvalOrigin` | JavaScript | Dynamic-function source origin | helper |
 | `JsAccessorCell` | JavaScript | Getter/setter property storage; `GC_TYPE_JS_ACCESSOR`, not a FUNC value | helper |
 | `JsInterpEnv` | JavaScript | GC-owned AST/eval lexical environment (interp payload shape) | helper |
 | `JsClassMeta` | JavaScript | JS class family, flags, prototype policy, and ops | helper |
@@ -1044,8 +1031,7 @@ layout-specific access.
 | `JsAsyncHooksState` | JavaScript | Async resource and hook roots | helper |
 | `JsAsyncLocalStorageState` | JavaScript | Realm-local async-local-storage instances | helper |
 | `JsAsyncAwaitState` | JavaScript | The realm-owned await result handoff Item | helper |
-| `JsEvalState` | JavaScript | Aggregate eval source, bridge, and local journals | helper |
-| `JsEvalSourceState` | JavaScript | Eval source/code root lanes and offsets | helper |
+| `JsEvalState` | JavaScript | Aggregate eval bridge and local journals | helper |
 | `JsEvalBridgeState` | JavaScript | Direct-eval binding journals and frame marks | helper |
 | `JsEvalLocalState` | JavaScript | Caller-local eval bindings and lexical keys | helper |
 | `JsCallActivation` | JavaScript | One synchronous call's ambient `this`/newTarget/args homes | helper |

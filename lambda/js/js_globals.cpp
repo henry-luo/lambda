@@ -14443,13 +14443,27 @@ extern "C" int64_t js_global_lexical_binding_exists(Item key) {
     return js_global_lexical_find(key) >= 0 ? 1 : 0;
 }
 
+// A MIR script's top-level lexical lives in its module slot. The linked record
+// reads and writes that slot, so interpreted code that resolves the realm record
+// (dynamic source, later scripts) observes the live value and its TDZ (JSI35).
+static bool js_global_lexical_activate_owner(RuntimeModuleStateScope* module_state,
+        const JsGlobalBinding* binding) {
+    return binding->module_state_id == UINT32_MAX ||
+        module_state->activate(binding->module_state_id);
+}
+
 extern "C" Item js_global_lexical_get_or_fallback(Item key, Item fallback) {
     JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     int idx = js_global_lexical_find(key);
     JsGlobalBinding* binding = js_global_environment_binding_at(
         js_global_environment_state, idx);
-    return binding ? js_global_environment_binding_value(
-        js_global_environment_state, binding) : fallback;
+    if (!binding) return fallback;
+    if (binding->module_index >= 0) {
+        RuntimeModuleStateScope module_state(context);
+        if (!js_global_lexical_activate_owner(&module_state, binding)) return fallback;
+        return lambda_active_module_var_at((uint32_t)binding->module_index);
+    }
+    return js_global_environment_binding_value(js_global_environment_state, binding);
 }
 
 extern "C" Item js_global_lexical_set_if_exists(Item key, Item value) {
@@ -14462,9 +14476,25 @@ extern "C" Item js_global_lexical_set_if_exists(Item key, Item value) {
     if (binding->immutable) {
         return js_throw_type_error("Assignment to constant variable");
     }
+    if (binding->module_index >= 0) {
+        RuntimeModuleStateScope module_state(context);
+        if (js_global_lexical_activate_owner(&module_state, binding)) {
+            lambda_active_module_var_store((uint32_t)binding->module_index, value);
+        }
+        return (Item){.item = b2it(true)};
+    }
     js_global_environment_set_binding_value(js_global_environment_state,
         binding, value);
     return (Item){.item = b2it(true)};
+}
+
+extern "C" void js_global_lexical_declare_module_slot(Item key, int64_t index,
+        int64_t immutable) {
+    key = js_to_property_key(key);
+    if (item_is_error(key) || index < 0) return;
+    js_global_environment_upsert(js_global_environment_state,
+        JS_GLOBAL_BINDING_LEXICAL, key, make_js_undefined(), immutable != 0,
+        (int)index, lambda_active_module_state_id());
 }
 
 extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutable) {
@@ -14478,6 +14508,8 @@ extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutabl
         js_global_environment_set_binding_value(js_global_environment_state,
             binding, value);
         binding->immutable = immutable != 0;
+        binding->module_index = -1;
+        binding->module_state_id = UINT32_MAX;
         return;
     }
     // Script global lexical declarations live in the global environment record
@@ -14496,6 +14528,9 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
+    // A direct eval's projected caller binding is nearer than any global
+    // lexical binding of the same name.
+    if (js_eval_env_has_binding(key)) return js_get_key_default(js_get_global_this(), key);
     Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
     lex = js_global_lexical_get_or_fallback(key, ItemError);
@@ -14506,6 +14541,7 @@ extern "C" Item js_get_global_property(Item key) {
 }
 
 extern "C" Item js_get_global_property_after_with_lookup(Item key) {
+    if (js_eval_env_has_binding(key)) return js_get_key_default(js_get_global_this(), key);
     Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
     lex = js_global_lexical_get_or_fallback(key, ItemError);
@@ -14561,7 +14597,7 @@ extern "C" int64_t js_global_binding_exists_after_with_lookup(Item key) {
     // not properties on globalThis. Later classic Scripts (including a
     // Test262 test after its harness) must find them before probing the
     // object environment.
-    if (js_eval_global_lexical_has_binding(key) ||
+    if (js_eval_env_has_binding(key) || js_eval_global_lexical_has_binding(key) ||
             js_global_lexical_binding_exists(key)) return 1;
     Item global = js_get_global_this();
     Item exists = js_in(key, global);
@@ -14606,6 +14642,9 @@ static Item js_set_global_target_property(Item target, Item key, Item value,
 static Item js_set_global_property_after_with_lookup_impl(Item key, Item value,
         bool strict) {
     js_last_with_binding_valid = false;
+    if (js_eval_env_has_binding(key)) {
+        return js_set_global_target_property(js_get_global_this(), key, value, strict);
+    }
     JS_ASSIGN_OR_RETURN(lexical_result, js_eval_global_lexical_set_if_exists(key, value));
     if (it2b(lexical_result)) return js_status_ok();
     JS_ASSIGN_OR_RETURN_INTO(lexical_result, js_global_lexical_set_if_exists(key, value));
@@ -15077,7 +15116,7 @@ extern "C" void js_eval_env_push_frame(void) {
 
 // Bridge vars introduced by a PRIOR direct eval in this function scope
 // (they live only in the eval-local journal, not in any static local slot).
-// Nested direct eval compiles as separate code that resolves free names
+// Nested direct eval runs as separate script code that resolves free names
 // through global lookup, so without this bridge `eval("var x = 1")`
 // followed by `eval("x")` throws ReferenceError. The values are exposed as
 // temporary globals exactly like bridged static locals; frame pop restores
@@ -15167,6 +15206,28 @@ extern "C" void js_eval_private_bind(Item unscoped_key, Item scoped_key) {
     }
 }
 
+// Snapshot the innermost eval-private frame as flat [source, identity] pairs.
+// Interpreted direct-eval code keeps them in its root environment, so a
+// closure it creates still resolves the caller's private names after the frame
+// is popped (JSI35).
+extern "C" Item js_eval_private_frame_pairs(void) {
+    JsEvalBridgeFrame* frame = js_eval_private_current_frame();
+    if (!frame || js_eval_private_binding_count <= frame->binding_mark) return ItemNull;
+    RootFrame roots(1);
+    Rooted<Item> pairs(roots, js_array_new(0));
+    if (item_is_error(pairs.get())) return pairs.get();
+    for (int i = frame->binding_mark; i < js_eval_private_binding_count; i++) {
+        Item pushed = js_array_push(pairs.get(),
+            *root_vector_at(&js_eval_private->unscoped_keys, i));
+        if (!item_is_error(pushed)) {
+            pushed = js_array_push(pairs.get(),
+                *root_vector_at(&js_eval_private->scoped_keys, i));
+        }
+        if (item_is_error(pushed)) return pushed;
+    }
+    return pairs.get();
+}
+
 extern "C" Item js_eval_private_resolve(Item unscoped_key) {
     if (js_eval_private_frame_depth <= 0 || get_type_id(unscoped_key) != LMD_TYPE_STRING) return ItemNull;
     JsEvalBridgeFrame* frame = js_eval_private_current_frame();
@@ -15218,34 +15279,6 @@ extern "C" void js_eval_local_export_var(Item key, Item value) {
         root_vector_pop(&js_eval_local.keys);
         log_error("js-eval-local: cannot grow var value journal");
     }
-}
-
-extern "C" int64_t js_eval_local_current_var_count(void) {
-    if (js_eval_local_frame_depth <= 0) return 0;
-    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
-    if (!local_frame) return 0;
-    int frame_start = local_frame->local_mark;
-    return js_eval_local_binding_count - frame_start;
-}
-
-extern "C" Item js_eval_local_current_var_key(int64_t index) {
-    if (js_eval_local_frame_depth <= 0 || index < 0) return ItemNull;
-    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
-    if (!local_frame) return ItemNull;
-    int frame_start = local_frame->local_mark;
-    int binding_index = frame_start + (int)index;
-    return binding_index >= frame_start && binding_index < js_eval_local_binding_count
-        ? (*root_vector_at(&js_eval_local.keys, (binding_index))) : ItemNull;
-}
-
-extern "C" Item js_eval_local_current_var_value(int64_t index) {
-    if (js_eval_local_frame_depth <= 0 || index < 0) return ItemNull;
-    JsEvalLocalFrameMarks* local_frame = js_eval_local_current_frame();
-    if (!local_frame) return ItemNull;
-    int frame_start = local_frame->local_mark;
-    int binding_index = frame_start + (int)index;
-    return binding_index >= frame_start && binding_index < js_eval_local_binding_count
-        ? (*root_vector_at(&js_eval_local.values, (binding_index))) : ItemNull;
 }
 
 static void js_eval_local_note_binding(Item key, RootVector* keys,
@@ -15412,17 +15445,6 @@ extern "C" Item js_eval_global_lexical_set_if_exists(Item key, Item value) {
 }
 
 JS_FORWARD_EXPRESSION(int64_t, js_eval_env_is_active, (void), js_eval_env_frame_depth > 0 ? 1 : 0)
-
-extern "C" void js_eval_env_track_global_binding(Item key) {
-    if (js_eval_env_frame_depth <= 0) return;
-    JsEvalBridgeFrame* frame = js_eval_binding_journal_current_frame(js_eval_env);
-    if (!frame) return;
-    int frame_start = frame->binding_mark;
-    for (int i = js_eval_env_binding_count - 1; i >= frame_start; i--) {
-        if (js_with_binding_key_same((*root_vector_at(&js_eval_env->keys, (i))), key)) return;
-    }
-    js_eval_binding_journal_record(js_eval_env, key, false, false, "env");
-}
 
 static void js_eval_restore_global_binding(Item global, Item key, Item old_value, bool had_own) {
     if (had_own) {

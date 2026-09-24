@@ -372,8 +372,11 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
     placeholder->source_span = function->source_span;
     placeholder->name = function->name;
     placeholder->type = &TYPE_FUNC;
+    bool companion_is_new = var_scope && !name_scope_lookup_name(var_scope,
+        function->name);
     NameEntry* outer = js_scope_define_in_scope(tp, var_scope,
         function->name, (JsAstNode*)placeholder, JS_VAR_VAR);
+    if (outer && companion_is_new) outer->is_annex_b_companion = true;
     if (outer && !outer->is_parameter) {
         lexical->annex_b_outer_binding = outer;
         // the global companion keeps its established unresolved-name path
@@ -630,6 +633,7 @@ static void direct_walk_catch(JsTranspiler* tp, JsCatchNode* handler) {
     // var region; destructured catch parameters must reject that redeclaration.
     scope->allows_legacy_var_redeclaration = handler->param &&
         handler->param->node_type == AST_NODE_IDENT;
+    scope->is_catch_clause = true;
     handler->vars = scope;
     js_scope_push(tp, scope);
     direct_bind_pattern(tp, handler->param, JS_VAR_LET, NULL, false, false);

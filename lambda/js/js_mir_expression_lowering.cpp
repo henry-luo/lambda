@@ -600,7 +600,7 @@ static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
 static void jm_emit_global_var_property_sync(JsMirTranspiler* mt, JsModuleConstEntry* mc,
                                              String* name, MIR_reg_t value) {
     if (!mt || !mc || !name || name->len <= 0 || value == 0) return;
-    if (mt->is_module || mt->is_eval_direct) return;
+    if (mt->is_module) return;
     if (mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) return;
     if (mc->is_iife_var) return;
     MIR_reg_t key = jm_box_property_name_literal(mt, name->chars, name->len);
@@ -1372,7 +1372,7 @@ static MIR_reg_t jm_emit_reference_name_id(JsMirTranspiler* mt,
 
 static const JubeTypeDef* jm_jube_seed_type(JsMirTranspiler* mt,
                                              JsIdentifierNode* id) {
-    if (!mt || !id || !id->name || mt->with_depth > 0 || mt->is_eval_direct ||
+    if (!mt || !id || !id->name || mt->with_depth > 0 ||
             (mt->current_fc && (JM_JS_FACT(mt->current_fc, has_direct_eval) ||
                                 JM_JS_FACT(mt->current_fc, uses_with)))) {
         return NULL;
@@ -1391,7 +1391,7 @@ static const JubeTypeDef* jm_jube_seed_type(JsMirTranspiler* mt,
 // the immutable global seed participate. Unknown assignments and joins return
 // NULL, so the ordinary JS property path remains the semantic fallback.
 const JubeTypeDef* jm_infer_jube_type(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!mt || !node || mt->with_depth > 0 || mt->is_eval_direct ||
+    if (!mt || !node || mt->with_depth > 0 ||
             (mt->current_fc && (JM_JS_FACT(mt->current_fc, has_direct_eval) ||
                                 JM_JS_FACT(mt->current_fc, uses_with)))) {
         return NULL;
@@ -2080,7 +2080,7 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     bool annexb_self_body = mt->current_fc && mt->current_fc->node &&
                         id->entry && id->entry == mt->current_fc->node->entry;
                     MIR_reg_t prefer_non_function_module = jm_new_reg(mt, "annexb_pnfm", MIR_T_I64);
-                    if (mt->is_eval_direct || annexb_self_body) {
+                    if (annexb_self_body) {
                         jm_emit_mov(mt, prefer_non_function_module, module_not_function);
                     } else {
                         jm_emit_reg_binary_op(mt, MIR_EQ, prefer_non_function_module, global_is_function, MIR_new_int_op(mt->ctx, 0));
@@ -6863,38 +6863,6 @@ static MirValue jm_emit_assignment_value(JsMirTranspiler* mt,
                                 rhs, "mwa_res", strict_put, NULL, mc, id->name, vname));
                         }
                     }
-                    if (mt->is_eval_direct) {
-                        MIR_reg_t eval_key = jm_box_property_name_literal(mt,
-                            id->name->chars, id->name->len);
-                        MIR_reg_t has_env_bridge = jm_callr_1(mt,
-                            "js_eval_env_has_binding", MIR_T_I64, eval_key);
-                        MIR_reg_t has_global_lexical_bridge = jm_callr_1(mt,
-                            "js_eval_global_lexical_has_binding", MIR_T_I64, eval_key);
-                        MIR_reg_t has_bridge = jm_new_reg(mt, "eval_bridge", MIR_T_I64);
-                        // direct eval uses an environment bridge for function
-                        // locals and a global-lexical bridge at script scope
-                        jm_emit_reg_binary(mt, MIR_OR, has_bridge,
-                            has_env_bridge, has_global_lexical_bridge);
-                        MIR_label_t module_store = jm_new_label(mt);
-                        MIR_label_t store_done = jm_new_label(mt);
-                        MIR_reg_t store_result = jm_new_reg(mt, "eval_mva_res", MIR_T_I64);
-                        jm_emit_branch(mt, MIR_BF, module_store, has_bridge);
-                        jm_call_3(mt, "js_set_global_property", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-                        jm_emit_error_lane_propagate_check(mt);
-                        jm_emit_mov(mt, store_result, rhs);
-                        jm_emit_jmp(mt, store_done);
-                        jm_emit_label(mt, module_store);
-                        jm_store_module_var(mt, (uint32_t)mc->int_val, rhs);
-                        jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
-                        jm_scope_env_mark_and_writeback_binding(mt, vname,
-                            (JsAstNode*)id, rhs);
-                        jm_emit_mov(mt, store_result, rhs);
-                        jm_emit_label(mt, store_done);
-                        return publish_item(store_result);
-                    }
                     jm_store_module_var(mt, (uint32_t)mc->int_val, rhs);
                     jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
                     // Write back to scope env if captured by child closures
@@ -7594,7 +7562,8 @@ static void jm_eval_local_note_bindings(JsMirTranspiler* mt, bool immutable) {
         size_t iter = 0; void* item;
         while (hashmap_iter(scope, &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
-            if (immutable ? !entry->var.is_nfe_binding :
+            // A const is immutable exactly like an AST caller's (JSI35).
+            if (immutable ? (!entry->var.is_nfe_binding && !entry->var.is_const) :
                     (!entry->var.is_let_const && !entry->var.is_const)) continue;
             if (strncmp(entry->name, "_js_", 4) != 0) continue;
             if (jm_is_receiver_meta_binding(entry->name)) continue;
@@ -9859,10 +9828,6 @@ static MirValue jm_emit_tagged_template_value(JsMirTranspiler* mt,
         site_id ^= source_part; site_id *= 1099511628211ULL;
         site_id ^= start_part; site_id *= 1099511628211ULL;
         site_id ^= end_part; site_id *= 1099511628211ULL;
-        if (mt->template_site_salt != 0) {
-            site_id ^= mt->template_site_salt;
-            site_id *= 1099511628211ULL;
-        }
     }
 
     MIR_reg_t tmpl_obj = jm_call_4(mt, "js_build_template_object_cached", MIR_T_I64,

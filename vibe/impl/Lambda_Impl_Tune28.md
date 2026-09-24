@@ -984,7 +984,7 @@ of noise on a 7 ms row, not of the change. hyphen and base64 are not
 and is not the lever. Part (c), borrowed substring views, changes string
 representation and needs its own round.
 
-**Follow-up (2026-09-24): `replace()` and `find()` join the kernel.** Their literal paths still ran the pre-T28-5 loop — a count pass, then a copy (or collect) pass, each calling `memcmp` at every byte position. revcomp's complement is a chain of 18 one-character `replace()` calls, and that chain was 0.79 of revcomp2's 0.99 ms; regexredux's IUPAC expansion is 11 more. The kernel is now `literal_find`: it takes `ignore_case` (ASCII folding probes every position, since `memchr` cannot fold case) and serves `split`, `replace` and `find` (rule 13). `count_literal_matches` absorbs `split_literal_match_count` and counts a one-byte needle with the SWAR `str_count_byte`, because a dense needle ("A" in DNA) would otherwise pay a `memchr` call per match. A one-byte-for-one-byte `replace()` of every match skips the search altogether: `translate_byte` is a branch-free select that clang vectorizes (NEON `cmeq.16b`/`bit.16b`, 64 bytes per iteration in the release binary).
+**Follow-up T28-5.1 (2026-09-24): `replace()` and `find()` join the kernel.** Their literal paths still ran the pre-T28-5 loop — a count pass, then a copy (or collect) pass, each calling `memcmp` at every byte position. revcomp's complement is a chain of 18 one-character `replace()` calls, and that chain was 0.79 of revcomp2's 0.99 ms; regexredux's IUPAC expansion is 11 more. The kernel is now `literal_find`: it takes `ignore_case` (ASCII folding probes every position, since `memchr` cannot fold case) and serves `split`, `replace` and `find` (rule 13). `count_literal_matches` absorbs `split_literal_match_count` and counts a one-byte needle with the SWAR `str_count_byte`, because a dense needle ("A" in DNA) would otherwise pay a `memchr` call per match. A one-byte-for-one-byte `replace()` of every match skips the search altogether: `translate_byte` is a branch-free select that clang vectorizes (NEON `cmeq.16b`/`bit.16b`, 64 bytes per iteration in the release binary).
 
 **Correctness.** A 4,000-case differential fuzz of `replace`/`find`/`split` — a dense six-letter alphabet that includes a two-byte UTF-8 letter, one- to three-letter needles, every option kind, and the keep-delimiter split — is byte-identical to the control. `test/lambda/find_replace_options.ls` gains overlapping, near-miss, translate, symbol, window and UTF-8 cases. The regression pin now names `literal_find` and also asserts that `fn_replace_impl` and `fn_find_impl` call it.
 
@@ -1000,6 +1000,8 @@ representation and needs its own round.
 | text/prettier_ast2 | 518.7 | 493.0 | 1.05x |
 
 knucleotide2 and log_pipeline2 read 0.98x on interleaved runs with overlapping ranges; log_pipeline2 calls none of the three builtins, so that is noise. What remains of regexredux is mostly its nine case-insensitive pattern `find()`s, which run in RE2.
+
+**Further work (T28-5 series, forward pointer).** The mechanism behind T28-5/T28-5.1 and a measured survey of the same pattern across `lib/`, the runtime string builtins, LambdaJS, the input parsers and the formatters — with the candidates, correctness findings and phasing — are in [Lambda String Function Tuning — Proposal](../Lambda_String_Func_Tuning.md).
 
 
 ### 9.11 T28-4 follow-on — inlining the module-state lookup: built, measured, REVERTED

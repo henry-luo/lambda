@@ -185,6 +185,15 @@ a filter over text now returning a string, the checker still typed the result
 interpreter answered true (S1.6) — the result type, not the runtime, was the
 defect.
 
+### String function tuning survey — 2026-09-24
+
+A survey of byte-level text processing (the [string function tuning proposal](Lambda_String_Func_Tuning.md), §5.1) found three defects that return a **wrong value with no error**. Each was reproduced on both tiers before filing:
+- [LR05-14](#lr05-14): `last_index_of` and `lastIndexOf` can return a position past the real last match.
+- [LR05-15](#lr05-15): indexing a non-ASCII symbol splits a character.
+- [LR09-31](#lr09-31): `format()` drops large text in markup output.
+
+The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here.
+
 ---
 
 
@@ -537,6 +546,25 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
+<a id="lr05-14"></a>**LR05-14 · `str_rfind_byte` can return a position past the real last match · OPEN**
+`str_rfind_byte` (`lib/str.c:266`) scans backwards eight bytes at a time and returns the highest byte flagged by `_swar_has_byte` (`:279`).
+- **Cause:** through borrow propagation, that test can also flag the byte just above a real match when that byte equals `c ^ 0x01`. The caveat is already noted in `str_count_byte` (`:404`). So a backward search can return the position just after the true last match.
+- **Forward search is unaffected:** `str_find_byte` takes the lowest flagged byte, which is always a real match.
+- **Callers:** every one-byte reverse search reaches it through `str_rfind` (`:321`):
+  - Lambda `last_index_of` (`lambda/runtime/lambda-eval.cpp:6524`);
+  - LambdaJS `String.prototype.lastIndexOf` (`js_string_find_position` in `lambda/js/js_runtime.cpp`);
+  - Node-compatible `Buffer.lastIndexOf` (`lambda/module/node_core/node_buffer.cpp:1584`).
+- **Reproduced 2026-09-24 on both tiers:** `last_index_of("dir/.hidden", "/")` is 4 and `last_index_of("abcdefgh", "b")` is 2, where 3 and 1 are right. LambdaJS `lastIndexOf` gives the same 4 and 2; Node gives 3 and 1.
+- **Why tests missed it:** in `test/lib/test_str_gtest.cpp:218`–`221`, every match checked falls in the scalar tail.
+- **Fix:** use an exact zero-byte mask for the backward scan, `~(((x & 0x7F…) + 0x7F…) | x | 0x7F…)`, and add both reproducers as tests.
+
+<a id="lr05-15"></a>**LR05-15 · Indexing a non-ASCII symbol splits a character · OPEN**
+S2.5.8 has indexing and every sequence operation see a symbol as its code points.
+- **Cause:** `item_at` (`lambda/runtime/lambda-data-runtime.cpp`, the `LMD_TYPE_STRING`/`LMD_TYPE_SYMBOL` case) starts from `is_ascii = true` and corrects it only for strings, which carry the flag. A symbol therefore always takes the byte-indexed fast path.
+- **Reproduced 2026-09-24 on both tiers:** `'café'[3]` is the one-byte symbol `'\xC3'`, where `'é'` is right. By contrast, `len('café')` is 4 and `"café"[3]` is `"é"`.
+- **Knock-on:** `reverse`, `sort` and the other text sequence operations read characters through `item_at` (via `vector_text_items`, `lambda/runtime/lambda-vector.cpp:304`). So `reverse('café')` is `'\xC3fac'` and `sort('bé')` is `'b\xC3'`: the byte `0xA9` is lost, and neither result is valid UTF-8.
+- **Fix:** the UTF-8 path below the fast path already handles symbols correctly. Establish ASCII-ness for a symbol before choosing the path, either with `str_is_ascii` over its bytes or with an `is_ascii` bit on `Symbol`.
+
 ---
 
 
@@ -702,6 +730,17 @@ is retained as [LR04-4](<Lambda_Issue_Ledger (fixed).md#lr04-4>).
 they are lowered inline. A `NULL` that *should* have been a real pointer would
 surface only as a JIT import-resolution miss (`mir.c` logs
 `failed to resolve native fn`), not as a build error.
+
+<a id="lr09-31"></a>**LR09-31 · `format()` silently drops large text in markup output · OPEN**
+The markup formatters skip any text string above a size cap, log an error and carry on. `format()` then returns a document with the text missing and no error value.
+- **Caps:**
+  - `format_markup_string_safe_ex` (`lambda/format/format-utils.cpp:179`–`185`), shared by the HTML and XML formatters, drops text longer than 1 MiB. Attribute values are kept up to 32 MiB.
+  - The JSX formatter drops text longer than 10,000 bytes and JS expressions of 10,000 bytes or more (`lambda/format/format-jsx.cpp:17`, `:46`).
+  - The LaTeX formatter drops strings of 64 KiB or more (`lambda/format/format-latex.cpp:56`).
+- **Reproduced 2026-09-24 on both tiers, for HTML and XML:** a paragraph of 1,200,000 characters followed by `<p>tail-marker</p>` formats to 79 characters of HTML and 120 of XML. The paragraph is gone and the marker survives. The only trace is an `[ERR!] html_string_guard: skipping suspicious string` log line.
+- **Likely intent:** the log wording suggests a defence against corrupt string pointers, not an intended size limit.
+- **Why filed here:** the formatters sit outside LR_09's scope (`lambda/format/`, which `lambda convert` also uses), but the wrong value is observed through the `format()` builtin.
+- **Fix:** needs a decision — remove the caps, or make an oversized string an error.
 
 ## 10. Error handling (LR_10)
 

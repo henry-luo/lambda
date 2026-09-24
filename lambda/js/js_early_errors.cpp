@@ -297,6 +297,28 @@ static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
     }
 }
 
+static void check_strict_target_names(EarlyErrorCtx* ctx, JsAstNode* target);
+
+static void check_strict_target_names_child(JsAstNode* child, void* opaque) {
+    check_strict_target_names((EarlyErrorCtx*)opaque, child);
+}
+
+// Strict code may not assign `eval` or `arguments` in any target position: a
+// simple, compound, or logical assignment, a destructuring element, or a
+// for-in/of head.
+static void check_strict_target_names(EarlyErrorCtx* ctx, JsAstNode* target) {
+    if (!ctx->in_strict || !target) return;
+    if (target->node_type == AST_NODE_IDENT) {
+        String* name = ((JsIdentifierNode*)target)->name;
+        if (name && (strcmp(name->chars, "eval") == 0 ||
+                strcmp(name->chars, "arguments") == 0)) {
+            ee_error(ctx, target, "Unexpected eval or arguments in strict mode");
+        }
+        return;
+    }
+    js_ast_visit_binding_pattern_children(target, check_strict_target_names_child, ctx);
+}
+
 static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     if (!node) return;
     JsAssignmentNode* asgn = (JsAssignmentNode*)node;
@@ -313,12 +335,13 @@ static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
             lhs->node_type != AST_NODE_MEMBER_EXPR &&
             (ctx->in_strict || lhs->node_type != AST_NODE_CALL_EXPR)) {
             ee_error(ctx, node, "Invalid left-hand side in compound assignment");
+            return;
         }
-    } else {
-        if (!is_valid_assignment_target(lhs, ctx->in_strict)) {
-            ee_error(ctx, node, "Invalid left-hand side in assignment");
-        }
+    } else if (!is_valid_assignment_target(lhs, ctx->in_strict)) {
+        ee_error(ctx, node, "Invalid left-hand side in assignment");
+        return;
     }
+    check_strict_target_names(ctx, lhs);
 }
 
 static void check_update_target(EarlyErrorCtx* ctx, JsAstNode* node) {
@@ -837,6 +860,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             JsForOfNode* fo = (JsForOfNode*)node;
             walk_statement(ctx, fo->left); // may be var decl
             walk_expression(ctx, fo->left); // may be pattern
+            if (fo->left && fo->left->node_type != AST_NODE_VAR_STAM) {
+                check_strict_target_names(ctx, fo->left);
+            }
             walk_expression(ctx, fo->right);
             bool saved_in_iteration = ctx->in_iteration;
             ctx->in_iteration = true;

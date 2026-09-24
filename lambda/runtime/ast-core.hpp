@@ -314,6 +314,9 @@ struct NameEntry {
     // A sloppy block function publishes only to this validated Annex-B outer
     // binding; null records a parameter, arguments, or lexical collision.
     NameEntry* annex_b_outer_binding;
+    // This var binding exists only as an Annex-B block-function companion;
+    // an ordinary `var` declaration of the same name clears it.
+    bool is_annex_b_companion;
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
@@ -482,6 +485,9 @@ struct NameScope {
     // JavaScript B.3.5 permits a legacy var redeclaration of a simple catch
     // BindingIdentifier; JavaScript marks only that handler scope.
     bool allows_legacy_var_redeclaration;
+    // A JavaScript catch clause's own record. Annex B.3.4 lets direct eval
+    // hoist a var over any catch parameter, simple or destructured.
+    bool is_catch_clause;
     // A named function expression owns an immutable lexical name record that
     // sits outside its ordinary Function Environment Record.
     bool is_function_name_scope;

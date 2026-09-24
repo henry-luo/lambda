@@ -688,3 +688,188 @@ before accessing 'this'". Three parts:
   defers to the runtime TDZ check, which was already correct.
 
 test262 is 40261/40261.
+
+## JSI35: dynamic source runs only in the AST interpreter (2026-09-24)
+
+**Ruling:** **D8.1.3v20 / JSI35** (USER, 2026-09-24). Design:
+`vibe/Lambda_Design_JS_Interpreter.md` §5.6, §15.18, Appendix S2.
+
+Before this change, the AST tier handed every direct eval to the MIR
+dynamic-code service. In a MIR-rooted realm, all dynamic source went to MIR.
+That service had three tiers chosen by scanning the source text: a
+regex-literal shortcut, a `return (…)` function wrapper, and a whole-script
+"Phase C" form with its own `is_eval_direct` lowering mode.
+
+**Deleted.**
+- `js_mir_eval_lowering.cpp`, 1,838 lines, is replaced by
+  `js_dynamic_code.cpp`, about 580 lines. The new file assembles source,
+  runs the context checks, and dispatches to the interpreter.
+- The expression-wrapper and whole-script eval tiers.
+- The dynamic-Function MIR cache and its `return <identifier>` native
+  fast path.
+- `js_install_realm_global_preamble` and inherited eval preambles.
+- The `is_eval_direct` and `template_site_salt` context fields, and every
+  branch that read them in module, statement, and expression lowering.
+  That includes the eval export epilogue, the evalScript precheck family,
+  eval Annex-B pre-initialisation, and class/`let` global declarations
+  inside eval units.
+- `js_builtin_eval_with_options` and `js_eval_env_track_global_binding`.
+- Ten JIT import registrations that only eval units emitted.
+- The `JS_OPT_DYNAMIC_FUNCTION_*` opt-trace events and their two
+  `test_js_opt_gtest` cases.
+- The code diff across `lambda/` and `test/` is about +1,170 / −2,500
+  lines, a net reduction of roughly 1,330.
+
+**Kept on the MIR side.** A MIR-compiled caller still performs a direct
+eval: it projects its bindings into the `EvalContext` bridge, calls
+`js_builtin_eval`, writes the bindings back, and pops the bridge. Inside a
+function it now also bridges the script's top-level `let`/`const` module
+slots through a global-lexical frame. Interpreted eval code cannot read
+those slots through the compile-time preamble map that the MIR eval unit
+used.
+
+**Interpreter semantics added.** They reproduce the MIR eval unit's
+behaviour except where noted.
+- *Direct-eval scripts* (`JsScript::is_direct_eval`).
+  - Code runs with the caller's raw `this` binding.
+  - `new.target` stays undefined, as before.
+  - Private names come from a root environment built from the caller's
+    eval-private frame. A closure created by eval code therefore keeps
+    resolving `#x` after the frame pops.
+- *Declaration targets* (`js_interp_eval_vars`):
+  - sloppy global eval code → configurable global properties;
+  - sloppy direct eval in function code → the activation journal;
+  - strict eval code → private slots;
+  - `$262.evalScript` → Script semantics.
+  - Eval lexical declarations never become realm-global lexicals. The
+    old AST indirect-eval path wrongly declared them there.
+- *Caller-context vars.* The bridge cannot tell the caller's own bindings
+  from outer ones. An eval `var` therefore starts from an earlier eval's
+  journal value or `undefined`, and writes go through the journal. Only an
+  Annex-B companion (new `NameEntry::is_annex_b_companion` flag) aliases
+  its projected caller binding. That matches the MIR `is_nested_func_hoist`
+  rule, and the case is what `S11.13.1_A6_T1` pins down.
+- *Bridge authority.* Inside direct-eval code, a bridged caller binding is
+  read and written through the bridge before the journal. The bridge frame
+  refreshes the journal copy when it pops, so a journal-first access
+  observes or loses a stale value.
+- *Exports.* Eval vars export eagerly, not in an epilogue. A var therefore
+  survives a later throw, and a caller closure invoked mid-eval sees it.
+- *Completion values.* Script frames carry a completion register
+  (`JsInterpFrame::completion_home`). Expression statements store their
+  value into it. `if`, loops, `switch`, `try`, and `with` reset it on
+  entry. `finally` saves the register, resets it, and restores it after a
+  normal exit.
+- *Cost.* Whitespace- or comment-only sources and lone RegExp literals
+  create no script. An unterminated `/*` now reaches the parser's
+  SyntaxError. Dynamic source keeps sharing the process-wide AST template
+  cache, as `JsInterpreter.ReusesAstTemplatesForClassModuleEvalAndTypeScript`
+  requires. The exception is a direct eval that names private members; its
+  early errors depend on the caller. Nested dynamic runs reuse the caller's
+  `Input` rather than creating an arena per call.
+  - *Open question:* the cache has no default byte limit, so a loop over
+    distinct eval strings retains one template per string.
+  - One `language/literals/regexp` loop runs 65,536 evals. On the first
+    attempt it peaked at 2.17 GB and crashed a batch worker. It now runs in
+    1.4 s at 89 MB.
+
+**Bridge corrections.** A MIR-pinned fixture exposed three wrong results. All
+three predate this change. The bridge is now the single caller protocol, so
+they are fixed there:
+- A function-local `let` that shadows a script-level `let` was invisible to
+  eval. The realm lexical record answered before the projected binding on
+  `globalThis`. Global lookup, existence checks, and assignment now give a
+  projected env binding precedence (`js_get_global_property*`,
+  `js_global_binding_exists_after_with_lookup`, and the global set path).
+- From an interpreted function, an eval write to a script-level `let`
+  reached the realm record but not the script slab. Interpreted scripts now
+  declare their top-level lexicals as module-slot-linked realm records
+  (below), so the write lands in the slot. No extra bridge frame is needed.
+- A MIR caller recorded only named-function-expression bindings as
+  immutable, so strict eval could silently assign to a caller `const`. MIR
+  now records consts as immutable, as an interpreted caller does.
+
+A fourth defect came from the move itself. MIR eval units used to read a MIR
+script's top-level `let`/`const`/`class` through compile-time preamble slot
+maps. After the move, indirect eval, `Function`, and timer code in a MIR realm
+read the realm lexical record, which MIR had only initialized to `undefined`.
+MIR scripts, and now also interpreted scripts, declare those lexicals with
+`js_global_lexical_declare_module_slot`. The record keeps the owner module
+slot and module-state id, the same way global `var` module bindings do.
+`js_global_lexical_get_or_fallback` and `js_global_lexical_set_if_exists`
+read and write through that slot, so the live value and its TDZ are
+observable. Batch generation release drops linked lexicals together with
+module vars.
+
+Fixtures: `test/js/jsi35_eval_ast_semantics.js` runs on the interpreter.
+`test/js/jsi35_eval_mir_caller.js` is pinned to MIR through
+`test/js/mir_list.txt`. Both produce identical output on either backend.
+
+**Validation.**
+- test262 baseline: 40,261/40,261, 0 regressions, 40.6 s (41.4 s before).
+- The untracked `test/language/eval-code` directory (343 runnable tests,
+  measured with an ad-hoc runner) improved on both tiers: interpreter
+  202 → 214, MIR 203 → 217. Before the change the two tiers disagreed on
+  about 49 tests. The remaining disagreements are only the `arguments`
+  declaration cases, which come from caller-side checks.
+- `make test-lambda-baseline`: 3,754/3,754. This includes `test_js_gtest`
+  479/479 (with both new fixtures), `test_js_script_gtest` 191/191,
+  `test_js_opt_gtest` 77/77, `test_js_mir_emission_gtest`,
+  `test_mir_ratchet_gtest`, and `test_mir_gc_stress_gtest` 221/221.
+- `test_js_gtest --baseline --full-mir`: 477/477.
+- The premake generator now deletes each static archive before `ar`. A
+  deleted or renamed source, here `js_mir_eval_lowering.cpp`, otherwise
+  leaves a stale member in `liblambda-rt-cpp.a`. That member duplicated the
+  moved preamble symbols and broke the test links.
+
+**Residuals.** These are unchanged from the MIR eval unit.
+- A closure created by eval over a caller-local binding loses it after the
+  eval returns.
+- `eval("arguments")` in a function throws ReferenceError.
+- `new.target` inside direct eval is undefined.
+- `var x; x` in eval over the caller's own `x` reads `undefined`.
+
+The retirement path is §5.6's T0 environment linking. It has since landed for
+interpreted callers; see the next section.
+
+## Direct eval links an interpreted caller's environments (2026-09-24)
+
+**Ruling:** **D8.1.3v21 / JSI36** (USER, 2026-09-24). Design: `vibe/Lambda_Design_JS_Interpreter.md` §5.6, §16 item 13, Appendix S3. This is the first step of the §5.6 residual. Ledger: JS05-L5, JS05-L6, JS05-L7 (resolved for interpreted callers).
+
+Before this change an AST caller used the same `EvalContext` bridge as a MIR caller. It copied its interpreter cells into temporary global properties, ran the eval, and wrote them back. Eval-created vars went through a per-activation journal. A copy is not a binding, so three defects followed: closures made by eval code lost caller locals once the eval returned (L5); `arguments` and `new.target` were missing (L6); and `var x` could not tell the caller's own `x` from an outer one, so it read `undefined` (L7).
+
+**Linking.** `js_interp_direct_eval` now parses the source with the caller's strictness and runs it with `js_interp_run_linked_eval`. The eval activation gets one boundary record. Its scope is the eval Script's global scope, `JsInterpEnv::eval_script` marks it, and its `outer` is the caller frame's current environment. The record's slots hold the eval's lexical declarations, and a strict eval's vars (its VariableEnvironment is that record). The eval Script's `JsScript::eval_caller_script` names the caller's Script. The frame borrows the caller's `this`, new.target, and home-object homes, and its `active_function`, so `super()` in eval code initializes the caller's `this`.
+
+**Resolution by name.** Code of a linked eval, and every closure it creates, resolves a free name, and a var its sloppy code declared, with `js_interp_lookup_name`. The walk visits each record in ResolveBinding order. A record answers from its declarations, then its materialized `arguments` (unless a parameter or function named `arguments` replaces it), then the vars direct eval added to it. A boundary record answers only for bindings it holds and then switches to its caller's Script. Past the last record, the name resolves as code of the outermost unlinked Script would: its top-level bindings (a module's, or a bridged eval's journal), then the realm. The result kinds are `SLOT`, `EVAL`, `ARGUMENTS`, and `OUTER`. A Reference stores its lookup before the right-hand side runs, so PutValue writes the binding it found. TDZ reads, `const` writes, and mapped-parameter aliasing come from the found record itself. The `with` probe stops below the function's captured `with` depth when the lookup found a record of the activation; that also fixes `with (o) { var g = function (a) { return eval("a"); }; }`, which used to read `o.a`. `typeof` and `delete` follow the same walk. `delete` removes a var that direct eval created (a null key tombstones the pair), for linked and ordinary code alike.
+
+**EvalDeclarationInstantiation.** `js_interp_instantiate_linked_eval` targets the caller's nearest function record. Beyond the linked records the target is the realm, or a bridged MIR caller's journal. Every var-scoped name is validated first. A var that a record between the eval and that environment binds is a SyntaxError, unless only a catch parameter binds it (Annex B.3.4, new `NameScope::is_catch_clause`). During a parameter initializer, a parameter or `arguments` also conflicts, so the re-parsing `js_interp_eval_redeclares_parameter` is gone. A name the target already binds is reused; otherwise it becomes a deletable binding. An Annex-B block function whose name such a record binds is skipped (B.3.2.3). The boundary slot of each var-scoped entry records whether it was instantiated, and `js_interp_publish_annex_b_functions` consults it. Function objects are written to the variable environment itself, even beneath a like-named catch parameter.
+
+**Arguments.** `JsAstFunctionFacts::observes_direct_eval` marks a direct eval in a function's body or in a nested arrow. It feeds `JsCallableCode::uses_arguments` and blocks environment elision, so the function materializes `arguments` for its eval code. MIR analysis ignores the bit.
+
+**Deleted on the T0 side.** `JsInterpEvalBridge` with its projection and write-back helpers, `js_interp_capture_eval_bindings`, `JsInterpEvalLocalFrame` and its four activation sites, `js_interp_eval_note_lexicals`, `js_interp_eval_redeclares_parameter`, `js_interp_find_variable_env`, and the now-dead `js_eval_local_current_var_*` accessors. Interpreted code consults the eval journal only inside a MIR caller's eval code. `JsInterpPrivateEvalBridge` stays, but only while the source is parsed, for private-name early errors.
+
+**Kept for MIR callers.** `js_builtin_eval` with the direct flag, the bridge, the journal, and the const-write source scan (`js_eval_source_assigns_immutable_binding`). An interpreted caller reaches the same error from the binding itself. Both paths share the pre-parse steps in `js_eval_source_shortcut`. The restricted-name scan (`js_eval_strict_assigns_restricted_name`) is retired; see the legacy audit below.
+
+**A separate fix.** A throw while an AST async function bound its parameters fulfilled the promise with the error-lane marker instead of rejecting it. The new parameter-initializer SyntaxError exposed it. The async resume now unwraps `js_error_lane_payload`, as the body path already did.
+
+Fixture: `test/js/regression_js05_eval_env_linking.js`, which matches Node except on two lines where test262 and V8 disagree (`S11.13.1_A6_T1` and the `*-declare-arguments` cases); the fixture follows test262.
+
+**Validation.**
+- test262 baseline: 40,261/40,261, 0 regressions, 42.3 s.
+- `make test-lambda-baseline`: 3,755/3,755, including `test_js_gtest` 480/480 and `test_js_script_gtest` 191/191.
+- `test/language/eval-code` with the ad-hoc runner: interpreter 214 → 312 of 343, MIR 217 → 218. No test that passed before fails.
+- `test_js_gtest --baseline --full-mir`: 478/479. The failure is `jsi35_eval_ast_semantics`'s `mid-eval-closure` line: a MIR closure cannot see a var that its enclosing MIR function's eval created. That is the MIR bridge's own limit, and the pre-JSI35 binary prints the same. The earlier 477/477 was measured before the two JSI35 fixtures existed.
+
+**Residuals.**
+- MIR callers keep the bridge until P4 shared environment cells.
+- The interpreter still keeps parameters and body vars in one function record. The four `arrow-fn-body-cntns-arguments-*` eval-code cases need the separate parameter and body variable environments of FunctionDeclarationInstantiation step 28.
+- PerformEval's `new.target`/`super` early errors, which depend on the caller's function kind, are not enforced (eval-code `new.target*`, `super-*`).
+
+**Legacy audit (same day).** A follow-up sweep removed the dead code that the dynamic-code work left behind. The compiler already rejects unused `static` functions, so the sweep covered exported helpers, struct fields, and scans.
+- *Restricted-name scan.* With the scan gone from the interpreted path, strict `arguments += 1` in eval code evaluated, because the early-error pass rejected `eval`/`arguments` only as plain `=` and update targets. It missed them in all strict code, eval or not. `check_strict_target_names` in `js_early_errors.cpp` now rejects them in simple, compound, and logical assignment, in destructuring elements, and in for-in/of heads. That covers every case the scan caught, so it is deleted for MIR callers too. Fixture: `test/js/regression_strict_eval_arguments_targets.js`, identical to Node on both tiers.
+- *Eval-source stack and function eval origin.* `JsEvalSourceRecord`/`JsEvalSourceState`, `js_eval_source_push`/`pop`, the eval branch of `js_error_materialize_stack`, the `JsEvalOrigin` payload record, and the call kernel's `vm_stack_source` checks are deleted. Their only producer was `js_builtin_eval_with_options` in the deleted MIR eval unit; the function-origin setter was removed as uncalled on 2026-09-22.
+- *Dead fact.* `JsCallableCode::has_direct_eval` and `js_fn_ast_has_direct_eval` lost their last readers with the per-activation journal frames.
+- *Kept, but reworded.* The `g_eval_preamble_*` snapshot is live: Radiant's `script_runner.cpp` feeds the shared document preamble from it. MIR's `eval_completion_reg` is the Script completion value that `js_main` returns. Only their comments claimed they still served `eval()`.
+- *Kept by design (until P4).* The MIR bridge and journal APIs (`js_eval_env_*`, `js_eval_global_lexical_*`, `js_eval_local_*`, `js_eval_private_*`), the MIR-side `jm_eval_*` lowering, `js_interp_execute_direct_eval_source`, and the bridged branches of `js_interp_execute_script`.
+- `vibe/meta/ds/struct_census.*` still lists `JsEvalOrigin` and `JsEvalSourceState`. `utils/struct_census.py` regenerates it at the next census.
+- Validation after the sweep: test262 baseline 40,261/40,261 with 0 regressions (41.0 s); `make test-lambda-baseline` 3,756/3,756, including `test_js_gtest` 481/481; the eval-code runner is unchanged (interpreter 312, MIR 218).
