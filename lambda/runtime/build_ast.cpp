@@ -4853,14 +4853,26 @@ static const BaseTypeName BASE_TYPE_NAMES[] = {
     {"f16", (Type*)&LIT_TYPE_F16},        {"f32", (Type*)&LIT_TYPE_F32},
 };
 
-Type* lookup_base_type_name(Transpiler* tp, StrView name) {
-    // `any` is the one entry that is not a constant: it records whether the
-    // annotation spelled it explicitly.
-    if (strview_equal(&name, "any")) { return set_lit_type_any(tp, ANY_EXPLICIT); }
-    for (size_t i = 0; i < sizeof(BASE_TYPE_NAMES)/sizeof(BASE_TYPE_NAMES[0]); i++) {
-        if (strview_equal(&name, BASE_TYPE_NAMES[i].name)) { return BASE_TYPE_NAMES[i].type; }
+// `any` sits past the table: it is the one entry that is not a constant,
+// because it records whether the annotation spelled it explicitly.
+static const int BASE_TYPE_ANY_INDEX =
+    (int)(sizeof(BASE_TYPE_NAMES) / sizeof(BASE_TYPE_NAMES[0]));
+
+int lambda_base_type_index(StrView name) {
+    if (strview_equal(&name, "any")) return BASE_TYPE_ANY_INDEX;
+    for (int i = 0; i < BASE_TYPE_ANY_INDEX; i++) {
+        if (strview_equal(&name, BASE_TYPE_NAMES[i].name)) return i;
     }
-    return NULL;
+    return -1;
+}
+
+Type* lambda_base_type_from_index(Transpiler* tp, int index) {
+    if (index == BASE_TYPE_ANY_INDEX) return set_lit_type_any(tp, ANY_EXPLICIT);
+    return index >= 0 && index < BASE_TYPE_ANY_INDEX ? BASE_TYPE_NAMES[index].type : NULL;
+}
+
+Type* lookup_base_type_name(Transpiler* tp, StrView name) {
+    return lambda_base_type_from_index(tp, lambda_base_type_index(name));
 }
 
 
@@ -4905,26 +4917,16 @@ ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* 
 // e.g. int where (5 < ~ < 10), string where (len(~) > 0)
 
 
-AstBinaryNode* build_registered_binary_type_from_span(Transpiler* tp,
-        SourceSpan span,
-        AstNode* left, AstNode* right, Type* left_type, Type* right_type,
-        Operator op, StrView op_str) {
-    AstBinaryNode* binary = (AstBinaryNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_BINARY_TYPE, span, sizeof(AstBinaryNode));
+void register_binary_type(Transpiler* tp, AstBinaryNode* binary) {
     binary->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY,
         sizeof(TypeBinary));
     ((TypeType*)binary->type)->type = (Type*)type;
-    binary->left = left;
-    binary->right = right;
-    binary->op = op;
-    binary->op_str = op_str;
-    type->left = unwrap_simple_type_type(left_type);
-    type->right = unwrap_simple_type_type(right_type);
-    type->op = op;
+    type->left = unwrap_simple_type_type(binary->left->type);
+    type->right = unwrap_simple_type_type(binary->right->type);
+    type->op = binary->op;
     arraylist_append(tp->type_list, binary->type);
     type->type_index = tp->type_list->length - 1;
-    return binary;
 }
 
 
@@ -4976,24 +4978,19 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
     if (has_second) *max_count = second;
 }
 
-AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
-        SourceSpan span,
+void fill_function_return_contract_node(Transpiler* tp, AstNode* wrapper,
         Type* returned, Type* error_type, bool can_raise) {
     // Both grammar paths must carry exactly this compact TypeFunc contract;
     // build_func reads it before replacing the wrapper with the declared fn.
-    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_FUNC_TYPE, span, sizeof(AstFuncNode));
-    wrapper_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    wrapper->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
-    ((TypeType*)wrapper_node->type)->type = (Type*)fn_type_info;
+    ((TypeType*)wrapper->type)->type = (Type*)fn_type_info;
 
     fn_type_info->returned = returned;
     fn_type_info->inferred_return = returned;
     set_function_return_contract(fn_type_info, returned, true);
     fn_type_info->error_type = error_type;
     fn_type_info->can_raise = can_raise;
-
-    return (AstNode*)wrapper_node;
 }
 
 
@@ -9115,18 +9112,37 @@ static bool direct_scope_has_forward_binder_ref(NameScope* scope, String* name) 
     return false;
 }
 
-AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
+AstNode* build_binder_type_syntax(Transpiler* tp, SourceSpan span,
         AstNode* base, StrView name) {
+    AstNamedNode* site = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_TYPE, span, sizeof(AstNamedNode));
+    site->syntax_form = LSF_BINDER;
+    site->as = base;
+    site->name = name.length ? name_pool_create_strview(tp->name_pool, name) : NULL;
+    return (AstNode*)site;
+}
+
+void resolve_binder_type(Transpiler* tp, AstNode* node) {
+    AstNamedNode* site = (AstNamedNode*)node;
+    AstNode* base = site->as;
+    String* pooled = site->name;
+    // the retained node is a plain AST_NODE_TYPE; base and name were syntax
+    site->as = NULL;
+    site->name = NULL;
+    SourceSpan span = node->source_span;
+    StrView name = pooled ? (StrView){pooled->chars, (size_t)pooled->len}
+        : (StrView){NULL, 0};
+    // every rejection leaves the error type on the binder site
+    node->type = (Type*)&LIT_TYPE_ERROR;
     Type* bound = base && base->type ? unwrap_simple_type_type(base->type) : NULL;
-    if (!tp || !bound || !name.length) return direct_type_error_from_span(tp, span);
+    if (!tp || !bound || !name.length) return;
 
     if (lookup_base_type_name(tp, name)) {
         record_semantic_error_span(tp, span, ERR_BINDER_COLLISION,
             "binder '%.*s' conflicts with a base type", (int)name.length, name.str);
-        return direct_type_error_from_span(tp, span);
+        return;
     }
 
-    String* pooled = name_pool_create_strview(tp->name_pool, name);
     NameEntry* prior = lookup_name_in_current_scope(tp, pooled);
     TypeBinder* canonical = NULL;
     if (prior) {
@@ -9134,7 +9150,7 @@ AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
             record_semantic_error_span(tp, span, ERR_BINDER_COLLISION,
                 "binder '%.*s' conflicts with an existing name", (int)name.length,
                 name.str);
-            return direct_type_error_from_span(tp, span);
+            return;
         }
         canonical = prior->binder;
         if (!lambda_type_contract_semantically_compatible(canonical->bound, bound) ||
@@ -9142,14 +9158,14 @@ AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
             record_semantic_error_span(tp, span, ERR_BINDER_BOUND_MISMATCH,
                 "binder sites for '%.*s' must share one bound", (int)name.length,
                 name.str);
-            return direct_type_error_from_span(tp, span);
+            return;
         }
     }
     if (!canonical && direct_scope_has_forward_binder_ref(tp->current_scope, pooled)) {
         record_semantic_error_span(tp, span, ERR_BINDER_FORWARD_REF,
             "binder '%.*s' must be introduced before it is referenced",
             (int)name.length, name.str);
-        return direct_type_error_from_span(tp, span);
+        return;
     }
 
     TypeBinder* binder = (TypeBinder*)alloc_type_kind(tp->pool,
@@ -9168,10 +9184,14 @@ AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
         entry->binder = binder;
         direct_append_binder_name(tp, entry);
     }
-
-    AstNode* node = alloc_ast_node_from_span(tp, AST_NODE_TYPE, span,
-        sizeof(AstNode));
     node->type = (Type*)binder;
+}
+
+AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
+        AstNode* base, StrView name) {
+    AstNode* node = build_binder_type_syntax(tp, span, base, name);
+    node->syntax_form = LSF_NONE;
+    resolve_binder_type(tp, node);
     return node;
 }
 

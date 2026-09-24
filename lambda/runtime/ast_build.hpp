@@ -14,6 +14,64 @@
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size);
 
+// How the syntax phase built a node, stored in AstNode::syntax_form so the
+// resolve pass can replay the semantic construction the parser deferred:
+// name binding, typing, constant/type registration and diagnostics, in the
+// order the productions completed. LSF_NONE marks a resolved node.
+typedef enum LambdaSyntaxForm : uint8_t {
+    LSF_NONE = 0,
+    // `T as name`: an AST_NODE_TYPE allocated as AstNamedNode so it can carry
+    // its base pattern (`as`) and binder `name` until resolution.
+    LSF_BINDER,
+    // ---- type-pattern sub-language (parse_type_pattern.cpp) ----
+    LSF_TP_FIRST,
+    LSF_TP_LIT_STRING = LSF_TP_FIRST, // PRIMARY; flag symbol; literal_value = String*
+    LSF_TP_LIT_NUMBER,        // PRIMARY; flag float; literal_value = value bits
+    LSF_TP_LIT_BOOL,          // PRIMARY
+    LSF_TP_ANY,               // PRIMARY: the `any` operand of a type `!T`
+    LSF_TP_BASE,              // AST_NODE_TYPE; aux = base-type table index
+    LSF_TP_NAME,              // IDENT; a binder reference morphs to AST_NODE_TYPE
+    LSF_TP_CHAR_CLASS,        // PATTERN_CHAR_CLASS
+    LSF_TP_PATTERN_REF,       // IDENT naming a pattern inside an island
+    LSF_TP_PATTERN_RANGE,     // PATTERN_RANGE of two string literals
+    LSF_TP_ISLAND_GROUP,      // LIST_TYPE: a parenthesized island body
+    LSF_TP_ISLAND_UNARY,      // UNARY_TYPE: island negation or occurrence
+    LSF_TP_ISLAND_SEQ,        // PATTERN_SEQ
+    LSF_TP_ISLAND,            // PATTERN_ISLAND
+    LSF_TP_BINARY,            // BINARY_TYPE over wrapped operand types
+    LSF_TP_REGISTERED_BINARY, // BINARY_TYPE over unwrapped operand types
+    LSF_TP_RANGE,             // BINARY `lo to hi`
+    LSF_TP_OCCURRENCE,        // UNARY_TYPE occurrence or array suffix
+    LSF_TP_OPTIONAL_FIELD,    // UNARY_TYPE for a `name?:` field
+    LSF_TP_ARRAY,             // ARRAY_TYPE
+    LSF_TP_FIELD,             // KEY_EXPR: map field or element attribute
+    LSF_TP_MAP,               // MAP_TYPE
+    LSF_TP_TUPLE,             // LIST_TYPE
+    LSF_TP_CONTENT,           // CONTENT_TYPE of an element type
+    LSF_TP_ELEMENT,           // ELMT_TYPE
+    LSF_TP_FN_PARAM,          // KEY_EXPR: one fn-type parameter
+    LSF_TP_FN,                // FUNC_TYPE
+    LSF_TP_RETURN_CONTRACT,   // FUNC_TYPE wrapper of a declaration return contract
+    LSF_TP_LAST = LSF_TP_RETURN_CONTRACT,
+} LambdaSyntaxForm;
+
+static inline bool lambda_syntax_form_is_type_pattern(uint8_t form) {
+    return form >= LSF_TP_FIRST && form <= LSF_TP_LAST;
+}
+
+// Base-type spellings are lexical, so the syntax phase classifies them with no
+// side effects; resolution then yields the Type (and counts an explicit
+// `any`). A negative index means the word is not a base type.
+int lambda_base_type_index(StrView name);
+Type* lambda_base_type_from_index(Transpiler* tp, int index);
+
+// `T as name` binder sites. The syntax half only records base and name; the
+// resolve half performs the collision checks and registers the binder in the
+// current scope, morphing the node into the error type on rejection.
+AstNode* build_binder_type_syntax(Transpiler* tp, SourceSpan span,
+        AstNode* base, StrView name);
+void resolve_binder_type(Transpiler* tp, AstNode* node);
+
 // Move a direct-parser fragment's byte ranges into an append-only REPL source
 // buffer. The parser receives only the new fragment, so its local offsets must
 // be rebased before the fragment is attached to the session AST.

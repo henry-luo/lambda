@@ -525,10 +525,21 @@ struct AstNode {
     // The direct binder stamps this instead of allocating a per-pass visited
     // set. A process-wide epoch keeps retained and replayed ASTs disjoint.
     uint32_t last_bind_epoch;
+    // Lambda's parser builds syntax-only nodes and a separate resolve pass
+    // binds names and assigns types. `syntax_form` records which production
+    // built the node (LambdaSyntaxForm, zero once resolved) and the two
+    // fields beside it carry that production's small syntactic facts. They
+    // occupy what was alignment padding, so AstNode does not grow.
+    uint8_t syntax_form;
+    uint8_t syntax_flags;
+    uint16_t syntax_aux;
     Type *type;
     AstNode* next;
     SourceSpan source_span;
 };
+// the syntax fields must stay inside the padding that precedes `type`
+static_assert(offsetof(AstNode, type) == 16,
+    "AstNode syntax fields must not grow the node header");
 
 // Shared sibling-list sizing keeps language profiles from carrying private
 // count walks for the same `next` contract.
