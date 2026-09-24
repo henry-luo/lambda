@@ -47,7 +47,7 @@ same fact bits. The JS manager lives in `js_transpiler_parse_c`
 
 | Stage | LambdaJS | Lambda (for comparison) | Shared today |
 |---|---|---|---|
-| parse-build (AST) | Reduction sink `js_c_reduce` allocates `JsAstNode`s directly; **no binding during construction**. Lexer/parser `lambda/js/parser/`. | Parser emits a reduction tape; replay builds nodes **and binds names inline**, with per-function analyses at `FUNCTION_END`. | `AstNode` header, core node kinds (D8.2.2), pool/name-pool |
+| parse-build (AST) | Reduction sink `js_c_reduce` allocates `JsAstNode`s directly; **no binding during construction**. Lexer/parser `lambda/js/parser/`. | The syntax sink allocates nodes as productions complete, with names unbound; the resolve pass (`build`) then **binds names and types in production order**, with per-function analyses at each function's end (LC3.9). | `AstNode` header, core node kinds (D8.2.2), pool/name-pool |
 | bind (BOUND) | `js_rebuild_direct_scope_graph` creates the scope graph, hoists declarations, resolves identifiers, and plans binding slots. | Lambda retains its language-specific scope rebuild. | `NameScope` owns the shared lazy pointer-identity lookup index and slot planner (`D8.2.4v2`). |
 | validate (VALIDATED) | `js_check_early_errors` (`js_early_errors.cpp`): one walk with a strict/generator/async/label context. | `lambda_ast_finalize_script`: ≈9 full walks plus per-procedure fixed points (colour, COW borrows, concurrency). | — |
 | index (INDEXED) | shared `ast_index_compiler_pass` with `js_profile` (`visit_ext_children`, `publish_ext_facts`). | same pass, `lambda_profile`. | `AstIndex` (D8.2.4) |

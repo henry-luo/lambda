@@ -809,20 +809,20 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
 
     AstScript* root = nullptr;
     LambdaParseError parse_error = {};
-    LambdaReductionTape* tape = nullptr;
-    ASSERT_EQ(lambda_rd_parse_reductions(source, sizeof(source) - 1,
-        &tape, &parse_error), LAMBDA_PARSE_OK);
-    ASSERT_NE(tape, nullptr);
-    // The replay workspace is the first tracked builder allocation; fail the
-    // following sized-literal copy, which is the failure this test covers.
-    memtrack_fault_inject(1);
-    LambdaParseStatus status = lambda_rd_build_reductions(&tp, source,
-        sizeof(source) - 1, tape, &root, &parse_error);
+    LambdaSyntaxUnit* syntax = nullptr;
+    ASSERT_EQ(lambda_rd_parse_syntax(&tp, source, sizeof(source) - 1,
+        &syntax, &parse_error), LAMBDA_PARSE_OK);
+    ASSERT_NE(syntax, nullptr);
+    // The sized-literal copy is the resolve pass's first tracked allocation,
+    // and its failure is what this test covers.
+    memtrack_fault_inject(0);
+    LambdaParseStatus status = lambda_rd_resolve_syntax(&tp, syntax, &root,
+        &parse_error);
     if (status == LAMBDA_PARSE_OK && root) lambda_ast_finalize_script(&tp, root);
     memtrack_fault_clear();
-    lambda_rd_destroy_reductions(tape);
+    lambda_rd_destroy_syntax(syntax);
 
-    // D8.2.5: a failed build replay cannot publish a partial AST.
+    // D8.2.5: a failed resolve pass cannot publish a partial AST.
     EXPECT_EQ(status, LAMBDA_PARSE_ERROR);
     EXPECT_EQ(root, nullptr);
     EXPECT_GT(tp.error_count, 0);
@@ -832,7 +832,7 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
     pool_destroy(pool);
 }
 
-TEST(AstBuildReductionTest, ParseTapeDefersBindingUntilBuildReplay) {
+TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
     const char source[] =
         "fn outer(value: int) => inner(value)\n"
         "fn inner(value: int) => value + 1\n";
@@ -854,21 +854,21 @@ TEST(AstBuildReductionTest, ParseTapeDefersBindingUntilBuildReplay) {
     ASSERT_NE(tp.const_list, nullptr);
     ASSERT_NE(tp.current_scope, nullptr);
 
-    LambdaReductionTape* tape = nullptr;
+    LambdaSyntaxUnit* syntax = nullptr;
     LambdaParseError parse_error = {};
-    ASSERT_EQ(lambda_rd_parse_reductions(source, sizeof(source) - 1,
-        &tape, &parse_error), LAMBDA_PARSE_OK);
-    ASSERT_NE(tape, nullptr);
-    // D8.2.5: parsing records source reductions but cannot publish bindings.
+    ASSERT_EQ(lambda_rd_parse_syntax(&tp, source, sizeof(source) - 1,
+        &syntax, &parse_error), LAMBDA_PARSE_OK);
+    ASSERT_NE(syntax, nullptr);
+    // D8.2.5: the syntax phase builds nodes but cannot publish bindings.
     EXPECT_EQ(tp.current_scope->first, nullptr);
 
     AstScript* root = nullptr;
-    ASSERT_EQ(lambda_rd_build_reductions(&tp, source, sizeof(source) - 1,
-        tape, &root, &parse_error), LAMBDA_PARSE_OK);
+    ASSERT_EQ(lambda_rd_resolve_syntax(&tp, syntax, &root, &parse_error),
+        LAMBDA_PARSE_OK);
     EXPECT_NE(root, nullptr);
     EXPECT_NE(tp.current_scope->first, nullptr);
 
-    lambda_rd_destroy_reductions(tape);
+    lambda_rd_destroy_syntax(syntax);
     arraylist_free(tp.const_list);
     arraylist_free(input->type_list);
     pool_destroy(pool);

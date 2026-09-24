@@ -17,3 +17,5 @@
 ["a", "c", true, true]
 "-- placed as one value (S10.6.1) --"
 [[1, "ab"], ["ab", 1], ["ab", "cd"]]
+"-- non-ASCII symbols walk by code point too (LR05-15) --"
+['é', 'éfac', 'bé', 4, true]

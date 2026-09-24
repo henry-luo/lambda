@@ -24,3 +24,5 @@
 ["abc"[0], "abc"[2], "abc"[3] == null, "abc"[-1] == null]
 "-- placed as one value (S10.6.1) --";
 [[1] ++ "ab", "ab" ++ [1], ["ab", "cd"]]
+"-- non-ASCII symbols walk by code point too (LR05-15) --";
+['café'[3], reverse('café'), sort('bé'), len('café'), 'café'[4] == null]

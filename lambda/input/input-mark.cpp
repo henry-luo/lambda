@@ -102,7 +102,8 @@ static void append_mark_string_escape(StringBuf* sb, const char** mark) {
     } else if (**mark == 'u') {
         uint32_t codepoint = 0;
         size_t consumed = 0;
-        if (escape_decode_utf16_escape(*mark + 1, strlen(*mark + 1), true,
+        // bounded like parse_escape_char: the decoder reads at most 10 bytes
+        if (escape_decode_utf16_escape(*mark + 1, strnlen(*mark + 1, 10), true,
                                        &codepoint, &consumed)) {
             stringbuf_append_utf8(sb, codepoint);
             *mark += consumed; // trailing ++ moves past the escape.

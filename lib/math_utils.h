@@ -11,6 +11,7 @@
 #define LIB_MATH_UTILS_H
 
 #include <math.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 
@@ -71,6 +72,24 @@ namespace lib_math {
 #define LMB_MIN(a, b)         ((a) < (b) ? (a) : (b))
 #define LMB_MAX(a, b)         ((a) > (b) ? (a) : (b))
 #endif
+
+// count of leading zero bits in v, 64 for 0 (the portable fallback used to
+// return 63 for 0)
+static inline int math_clz64(uint64_t v) {
+#if defined(__GNUC__) || defined(__clang__)
+    return v ? __builtin_clzll(v) : 64;
+#else
+    if (!v) return 64;
+    int n = 0;
+    if (!(v & 0xFFFFFFFF00000000ULL)) { n += 32; v <<= 32; }
+    if (!(v & 0xFFFF000000000000ULL)) { n += 16; v <<= 16; }
+    if (!(v & 0xFF00000000000000ULL)) { n += 8;  v <<= 8;  }
+    if (!(v & 0xF000000000000000ULL)) { n += 4;  v <<= 4;  }
+    if (!(v & 0xC000000000000000ULL)) { n += 2;  v <<= 2;  }
+    if (!(v & 0x8000000000000000ULL)) { n += 1; }
+    return n;
+#endif
+}
 
 static inline unsigned char clamp_byte(int v) {
     return (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));

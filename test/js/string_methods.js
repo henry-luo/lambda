@@ -50,3 +50,7 @@ console.log("A😀B".length);
 // trimStart / trimEnd
 console.log("  hello  ".trimStart());
 console.log("  hello  ".trimEnd());
+
+// LR05-14: lastIndexOf of a byte followed by its c ^ 0x01 neighbour
+console.log("dir/.hidden".lastIndexOf("/"));
+console.log("abcdefgh".lastIndexOf("b"));

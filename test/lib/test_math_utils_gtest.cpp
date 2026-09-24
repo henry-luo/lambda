@@ -106,3 +106,16 @@ TEST(MathUtilsTest, MacroFormsWorkInCppToo) {
     EXPECT_EQ(LMB_SIGN(2), 1);
     EXPECT_EQ(LMB_SIGN(0), 0);
 }
+
+TEST(MathUtilsTest, Clz64) {
+    EXPECT_EQ(math_clz64(0), 64);
+    EXPECT_EQ(math_clz64(1), 63);
+    EXPECT_EQ(math_clz64(2), 62);
+    EXPECT_EQ(math_clz64(3), 62);
+    EXPECT_EQ(math_clz64(0x80000000ULL), 32);
+    EXPECT_EQ(math_clz64(0xFFFFFFFFFFFFFFFFULL), 0);
+    // every single-bit value
+    for (int bit = 0; bit < 64; bit++) {
+        EXPECT_EQ(math_clz64(1ULL << bit), 63 - bit) << "bit " << bit;
+    }
+}

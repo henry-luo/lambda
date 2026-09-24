@@ -16719,13 +16719,11 @@ static JsRegexMatchResult js_regex_match_internal(JsRegexData* rd, const char* i
                 found = input + start_pos;
             }
         } else {
-            int max_pos = input_len - pat_len;
-            for (int i = start_pos; i <= max_pos; i++) {
-                if (memcmp(input + i, rd->literal_pattern, pat_len) == 0) {
-                    found = input + i;
-                    break;
-                }
-            }
+            // one candidate scan instead of memcmp at every position (the loop
+            // T28-5 removed from Lambda's split/replace/find)
+            size_t at = str_find(input + start_pos, (size_t)(input_len - start_pos),
+                                 rd->literal_pattern, (size_t)pat_len);
+            if (at != STR_NPOS) found = input + start_pos + at;
         }
         if (!found) return JS_REGEX_MATCH_NO_MATCH;
         if (num_groups > 0) matches[0] = re2::StringPiece(found, pat_len);
@@ -22385,6 +22383,15 @@ JS_FORWARD_ITEM(js_string_replace_nonws_global_fast_no_dollar,
     (Item str, Item replacement), js_string_replace_nonws_global_fast_impl,
     (str, replacement, true))
 
+// memmem-shaped wrapper over lib's candidate-scan kernel (str_find): macOS
+// memmem is a scalar first-byte loop, 4.7x slower here, and the Windows
+// fallback in windows_compat.h compares at every position
+static inline const char* js_str_search(const char* hay, size_t hay_len,
+                                        const char* needle, size_t needle_len) {
+    size_t at = str_find(hay, hay_len, needle, needle_len);
+    return at == STR_NPOS ? NULL : hay + at;
+}
+
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
     String* s = it2s(str);
     if (!s) return str;
@@ -22562,7 +22569,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
             int pos = 0;
             bool found_any = false;
             while (pos <= (int)s->len - (int)search->len) {
-                const char* found = (const char*)memmem(s->chars + pos, s->len - pos, search->chars, search->len);
+                const char* found = js_str_search(s->chars + pos, s->len - pos, search->chars, search->len);
                 if (!found) break;
                 found_any = true;
                 int match_start = (int)(found - s->chars);
@@ -22583,7 +22590,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         // JS .replace() with string pattern: replace FIRST occurrence only
         {
             String* repl = it2s(replacement_arg);
-            const char* found = (const char*)memmem(s->chars, s->len, search->chars, search->len);
+            const char* found = js_str_search(s->chars, s->len, search->chars, search->len);
             if (!found) return str;
             int match_start = (int)(found - s->chars);
             int match_len = (int)search->len;
@@ -22604,7 +22611,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     int pos = 0;
     bool found_any = false;
     while (pos <= (int)s->len - (int)search->len) {
-        const char* found = (const char*)memmem(s->chars + pos, s->len - pos, search->chars, search->len);
+        const char* found = js_str_search(s->chars + pos, s->len - pos, search->chars, search->len);
         if (!found) break;
         found_any = true;
         int match_start = (int)(found - s->chars);

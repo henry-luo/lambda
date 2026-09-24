@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,12 @@ bool html_is_void_element(const char* tag, size_t len);
 
 /** Raw text elements (content not parsed as HTML). */
 bool html_is_raw_text_element(const char* tag, size_t len);
+
+/** As html_is_void_element / html_is_raw_text_element, answered by table when
+ *  tag_id is a well-known markup name id (TypeElmt::name_id); any other id,
+ *  NAME_ID_NONE included, falls back to the string lookup. */
+bool html_is_void_element_id(uint32_t tag_id, const char* tag, size_t len);
+bool html_is_raw_text_element_id(uint32_t tag_id, const char* tag, size_t len);
 
 /** Boolean attributes (value may be omitted). */
 bool html_is_boolean_attribute(const char* attr, size_t len);

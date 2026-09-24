@@ -194,7 +194,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             // breaks downstream parsers — e.g. an injected
             // `@font-face { src: url("data:font/ttf;base64,...") }` block
             // becomes invalid CSS once quotes are entity-escaped.
-            bool is_raw_text = html_is_raw_text_element(elem_name, strlen(elem_name));
+            bool is_raw_text = html_is_raw_text_element_id(elem.tagId(), elem_name, strlen(elem_name));
 
             // Handle element content (text/child elements)
             if (elem.childCount() > 0) {
@@ -207,7 +207,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                         String* str = child.asString();
                         if (str) {
                             if (is_raw_text) {
-                                stringbuf_append_format(ctx_.output(), "%.*s",
+                                stringbuf_emit(ctx_.output(), "%.*s",
                                     (int)str->len, str->chars);
                             } else {
                                 format_xml_string(ctx_, str);

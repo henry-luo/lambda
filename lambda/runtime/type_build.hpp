@@ -33,28 +33,16 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
 // Declare a fn type's return contract.
 void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit);
 
-// Construct the declaration-level return contract wrapper used by the
-// external-token parser.
-AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
-        SourceSpan span, Type* returned, Type* error_type, bool can_raise);
-
-// Construct a registered binary type with raw TypeBinary operands. Return
-// contracts use this rather than the general pattern binary constructor.
-AstBinaryNode* build_registered_binary_type_from_span(Transpiler* tp,
-        SourceSpan span, AstNode* left, AstNode* right, Type* left_type,
-        Type* right_type, Operator op, StrView op_str);
+// Register a binary type with raw TypeBinary operands over the node's already
+// resolved operands. Declaration return types use this rather than the
+// general pattern binary constructor.
+void register_binary_type(Transpiler* tp, AstBinaryNode* binary);
 
 // Allocate an AST node. Defined in build_ast.cpp; promoted because pattern
 // islands are the one type form whose AST must survive to MIR transpilation,
 // so the hand parser has to build real nodes for them.
 AstNode* alloc_ast_node_from_span(Transpiler* tp, AstNodeType node_type,
         SourceSpan span, size_t size);
-
-// Construct the level-1 parameter-contract binder suffix (`bound as T`).
-// The builder owns scope registration because later parameter annotations must
-// resolve T before the surrounding parameter reduction completes.
-AstNode* build_binder_type_from_parts(Transpiler* tp, SourceSpan span,
-        AstNode* base, StrView name);
 
 // Evaluate a literal AST node to the Item it denotes (compile-time constants
 // only). Used for bracket-type positions and range bounds.

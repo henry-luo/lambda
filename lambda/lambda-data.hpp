@@ -208,6 +208,11 @@ typedef struct Complex {
     double imag;
 } Complex;
 
+// Set by complex_new, the only constructor of Complex values, and never
+// cleared. While it reads false no Item can hold a complex, so whole-tree
+// complex scans (format_data) are skipped. Accessed with relaxed atomics.
+extern bool g_complex_value_created;
+
 #pragma pack(push, 1)
 // TypedItem for storing data in map with type_id
 typedef struct TypedItem {

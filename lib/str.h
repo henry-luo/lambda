@@ -41,8 +41,21 @@ typedef struct StrBuf StrBuf;
 /** lexicographic compare; returns <0, 0, or >0 (like memcmp/strcmp). */
 int str_cmp(const char* a, size_t a_len, const char* b, size_t b_len);
 
-/** case-insensitive compare (ASCII). */
-int str_icmp(const char* a, size_t a_len, const char* b, size_t b_len);
+/** case-insensitive compare (ASCII). Inline so header-only helpers
+ *  (lib/binsearch.h) can use it without linking str.c. */
+static inline int str_icmp(const char* a, size_t a_len, const char* b, size_t b_len) {
+    if (!a) a_len = 0;
+    if (!b) b_len = 0;
+    size_t min_len = a_len < b_len ? a_len : b_len;
+    for (size_t i = 0; i < min_len; i++) {
+        int ca = (unsigned char)a[i];
+        int cb = (unsigned char)b[i];
+        if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
+        if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
+        if (ca != cb) return ca - cb;
+    }
+    return (a_len > b_len) - (a_len < b_len);
+}
 
 /** case-insensitive compare of NUL-terminated strings (ASCII). */
 int str_icmp_cstr(const char* a, const char* b);
@@ -139,12 +152,21 @@ typedef struct {
     uint64_t bits[4];     /* 256 bits — one per possible byte value */
 } StrByteSet;
 
-void str_byteset_clear(StrByteSet* set);
-void str_byteset_add(StrByteSet* set, unsigned char c);
+/* clear/add/test are inline: escapers build a small stop set per call and
+ * scanners test one for every input byte, often from other translation units
+ * (formatters, parsers) */
+static inline void str_byteset_clear(StrByteSet* set) {
+    set->bits[0] = set->bits[1] = set->bits[2] = set->bits[3] = 0;
+}
+static inline void str_byteset_add(StrByteSet* set, unsigned char c) {
+    set->bits[c >> 6] |= (1ULL << (c & 63u));
+}
 void str_byteset_add_range(StrByteSet* set, unsigned char lo, unsigned char hi);
 void str_byteset_add_many(StrByteSet* set, const char* chars, size_t len);
 void str_byteset_invert(StrByteSet* set);
-bool str_byteset_test(const StrByteSet* set, unsigned char c);
+static inline bool str_byteset_test(const StrByteSet* set, unsigned char c) {
+    return (set->bits[c >> 6] & (1ULL << (c & 63u))) != 0;
+}
 
 /** pre-built byte sets (call once, reuse). */
 void str_byteset_whitespace(StrByteSet* set);   /* SP, TAB, CR, LF, FF, VT */

@@ -473,10 +473,6 @@
             "named": true
           },
           {
-            "type": "base_type",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -507,10 +503,6 @@
       "required": false,
       "types": [
         {
-          "type": "base_type",
-          "named": true
-        },
-        {
           "type": "computed_key",
           "named": true
         },
@@ -520,10 +512,6 @@
         },
         {
           "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "last_index",
           "named": true
         },
         {
@@ -914,6 +902,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "break_stam",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "call_expr",
@@ -1745,6 +1738,11 @@
     }
   },
   {
+    "type": "continue_stam",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "current_error_expr",
     "named": true,
     "fields": {}
@@ -1983,6 +1981,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "symbol",
           "named": true
         }
       ]
@@ -2800,10 +2802,6 @@
         "required": false,
         "types": [
           {
-            "type": "base_type",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -3149,6 +3147,11 @@
     }
   },
   {
+    "type": "last_index",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "leading_binder_type",
     "named": true,
     "fields": {
@@ -3357,6 +3360,10 @@
         "required": false,
         "types": [
           {
+            "type": "base_type",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           }
@@ -3518,19 +3525,11 @@
             "named": false
           },
           {
-            "type": "base_type",
-            "named": true
-          },
-          {
             "type": "computed_key",
             "named": true
           },
           {
             "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "last_index",
             "named": true
           },
           {
@@ -3586,10 +3585,6 @@
         "multiple": false,
         "required": true,
         "types": [
-          {
-            "type": "base_type",
-            "named": true
-          },
           {
             "type": "identifier",
             "named": true
@@ -3829,10 +3824,6 @@
         "required": true,
         "types": [
           {
-            "type": "base_type",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -3939,6 +3930,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "named_value",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "negation_type",
@@ -4615,10 +4611,6 @@
         },
         {
           "type": "let_expr",
-          "named": true
-        },
-        {
-          "type": "let_outside_list",
           "named": true
         },
         {
@@ -5674,6 +5666,20 @@
           }
         ]
       },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "edit",
+            "named": false
+          },
+          {
+            "type": "view",
+            "named": false
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": false,
@@ -5939,8 +5945,8 @@
     "named": true
   },
   {
-    "type": "break_stam",
-    "named": true
+    "type": "break",
+    "named": false
   },
   {
     "type": "by",
@@ -5952,15 +5958,16 @@
   },
   {
     "type": "comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "commit",
     "named": false
   },
   {
-    "type": "continue_stam",
-    "named": true
+    "type": "continue",
+    "named": false
   },
   {
     "type": "current_expr",
@@ -5983,6 +5990,14 @@
     "named": true
   },
   {
+    "type": "decimal.inf",
+    "named": false
+  },
+  {
+    "type": "decimal.nan",
+    "named": false
+  },
+  {
     "type": "default",
     "named": false
   },
@@ -5999,7 +6014,15 @@
     "named": false
   },
   {
+    "type": "edit",
+    "named": false
+  },
+  {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "false",
     "named": false
   },
   {
@@ -6039,6 +6062,10 @@
     "named": false
   },
   {
+    "type": "inf",
+    "named": false
+  },
+  {
     "type": "integer",
     "named": true
   },
@@ -6051,16 +6078,12 @@
     "named": false
   },
   {
-    "type": "last_index",
-    "named": true
+    "type": "last",
+    "named": false
   },
   {
     "type": "let",
     "named": false
-  },
-  {
-    "type": "let_outside_list",
-    "named": true
   },
   {
     "type": "limit",
@@ -6071,8 +6094,8 @@
     "named": false
   },
   {
-    "type": "named_value",
-    "named": true
+    "type": "nan",
+    "named": false
   },
   {
     "type": "not",
@@ -6167,6 +6190,10 @@
     "named": false
   },
   {
+    "type": "true",
+    "named": false
+  },
+  {
     "type": "type",
     "named": false
   },
@@ -6181,6 +6208,10 @@
   {
     "type": "variadic",
     "named": true
+  },
+  {
+    "type": "view",
+    "named": false
   },
   {
     "type": "w",

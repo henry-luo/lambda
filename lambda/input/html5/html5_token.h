@@ -28,6 +28,11 @@ typedef struct Html5Token {
     String* tag_name;
     Map* attributes;        // Map of attribute name -> value (both String*)
     bool self_closing;
+    // markup name id of tag_name, cached by html5_token_tag_id. It sits in
+    // the padding after self_closing: a token is allocated per character run,
+    // and growing it past 96 bytes cost 3% of HTML parse memory.
+    bool tag_id_known;
+    NameId tag_id;
 
     // For comment and character tokens
     String* data;
@@ -50,6 +55,11 @@ Html5Token* html5_token_create_character_string(Pool* pool, Arena* arena, const 
 Html5Token* html5_token_create_eof(Pool* pool, Arena* arena);
 
 // Token helper functions
+// Renames a tag token; the cached markup id (html5_token_tag_id) follows.
+static inline void html5_token_set_tag_name(Html5Token* token, String* tag_name) {
+    token->tag_name = tag_name;
+    token->tag_id_known = false;
+}
 void html5_token_add_attribute(Html5Token* token, String* name, Item value, Input* input);
 void html5_token_append_to_tag_name(Html5Token* token, char c);
 void html5_token_append_to_data(Html5Token* token, char c);

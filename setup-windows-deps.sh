@@ -387,7 +387,7 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     # Generate parser.c if it doesn't exist
     if [ ! -f "src/parser.c" ]; then
         echo "Generating parser.c for tree-sitter-lambda..."
-        npx tree-sitter-cli@0.24.7 generate
+        npx tree-sitter-cli@0.25.10 generate
     fi
 
     # Compile .c files directly to avoid Makefile OS guard and regeneration rules
@@ -424,7 +424,7 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     # Generate parser.c if it doesn't exist
     if [ ! -f "src/parser.c" ]; then
         echo "Generating parser.c for tree-sitter-javascript..."
-        npx tree-sitter-cli@0.24.7 generate
+        npx tree-sitter-cli@0.25.10 generate --abi 14
     fi
 
     # Compile .c files directly to avoid Makefile OS guard and regeneration rules
@@ -461,7 +461,7 @@ if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
     # Generate parser.c if it doesn't exist
     if [ ! -f "src/parser.c" ]; then
         echo "Generating parser.c for tree-sitter-latex..."
-        npx tree-sitter-cli@0.24.7 generate
+        npx tree-sitter-cli@0.25.10 generate --abi 14
     fi
 
     # Compile .c files directly to avoid Makefile OS guard and regeneration rules

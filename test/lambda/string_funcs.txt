@@ -60,4 +60,8 @@ true
 0
 "64. split tabs/newlines:"
 3
+"65. last_index_of before '.', expect 3:"
+3
+"66. last_index_of before c ^ 1, expect 1:"
+1
 "===== ALL TESTS PASSED ====="

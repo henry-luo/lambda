@@ -109,6 +109,23 @@ static void parse_emphasis_item(MarkupParser* parser, Element* span, StringBuf* 
  * @param text The text to parse for inline elements
  * @return Item containing span element with parsed content
  */
+// The bytes that can start inline markup, as a lookup table built once
+// (a thread-safe function-local static). The prefilter used strpbrk, which
+// on macOS compares every byte against every member of the set: a quarter
+// of Markdown parse time.
+struct InlineMarkupTable {
+    unsigned char is_markup[256];
+    InlineMarkupTable() {
+        memset(is_markup, 0, sizeof(is_markup));
+        for (const char* c = "*_`[!~\\$:^{@'<&\n\r"; *c; c++) is_markup[(unsigned char)*c] = 1;
+    }
+};
+
+static const unsigned char* inline_markup_bytes() {
+    static const InlineMarkupTable table;
+    return table.is_markup;
+}
+
 Item parse_inline_spans(MarkupParser* parser, const char* text) {
     if (!parser || !text || !*text) {
         return Item{.item = ITEM_UNDEFINED};
@@ -119,10 +136,13 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     // For simple text without markup, return as string
     // Check for any potential inline markup characters
     // Also include newline since we need to check for hard line breaks (2+ spaces before \n)
-    if (!strpbrk(text, "*_`[!~\\$:^{@'<&\n\r")) {
+    const unsigned char* markup = inline_markup_bytes();
+    const char* first_markup = text;
+    while (*first_markup && !markup[(unsigned char)*first_markup]) first_markup++;
+    if (!*first_markup) {
         log_debug("parse_inline_spans: no markup chars, returning as plain string");
         // Strip trailing spaces (hard line breaks at end of paragraph are ignored)
-        size_t len = strlen(text);
+        size_t len = (size_t)(first_markup - text);
         while (len > 0 && text[len - 1] == ' ') {
             len--;
         }
@@ -142,7 +162,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
     // Make a local copy of the text since we use the shared parser->sb which
     // might be the source of the text pointer (e.g., when called from block_quote)
-    size_t text_len = strlen(text);
+    size_t text_len = (size_t)(first_markup - text) + strlen(first_markup);
     char* text_copy = mem_dup_n(text, text_len, MEM_CAT_INPUT_MARKUP);
     if (!text_copy) {
         String* content = create_string(parser, text);

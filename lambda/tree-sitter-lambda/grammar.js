@@ -22,6 +22,9 @@
  * three zero-width guards — `_join`, `_stmt_boundary`, `_not_paren`. See
  * src/scanner.c.
  *
+ * KEYWORDS (S16.10) are tree-sitter RESERVED words (`reserved` below), which
+ * need tree-sitter CLI 0.25 or later and make this parser ABI 15.
+ *
  * AUTHORITY ORDER: spec/design doc -> this grammar -> C parser. A divergence
  * anywhere downstream is a bug in the downstream artifact.
  */
@@ -37,11 +40,24 @@ function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
 
+// S16.10.1v2 (Design_Syntax Appendix K.1): a word that can BEGIN a construct
+// never names a binding, so the grammar reserves it (`reserved` below). These
+// words stay legal DATA names (S16.10.2, S16.10.3) through `_keyword_name`,
+// exactly as the C parser's `token_is_name_word` admits them.
+const KEYWORD_NAMES = [
+  'let', 'pub', 'var', 'type', 'fn', 'pn', 'view', 'edit', 'state',
+  'if', 'match', 'for', 'while', 'break', 'continue', 'return', 'raise',
+  'import', 'apply', 'last', 'put', 'del', 'commit', 'rollback', 'open',
+];
+// Reserved as well, but a data name in neither parser: the prefix operator
+// `not` and the named values.
+const RESERVED_VALUE_WORDS = ['not', 'true', 'false', 'inf', 'nan'];
+
 // S2.4.3v2: a namespace-qualified name is maximal, so `<svg .rect>` keeps the
 // tag `svg.rect` while `<svg, .rect>` (§7.11) is tag + path child.
 function qualified_name($, precedence) {
   return prec.left(precedence, seq(
-    choice($.identifier, $.symbol),
+    $._data_name,
     repeat1(prec.left(precedence, seq(
       // Either dot may arrive here. In a position where a member expression is
       // also possible — an element interior, where `xml` could equally begin
@@ -49,7 +65,7 @@ function qualified_name($, precedence) {
       // high-precedence dot is never produced, so a namespaced NAME must accept
       // both spellings or `<div xml.lang: "en">` cannot parse.
       choice(token(prec(precedence, '.')), alias($._member_dot, '.')),
-      choice($.identifier, $.symbol),
+      $._data_name,
     ))),
   ));
 }
@@ -219,6 +235,29 @@ function parameter_list($) {
   )), ')');
 }
 
+// The two declaration shapes, parameterized by what may name them: a binding
+// name at statement level, a data name for an object type's method.
+function fn_declaration($, name) {
+  return seq(
+    optional(field('pub', 'pub')),
+    field('kind', choice('fn', 'pn', 'function')),
+    field('name', name),
+    parameter_list($),
+    optional(field('type', $.return_type)),
+    field('body', $._body_block),
+  );
+}
+
+function fn_expr_declaration($, name) {
+  return seq(
+    optional(field('pub', 'pub')),
+    field('kind', choice('fn', 'function')), field('name', name),
+    parameter_list($),
+    optional(field('type', $.return_type)),
+    '=>', field('body', $._expr_body),
+  );
+}
+
 // A return contract: alternatives joined by `|`, `&` or `!`, then an optional
 // `^` error arm (`T^` any error, `T^E` a named one).
 const return_contract = pattern => $ => prec.right(seq(
@@ -236,6 +275,23 @@ module.exports = grammar({
   extras: $ => [/\s/, $.comment],
 
   word: $ => $.identifier,
+
+  // S16.10.1v2. Keyword extraction (`word`) lexes a keyword as an identifier
+  // wherever the parse state has no action for it, so without this set every
+  // binding position silently took keywords (`let if = 1`; `let a = let b = 2`
+  // as `let a = let`) while a data name that could also start a statement was
+  // refused (`{while: 1}`). A reserved word lexes as its keyword wherever an
+  // identifier is expected, so it is an error unless the state takes that
+  // keyword: its own construct, or `_keyword_name` in a data-name position.
+  // An entry must be the very token the keyword lexer yields for its word,
+  // which is why no reserved word has a second, differently spelled token.
+  // `lambda` is absent: it is an identifier in both parsers, and its
+  // S16.10.1v2 bar is the compile-time E201.
+  reserved: {
+    global: $ => [
+      ...KEYWORD_NAMES, ...RESERVED_VALUE_WORDS, $._base_type_kw,
+    ],
+  },
 
   externals: $ => [
     // Guarded operators (S16.2.3). Each consumes its own lexeme and the scanner
@@ -271,9 +327,6 @@ module.exports = grammar({
     $._not_paren,
     // §7.16: a numeric literal may not run straight into an identifier.
     $._num_boundary,
-    // S16.6.6: zero-width, withheld when an unbraced expression body starts
-    // with `return`/`break`/`continue`.
-    $._expr_body_start,
     // S2.4.1v2: zero-width, emitted after a bare path root `/` or `\` only when
     // a step or the end of the path follows, so `/b` (the retired `/a`
     // spelling) is an error rather than `/` plus a juxtaposed statement `b`.
@@ -281,10 +334,6 @@ module.exports = grammar({
     // S11.1.5v2: zero-width, in front of a signature's return type, which must
     // start on the `)` line; a name opening the next line gets no token at all.
     $._fn_return,
-    // Never emitted: the dead end after a `let` outside a list (`_misplaced_let`).
-    // Visible, so the recovery prints `(MISSING let_outside_list)` -- a hidden
-    // missing token leaves no trace in the CLI output the S16 script reads.
-    $.let_outside_list,
     // Never valid in the grammar; its presence means error recovery.
     $._error_sentinel,
   ],
@@ -301,13 +350,16 @@ module.exports = grammar({
     // (`a?: T`, `a: T`) or a bare content TYPE (`a?`, `a`). The `:` decides,
     // one or two tokens later.
     [$._field_name, $.primary_type],
-    [$._field_name, $.base_type],
-    // S16.10.2 vs S16.10.1: inside `{`, a Tier-3 statement head is either the
-    // statement (a BLOCK interior) or a map KEY. The `:` one token later
-    // decides, so GLR forks and the losing branch dies immediately -- the same
-    // shape as the `_field_name` forks above.
-    [$._key, $._stam_seq],
-    [$._key, $.primary_expr],
+    // The same fork for a keyword-spelled field (`type?: T` against the
+    // content type `type?`), whose name reaches `_field_name` through
+    // `_keyword_name`. A keyword that heads a statement needs no fork: no
+    // statement continues its keyword with `:`, so in `{while: 1}` one token
+    // of lookahead settles map key against block.
+    [$._keyword_name, $.base_type],
+    // Inside an element, `last.x` opens a dotted attribute name
+    // (`<div last.x: 1>`) or is the content value `last` and a member step;
+    // the `:` two tokens later decides.
+    [$._keyword_name, $.last_index],
     // S2.5.1v2: `(x, y)` is a list and `(x, y) => …` an arrow head, so a bare
     // name in a group is a parameter and an item at once until the `=>` (or
     // its absence) decides. Parsing them side by side, rather than reading
@@ -325,10 +377,10 @@ module.exports = grammar({
     $._list_item,
     $._number,
     $._key,
-    // S16.6.6: inlined so the guard+expression pair never becomes a reduction
-    // point of its own. As a real nonterminal it forced a choice between
-    // reducing `_expr_body` and continuing a trailing binary operator
-    // (`... => x > y`), which is not an ambiguity the guard should introduce.
+    $._data_name,
+    // S16.6.6: inlined so an expression body is never a reduction point of its
+    // own. As a real nonterminal it forced a choice between reducing
+    // `_expr_body` and continuing a trailing binary operator (`... => x > y`).
     $._expr_body,
   ],
 
@@ -549,9 +601,11 @@ module.exports = grammar({
 
     datetime: _ => token(seq("t'", repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)), "'")),
 
-    named_value: _ => token(choice(
-      'decimal.inf', 'decimal.nan', 'true', 'false', 'inf', 'nan',
-    )),
+    // Four separate word tokens rather than one fused token, so each is a
+    // keyword the `reserved` set can name.
+    named_value: _ => choice(
+      'true', 'false', 'inf', 'nan', 'decimal.inf', 'decimal.nan',
+    ),
 
     _non_null_literal: $ => choice(
       $._number, $.string, $.symbol, $.datetime, $.binary, $.named_value,
@@ -559,25 +613,25 @@ module.exports = grammar({
 
     // ============================ Containers ==============================
 
-    // Names, not types: a field/attribute may be spelled with a base-type
-    // keyword (`type: string`, `string: int`), which is what the C parser's
-    // `token_is_key` has always allowed.
-    _field_name: $ => choice($.symbol, $.identifier,
-      alias($._base_type_kw, $.base_type), alias('type', $.base_type),
-      alias($._tier3_kw, $.identifier)),
+    // Names, not types: a field/attribute may be spelled with a keyword or a
+    // base-type word (`type: string`, `string: int`).
+    _field_name: $ => $._data_name,
 
-    _key: $ => choice($.symbol, $.identifier,
-      alias($._base_type_kw, $.base_type), alias('type', $.base_type),
-      alias($._tier3_kw, $.identifier),
-      $.last_index, '*'),
+    _key: $ => choice($._data_name, '*'),
 
-    // S16.10.2: `put`, `del`, `commit`, `rollback` and `open` are barred as
-    // BINDING names (S16.10.1) and stay legal as DATA names. These are the
-    // SAME anonymous tokens the statements use, deliberately: a separate
-    // higher-precedence token would win in the lexer and the statement heads
+    // S16.10.2 / S16.10.3: a DATA name -- map key, field, attribute, element
+    // tag, member step, fragment, method, named argument -- may be spelled
+    // with a keyword or base-type word, as the C parser's `token_is_key`
+    // admits; `not` and the named values are the reserved words it refuses.
+    _data_name: $ => choice($.identifier, $.symbol,
+      alias($._keyword_name, $.identifier)),
+
+    // The SAME tokens the constructs use, deliberately: a separate,
+    // higher-precedence token would win in the lexer and the construct heads
     // could never match. Which reading applies is a parse-state decision, and
-    // the `_key`/`_stam_seq` conflict above is what lets GLR see the `:`.
-    _tier3_kw: _ => choice('put', 'del', 'commit', 'rollback', 'open'),
+    // where a statement could also start (`{while: 1}`) the `:` one token
+    // later settles it.
+    _keyword_name: $ => choice(...KEYWORD_NAMES, $._base_type_kw),
 
     // S16.8.9: a bracketed key is evaluated, while a bare name remains a
     // literal attribute name. Keeping the computed form separate prevents
@@ -625,7 +679,7 @@ module.exports = grammar({
     // or where it disambiguates the tag (`<svg, .rect>` vs the maximal-munch
     // qualified tag `<svg .rect>`). Content juxtaposes after that: `<div "s">`.
     element: $ => seq('<',
-      field('tag', choice($.dotted_name, $.symbol, $.identifier)),
+      field('tag', choice($.dotted_name, $._data_name)),
       optional(choice(
         // Attributes, then content only behind a REQUIRED boundary comma. The
         // comma is also what settles a greedy attribute value: `<div a: x (y)>`
@@ -695,11 +749,11 @@ module.exports = grammar({
     ),
 
     // S16.6.6: an unbraced body is an expression position, so `return`,
-    // `break` and `continue` are barred there. The zero-width scanner guard is
-    // withheld for exactly those words; `raise` is an expression and stays
-    // valid. A BRACED body in any of these positions is the statement spelling
-    // and is unaffected.
-    _expr_body: $ => seq($._expr_body_start, $._expr),
+    // `break` and `continue` are barred there. They are reserved words with no
+    // action in an expression, so they are errors here with no guard; `raise`
+    // is an expression and stays valid. A BRACED body in any of these positions
+    // is the statement spelling and is unaffected.
+    _expr_body: $ => $._expr,
 
     raise_expr: $ => prec.right(seq('raise', field('value', $._expr))),
 
@@ -737,24 +791,14 @@ module.exports = grammar({
       $.current_parent_expr,
       $.current_error_expr,
       $.variadic,
-      $._misplaced_let,
     )),
-
-    // S2.5.4v2 (USER 2026-09-24): `let` binds as an expression only as an item
-    // of a parenthesized list. It is a keyword, never a name, but tree-sitter
-    // lexes a keyword as an identifier wherever the parse state has no action
-    // for it, so `let a = let b = 2` read as `let a = let` and then `b = 2`.
-    // This dead end gives every expression position an action for `let`, and
-    // `let_outside_list` is never emitted, so a `let` there is an error, as
-    // in C.
-    _misplaced_let: $ => seq('let', $.let_outside_list),
 
     // Every postfix form below opens with a dual-role token, so each takes the
     // `_join` guard: on its own line, `(`, `[`, `.`, and `^` are S16.2.3
     // errors rather than silent continuations or silent new statements.
     call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, 'import',
-        alias($._apply_kw, $.identifier),
+        alias('apply', $.identifier),
         // `type(x)` — the keyword is callable even though it is not a bare
         // value. One token of lookahead separates it from a declaration:
         // `(` means call, an identifier means `type Name …`.
@@ -784,7 +828,8 @@ module.exports = grammar({
       repeat(seq(',', field('field', $._expr))),
       ']',
     )),
-    last_index: _ => token(prec(2, 'last')),
+    // The same `last` word token a data name spells (`_keyword_name`).
+    last_index: _ => 'last',
 
     // PTH32/PTH33: the force step. `#` is a PURE continuation token -- it has
     // no prefix reading, so unlike `(`/`[`/`.`/`^` it needs no `_join` guard
@@ -793,8 +838,7 @@ module.exports = grammar({
     force_expr: $ => prec.left(110, seq(
       field('operand', $.primary_expr),
       '#',
-      optional(field('fragment', choice($.identifier, $.symbol, $.integer,
-        $.base_type))),
+      optional(field('fragment', choice($._data_name, $.integer))),
     )),
 
     // PTH40: prefix `&` is address-of. `&` is also infix set intersection, so
@@ -811,7 +855,6 @@ module.exports = grammar({
     )),
 
     variadic: _ => token(prec(2, '...')),
-    var_param_marker: _ => token(prec(3, 'var')),
 
     path_parent: _ => token(prec(3, '~~')),
     path_root: _ => token(prec(3, '/')),
@@ -820,8 +863,7 @@ module.exports = grammar({
       prec.left(110, seq(
         field('object', choice($.primary_expr, $.member_expr)),
         alias($._member_dot, '.'),
-        field('field', choice($.identifier, $.symbol, $.integer,
-          $.path_wildcard, $.base_type, alias($._tier3_kw, $.identifier))),
+        field('field', choice($._data_name, $.integer, $.path_wildcard)),
       )),
       prec.left('member', seq(
         field('object', choice($.primary_expr, $.member_expr)),
@@ -865,7 +907,6 @@ module.exports = grammar({
 
     _at: _ => token(prec(2, 'at')),
     _into: _ => token(prec(2, 'into')),
-    _apply_kw: _ => token(prec(2, 'apply')),
 
     // §7.1: unary `!` is GONE from value expressions — `!true` used to mean
     // type complement and silently produced a type. `not` is the one logical
@@ -896,7 +937,7 @@ module.exports = grammar({
     // a real GLR fork between parameter and item (see `conflicts`), not a
     // reduction precedence settles before `=>` is seen.
     _named_parameter: $ => prec(50, seq(
-      optional(field('var', $.var_param_marker)),
+      optional(field('var', alias('var', $.var_param_marker))),
       field('name', choice($.identifier, $.symbol)),
       optional(field('optional', '?')),
       optional(seq(':', field('type', $._parameter_annotation_type))),
@@ -904,11 +945,10 @@ module.exports = grammar({
     )),
     _rest_parameter: $ => prec(50, field('variadic', $.variadic)),
 
-    // `let` is a keyword wherever an expression may start (`_misplaced_let`),
-    // so it names an argument only by being admitted here, as C's `token_is_key`
-    // admits it: `f(let: 1)`.
+    // Spelled like a data name, as C's `token_is_key` reads it: `f(let: 1)`,
+    // `f(type: 1)`.
     named_argument: $ => seq(
-      field('name', choice($.identifier, $.symbol, alias('let', $.identifier))),
+      field('name', $._data_name),
       ':',
       field('value', $._expr),
     ),
@@ -919,22 +959,12 @@ module.exports = grammar({
     // illegal simply by the modifier not composing with `var`.
     // S12.1.4v2: `function` declares a colour-polymorphic `fn` — pure iff its
     // `function`-typed arguments are.
-    fn_stam: $ => seq(
-      optional(field('pub', 'pub')),
-      field('kind', choice('fn', 'pn', 'function')),
-      field('name', choice($.identifier, $.symbol)),
-      parameter_list($),
-      optional(field('type', $.return_type)),
-      field('body', $._body_block),
-    ),
-
-    fn_expr_stam: $ => seq(
-      optional(field('pub', 'pub')),
-      field('kind', choice('fn', 'function')), field('name', choice($.identifier, $.symbol)),
-      parameter_list($),
-      optional(field('type', $.return_type)),
-      '=>', field('body', $._expr_body),
-    ),
+    fn_stam: $ => fn_declaration($, choice($.identifier, $.symbol)),
+    fn_expr_stam: $ => fn_expr_declaration($, choice($.identifier, $.symbol)),
+    // S16.10.2: a method's name is a data name, reached only through a
+    // receiver (`x.state()`), so inside an object type it admits keywords.
+    _method_stam: $ => fn_declaration($, $._data_name),
+    _method_expr_stam: $ => fn_expr_declaration($, $._data_name),
 
     // The arrow body is an ordinary expression, and since `{...}` is now
     // interior-differentiated (§5.9v3) that covers both block bodies
@@ -1085,7 +1115,7 @@ module.exports = grammar({
       ),
       seq(
         field('index', $.identifier),
-        optional(seq(':', field('index_type', $.identifier))),
+        optional(seq(':', field('index_type', choice($.base_type, $.identifier)))),
         ',', field('name', $.identifier),
         optional(field('optional', '?')),
         'in', field('as', $._expr),
@@ -1154,12 +1184,12 @@ module.exports = grammar({
     // statement; `apply(...)` stays an ordinary call. The same-line `(` test
     // that separates them is exactly the S16.2.5 shape already used by
     // `return`, so no fused lexeme is needed.
-    apply_stam: $ => seq($._apply_kw, $._not_paren),
+    apply_stam: $ => seq('apply', $._not_paren),
 
     // ========================= View declarations ==========================
 
     view_stam: $ => seq(
-      field('kind', token(prec(1, choice('view', 'edit')))),
+      field('kind', choice('view', 'edit')),
       optional(seq(field('name', $.identifier), ':')),
       field('pattern', $.view_pattern),
       optional(seq(parameter_list($), optional(field('type', $.return_type)))),
@@ -1292,7 +1322,7 @@ module.exports = grammar({
 
     // A namespace-qualified tag is legal in an element VALUE (S2.4.3v2), so an
     // element TYPE must admit one too — `type T = <soap.Fault …>`.
-    element_type: $ => seq('<', choice($.dotted_name, $.identifier), choice(
+    element_type: $ => seq('<', choice($.dotted_name, $._data_name), choice(
       seq(alias($.pattern_attr_type, $.attr),
         repeat(seq(',', alias($.pattern_attr_type, $.attr))),
         optional(seq(',', $.content_type))),
@@ -1417,8 +1447,8 @@ module.exports = grammar({
       optional(comma_sep1(choice(
         alias($.attr_type, $.attr),
         $.that_constraint,
-        $.fn_stam,
-        $.fn_expr_stam,
+        alias($._method_stam, $.fn_stam),
+        alias($._method_expr_stam, $.fn_expr_stam),
         $._type_pattern,
       ))),
       '}',
@@ -1464,9 +1494,12 @@ module.exports = grammar({
 
     // ============================== Imports ===============================
 
-    // S16.9.6: `.` is the only import separator (`import .a.b`).
-    relative_name: $ => repeat1(seq('.', $.identifier)),
-    absolute_name: $ => seq($.identifier, repeat(seq('.', $.identifier))),
+    // S16.9.6: `.` is the only import separator (`import .a.b`). A segment
+    // names a module file, not a binding, so a keyword spells one, as C's
+    // `token_is_key` reads it.
+    _module_segment: $ => choice($.identifier, alias($._keyword_name, $.identifier)),
+    relative_name: $ => repeat1(seq('.', $._module_segment)),
+    absolute_name: $ => seq($._module_segment, repeat(seq('.', $._module_segment))),
     import_module: $ => choice(
       field('module', choice($.absolute_name, $.relative_name, $.symbol)),
       seq(field('alias', $.identifier), ':',

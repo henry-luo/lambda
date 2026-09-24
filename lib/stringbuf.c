@@ -310,6 +310,21 @@ void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args) {
             if (s) stringbuf_append_str(sb, s);
             break;
         }
+        case '.': {
+            // %.*s — printf's precision-bounded string: at most N bytes,
+            // stopping at a NUL, and the whole string for a negative N.
+            if (p[1] == '*' && p[2] == 's') {
+                int n = va_arg(args, int);
+                const char* s = va_arg(args, const char*);
+                if (s) stringbuf_append_str_n(sb, s, n < 0 ? strlen(s) : strnlen(s, (size_t)n));
+                p += 2;
+            } else {
+                // unknown specifier: emit as-is
+                stringbuf_append_char(sb, '%');
+                stringbuf_append_char(sb, '.');
+            }
+            break;
+        }
         case '%':
             stringbuf_append_char(sb, '%');
             break;

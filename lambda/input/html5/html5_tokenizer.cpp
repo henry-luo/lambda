@@ -33,9 +33,13 @@ static size_t html5_scan_run(Html5Parser* parser, bool stop_ampersand) {
     const char* end = parser->html + parser->length;
     const char* p = start;
 
+    // Bytes >= 0x80 stay in the run: the per-byte DATA, RCDATA and RAWTEXT
+    // paths emit them unchanged, so stopping there only split non-ASCII text
+    // into one pool-allocated token per byte (3.5x slower, 4.3x the memory
+    // on Chinese text).
     while (p < end) {
         unsigned char c = (unsigned char)*p;
-        if (c == '<' || (stop_ampersand && c == '&') || c == '\0' || c >= 0x80) {
+        if (c == '<' || (stop_ampersand && c == '&') || c == '\0') {
             break;
         }
         p++;
@@ -43,8 +47,8 @@ static size_t html5_scan_run(Html5Parser* parser, bool stop_ampersand) {
     return p - start;
 }
 
-// Scan a run of ASCII text characters that don't need special handling.
-// Stops at: '<', '&', '\0', EOF, or non-ASCII bytes (>= 0x80 for UTF-8).
+// Scan a run of text characters that don't need special handling.
+// Stops at: '<', '&', '\0' or EOF; UTF-8 bytes are part of the run.
 static size_t html5_scan_text_run(Html5Parser* parser) {
     return html5_scan_run(parser, true);
 }
@@ -1083,7 +1087,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     // Check if this is the appropriate end tag
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
+                        html5_token_set_tag_name(parser->current_token, html5_create_lowercase_string_from_temp_buffer(parser));
                         html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                     } else {
                         // Not appropriate, emit as text
@@ -1091,14 +1095,14 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     }
                 } else if (c == '/') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
+                        html5_token_set_tag_name(parser->current_token, html5_create_lowercase_string_from_temp_buffer(parser));
                         html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                     } else {
                         goto rcdata_emit_as_text;
                     }
                 } else if (c == '>') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
+                        html5_token_set_tag_name(parser->current_token, html5_create_lowercase_string_from_temp_buffer(parser));
                         html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                         Html5Token* token = parser->current_token;
                         parser->current_token = nullptr;
@@ -1162,21 +1166,21 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                 // Tag name is created with lowercase
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
+                        html5_token_set_tag_name(parser->current_token, html5_create_lowercase_string_from_temp_buffer(parser));
                         html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                     } else {
                         goto rawtext_emit_as_text;
                     }
                 } else if (c == '/') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
+                        html5_token_set_tag_name(parser->current_token, html5_create_lowercase_string_from_temp_buffer(parser));
                         html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                     } else {
                         goto rawtext_emit_as_text;
                     }
                 } else if (c == '>') {
                     if (html5_is_appropriate_end_tag(parser)) {
-                        parser->current_token->tag_name = html5_create_lowercase_string_from_temp_buffer(parser);
+                        html5_token_set_tag_name(parser->current_token, html5_create_lowercase_string_from_temp_buffer(parser));
                         html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
                         Html5Token* token = parser->current_token;
                         parser->current_token = nullptr;
@@ -1274,13 +1278,13 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
 
             case HTML5_TOK_TAG_NAME: {
                 if (c == '\t' || c == '\n' || c == '\f' || c == ' ') {
-                    parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                    html5_token_set_tag_name(parser->current_token, html5_create_string_from_temp_buffer(parser));
                     html5_switch_tokenizer_state(parser, HTML5_TOK_BEFORE_ATTRIBUTE_NAME);
                 } else if (c == '/') {
-                    parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                    html5_token_set_tag_name(parser->current_token, html5_create_string_from_temp_buffer(parser));
                     html5_switch_tokenizer_state(parser, HTML5_TOK_SELF_CLOSING_START_TAG);
                 } else if (c == '>') {
-                    parser->current_token->tag_name = html5_create_string_from_temp_buffer(parser);
+                    html5_token_set_tag_name(parser->current_token, html5_create_string_from_temp_buffer(parser));
                     return html5_emit_current_tag(parser);
                 } else if (c >= 'A' && c <= 'Z') {
                     // convert uppercase to lowercase

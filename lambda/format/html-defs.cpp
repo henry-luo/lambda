@@ -4,6 +4,7 @@
  * Sorted arrays with binary search for O(log n) lookups.
  */
 #include "html-defs.h"
+#include "../core/markup_name_classes.hpp"
 #include "../../lib/str.h"
 #include "../../lib/binsearch.h"
 #include <string.h>
@@ -56,6 +57,35 @@ bool html_is_void_element(const char* tag, size_t len) {
 
 bool html_is_raw_text_element(const char* tag, size_t len) {
     return lookup(raw_text_elements, raw_text_elements_count, tag, len);
+}
+
+// ── id-first lookups ───────────────────────────────────────────────
+// Void/raw-text bits of every well-known markup name, by id
+// (markup_name_classes.hpp). The per-element binary searches -- about eight
+// case-folding compares -- were a quarter of HTML output time.
+
+enum { HTML_NAME_VOID = 1, HTML_NAME_RAW_TEXT = 2 };
+
+static uint32_t html_name_bits(const char* name, size_t len) {
+    return (html_is_void_element(name, len) ? HTML_NAME_VOID : 0) |
+           (html_is_raw_text_element(name, len) ? HTML_NAME_RAW_TEXT : 0);
+}
+
+static bool html_name_bits_by_id(uint32_t tag_id, uint32_t* bits) {
+    static const MarkupNameClassTable table(html_name_bits);
+    return table.lookup(tag_id, bits);
+}
+
+bool html_is_void_element_id(uint32_t tag_id, const char* tag, size_t len) {
+    uint32_t bits;
+    return html_name_bits_by_id(tag_id, &bits) ? (bits & HTML_NAME_VOID) != 0
+                                               : html_is_void_element(tag, len);
+}
+
+bool html_is_raw_text_element_id(uint32_t tag_id, const char* tag, size_t len) {
+    uint32_t bits;
+    return html_name_bits_by_id(tag_id, &bits) ? (bits & HTML_NAME_RAW_TEXT) != 0
+                                               : html_is_raw_text_element(tag, len);
 }
 
 bool html_is_boolean_attribute(const char* attr, size_t len) {

@@ -6903,15 +6903,14 @@ static unsigned char ascii_case_fold(unsigned char c) {
     return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
 }
 
-// T28-5 (N5): the one literal scan kernel, shared by split(), replace() and
-// find(). Returns the index of the leftmost occurrence of `needle` starting at
-// or after `from`, or SIZE_MAX. `memchr` locates the needle's first byte --
-// libc vectorizes it -- so each candidate costs one `memcmp` over the
-// remaining bytes, and a one-byte needle costs none. The byte-at-a-time loops
-// this replaces called `memcmp` at EVERY position, so a one-character search
-// paid a library call per source byte, and paid it twice (the count pass,
-// then the split/replace pass): a quarter of three_way_merge, and four fifths
-// of revcomp, whose complement is a chain of replace() calls.
+// T28-5 (N5): the literal scan shared by split(), replace() and find().
+// Returns the index of the leftmost occurrence of `needle` starting at or
+// after `from`, or SIZE_MAX. The case-sensitive scan is lib's `str_find`, the
+// one candidate-scan kernel (memchr to the next first byte, a second-byte
+// filter, memcmp only at candidates). The byte-at-a-time loops this replaced
+// called `memcmp` at EVERY position, and paid it twice (the count pass, then
+// the split/replace pass): a quarter of three_way_merge, and four fifths of
+// revcomp, whose complement is a chain of replace() calls.
 // memchr cannot fold case, so `ignore_case` (ASCII folding) probes every
 // position. Leftmost-first like the loops it replaces; callers step past a
 // match by `needle_len`, which keeps matches non-overlapping.
@@ -6932,19 +6931,9 @@ static size_t literal_find(const char* chars, size_t chars_len, size_t from,
         }
         return SIZE_MAX;
     }
-    const unsigned char first = (unsigned char)needle[0];
-    while (from <= last) {
-        const char* hit = (const char*)memchr(chars + from, first,
-            last - from + 1);
-        if (!hit) return SIZE_MAX;
-        size_t at = (size_t)(hit - chars);
-        if (needle_len == 1 ||
-                memcmp(hit + 1, needle + 1, needle_len - 1) == 0) {
-            return at;
-        }
-        from = at + 1;
-    }
-    return SIZE_MAX;
+    if (from > last) return SIZE_MAX;
+    size_t at = str_find(chars + from, chars_len - from, needle, needle_len);
+    return at == STR_NPOS ? SIZE_MAX : from + at;
 }
 
 // Non-overlapping match count: split()'s part count, replace()'s output size

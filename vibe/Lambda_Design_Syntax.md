@@ -698,8 +698,8 @@ implemented in both.
 **The C parser is production.** `lambda/runtime/parser/` — a hand-written
 lexer (`lambda_lexer.c`) plus recursive-descent/Pratt parser
 (`lambda_parser.c`) behind a C ABI — parses source **directly to AST**
-through a reduction sink (`lambda_rd_parse_source` →
-`direct_ast_reduce` in `build_ast.cpp`), with no CST in between. It is the
+through a reduction sink (`lambda_rd_parse_source` → the syntax sink and
+resolve pass in `build_ast.cpp`), with no CST in between. It is the
 default path; every script the shipped binary runs goes through it.
 
 **The Tree-sitter grammar is the official grammar and reference
@@ -1410,12 +1410,13 @@ for scalars".
     which a statement body in the paren spelling would dissolve. Cost accepted:
     C-family developers will miss the non-braced form. Both front ends
     enforce it: the C parser by a direct check at each body site, the
-    reference grammar by a zero-width `_expr_body_start` scanner guard
-    (context-aware lexing means a grammar-only fix is impossible — the
-    keyword falls back to `identifier` wherever only an identifier is
-    valid). The guard is scoped to the four body positions, not to every
-    identifier, keeping the §7.17 scanner blast radius small; it is
-    stateless, so it carries none of that note's stale-carry hazard.
+    reference grammar through its reserved words. `return`, `break` and
+    `continue` are reserved (§7.24), so wherever an identifier is expected
+    they lex as keywords, and no expression takes them. Until 2026-09-24,
+    when the grammar moved to tree-sitter 0.25, a zero-width
+    `_expr_body_start` scanner guard at the four body positions did this job,
+    because 0.24 had no reserved words and the keyword fell back to
+    `identifier` wherever only an identifier was valid.
 36. *(ratified 2026-08-24 as S16.6.7, spec v13.0.0)* **`pn` has one body
     form**: `pn name() { ... }`. No `=>` after a procedure signature, named
     or anonymous — `pn p() => expr` was redundant with `fn`, and
@@ -2769,7 +2770,7 @@ word cannot be reclaimed once programs bind it. That makes `state` and
 `lambda` the two words barred by reservation rather than capture.
 
 **The two lists are enumerated in Appendix K**, verified against the running
-engine — K.1 barred (60 words), K.2 allowed (28), K.3 what the bar does not
+engine — K.1 barred (64 words), K.2 allowed (28), K.3 what the bar does not
 reach.
 
 **Migration and status.** 55 keyword-named bindings in `test/` + `lambda/`
@@ -2778,6 +2779,18 @@ others 1); 0 keyword import aliases. Enforcement must land in the C parser
 and the reference grammar, and E201 must extend from `last` to the whole
 table. Tracked as LR02-14 in the issue ledger; the `let type` silent
 misread is the priority defect.
+
+**Reference grammar, 2026-09-24.** The C parser landed first, on 2026-08-27.
+Tree-sitter's keyword extraction had kept the grammar out of step: it lexes a
+keyword as an identifier wherever the parse state has no action for it, so
+binding positions took keywords and some data-name positions refused them.
+The grammar now declares a `reserved` set (CLI 0.25.10, ABI 15) with every K.1
+word, which rejects them in binding and value positions, and a single
+`_keyword_name` rule admits them back as data names wherever C's
+`token_is_key` reads one. `not` and the named values stay out of data names,
+as in C, and `lambda` stays an identifier, barred by E201 alone. Details and
+corpus numbers: LR02-14 in the fixed ledger; the edges left unruled are
+LR02-23.
 
 ### 7.25 Sys-func shadowing: user-first, module-lexical (decided 2026-08-27)
 
@@ -3266,19 +3279,26 @@ BEGIN a construct, so a binding of that name could not be read back where the
 construct starts. A word is **allowed** when it only ever appears after
 something else.
 
-### K.1 Barred from binding names (60)
+### K.1 Barred from binding names (64)
 
 Using one is `error[E201]` at the declaration site. This covers `let`/`var`
 names, parameters, `fn`/`pn`/`type`/`view` declaration names, and import
-aliases — with **no quoted escape** (§7.24 rule 1).
+aliases — with **no quoted escape** (§7.24 rule 1). The reference grammar
+reserves the same words (`reserved` in `grammar.js`), so there a barred
+binding is a syntax error rather than E201.
 
 | Group | Words |
 |---|---|
 | Declaration & statement keywords (21) | `let` `pub` `var` `type` `fn` `pn` `view` `edit` `state` `if` `match` `for` `while` `break` `continue` `return` `raise` `import` `apply` `not` `last` |
+| Tier-3 statement keywords (5) | `put` `del` `commit` `rollback` `open` |
 | Base-type names (34) | `null` `any` `bool` `int` `integer` `float` `f64` `f32` `f16` `complex` `decimal` `number` `datetime` `date` `time` `binary` `range` `list` `array` `map` `element` `object` `function` `error` `string` `symbol` `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` |
-
-`entity` left this table on 2026-09-03 (S2.1.1v2, OB1): it never named a type, and `object` is the one nominal kind. Until the lexer, reference grammar, and `is_type_keyword` drop it, `let entity = 1` is still wrongly barred.
 | Named values (4) | `true` `false` `inf` `nan` |
+
+The Tier-3 row joined with PTH55–PTH80 (2026-09-18); the five stay data names
+(S16.10.2). `entity` left the base-type row on 2026-09-03 (S2.1.1v2, OB1): it
+never named a type, and `object` is the one nominal kind. The C lexer and the
+reference grammar have both dropped it (the third table, `is_type_keyword`,
+is itself retired), so `let entity = 1` is legal (verified 2026-09-24).
 
 **`int64` is not on this list and is not a type.** `i64` is the one surface
 spelling (S2.1.1); `int64` is a concept name that the parser answers with

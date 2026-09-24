@@ -794,9 +794,14 @@ static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
     LambdaParseValue value = parse_type_slot_mode(parser, allow_binder, 0);
     if (!value) return false;
     if (parser_accept(parser, LAMBDA_TOK_TO)) {
-        if (!parse_expression(parser, 0)) return false;
+        LambdaParseValue range_end = parse_expression(parser, 0);
+        if (!range_end) return false;
+        // the range type supersedes both parts, which still reach the sink
+        LambdaParseValue parts[2] = {value, range_end};
         SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
-        value = parser_reduce_token(parser, LAMBDA_REDUCE_TYPE_SLOT, LAMBDA_REDUCTION_FORM_TOKEN, span, first, NULL, 0);
+        value = parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT,
+            LAMBDA_REDUCTION_FORM_TOKEN, span, first, (LambdaToken){0},
+            LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE, parts, 2);
     }
     if (parser_accept(parser, LAMBDA_TOK_THAT)) {
         LambdaParseValue constraint;
@@ -1911,9 +1916,9 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool 
     uint32_t function_flags = is_proc ? LAMBDA_REDUCTION_FLAG_PROC : 0u;
     if (is_colour_poly) function_flags |= LAMBDA_REDUCTION_FLAG_COLOUR_POLY;
     if (is_public) function_flags |= LAMBDA_REDUCTION_FLAG_PUBLIC;
-    // Publish the declaration header before parsing the signature/body. The
-    // reduction tape can predeclare later module functions without a second
-    // lexer pass, while nested/function-expression contexts remain unmarked.
+    // Publish the declaration header before parsing the signature/body, so
+    // the sink can collect top-level functions for predeclaration without a
+    // second lexer pass; nested/function-expression contexts remain unmarked.
     parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN,
         (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name,
         function_flags | LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER, NULL, 0);
@@ -1964,14 +1969,24 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     if (!pattern) return 0;
     parser_context_ex(parser, LAMBDA_REDUCTION_FORM_VIEW_BEGIN, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, 0, &pattern, 1);
     LambdaParseValue parameters = 0;
+    // a view has no return contract, but a written one still reaches the sink
+    // (after the parameters) so its type slots resolve in source order
+    LambdaParseValue view_children[4] = {0};
+    uint32_t view_child_count = 2;
     if (parser->current.kind == LAMBDA_TOK_LPAREN) {
         LambdaCallableSignature signature;
         if (!parser_parse_callable_signature(parser, false, true,
                 error_expected_parameter_name,
                 error_expected_parameter_close, &signature)) return 0;
         parameters = signature.parameters;
+        for (uint32_t i = 0; i < signature.return_count; i++) {
+            view_children[view_child_count++] = signature.return_types[i];
+        }
     } else {
-        if (!parser_parse_return_types(parser, NULL, NULL, NULL)) return 0;
+        uint32_t return_count = 0;
+        if (!parser_parse_return_types(parser, view_children + 2, &return_count,
+                NULL)) return 0;
+        view_child_count += return_count;
     }
     if (parser_accept(parser, LAMBDA_TOK_STATE)) {
         do {
@@ -2005,8 +2020,9 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
         parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW_HANDLER, (SourceSpan){on.span.start_byte, parser->current.span.start_byte}, event, (LambdaToken){0}, 0, handler_children, 2);
         parser_context(parser, LAMBDA_REDUCTION_FORM_VIEW_HANDLER_END, (SourceSpan){on.span.start_byte, parser->current.span.start_byte}, event);
     }
-    LambdaParseValue view_children[2] = {parameters, body};
-    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, 0, view_children, 2);
+    view_children[0] = parameters;
+    view_children[1] = body;
+    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW, LAMBDA_REDUCTION_FORM_VIEW, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, name, 0, view_children, view_child_count);
     parser_context(parser, LAMBDA_REDUCTION_FORM_VIEW_END, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first);
     return result;
 }
@@ -2420,11 +2436,18 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             LambdaParseValue public_value = parse_assignment_clause(parser,
                 error_expected_public_binding_name, error_expected_equals_after_public_binding);
             if (parser->status != LAMBDA_PARSE_OK) return 0;
+            // Only the first clause is published. The rest still bind, so
+            // they reach the sink as a second child it does not retain.
+            LambdaParseValue extra_clauses = 0;
             while (parser_accept(parser, LAMBDA_TOK_COMMA)) {
-                if (!parse_assignment_clause(parser, error_expected_public_binding_name,
-                        error_expected_equals_after_public_binding)) return 0;
+                LambdaParseValue clause = parse_assignment_clause(parser,
+                    error_expected_public_binding_name,
+                    error_expected_equals_after_public_binding);
+                if (!clause) return 0;
+                extra_clauses = parser_list_append(parser, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, extra_clauses, clause);
             }
-            return parser_reduce_one_ex(parser, LAMBDA_REDUCE_DECLARATION, LAMBDA_REDUCTION_FORM_NONE, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, (LambdaToken){0}, LAMBDA_REDUCTION_FLAG_PUBLIC, public_value);
+            LambdaParseValue public_children[2] = {public_value, extra_clauses};
+            return parser_reduce_tokens(parser, LAMBDA_REDUCE_DECLARATION, LAMBDA_REDUCTION_FORM_NONE, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, first, (LambdaToken){0}, LAMBDA_REDUCTION_FLAG_PUBLIC, public_children, extra_clauses ? 2u : 1u);
         }
         if (parser->current.kind == LAMBDA_TOK_RETURN || parser->current.kind == LAMBDA_TOK_BREAK || parser->current.kind == LAMBDA_TOK_CONTINUE) {
             LambdaToken control = parser->current;

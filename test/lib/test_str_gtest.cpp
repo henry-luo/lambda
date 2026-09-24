@@ -221,6 +221,36 @@ TEST_F(StrSearchTest, RFindByte) {
     EXPECT_EQ(str_rfind_byte(NULL, 0, 'a'), STR_NPOS);
 }
 
+// LR05-14: a match followed by c ^ 0x01 inside an 8-byte word must not
+// report the following byte ('b' then 'c'; '/' then '.').
+TEST_F(StrSearchTest, RFindByteSwarNeighbour) {
+    EXPECT_EQ(str_rfind_byte("abcdefgh", 8, 'b'), 1u);
+    EXPECT_EQ(str_rfind_byte("dir/.hidden", 11, '/'), 3u);
+    EXPECT_EQ(str_rfind("dir/.hidden", 11, "/", 1), 3u);
+    EXPECT_EQ(str_rfind_byte("01234567a`234567", 16, 'a'), 8u);
+}
+
+// every length and alignment over an alphabet built around c and c ^ 1
+TEST_F(StrSearchTest, RFindByteMatchesNaive) {
+    const char alphabet[] = {'b', 'c', 'x', '/', '.'};
+    char buf[40];
+    uint32_t seed = 12345;
+    for (int round = 0; round < 2000; round++) {
+        size_t len = (size_t)(round % 40);
+        for (size_t i = 0; i < len; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            buf[i] = alphabet[(seed >> 24) % 5];
+        }
+        for (char c : {'b', '/'}) {
+            size_t expected = STR_NPOS;
+            for (size_t i = len; i > 0; i--) {
+                if (buf[i - 1] == c) { expected = i - 1; break; }
+            }
+            ASSERT_EQ(str_rfind_byte(buf, len, c), expected) << "round " << round;
+        }
+    }
+}
+
 TEST_F(StrSearchTest, Find) {
     EXPECT_EQ(str_find("hello world", 11, "world", 5), 6u);
     EXPECT_EQ(str_find("hello world", 11, "hello", 5), 0u);
@@ -2043,4 +2073,147 @@ TEST_F(StrFmtTest, BinaryPayloadDecodeErrors) {
     EXPECT_EQ(str_binary_payload_decode("\\64Z=g", 6, out, &err_off), -1);
     EXPECT_EQ(err_off, 5);
     strbuf_free(out);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// String tuning P2: the rewritten kernels against naive references, over
+// lengths that cross their block boundaries (32 for ASCII, 255 for counts)
+// ══════════════════════════════════════════════════════════════════════
+
+static uint32_t kernel_seed = 2463534242u;
+static uint32_t kernel_rand() {
+    kernel_seed ^= kernel_seed << 13; kernel_seed ^= kernel_seed >> 17; kernel_seed ^= kernel_seed << 5;
+    return kernel_seed;
+}
+static void kernel_fill(char* buf, size_t len, const char* alphabet, size_t alpha_len) {
+    for (size_t i = 0; i < len; i++) buf[i] = alphabet[kernel_rand() % alpha_len];
+}
+
+TEST(StrKernelTest, FindMatchesNaive) {
+    // dense first bytes make many rejected candidates
+    const char alphabet[] = "aab";
+    char hay[80];
+    char needle[5];
+    for (int round = 0; round < 4000; round++) {
+        size_t hay_len = (size_t)(round % 80);
+        size_t needle_len = 1 + (size_t)(kernel_rand() % 4);
+        kernel_fill(hay, hay_len, alphabet, 3);
+        kernel_fill(needle, needle_len, alphabet, 3);
+        size_t expected = STR_NPOS;
+        for (size_t i = 0; i + needle_len <= hay_len; i++) {
+            if (memcmp(hay + i, needle, needle_len) == 0) { expected = i; break; }
+        }
+        ASSERT_EQ(str_find(hay, hay_len, needle, needle_len), expected) << "round " << round;
+        size_t rexpected = STR_NPOS;
+        for (size_t i = hay_len >= needle_len ? hay_len - needle_len + 1 : 0; i > 0; i--) {
+            if (memcmp(hay + i - 1, needle, needle_len) == 0) { rexpected = i - 1; break; }
+        }
+        ASSERT_EQ(str_rfind(hay, hay_len, needle, needle_len), rexpected) << "round " << round;
+    }
+}
+
+TEST(StrKernelTest, CountByteMatchesNaive) {
+    static char buf[700];
+    for (int round = 0; round < 300; round++) {
+        size_t len = (size_t)(kernel_rand() % 700);
+        kernel_fill(buf, len, "abc,", 4);
+        size_t expected = 0;
+        for (size_t i = 0; i < len; i++) expected += buf[i] == ',';
+        ASSERT_EQ(str_count_byte(buf, len, ','), expected) << "len " << len;
+    }
+}
+
+TEST(StrKernelTest, Utf8CountMatchesNaive) {
+    // "é" (2 bytes) and "日" (3 bytes) mixed with ASCII
+    const char* pieces[] = {"a", "\xC3\xA9", "\xE6\x97\xA5", " "};
+    static char buf[800];
+    for (int round = 0; round < 300; round++) {
+        size_t len = 0, expected = 0;
+        size_t target = (size_t)(kernel_rand() % 700);
+        while (len < target) {
+            const char* piece = pieces[kernel_rand() % 4];
+            size_t n = strlen(piece);
+            memcpy(buf + len, piece, n);
+            len += n;
+            expected++;
+        }
+        ASSERT_EQ(utf8_count(buf, len), expected) << "len " << len;
+    }
+}
+
+TEST(StrKernelTest, IsAsciiMatchesNaive) {
+    static char buf[200];
+    for (size_t len = 0; len < 200; len++) {
+        memset(buf, 'a', len);
+        EXPECT_TRUE(str_is_ascii(buf, len)) << "len " << len;
+        for (size_t pos = 0; pos < len; pos += 7) {
+            buf[pos] = (char)0xC3;
+            EXPECT_FALSE(str_is_ascii(buf, len)) << "len " << len << " pos " << pos;
+            buf[pos] = 'a';
+        }
+    }
+}
+
+TEST(StrKernelTest, SetScannersMatchNaive) {
+    // bounded scanners also pass embedded NULs; one-stop-byte sets take memchr
+    const char alphabet[] = {'a', 'b', ',', '\n', ' ', '\0'};
+    const char* sets[] = {",", ",\n", ", \n", "ab", ""};
+    char buf[64];
+    for (int round = 0; round < 3000; round++) {
+        size_t len = (size_t)(round % 64);
+        kernel_fill(buf, len, alphabet, 6);
+        const char* set = sets[kernel_rand() % 5];
+        const char* end = buf + len;
+        const char* naive_until = buf;
+        while (naive_until < end && !str_char_in_set(*naive_until, set)) naive_until++;
+        const char* naive_skip = buf;
+        while (naive_skip < end && str_char_in_set(*naive_skip, set)) naive_skip++;
+        ASSERT_EQ(strn_scan_until_any(buf, end, set), naive_until) << "round " << round;
+        ASSERT_EQ(strn_skip_chars(buf, end, set), naive_skip) << "round " << round;
+        // NUL-terminated forms stop at the first NUL (buf[len] = 0 below)
+        char zbuf[65];
+        memcpy(zbuf, buf, len);
+        zbuf[len] = '\0';
+        const char* z_until = zbuf;
+        while (*z_until && !str_char_in_set(*z_until, set)) z_until++;
+        const char* z_skip = zbuf;
+        while (str_char_in_set(*z_skip, set)) z_skip++;
+        ASSERT_EQ(str_scan_until_any(zbuf, set), z_until) << "round " << round;
+        ASSERT_EQ(str_skip_chars(zbuf, set), z_skip) << "round " << round;
+    }
+}
+
+TEST(StrKernelTest, ByteSetFindMatchesNaive) {
+    // the scan tests 8-byte blocks: long buffers, sparse and dense members at
+    // every block offset, and members among high bytes and NUL
+    char buf[200];
+    for (int round = 0; round < 20000; round++) {
+        size_t len = (size_t)(kernel_rand() % sizeof(buf));
+        StrByteSet set;
+        str_byteset_clear(&set);
+        int members = 1 + (int)(kernel_rand() % 6);
+        for (int m = 0; m < members; m++) str_byteset_add(&set, (unsigned char)(kernel_rand() % 256));
+        // one in `density` bytes is drawn from all 256 values, the rest are 'x'
+        unsigned density = 1 + kernel_rand() % 64;
+        for (size_t i = 0; i < len; i++) {
+            buf[i] = kernel_rand() % density == 0 ? (char)(kernel_rand() % 256) : 'x';
+        }
+        size_t naive_find = STR_NPOS, naive_not = STR_NPOS;
+        for (size_t i = 0; i < len && naive_find == STR_NPOS; i++) {
+            if (str_byteset_test(&set, (unsigned char)buf[i])) naive_find = i;
+        }
+        for (size_t i = 0; i < len && naive_not == STR_NPOS; i++) {
+            if (!str_byteset_test(&set, (unsigned char)buf[i])) naive_not = i;
+        }
+        ASSERT_EQ(str_find_byteset(buf, len, &set), naive_find) << "round " << round;
+        // with 'x' a member, the not-member scan runs over long runs too
+        StrByteSet with_x = set;
+        str_byteset_add(&with_x, 'x');
+        size_t naive_not_x = STR_NPOS;
+        for (size_t i = 0; i < len && naive_not_x == STR_NPOS; i++) {
+            if (!str_byteset_test(&with_x, (unsigned char)buf[i])) naive_not_x = i;
+        }
+        ASSERT_EQ(str_find_not_byteset(buf, len, &set), naive_not) << "round " << round;
+        ASSERT_EQ(str_find_not_byteset(buf, len, &with_x), naive_not_x) << "round " << round;
+    }
 }

@@ -390,9 +390,23 @@ TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
     size_t kernel_end = runtime_source.find("\n}\n", kernel_start);
     ASSERT_NE(kernel_end, std::string::npos);
     std::string kernel = runtime_source.substr(kernel_start, kernel_end - kernel_start);
-    EXPECT_NE(kernel.find("memchr(chars + from, first"), std::string::npos);
-    EXPECT_NE(kernel.find("if (needle_len == 1 ||"), std::string::npos);
-    EXPECT_NE(kernel.find("memcmp(hit + 1, needle + 1, needle_len - 1)"),
+    // The case-sensitive scan is lib's str_find, the one candidate-scan kernel
+    // shared with contains/index_of and LambdaJS (string tuning P2).
+    EXPECT_NE(kernel.find("str_find(chars + from"), std::string::npos);
+    char* lib_text = read_text_file("lib/str.c");
+    ASSERT_NE(lib_text, nullptr);
+    if (!lib_text) return;
+    std::string lib_source(lib_text);
+    free(lib_text);
+    size_t find_kernel_start = lib_source.find("size_t str_find(const char* s, size_t s_len,");
+    ASSERT_NE(find_kernel_start, std::string::npos);
+    size_t find_kernel_end = lib_source.find("\n}\n", find_kernel_start);
+    ASSERT_NE(find_kernel_end, std::string::npos);
+    std::string find_kernel = lib_source.substr(find_kernel_start,
+        find_kernel_end - find_kernel_start);
+    EXPECT_NE(find_kernel.find("if (needle_len == 1) return str_find_byte("), std::string::npos);
+    EXPECT_NE(find_kernel.find("memchr(p, first"), std::string::npos);
+    EXPECT_NE(find_kernel.find("memcmp(hit + 2, needle + 2, needle_len - 2)"),
         std::string::npos);
     // The literal replace() and find() paths share the kernel; before they did,
     // both called memcmp at every byte (four fifths of revcomp).

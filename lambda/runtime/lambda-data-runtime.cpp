@@ -3240,11 +3240,16 @@ Item item_at(Item data, int64_t index) {
         if (index < 0) {
             return ItemNull;
         }
-        bool is_ascii = true;
+        bool is_ascii;
         if (type_id == LMD_TYPE_STRING) {
             String* str = data.get_safe_string();
             if (!str) { return ItemNull; }
             is_ascii = str->is_ascii != 0;
+        } else {
+            // LR05-15: a Symbol carries no ASCII flag, and assuming ASCII
+            // indexed non-ASCII symbols by byte ('café'[3] was '\xC3');
+            // S2.5.8 indexes text by code point, so decide from the bytes
+            is_ascii = str_is_ascii(chars, byte_len);
         }
 
         // ASCII fast-path: byte index == char index, O(1)

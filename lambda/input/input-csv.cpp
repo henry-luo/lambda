@@ -46,39 +46,43 @@ bool is_header_line(const char* csv_string, char separator) {
 
 // Helper: parse a single CSV field (handles quoted fields)
 String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int line_num, int field_num) {
+    if (**csv != '"') {
+        // unquoted: the field is a slice of the source, up to the separator, a
+        // line break or the end -- created in one copy, with no scratch buffer
+        const char* start = *csv;
+        const char* end = start;
+        while (*end && *end != separator && *end != '\n' && *end != '\r') end++;
+        *csv = end;
+        if (end > start) return ctx->builder.createString(start, (size_t)(end - start));
+        return nullptr;  // empty string maps to null
+    }
+
     StringBuf *sb = ctx->sb;
     stringbuf_reset(sb);
+    (*csv)++; // skip opening quote
+    bool quote_closed = false;
 
-    if (**csv == '"') {
-        (*csv)++; // skip opening quote
-        bool quote_closed = false;
-
-        while (**csv) {
-            if (**csv == '"') {
-                if (*((*csv)+1) == '"') {
-                    // Escaped quote
-                    stringbuf_append_char(sb, '"');
-                    (*csv) += 2;
-                } else {
-                    // Closing quote
-                    quote_closed = true;
-                    (*csv)++; // skip closing quote
-                    break;
-                }
-            } else {
-                stringbuf_append_char(sb, **csv);
-                (*csv)++;
-            }
+    while (**csv) {
+        // append the run up to the next quote in one call
+        const char* quote = strchr(*csv, '"');
+        const char* run_end = quote ? quote : *csv + strlen(*csv);
+        stringbuf_append_str_n(sb, *csv, (size_t)(run_end - *csv));
+        *csv = run_end;
+        if (!quote) break;
+        if (*((*csv)+1) == '"') {
+            // Escaped quote
+            stringbuf_append_char(sb, '"');
+            (*csv) += 2;
+        } else {
+            // Closing quote
+            quote_closed = true;
+            (*csv)++; // skip closing quote
+            break;
         }
+    }
 
-        if (!quote_closed) {
-            ctx->addError("Unclosed quoted field at line %d, field %d", line_num, field_num);
-        }
-    } else {
-        const char stops[] = {separator, '\n', '\r', '\0'};
-        const char* field_end = str_scan_until_any(*csv, stops);
-        stringbuf_append_str_n(sb, *csv, (size_t)(field_end - *csv));
-        *csv = field_end;
+    if (!quote_closed) {
+        ctx->addError("Unclosed quoted field at line %d, field %d", line_num, field_num);
     }
 
     if (sb->length > 0) {

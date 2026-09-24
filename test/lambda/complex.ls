@@ -20,3 +20,6 @@ let values = [{z: 1j}, {z: 2j}];
 '=== typed parameters ==='
 fn reflect(value: complex) complex { conj(value) }
 reflect(2 + 3j)
+
+'=== format refuses complex outside mark ===';
+[format({a: 1, b: [2, <x c: 3j>]}, 'json') or 'refused', format([2 + 3j], 'mark')]

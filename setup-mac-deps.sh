@@ -116,8 +116,8 @@ fi
 
 # Verify npx can access tree-sitter CLI
 echo "Verifying tree-sitter CLI access via npx..."
-if npx --yes tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
-    echo "Tree-sitter CLI 0.24.7 accessible via npx"
+if npx --yes tree-sitter-cli@0.25.10 --version >/dev/null 2>&1; then
+    echo "Tree-sitter CLI 0.25.10 accessible via npx"
 else
     echo "Warning: tree-sitter CLI may need to be downloaded on first use"
 fi
@@ -964,7 +964,7 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     make clean || true
 
     # Build static library for Mac (creates libtree-sitter-lambda.a)
-    make TS="npx --yes tree-sitter-cli@0.24.7" libtree-sitter-lambda.a
+    make TS="npx --yes tree-sitter-cli@0.25.10" libtree-sitter-lambda.a
 
     cd - > /dev/null
     echo "Tree-sitter-lambda built successfully"
@@ -987,14 +987,14 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
         echo "Generating tree-sitter-javascript parser..."
         if command -v npx >/dev/null 2>&1; then
-            npx --yes tree-sitter-cli@0.24.7 generate
+            npx --yes tree-sitter-cli@0.25.10 generate --abi 14
         else
             echo "Warning: npx not available, assuming parser files are already generated"
         fi
     fi
 
     # Build static library for Mac (creates libtree-sitter-javascript.a)
-    make TS="npx --yes tree-sitter-cli@0.24.7" libtree-sitter-javascript.a
+    make TS="npx --yes tree-sitter-cli@0.25.10" libtree-sitter-javascript.a
 
     cd - > /dev/null
     echo "Tree-sitter-javascript built successfully"

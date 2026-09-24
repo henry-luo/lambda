@@ -155,19 +155,16 @@ public:
     }
 
     inline void write_indent() {
-        if (!compact_mode_ && output_) {
-            for (int i = 0; i < indent_level_; i++) {
-                stringbuf_append_str(output_, "  ");
-            }
+        // one fill per indent instead of an append (and strlen) per level
+        if (!compact_mode_ && output_ && indent_level_ > 0) {
+            stringbuf_append_char_n(output_, ' ', (size_t)indent_level_ * 2);
         }
     }
 
     // Write explicit indent level (for formatters that pass indent as parameter)
     inline void write_indent(int level) {
-        if (output_) {
-            for (int i = 0; i < level; i++) {
-                stringbuf_append_str(output_, "  ");
-            }
+        if (output_ && level > 0) {
+            stringbuf_append_char_n(output_, ' ', (size_t)level * 2);
         }
     }
 

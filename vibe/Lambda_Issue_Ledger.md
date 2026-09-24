@@ -188,11 +188,11 @@ defect.
 ### String function tuning survey — 2026-09-24
 
 A survey of byte-level text processing (the [string function tuning proposal](Lambda_String_Func_Tuning.md), §5.1) found three defects that return a **wrong value with no error**. Each was reproduced on both tiers before filing:
-- [LR05-14](#lr05-14): `last_index_of` and `lastIndexOf` can return a position past the real last match.
-- [LR05-15](#lr05-15): indexing a non-ASCII symbol splits a character.
+- [LR05-14](<Lambda_Issue_Ledger (fixed).md#lr05-14>): `last_index_of` and `lastIndexOf` can return a position past the real last match.
+- [LR05-15](<Lambda_Issue_Ledger (fixed).md#lr05-15>): indexing a non-ASCII symbol splits a character.
 - [LR09-31](#lr09-31): `format()` drops large text in markup output.
 
-The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here.
+The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here. *Later on 2026-09-24:* P0 of [the implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) fixed LR05-14 and LR05-15, and both moved to the fixed archive.
 
 ---
 
@@ -464,9 +464,9 @@ literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
 `LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
 confirm it is unintended before lifting it.
 *Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
-`children` by pointer and count to a synchronous sink, `direct_tape_reduce`
-(`build_ast.cpp:8074`) copies children and name tokens into the arena sized
-by count, and the GROUP/ELEMENT/POSTFIX/LET tape handlers walk `child_count`.
+`children` by pointer and count to a synchronous sink, `syntax_sink_reduce`
+(`build_ast.cpp`), whose GROUP/ELEMENT/POSTFIX/LET handlers walk
+`child_count` (the reduction tape that copied them is retired, LC3.9).
 A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
 (rest parameters exempt), whose `binder_env`/`resolved` arrays are
 bounds-checked. A growable buffer with inline storage keeps every reduction
@@ -478,6 +478,57 @@ heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
 `children[65]` (:1674) only ever uses slot 0. Pin the fix with mirrored accept
 cases (a 65-item list literal, 65 call arguments) in both S16 conformance
 scripts.
+
+<a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · OPEN (found 2026-09-24)**
+`token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
+`apply`, `view` and `edit` as identifiers since the parser's first version
+(2026-08-20), a week before S16.10.1v2 barred all four as binding names, and
+`parse_prefix` (:1579) reduces `fn` as an atom. So `let a = view`,
+`let a = state`, `let a = apply` and `let a = fn` parse and compile, although
+no binding of those names can exist, so the read can never resolve. The
+reference grammar rejects all of them since it reserves its keywords
+(`test/ts_s16_conformance.sh`, "no fn as a value" and its three siblings); the
+C script omits those four cases until this is fixed. Fixing it means moving
+the four words from `token_is_identifier_like` into `token_is_name_word`
+explicitly, since they stay data names (S16.10.2), and keeping `apply(...)`
+callable through `token_is_literal`.
+The `fn` atom also hides an unruled form. `doc/Lambda_Func.md` documents an
+unnamed `fn (x: int, y: int) { x + y }`, which no `S#` covers and the
+reference grammar has no rule for. C parses it as the `fn` atom, a call with
+named arguments and a juxtaposed block, and it fails at run time with
+`fn_call2: cannot call non-function value`. The negative runtime fixtures
+`test_closure_call_stack.ls` and `negative/test_stack_deep.ls` get their
+`error` lines from that misparse, and `test/std/core/statements/higher_order.ls`
+passes the arrow-bodied variant `fn(x) => x * 2`. Both forms need a ruling
+(legal, or dropped from `Lambda_Func.md`) before either parser changes.
+
+<a id="lr02-22"></a>**LR02-22 · The reference grammar never reads a force-step fragment (PTH33) · OPEN (found 2026-09-24)**
+`force_expr` takes an optional fragment after `#`, but the operand-only form
+can also end the statement there, so `_stmt_boundary` is valid, and the
+scanner emits it before any start word. `p#name` therefore parses as the force
+`p#` plus a juxtaposed statement `name`, a silent misparse, and `p#if` is an
+error. The rule's comment still says `token(seq(...))` keeps the fragment
+tight to the `#`, but the rule no longer does. C reads the fragment exactly
+when it abuts the `#` (`lambda_parser.c:1750`). It predates the reserved-word
+change: the 0.24.7 grammar parses `p#name` the same way. The fix is a scanner
+rule that withholds the boundary when a name abuts the `#`, with mirrored
+cases (`p#name`, `p#if`, `p# name`) in both S16 scripts.
+
+<a id="lr02-23"></a>**LR02-23 · S16.10.2 is silent on named-argument names, `not`, and the named values · OBSERVATION (2026-09-24)**
+Two data-name questions surfaced while the reference grammar took over C's
+keyword behaviour. Both parsers now agree on each, so nothing diverges, but
+neither behaviour is ruled.
+- **Named arguments.** C's `parse_call_argument` (:1666) takes any
+  `token_is_key` word before `:`, so `f(if: 1)` and `f(type: 1)` parse. The
+  grammar now does the same through `_data_name`; it used to admit `let` alone
+  and to take or refuse the other keywords by accident of parse state. A
+  keyword can never name the parameter (S16.10.1v2), so such an argument can
+  only ever reach a builtin. Rule whether a named-argument name is a data name.
+- **`not` and the named values.** S16.10.2 says container names admit
+  keywords, yet both parsers refuse `not`, `true`, `false`, `inf` and `nan` as
+  data names (`{true: 1}`, `m.not`). `token_is_name_word` omits `NOT` and
+  `NAMED_VALUE`, and the grammar reserves the five words without admitting
+  them as data names. Rule whether S16.10.2's "keywords" covers them.
 
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
@@ -602,25 +653,6 @@ hard-codes 256 bins in a stack `int64_t h[256]` (`:4501`).
 Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
-
-<a id="lr05-14"></a>**LR05-14 · `str_rfind_byte` can return a position past the real last match · OPEN**
-`str_rfind_byte` (`lib/str.c:266`) scans backwards eight bytes at a time and returns the highest byte flagged by `_swar_has_byte` (`:279`).
-- **Cause:** through borrow propagation, that test can also flag the byte just above a real match when that byte equals `c ^ 0x01`. The caveat is already noted in `str_count_byte` (`:404`). So a backward search can return the position just after the true last match.
-- **Forward search is unaffected:** `str_find_byte` takes the lowest flagged byte, which is always a real match.
-- **Callers:** every one-byte reverse search reaches it through `str_rfind` (`:321`):
-  - Lambda `last_index_of` (`lambda/runtime/lambda-eval.cpp:6524`);
-  - LambdaJS `String.prototype.lastIndexOf` (`js_string_find_position` in `lambda/js/js_runtime.cpp`);
-  - Node-compatible `Buffer.lastIndexOf` (`lambda/module/node_core/node_buffer.cpp:1584`).
-- **Reproduced 2026-09-24 on both tiers:** `last_index_of("dir/.hidden", "/")` is 4 and `last_index_of("abcdefgh", "b")` is 2, where 3 and 1 are right. LambdaJS `lastIndexOf` gives the same 4 and 2; Node gives 3 and 1.
-- **Why tests missed it:** in `test/lib/test_str_gtest.cpp:218`–`221`, every match checked falls in the scalar tail.
-- **Fix:** use an exact zero-byte mask for the backward scan, `~(((x & 0x7F…) + 0x7F…) | x | 0x7F…)`, and add both reproducers as tests.
-
-<a id="lr05-15"></a>**LR05-15 · Indexing a non-ASCII symbol splits a character · OPEN**
-S2.5.8 has indexing and every sequence operation see a symbol as its code points.
-- **Cause:** `item_at` (`lambda/runtime/lambda-data-runtime.cpp`, the `LMD_TYPE_STRING`/`LMD_TYPE_SYMBOL` case) starts from `is_ascii = true` and corrects it only for strings, which carry the flag. A symbol therefore always takes the byte-indexed fast path.
-- **Reproduced 2026-09-24 on both tiers:** `'café'[3]` is the one-byte symbol `'\xC3'`, where `'é'` is right. By contrast, `len('café')` is 4 and `"café"[3]` is `"é"`.
-- **Knock-on:** `reverse`, `sort` and the other text sequence operations read characters through `item_at` (via `vector_text_items`, `lambda/runtime/lambda-vector.cpp:304`). So `reverse('café')` is `'\xC3fac'` and `sort('bé')` is `'b\xC3'`: the byte `0xA9` is lost, and neither result is valid UTF-8.
-- **Fix:** the UTF-8 path below the fast path already handles symbols correctly. Establish ASCII-ness for a symbol before choosing the path, either with `str_is_ascii` over its bytes or with an `is_ascii` bit on `Symbol`.
 
 ---
 

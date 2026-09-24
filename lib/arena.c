@@ -580,6 +580,19 @@ bool arena_owns(Arena* arena, const void* ptr) {
         return false;
     }
 
+    // The chunk being allocated from owns the most recent buffers -- a list
+    // that is still growing lives there -- so test it before walking the list
+    // from the oldest chunk. list growth asks on every step, and the walk made
+    // large documents quadratic (58% of Markdown parse time).
+    ArenaChunk* current = arena->current;
+    if (current) {
+        uintptr_t current_start = (uintptr_t)&current->data[0];
+        uintptr_t ptr_addr = (uintptr_t)ptr;
+        if (ptr_addr >= current_start && ptr_addr < current_start + current->used) {
+            return true;
+        }
+    }
+
     // Iterate through all chunks to find if ptr is within any chunk's data
     ArenaChunk* chunk = arena->first;
     while (chunk) {

@@ -70,6 +70,7 @@ static bool complex_components_from_item(Item item, double* real, double* imag) 
 Item complex_new(double real, double imag) {
     Complex* value = (Complex*)heap_calloc(sizeof(Complex), LMD_TYPE_COMPLEX);
     if (!value) return ItemError;
+    __atomic_store_n(&g_complex_value_created, true, __ATOMIC_RELAXED);
     value->type_id = LMD_TYPE_COMPLEX;
     value->real = real;
     value->imag = imag;
