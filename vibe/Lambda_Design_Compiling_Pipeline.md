@@ -432,6 +432,14 @@ reproduces the reducer's order, so constant indices, type-list order and
 diagnostic order are identical (verified by AST-dump identity over every
 `.ls` in the tree and run-output identity over `test/lambda`).
 
+**Measured (2026-09-24).** Release builds, `utils/compile_phase_bench.sh
+interp 5`, the 19 compiling scripts of the default corpus, sum of per-script
+minima: parse 93.9 → 78.8 ms (−16%), build+bind+validate+index 77.3 →
+52.2 ms (−33%), together 171.3 → 131.0 ms (−24%). Parse now pays for node
+allocation but no longer copies every reduction onto the tape;
+`oracle_poc.ls` goes 31.7 → 24.2 ms and `complex_iot_report_html.ls`
+73.1 → 55.0 ms.
+
 ### 3.9 Non-goals
 
 - No bytecode, no second IR, no change to the syntax/resolve split
@@ -454,6 +462,7 @@ diagnostic order are identical (verified by AST-dump identity over every
 | LC3.6 tape arena (superseded by LC3.9) | T0 critical | ≈1–2 ms | all rows, small |
 | LC3.7 JIT liveness/tables | jit + satellites | — | `lets_1000` 73 s → sub-second; jit tier −40–50% |
 | LC3.8 log gating | dev loop | — | debug-build compile 3× faster |
+| LC3.9 syntax/resolve split | T0 critical | parse+ast 31.7 → 24.2 ms (release) | corpus parse+ast −24% |
 
 ### 3.11 Implementation record (2026-09-22)
 
