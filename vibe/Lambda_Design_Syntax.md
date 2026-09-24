@@ -2389,6 +2389,16 @@ it decides with one token of lookahead. Admit the bare comma-list form and
 decomposition awaiting its `=` and the result expression. At statement level
 no result expression competes, so the comma list is unambiguous there.
 
+**Ratified as S2.5.4v2 (USER, 2026-09-24): an expression-level `let` exists
+only as an item of a parenthesized list.** Since P1 of the list fixes it may
+sit anywhere among the items (`(1, let x = 2, x)`), so the chain is no longer
+"terminated by its result expression" as above; outside a list, `let` is a
+statement. The C parser had admitted `let` as a prefix expression anywhere
+(`[let x = 1, x]`, `f(let x = 1)`, `1 + let x = 2`) and now rejects it with
+E100. In the reference grammar `let` stays a keyword in every expression
+position — tree-sitter otherwise lexes an unexpected keyword as a name, which
+had read `let a = let b = 2` as two statements.
+
 ### 7.19 Considered and rejected: `,` everywhere (`{ , , , }`)
 
 The last simplification available was to retire `;` entirely and separate

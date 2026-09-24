@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Verify native test-host dependency expansion in the Premake generator."""
+"""Verify native test-host dependency expansion and link dependencies in the Premake generator."""
 
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,10 +56,56 @@ def expect_node_core_provider(module, platform_name: str) -> None:
         fail(f"{platform_name} runtime-full test omitted the node-core trace provider")
 
 
+def lddeps_of(makefile: Path) -> set[str]:
+    return {dep for line in re.findall(r"^\s*LDDEPS \+=(.*)$", makefile.read_text(), re.M)
+            for dep in line.split()}
+
+
+def expect_archive_link_deps(module) -> None:
+    # Run the emitted hook through the installed premake: its gmake internals,
+    # not this generator, decide whether a rebuilt archive relinks a binary.
+    premake = os.environ.get("PREMAKE5_BIN") or shutil.which("premake5")
+    if not premake:
+        fail("premake5 not found")
+    generator = module.PremakeGenerator(str(ROOT / "build_lambda_config.json"), "linux")
+    generator.generate_archive_link_deps()
+    (ROOT / "temp").mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=ROOT / "temp") as work:
+        script = Path(work) / "premake5.lua"
+        script.write_text("\n".join([
+            *generator.premake_content,
+            'workspace "probe"',
+            '    configurations { "debug", "release" }',
+            '    location "build"',
+            '    language "C"',
+            'project "app"',
+            '    kind "ConsoleApp"',
+            '    files { "app.c" }',
+            '    linkoptions { "-Wl,-force_load,../lib/libgrammar.a", "../lib/libplain.a",',
+            '                  "-Wl,--start-group,../lib/libgroup.a,--end-group", "-lm" }',
+            'project "archive"',
+            '    kind "StaticLib"',
+            '    files { "archive.c" }',
+            '    linkoptions { "../lib/libgrammar.a" }',
+            '',
+        ]))
+        result = subprocess.run([premake, f"--file={script}", "gmake"],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if result.returncode != 0:
+            fail(f"premake5 gmake failed:\n{result.stdout}")
+        app_deps = lddeps_of(Path(work) / "build" / "app.make")
+        archive_deps = lddeps_of(Path(work) / "build" / "archive.make")
+    if app_deps != {"../lib/libgrammar.a", "../lib/libplain.a", "../lib/libgroup.a"}:
+        fail(f"executable LDDEPS omit its linkoptions archives: {sorted(app_deps)}")
+    if archive_deps:
+        fail(f"static library LDDEPS gained archives it never reads: {sorted(archive_deps)}")
+
+
 def main() -> int:
     module = load_generator_module()
     expect_node_core_provider(module, "macos")
     expect_node_core_provider(module, "linux")
+    expect_archive_link_deps(module)
     print("PREMAKE_GENERATOR_SELFTEST: passed")
     return 0
 

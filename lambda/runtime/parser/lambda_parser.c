@@ -88,6 +88,9 @@ static const char* const error_expected_parameter_name = "expected a parameter n
 static const char* const error_expected_parameter_close = "expected ')' after parameters";
 static const char* const error_arrow_body_expression =
     "'return', 'break', and 'continue' are statements; an arrow '=>' body is an expression";
+static const char* const error_let_outside_list =
+    "'let' binds as an expression only inside a parenthesized list; "
+    "write '(let x = 1, x + 1)' or a 'let' statement";
 static const char* const error_if_condition_close = "expected ')' after if condition";
 static const char* const error_if_body_close = "expected '}' after if body";
 static const char* const error_else_body_close = "expected '}' after else body";
@@ -521,6 +524,7 @@ static void parser_leave(LambdaRdParser* parser) {
 }
 
 static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp);
+static LambdaParseValue parse_let_expression(LambdaRdParser* parser);
 static LambdaParseValue parse_if_expression(LambdaRdParser* parser);
 static LambdaParseValue parse_if_statement(LambdaRdParser* parser);
 static bool if_starts_block_statement(const LambdaRdParser* parser);
@@ -542,6 +546,14 @@ static bool parser_consume_balanced(LambdaRdParser* parser, LambdaTokenKind open
 typedef LambdaParseValue (*LambdaParseItemFn)(LambdaRdParser* parser);
 
 static LambdaParseValue parser_parse_expression_item(LambdaRdParser* parser) {
+    return parse_expression(parser, 0);
+}
+
+// S2.5.4v2 (USER 2026-09-24): a `let` binds as an expression only as an item
+// of a parenthesized list -- `(let x = 1, x + 1)`. Everywhere else it is a
+// statement, so `parse_prefix` rejects it.
+static LambdaParseValue parser_parse_group_item(LambdaRdParser* parser) {
+    if (parser->current.kind == LAMBDA_TOK_LET) return parse_let_expression(parser);
     return parse_expression(parser, 0);
 }
 
@@ -1104,10 +1116,12 @@ static bool parser_parse_callable_signature(LambdaRdParser* parser, bool opener_
         &signature->return_count, &signature->raised);
 }
 
+// S16.9.7 (USER 2026-09-24): an arrow head takes a rest parameter as a named
+// function does, so `(...) => len(varg())` is an arrow, not a group followed by `=>`.
 static bool arrow_head_candidate(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
     LambdaCallableSignature signature;
-    if (!parser_parse_callable_signature(&probe, true, false,
+    if (!parser_parse_callable_signature(&probe, true, true,
             error_expected_arrow_parameter_name,
             error_expected_arrow_parameter_close, &signature)) return false;
     return probe.current.kind == LAMBDA_TOK_ARROW;
@@ -1131,7 +1145,7 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
     if (arrow_head_candidate(parser)) {
         parser_context(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN, first.span, first);
         LambdaCallableSignature signature;
-        if (!parser_parse_callable_signature(parser, true, false,
+        if (!parser_parse_callable_signature(parser, true, true,
                 error_expected_arrow_parameter_name,
                 error_expected_arrow_parameter_close, &signature)) return 0;
         children[count++] = signature.parameters;
@@ -1140,14 +1154,16 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
         }
         if (!parser_parse_arrow_body(parser, &children[count++])) return 0;
         SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
-        LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FUNCTION, LAMBDA_REDUCTION_FORM_FUNCTION, span, first, (LambdaToken){0}, signature.raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0u, children, count);
+        uint32_t flags = (signature.raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0u) |
+            (signature.variadic ? LAMBDA_REDUCTION_FLAG_VARIADIC : 0u);
+        LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FUNCTION, LAMBDA_REDUCTION_FORM_FUNCTION, span, first, (LambdaToken){0}, flags, children, count);
         parser_context(parser, LAMBDA_REDUCTION_FORM_FUNCTION_END, first.span, first);
         parser_context(parser, LAMBDA_REDUCTION_FORM_GROUP_END, first.span, first);
         return result;
     }
     bool empty_group = parser_accept(parser, LAMBDA_TOK_RPAREN);
     if (!empty_group) {
-        if (!parser_parse_expression_list(parser, LAMBDA_TOK_RPAREN, children, 64, &count, false, parser_parse_expression_item,
+        if (!parser_parse_expression_list(parser, LAMBDA_TOK_RPAREN, children, 64, &count, false, parser_parse_group_item,
                 error_too_many_grouped_expressions)) return 0;
     }
     parser_context(parser, LAMBDA_REDUCTION_FORM_GROUP_END, first.span, first);
@@ -1563,7 +1579,9 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         // S16.2.3v3 banned set below.
         value = parse_prefix_operator(parser, first, first.kind == LAMBDA_TOK_NOT ? LAMBDA_BP_MEMBERSHIP : LAMBDA_BP_PREFIX);
     } else if (first.kind == LAMBDA_TOK_LET) {
-        value = parse_let_expression(parser);
+        // A list item reaches `parse_let_expression` through
+        // `parser_parse_group_item`, never through here.
+        parser_set_error(parser, error_let_outside_list, LAMBDA_TOK_LPAREN);
     } else if (first.kind == LAMBDA_TOK_IF) {
         value = parse_if_expression(parser);
     } else if (first.kind == LAMBDA_TOK_FOR) {

@@ -1,0 +1,8 @@
+{
+  counts: [3, 0],
+  mixed: 12,
+  captured: 106,
+  indexed: "b",
+  own_args: 2,
+  as_value: 6
+}

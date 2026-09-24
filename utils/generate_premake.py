@@ -637,6 +637,45 @@ class PremakeGenerator:
         _, standard, _ = self._get_language_info(target)
         return standard
 
+    def generate_archive_link_deps(self) -> None:
+        """Make gmake relink a binary when a static archive in its linkoptions changes."""
+        self.premake_content.extend([
+            '-- Premake lists only sibling projects in LDDEPS, but external archives such',
+            '-- as the tree-sitter grammars, MIR and RE2 reach the linker through',
+            '-- linkoptions (-Wl,-force_load,<lib>.a, GNU link groups, plain paths), so a',
+            '-- rebuilt archive never relinked its binary. List those archives as well.',
+            'do',
+            '    local gmake = require("gmake")',
+            '    -- premake 5.0-beta5+ emits LDDEPS from gmake.cpp.ldDeps; the legacy gmake',
+            '    -- of beta4 and earlier (beta2 in the Linux CI image) emits it from gmake.ldDeps',
+            '    local legacy = not (gmake.cpp and gmake.cpp.ldDeps)',
+            '    local scope = legacy and gmake or gmake.cpp',
+            '    if scope.ldDeps then',
+            '        premake.override(scope, "ldDeps", function(base, cfg, toolset)',
+            '            base(cfg, toolset)',
+            '            -- archiving a static library reads no other archive',
+            '            if cfg.kind == premake.STATICLIB then return end',
+            '            local archives = {}',
+            '            for _, option in ipairs(cfg.linkoptions) do',
+            '                for token in option:gmatch("[^%s,]+") do',
+            '                    if token:find("%.a$") and not token:find("^%-") and',
+            '                            not table.contains(archives, token) then',
+            '                        table.insert(archives, token)',
+            '                    end',
+            '                end',
+            '            end',
+            '            if #archives > 0 then',
+            '                premake.outln((legacy and "  " or "") .. "LDDEPS +=" ..',
+            '                    gmake.list(premake.esc(archives)))',
+            '            end',
+            '        end)',
+            '    else',
+            '        premake.warn("gmake has no ldDeps hook; rebuilt static archives will not relink")',
+            '    end',
+            'end',
+            '',
+        ])
+
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
         vlog("DEBUG: Generating workspace configuration...")
@@ -3847,6 +3886,7 @@ class PremakeGenerator:
         vlog(f"DEBUG: Added header comment for {platform_name}")
 
         # Generate all sections
+        self.generate_archive_link_deps()
         vlog("DEBUG: Generating workspace...")
         self.generate_workspace()
         vlog("DEBUG: Generating library projects...")
