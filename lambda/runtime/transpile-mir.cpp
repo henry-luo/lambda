@@ -975,8 +975,7 @@ static bool mir_var_param_may_publish(AstNamedNode* param) {
 
 static Type* mir_named_contract(AstNamedNode* named) {
     if (!named) return NULL;
-    TypeParam* parameter = named->type && named->type->kind == TYPE_KIND_PARAM
-        ? (TypeParam*)named->type : NULL;
+    TypeParam* parameter = lambda_type_param(named->type);
     // TypeParam keeps a compact payload TypeId, while contract_type retains
     // semantic wrappers such as the implicit T? on `p?: T`.  Consulting the
     // source annotation first erased that nullability before lane selection.
@@ -1223,10 +1222,10 @@ static bool mir_function_uses_value_typed_array_witness(AstFuncNode* fn_node) {
 }
 
 static TypeId mir_typed_array_element_type(AstNamedNode* param) {
-    if (!param || !param->type || param->type->kind != TYPE_KIND_PARAM) {
+    TypeParam* type_param = param ? lambda_type_param(param->type) : NULL;
+    if (!type_param) {
         return LMD_TYPE_ANY;
     }
-    TypeParam* type_param = (TypeParam*)param->type;
     Type* full = type_param->full_type ? type_param->full_type :
         type_param->contract_type;
     Type* element = mir_array_occurrence_element(full);
@@ -3932,9 +3931,7 @@ static bool mir_bool_or_null_binding_scan_node(AstNode* node, void* opaque) {
     for (AstNamedNode* parameter = callee ? callee->param : NULL;
             parameter && !may_mutate_argument;
             parameter = (AstNamedNode*)parameter->next) {
-        TypeParam* type_param = parameter->type &&
-                parameter->type->kind == TYPE_KIND_PARAM
-            ? (TypeParam*)parameter->type : NULL;
+        TypeParam* type_param = lambda_type_param(parameter->type);
         may_mutate_argument = type_param && type_param->is_var_param;
     }
     if (!may_mutate_argument) return true;
@@ -4644,8 +4641,7 @@ static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_p
     // MIR native-call metadata must keep them as boxed containers; treating
     // `float[]` as scalar FLOAT makes callers pass an array where the proto
     // expects a double.
-    if (param->type && param->type->kind == TYPE_KIND_PARAM) {
-        TypeParam* tp_cast = (TypeParam*)param->type;
+    if (TypeParam* tp_cast = lambda_type_param(param->type)) {
         Type* full = tp_cast->full_type ? tp_cast->full_type : tp_cast->contract_type;
         Type* element = mir_array_occurrence_element(full);
         if (element) {
@@ -7468,9 +7464,7 @@ static bool mir_direct_call_has_parameter_error_guard(MirTranspiler* mt,
         } else if (positional) {
             positional = (AstNamedNode*)positional->next;
         }
-        TypeParam* type_param = parameter && parameter->type &&
-            parameter->type->kind == TYPE_KIND_PARAM
-            ? (TypeParam*)parameter->type : NULL;
+        TypeParam* type_param = parameter ? lambda_type_param(parameter->type) : NULL;
         bool argument_error = mir_argument_may_return_item_error(mt, value);
         if (mir_param_short_circuits_item_error(type_param) &&
                 argument_error) return true;
@@ -16163,8 +16157,7 @@ static void mir_loop_cow_quiet_call_args(MirLoopCowScan* scan, AstCallNode* call
     AstNamedNode* param = callee->param;
     for (int i = 0; param && i < LAMBDA_MAX_FUNCTION_ARGS;
             i++, param = (AstNamedNode*)param->next) {
-        TypeParam* type_param = param->type && param->type->kind == TYPE_KIND_PARAM
-            ? (TypeParam*)param->type : NULL;
+        TypeParam* type_param = lambda_type_param(param->type);
         // same retention rule as the call emitter's plain-argument mark
         bool plain_arg_may_retain = !type_param ||
             (!type_param->is_var_param && (!param->entry ||
@@ -27066,8 +27059,7 @@ static bool mir_inline_stmt_ok(MirTranspiler* mt, AstFuncNode* fn, AstNode* node
         if (return_tid != LMD_TYPE_ANY) return false;
         AstCompoundAssignNode* store = (AstCompoundAssignNode*)base;
         AstNamedNode* array = mir_inline_param_for(fn, store->object);
-        TypeParam* array_type = array && array->type &&
-            array->type->kind == TYPE_KIND_PARAM ? (TypeParam*)array->type : NULL;
+        TypeParam* array_type = array ? lambda_type_param(array->type) : NULL;
         TypeId elem = array ? mir_typed_array_element_type(array) : LMD_TYPE_ANY;
         // The value's own lane is not checked here: the inlined store emits
         // through the same emitter, on the same array carrier, as the callee
@@ -27135,8 +27127,7 @@ static bool mir_inline_callee_ok(MirTranspiler* mt, AstFuncNode* fn,
     int index = 0;
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)param->next, index++) {
-        TypeParam* type_param = param->type &&
-            param->type->kind == TYPE_KIND_PARAM ? (TypeParam*)param->type : NULL;
+        TypeParam* type_param = lambda_type_param(param->type);
         if (!type_param || type_param->is_optional || type_param->default_value ||
                 type_param->binder || !param->entry ||
                 !mir_param_is_declared(fn, index)) return false;
@@ -27177,8 +27168,7 @@ static MirVarEntry* mir_inline_array_argument(MirTranspiler* mt,
     if (var->elem_type != mir_param_array_element_type(fn, index, param)) {
         return NULL;
     }
-    TypeParam* type_param = param && param->type &&
-        param->type->kind == TYPE_KIND_PARAM ? (TypeParam*)param->type : NULL;
+    TypeParam* type_param = param ? lambda_type_param(param->type) : NULL;
     // a `var` parameter writes through, so the caller's binding must be a
     // place the caller itself may write
     if (type_param && type_param->is_var_param &&
@@ -38854,9 +38844,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             for (AstNamedNode* binder_param = fn_node->param;
                 binder_param && binder_index < user_param_count;
                 binder_param = (AstNamedNode*)((AstNode*)binder_param)->next, binder_index++) {
-            TypeParam* parameter_type = binder_param->type &&
-                binder_param->type->kind == TYPE_KIND_PARAM
-                ? (TypeParam*)binder_param->type : NULL;
+            TypeParam* parameter_type = lambda_type_param(binder_param->type);
             Type* contract = mir_param_contract_at(fn_node, binder_index);
             bool binder_site = parameter_type && parameter_type->binder;
             if (!binder_site) binder_site = mir_contract_has_binder(contract, false);
@@ -38878,9 +38866,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             for (AstNamedNode* ref_param = fn_node->param;
                 ref_param && ref_index < user_param_count;
                 ref_param = (AstNamedNode*)((AstNode*)ref_param)->next, ref_index++) {
-            TypeParam* parameter_type = ref_param->type &&
-                ref_param->type->kind == TYPE_KIND_PARAM
-                ? (TypeParam*)ref_param->type : NULL;
+            TypeParam* parameter_type = lambda_type_param(ref_param->type);
             Type* contract = mir_param_contract_at(fn_node, ref_index);
             bool binder_site = parameter_type && parameter_type->binder;
             if (!binder_site) binder_site = mir_contract_has_binder(contract, false);
@@ -38992,8 +38978,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 // keeps `T?` visible to null-propagating arithmetic and boxing.
                 native_param->full_type = mir_param_contract_at(fn_node, pi);
             }
-            if (native_param && tid == LMD_TYPE_ARRAY_NUM && param->type &&
-                    param->type->kind == TYPE_KIND_PARAM) {
+            if (native_param && tid == LMD_TYPE_ARRAY_NUM &&
+                    lambda_type_param(param->type)) {
                 // The native caller or wrapper has admitted the typed-array
                 // representation before this raw body starts. A `var` param
                 // retains its live COW guard, but that ownership fact is
@@ -39093,8 +39079,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             if (var_type == LMD_TYPE_ARRAY_NUM) {
                 // Re-derive element type from the param's type annotation
                     param_elem_tid = mir_param_array_element_type(fn_node, pi, param);
-                if (param->type && param->type->kind == TYPE_KIND_PARAM) {
-                    TypeParam* tp_cast = (TypeParam*)param->type;
+                if (TypeParam* tp_cast = lambda_type_param(param->type)) {
                     Type* full = tp_cast->full_type ? tp_cast->full_type : tp_cast->contract_type;
                     Type* element = mir_array_occurrence_element(full);
                     if (element) param_elem_tid = element->type_id;

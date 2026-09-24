@@ -1053,6 +1053,14 @@ typedef struct TypeParam : Type {
     struct AstNode* type_expr; // source contract, retained for binder ordering checks
 } TypeParam;
 
+// TYPE_KIND_PARAM marks a TypeParam, which every AST_NODE_PARAM binding owns.
+// Pass only such a binding's type: a TypeParam keeps its carrier TypeId, and a
+// non-literal f16 Type stores NUM_FLOAT16, which equals TYPE_KIND_PARAM, in
+// the same `kind` field, so the test cannot classify an arbitrary Type.
+static inline TypeParam* lambda_type_param(Type* type) {
+    return type && type->kind == TYPE_KIND_PARAM ? (TypeParam*)type : NULL;
+}
+
 typedef struct TypeFunc : Type {
     TypeParam* param;
     Type* returned;         // established success type used by the current call ABI

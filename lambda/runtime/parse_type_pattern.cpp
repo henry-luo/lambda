@@ -789,8 +789,7 @@ AstNode* parse_fn_type(Lexer* lx, bool is_proc) {
         while (!at(lx, ')') && lx->p < lx->end) {
             StrView pname = take_word(lx);
             if (!pname.length) { fail(lx, "expected a parameter name"); return NULL; }
-            TypeParam* param = (TypeParam*)alloc_type(lx->tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
-            param->kind = TYPE_KIND_PARAM;
+            TypeParam* param = alloc_type_param(lx->tp->pool, NULL);
             param->is_optional = eat(lx, '?');
             if (eat(lx, ':')) {
                 AstNode* declared = parse_binder(lx);

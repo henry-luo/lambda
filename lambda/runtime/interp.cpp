@@ -1163,8 +1163,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         AstNamedNode* parameter, const char* boundary) {
     if (!parameter) return value;
-    TypeParam* parameter_type = parameter->type &&
-        parameter->type->kind == TYPE_KIND_PARAM ? (TypeParam*)parameter->type : NULL;
+    TypeParam* parameter_type = lambda_type_param(parameter->type);
     if (parameter_type && parameter_type->binder) {
         Scratch source_root(f);
         source_root.set(value);
@@ -1208,8 +1207,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
 }
 
 static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
-    TypeParam* parameter_type = parameter && parameter->type &&
-        parameter->type->kind == TYPE_KIND_PARAM ? (TypeParam*)parameter->type : NULL;
+    TypeParam* parameter_type = parameter ? lambda_type_param(parameter->type) : NULL;
     Type* contract = parameter_type && parameter_type->contract_type
         ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
     return parameter_type && (parameter_type->binder ||
@@ -1907,9 +1905,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             if (value_node) {
                 words[i] = eval_expr(f, value_node).item;
             } else {
-                TypeParam* type_param = parameter && parameter->type &&
-                    parameter->type->kind == TYPE_KIND_PARAM
-                    ? (TypeParam*)parameter->type : NULL;
+                TypeParam* type_param = parameter ? lambda_type_param(parameter->type) : NULL;
                 words[i] = type_param && type_param->default_value
                     ? eval_expr(f, type_param->default_value).item : ITEM_NULL;
             }

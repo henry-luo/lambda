@@ -366,6 +366,34 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
     shell_result_free(&result);
 }
 
+TEST(TypeContractMetadataTest, AstDumpViewStateBindingsCarryNoParameterContract) {
+    // A view `state` binding is an AST_NODE_PARAM whose TypeParam carries no
+    // contract. It once held its initializer's plain Type, and dumping a
+    // handler's assignment to it read a contract past the end of that Type.
+    const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
+        "test/lambda/view_state.ls", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+    // the census trailer follows the tree, so the whole dump was emitted
+    EXPECT_NE(strstr(result.stdout_buf, "(any_census "), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"flag\")))"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"cursor\")))"), nullptr);
+    // f16 initializers: the width NUM_FLOAT16 equals TYPE_KIND_PARAM, so a
+    // plain Type here was taken for a TypeParam and still crashed
+    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"level\")))"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"trim\")))"), nullptr);
+    // a handler's own parameter is still a TypeParam with its contract
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(AST_NODE_PARAM (name \"e\") (contract \"any \\\\ error\") "
+        "(contract_explicit false))"), nullptr);
+
+    shell_result_free(&result);
+}
+
 TEST(TypeContractMetadataTest, SysFuncRelationsInstantiateSelectedArguments) {
     const char* args[] = {LAMBDA_EXE, "--emit-ast-dump",
         "test/lambda/sysfunc_type_relations.ls", NULL};

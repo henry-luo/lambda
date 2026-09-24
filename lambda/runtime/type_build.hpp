@@ -22,6 +22,10 @@ void parse_occurrence_count(StrView op_str, int* min_count, int* max_count);
 ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* name, Type* field_type,
         ShapeEntry** shape, ShapeEntry** prev_entry, int byte_offset);
 
+// Allocate the TypeParam an AST_NODE_PARAM binding owns: `carrier`'s compact
+// prefix (`any` when NULL) marked TYPE_KIND_PARAM; contract and full_type unset.
+TypeParam* alloc_type_param(Pool* pool, const Type* carrier);
+
 // Fold a declared type into a TypeParam (compact prefix, retained contract,
 // full_type selection). Used for `fn(a: T)` parameters.
 void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* declared);

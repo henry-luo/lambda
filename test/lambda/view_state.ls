@@ -55,4 +55,17 @@ on focus() {
   cursor = 1
 }
 apply(<msg "hi">)
+0
+
+// Test 8: State initialized from non-literal f16 values, written by a handler
+// (an f16 Type stores its width in the same `kind` field as TYPE_KIND_PARAM)
+let half: f16 = 1.5f16
+view <gauge> state level: half, trim: 0.5f16 + 0.25f16 {
+  string(level) ++ "," ++ string(trim)
+}
+on change() {
+  level = half
+  trim = 1.0f16
+}
+apply(<gauge>)
 

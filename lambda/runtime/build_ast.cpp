@@ -3174,9 +3174,9 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
         }
         else {
             ast_node->type = entry->node->type;
-            if (entry->node->node_type == AST_NODE_PARAM && entry->node->type &&
-                    entry->node->type->kind == TYPE_KIND_PARAM) {
-                TypeParam* pt = (TypeParam*)entry->node->type;
+            TypeParam* pt = entry->node->node_type == AST_NODE_PARAM
+                ? lambda_type_param(entry->node->type) : NULL;
+            if (pt) {
                 // The compact TypeParam prefix selects the call ABI, but it
                 // hid an implicit `any \\ error` in recursive expression typing.
                 // Reads must expose the retained source contract so `or` and
@@ -4616,9 +4616,8 @@ AstNode* build_match_from_parts(Transpiler* tp, SourceSpan span,
     if (value && value->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)value;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
-        TypeParam* parameter = binding && binding->node_type == AST_NODE_PARAM &&
-                binding->type && binding->type->kind == TYPE_KIND_PARAM
-            ? (TypeParam*)binding->type : NULL;
+        TypeParam* parameter = binding && binding->node_type == AST_NODE_PARAM
+            ? lambda_type_param(binding->type) : NULL;
         if (parameter && !parameter->has_explicit_contract && parameter->contract_type &&
                 !lambda_type_accepts_error(parameter->contract_type) &&
                 match_has_error_handler(node)) {
@@ -5459,6 +5458,16 @@ static void enter_for_group_scope(Transpiler* tp, AstForNode* for_node) {
 // assignment statement for mutable variables (procedural only)
 // supports: x = val, arr[i] = val, obj.field = val
 
+
+// A TypeParam keeps its carrier's compact Type prefix -- the view native call
+// lowering reads -- and TYPE_KIND_PARAM marks the record. Every AST_NODE_PARAM
+// binding owns one, so its consumers never test `kind` on a plain Type.
+TypeParam* alloc_type_param(Pool* pool, const Type* carrier) {
+    TypeParam* param = (TypeParam*)alloc_type(pool, LMD_TYPE_ANY, sizeof(TypeParam));
+    *(Type*)param = carrier ? *carrier : TYPE_ANY;
+    param->kind = TYPE_KIND_PARAM;
+    return param;
+}
 
 // returns NULL for variadic marker (...)
 // Fold a declared type into a TypeParam: copy the compact Type prefix, restore
@@ -7859,13 +7868,14 @@ static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
     if (!node || node->node_type != AST_NODE_IDENT) return false;
     NameEntry* entry = ((AstIdentNode*)node)->entry;
     AstNode* binding = entry ? entry->node : NULL;
-    if (!binding || binding->node_type != AST_NODE_PARAM || !binding->type ||
-            binding->type->kind != TYPE_KIND_PARAM) return false;
+    TypeParam* parameter = binding && binding->node_type == AST_NODE_PARAM
+        ? lambda_type_param(binding->type) : NULL;
+    if (!parameter) return false;
     // only this function's own parameter; a captured outer one is not its caller's
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
         if ((AstNode*)param == binding) {
-            return lambda_type_param_is_colour_poly((TypeParam*)binding->type);
+            return lambda_type_param_is_colour_poly(parameter);
         }
     }
     return false;
@@ -7906,8 +7916,7 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
     int index = 0;
     for (AstNamedNode* param = callee->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
             param = (AstNamedNode*)((AstNode*)param)->next, index++) {
-        if (!param->type || param->type->kind != TYPE_KIND_PARAM ||
-                !lambda_type_param_is_colour_poly((TypeParam*)param->type)) continue;
+        if (!lambda_type_param_is_colour_poly(lambda_type_param(param->type))) continue;
         AstNode* value = index >= shift ? resolved[index - shift] : NULL;
         CallColour colour = value ? colour_walk_value(walk, value) :
             (index < shift ? CALL_COLOUR_UNKNOWN : CALL_COLOUR_FN);
@@ -8827,8 +8836,14 @@ static bool direct_view_add_state(LambdaDirectAstSink* sink,
     AstNamedNode* binding = (AstNamedNode*)alloc_ast_node_from_span(tp,
         AST_NODE_PARAM, reduction->span, sizeof(AstNamedNode));
     binding->name = state->name;
-    binding->type = state->value && state->value->type
+    // State has no contract: reads keep the initializer's type via full_type.
+    // A plain Type here passed parameter consumers' `kind` test whenever it was
+    // a non-literal f16, whose width NUM_FLOAT16 equals TYPE_KIND_PARAM.
+    Type* initial = state->value && state->value->type
         ? state->value->type : &TYPE_ANY;
+    TypeParam* binding_type = alloc_type_param(tp->pool, initial);
+    binding_type->full_type = initial;
+    binding->type = (Type*)binding_type;
     lambda_ast_register_name(tp, binding);
     NameEntry* entry = lookup_name_in_current_scope(tp, binding->name);
     if (entry) {
@@ -9175,7 +9190,7 @@ static bool direct_scope_has_forward_binder_ref(NameScope* scope, String* name) 
     if (!scope || !name) return false;
     for (NameEntry* entry = scope->first; entry; entry = entry->next) {
         if (!entry->node || entry->node->node_type != AST_NODE_PARAM) continue;
-        TypeParam* parameter = (TypeParam*)entry->node->type;
+        TypeParam* parameter = lambda_type_param(entry->node->type);
         if (!parameter || !parameter->type_expr) continue;
         DirectBinderForwardRef search = {name, false, 0};
         direct_find_forward_binder_ref(parameter->type_expr, NULL, &search);
@@ -10522,26 +10537,19 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
         AST_NODE_PARAM, span, sizeof(AstNamedNode));
     param->name = name_pool_create_strview(tp->name_pool, name);
     param->as = default_value;
-    TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY,
-        sizeof(TypeParam));
     Type* declared = type_expr ? type_expr->type : NULL;
     declared = unwrap_simple_type_type(declared);
+    // an undeclared parameter takes its default's prefix, else `any`
+    TypeParam* param_type = alloc_type_param(tp->pool,
+        declared ? declared : default_value ? default_value->type : NULL);
     if (declared) {
-        *(Type*)param_type = *declared;
         param_type->full_type = declared;
         param->declared_type = declared;
         set_param_contract(param_type,
             parameter_contract_for_declared(tp, declared, optional, default_value), true);
-    } else if (default_value && default_value->type) {
-        *(Type*)param_type = *default_value->type;
-        param_type->full_type = NULL;
-        set_param_contract(param_type, &TYPE_ANY_NO_ERROR, false);
     } else {
-        *(Type*)param_type = TYPE_ANY;
-        param_type->full_type = NULL;
         set_param_contract(param_type, &TYPE_ANY_NO_ERROR, false);
     }
-    param_type->kind = TYPE_KIND_PARAM;
     param_type->is_optional = optional;
     param_type->is_var_param = is_var;
     param_type->default_value = default_value;

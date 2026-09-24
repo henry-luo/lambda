@@ -435,7 +435,8 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         }
         case AST_NODE_PARAM: {
             AstNamedNode* named = (AstNamedNode*)node;
-            TypeParam* parameter = (TypeParam*)named->type;
+            // a view `state` binding's TypeParam carries no contract
+            TypeParam* parameter = lambda_type_param(named->type);
             emit_dump_string_field("name", named->name);
             if (parameter && parameter->contract_type) {
                 emit_dump_contract_field("contract", parameter->contract_type,
