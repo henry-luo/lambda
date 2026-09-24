@@ -57,6 +57,8 @@ void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args);
 //   %Q  — double-quote Lambda String* with \ and " escaped:  "arg"
 //   %b  — bool as text: true or false (int arg, 0=false)
 //   %N  — name/key semantic alias for %s (C string)
+//   %.*s — at most N bytes of a C string, stopping at a NUL (int N, const char*),
+//          as printf; the formatters' "%.*s" copies need no vsnprintf pass
 void stringbuf_emit(StringBuf *sb, const char *fmt, ...);
 void stringbuf_vemit(StringBuf *sb, const char *fmt, va_list args);
 

@@ -2182,3 +2182,38 @@ TEST(StrKernelTest, SetScannersMatchNaive) {
         ASSERT_EQ(str_skip_chars(zbuf, set), z_skip) << "round " << round;
     }
 }
+
+TEST(StrKernelTest, ByteSetFindMatchesNaive) {
+    // the scan tests 8-byte blocks: long buffers, sparse and dense members at
+    // every block offset, and members among high bytes and NUL
+    char buf[200];
+    for (int round = 0; round < 20000; round++) {
+        size_t len = (size_t)(kernel_rand() % sizeof(buf));
+        StrByteSet set;
+        str_byteset_clear(&set);
+        int members = 1 + (int)(kernel_rand() % 6);
+        for (int m = 0; m < members; m++) str_byteset_add(&set, (unsigned char)(kernel_rand() % 256));
+        // one in `density` bytes is drawn from all 256 values, the rest are 'x'
+        unsigned density = 1 + kernel_rand() % 64;
+        for (size_t i = 0; i < len; i++) {
+            buf[i] = kernel_rand() % density == 0 ? (char)(kernel_rand() % 256) : 'x';
+        }
+        size_t naive_find = STR_NPOS, naive_not = STR_NPOS;
+        for (size_t i = 0; i < len && naive_find == STR_NPOS; i++) {
+            if (str_byteset_test(&set, (unsigned char)buf[i])) naive_find = i;
+        }
+        for (size_t i = 0; i < len && naive_not == STR_NPOS; i++) {
+            if (!str_byteset_test(&set, (unsigned char)buf[i])) naive_not = i;
+        }
+        ASSERT_EQ(str_find_byteset(buf, len, &set), naive_find) << "round " << round;
+        // with 'x' a member, the not-member scan runs over long runs too
+        StrByteSet with_x = set;
+        str_byteset_add(&with_x, 'x');
+        size_t naive_not_x = STR_NPOS;
+        for (size_t i = 0; i < len && naive_not_x == STR_NPOS; i++) {
+            if (!str_byteset_test(&with_x, (unsigned char)buf[i])) naive_not_x = i;
+        }
+        ASSERT_EQ(str_find_not_byteset(buf, len, &set), naive_not) << "round " << round;
+        ASSERT_EQ(str_find_not_byteset(buf, len, &with_x), naive_not_x) << "round " << round;
+    }
+}

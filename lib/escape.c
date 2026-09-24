@@ -167,14 +167,64 @@ static void escape_append_str_stringbuf(void* out, const char* s) {
     stringbuf_append_str((StringBuf*)out, s);
 }
 
+/* length-aware appends: the typed wrappers bulk-copy runs that need no
+ * escaping instead of calling append_char through a pointer for every byte */
+typedef void (*EscapeAppendNFn)(void* out, const char* s, size_t n);
+
+static void escape_append_n_strbuf(void* out, const char* s, size_t n) {
+    strbuf_append_str_n((StrBuf*)out, s, n);
+}
+
+static void escape_append_n_stringbuf(void* out, const char* s, size_t n) {
+    stringbuf_append_str_n((StringBuf*)out, s, n);
+}
+
+/* Appends s[i..] up to the first byte in `stops` -- the bytes the calling
+ * escaper must handle itself -- and returns that byte's index, or len. Clean
+ * text then costs one scan and one bulk copy per run instead of a rule lookup
+ * and an indirect append per byte. Without a length-aware sink (the public
+ * callback entry points) the run still goes out a byte at a time. */
+static size_t escape_append_run(void* out, const char* s, size_t i, size_t len,
+                                const StrByteSet* stops,
+                                EscapeAppendCharFn append_char,
+                                EscapeAppendNFn append_n) {
+    size_t at = str_find_byteset(s + i, len - i, stops);
+    size_t end = at == STR_NPOS ? len : i + at;
+    if (append_n) {
+        if (end > i) append_n(out, s + i, end - i);
+    } else {
+        for (size_t k = i; k < end; k++) append_char(out, s[k]);
+    }
+    return end;
+}
+
+size_t escape_append_run_stringbuf(StringBuf* out, const char* s, size_t from,
+                                   size_t len, const StrByteSet* stops) {
+    return escape_append_run(out, s, from, len, stops,
+                             escape_append_char_stringbuf, escape_append_n_stringbuf);
+}
+
+/* The bytes the JSON escaper handles: controls, '"' and '\\', plus 0xED -- the
+ * only lead byte of a UTF-8 surrogate -- when surrogates are escaped. Word w
+ * of a StrByteSet holds bytes 64w..64w+63. */
+static const StrByteSet ESCAPE_JSON_STOPS = {{
+    0xFFFFFFFFULL | (1ULL << '"'), 1ULL << ('\\' - 64), 0, 0 }};
+static const StrByteSet ESCAPE_JSON_SURROGATE_STOPS = {{
+    0xFFFFFFFFULL | (1ULL << '"'), 1ULL << ('\\' - 64), 0, 1ULL << (0xED - 192) }};
+
 static void escape_append_json_common(void* out, const char* s, size_t len,
         bool quote, bool escape_utf8_surrogates,
-        EscapeAppendCharFn append_char, EscapeAppendStrFn append_str) {
+        EscapeAppendCharFn append_char, EscapeAppendStrFn append_str,
+        EscapeAppendNFn append_n) {
     if (!out || !s || !append_char || !append_str) return;
 
     if (quote) append_char(out, '"');
+    const StrByteSet* stops = escape_utf8_surrogates ? &ESCAPE_JSON_SURROGATE_STOPS
+                                                     : &ESCAPE_JSON_STOPS;
     char tmp[16];
     for (size_t i = 0; i < len; i++) {
+        i = escape_append_run(out, s, i, len, stops, append_char, append_n);
+        if (i >= len) break;
         unsigned char c = (unsigned char)s[i];
         const char* replacement = escape_find_rule((char)c, ESCAPE_RULES_JSON, ESCAPE_RULES_JSON_COUNT);
         if (replacement) {
@@ -224,27 +274,45 @@ static void escape_append_json_common(void* out, const char* s, size_t len,
 void escape_append_json_string(StrBuf* out, const char* s, size_t len,
                                bool quote, bool escape_utf8_surrogates) {
     escape_append_json_common(out, s, len, quote, escape_utf8_surrogates,
-        escape_append_char_strbuf, escape_append_str_strbuf);
+        escape_append_char_strbuf, escape_append_str_strbuf, escape_append_n_strbuf);
 }
 
 void escape_append_json_stringbuf(StringBuf* out, const char* s, size_t len,
                                   bool quote, bool escape_utf8_surrogates) {
     escape_append_json_common(out, s, len, quote, escape_utf8_surrogates,
-        escape_append_char_stringbuf, escape_append_str_stringbuf);
+        escape_append_char_stringbuf, escape_append_str_stringbuf, escape_append_n_stringbuf);
 }
 
 void escape_append_json_to(void* out, const char* s, size_t len,
                            bool quote, bool escape_utf8_surrogates,
                            EscapeAppendCharFn append_char, EscapeAppendStrFn append_str) {
     escape_append_json_common(out, s, len, quote, escape_utf8_surrogates,
-                              append_char, append_str);
+                              append_char, append_str, NULL);
 }
 
-void escape_append_quoted_to(void* out, const char* s, size_t len, char quote,
-                             EscapeQuotedOptions options,
-                             EscapeAppendCharFn append_char, EscapeAppendStrFn append_str) {
+static void escape_append_quoted_common(void* out, const char* s, size_t len, char quote,
+        EscapeQuotedOptions options, EscapeAppendCharFn append_char,
+        EscapeAppendStrFn append_str, EscapeAppendNFn append_n) {
     if (!out || !s || !append_char || !append_str) return;
+    /* exactly the bytes the branches below rewrite or drop */
+    StrByteSet stops;
+    str_byteset_clear(&stops);
+    str_byteset_add(&stops, '\\');
+    str_byteset_add(&stops, (unsigned char)quote);
+    if (options & (ESCAPE_QUOTED_LINE_BREAKS | ESCAPE_QUOTED_DROP_CARRIAGE_RETURN)) {
+        str_byteset_add(&stops, '\r');
+    }
+    if (options & ESCAPE_QUOTED_LINE_BREAKS) {
+        str_byteset_add(&stops, '\n');
+        str_byteset_add(&stops, '\t');
+    }
+    if (options & ESCAPE_QUOTED_C_CONTROLS) {
+        str_byteset_add(&stops, '\b');
+        str_byteset_add(&stops, '\f');
+    }
     for (size_t i = 0; i < len; i++) {
+        i = escape_append_run(out, s, i, len, &stops, append_char, append_n);
+        if (i >= len) break;
         char ch = s[i];
         if (ch == '\\') append_str(out, "\\\\");
         else if (ch == quote) {
@@ -261,29 +329,35 @@ void escape_append_quoted_to(void* out, const char* s, size_t len, char quote,
     }
 }
 
+void escape_append_quoted_to(void* out, const char* s, size_t len, char quote,
+                             EscapeQuotedOptions options,
+                             EscapeAppendCharFn append_char, EscapeAppendStrFn append_str) {
+    escape_append_quoted_common(out, s, len, quote, options, append_char, append_str, NULL);
+}
+
 void escape_append_js_quoted(StrBuf* out, const char* s, size_t len, char quote) {
-    escape_append_quoted_to(out, s, len, quote, ESCAPE_QUOTED_LINE_BREAKS,
-                            escape_append_char_strbuf, escape_append_str_strbuf);
+    escape_append_quoted_common(out, s, len, quote, ESCAPE_QUOTED_LINE_BREAKS,
+        escape_append_char_strbuf, escape_append_str_strbuf, escape_append_n_strbuf);
 }
 
 void escape_append_c_quoted(StrBuf* out, const char* s, size_t len, char quote) {
-    escape_append_quoted_to(out, s, len, quote,
+    escape_append_quoted_common(out, s, len, quote,
         (EscapeQuotedOptions)(ESCAPE_QUOTED_LINE_BREAKS | ESCAPE_QUOTED_C_CONTROLS),
-        escape_append_char_strbuf, escape_append_str_strbuf);
+        escape_append_char_strbuf, escape_append_str_strbuf, escape_append_n_strbuf);
 }
 
 void escape_append_stringbuf_quoted(StringBuf* out, const char* s, size_t len,
                                     char quote, EscapeQuotedOptions options) {
-    escape_append_quoted_to(out, s, len, quote, options,
-                            escape_append_char_stringbuf, escape_append_str_stringbuf);
+    escape_append_quoted_common(out, s, len, quote, options,
+        escape_append_char_stringbuf, escape_append_str_stringbuf, escape_append_n_stringbuf);
 }
 
 void escape_append_lambda_quoted_drop_cr(StrBuf* out, const char* s, size_t len,
                                          char quote) {
-    escape_append_quoted_to(out, s, len, quote,
+    escape_append_quoted_common(out, s, len, quote,
         (EscapeQuotedOptions)(ESCAPE_QUOTED_LINE_BREAKS |
                               ESCAPE_QUOTED_DROP_CARRIAGE_RETURN),
-        escape_append_char_strbuf, escape_append_str_strbuf);
+        escape_append_char_strbuf, escape_append_str_strbuf, escape_append_n_strbuf);
 }
 
 static bool escape_is_js_identifier(const char* s, size_t len) {
@@ -550,11 +624,26 @@ static void escape_append_common(void* out, const char* s, size_t len,
                                  const EscapeRule* rules, int rule_count,
                                  EscapeCtrlMode ctrl_mode,
                                  EscapeAppendCharFn append_char,
-                                 EscapeAppendStrFn append_str) {
+                                 EscapeAppendStrFn append_str,
+                                 EscapeAppendNFn append_n) {
     if (!out || !s || !append_char || !append_str) return;
 
+    /* the rule bytes, plus the controls other than \n \r \t unless ctrl_mode
+     * passes them through unchanged (ESCAPE_CTRL_NONE) */
+    StrByteSet stops;
+    str_byteset_clear(&stops);
+    for (int r = 0; rules && r < rule_count; r++) {
+        str_byteset_add(&stops, (unsigned char)rules[r].from);
+    }
+    if (ctrl_mode != ESCAPE_CTRL_NONE) {
+        str_byteset_add_range(&stops, 0x00, 0x08);
+        str_byteset_add_range(&stops, 0x0B, 0x0C);
+        str_byteset_add_range(&stops, 0x0E, 0x1F);
+    }
     char tmp[16];
     for (size_t i = 0; i < len; i++) {
+        i = escape_append_run(out, s, i, len, &stops, append_char, append_n);
+        if (i >= len) break;
         unsigned char c = (unsigned char)s[i];
         const char* replacement = rules ? escape_find_rule((char)c, rules, rule_count) : NULL;
         if (replacement) {
@@ -583,12 +672,14 @@ void escape_append(StrBuf* out, const char* s, size_t len,
                    const EscapeRule* rules, int rule_count,
                    EscapeCtrlMode ctrl_mode) {
     escape_append_common(out, s, len, rules, rule_count, ctrl_mode,
-                         escape_append_char_strbuf, escape_append_str_strbuf);
+                         escape_append_char_strbuf, escape_append_str_strbuf,
+                         escape_append_n_strbuf);
 }
 
 void escape_append_stringbuf(StringBuf* out, const char* s, size_t len,
                              const EscapeRule* rules, int rule_count,
                              EscapeCtrlMode ctrl_mode) {
     escape_append_common(out, s, len, rules, rule_count, ctrl_mode,
-                         escape_append_char_stringbuf, escape_append_str_stringbuf);
+                         escape_append_char_stringbuf, escape_append_str_stringbuf,
+                         escape_append_n_stringbuf);
 }

@@ -4,6 +4,7 @@
  * Sorted arrays with binary search for O(log n) lookups.
  */
 #include "html-defs.h"
+#include "../core/well_known_markup_names.h"
 #include "../../lib/str.h"
 #include "../../lib/binsearch.h"
 #include <string.h>
@@ -56,6 +57,48 @@ bool html_is_void_element(const char* tag, size_t len) {
 
 bool html_is_raw_text_element(const char* tag, size_t len) {
     return lookup(raw_text_elements, raw_text_elements_count, tag, len);
+}
+
+// ── id-first lookups ───────────────────────────────────────────────
+// Void/raw-text bits of every well-known markup name, indexed by the ordinal
+// of its NameId (markup names are segment 0). Built once from the tables
+// above, so an id answers exactly what its spelling would. The per-element
+// binary searches -- about eight case-folding compares -- were a quarter of
+// HTML output time.
+
+enum { HTML_NAME_VOID = 1, HTML_NAME_RAW_TEXT = 2 };
+
+struct HtmlMarkupNameBits {
+    uint8_t bits[65536];  // the whole ordinal space: no bound check per lookup
+    HtmlMarkupNameBits() {
+        // static storage is zero-initialized; set only the classified names
+        for (size_t i = 0; i < g_well_known_markup_name_count; i++) {
+            const WellKnownNameRecord* rec = &g_well_known_markup_names[i];
+            NameId id = rec->meta.name_id;
+            if (id == NAME_ID_NONE || (id >> 16) != 0) continue;
+            uint8_t b = 0;
+            if (html_is_void_element(rec->chars, rec->len)) b |= HTML_NAME_VOID;
+            if (html_is_raw_text_element(rec->chars, rec->len)) b |= HTML_NAME_RAW_TEXT;
+            bits[id] = b;
+        }
+    }
+};
+
+// the class bits of a markup-segment id, or -1 when the id is not one
+static int html_markup_name_bits(uint32_t tag_id) {
+    if (tag_id == NAME_ID_NONE || (tag_id >> 16) != 0) return -1;
+    static const HtmlMarkupNameBits table;
+    return table.bits[tag_id];
+}
+
+bool html_is_void_element_id(uint32_t tag_id, const char* tag, size_t len) {
+    int bits = html_markup_name_bits(tag_id);
+    return bits >= 0 ? (bits & HTML_NAME_VOID) != 0 : html_is_void_element(tag, len);
+}
+
+bool html_is_raw_text_element_id(uint32_t tag_id, const char* tag, size_t len) {
+    int bits = html_markup_name_bits(tag_id);
+    return bits >= 0 ? (bits & HTML_NAME_RAW_TEXT) != 0 : html_is_raw_text_element(tag, len);
 }
 
 bool html_is_boolean_attribute(const char* attr, size_t len) {

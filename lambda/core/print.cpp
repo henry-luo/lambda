@@ -1,4 +1,5 @@
 #include "../lambda-data.hpp"
+#include "print.h"
 #include "lambda-decimal.hpp"
 #include "lambda_typed.hpp"
 #include "../../lib/log.h"
@@ -6,6 +7,7 @@
 #include "../../lib/str.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
+#include <string.h>
 #ifndef LAMBDA_PRINT_VALUE_ONLY
 #include "../runtime/ast.hpp"
 #endif
@@ -88,17 +90,37 @@ void print_double(StrBuf *strbuf, double num) {
 // parseable spellings (distinct from float's bare inf/nan, so int and float
 // output stay separable), and finite ints print as integers at every magnitude
 // with no exponent form (spec §4.6).
-void print_int_value(StrBuf* strbuf, double value) {
+size_t print_int_value_chars(char* buf, double value) {
     if (LAMBDA_INT_VALUE_IS_POISON(value)) {
         // One spelling: `int` and `float` share these values, so there is no
         // `int.`-prefixed form to print (formal semantics 4).
-        strbuf_append_str(strbuf,
-            LAMBDA_INT_VALUE_IS_INF(value) ? "inf" :
-            LAMBDA_INT_VALUE_IS_NEG_INF(value) ? "-inf" : "nan");
-        return;
+        const char* text = LAMBDA_INT_VALUE_IS_INF(value) ? "inf" :
+            LAMBDA_INT_VALUE_IS_NEG_INF(value) ? "-inf" : "nan";
+        size_t len = strlen(text);
+        memcpy(buf, text, len + 1);
+        return len;
     }
     if (value >= (double)INT53_MIN && value <= (double)INT53_MAX) {
-        strbuf_append_format(strbuf, "%" PRId64, (int64_t)value);
+        // digits written directly: the format path ran vsnprintf twice per int
+        int64_t v = (int64_t)value;
+        size_t len = 0;
+        uint64_t magnitude = (uint64_t)v;
+        if (v < 0) {
+            buf[len++] = '-';
+            magnitude = 0 - magnitude;
+        }
+        len += str_uint64_decimal_write(buf + len, magnitude);
+        buf[len] = '\0';
+        return len;
+    }
+    return 0;   // finite and outside the band: the caller uses "%.0f"
+}
+
+void print_int_value(StrBuf* strbuf, double value) {
+    char buf[PRINT_INT_VALUE_CHARS_CAP];
+    size_t len = print_int_value_chars(buf, value);
+    if (len > 0) {
+        strbuf_append_str_n(strbuf, buf, len);
     } else {
         strbuf_append_format(strbuf, "%.0f", value);
     }

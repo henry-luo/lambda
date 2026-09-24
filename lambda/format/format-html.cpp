@@ -15,14 +15,14 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
 static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, int depth, bool raw_text_mode);
 
 // Use shared html-defs.h for void/raw-text/boolean lookups
-static inline bool is_void_element(const char* tag_name, size_t tag_len) {
-    return html_is_void_element(tag_name, tag_len);
+static inline bool is_void_element(const ElementReader& elem, const char* tag_name, size_t tag_len) {
+    return html_is_void_element_id(elem.tagId(), tag_name, tag_len);
 }
 static inline bool is_boolean_attribute(const char* attr_name, size_t attr_len) {
     return html_is_boolean_attribute(attr_name, attr_len);
 }
-static inline bool is_raw_text_element(const char* tag_name, size_t tag_len) {
-    return html_is_raw_text_element(tag_name, tag_len);
+static inline bool is_raw_text_element(const ElementReader& elem, const char* tag_name, size_t tag_len) {
+    return html_is_raw_text_element_id(elem.tagId(), tag_name, tag_len);
 }
 
 static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
@@ -36,7 +36,7 @@ static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
     } else if (value.isSymbol()) {
         Symbol* sym = value.asSymbol();
         if (sym) {
-            stringbuf_append_format(ctx.output(), "%.*s", (int)sym->len, sym->chars);
+            stringbuf_emit(ctx.output(), "%.*s", (int)sym->len, sym->chars);
         }
     }
 }
@@ -44,7 +44,7 @@ static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
 static void html_write_reader_string_raw(HtmlContext& ctx, const ItemReader& item) {
     if (!item.isString()) return;
     String* str = item.asString();
-    if (str) stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
+    if (str) stringbuf_emit(ctx.output(), "%.*s", (int)str->len, str->chars);
 }
 
 static void html_write_first_child_raw(HtmlContext& ctx, const ElementReader& elem) {
@@ -120,7 +120,7 @@ static bool format_html_special_element(HtmlContext& ctx, const ElementReader& e
 
     if (str_starts_with_const(tag_name, tag_len, "!DOCTYPE") ||
         str_starts_with_const(tag_name, tag_len, "!doctype")) {
-        stringbuf_append_format(ctx.output(), "<!%.*s", (int)(tag_len - 1), tag_name + 1);
+        stringbuf_emit(ctx.output(), "<!%.*s", (int)(tag_len - 1), tag_name + 1);
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
             stringbuf_append_char(ctx.output(), ' ');
@@ -275,17 +275,17 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
 
             if (value.isNull()) {
                 if (is_bool_attr) {
-                    stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
+                    stringbuf_emit(ctx.output(), " %.*s", field_name_len, field_name);
                 } else {
-                    stringbuf_append_format(ctx.output(), " %.*s=\"\"", field_name_len, field_name);
+                    stringbuf_emit(ctx.output(), " %.*s=\"\"", field_name_len, field_name);
                 }
             } else if (value.isBool() && is_bool_attr) {
                 if (value.asBool()) {
-                    stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
+                    stringbuf_emit(ctx.output(), " %.*s", field_name_len, field_name);
                 }
             } else if (value.isString() || value.isNumber() ||
                        value.isBool() || value.isSymbol()) {
-                stringbuf_append_format(ctx.output(), " %.*s=\"", field_name_len, field_name);
+                stringbuf_emit(ctx.output(), " %.*s=\"", field_name_len, field_name);
                 format_html_attr_value(ctx, value);
                 ctx.write_char('"');
             }
@@ -293,7 +293,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
     }
 
     // check if this is a void element (self-closing)
-    bool is_void = is_void_element(tag_name, tag_len);
+    bool is_void = is_void_element(elem, tag_name, tag_len);
 
     if (is_void) {
         // void elements don't have closing tags in HTML5
@@ -302,7 +302,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         ctx.write_char('>');
 
         // check if this is a raw text element (script, style, etc.)
-        bool is_raw = is_raw_text_element(tag_name, tag_len);
+        bool is_raw = is_raw_text_element(elem, tag_name, tag_len);
 
         // add children if available
         auto it = elem.children();
@@ -335,7 +335,7 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
             if (!str) return;
             if (raw_text_mode_) {
                 // in raw text mode (script, style, etc.), output string as-is without escaping
-                stringbuf_append_format(ctx_.output(), "%.*s", (int)str->len, str->chars);
+                stringbuf_emit(ctx_.output(), "%.*s", (int)str->len, str->chars);
             } else {
                 // in normal mode, escape HTML entities
                 format_html_string_safe(ctx_.output(), str, false);
@@ -353,9 +353,9 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
             if (res.kind == CSS_SYMBOL_EMOJI && res.utf8) {
                 stringbuf_append_str(ctx_.output(), res.utf8);
             } else if (res.kind == CSS_SYMBOL_HTML_ENTITY) {
-                stringbuf_append_format(ctx_.output(), "&%.*s;", (int)sym->len, sym->chars);
+                stringbuf_emit(ctx_.output(), "&%.*s;", (int)sym->len, sym->chars);
             } else {
-                stringbuf_append_format(ctx_.output(), ":%.*s:", (int)sym->len, sym->chars);
+                stringbuf_emit(ctx_.output(), ":%.*s:", (int)sym->len, sym->chars);
             }
         }
         void array_value(const ItemReader& item, ArrayReader arr) override {

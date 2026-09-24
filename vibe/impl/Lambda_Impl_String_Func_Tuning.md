@@ -15,8 +15,8 @@
 | P1 | quadratic paths and few-line fixes: §5.2-1 to §5.2-5, §5.5-1 | done |
 | P2 | shared `lib/` kernels | done |
 | P3 | parser inner loops | done |
-| P4 | formatter loops | next |
-| P5 | structural | planned |
+| P4 | formatter loops, plus the escape sink (§5.3-7) planned for P2 | done |
+| P5 | structural | next |
 
 ## P0 — correctness
 
@@ -153,6 +153,85 @@ JSON now parses at 322 MiB/s. Node's `JSON.parse` does 449 MiB/s on the same fil
 
 **Near-miss.** The scripted swap of `strbuf_free(sb)` for the YAML release call also rewrote the fallback inside the new `yaml_scratch_release`, making it call itself. It would only have fired with more than eight scratch buffers live, which tests would rarely reach. Counting replacements against allocations caught it: five frees against four allocations.
 
+## P4 — formatter loops
+
+**Changes:**
+- **§5.3-7, one clean-run copy for every escaper** (planned for P2, landed here).
+  - `lib/escape.c` has a length-aware sink. Every escaper copies the bytes that need no escaping through one helper, `escape_append_run`, and handles only the byte that stopped the run. That covers JSON, the rule-table escaper (YAML, TOML/INI/properties, JSX, graph, Radiant SVG) and the quoted escaper (Mark strings, `%q`).
+  - Formatters that write a `StringBuf` directly use `escape_append_run_stringbuf`: HTML/XML, Markdown/RST/Wiki.
+  - Each stop set holds exactly the bytes its escaper rewrites:
+    - JSON: static, with and without 0xED, the only lead byte of a UTF-8 surrogate.
+    - HTML/XML markup: eight precomputed sets, one per combination of the quote, apostrophe and non-ASCII flags.
+    - Rule tables and quote options: built per call.
+  - The public callback entry points (`escape_append_json_to`, `escape_append_quoted_to`) still write to their caller's sink a byte at a time.
+- **§5.3-4, one byte-set kernel.**
+  - `str_find_byteset`, `str_find_not_byteset` and the bounded set scanners `strn_scan_until_any` and `strn_skip_chars` share `_byteset_scan`.
+  - It tests the first eight bytes one at a time, then eight bytes per step without branching, with one branch per block.
+  - In isolation it scans long runs 1.66× faster (5.4 against 3.2 GB/s).
+  - The byte-wise head keeps dense stops at the old cost. Without it, XML output of Chinese text, where every byte is a stop, ran at 0.78×.
+  - `str_byteset_clear`, `str_byteset_add` and `str_icmp` are now inline. `lib/binsearch.h` stays header-only; `test_binsearch_gtest` links no `.c` file.
+- **§5.7-2, escaping.**
+  - Every text path now copies clean runs: HTML/XML text and attributes, Markdown/RST/Wiki text, JSON strings, YAML/TOML/INI/JSX/graph values and Mark strings.
+  - XML writes each non-ASCII byte's numeric reference with `str_hex_encode` instead of an `snprintf`, which cost three calls per CJK character.
+- **§5.7-3, integers.**
+  - `print_int_value_chars` writes an int's digits into a stack buffer.
+  - `format_number_impl` no longer allocates a `StrBuf` and runs `vsnprintf` twice per int.
+- **§5.7-4, tag dispatch.**
+  - The void and raw-text checks read the element's `name_id` (`ElementReader::tagId()`). MarkBuilder sets it from the name pool, which resolves every well-known spelling to its `MARKUP_NAME_*` record, Input pools included.
+  - A table built once from the string tables answers those IDs, so an ID gives exactly the answer its spelling would.
+  - Names without a markup ID (custom or uppercase) fall back to the string tables. Their binary search now folds ASCII (`str_icmp`) instead of calling `strncasecmp`.
+  - Before, the per-element binary searches were 27% of HTML output.
+- **§5.7-5, `format_contains_complex`.** This deviates from the proposal, which folds the check into the formatting walk; folding would make every formatter handle complex values. Instead:
+  - `complex_new`, the only constructor of complex values (both tiers' literals call it), sets the process-wide flag `g_complex_value_created`.
+  - `format_data` skips the whole-tree pre-walk while that flag is clear.
+  - The refusal itself is unchanged, and a script that builds a complex still gets the walk.
+  - A new golden case in `test/lambda/complex.ls` pins the refusal on both tiers.
+- **§5.7-6, smaller items.**
+  - `write_indent` appends the whole indent at once.
+  - `stringbuf_emit` gained `%.*s`, with printf's semantics (it stops at a NUL). That replaced 11 `stringbuf_append_format` calls in the HTML and XML formatters, each of which ran `vsnprintf` twice.
+  - YAML quote detection:
+    - one byte-set pass replaces 16 `strchr` passes;
+    - the reserved-word `strcmp`s run only for strings of at most five bytes;
+    - `strtol`/`strtod` run only when the first byte could start a number.
+
+**Results** (release, interleaved medians of 7; `format(d, fmt)` on the parsed corpus):
+
+| Output | P3 (ms) | P4 (ms) | P4 speedup | Since base `4bdafbd8c` |
+|---|---:|---:|---:|---:|
+| HTML, from 13 MiB HTML | 104.8 | 54.7 | 1.92× | 1.93× |
+| XML, from 19 MiB XML | 99.2 | 56.5 | 1.76× | 1.76× |
+| Markdown, from 12 MiB Markdown | 47.5 | 24.3 | 1.96× | 1.99× |
+| JSON, from 31 MiB JSON | 293.3 | 250.0 | 1.17× | 4.11× |
+| YAML, same input | 297.0 | 251.9 | 1.18× | 4.10× |
+| TOML, same input | 283.3 | 241.7 | 1.17× | 4.24× |
+| Mark, same input | 331.4 | 312.3 | 1.06× | 3.42× |
+| XML, from 3.1 MiB Chinese HTML | 93.4 | 14.7 | 6.34× | 6.77× |
+| JSON and XML, 15 MiB of long paragraphs | 73.2 | 16.6 | 4.42× | 4.54× |
+| LambdaJS `JSON.stringify` | 1944 | 1892 | 1.03× | — |
+
+Node's `JSON.stringify` takes 180 ms on the same workload, so the LambdaJS gap there lies outside the escaper.
+
+**Where output time goes now:**
+- **HTML:** the escaper's scan is 31% of samples, but it is bound by memory latency on short strings: the block kernel is neutral here and 1.21× on long strings.
+- **JSON, YAML, TOML and Mark:** float formatting dominates; libc `dtoa` is about 40% of YAML output. What remains is the Ryu decision (§8).
+
+**Semantics unchanged:**
+- **Formatter outputs:** 108 outputs (9 corpora × 12 formats) are byte-identical to P3.
+- **Adversarial escapes:** 126 outputs are identical to P3 (6 fixtures × 20 formats plus `print`). The fixtures cover:
+  - every control byte;
+  - quotes, backslashes, entities and near-entities;
+  - non-ASCII text;
+  - YAML reserved words and number-like strings;
+  - strings led by NUL.
+- **LambdaJS:** `JSON.stringify` output is identical to Node and to P3.
+- **Parsers:** the set scanners also serve CSV, kv, vcf, ics, eml and YAML parsing. 10 corpora, 99 test inputs and 13 adversarial files parse identically to P3.
+- **Unit tests:** the new `StrKernelTest.ByteSetFindMatchesNaive` runs 20,000 randomized rounds (sparse and dense members, high bytes and NUL, lengths up to 199). `test_str_gtest` passes 245/245 and `test_binsearch_gtest` 11/11.
+- **Baselines:** Lambda 5,862/5,862; test262 40,261/40,261 with no regressions; Radiant all suites pass (DOM UI Integration 125/125, layout 2,934 with no failures).
+
+**Build breaks caught by the Radiant baseline.** Its DOM UI Integration suite runs the full `build-test`, which the Lambda baseline does not, and it failed twice:
+- The first version of the `binsearch.h` change called the out-of-line `str_icmp`, but `test_binsearch_gtest` links no library. Moving `str_icmp` inline fixed it and keeps the header self-contained.
+- `print.cpp` never included `print.h`; it got the header through `ast.hpp`, which the `LAMBDA_PRINT_VALUE_ONLY` build of `lambda-boundary-core` leaves out, so the new `PRINT_INT_VALUE_CHARS_CAP` was undeclared there. `print.cpp` now includes its own header.
+
 ## Findings not yet filed
 
 These were found while measuring; each predates the branch (the base binary behaves the same). The two bugs go to the LambdaJS ledger once another session's edits to `vibe/JS_Issue_Ledger.md` have landed.
@@ -163,3 +242,6 @@ These were found while measuring; each predates the branch (the base binary beha
 - **JSON error messages print a literal `%s`.** `json_consume_comma_or_recover` reports `addError(loc, "%s", expected_message)`, and the output reads `error: %s`.
 - **`input()` stops at the first NUL byte of a file.** It reads the file as a NUL-terminated string, so an HTML document with a NUL in body text loses everything after it.
 - **CSV errors report a position of line 1, column 1.** The CSV parser does not advance the shared tracker.
+- **A failed `format()` is `null` under the JIT but `error` under the interpreter.** `fn_format2` returns a null `String*`. The interpreter's `eval_sys_call` deliberately maps a null `String*` to `ItemError` ("the error carrier"), while the MIR lowering boxes it as `null`. Found while pinning the complex refusal; the golden case uses `or`, which rescues both (S3.1, S7.5.3).
+- **XML output writes each UTF-8 byte of non-ASCII text as its own numeric reference.** `café` becomes `caf&#xc3;&#xa9;`, which any XML reader, Lambda's included, decodes as `cafÃ©`; CJK text is mangled the same way. This is deliberate: the code comment and `test/lambda/pdf/phase28_winansi_encoding.ls` pin the byte-wise form for decoded PDF text. Changing it needs a decision.
+- **YAML output leaves `True`, `TRUE`, `Null` and similar strings unquoted.** YAML 1.2's core schema reads them as booleans and null, so the round trip changes their type. The reserved-word list only has the lower-case spellings.

@@ -43,28 +43,29 @@ const TextEscapeConfig RST_ESCAPE_CONFIG = {
 void format_text_with_escape(StringBuf* sb, const char* s, size_t len, const TextEscapeConfig* config) {
     if (!sb || !s || len == 0 || !config) return;
 
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-        bool needs_escape = false;
-
-        // check if character needs escaping
-        if (config->chars_to_escape) {
-            for (const char* p = config->chars_to_escape; *p; p++) {
-                if (c == *p) { needs_escape = true; break; }
-            }
+    // The escape set as a bitmap, built once per call; the per-byte walk of
+    // chars_to_escape and the per-byte append were half of Markdown output
+    // time. NUL is never a member, as before.
+    StrByteSet escape_set;
+    str_byteset_clear(&escape_set);
+    if (config->chars_to_escape) {
+        for (const char* p = config->chars_to_escape; *p; p++) {
+            str_byteset_add(&escape_set, (unsigned char)*p);
         }
+    }
 
-        if (needs_escape) {
-            if (config->use_backslash_escape) {
-                stringbuf_append_char(sb, '\\');
-                stringbuf_append_char(sb, c);
-            } else if (config->escape_fn) {
-                const char* escaped = config->escape_fn(c);
-                if (escaped) stringbuf_append_str(sb, escaped);
-                else         stringbuf_append_char(sb, c);
-            } else {
-                stringbuf_append_char(sb, c);
-            }
+    for (size_t i = 0; i < len; i++) {
+        i = escape_append_run_stringbuf(sb, s, i, len, &escape_set);
+        if (i >= len) break;
+        // the run stopped on a member of the set: escape it
+        char c = s[i];
+        if (config->use_backslash_escape) {
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
+        } else if (config->escape_fn) {
+            const char* escaped = config->escape_fn(c);
+            if (escaped) stringbuf_append_str(sb, escaped);
+            else         stringbuf_append_char(sb, c);
         } else {
             stringbuf_append_char(sb, c);
         }
@@ -159,6 +160,34 @@ void format_markup_string_safe(StringBuf* sb, String* str, bool is_attribute,
         escape_apostrophe_in_attr, log_prefix, false);
 }
 
+// The bytes format_markup_string_safe_ex rewrites, per flag combination:
+// bit 0 escapes '"', bit 1 escapes '\'', bit 2 escapes non-ASCII bytes.
+// Every other byte is copied in runs.
+struct MarkupStopSets {
+    StrByteSet sets[8];
+    MarkupStopSets() {
+        for (int k = 0; k < 8; k++) {
+            StrByteSet* set = &sets[k];
+            str_byteset_clear(set);
+            str_byteset_add(set, '&');
+            str_byteset_add(set, '<');
+            str_byteset_add(set, '>');
+            // controls other than \n \r \t become numeric references
+            str_byteset_add_range(set, 0x00, 0x08);
+            str_byteset_add_range(set, 0x0B, 0x0C);
+            str_byteset_add_range(set, 0x0E, 0x1F);
+            if (k & 1) str_byteset_add(set, '"');
+            if (k & 2) str_byteset_add(set, '\'');
+            if (k & 4) str_byteset_add_range(set, 0x80, 0xFF);
+        }
+    }
+};
+
+static const StrByteSet* markup_stop_set(bool quote, bool apos, bool non_ascii) {
+    static const MarkupStopSets stops;
+    return &stops.sets[(quote ? 1 : 0) | (apos ? 2 : 0) | (non_ascii ? 4 : 0)];
+}
+
 void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
                                   bool escape_apostrophe_in_text,
                                   bool escape_apostrophe_in_attr,
@@ -185,7 +214,15 @@ void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
         return;
     }
 
+    // Bulk-append the runs the switch below would copy one byte at a time
+    // (27-30% of HTML/XML output time).
+    const StrByteSet* stops = markup_stop_set(is_attribute,
+        (is_attribute && escape_apostrophe_in_attr) ||
+            (!is_attribute && escape_apostrophe_in_text),
+        escape_non_ascii_bytes);
     for (size_t i = 0; i < len; i++) {
+        i = escape_append_run_stringbuf(sb, s, i, len, stops);
+        if (i >= len) break;
         char c = s[i];
 
         // check if this is an already-encoded entity (starts with & and ends with ;)
@@ -228,16 +265,15 @@ void format_markup_string_safe_ex(StringBuf* sb, String* str, bool is_attribute,
                 break;
             default:
                 // use unsigned char for comparison to handle UTF-8 multibyte sequences correctly
-                // XML tests assert the legacy byte-wise numeric form for decoded PDF text.
-                if (escape_non_ascii_bytes && (unsigned char)c >= 0x80) {
-                    char hex_buf[10];
-                    snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
-                    stringbuf_append_str(sb, hex_buf);
-                } else if ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
-                    // control characters - encode as numeric character reference
-                    char hex_buf[10];
-                    snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
-                    stringbuf_append_str(sb, hex_buf);
+                // XML tests assert the legacy byte-wise numeric form for decoded PDF text;
+                // control characters get the same numeric character reference.
+                if ((escape_non_ascii_bytes && (unsigned char)c >= 0x80) ||
+                        ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t')) {
+                    // "&#xHH;" without an snprintf per byte (three per CJK character)
+                    char ref[8] = "&#x";
+                    str_hex_encode(ref + 3, &c, 1);
+                    ref[5] = ';';
+                    stringbuf_append_str_n(sb, ref, 6);
                 } else {
                     stringbuf_append_char(sb, c);
                 }

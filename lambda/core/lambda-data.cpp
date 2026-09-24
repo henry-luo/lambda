@@ -33,6 +33,7 @@ Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
 Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_FLOAT64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_COMPLEX = {.type_id = LMD_TYPE_COMPLEX};
+bool g_complex_value_created = false;
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_INTEGER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL};

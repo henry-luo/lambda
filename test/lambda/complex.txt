@@ -10,3 +10,5 @@
 [0+1j, 1+0j, 0+0j, 1-0j, 0+0j]
 '=== typed parameters ==='
 2-3j
+'=== format refuses complex outside mark ==='
+['refused', "[2+3j]"]

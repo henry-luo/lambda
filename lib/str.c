@@ -6,7 +6,8 @@
  *   literal-search candidates (str_find), and block loops written without
  *   early exits or calls let the compiler vectorize ASCII checks and byte
  *   counts. Backward byte search uses SWAR (8 bytes per step) with an exact
- *   per-byte mask; case transforms keep byte lanes independent.
+ *   per-byte mask; byte-set scans test 8 bytes per branch; case transforms
+ *   keep byte lanes independent.
  * - NULL inputs are treated as empty (length 0) — never crash.
  * - All outputs NUL-terminated where applicable.
  */
@@ -89,19 +90,6 @@ int str_cmp(const char* a, size_t a_len, const char* b, size_t b_len) {
     size_t min_len = a_len < b_len ? a_len : b_len;
     int r = min_len ? memcmp(a, b, min_len) : 0;
     if (r != 0) return r;
-    return (a_len > b_len) - (a_len < b_len);
-}
-
-int str_icmp(const char* a, size_t a_len, const char* b, size_t b_len) {
-    if (!a) a_len = 0;
-    if (!b) b_len = 0;
-    _ensure_luts();
-    size_t min_len = a_len < b_len ? a_len : b_len;
-    for (size_t i = 0; i < min_len; i++) {
-        int ca = _lut_lower[(unsigned char)a[i]];
-        int cb = _lut_lower[(unsigned char)b[i]];
-        if (ca != cb) return ca - cb;
-    }
     return (a_len > b_len) - (a_len < b_len);
 }
 
@@ -394,15 +382,6 @@ size_t str_count_byte(const char* s, size_t s_len, char c) {
  *  4. Byte-set
  * ══════════════════════════════════════════════════════════════════════ */
 
-void str_byteset_clear(StrByteSet* set) {
-    if (!set) return;
-    set->bits[0] = set->bits[1] = set->bits[2] = set->bits[3] = 0;
-}
-
-void str_byteset_add(StrByteSet* set, unsigned char c) {
-    set->bits[c >> 6] |= (1ULL << (c & 63u));
-}
-
 void str_byteset_add_range(StrByteSet* set, unsigned char lo, unsigned char hi) {
     for (unsigned int c = lo; c <= hi; c++) {
         str_byteset_add(set, (unsigned char)c);
@@ -422,10 +401,6 @@ void str_byteset_invert(StrByteSet* set) {
     set->bits[1] = ~set->bits[1];
     set->bits[2] = ~set->bits[2];
     set->bits[3] = ~set->bits[3];
-}
-
-bool str_byteset_test(const StrByteSet* set, unsigned char c) {
-    return (set->bits[c >> 6] & (1ULL << (c & 63u))) != 0;
 }
 
 void str_byteset_whitespace(StrByteSet* set) {
@@ -456,12 +431,38 @@ void str_byteset_alnum(StrByteSet* set) {
     str_byteset_add_range(set, 'A', 'Z');
 }
 
-size_t str_find_byteset(const char* s, size_t len, const StrByteSet* set) {
-    if (!s || !set) return STR_NPOS;
-    for (size_t i = 0; i < len; i++) {
-        if (str_byteset_test(set, (unsigned char)s[i])) return i;
+/* Index of the first byte whose membership in `set` equals `member`, or
+ * STR_NPOS. Past the first eight bytes, eight are tested per step without
+ * branching and the loop branches once per block; the block holding the
+ * answer is rescanned byte by byte. A per-byte early exit ran long clean runs
+ * of the escapers at 0.6x; the byte-wise head keeps dense stops (every
+ * escaped byte of CJK text in XML) from paying for a block test per hit.
+ * Bit 0 of each shifted word is that byte's membership. */
+static inline size_t _byteset_scan(const unsigned char* p, size_t len,
+                                   const StrByteSet* set, bool member) {
+    const uint64_t flip = member ? 0 : 1;
+    size_t i = 0;
+    size_t head = len < 8 ? len : 8;
+    for (; i < head; i++) {
+        if (str_byteset_test(set, p[i]) == member) return i;
+    }
+    for (; i + 8 <= len; i += 8) {
+        uint64_t any = 0;
+        for (int k = 0; k < 8; k++) {
+            unsigned char c = p[i + k];
+            any |= (set->bits[c >> 6] >> (c & 63u)) ^ flip;
+        }
+        if (any & 1) break;
+    }
+    for (; i < len; i++) {
+        if (str_byteset_test(set, p[i]) == member) return i;
     }
     return STR_NPOS;
+}
+
+size_t str_find_byteset(const char* s, size_t len, const StrByteSet* set) {
+    if (!s || !set) return STR_NPOS;
+    return _byteset_scan((const unsigned char*)s, len, set, true);
 }
 
 size_t str_rfind_byteset(const char* s, size_t len, const StrByteSet* set) {
@@ -475,10 +476,7 @@ size_t str_rfind_byteset(const char* s, size_t len, const StrByteSet* set) {
 
 size_t str_find_not_byteset(const char* s, size_t len, const StrByteSet* set) {
     if (!s || !set) return STR_NPOS;
-    for (size_t i = 0; i < len; i++) {
-        if (!str_byteset_test(set, (unsigned char)s[i])) return i;
-    }
-    return STR_NPOS;
+    return _byteset_scan((const unsigned char*)s, len, set, false);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1458,11 +1456,11 @@ static inline void _byteset_from_chars(StrByteSet* set, const char* chars) {
 }
 
 const char* strn_skip_chars(const char* p, const char* end, const char* chars) {
-    if (!p) return p;
+    if (!p || p >= end) return p;
     StrByteSet set;
     _byteset_from_chars(&set, chars);
-    while (p < end && str_byteset_test(&set, (unsigned char)*p)) p++;
-    return p;
+    size_t at = _byteset_scan((const unsigned char*)p, (size_t)(end - p), &set, false);
+    return at == STR_NPOS ? end : p + at;
 }
 
 const char* strn_skip_line_space(const char* p, const char* end) {
@@ -1497,8 +1495,8 @@ const char* strn_scan_until_any(const char* p, const char* end, const char* stop
     }
     StrByteSet set;
     _byteset_from_chars(&set, stops);
-    while (p < end && !str_byteset_test(&set, (unsigned char)*p)) p++;
-    return p;
+    size_t at = _byteset_scan((const unsigned char*)p, (size_t)(end - p), &set, true);
+    return at == STR_NPOS ? end : p + at;
 }
 
 const char* strn_scan_to_line_end(const char* p, const char* end) {

@@ -15,7 +15,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
-#include <strings.h>
+#include "str.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,15 +31,22 @@ static inline int binsearch_strtab_n(const char* const* table, int count,
     while (lo <= hi) {
         int mid = lo + ((hi - lo) >> 1);
         const char* s = table[mid];
-        int cmp = case_insensitive
-            ? strncasecmp(s, key, key_len)
-            : strncmp(s, key, key_len);
-        if (cmp == 0) {
-            // strn(case)cmp ignores trailing chars in s; require equal length.
-            char tail = s[key_len];
-            if (tail == '\0') return mid;
-            cmp = (unsigned char)tail;  // s longer than key -> s > key
+        int cmp;
+        if (case_insensitive) {
+            // ASCII folding, not strncasecmp: macOS strncasecmp is locale-aware
+            // and was a quarter of HTML output time (a void-element probe per
+            // element). The ordering is the same for these ASCII tables.
+            cmp = str_icmp(s, strlen(s), key, key_len);
+        } else {
+            cmp = strncmp(s, key, key_len);
+            if (cmp == 0) {
+                // strncmp ignores trailing chars in s; require equal length.
+                char tail = s[key_len];
+                if (tail == '\0') return mid;
+                cmp = (unsigned char)tail;  // s longer than key -> s > key
+            }
         }
+        if (cmp == 0) return mid;
         if (cmp < 0) lo = mid + 1;
         else hi = mid - 1;
     }

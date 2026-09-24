@@ -7,6 +7,7 @@
 #include "strbuf.h"
 #include "stringbuf.h"
 #include "mempool.h"
+#include "str.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,6 +65,11 @@ void escape_append(StrBuf* out, const char* s, size_t len,
 void escape_append_stringbuf(StringBuf* out, const char* s, size_t len,
                              const EscapeRule* rules, int rule_count,
                              EscapeCtrlMode ctrl_mode);
+/* Appends s[from..] up to the first byte in `stops` (the bytes the calling
+ * escaper handles itself) and returns that byte's index, or len: the shared
+ * clean-run copy of every escaper. */
+size_t escape_append_run_stringbuf(StringBuf* out, const char* s, size_t from,
+                                   size_t len, const StrByteSet* stops);
 void escape_append_json_string(StrBuf* out, const char* s, size_t len,
                                bool quote, bool escape_utf8_surrogates);
 void escape_append_json_stringbuf(StringBuf* out, const char* s, size_t len,

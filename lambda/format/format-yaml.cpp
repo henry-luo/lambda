@@ -18,27 +18,48 @@ static void format_map_reader(YamlContext& ctx, const MapReader& map_reader, int
 static void format_element_reader(YamlContext& ctx, const ElementReader& elem, int indent_level);
 static void format_yaml_string(YamlContext& ctx, String* str);
 
+// the bytes whose presence anywhere in a scalar forces quoting
+static const StrByteSet* yaml_quote_trigger_set() {
+    static const StrByteSet set = [] {
+        StrByteSet bytes;
+        str_byteset_clear(&bytes);
+        for (const char* c = ":\n\"'#-[]{}|>&*!"; *c; c++) str_byteset_add(&bytes, (unsigned char)*c);
+        return bytes;
+    }();
+    return &set;
+}
+
 static bool yaml_scalar_needs_quotes(const char* s, size_t len) {
     if (!s) return false;
 
-    if (len == 0 || strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') ||
-        strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || strchr(s, '[') ||
-        strchr(s, ']') || strchr(s, '{') || strchr(s, '}') || strchr(s, '|') ||
-        strchr(s, '>') || strchr(s, '&') || strchr(s, '*') || strchr(s, '!') ||
+    // One pass over the bytes before the first NUL -- the range sixteen
+    // strchr passes searched, one per trigger byte (string tuning §5.7-6).
+    size_t text_len = strnlen(s, len);
+    if (len == 0 || str_find_byteset(s, text_len, yaml_quote_trigger_set()) != STR_NPOS ||
         (len > 0 && (str_char_is_ascii_space(s[0]) || str_char_is_ascii_space(s[len-1])))) {
         return true;
     }
 
-    if (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
+    // the reserved words below are all at most five bytes
+    if (text_len <= 5 && (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
         strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 ||
         strcmp(s, "no") == 0 || strcmp(s, "on") == 0 ||
         strcmp(s, "off") == 0 || strcmp(s, "~") == 0 ||
         strcmp(s, ".inf") == 0 || strcmp(s, "-.inf") == 0 ||
         strcmp(s, ".nan") == 0 || strcmp(s, ".Inf") == 0 ||
-        strcmp(s, "-.Inf") == 0 || strcmp(s, ".NaN") == 0) {
+        strcmp(s, "-.Inf") == 0 || strcmp(s, ".NaN") == 0)) {
         return true;
     }
 
+    // strtol/strtod accept only these first bytes here (leading space and
+    // '-' were quoted above); any other string stops both at offset 0. A
+    // leading NUL still goes through: the empty C string there counts as a
+    // number, as before.
+    unsigned char first = (unsigned char)s[0];
+    if (first != '\0' && !str_char_is_digit((char)first) && first != '+' &&
+            first != '.' && first != 'i' && first != 'I' && first != 'n' && first != 'N') {
+        return false;
+    }
     char* end;
     strtol(s, &end, 10);
     if (*end == '\0' && len > 0) return true;

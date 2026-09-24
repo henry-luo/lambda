@@ -59,10 +59,19 @@ static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
         // Route through THE int renderer rather than an i64 conversion, which
         // clamped every value above 2^63 -- `string(2^70)` came back as
         // INT64_MAX while printing the same value was correct.
-        StrBuf* tmp = strbuf_new_cap(40);
-        print_int_value(tmp, lambda_int_item_value(item));
-        stringbuf_append_str(sb, tmp->str);
-        strbuf_free(tmp);
+        // Into a stack buffer: a temporary StrBuf per int cost a malloc, a
+        // free and two vsnprintf calls.
+        double value = lambda_int_item_value(item);
+        char buf[PRINT_INT_VALUE_CHARS_CAP];
+        size_t len = print_int_value_chars(buf, value);
+        if (len > 0) {
+            stringbuf_append_str_n(sb, buf, len);
+        } else {
+            StrBuf* tmp = strbuf_new_cap(40);
+            print_int_value(tmp, value);
+            stringbuf_append_str(sb, tmp->str);
+            strbuf_free(tmp);
+        }
     } else if (type == LMD_TYPE_INT64) {
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%" PRId64, item.get_int64());
@@ -160,7 +169,10 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
 
     log_debug("Formatting with type: %s%s%s", t, f ? "-" : "", f ? f : "");
 
-    if (strcmp(t, "mark") != 0 && format_contains_complex(ItemReader(item.to_const()), 0)) {
+    // the whole-tree scan is skipped while no complex value was ever built
+    if (strcmp(t, "mark") != 0 &&
+            __atomic_load_n(&g_complex_value_created, __ATOMIC_RELAXED) &&
+            format_contains_complex(ItemReader(item.to_const()), 0)) {
         // External data syntaxes have no unambiguous complex scalar; refusing
         // the whole document prevents a nested value from silently becoming 0.
         log_error("format: complex values require the mark format");
