@@ -299,7 +299,9 @@ TEST_F(MemoryPoolTest, SplitAndCoalesceAdjacentFreeBlocks) {
     pool_free(pool, first);
     pool_free(pool, second);
 
-    void* joined = pool_alloc(pool, 320);
+    // too large for either freed block, so only their merge can serve it at
+    // `first`; 320 fit the merge exactly only with 64-byte block headers
+    void* joined = pool_alloc(pool, 256);
     ASSERT_NE(joined, nullptr);
     EXPECT_EQ(joined, first);
     EXPECT_TRUE(verify_pattern(third, 128, 0x5A));

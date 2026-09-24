@@ -277,13 +277,17 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     if (!math_size_align_up(size, alignment, &aligned_size)) return NULL;
     if (aligned_size < ARENA_MIN_FREE_BLOCK_SIZE) aligned_size = ARENA_MIN_FREE_BLOCK_SIZE;
 
-    // Try to allocate from free-list first (alignment-aware, A3 fix)
-    void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size, alignment);
-    if (free_ptr) {
-        arena->allocation_count++;
-        arena->reuse_hits++;
-        _arena_update_high_water(arena);
-        return free_ptr;
+    // Try to allocate from free-list first (alignment-aware, A3 fix). An arena
+    // that has never freed a block -- a parser's document arena, say -- skips
+    // the walk over its empty bins on every allocation.
+    if (arena->free_bytes) {
+        void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size, alignment);
+        if (free_ptr) {
+            arena->allocation_count++;
+            arena->reuse_hits++;
+            _arena_update_high_water(arena);
+            return free_ptr;
+        }
     }
     arena->reuse_misses++;
 
