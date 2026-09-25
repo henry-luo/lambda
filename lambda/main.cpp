@@ -2229,9 +2229,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
     _setmode(_fileno(stderr), _O_BINARY);
 #endif
 
-    // Store command line args for sys.proc.self.args access
-    sysinfo_set_args(argc, argv);
-
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
     apply_lambda_tier_env();
@@ -2278,6 +2275,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             i--;
         }
     }
+
+    // publish the compacted vector so sys.proc.self.argv uses its live count.
+    sysinfo_set_argv(argc, argv);
 
 #ifndef NDEBUG
     // suppress debug-build note in bash mode (test expected output was generated with release build)

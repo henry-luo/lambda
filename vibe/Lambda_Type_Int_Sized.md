@@ -10,7 +10,7 @@
   value-based `u64` fold and is implemented under `Lambda_Impl_Numbers.md`.
 - **Scope:** Lambda scalar sized integer annotations, literals, and builtins
   (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), plus the runtime
-  representation of the `int` / `int64` / `uint64` scalar family.
+  representation of the `int` / `i64` / `u64` scalar family.
 - **Related:** `vibe/Lambda_Type_Int.md` (compact-width promotion table),
   `vibe/Lambda_Semantics_Number_Model.md` (number model v2 — ranks,
   embeddings, egress), `vibe/Lambda_Type_Double_Boxing.md` (LANDED float
@@ -46,9 +46,10 @@ Decisions:
 4. **`u64` is real unsigned 64-bit.** Literals above `INT64_MAX` parse with
    unsigned conversion; same-width `u64` arithmetic wraps modulo 2⁶⁴
    (`18446744073709551615u64 + 1u64` → `0`).
-5. **Callable conversions exist and are two-mode.** `i8(x)`, `u8(x)`, …,
-   `u64(x)` are callable. A *constant* argument that overflows the target
-   width is a compile-time error (`error[E108]: constant conversion to i32
+5. **Callable conversions exist (S17.5.1).** `i8(x)`,
+   `i16(x)`, `i32(x)`, `i64(x)`, `u8(x)`, `u16(x)`, `u32(x)`, and `u64(x)`
+   are callable. For the compact widths, a *constant* argument that overflows
+   the target width is a compile-time error (`error[E108]: constant conversion to i32
    overflows`); a *runtime* value converts with storage semantics, i.e. wraps
    (`u8(v)` where `v = 300` → `44u8`).
 6. **Go is the primary reference model** because it preserves the

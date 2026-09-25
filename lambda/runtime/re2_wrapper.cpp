@@ -773,6 +773,15 @@ static re2::RE2* pattern_get_unanchored_options(TypePattern* pattern, bool ignor
     return re;
 }
 
+static size_t pattern_next_match_pos(const char* str, size_t len,
+                                     size_t start, size_t match_len) {
+    size_t next = start + match_len;
+    if (match_len != 0) return next;
+    // A zero-width match must advance by a code point, even though RE2 uses bytes.
+    size_t step = next < len ? str_utf8_char_len((unsigned char)str[next]) : 1;
+    return next + (step ? step : 1);
+}
+
 static int64_t pattern_count_matches_with_re(re2::RE2* re, const char* str, size_t len) {
     re2::StringPiece input(str, len);
     re2::StringPiece match;
@@ -783,8 +792,7 @@ static int64_t pattern_count_matches_with_re(re2::RE2* re, const char* str, size
         int64_t match_start = (int64_t)(match.data() - str);
         size_t match_len_val = match.size();
         count++;
-        pos = match_start + match_len_val;
-        if (match_len_val == 0) pos++;
+        pos = pattern_next_match_pos(str, len, (size_t)match_start, match_len_val);
     }
     return count;
 }
@@ -913,6 +921,8 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
     re2::StringPiece input(str, len);
     re2::StringPiece match;
     size_t pos = 0;
+    size_t indexed_byte = 0;
+    int64_t indexed_codepoints = 0;
     int64_t ordinal = 0;
     int64_t pushed = 0;
 
@@ -921,11 +931,15 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
             break;
         }
 
-        int64_t match_start = (int64_t)(match.data() - str);
+        size_t match_start = (size_t)(match.data() - str);
         size_t match_len_val = match.size();
 
         if (ordinal >= first && pushed < selected_count) {
-            Map* m = create_match_map(match.data(), match_len_val, match_start);
+            // Count only the new prefix so match indices stay linear in input size.
+            indexed_codepoints += (int64_t)str_utf8_count(str + indexed_byte,
+                match_start - indexed_byte);
+            indexed_byte = match_start;
+            Map* m = create_match_map(match.data(), match_len_val, indexed_codepoints);
             // Keep a new match live until the rooted result list owns it.
             rooted_match.set(m);
             // find() builds an array of matches: the verbatim append
@@ -936,8 +950,7 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
         ordinal++;
 
         // advance past match; if zero-length match, advance by 1 char
-        pos = match_start + match_len_val;
-        if (match_len_val == 0) pos++;
+        pos = pattern_next_match_pos(str, len, match_start, match_len_val);
         if (pushed >= selected_count) break;
     }
 
@@ -989,8 +1002,7 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
         }
 
         ordinal++;
-        pos = match_start + match_len_val;
-        if (match_len_val == 0) pos++;
+        pos = pattern_next_match_pos(str, str_len, match_start, match_len_val);
         if (replaced >= selected_count) break;
     }
     if (copy_pos < str_len) strbuf_append_str_n(out, str + copy_pos, str_len - copy_pos);
@@ -1094,10 +1106,8 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
             // "ab".split(/\d*/) where Python reports ['','a','b',''] — it
             // suppresses the leading and trailing empties alike. Step a whole
             // codepoint so the next slice stays on a character boundary.
-            const char* lead = rooted_source.get().get_chars();
-            size_t step = str_utf8_char_len((unsigned char)lead[match_start]);
-            if (step == 0) step = 1;
-            search = match_start + step;
+            search = pattern_next_match_pos(rooted_source.get().get_chars(),
+                len, match_start, 0);
             continue;
         }
 

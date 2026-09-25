@@ -16,6 +16,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include "side_stack.h"
+#include "sysinfo.h"
 #include "../core/binary.h"
 #include <math.h>
 #include <errno.h>
@@ -1328,6 +1329,8 @@ void heap_destroy() {
             gc_heap_destroy(context->heap->gc);
         }
         lambda_region_destroy_caches(context->heap);
+        // sys.* Mark data and its Input belong to this heap generation.
+        sysinfo_shutdown();
         if (context->heap->pool) {
             mem_pool_destroy(context->heap->pool);
             context->heap->pool = NULL;

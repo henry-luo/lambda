@@ -1495,39 +1495,38 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
 
     // Handle different URL schemes
     if (abs_url->scheme == URL_SCHEME_FILE) {
-        // Check if URL points to a directory (only for file:// URLs)
-        const char* pathname = url_get_pathname(abs_url);
-        // if Windows, need to strip the starting '/' for absolute paths like /C:/path/to/file
-        #ifdef _WIN32
-        if (pathname && pathname[0] == '/' && str_char_is_alpha(pathname[1]) && pathname[2] == ':') {
-            pathname++; // Skip the leading '/'
+        // Decode the URL pathname before any filesystem operation.
+        char* pathname = url_to_local_path(abs_url);
+        if (!pathname) {
+            url_destroy(abs_url);
+            return NULL;
         }
-        #endif
-        if (pathname) {
-            if (file_is_dir(pathname)) {
-                // URL points to a directory - use directory listing
-                log_debug("URL points to directory, using input_from_directory\n");
-                // Pass original URL string to preserve relative path info
-                Input* input = input_from_directory(pathname, url ? url->chars : NULL, false, 1); // non-recursive, single level only
-                url_destroy(abs_url);
-                return input;
-            }
+        if (file_is_dir(pathname)) {
+            // URL points to a directory - use directory listing
+            log_debug("URL points to directory, using input_from_directory\n");
+            // Pass original URL string to preserve relative path info
+            Input* input = input_from_directory(pathname, url ? url->chars : NULL, false, 1); // non-recursive, single level only
+            mem_free(pathname);
+            url_destroy(abs_url);
+            return input;
+        }
 
-            // check if file should be handled as a relational database
-            const char* type_str = type ? type->chars : NULL;
-            const char* rdb_driver = rdb_detect_format(pathname, type_str);
-            if (rdb_driver) {
-                log_debug("rdb: detected driver '%s' for path '%s'", rdb_driver, pathname);
-                Input* input = input_rdb_from_path(pathname, rdb_driver);
-                url_destroy(abs_url);
-                return input;
-            }
+        // check if file should be handled as a relational database
+        const char* type_str = type ? type->chars : NULL;
+        const char* rdb_driver = rdb_detect_format(pathname, type_str);
+        if (rdb_driver) {
+            log_debug("rdb: detected driver '%s' for path '%s'", rdb_driver, pathname);
+            Input* input = input_rdb_from_path(pathname, rdb_driver);
+            mem_free(pathname);
+            url_destroy(abs_url);
+            return input;
         }
 
         // URL points to a file - read as normal
-        log_debug("reading file from path: %s", pathname ? pathname : "null");
+        log_debug("reading file from path: %s", pathname);
 
         Input* input = input_from_local_path(pathname, abs_url, type, flavor);
+        mem_free(pathname);
         // on success the Input owns abs_url (stored as input->url, freed by
         // ~InputManager); only free it here if no input was created.
         if (!input) url_destroy(abs_url);
@@ -1610,27 +1609,26 @@ static Input* input_from_target_impl(Target* target, String* type,
 
         // Handle different URL schemes
         if (target->scheme == TARGET_SCHEME_FILE) {
-            const char* pathname = url_get_pathname(url);
-            #ifdef _WIN32
-            if (pathname && pathname[0] == '/' && str_char_is_alpha(pathname[1]) && pathname[2] == ':') {
-                pathname++; // Skip the leading '/' for Windows paths
-            }
-            #endif
+            char* pathname = url_to_local_path(url);
+            if (!pathname) return NULL;
 
             // check if file should be handled as a relational database
             const char* type_str = type ? type->chars : NULL;
             const char* rdb_driver = rdb_detect_format(pathname, type_str);
             if (rdb_driver) {
                 log_debug("input_from_target: rdb detected driver '%s' for '%s'", rdb_driver, pathname);
-                return input_rdb_from_path_with_name_parent(pathname, rdb_driver,
+                Input* input = input_rdb_from_path_with_name_parent(pathname, rdb_driver,
                     name_parent);
+                mem_free(pathname);
+                return input;
             }
 
-            log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
+            log_debug("input_from_target: reading file from path: %s", pathname);
             // Create a copy of the URL for the input (input owns lifecycle of url_copy via Input)
             Url* url_copy = url_parse(url->href->chars);
             Input* input = input_from_local_path(pathname, url_copy, type, flavor,
                 name_parent);
+            mem_free(pathname);
             if (!input && url_copy) url_destroy(url_copy);
             return input;
         }

@@ -630,7 +630,7 @@ Given `type SymIdent = \symbol(a w*)`:
 
 **Type:**
 
-`int(v)` `int64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
+`int(v)` `i8(v)` `i16(v)` `i32(v)` `i64(v)` `u8(v)` `u16(v)` `u32(v)` `u64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
 
 `type()` returns the canonical numeric name: `type(42i8)` → `"i8"`, `type(3.14f32)` → `"f32"`, `type(1.0f64)` → `"float"`
 

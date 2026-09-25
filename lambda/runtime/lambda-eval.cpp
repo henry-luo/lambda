@@ -7851,12 +7851,18 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     int64_t ordinal = 0;
     int64_t pushed = 0;
     size_t pos = 0;
+    size_t indexed_byte = 0;
+    int64_t indexed_codepoints = 0;
     while (pushed < selected_count) {
         size_t at = literal_find(str_chars, str_len, pos, needle, needle_len,
             options.ignore_case);
         if (at == SIZE_MAX) break;
         if (ordinal >= first) {
-            Map* m = create_match_map_ext(str_chars + at, needle_len, (int64_t)at);
+            // Match and slice offsets share the same code-point index unit.
+            indexed_codepoints += (int64_t)str_utf8_count(str_chars + indexed_byte,
+                at - indexed_byte);
+            indexed_byte = at;
+            Map* m = create_match_map_ext(str_chars + at, needle_len, indexed_codepoints);
             // The match is not reachable from the result until list_push
             // finishes, and that push may grow the list and collect.
             rooted_match.set(m);
