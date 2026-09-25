@@ -215,6 +215,7 @@ static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
 extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts);
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 static bool ascii_case_ext_equals(const char* ext, const char* end, const char* expected) {
     if (!ext || !end || !expected) return false;
@@ -373,6 +374,11 @@ static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
     }
     runtime->dom_doc = (void*)job->document;
     runtime->dom_ui_context = (void*)&job->session.uicon;
+    // Frame layout can leave an iframe evaluator bound; the batch script belongs to this runtime.
+    if (!radiant_eval_context_switch(runtime_get_eval_context(runtime))) {
+        js_batch_document_finish(runtime, job);
+        return false;
+    }
     return true;
 }
 
@@ -2667,6 +2673,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     return lambda_main_finish(1);
                 }
                 runtime.dom_ui_context = (void*)&js_document_session.uicon;
+                // Frame layout can leave an iframe evaluator bound; the CLI script owns a separate realm.
+                if (!radiant_eval_context_switch(runtime_get_eval_context(&runtime))) {
+                    log_error("js-document: could not bind the top-level evaluator");
+                    mem_free(js_source);
+                    runtime_cleanup(&runtime);
+                    js_document_session_finish(&js_document_session);
+                    return lambda_main_finish(1);
+                }
                 log_debug("Loaded HTML document for JS: %s", html_file);
             }
 

@@ -771,6 +771,7 @@ uint32_t dom_text_utf8_to_utf16(const DomText* t, uint32_t u8_offset);
 
 typedef struct DomRange {
     DocState* state;            // owning state store
+    DocState* allocation_state; // arena that owns this range across document adoption
     DomBoundary   start;
     DomBoundary   end;              // start <= end (invariant)
     bool          is_live;          // false for StaticRange (future)
@@ -1082,6 +1083,9 @@ bool dom_selection_triple_click_range_for_node(DomNode* node,
 // ============================================================================
 void dom_range_link_into_state(DocState* state, DomRange* range);
 void dom_range_unlink_from_state(DocState* state, DomRange* range);
+void dom_range_adopt_subtree(DocState* source, DocState* destination,
+                             DomNode* subtree);
+void dom_range_refresh_lifecycle_pins(DomDocument* doc);
 void dom_state_invalidate_all_range_layouts(DocState* state);
 
 // ============================================================================

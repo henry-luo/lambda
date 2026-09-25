@@ -1137,8 +1137,11 @@ extern "C" struct DomSelection* dom_range_state_selection(DocState* state) {
     return state ? state->dom_selection : NULL;
 }
 extern "C" DomNode* dom_range_state_document_root(DocState* state) {
-    return state && state->owner_store && state->owner_store->document
-        ? (DomNode*)state->owner_store->document->root : NULL;
+    DomDocument* doc = state && state->owner_store
+        ? state->owner_store->document : NULL;
+    if (!doc) return NULL;
+    // A fresh Range starts at the Document node, including for empty foreign documents.
+    return doc->js.doc_node ? (DomNode*)doc->js.doc_node : (DomNode*)doc->root;
 }
 
 // ----------------------------------------------------------------------------

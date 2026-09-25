@@ -48,6 +48,7 @@
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
 extern void free_document(DomDocument* doc);
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
 #define LAMBDA_MIR_CACHE_DEFAULT 1
@@ -3124,6 +3125,11 @@ void runtime_cleanup(Runtime* runtime) {
         if (runtime->dom_doc) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
+            // Child teardown can leave its evaluator and JS capsule bound here.
+            if (!eval_context_matches(cleanup_context) &&
+                    !radiant_eval_context_switch(cleanup_context)) return;
+            if (js_runtime_state_for(cleanup_context) &&
+                    !js_runtime_state_init(cleanup_context)) return;
         }
         runtime->dom_ui_context = NULL;
 
