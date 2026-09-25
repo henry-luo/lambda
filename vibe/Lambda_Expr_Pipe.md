@@ -547,7 +547,10 @@ data | slice(0, 10)    // slice(data, 0, 10)
 > the rulings left open (SO47) was ruled the same day as **S10.1.7** (spec
 > v37.1.0, §F.7): a single-subject body may leave `~` implicit, the pipe
 > family always spells it, and an implicit read never supplies a callee —
-> which S10.1.5v3's own `xs that len(~) > 2` needs. The set operators
+> which S10.1.5v3's own `xs that len(~) > 2` needs. The same day it was
+> extended to match arms, handler value arms and type constraints as
+> **S10.1.7v2** (spec v40.0.0; LR02-28, SO49 closed), and all of it is
+> implemented. The set operators
 > `| & !` keep P2's operand-kind rule until SO48 is ruled.
 
 ### §F.1 What was wrong with `that`
@@ -799,7 +802,11 @@ a bit.
 ### §F.7 Implicit fields: single-subject bodies only (ruled 2026-09-25)
 
 > **Ruling:** option (A) below, USER 2026-09-25, formalized as **S10.1.7**
-> (spec v37.1.0); closes SO47.
+> (spec v37.1.0); closes SO47. **Extended the same day** (USER, on LR02-28):
+> a match arm, a handler's value arm and a constrained arm are single-subject
+> bodies too, and each reads its own current item. See "Every `~` binder is a
+> body" below. The first form had already reached master, so the extension
+> is **S10.1.7v2** (spec v40.0.0), which also closed SO49.
 
 **The question.** The old `that` filter carried a convenience over from
 object constraints: in its body an unbound bare name read as a field of `~`
@@ -854,11 +861,17 @@ E238 hole (point 3).
 *declared* — a method, an object constraint — they are names of the body's
 scope and shadow outer bindings, as members shadow globals in Java or C++:
 with a module-level `let x = 100`, `P.get()` above returns the field. The
-proviso's subject has no declared shape — `x that p` takes any value — so a
-bare name there is the member `~.name` only when no binding claims it:
-`{x: 5} that x == 5` compares the module's `x`, 100. Letting a dynamic field
-shadow outer bindings would make every outer name capturable by whatever
-keys a value happens to carry.
+proviso's subject has no declared shape — `x that p` takes any value — and
+neither does a matched value, a handler's result or a constraint's
+candidate. So a bare name there is the member `~.name` only when no binding
+claims it: `{x: 5} that x == 5` compares the module's `x`, 100. Letting a
+dynamic field shadow outer bindings would make every outer name capturable
+by whatever keys a value happens to carry. A binding here includes the
+names no scope entry holds: an `import math` constant (`pi`) and a module or
+namespace prefix spelled as a member's object (`m.sqrt(x)` after
+`import m: math`, `lambda.sys.sum(xs)`). A system function is not a
+binding. In a proviso, a field named `name`, `len` or `type` must win over
+the builtin of that name, as it always has in `that` bodies.
 
 **Callee names.** An implicit read never supplies a callee. Before the
 ruling, the rewrite turned the callee of `len(~)` into `~.len`, so a `that`
@@ -866,31 +879,93 @@ body could not call a function its scope did not bind: the old filter
 `xs that len(~) > 2` kept nothing, and the proviso could never hold. The
 resolver now leaves a bare callee to ordinary lookup. (A declared field
 holding a function is an ordinary scope name in a method body, so calling it
-calls that field; this rule is about the implicit read only.)
+calls that field; this rule is about the implicit read only.) For the same
+reason an implicit read never supplies a write target, whether an
+assignment or a `put`/`del` edit: `x = 1` in a match arm assigns the
+variable `x`, or fails because nothing binds it. It never stores into the
+matched value.
 
 **Nesting.** A `|:` body switches implicit fields off even inside a `that`
 body — `x that (~.items |: flag(~))` reads `flag` as a name; a `that` inside
 a `|:` body reads its own subject — `[{a: 3}] |: (~ that a > 2) != null`
-reads `~.a` of each member.
+reads `~.a` of each member. Every other single-subject body nests the same
+way: the innermost one's current item wins, and the outer one is back when
+it ends (next section).
+
+**Every `~` binder is a body (extension, ruled 2026-09-25).** The first
+ruling named the method, the object constraint and the proviso. That left
+three constructs that also bind `~` to one value: a `match` arm (the
+scrutinee, S11.2.1), a handler's value arm `e ^ { h } ~ { v }` (the non-error
+result, S7.6.1v4), and a constrained arm `case T that (…)` (the candidate).
+Nested in a proviso, an implicit read under one of them was lowered to
+`~.name` and read that binder's value. That contradicted S10.1.7's "a field
+of that subject" and matched its gloss "reads `~.age`" (LR02-28). The USER's
+ruling: *these three cases align. `~` binds to the current item and can be
+omitted; `~` can also be spelled to refer to it. The current item is scoped
+to the expression body, and outside the body it is restored to the outer
+binding.* So:
+
+- **Each of the three is a single-subject body.** A bare field name reads
+  its own current item, whether or not it sits in a `that`:
+  `match user { case map: age >= 18 }` reads `~.age`. That holds in every
+  position of `T that cond`, which answers SO49.
+- **Innermost wins, and the outer binding is restored.** In
+  `order that (match kind { case map: total default: 0 }) + total == 104`,
+  the arm's `total` is `kind.total` and the second `total` is the order's.
+  The lowering already read the innermost `~`. The ruling confirms that
+  reading and discards the alternative, which was to bind the proviso's
+  subject so that implicit reads skip nested binders.
+- **A nested body's `~` is never free in an enclosing pipe body.** Before,
+  `has_current_item_ref` counted a match arm's `~` (LR02-5), so
+  `xs |> match (1) { case int: ~ * 10 }` mapped, although the arm's `~` is 1
+  for every item. With implicit reads in arms that became a real hazard: a
+  bare `price` in an arm would make the enclosing `|>` a mapping or an
+  application depending on whether a function `price` is in scope — point 1
+  above, one level down. The test now stops at match arms and at nested
+  pipe-family bodies, as it already stopped at a handler's value arm. The
+  `xs |> match (1) { … }` shape is whole-value application of a non-callable
+  value, which S10.1.2v4 calls a type error (LR02-29: unchecked, and the
+  tiers disagree).
+- **Patterns and write targets are not bodies.** A pattern names types and
+  values, so a bare name in one is an ordinary name. A constrained pattern's
+  `that` body is a body of its own. A write target is never an implicit
+  read (see "Callee names").
+
+The extension is a MAJOR revision (S10.1.7v2, spec v40.0.0), because a working program
+can change meaning in two ways:
+- `xs |> match (1) { … }` no longer maps.
+- A pipe body whose only `~` sits inside a nested `|>`, `|:` or `that` body
+  is now whole-value application.
+
+The corpus AST scan found no package or fixture affected, beyond the
+LR02-5 fixture, whose case was rewritten. One more change is nominal. An arm
+that names a builtin as a bare value, `case "len": len`, now reads `~.len`.
+But a builtin taken as a value was never callable (E229, "function does not
+publish a Core boxed dynamic-call"), so no working program relied on it; a
+wrapper `(x) => len(x)` works in both versions.
 
 **Open ends.**
 
-- A `|>` body nested in a single-subject body still receives implicit fields:
-  the resolver's `that` scope reaches it, so
-  `user that len(items |> price) == 2` reads `price` as `~.price` of each
-  item where the syntactic test of S10.1.2v4 makes it the application
-  `price(items)`. Recorded as S10.1.7's conformance gap; the fix is the one
-  `|:` already has — switch the scope off for a `|>` body.
-- Type-position `T that cond` outside an object type — an annotation, a
-  match arm — reads bare names as ordinary names: `case {a: int} that a > 1`
-  never reads `~.a`. Whether it joins the proviso is SO49.
+- *Fixed 2026-09-25:* a `|>` body nested in a single-subject body used to
+  receive implicit fields, because the resolver's `that` scope reached it:
+  `user that len(items |> price) == 2` read `price` as `~.price` of each
+  item, where the syntactic test of S10.1.2v4 makes it the application
+  `price(items)`. A `|>` body now switches the scope off, as `|:` already
+  did. `that_implicit_name.ls` §7 pins `(items |> len)` inside a proviso
+  as `len(items)`. The corpus AST scan found no other file affected.
+- *Resolved 2026-09-25:* LR02-28 (an implicit read under a nested `~`
+  binder) and SO49 (type-position `T that cond`) were answered by the
+  extension above.
+- S10.1.2v4's type error for a `~`-free non-callable pipe body is not
+  checked; T0 fails at run time and the JIT returns the body
+  ([LR02-29](Lambda_Issue_Ledger.md#lr02-29)).
 - Implicit reads are unchecked: a misspelled field in a `that` body reads
   `null`. That is a checker question — reject an implicit name the
   subject's static shape cannot have — not a question of which bodies allow
   implicit fields.
 - The data-processing design (PD13) held bare column names in verb arguments
   as a possible later extension "via the implicit-field rule". Verb
-  arguments are a pipe body, so under S10.1.7 that extension would need the
+  arguments are a pipe body, so under S10.1.7v2 that extension would need the
   ruling revised.
 
 ## Grammar Changes

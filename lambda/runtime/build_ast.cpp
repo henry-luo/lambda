@@ -3112,26 +3112,10 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
     // lookup the name
     NameEntry* entry = lookup_name(tp, var_name);
     if (!entry) {
-        // In 'that' clause, rewrite bare identifier to ~.name (member access on current item)
-        // Name resolution order: 1) scope names, 2) ~.name fields, 3) system properties
-        if (tp->in_that_clause) {
-            // create ~ (current item) as the object
-            AstNode* current_item = alloc_ast_node_from_span(tp,
-                AST_NODE_CURRENT_ITEM, span, sizeof(AstNode));
-            current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
-            // use the identifier as the field name (without scope lookup)
-            AstIdentNode* field = (AstIdentNode*)alloc_ast_node_from_span(tp,
-                AST_NODE_IDENT, span, sizeof(AstIdentNode));
-            field->name = ast_node->name;
-            field->type = set_type_any(tp, ANY_DYNAMIC_NAME);
-            AstFieldNode* field_node = (AstFieldNode*)ast_node;
-            morph_ast_node((AstNode*)field_node, AST_NODE_MEMBER_EXPR,
-                sizeof(AstIdentNode));
-            field_node->object = current_item;
-            field_node->field = (AstNode*)field;
-            field_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
-            return;
-        }
+        // Name resolution order for an unbound name: 1) `import math`
+        // constants, 2) `~.name` in a body that leaves `~` implicit, 3) system
+        // functions. The import is a binding, and S10.1.7v2 reads `~.name` only
+        // when no binding claims the name, so `pi` in a match arm stays pi.
         // Global import: resolve math constants (pi, e) when `import math;` is active
         if (tp->builtin_import_math) {
             double const_val = 0.0;
@@ -3154,6 +3138,26 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
                 ast_node->type = (Type*)ft;
                 return;
             }
+        }
+        // a bare field name in a body whose `~` may stay implicit reads
+        // `~.name`, the innermost current item (S10.1.7v2)
+        if (tp->in_that_clause) {
+            // create ~ (current item) as the object
+            AstNode* current_item = alloc_ast_node_from_span(tp,
+                AST_NODE_CURRENT_ITEM, span, sizeof(AstNode));
+            current_item->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+            // use the identifier as the field name (without scope lookup)
+            AstIdentNode* field = (AstIdentNode*)alloc_ast_node_from_span(tp,
+                AST_NODE_IDENT, span, sizeof(AstIdentNode));
+            field->name = ast_node->name;
+            field->type = set_type_any(tp, ANY_DYNAMIC_NAME);
+            AstFieldNode* field_node = (AstFieldNode*)ast_node;
+            morph_ast_node((AstNode*)field_node, AST_NODE_MEMBER_EXPR,
+                sizeof(AstIdentNode));
+            field_node->object = current_item;
+            field_node->field = (AstNode*)field;
+            field_node->type = set_type_any(tp, ANY_DYNAMIC_NAME);
+            return;
         }
         SysFuncInfo* sys_value = get_unambiguous_sys_func_value(&var_name);
         if (sys_value) {
@@ -4348,31 +4352,25 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_SPREAD:
         return has_current_item_ref(((AstUnaryNode*)node)->operand);
     case AST_NODE_BINARY:
-    case AST_NODE_PIPE:
         return has_current_item_ref(((AstBinaryNode*)node)->left) ||
                has_current_item_ref(((AstBinaryNode*)node)->right);
+    case AST_NODE_PIPE:
+        // a nested `|>`, `|:` or `that` binds its own `~` for its right side
+        // (S10.1.3), so only its operand can read the enclosing current item
+        return has_current_item_ref(((AstBinaryNode*)node)->left);
     case AST_NODE_IF_EXPR: {
         AstIfNode* if_node = (AstIfNode*)node;
         return has_current_item_ref(if_node->cond) ||
                has_current_item_ref(if_node->then) ||
                has_current_item_ref(if_node->otherwise);
     }
-    case AST_NODE_MATCH_EXPR: {
-        AstMatchNode* match_node = (AstMatchNode*)node;
-        if (has_current_item_ref(match_node->scrutinee)) return true;
-        // The arm BODY can consume a current item supplied by an enclosing
-        // pipe; the pattern cannot — `case int that (~ > 0)` rebinds `~` to the
-        // match subject, the same shadowing the handler case above models. This
-        // loop used to inspect nothing and fall through to `false`, so
-        // `xs |> match (1) { case int: (~) * 10 }` evaluated to `error`: the
-        // pipe never bound `~` because nothing reported the arm needed it.
-        AstMatchArm* arm = match_node->first_arm;
-        while (arm) {
-            if (has_current_item_ref(arm->body)) return true;
-            arm = (AstMatchArm*)arm->next;
-        }
-        return false;
-    }
+    case AST_NODE_MATCH_EXPR:
+        // Every arm, pattern and body alike, binds `~` to the matched value
+        // (S11.2.1), as the handler's value arm binds its result above, so only
+        // the scrutinee can read the enclosing current item. Counting arm
+        // bodies (LR02-5) let an arm's `~` -- spelled, or a bare field name that
+        // S10.1.7v2 reads as `~.name` -- turn an enclosing `|>` into a mapping.
+        return has_current_item_ref(((AstMatchNode*)node)->scrutinee);
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
         if (has_current_item_ref(call->function)) return true;
@@ -13558,9 +13556,9 @@ enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_TAIL };
 // LSF_CONTENT: the body of a braced `if`/`else` branch, which has a scope.
 enum { LSF_CONTENT_BRANCH = 1u << 0 };
 
-// LSF_BINARY: `that`, whose right side reads a bare name as a field, and `|:`,
-// a pipe stage whose right side never does (S10.1.6).
-enum { LSF_BINARY_THAT = 1u << 0, LSF_BINARY_FILTER = 1u << 1 };
+// LSF_BINARY: `that`, whose right side reads a bare name as a field, and the
+// pipe stages `|>` and `|:`, whose right side never does (S10.1.7v2).
+enum { LSF_BINARY_THAT = 1u << 0, LSF_BINARY_PIPE_BODY = 1u << 1 };
 
 static void syntax_record_part(LambdaSyntaxSink* sink, void** parts_slot,
         uint8_t kind, AstNode* node) {
@@ -14569,8 +14567,9 @@ static AstNode* syntax_reduce(LambdaSyntaxSink* sink,
         node->op_str = direct_token_text(tp, reduction->detail_token);
         if (reduction->detail_token.kind == LAMBDA_TOK_THAT) {
             node->syntax_flags |= LSF_BINARY_THAT;
-        } else if (reduction->detail_token.kind == LAMBDA_TOK_PIPE_FILTER) {
-            node->syntax_flags |= LSF_BINARY_FILTER;
+        } else if (reduction->detail_token.kind == LAMBDA_TOK_PIPE_FORWARD ||
+                reduction->detail_token.kind == LAMBDA_TOK_PIPE_FILTER) {
+            node->syntax_flags |= LSF_BINARY_PIPE_BODY;
         }
         return (AstNode*)node;
     }
@@ -14680,8 +14679,13 @@ static void resolver_handler_end(LambdaResolver* r) {
     r->tp->building_handler_body = r->handler_context[--r->handler_context_depth];
 }
 
-// in_that_clause turns an unbound bare name into `~.name`: on for a `that`
-// body, off for a `|:` body even when it sits inside a `that` (S10.1.6)
+// in_that_clause turns an unbound bare name into `~.name` of the innermost
+// current item. It is on in a body that binds `~` to one subject -- the `that`
+// proviso, a constraint, a match arm, a handler's value arm -- and off in a
+// `|>` or `|:` body, even nested in one of those. A field supplied behind the
+// text would flip `|>` between application and mapping by binding state
+// (S10.1.2v4) and let `xs |: typo` pass E238 (S10.1.7v2). Each body restores
+// the outer setting when it ends, as `~` itself is restored.
 static void resolver_that_begin(LambdaResolver* r, bool in_that) {
     if (r->that_context_depth >= 64) return resolver_fail(r, "that context overflow");
     r->that_context[r->that_context_depth++] = r->tp->in_that_clause;
@@ -14691,6 +14695,31 @@ static void resolver_that_begin(LambdaResolver* r, bool in_that) {
 static void resolver_that_end(LambdaResolver* r) {
     if (!r->that_context_depth) return resolver_fail(r, "that context underflow");
     r->tp->in_that_clause = r->that_context[--r->that_context_depth];
+}
+
+// S10.1.7v2 reads a bare name as `~.name` only when no binding claims it. A
+// module or namespace prefix is such a binding, but no scope entry holds it:
+// resolve_field and resolve_call recognise `math.pi`, `m.sqrt(x)` (`import m:
+// math`), `ns.tag`, `lambda.sys.f(x)` and an import alias's `box.f` from the
+// object ident, so the prefix must reach them unrewritten.
+static bool member_object_names_module(Transpiler* tp, AstNode* object,
+        AstNode* field) {
+    AstNode* obj = ast_unwrap_primary(object);
+    if (!obj || obj->node_type != AST_NODE_IDENT) return false;
+    String* name = ((AstIdentNode*)obj)->name;
+    StrView view = {name->chars, (size_t)name->len};
+    if (lookup_name(tp, view)) return false;
+    // `lambda` is the reserved namespace root (S17.2.1)
+    if (strview_equal(&view, "lambda")) return true;
+    if (lookup_namespace(tp, name) || resolve_imported_module(tp, &view)) return true;
+    AstNode* member = ast_unwrap_primary(field);
+    if (!member || member->node_type != AST_NODE_IDENT) return false;
+    String* member_name = ((AstIdentNode*)member)->name;
+    char qualified[256];
+    snprintf(qualified, sizeof(qualified), "%.*s.%.*s", (int)name->len,
+        name->chars, (int)member_name->len, member_name->chars);
+    NameEntry* imported = lookup_name(tp, strview_from_cstr(qualified));
+    return imported && imported->import;
 }
 
 static bool resolver_in_proc(Transpiler* tp) {
@@ -15687,9 +15716,17 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     }
     case LSF_MATCH_ARM: {
         AstMatchArm* arm = (AstMatchArm*)node;
+        // a pattern names types and values, never a field; a constrained
+        // pattern's `that` body opens its own scope (LSF_CONSTRAINED)
+        resolver_that_begin(r, false);
         resolve_walk(r, arm->pattern);
+        resolver_that_end(r);
         resolver_branch_begin(r);
+        // the arm body's current item is the matched value, and a bare field
+        // name may leave that `~` implicit (S10.1.7v2, S11.2.1)
+        resolver_that_begin(r, true);
         resolve_walk(r, arm->body);
+        resolver_that_end(r);
         resolver_branch_end(r);
         resolve_diagnostics(r, node);
         break;
@@ -15754,7 +15791,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
         bool that = (node->syntax_flags & LSF_BINARY_THAT) != 0;
-        bool scoped = that || (node->syntax_flags & LSF_BINARY_FILTER) != 0;
+        bool scoped = that || (node->syntax_flags & LSF_BINARY_PIPE_BODY) != 0;
         resolve_walk(r, binary->left);
         if (scoped) resolver_that_begin(r, that);
         resolve_walk(r, binary->right);
@@ -15764,12 +15801,18 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         break;
     }
     case LSF_MEMBER:
-    case LSF_INDEX:
-        resolve_walk(r, ((AstFieldNode*)node)->object);
-        resolve_walk_chain(r, ((AstFieldNode*)node)->field);
+    case LSF_INDEX: {
+        AstFieldNode* member = (AstFieldNode*)node;
+        bool module_prefix = form == LSF_MEMBER &&
+            member_object_names_module(tp, member->object, member->field);
+        if (module_prefix) resolver_that_begin(r, false);
+        resolve_walk(r, member->object);
+        if (module_prefix) resolver_that_end(r);
+        resolve_walk_chain(r, member->field);
         resolve_diagnostics(r, node);
-        resolve_field(tp, (AstFieldNode*)node);
+        resolve_field(tp, member);
         break;
+    }
     case LSF_QUERY:
         resolve_walk(r, ((AstQueryNode*)node)->object);
         resolve_walk(r, ((AstQueryNode*)node)->query);
@@ -15784,7 +15827,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolver_handler_begin(r);
         resolve_walk(r, handler->body);
         resolver_handler_end(r);
+        // the value arm `~ { … }` binds the non-error result as its current
+        // item; the error arm binds `^` and keeps the outer `~` (S10.1.7v2)
+        resolver_that_begin(r, true);
         resolve_walk(r, handler->value_body);
+        resolver_that_end(r);
         resolve_diagnostics(r, node);
         resolve_handler(tp, handler);
         break;
@@ -15806,7 +15853,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     }
     case LSF_CONSTRAINED:
         resolve_walk(r, ((AstConstrainedTypeNode*)node)->base);
+        // `T that cond` binds the candidate as the current item, in every
+        // position: annotation, alias, field, match arm (S10.1.7v2)
+        resolver_that_begin(r, true);
         resolve_walk(r, ((AstConstrainedTypeNode*)node)->constraint);
+        resolver_that_end(r);
         resolve_diagnostics(r, node);
         resolve_constrained(tp, (AstConstrainedTypeNode*)node);
         break;
@@ -15854,9 +15905,9 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
                 continue;
             }
             // constraint bodies read bare names as fields of the value
-            tp->in_that_clause = true;
+            resolver_that_begin(r, true);
             resolve_walk(r, part->node);
-            tp->in_that_clause = false;
+            resolver_that_end(r);
             resolve_object_constraint(r, part->node);
         }
         resolve_diagnostics(r, node);
@@ -15890,7 +15941,12 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_let_stam(tp, (AstLetNode*)node);
         break;
     case LSF_ASSIGN:
+        // S10.1.7v2 grants a bare name an implicit field READ; a write target
+        // stays an ordinary name, or `x = 1` in a match arm would store into
+        // the matched value instead of reporting that `x` has no binding
+        resolver_that_begin(r, false);
         resolve_walk(r, ((AstAssignNode*)node)->left);
+        resolver_that_end(r);
         resolve_walk(r, ((AstAssignNode*)node)->right);
         resolve_diagnostics(r, node);
         resolve_assignment(tp, (AstAssignNode*)node);
@@ -15905,7 +15961,10 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_control_statement(tp, node);
         break;
     case LSF_CRUD:
+        // a `put`/`del` target is a write place, never an implicit read
+        resolver_that_begin(r, false);
         resolve_walk(r, ((AstCrudNode*)node)->object);
+        resolver_that_end(r);
         resolve_walk(r, ((AstCrudNode*)node)->value);
         resolve_diagnostics(r, node);
         resolve_crud(tp, (AstCrudNode*)node);

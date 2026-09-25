@@ -345,6 +345,16 @@ match event {
 }
 ```
 
+> **Implicit fields (S10.1.7v2, ruled 2026-09-25).** An arm body is a
+> single-subject body, so `~` may be left implicit:
+> `case {type: symbol, x: int, y: int}: handle_click(x, y)` reads `~.x` and
+> `~.y`, unless a binding claims the name first. A constrained arm's `that`
+> body reads its candidate the same way. The current item is scoped to the
+> arm: a nested `match` reads its own scrutinee, and the outer one is back
+> after it. An arm's `~`, spelled or implicit, is never free in an enclosing
+> `|>` body, so it cannot turn that pipe into a mapping. Reasoning:
+> [Expr_Pipe §F.7](Lambda_Expr_Pipe.md).
+
 ### Nested Pipe Within Arms
 
 Since `~` already refers to the matched value, pipe expressions within match arms work naturally:

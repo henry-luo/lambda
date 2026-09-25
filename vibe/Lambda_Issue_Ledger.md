@@ -455,6 +455,13 @@ S11.1.5v2 shows only named parameters, and Design_Syntax §7.29 leaves the form 
 - **If it may not,** C must reject it, and the docs and the fixture must migrate to `fn (x: int) int`.
 - **Either way,** rule whether an untyped name (`fn (x) int`) is allowed.
 
+<a id="lr02-29"></a>**LR02-29 · A `~`-free non-callable `|>` body is not a type error, and the tiers disagree at run time (S10.1.2v4) · OPEN (found 2026-09-25)**
+S10.1.2v4 reads a `|>` body with no free `~` as whole-value application, and says "a `~`-free non-callable body is a type error." Neither front end checks it. At run time the tiers disagree: T0 fails the script with "interp: pipe target is not callable", while the JIT returns the body's value and drops the piped operand.
+- `[1, 2] |> 50` fails on T0 and is `50` on the JIT.
+- `[1, 2] |> match (5) { case int: ~ * 10 default: 0 }` fails on T0 and is `50` on the JIT. Until S10.1.7v2 (2026-09-25) this was a mapping, `[50, 50]`, because [LR02-5](<Lambda_Issue_Ledger (fixed).md#lr02-5>) counted an arm's `~` as free in the pipe body. It no longer does: the arm binds that `~`.
+
+The check belongs in `resolve_binary` (`build_ast.cpp`), which already inspects a `~`-free body for `direct_promote_bare_pipe_sysfunc`: a body whose static type cannot be called is the S10.1.2v4 type error. An `any` body stays a run-time check, and there the JIT should fail as T0 does rather than return the body.
+
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
 first from the whole keyword table to *capture-real* words only (the full ban

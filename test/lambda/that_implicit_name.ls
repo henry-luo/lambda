@@ -1,7 +1,7 @@
 // Test: implicit ~.name resolution in a 'that' body
 // In a 'that' proviso (S10.1.5v3), a bare identifier not in scope resolves to
-// ~.name, where ~ is the proviso's left operand. The '|:' filter (S10.1.6) is
-// a pipe stage and never does this: its body names ~ explicitly.
+// ~.name, where ~ is the proviso's left operand. A pipe-family body ('|>',
+// '|:') never does this, even inside a 'that': it names ~ explicitly (S10.1.7v2).
 // Name resolution order: 1) scope names, 2) ~.name, 3) system properties
 
 // ============================================================
@@ -71,3 +71,20 @@ let age2 = 25;
 
 '=6b=';
 [[1, 2, 3], [1]] that len(~) > 1
+
+// ============================================================
+// Section 7: A '|>' body inside a 'that' reads bare names as names
+// ============================================================
+
+'=7a=';
+// ~.price maps over the items, so the proviso holds
+{items: [{price: 3}, {price: 4}]} that (len(items |> ~.price) == 2)
+
+'=7b=';
+// a ~-free body is applied to the whole value (S10.1.2v4): len is the system
+// function applied to items, never the field ~.len of each item
+{items: [{len: 5}, {len: 6}]} that ((items |> len) is int)
+
+'=7c=';
+// a proviso inside a |> body reads its own ~ implicitly
+[{a: 1}, {a: 3}] |> (~ that a > 2)

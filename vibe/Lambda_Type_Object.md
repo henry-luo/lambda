@@ -376,13 +376,17 @@ Method calls use dot syntax: `obj.method(args)`. The runtime:
 2. Binds `~` (and implicit field scope) to the object
 3. Dispatches the call
 
-> **Implicit fields (S10.1.7, ruled 2026-09-25).** A method body is the model
+> **Implicit fields (S10.1.7v2, ruled 2026-09-25).** A method body is the model
 > *single-subject* body: the type's declared fields are names of its scope,
 > so they are read bare and shadow outer bindings — the OOP receiver
-> convention. Object-level `that` constraints and the `that` proviso
-> (S10.1.5v3) follow the same convention; the pipe family (`|>`, `|:`) never
-> does, and always spells `~`. Reasoning and the resolution orders:
-> [Expr_Pipe §F.7](Lambda_Expr_Pipe.md).
+> convention. Object-level `that` constraints follow the same convention,
+> and so does every other body that binds `~` to one value: the `that`
+> proviso (S10.1.5v3), a type constraint `T that cond`, a `match` arm and a
+> handler's value arm. Each reads its own current item, and the innermost
+> one wins. The pipe family (`|>`, `|:`) never does, and always spells `~`.
+> Unlike a method's receiver, those current items have no declared shape, so
+> an outer binding claims a bare name before `~.name` does. Reasoning and the
+> resolution orders: [Expr_Pipe §F.7](Lambda_Expr_Pipe.md).
 
 If no method is found on the object's type, falls back to:
 - Inherited methods (walking the parent chain)

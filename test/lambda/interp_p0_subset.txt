@@ -113,6 +113,7 @@ test/lambda/handler_two_arm.ls	direct
 test/lambda/hex_literals.ls	direct
 test/lambda/hostobj_demo_jube_import.ls	direct
 test/lambda/if_expr_types.ls	direct
+test/lambda/implicit_current_item.ls	direct
 test/lambda/import.ls	direct
 test/lambda/import_arrays.ls	direct
 test/lambda/import_chain.ls	direct
