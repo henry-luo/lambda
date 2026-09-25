@@ -439,32 +439,65 @@ When `~` is not used, the pipe passes the entire collection/data on left side to
 | `[3, 1, 4, 1, 5] \|> sort` | `[1, 1, 3, 4, 5]` |
 | `[1, 2, 3, 4, 5] \|> take(3)` | `[1, 2, 3]` |
 
-### That Clause (Filtering)
+### Filter Stage `|:`
+
+`c |: p` walks exactly what `c |> body` walks, binds `~` to each member (and
+`~key` to its key or index), and keeps the members for which `p` is truthy
+(S10.1.6). It is the filter stage of the pipe family: same precedence as `|>`,
+left-associative, so filters and mappings chain left to right.
 
 | Expression | Result | |
 |---|---|---|
-| `[1, 2, 3, 4, 5] that (~ > 3)` | `[4, 5]` | basic filtering |
-| `users that (age >= 18)` | adult users only | filter objects |
-| `[1, 2, 3, 4, 5] that ~ == 3` | `[3]` | `==` and `!=` work without parens |
-| `data \|> ~.name that (len(~) > 3) \|> ~.upper()` | | combined with pipe |
+| `[1, 2, 3, 4, 5] \|: (~ > 3)` | `[4, 5]` | basic filtering |
+| `users \|: ~.age >= 18` | adult users only | filter objects |
+| `[1, 2, 3, 4, 5] \|: ~ == 3` | `[3]` | `==` and `!=` work without parens |
+| `data \|> ~.name \|: len(~) > 3 \|> upper(~)` | | combined with pipe |
+| `{a: 1, b: 2, c: 3} \|: ~ != 2` | `[1, 3]` | a map filters its values; the keys are dropped |
+| `"banana" \|: ~ != "a"` | `"bnn"` | text filters by code point and keeps its kind |
 
-> **Note:** A `that` (or `|>`) condition needs no parentheses around the
-> relational operators `<`, `>`, `<=`, `>=` — `items that ~ > 0` is fine, and
+A `|:` body must mention `~`: `xs |: is_even` is a compile error (E238), and
+the idiom is `xs |: is_even(~)`. The rule exists because `|>` reads a `~`-free
+body as whole-value application (`data |> sum`), and the two pipes must not
+read the same text two ways. Unlike a `that` body, a `|:` body reads bare names
+as ordinary names — write `~.field` for a field of the current item.
+
+> **Note:** A `|:` (or `|>`) condition needs no parentheses around the
+> relational operators `<`, `>`, `<=`, `>=` — `items |: ~ > 0` is fine, and
 > the parenthesized form is only a readability choice. The element-tag
 > ambiguity is resolved by context and bites solely inside an element's tag
 > region, where `>` closes the tag: `<div w: 1 > 2>` is rejected, so wrap that
 > operand — `<div w: (1 > 2)>`.
 
+### The `that` Proviso
+
+`x that p` is `x` when `p` — with `~` bound to `x` — is truthy, and `null`
+otherwise (S10.1.5v3). The left operand is **one item whatever it is**: a
+collection is not walked, so `xs that len(~) > 2` is all of `xs` or `null`.
+A failed proviso is absence, not an error, so it composes with `or` and with
+truthiness in `if`. It shares the pipe precedence tier, so `c |> f that p`
+applies the proviso to the piped result.
+
+| Expression | Result | |
+|---|---|---|
+| `5 that ~ > 3` | `5` | the value, when the proviso holds |
+| `5 that ~ > 9` | `null` | absence, when it fails |
+| `[1, 2, 3] that len(~) > 2` | `[1, 2, 3]` | the whole collection is one item |
+| `(n that ~ >= 0) or 0` | `n`, or `0` when negative | a default for a failed proviso |
+
+> **Note:** `that` was the filter spelling before `|:`. An old filter site
+> `xs that p` still parses, but it now means "all of `xs`, or `null`" — to keep
+> the members for which `p` holds, write `xs |: p`.
+
 #### Implicit Field Access in `that` Clause
 
-Inside a `that` clause, bare identifiers that are not in scope automatically resolve to `~.name` — **implicit field access**:
+Inside a `that` body, bare identifiers that are not in scope automatically resolve to `~.name` — **implicit field access**:
 
 ```lambda
 // Explicit: ~.field
-users that (~.age >= 18 and ~.name != "admin")
+user that (~.age >= 18 and ~.name != "admin")
 
 // Implicit: bare field names
-users that (age >= 18 and name != "admin")
+user that (age >= 18 and name != "admin")
 
 // Both forms produce identical results
 ```
@@ -474,10 +507,13 @@ Name resolution order inside a `that` clause:
 2. Stored field on the current item `~` (map/object/element)
 3. System properties of the current item `~`
 
+A name that is called is a function, never a field: in `user that len(name) > 2`,
+`len` is the system function and `name` is `~.name`.
+
 ```lambda
 let min_age = 18
 // 'min_age' resolves to the let binding; 'age' resolves to ~.age
-users that (age >= min_age)
+user that (age >= min_age)
 ```
 
 ### Pipe Behavior Summary
@@ -485,25 +521,28 @@ users that (age >= min_age)
 | Left Side | `~` Binds To | `~key` Binds To | Result |
 |-----------|--------------|---------------|--------|
 | `[a, b, c]` (array) | Each element | Index (0, 1, 2) | Array of results |
-| `(a, b, c)` (tuple) | Each element | Index (0, 1, 2) | Array of results |
+| `(a, b, c)` (list) | Each element | Index (0, 1, 2) | Array of results — a list is built, never computed (S2.5.7v2) |
 | `1 to 10` (range) | Each number | Position (0-9) | Array of results |
-| `{a: 1, b: 2}` (map) | Each value | Key ('a', 'b') | Collection of results |
+| `{a: 1, b: 2}` (map) | Each value | Key ('a', 'b') | Array of results (the keys are dropped) |
 | `42` (scalar) | The value itself | N/A | Single result |
 
-### Spreading in Array Literals
+The filter `|:` walks the same way and returns the same kinds: `(1, 2, 3) |: ~ > 2`
+is `[3]`, and a filter that keeps nothing is `[]`, never `null`.
 
-Pipe (`|>`) and filter (`that`) expressions inside array literals produce **spreadable results** — their array output is automatically flattened into the enclosing array, just like for-expressions and the spread operator:
+### Pipe Results in Array Literals
+
+A pipe (`|>`) or filter (`|:`) result is placed as a value, and the value
+decides whether it spreads (S2.5.1v2): a pipe over any sequence, a list
+included, returns an array, which stays one item, and a scalar result is its
+one value. Write `*(…)` to splice an array result.
 
 | Expression | Result | |
 |---|---|---|
-| `[1, [2, 3] \|> ~, 4, 5]` | `[1, 2, 3, 4, 5]` | pipe spreads into enclosing array |
-| `[0, [1, 2, 3] \|> ~ * 10, 99]` | `[0, 10, 20, 30, 99]` | |
-| `[1, [1, 5, 7, 10, 15] that (~ > 5), 99]` | `[1, 7, 10, 15, 99]` | `that` spreads into enclosing array |
-| `[1, 5 \|> double, 4]` | `[1, 10, 4]` | non-array pipe results are pushed normally (given `fn double(x: int) { x * 2 }`) |
-| `[for (x in [1, 2]) x, [3, 4] \|> ~ * 10, [5, 6, 7] that (~ > 5)]` | `[1, 2, 30, 40, 6, 7]` | mixed for-expr + pipe + `that` |
-
-> **Rationale:** This is consistent with for-expression and spread behavior — collection-producing
-> sub-expressions flatten into the enclosing array literal, giving a uniform "inline expansion" semantics.
+| `[1, [2, 3] \|> ~, 4, 5]` | `[1, [2, 3], 4, 5]` | an array result is one item |
+| `[0, *([1, 2, 3] \|> ~ * 10), 99]` | `[0, 10, 20, 30, 99]` | `*` splices it |
+| `[1, [1, 5, 7, 10, 15] \|: (~ > 5), 99]` | `[1, [7, 10, 15], 99]` | a filter result is one item too |
+| `[1, 5 \|> double, 4]` | `[1, 10, 4]` | a scalar result is its value (given `fn double(x: int) { x * 2 }`) |
+| `[for (x in [1, 2]) x, [3, 4] \|> ~ * 10, [5, 6, 7] \|: (~ > 5)]` | `[1, 2, [30, 40], [6, 7]]` | a for-expression is a list and splices |
 
 ---
 
@@ -1237,7 +1276,7 @@ From highest to lowest:
 | 9          | `or`                       | Logical OR      |
 | 10         | `to`                       | Range           |
 | 11         | `is`, `in`                 | Type operations |
-| 12         | `\|>`, `that`              | Pipe, Filter    |
+| 12         | `\|>`, `\|:`, `that`       | Pipe, Filter, Proviso |
 
 ### Arithmetic Operators
 
@@ -1294,7 +1333,8 @@ From highest to lowest:
 |----------|-------------|---------|--------|
 | `\|` | Union | `[1, 2] \| [2, 3]` | `[1, 2, 3]` |
 | `\|>` | Pipe (transform) | `[1, 2, 3] \|> ~ * 2` | `[2, 4, 6]` |
-| `that` | Filter | `[1, 2, 3, 4] that (~ > 2)` | `[3, 4]` |
+| `\|:` | Filter | `[1, 2, 3, 4] \|: (~ > 2)` | `[3, 4]` |
+| `that` | Proviso (one value) | `[1, 2, 3, 4] that len(~) > 2` | `[1, 2, 3, 4]` |
 
 ### File Output
 

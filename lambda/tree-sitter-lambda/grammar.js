@@ -99,7 +99,7 @@ const sized_float_suffix = choice('f16', 'f32', 'f64');
 // S16.2.3: an operator that can also START an expression is dual-role, so a
 // line may not begin with it. The `_join` guard is what enforces that — the
 // scanner emits it only when the operator is on the same line as its left
-// operand. Operators that can only ever continue (`|> | & % > == != <= >=`,
+// operand. Operators that can only ever continue (`|> |: | & % > == != <= >=`,
 // `++`, `**`, and every word operator) carry no guard, so they are free to
 // open a line (S16.2.2).
 //
@@ -131,6 +131,9 @@ function binary_rules($, in_element) {
     mk('to', 'range_to', 'left'),
     mk('|', 'set_union', 'left'),
     mk('|>', 'pipe', 'left'),
+    // S10.1.6: `|:` is the filter stage; `that` is the single-value proviso
+    // (S10.1.5v3). Both share the pipe tier, left-associative.
+    mk('|:', 'pipe', 'left'),
     mk('that', 'pipe', 'left'),
     mk(alias($._bin_amp, '&'), 'set_intersect', 'left'),
     // §7.1 removed unary `!` from value expressions, so infix `!` (set

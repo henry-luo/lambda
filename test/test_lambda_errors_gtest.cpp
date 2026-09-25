@@ -828,8 +828,7 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
     EXPECT_GT(tp.error_count, 0);
 
     arraylist_free(tp.const_list);
-    arraylist_free(input->type_list);
-    pool_destroy(pool);
+    pool_destroy(pool);  // releases the Input too (D4.2.6)
 }
 
 TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
@@ -870,8 +869,7 @@ TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
 
     lambda_rd_destroy_syntax(syntax);
     arraylist_free(tp.const_list);
-    arraylist_free(input->type_list);
-    pool_destroy(pool);
+    pool_destroy(pool);  // releases the Input too (D4.2.6)
 }
 
 TEST_F(ErrorCreationTest, CreateFormattedError) {
@@ -1692,6 +1690,35 @@ TEST_F(NegativeScriptTest, StringLiteralParameterKeepsItsCheckOnEveryTier) {
         false, "failed: expected \"a\", got string 'c'");
 }
 
+// S11.1.3 (LR03-14, LR03-18): a range type admits its members only. It wore
+// the range VALUE tag (D3.1.1v4), so a range-typed parameter rejected every
+// int statically while the JIT admitted a range value, and a range-typed map
+// field read its int as a pointer.
+TEST_F(NegativeScriptTest, RangeParameterRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_param.ls",
+        false, "failed: expected 1 to 5, got int 9");
+}
+
+TEST_F(NegativeScriptTest, RangeParameterRejectsRangeValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_range_value.ls",
+        false, "failed: expected 1 to 5, got range");
+}
+
+TEST_F(NegativeScriptTest, RangeMapFieldRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_field.ls",
+        false, "validator at .a: Expected type '1 to 5', but got 'int'");
+}
+
+TEST_F(NegativeScriptTest, CharacterRangeRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_char.ls",
+        false, "failed: expected \"a\" to \"e\", got string 'z'");
+}
+
+TEST_F(NegativeScriptTest, RangeValueArgumentIsStaticError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/range_argument_static.ls",
+        "argument 1 expected 1 to 5, got range");
+}
+
 TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongLengthOnEveryTier) {
     ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_flat_contract.ls",
         false, "error[E201]: type check at declaration 'a' failed: expected int[3]");
@@ -1860,6 +1887,24 @@ TEST_F(NegativeScriptTest, SyntaxError_LetOutsideList) {
     ExpectErrorCode("test/lambda/negative/syntax/let_outside_list.ls", "error[E100]");
     ExpectErrorMessage("test/lambda/negative/syntax/let_outside_list.ls",
         "'let' binds as an expression only inside a parenthesized list");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_WhereFilterNamesPipeFilter) {
+    // S10.3.1v3: the retired infix `where` points at the filter stage `|:`
+    ExpectErrorMessage("test/lambda/negative/syntax/where_filter_retired.ls",
+        "error[E100]: 'where' is not a filter operator; write '|:'");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_PipeFilterGluedToArmColon) {
+    // S10.1.6: longest match lexes `|:` in `case int |: …`, which stays an error
+    ExpectErrorMessage("test/lambda/negative/syntax/pipe_filter_glued_case.ls",
+        "error[E100]: expected ':' or '{' after match arm");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_FilterBodyWithoutCurrentItem) {
+    // S10.1.6: a `|:` body must mention `~`; `|>` would read it as application
+    ExpectErrorMessage("test/lambda/negative/semantic/filter_body_no_current.ls",
+        "error[E238]: filter body must mention `~`");
 }
 
 TEST_F(NegativeScriptTest, SyntaxError_SignatureReturnLineStart) {

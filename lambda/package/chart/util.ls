@@ -143,7 +143,7 @@ pub fn unique_by(arr, key_fn) {
 pub fn group_by(arr, field: string) {
     let all_keys = unique_vals(arr |> ~[field]);
     [for (k in all_keys)
-        {key: k, items: (arr that ~[field] == k)}]
+        {key: k, items: (arr |: ~[field] == k)}]
 }
 
 // find extent (min, max) of numeric values in an array

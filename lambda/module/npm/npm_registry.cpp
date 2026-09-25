@@ -7,8 +7,8 @@
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/mem_factory.h"
-#include "../../../lambda-data.hpp"
-#include "../../../core/mark_reader.hpp"
+#include "../../lambda-data.hpp"
+#include "../../core/mark_reader.hpp"
 #include "../../../input/input.hpp"
 // forward-declare JSON parser
 Item parse_json_to_item(Input* input, const char* json_string);

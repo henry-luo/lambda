@@ -127,7 +127,7 @@ pub fn line_mark(data, ctx, mark_config) {
     let series = if (group_field)
         (let groups = util.unique_vals(data |> ~[group_field]),
         [for (g in groups) (
-            let group_items = data that ~[group_field] == g,
+            let group_items = data |: ~[group_field] == g,
             {
                 key: g,
                 items: group_items,
@@ -181,7 +181,7 @@ pub fn area_mark(data, ctx, mark_config) {
     let series = if (group_field)
         (let groups = util.unique_vals(data |> ~[group_field]),
         [for (g in groups) (
-            let group_items = data that ~[group_field] == g,
+            let group_items = data |: ~[group_field] == g,
             {
                 key: g,
                 items: group_items,
@@ -375,7 +375,7 @@ pub fn rule_mark(data, ctx, mark_config) {
             let y2_px = float(scale.scale_apply(y_scale, float(d[y2_field]))),
             svg.line(x_pos + bw, y0_px, x_pos + bw, y2_px, stroke_color, stroke_w))
         else null
-    ] that (~ != null);
+    ] |: (~ != null);
 
     svg.group_class("marks rules", rules)
 }
@@ -423,7 +423,7 @@ pub fn boxplot_mark(data, ctx, mark_config) {
     // group data by x field
     let groups = util.unique_vals(data |> ~[x_field]);
     let elements = [for (g in groups) (
-        let items = data that ~[x_field] == g,
+        let items = data |: ~[x_field] == g,
         let vals = [for (d in items) float(d[y_field])],
         let sorted_vals = [for (v in vals order by v) v],
         let q1 = math.quantile(sorted_vals, 0.25),
@@ -432,9 +432,9 @@ pub fn boxplot_mark(data, ctx, mark_config) {
         let iqr = q3 - q1,
         let lo_fence = q1 - extent * iqr,
         let hi_fence = q3 + extent * iqr,
-        let whisker_lo = min(sorted_vals that ~ >= lo_fence),
-        let whisker_hi = max(sorted_vals that ~ <= hi_fence),
-        let outliers = sorted_vals that (~ < lo_fence or ~ > hi_fence),
+        let whisker_lo = min(sorted_vals |: ~ >= lo_fence),
+        let whisker_hi = max(sorted_vals |: ~ <= hi_fence),
+        let outliers = sorted_vals |: (~ < lo_fence or ~ > hi_fence),
         let x_pos = float(scale.scale_apply(x_scale, g)),
         let bw = if (x_scale.bandwidth) x_scale.bandwidth else 30.0,
         let cx = x_pos + bw / 2.0,
@@ -574,6 +574,6 @@ pub fn rect_mark(data, ctx, mark_config) {
 
 fn find_cat_index(cats, val) {
     let matches = [for (i in 0 to (len(cats) - 1))
-        if (cats[i] == val) i else null] that (~ != null)
+        if (cats[i] == val) i else null] |: (~ != null)
     if (len(matches) > 0) matches[0] else 0
 }

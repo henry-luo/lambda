@@ -698,22 +698,45 @@ static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
     return capacity;
 }
 
+// Where a type's records come from (D4.1.4v4). A transition-tree node is never
+// freed on its own, so it takes the Input's arena and goes with the Input
+// (D3.4.3v2, D4.2.6); a type a container owns takes a pool.
+typedef struct TypeAlloc {
+    Pool* pool;
+    Arena* arena;   // when set, records come from here rather than `pool`
+} TypeAlloc;
+
+static inline TypeAlloc type_alloc_of_pool(Pool* pool) {
+    TypeAlloc alloc = {pool, NULL};
+    return alloc;
+}
+
+static inline void* type_alloc_zeroed(TypeAlloc alloc, size_t size) {
+    if (alloc.arena) return arena_calloc(alloc.arena, size);
+    return alloc.pool ? pool_calloc(alloc.pool, size) : NULL;
+}
+
 // Allocates a fresh empty table for `expected_fields`. Any previous table is
-// left to the pool: a struct copy of this TypeMap may still share it.
-static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expected_fields) {
+// left to its owner: a struct copy of this TypeMap may still share it.
+static inline void typemap_hash_prepare_in(TypeMap* tm, TypeAlloc alloc, int64_t expected_fields) {
     if (!tm) return;
     tm->field_index = NULL;
     tm->field_capacity = 0;
     tm->field_count = 0;
 
     int capacity = typemap_hash_recommended_capacity(expected_fields);
-    if (capacity > 0 && pool) {
-        ShapeEntry** slots = (ShapeEntry**)pool_calloc(pool, (size_t)capacity * sizeof(ShapeEntry*));
+    if (capacity > 0) {
+        ShapeEntry** slots = (ShapeEntry**)type_alloc_zeroed(alloc,
+            (size_t)capacity * sizeof(ShapeEntry*));
         if (slots) {
             tm->field_index = slots;
             tm->field_capacity = (uint16_t)capacity;
         }
     }
+}
+
+static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expected_fields) {
+    typemap_hash_prepare_in(tm, type_alloc_of_pool(pool), expected_fields);
 }
 
 static inline bool typemap_shape_name_equals_hash(ShapeEntry* e, const char* key,
@@ -844,12 +867,16 @@ static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     // table full — callers fall back to the authoritative shape chain.
 }
 
-static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {
+static inline void typemap_hash_build_in(TypeMap* tm, TypeAlloc alloc) {
     if (!tm) return;
-    typemap_hash_prepare(tm, pool, tm->length);
+    typemap_hash_prepare_in(tm, alloc, tm->length);
     for (ShapeEntry* e = tm->shape; e; e = e->next) {
         typemap_hash_insert(tm, e);
     }
+}
+
+static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {
+    typemap_hash_build_in(tm, type_alloc_of_pool(pool));
 }
 
 static inline ShapeEntry* typemap_first_field(TypeMap* tm) {
@@ -1181,6 +1208,23 @@ extern Type TYPE_ANY_NO_ERROR;
 extern Type TYPE_ANY_NO_NULL;
 extern Type TYPE_ANY_NO_ERROR_OR_NULL;
 
+// D3.1.1v4: a range type `X to Y` is a type-kind node under the shared
+// LMD_TYPE_TYPE tag. It must never wear LMD_TYPE_RANGE, the tag of a range
+// VALUE, or every tag-driven consumer reads "an int from 1 to 5" as "a range"
+// (LR03-18, LR03-14).
+static inline bool lambda_type_is_range(const Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_RANGE;
+}
+
+// The domain a range type draws its members from (S11.1.3): `int` for an
+// integer range, `string` for a character range. It serves static carrier
+// checks only. A member keeps its own representation (`3.0` is a member of
+// `1 to 5`), so the domain never selects a native lane.
+static inline Type* lambda_range_type_domain(const Type* type) {
+    if (!lambda_type_is_range(type)) return NULL;
+    return ((const TypeRange*)type)->is_char ? &TYPE_STRING : &TYPE_INT;
+}
+
 // S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
 // union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
 // so a caller that needs a signature must ask here rather than cast on the id.
@@ -1502,10 +1546,12 @@ bool item_deep_equal(Item a, Item b);
 #ifdef __cplusplus
 extern "C++" {
 Type* alloc_type(Pool* pool, TypeId type, size_t size);
+Type* alloc_type_in(TypeAlloc alloc, TypeId type, size_t size);
 Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size);
 }
 #else
 Type* alloc_type(Pool* pool, TypeId type, size_t size);
+Type* alloc_type_in(TypeAlloc alloc, TypeId type, size_t size);
 Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size);
 #endif
 

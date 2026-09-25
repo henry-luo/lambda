@@ -37,6 +37,11 @@ static __thread InputManager* g_input_thread_manager = NULL;
 static __thread Pool* g_input_thread_pool = NULL;
 
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
+    return alloc_shape_entry_in(type_alloc_of_pool(pool), key, type_id, prev_entry);
+}
+
+ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
+        ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = NULL;
     if (key) {
         // Allocate ShapeEntry + StrView + a copy of the key string data in one block.
@@ -44,7 +49,9 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
         // when the original key String lives in a shorter-lived pool (e.g. a JS
         // transpiler's name_pool that is freed by js_transpiler_destroy).
         size_t str_copy_size = key->len + 1;
-        shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView) + str_copy_size);
+        shape_entry = (ShapeEntry*)type_alloc_zeroed(alloc,
+            sizeof(ShapeEntry) + sizeof(StrView) + str_copy_size);
+        if (!shape_entry) return NULL;
         StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
         char* str_copy = (char*)nv + sizeof(StrView);
         ::str_copy(str_copy, str_copy_size, key->chars, key->len);
@@ -60,7 +67,8 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     } else {
         // no key, for nested map
         log_debug("alloc_shape_entry: null key for nested map, type_id=%d", type_id);
-        shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+        shape_entry = (ShapeEntry*)type_alloc_zeroed(alloc, sizeof(ShapeEntry));
+        if (!shape_entry) return NULL;
         shape_entry->name = NULL;
         shape_entry_set_type(shape_entry, type_info[type_id].type);
     }
@@ -253,15 +261,15 @@ static bool map_ensure_data_capacity_for_end(Map** map_slot, Pool* pool,
     return true;
 }
 
-static ShapeEntry* clone_shape_entries(Pool* pool, ShapeEntry* source,
+static ShapeEntry* clone_shape_entries(TypeAlloc alloc, ShapeEntry* source,
         ShapeEntry** out_last) {
     if (out_last) *out_last = NULL;
-    if (!pool || !source) return NULL;
+    if (!source) return NULL;
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;
     ShapeEntry* last = NULL;
     for (ShapeEntry* src = source; src; src = src->next) {
-        ShapeEntry* dst = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+        ShapeEntry* dst = (ShapeEntry*)type_alloc_zeroed(alloc, sizeof(ShapeEntry));
         if (!dst) return NULL;
         dst->name = src->name;
         dst->type = src->type;
@@ -283,9 +291,9 @@ static ShapeEntry* clone_shape_entries(Pool* pool, ShapeEntry* source,
     return first;
 }
 
-static ShapeEntry* clone_shape_chain_for_transition(Pool* pool, TypeMap* parent,
+static ShapeEntry* clone_shape_chain_for_transition(TypeAlloc alloc, TypeMap* parent,
         ShapeEntry** out_last) {
-    return clone_shape_entries(pool, parent ? parent->shape : NULL, out_last);
+    return clone_shape_entries(alloc, parent ? parent->shape : NULL, out_last);
 }
 
 // js constructor/pre-shape caches share TypeMap instances across many Maps.
@@ -316,7 +324,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->has_array_index_shape = tm->has_array_index_shape;
 
     ShapeEntry* last_clone = NULL;
-    clone->shape = clone_shape_chain_for_transition(pool, tm, &last_clone);
+    clone->shape = clone_shape_chain_for_transition(type_alloc_of_pool(pool), tm, &last_clone);
     if (tm->shape && !clone->shape) return NULL;
     clone->last = last_clone;
 
@@ -370,7 +378,8 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->ns = tm->ns;
 
     ShapeEntry* last_clone = NULL;
-    clone->shape = clone_shape_chain_for_transition(pool, (TypeMap*)tm, &last_clone);
+    clone->shape = clone_shape_chain_for_transition(type_alloc_of_pool(pool), (TypeMap*)tm,
+        &last_clone);
     if (tm->shape && !clone->shape) return NULL;
     clone->last = last_clone;
     typemap_hash_build((TypeMap*)clone, pool);
@@ -429,6 +438,13 @@ static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* targe
 static const int MAX_SHAPE_GRAPH = 1024;
 static const int MAX_ELEMENT_SHAPE_GRAPH = 16384;
 
+// D4.1.4v4: a tree node and its edge are never freed on their own, so they
+// come from the Input's arena and go with the Input (D4.2.6).
+static TypeAlloc input_tree_alloc(Input* input) {
+    TypeAlloc alloc = {input->pool, input->arena};
+    return alloc;
+}
+
 static bool transition_graph_has_room(Input* input, bool element) {
     return element ? input->element_transition_shapes < MAX_ELEMENT_SHAPE_GRAPH
                    : input->shape_transition_shapes < MAX_SHAPE_GRAPH;
@@ -483,9 +499,9 @@ static TransitionKey transition_key_of_entry(const ShapeEntry* like) {
 
 // The entry a replayed field adds: `like`'s identity at a new type. The name
 // is shared, as clone_shape_entries shares it, since both live in the Input.
-ShapeEntry* shape_entry_copy_as(Pool* pool, const ShapeEntry* like,
+ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like,
         TypeId type_id, ShapeEntry* prev_entry) {
-    ShapeEntry* entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+    ShapeEntry* entry = (ShapeEntry*)type_alloc_zeroed(alloc, sizeof(ShapeEntry));
     if (!entry) return NULL;
     entry->name = like->name;
     entry->name_hash = like->name_hash;
@@ -540,7 +556,8 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     if (!transition_graph_has_room(input, is_element)) return NULL;
 
     // an element's node is a TypeElmt: its tag, id and namespace ride along
-    TypeMap* child = (TypeMap*)alloc_type(input->pool, parent->type_id,
+    TypeAlloc tree = input_tree_alloc(input);
+    TypeMap* child = (TypeMap*)alloc_type_in(tree, parent->type_id,
         is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
     if (!child) return NULL;
     if (is_element) {
@@ -551,11 +568,11 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     }
 
     ShapeEntry* last_clone = NULL;
-    ShapeEntry* first = clone_shape_chain_for_transition(input->pool, parent, &last_clone);
+    ShapeEntry* first = clone_shape_chain_for_transition(tree, parent, &last_clone);
     if (parent->shape && !first) return NULL;
     ShapeEntry* added = k->key
-        ? alloc_shape_entry(input->pool, k->key, type_id, last_clone)
-        : shape_entry_copy_as(input->pool, k->like, type_id, last_clone);
+        ? alloc_shape_entry_in(tree, k->key, type_id, last_clone)
+        : shape_entry_copy_as(tree, k->like, type_id, last_clone);
     if (!added) return NULL;
     added->byte_offset = parent->byte_size;
     if (!first) first = added;
@@ -575,11 +592,11 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     child->js_meta = parent->js_meta;
     child->has_array_index_shape = parent->has_array_index_shape;
 
-    typemap_hash_build(child, input->pool);
+    typemap_hash_build_in(child, tree);
 
     int fixed_slot_count = typemap_fixed_slot_prefix_count(parent);
     if (fixed_slot_count > 0) {
-        ShapeEntry** entries = (ShapeEntry**)pool_calloc(input->pool,
+        ShapeEntry** entries = (ShapeEntry**)type_alloc_zeroed(tree,
             (size_t)fixed_slot_count * sizeof(ShapeEntry*));
         if (entries) {
             ShapeEntry* e = first;
@@ -599,7 +616,7 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     child->type_index = input->type_list->length - 1;
     transition_graph_count(input, is_element);
 
-    TypeMapTransition* tr = (TypeMapTransition*)pool_calloc(input->pool,
+    TypeMapTransition* tr = (TypeMapTransition*)type_alloc_zeroed(tree,
         sizeof(TypeMapTransition));
     if (!tr) return child;
     tr->name_id = added->name_id;
@@ -638,7 +655,8 @@ static TypeMap* map_shape_transition_root(Input* input,
         return input->shape_transition_root->js_meta == js_meta
             ? input->shape_transition_root : NULL;
     }
-    TypeMap* root = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    TypeMap* root = (TypeMap*)alloc_type_in(input_tree_alloc(input), LMD_TYPE_MAP,
+        sizeof(TypeMap));
     if (!root) return NULL;
     root->is_transition_shared_shape = true;
     root->js_meta = js_meta;
@@ -965,18 +983,22 @@ TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns) {
     const char* name = tag_name->chars;
     if (TypeElmt* root = elmt_tree_root_find(input, name, ns)) return root;
     if (!transition_graph_has_room(input, true)) return NULL;
-    // keep the table at most half full; a replaced table is left to the pool
+    // Keep the table at most half full. Growing replaces it and frees the old
+    // one, so the table is a pool block, unlike the roots it indexes (D4.1.4v4).
     if ((input->element_root_count + 1) * 2 > input->element_root_cap) {
         int cap = input->element_root_cap ? input->element_root_cap * 2 : 64;
         TypeElmt** table = (TypeElmt**)pool_calloc(input->pool, sizeof(TypeElmt*) * (size_t)cap);
         if (!table) return NULL;
+        TypeElmt** old_table = input->element_roots;
         for (int i = 0; i < input->element_root_cap; i++) {
-            if (input->element_roots[i]) elmt_root_table_insert(table, cap, input->element_roots[i]);
+            if (old_table[i]) elmt_root_table_insert(table, cap, old_table[i]);
         }
         input->element_roots = table;
         input->element_root_cap = cap;
+        if (old_table) pool_free(input->pool, old_table);
     }
-    TypeElmt* root = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    TypeElmt* root = (TypeElmt*)alloc_type_in(input_tree_alloc(input), LMD_TYPE_ELEMENT,
+        sizeof(TypeElmt));
     if (!root) return NULL;
     root->name.str = name;
     root->name.length = tag_name->len;
@@ -1710,6 +1732,8 @@ Input* input_from_target_with_name_parent(Target* target, String* type,
     return input_from_target_impl(target, type, flavor, name_parent);
 }
 
+static void input_pool_cleanup(void* arg);
+
 Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
     return Input::create_with_name_parent(pool, abs_url, parent, NULL);
 }
@@ -1726,16 +1750,18 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
         return NULL;
     }
     input->pool = pool;
-    // Per-document memory sub-context: registers the document URL and groups this
-    // input's direct arena and semantic name/shape owners under it so snapshots
-    // attribute memory to the source document. The shared input pool stays in
-    // the root context; these allocators carry the document id.
-    MemContext* dctx = NULL;
-    if (abs_url && abs_url->href && abs_url->href->len > 0) {
+    // D4.2.3: every Input owns a context for its arena and name pool, with or
+    // without a URL; a URL also registers the document so snapshots attribute
+    // the memory to it. The context sits under the pool's own context, so a
+    // cascade that destroys the pool destroys this context first (D4.2.6).
+    bool has_url = abs_url && abs_url->href && abs_url->href->len > 0;
+    MemContext* dctx = mem_context_create(
+        mem_node_owner((MemNode*)pool_get_mem_node(pool)), MEM_ROLE_INPUT,
+        has_url ? "input.doc" : "input.local");
+    if (has_url) {
         uint32_t parent_doc = (parent && parent->mem_ctx)
             ? mem_context_doc_id((MemContext*)parent->mem_ctx) : 0;
         uint32_t doc_id = mem_doc_register(abs_url->href->chars, parent_doc);
-        dctx = mem_context_create(NULL, MEM_ROLE_INPUT, "input.doc");
         mem_context_set_doc_id(dctx, doc_id);
     }
     input->mem_ctx = dctx;
@@ -1762,6 +1788,13 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     input->parse_failed = false;
     input->parse_error_message = nullptr;
     input->xml_stylesheet_href = nullptr;
+    // D4.2.6: the Input lives in `pool`, so the pool releases it at the latest.
+    // Without this, a URL-less Input's arena outlived every owner.
+    if (!pool_add_cleanup(pool, input_pool_cleanup, input)) {
+        log_error("Input::create: failed to register the Input with its pool");
+        input_release_document_resources(input);
+        return NULL;
+    }
     return input;
 }
 
@@ -1787,6 +1820,27 @@ void input_release_document_resources(Input* input) {
         input->mem_ctx = nullptr;
         input->arena = nullptr;
     }
+    // The transition tree lived in that arena (D3.4.3v2); drop its entry points.
+    if (input->element_roots) {
+        pool_free(input->pool, input->element_roots);
+        input->element_roots = nullptr;
+        input->element_root_cap = 0;
+        input->element_root_count = 0;
+    }
+    input->shape_transition_root = nullptr;
+}
+
+// D4.2.6: runs when the Input's pool releases its blocks. Releasing is
+// idempotent, so an Input already released explicitly is left as is. Inside a
+// registry cascade the lock is held and the Input's context — created under
+// the pool's context — is already gone, so only the registry-free parts remain.
+static void input_pool_cleanup(void* arg) {
+    Input* input = (Input*)arg;
+    if (mem_context_in_teardown()) {
+        input->mem_ctx = nullptr;
+        input->arena = nullptr;
+    }
+    input_release_document_resources(input);
 }
 
 // Global singleton instance

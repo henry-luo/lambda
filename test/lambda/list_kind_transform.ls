@@ -1,9 +1,11 @@
 // P0 fixture of vibe/impl/Lambda_List_Fixes (done).md — lives in test/lambda/ext until its
 // phase turns it green, then moves to test/lambda (baseline). Golden written from the
 // rulings, not from the runtime.
-// S2.5.7: sequence operations preserve the input kind; mixing gives an array;
-// constructors fix their own kind; fill follows its item; zip pairs are arrays.
-// (phase P2)
+// S2.5.7v2: functions return an array for any sequence input, a list included
+// (sort, reverse, unique, take, drop, slice, [i to j], zip, fill); operators
+// keep the operand kind, and mixing gives an array; constructors fix their own
+// kind; zip pairs are arrays. (phase P2; functions flipped to arrays by
+// S2.5.7v2, 2026-09-25)
 // Green on both tiers after P2 (2026-09-22); moved from test/lambda/ext.
 
 let L = (3, 1, 2)

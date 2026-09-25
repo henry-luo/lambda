@@ -11,5 +11,5 @@ let unicode = "é";
     ascii[-1] == null,
     unicode[1] == null,
     type(ascii[3]),
-    ("abc" that ~ == "z") == ""
+    ("abc" |: ~ == "z") == ""
 ]

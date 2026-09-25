@@ -1,12 +1,12 @@
 "-- reorder / select --"
-[list, array, array]
-[list, array, array]
-[list, array]
-[list, array, array]
-[list, array, array]
-[list, array, array]
-[list, array, array]
-[1, 2, 3, 9]
+[array, array, array]
+[array, array, array]
+[array, array]
+[array, array, array]
+[array, array, array]
+[array, array, array]
+[array, array, array]
+[[1, 2, 3], 9]
 [[1, 2, 3], 9]
 [[3, 2, 1], 9]
 "-- vector arithmetic --"
@@ -18,12 +18,12 @@
 [list, array]
 [list, array, array]
 "-- zip --"
-[list, array, array]
+[array, array, array]
 [3, array, 2]
-[[1, 3], [2, 4], 9]
+[[[1, 3], [2, 4]], 9]
 "-- fill --"
-[list, 4, array, 2, array]
-[1, 2, 1, 2, 9]
+[array, 4, array, 2, array]
+[[1, 2, 1, 2], 9]
 "-- constructors --"
 [array, array, array]
 [["a", "b"], 9]

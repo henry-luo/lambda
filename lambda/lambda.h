@@ -1411,10 +1411,13 @@ Item slot_image(Item value);
 // The JIT's direct field writer on a list value: store the image at the slot,
 // re-deriving the slot from the rooted owner after the copy allocates.
 void lambda_direct_field_store_image(Item owner, int64_t byte_offset, Item list);
-// Finish a transform result in the kind its sources decide (S2.5.7): a list
+// Finish an operator result in the kind its operands decide (S2.5.7v2): a list
 // collapses (none is null, one is its item, S2.5.5v2); an array keeps its length.
 Item seq_finish_kind(Item result, bool as_list);
-// S2.5.7: an operation over two sequences is a list only when every sequence
+// S2.5.7v2: a list is built, never computed -- a function or pipe result is an
+// array for any sequence input, so a kind bit the result carries is cleared.
+Item seq_finish_array(Item result);
+// S2.5.7v2: an operator over two sequences is a list only when every sequence
 // operand is a list; scalars and null do not decide.
 bool seq_operands_are_lists(Item left, Item right);
 #ifdef __cplusplus
@@ -2836,6 +2839,11 @@ extern "C" {
     // returns its input on success and a diagnostic-carrying Error Item on a
     // mismatch; no native lane may be entered before this succeeds.
     bool lambda_type_matches(Item value, Type* expected);
+    // S11.1.3: membership in a range type, and its bounds as one inclusive
+    // interval (codepoints for a character range). A bound outside the
+    // range's domain makes both answer false: that range admits nothing.
+    bool lambda_range_type_contains(const Type* range_type, Item value);
+    bool lambda_range_type_bounds(const Type* range_type, int64_t* start, int64_t* end);
     Item lambda_type_error(Item actual, Type* expected, const char* boundary);
     Item lambda_type_check(Item value, Type* expected, const char* boundary);
     // S12.1.4v2(3): the run-time half of an `fn`-context call's colour check.

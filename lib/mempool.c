@@ -100,6 +100,14 @@ MEMPOOL_WEAK size_t mem_vm_region_reserved_bytes(const MemVmRegion* region) {
 typedef struct PoolBlock PoolBlock;
 typedef struct PoolExtent PoolExtent;
 
+// A resource the pool owns without holding it as a block (D4.2.6). The record
+// is itself a pool block, so it needs no release of its own.
+typedef struct PoolCleanup {
+    void (*fn)(void* arg);
+    void* arg;
+    struct PoolCleanup* next;
+} PoolCleanup;
+
 // PoolBlock is the physical boundary tag, 32 bytes ahead of every payload. The
 // Pool owns the containing extent, so no global pointer index is required.
 // A free block keeps its free-list links in its own payload (POOL_MIN_PAYLOAD
@@ -164,6 +172,7 @@ struct Pool {
     size_t high_water_live_bytes;
     size_t free_count;
     void* mem_node;
+    PoolCleanup* cleanups;   // newest first
 };
 
 static unsigned next_pool_id = 1;
@@ -686,6 +695,28 @@ static void pool_release_node(Pool* pool) {
     }
 }
 
+// Runs every cleanup once, newest first, while the pool's blocks are still
+// valid. Each record is unlinked before its callback, so a cleanup that
+// registers another has it run in the same pass.
+static void pool_run_cleanups(Pool* pool) {
+    PoolCleanup* cleanup;
+    while ((cleanup = pool->cleanups) != NULL) {
+        pool->cleanups = cleanup->next;
+        cleanup->fn(cleanup->arg);
+    }
+}
+
+bool pool_add_cleanup(Pool* pool, void (*fn)(void* arg), void* arg) {
+    if (!pool || pool->valid != POOL_VALID_MARKER || !fn) return false;
+    PoolCleanup* cleanup = (PoolCleanup*)pool_alloc(pool, sizeof(PoolCleanup));
+    if (!cleanup) return false;
+    cleanup->fn = fn;
+    cleanup->arg = arg;
+    cleanup->next = pool->cleanups;
+    pool->cleanups = cleanup;
+    return true;
+}
+
 Pool* pool_create_sized(size_t initial_size) {
     size_t normalized = pool_normalize_initial_size(initial_size);
     if (normalized == 0 || normalized > SIZE_LIMIT) return NULL;
@@ -702,6 +733,7 @@ Pool* pool_create(void) {
 
 void pool_drain(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
+    pool_run_cleanups(pool);
     pool_release_node(pool);
     pool_release_all_extents(pool);
     pool->valid = 0;
@@ -718,6 +750,7 @@ void pool_destroy(Pool* pool) {
 
 void pool_reset(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
+    pool_run_cleanups(pool);
     pool_clear_free_bins(pool);
     pool->live_bytes = 0;
     for (PoolExtent* extent = pool->extents; extent; extent = extent->next) {

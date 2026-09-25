@@ -5,7 +5,9 @@
 // EXPRESSION in item position splices what it has (void), a list VALUE has
 // collapsed (a bound empty list is null and lands as null). S8.3.1v3: a
 // scalar has no content, so a computed one-item list is invisible to for/len/
-// index — wrap in [...] for a stable collection. (phase P1; take: P2)
+// index — wrap in [...] for a stable collection. A function result is an
+// array and never collapses (S2.5.7v2, S7.10.1v3): take((10, 20, 30), 1) is
+// [10]. (phase P1; take: P2, flipped to arrays 2026-09-25)
 // Green on both tiers after P2 (2026-09-22); moved from test/lambda/ext.
 
 "-- collapse --";
@@ -32,7 +34,7 @@ let one = for (x in [5]) x;
 let two = for (x in [5, 6]) x;
 [type(two), two == (5, 6), two == [5, 6]];
 [two, 1]
-"-- the n = 1 edge (S8.3.1v3) --"
+"-- the n = 1 edge: a function result never collapses (S7.10.1v3) --"
 let t1 = take((10, 20, 30), 1)
 let t2 = take((10, 20, 30), 2)
 let t0 = take((10, 20, 30), 0);

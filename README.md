@@ -94,20 +94,20 @@ Scalar operations automatically broadcast over collections:
 
 #### Pipe Operator & Data Pipelines
 
-The pipe operator `|` enables fluent data transformations. Use `~` to reference the current item:
+The pipe operator `|>` enables fluent data transformations, and its filter stage `|:` keeps the items a test accepts. Use `~` to reference the current item:
 
 ```lambda
 // Map: double each element
-[1, 2, 3] | ~ * 2                    // [2, 4, 6]
+[1, 2, 3] |> ~ * 2                   // [2, 4, 6]
 
 // Extract fields
-users | ~.name                       // ["Alice", "Bob", "Carol"]
+users |> ~.name                      // ["Alice", "Bob", "Carol"]
 
-// Filter with 'that'
-[1, 2, 3, 4, 5] that ~ > 3          // [4, 5]
+// Filter with '|:'
+[1, 2, 3, 4, 5] |: ~ > 3             // [4, 5]
 
 // Chain operations: filter → map → aggregate
-users that ~.age >= 18 | ~.name | len   // count adult names
+users |: ~.age >= 18 |> ~.name |> len   // count adult names
 ```
 
 #### For-Expressions with SQL-like Clauses

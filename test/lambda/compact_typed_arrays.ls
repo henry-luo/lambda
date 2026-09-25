@@ -66,7 +66,7 @@ a8[1]
 [10u16, 20u16, 30u16] |> ~ * 2;
 
 // filter
-[10i32, 20i32, 30i32, 40i32] that (~ > 25)
+[10i32, 20i32, 30i32, 40i32] |: (~ > 25)
 
 // ===== type annotations with compact arrays =====
 "=== annotations ==="

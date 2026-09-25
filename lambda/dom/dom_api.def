@@ -236,6 +236,7 @@ DOM_OP(CORE, ime_preedit,      input, 1, "fn(n: any) -> any",                   
 DOM_OP(CORE, set_ime_preedit,  input, 3, "pn(n: any, text: any, caret: int) -> bool",       dom_engine_set_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, clear_ime_preedit, input, 1, "pn(n: any) -> bool",                             dom_engine_clear_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, clipboard_text,   input, 0, "fn() -> string|null",                             dom_engine_clipboard_text, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, clipboard_copy_event, input, 0, "pn() -> bool",                                  dom_engine_clipboard_copy_event, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Selection serialization and clipboard writing are capability-checked DOM
 // mechanisms.  The behavior package chooses copy/cut policy and representations.
 DOM_OP(CORE, edit_selection_text, editing, 2, "fn(host: any, invocation: int) -> string|null", dom_engine_edit_selection_text, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
@@ -531,6 +532,7 @@ DOM_OP(CORE, set_range_text,      textctl, 5, "pn(n: any, replacement: string, s
 
 DOM_OP(CORE, select_named_item, select, 2, "fn(n: any, name: string) -> any", dom_core_select_named_item, 0, "", select_element, "named_item", "namedItem")
 DOM_OP(CORE, select_add,        select, 3, "pn(n: any, item: any, before: any) -> null", dom_core_select_add, DOM_F_MUTATES, "", select_element, "add", "")
+DOM_OP(CORE, select_show_picker, select, 1, "pn(n: any) -> null", dom_core_select_show_picker, DOM_F_MUTATES, "", select_element, "show_picker", "showPicker")
 
 // ---------------------------------------------------------------------------
 // NATIVE — the retired `->dom` section (ES40)

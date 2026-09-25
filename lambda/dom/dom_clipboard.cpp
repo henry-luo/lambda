@@ -29,6 +29,7 @@
 #include "../js/js_typed_array.h"
 #include "../js/js_class.h"
 #include "dom_events.h"
+#include "dom.h"
 #include "../lambda-data.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"
@@ -174,7 +175,8 @@ static Item blob_append_part(StrBuf* sb, Item part) {
     }
     if (tid == LMD_TYPE_MAP) {
         // Blob? Pull _text.
-        if (js_class_id(part) == JS_CLASS_BLOB) {
+        if (js_class_id(part) == JS_CLASS_BLOB ||
+            js_class_id(part) == JS_CLASS_FILE) {
             size_t n = 0;
             const char* t = str_prop_get(part, "_text", &n);
             if (t && n > 0) strbuf_append_str_n(sb, t, n);
@@ -186,21 +188,27 @@ static Item blob_append_part(StrBuf* sb, Item part) {
 }
 
 static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
+    RootFrame roots(5);
+    Rooted<Item> parts_root(roots, parts);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> part_root(roots, ItemNull);
+    Rooted<Item> obj_root(roots, ItemNull);
+    Rooted<Item> text_root(roots, ItemNull);
     StrBuf* sb = strbuf_new();
-    if (get_type_id(parts) == LMD_TYPE_ARRAY) {
-        int64_t n = js_array_length(parts);
+    if (get_type_id(parts_root.get()) == LMD_TYPE_ARRAY) {
+        int64_t n = js_array_length(parts_root.get());
         for (int64_t i = 0; i < n; i++) {
-            Item p = js_elements_get_int(parts, i);
-            Item append_result = blob_append_part(sb, p);
+            part_root.set(js_elements_get_int(parts_root.get(), i));
+            Item append_result = blob_append_part(sb, part_root.get());
             if (item_is_error(append_result)) {
                 strbuf_free(sb);
                 return append_result;
             }
         }
-    } else if (get_type_id(parts) != LMD_TYPE_NULL) {
+    } else if (get_type_id(parts_root.get()) != LMD_TYPE_NULL) {
         // Per spec the parts argument must be iterable; if it's a single string
         // we accept it as a one-element sequence (matches the shim's behavior).
-        Item append_result = blob_append_part(sb, parts);
+        Item append_result = blob_append_part(sb, parts_root.get());
         if (item_is_error(append_result)) {
             strbuf_free(sb);
             return append_result;
@@ -209,9 +217,9 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
 
     // Resolve `type` from options (lowercased; empty if any byte outside 0x20..0x7e).
     char type_buf[256] = "";
-    if (get_type_id(options) == LMD_TYPE_MAP) {
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
         size_t tn = 0;
-        const char* t = str_prop_get(options, "type", &tn);
+        const char* t = str_prop_get(options_root.get(), "type", &tn);
         if (t && tn > 0 && tn < sizeof(type_buf)) {
             bool ok = true;
             for (size_t i = 0; i < tn; i++) {
@@ -224,18 +232,18 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
         }
     }
 
-    Item obj = dom_realm_new_object_of_class(class_id);
-    attach_known_prototype(obj, g_blob_proto);
-    Item text_str = make_str_n(sb->str ? sb->str : "", sb->length);
-    dom_realm_set_cstr(obj, "_text", text_str);
-    dom_realm_set_cstr(obj, "size", (Item){.item = i2it((int64_t)sb->length)});
-    dom_realm_set_cstr(obj, "type", make_str(type_buf));
+    obj_root.set(dom_realm_new_object_of_class(class_id));
+    attach_known_prototype(obj_root.get(), g_blob_proto);
+    text_root.set(make_str_n(sb->str ? sb->str : "", sb->length));
+    dom_realm_set_cstr(obj_root.get(), "_text", text_root.get());
+    dom_realm_set_cstr(obj_root.get(), "size", (Item){.item = i2it((int64_t)sb->length)});
+    dom_realm_set_cstr(obj_root.get(), "type", make_str(type_buf));
     // bind prototype methods directly to instance (Lambda has no proto chain walk)
-    js_clipboard_set_method(obj, "text", js_blob_text);
-    js_clipboard_set_method(obj, "arrayBuffer", js_blob_array_buffer);
-    js_clipboard_set_method(obj, "slice", js_blob_slice);
+    js_clipboard_set_method(obj_root.get(), "text", js_blob_text);
+    js_clipboard_set_method(obj_root.get(), "arrayBuffer", js_blob_array_buffer);
+    js_clipboard_set_method(obj_root.get(), "slice", js_blob_slice);
     strbuf_free(sb);
-    return obj;
+    return obj_root.get();
 }
 JS_FORWARD_ITEM(js_blob_new, (Item parts, Item options), js_blob_new_with_class, (parts, options, JS_CLASS_BLOB))
 
@@ -337,74 +345,95 @@ extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
 // We snapshot the keys (preserving original case) and store representations.
 
 extern "C" Item js_clipboard_item_new(Item items, Item options) {
-    if (get_type_id(items) != LMD_TYPE_MAP) {
+    RootFrame roots(10);
+    Rooted<Item> items_root(roots, items);
+    Rooted<Item> options_root(roots, options);
+    Rooted<Item> keys_root(roots, ItemNull);
+    Rooted<Item> obj_root(roots, ItemNull);
+    Rooted<Item> types_root(roots, ItemNull);
+    Rooted<Item> orig_types_root(roots, ItemNull);
+    Rooted<Item> reps_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> lower_key_root(roots, ItemNull);
+    Rooted<Item> rep_root(roots, ItemNull);
+    if (get_type_id(items_root.get()) != LMD_TYPE_MAP) {
         return dom_realm_throw_type_error("ClipboardItem requires a record of MIME types");
     }
-    // Per spec: items must be a plain record. Reject Blob (and other tagged classes).
-    if (js_class_id(items) != JS_CLASS_NONE) {
+    // Plain JS records carry JS_CLASS_OBJECT; reject only branded built-ins.
+    JsClass item_class = js_class_id(items_root.get());
+    if (item_class != JS_CLASS_OBJECT && item_class != JS_CLASS_NONE) {
         return dom_realm_throw_type_error("ClipboardItem requires a record, not a Blob");
     }
     // Iterate source map keys via js_object_keys helper.
-    Item keys = js_object_keys(items);
-    int64_t nk = (get_type_id(keys) == LMD_TYPE_ARRAY) ? js_array_length(keys) : 0;
+    keys_root.set(js_object_keys(items_root.get()));
+    int64_t nk = (get_type_id(keys_root.get()) == LMD_TYPE_ARRAY) ? js_array_length(keys_root.get()) : 0;
     if (nk == 0) {
         return dom_realm_throw_type_error("ClipboardItem requires at least one representation");
     }
-    Item obj = dom_realm_new_object_of_class(JS_CLASS_CLIPBOARD_ITEM);
-    attach_known_prototype(obj, g_clipboard_item_proto);
+    obj_root.set(dom_realm_new_object_of_class(JS_CLASS_CLIPBOARD_ITEM));
+    attach_known_prototype(obj_root.get(), g_clipboard_item_proto);
 
-    Item types = js_array_new(0);
-    Item orig_types = js_array_new(0);
-    Item reps = js_new_object(); // { lower_mime: Blob|string|Promise }
+    types_root.set(js_array_new(0));
+    orig_types_root.set(js_array_new(0));
+    reps_root.set(js_new_object()); // { lower_mime: Blob|string|Promise }
 
     char mime_buf[256];
     for (int64_t i = 0; i < nk; i++) {
-        Item k = js_elements_get_int(keys, i);
-        if (get_type_id(k) != LMD_TYPE_STRING) continue;
-        String* ks = it2s(k);
+        key_root.set(js_elements_get_int(keys_root.get(), i));
+        if (get_type_id(key_root.get()) != LMD_TYPE_STRING) continue;
+        String* ks = it2s(key_root.get());
         if (!ks || ks->len == 0 || ks->len >= sizeof(mime_buf)) continue;
         for (size_t j = 0; j < ks->len; j++) {
             unsigned char c = (unsigned char)ks->chars[j];
             mime_buf[j] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c;
         }
         mime_buf[ks->len] = '\0';
-        Item lower_k = make_str(mime_buf);
-        js_array_push(types, lower_k);
-        js_array_push(orig_types, k);
-        dom_realm_set(reps, lower_k, dom_realm_get(items, k));
+        lower_key_root.set(make_str(mime_buf));
+        js_array_push(types_root.get(), lower_key_root.get());
+        js_array_push(orig_types_root.get(), key_root.get());
+        rep_root.set(dom_realm_get(items_root.get(), key_root.get()));
+        dom_realm_set(reps_root.get(), lower_key_root.get(), rep_root.get());
     }
 
-    dom_realm_set_cstr(obj, "types", types);
-    dom_realm_set_cstr(obj, "_orig_types", orig_types);
-    dom_realm_set_cstr(obj, "_reps", reps);
+    dom_realm_set_cstr(obj_root.get(), "types", types_root.get());
+    dom_realm_set_cstr(obj_root.get(), "_orig_types", orig_types_root.get());
+    dom_realm_set_cstr(obj_root.get(), "_reps", reps_root.get());
     // bind prototype methods directly to instance (Lambda has no proto chain walk)
-    js_clipboard_set_method(obj, "getType", js_clipboard_item_get_type);
+    js_clipboard_set_method(obj_root.get(), "getType", js_clipboard_item_get_type);
 
     const char* presentation = "attachment";
-    if (get_type_id(options) == LMD_TYPE_MAP) {
+    if (get_type_id(options_root.get()) == LMD_TYPE_MAP) {
         size_t pn = 0;
-        const char* p = str_prop_get(options, "presentationStyle", &pn);
+        const char* p = str_prop_get(options_root.get(), "presentationStyle", &pn);
         if (p && (strcmp(p, "inline") == 0 || strcmp(p, "attachment") == 0 ||
                   strcmp(p, "unspecified") == 0)) presentation = p;
     }
-    dom_realm_set_cstr(obj, "presentationStyle", make_str(presentation));
-    return obj;
+    dom_realm_set_cstr(obj_root.get(), "presentationStyle", make_str(presentation));
+    return obj_root.get();
 }
 
 extern "C" Item js_clipboard_item_get_type(Item type_item) {
-    Item self = dom_realm_receiver();
-    Item gen = dom_realm_get_cstr(self, "_clipboard_generation");
+    RootFrame roots(8);
+    Rooted<Item> type_root(roots, type_item);
+    Rooted<Item> self_root(roots, dom_realm_receiver());
+    Rooted<Item> reps_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> rep_root(roots, ItemNull);
+    Rooted<Item> parts_root(roots, ItemNull);
+    Rooted<Item> options_root(roots, ItemNull);
+    Rooted<Item> blob_root(roots, ItemNull);
+    Item gen = dom_realm_get_cstr(self_root.get(), "_clipboard_generation");
     if (get_type_id(gen) == LMD_TYPE_INT && (int64_t)it2i(gen) != g_clipboard_generation) {
         JS_CLIPBOARD_REJECT("DataError", "clipboard item is stale");
     }
-    if (get_type_id(type_item) != LMD_TYPE_STRING) {
+    if (get_type_id(type_root.get()) != LMD_TYPE_STRING) {
         JS_CLIPBOARD_REJECT("TypeError", "ClipboardItem.getType: type must be a string");
     }
-    Item reps = dom_realm_get_cstr(self, "_reps");
-    if (get_type_id(reps) != LMD_TYPE_MAP) {
+    reps_root.set(dom_realm_get_cstr(self_root.get(), "_reps"));
+    if (get_type_id(reps_root.get()) != LMD_TYPE_MAP) {
         JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
     }
-    String* ts = it2s(type_item);
+    String* ts = it2s(type_root.get());
     char buf[256];
     if (!ts || ts->len == 0 || ts->len >= sizeof(buf)) {
         JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
@@ -414,19 +443,22 @@ extern "C" Item js_clipboard_item_get_type(Item type_item) {
         buf[j] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c;
     }
     buf[ts->len] = '\0';
-    Item rep = dom_realm_get(reps, make_str(buf));
-    if (rep.item == ITEM_JS_UNDEFINED || get_type_id(rep) == LMD_TYPE_NULL) {
+    key_root.set(make_str(buf));
+    rep_root.set(dom_realm_get(reps_root.get(), key_root.get()));
+    if (rep_root.get().item == ITEM_JS_UNDEFINED || get_type_id(rep_root.get()) == LMD_TYPE_NULL) {
         JS_CLIPBOARD_REJECT("NotFoundError", "type not found");
     }
     // If it's already a Blob, resolve directly. If it's a string, wrap in Blob.
-    if (get_type_id(rep) == LMD_TYPE_STRING) {
-        Item parts = js_array_new(0);
-        js_array_push(parts, rep);
-        Item opts = js_new_object();
-        dom_realm_set_cstr(opts, "type", make_str(buf));
-        return dom_realm_promise_resolve(js_blob_new(parts, opts));
+    if (get_type_id(rep_root.get()) == LMD_TYPE_STRING) {
+        // D5.3.3: Blob construction can collect an unrooted representation.
+        parts_root.set(js_array_new(0));
+        js_array_push(parts_root.get(), rep_root.get());
+        options_root.set(js_new_object());
+        dom_realm_set_cstr(options_root.get(), "type", key_root.get());
+        blob_root.set(js_blob_new(parts_root.get(), options_root.get()));
+        return dom_realm_promise_resolve(blob_root.get());
     }
-    return dom_realm_promise_resolve(rep);
+    return dom_realm_promise_resolve(rep_root.get());
 }
 
 extern "C" Item js_clipboard_item_supports(Item type_item) {
@@ -1029,7 +1061,11 @@ static const char* dt_read_record(Item dt, const char* mime) {
 // Returns true if the handler called preventDefault().
 extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const char* type) {
     bool is_paste = (strcmp(type, "paste") == 0);
-    Item dt;
+    // Event listeners can allocate while the target, transfer, and event remain live.
+    RootFrame roots(3);
+    Rooted<Item> target_root(roots, target_item);
+    Rooted<Item> dt_root(roots, ItemNull);
+    Rooted<Item> ev_root(roots, ItemNull);
     if (is_paste) {
         // clipboard_store_read_mime returns a pointer into a single reused
         // buffer — the second call invalidates the first, so copy text/plain
@@ -1037,22 +1073,31 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
         const char* plain_raw = clipboard_store_read_mime("text/plain");
         char* plain = (plain_raw && *plain_raw) ? mem_strdup(plain_raw, MEM_CAT_DOM) : NULL;
         const char* html = clipboard_store_read_mime("text/html");
-        dt = js_data_transfer_new_with_strings(plain, html);
+        dt_root.set(js_data_transfer_new_with_strings(plain, html));
         mem_free(plain);
     } else {
-        dt = js_make_data_transfer_object();
+        dt_root.set(js_make_data_transfer_object());
     }
-    Item ev = js_create_event(type, /*bubbles=*/1, /*cancelable=*/1);
-    dom_realm_set_cstr(ev, "clipboardData", dt);
-    dom_dispatch_event(target_item, ev);
-    bool prevented = radiant_dom_event_default_prevented(ev);
+    ev_root.set(js_create_event(type, /*bubbles=*/1, /*cancelable=*/1));
+    dom_realm_set_cstr(ev_root.get(), "clipboardData", dt_root.get());
+    dom_dispatch_event(target_root.get(), ev_root.get());
+    bool prevented = radiant_dom_event_default_prevented(ev_root.get());
     if (!is_paste) {
-        const char* plain = dt_read_record(dt, "text/plain");
-        const char* html  = dt_read_record(dt, "text/html");
+        const char* plain = dt_read_record(dt_root.get(), "text/plain");
+        const char* html  = dt_read_record(dt_root.get(), "text/html");
         if (html && *html) clipboard_store_write_html(html, plain ? plain : "");
         else if (plain && *plain) clipboard_store_write_text(plain);
     }
     return prevented;
+}
+
+// D7.2.5: expose document event transport; command policy stays in the package.
+extern "C" Item dom_engine_clipboard_copy_event(void) {
+    RootFrame roots(1);
+    Rooted<Item> document_root(roots, js_get_document_object_value());
+    if (get_type_id(document_root.get()) == LMD_TYPE_NULL) return (Item){.item = b2it(false)};
+    bool copied = js_dispatch_clipboard_event_to_element(document_root.get(), "copy");
+    return (Item){.item = b2it(copied)};
 }
 
 // Stage 4C Phase B: HTML5 drag-and-drop JS event dispatch. Radiant's native
@@ -1421,6 +1466,19 @@ extern "C" Item js_clipboard_write(Item items_array) {
 // Clipboard.prototype.read — synchronous read of the C ClipboardStore wrapped
 // in ClipboardItems whose representations are Blobs (per spec).
 extern "C" Item js_clipboard_read(Item opts) {
+    RootFrame roots(12);
+    Rooted<Item> opts_root(roots, opts);
+    Rooted<Item> recs_root(roots, ItemNull);
+    Rooted<Item> out_root(roots, ItemNull);
+    Rooted<Item> rec_root(roots, ItemNull);
+    Rooted<Item> keys_root(roots, ItemNull);
+    Rooted<Item> wrapped_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> parts_root(roots, ItemNull);
+    Rooted<Item> blob_options_root(roots, ItemNull);
+    Rooted<Item> blob_root(roots, ItemNull);
+    Rooted<Item> clipboard_item_root(roots, ItemNull);
     if (clipboard_store_get_permission_read() == CLIPBOARD_PERMISSION_DENIED) {
         JS_CLIPBOARD_REJECT("NotAllowedError", "Read permission denied");
     }
@@ -1428,11 +1486,11 @@ extern "C" Item js_clipboard_read(Item opts) {
     // sequence. An *absent* key is fine (skip). An explicit `null` (or any
     // non-array value) rejects with TypeError. A non-empty array rejects
     // with NotAllowedError (we don't support unsanitised reads in headless).
-    if (get_type_id(opts) == LMD_TYPE_MAP) {
+    if (get_type_id(opts_root.get()) == LMD_TYPE_MAP) {
         // Detect presence by walking keys (dom_realm_get can't distinguish
         // explicit-null from absent on plain Lambda maps).
         bool has_unsanitized = false;
-        Item okeys = js_object_keys(opts);
+        Item okeys = js_object_keys(opts_root.get());
         if (get_type_id(okeys) == LMD_TYPE_ARRAY) {
             int64_t okn = js_array_length(okeys);
             for (int64_t kk = 0; kk < okn; kk++) {
@@ -1446,7 +1504,7 @@ extern "C" Item js_clipboard_read(Item opts) {
             }
         }
         if (has_unsanitized) {
-            Item u = dom_realm_get_cstr(opts, "unsanitized");
+            Item u = dom_realm_get_cstr(opts_root.get(), "unsanitized");
             TypeId ut = get_type_id(u);
             if (ut == LMD_TYPE_ARRAY) {
                 if (js_array_length(u) > 0) {
@@ -1459,44 +1517,44 @@ extern "C" Item js_clipboard_read(Item opts) {
     }
 
     // Snapshot the C store, wrap each value in a Blob.
-    Item recs = js_lambda_clipboard_read_records();
-    Item out = js_array_new(0);
-    if (get_type_id(recs) == LMD_TYPE_ARRAY) {
-        int64_t n = js_array_length(recs);
+    recs_root.set(js_lambda_clipboard_read_records());
+    out_root.set(js_array_new(0));
+    if (get_type_id(recs_root.get()) == LMD_TYPE_ARRAY) {
+        int64_t n = js_array_length(recs_root.get());
         for (int64_t i = 0; i < n; i++) {
-            Item rec = js_elements_get_int(recs, i);
-            if (get_type_id(rec) != LMD_TYPE_MAP) continue;
-            Item keys = js_object_keys(rec);
-            int64_t nk = (get_type_id(keys) == LMD_TYPE_ARRAY) ? js_array_length(keys) : 0;
-            Item wrapped = js_new_object();
+            rec_root.set(js_elements_get_int(recs_root.get(), i));
+            if (get_type_id(rec_root.get()) != LMD_TYPE_MAP) continue;
+            keys_root.set(js_object_keys(rec_root.get()));
+            int64_t nk = (get_type_id(keys_root.get()) == LMD_TYPE_ARRAY) ? js_array_length(keys_root.get()) : 0;
+            wrapped_root.set(js_new_object());
             for (int64_t j = 0; j < nk; j++) {
-                Item k = js_elements_get_int(keys, j);
-                Item v = dom_realm_get(rec, k);
-                if (get_type_id(k) == LMD_TYPE_STRING &&
-                    get_type_id(v) == LMD_TYPE_STRING) {
-                    String* ks = it2s(k);
-                    String* vs = it2s(v);
+                key_root.set(js_elements_get_int(keys_root.get(), j));
+                value_root.set(dom_realm_get(rec_root.get(), key_root.get()));
+                if (get_type_id(key_root.get()) == LMD_TYPE_STRING &&
+                    get_type_id(value_root.get()) == LMD_TYPE_STRING) {
+                    String* ks = it2s(key_root.get());
+                    String* vs = it2s(value_root.get());
                     if (ks && vs && ks->len == 9 &&
                         memcmp(ks->chars, "text/html", 9) == 0) {
                         StrBuf* sb = strbuf_new();
                         strip_html_script_style(sb, vs->chars, vs->len);
-                        v = make_str_n(sb->str ? sb->str : "", sb->length);
+                        value_root.set(make_str_n(sb->str ? sb->str : "", sb->length));
                         strbuf_free(sb);
                     }
                 }
-                Item parts = js_array_new(0);
-                js_array_push(parts, v);
-                Item bopts = js_new_object();
-                dom_realm_set_cstr(bopts, "type", k);
-                Item blob = js_blob_new(parts, bopts);
-                dom_realm_set(wrapped, k, blob);
+                parts_root.set(js_array_new(0));
+                js_array_push(parts_root.get(), value_root.get());
+                blob_options_root.set(js_new_object());
+                dom_realm_set_cstr(blob_options_root.get(), "type", key_root.get());
+                blob_root.set(js_blob_new(parts_root.get(), blob_options_root.get()));
+                dom_realm_set(wrapped_root.get(), key_root.get(), blob_root.get());
             }
-            Item ci = js_clipboard_item_new(wrapped, ItemNull);
-            dom_realm_set_cstr(ci, "_clipboard_generation", (Item){.item = i2it(g_clipboard_generation)});
-            js_array_push(out, ci);
+            clipboard_item_root.set(js_clipboard_item_new(wrapped_root.get(), ItemNull));
+            dom_realm_set_cstr(clipboard_item_root.get(), "_clipboard_generation", (Item){.item = i2it(g_clipboard_generation)});
+            js_array_push(out_root.get(), clipboard_item_root.get());
         }
     }
-    return dom_realm_promise_resolve(out);
+    return dom_realm_promise_resolve(out_root.get());
 }
 
 // =============================================================================
@@ -1641,26 +1699,31 @@ extern "C" Item js_lambda_clipboard_write_records(Item arr) {
 }
 
 extern "C" Item js_lambda_clipboard_read_records(void) {
-    Item out = js_array_new(0);
+    // D5.3.3: record and key construction may collect before the snapshot is published.
+    RootFrame roots(4);
+    Rooted<Item> out_root(roots, js_array_new(0));
+    Rooted<Item> rec_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
     ArrayList* items = clipboard_store_read_items();
-    if (!items) return out;
+    if (!items) return out_root.get();
     for (int i = 0; i < items->length; i++) {
         ClipboardItem* it = (ClipboardItem*)items->data[i];
         if (!it) continue;
-        Item rec = js_new_object();
+        rec_root.set(js_new_object());
         if (it->entries) {
             for (int j = 0; j < it->entries->length; j++) {
                 ClipboardEntry* e = (ClipboardEntry*)it->entries->data[j];
                 if (!e || !e->mime || !e->data) continue;
-                Item key_item = make_str(e->mime);
-                Item val_item = make_str_n(e->data, e->data_len);
-                dom_realm_set(rec, key_item, val_item);
+                key_root.set(make_str(e->mime));
+                value_root.set(make_str_n(e->data, e->data_len));
+                dom_realm_set(rec_root.get(), key_root.get(), value_root.get());
             }
         }
-        js_array_push(out, rec);
+        js_array_push(out_root.get(), rec_root.get());
     }
     free_items_snapshot(items);
-    return out;
+    return out_root.get();
 }
 
 static ClipboardPermission perm_from_str(const char* s) {
@@ -1719,7 +1782,8 @@ static Item js_clipboard_install_interface(Item global, const char* name,
     js_set_function_name(ctor_root.get(), make_str(name));
     proto_root.set(js_new_object());
     dom_realm_set_cstr(proto_root.get(), "constructor", ctor_root.get());
-    dom_realm_set_cstr(ctor_root.get(), "prototype", proto_root.get());
+    // Publish the construct payload and public prototype as one identity.
+    dom_realm_init_constructor_prototype(ctor_root.get(), proto_root.get());
     if (out_proto) *out_proto = proto_root.get();
     dom_realm_set_cstr(global, name, ctor_root.get());
     return ctor_root.get();
@@ -1850,6 +1914,8 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Rooted<Item> permissions_root(roots, ItemNull);
         Rooted<Item> service_worker_root(roots, ItemNull);
         Rooted<Item> navigator_root(roots, ItemNull);
+        // Brand and prototype must agree for instanceof on navigator.clipboard.
+        attach_known_prototype(clipboard_root.get(), clipboard_proto_root.get());
         dom_realm_set_cstr(clipboard_root.get(), "writeText", dom_realm_get_cstr(clipboard_proto_root.get(), "writeText"));
         dom_realm_set_cstr(clipboard_root.get(), "readText", dom_realm_get_cstr(clipboard_proto_root.get(), "readText"));
         dom_realm_set_cstr(clipboard_root.get(), "write", dom_realm_get_cstr(clipboard_proto_root.get(), "write"));

@@ -146,6 +146,7 @@ Item dom_core_set_selection_range(Item n, Item start, Item end, Item dir);
 Item dom_core_set_range_text(Item n, Item replacement, Item start, Item end, Item mode);
 Item dom_core_select_named_item(Item n, Item name);
 Item dom_core_select_add(Item n, Item item, Item before);
+Item dom_core_select_show_picker(Item n);
 
 // --- bodies the catalog references that are defined elsewhere in the core
 // (range/selection bindings over radiant/dom_range, CSSOM, DOMParser). They
@@ -181,6 +182,7 @@ Item dom_engine_caret_operation(Item a, Item b, Item c);
 Item dom_engine_pointer_selection(Item a, Item b);
 Item dom_engine_clear_ime_preedit(Item a);
 Item dom_engine_clipboard_text(void);
+Item dom_engine_clipboard_copy_event(void);
 Item dom_engine_edit_selection_text(Item a, Item b);
 Item dom_engine_edit_selection_html(Item a, Item b);
 Item dom_engine_edit_clipboard_write(Item a, Item b, Item c, Item d);

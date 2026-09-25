@@ -114,6 +114,8 @@ The rationale: structural identifiers are highly repetitive and benefit from int
 
 **The shape pool is retired** (D3.4.3v2, 2026-09-25). Maps, parsed elements and `MarkEditor` rebuilds share whole types through the per-`Input` transition tree ([LR_03](LR_03_Value_and_Type_Model.md) §4), and a map or element grown at runtime without an `Input` keeps a type of its own, so no allocator deduplicates `ShapeEntry` chains any more. The `ShapeEntry`/`TypeMap` structures are owned by [LR_03](LR_03_Value_and_Type_Model.md) §4.
 
+**Input ownership** (D4.2.6, 2026-09-25). An `Input` lives in the `Pool` its creator passes to `Input::create`, and that pool owns it: the `Input` registers its release as a pool cleanup (`pool_add_cleanup`, run when the pool is destroyed, drained or reset), so its context — and with it the arena, the name pool and the type list — is released explicitly (`input_release_document_resources`: `InputManager::reset_inputs`, Radiant's `free_document`) or, at the latest, with the pool. Every `Input` has that context, with or without a URL, created under the pool's own context. Before this, an `Input` without a URL registered its arena in the root context and nothing freed it before exit.
+
 ---
 
 ## 8. The memory-context registry & the stack-overflow guard

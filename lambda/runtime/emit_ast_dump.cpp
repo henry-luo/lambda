@@ -23,9 +23,7 @@ struct EmitDirectParseState {
 static void emit_release_direct_parse(EmitDirectParseState* state) {
     if (!state || !state->input) return;
     Pool* pool = state->input->pool;
-    // The direct AST owns auxiliary registries outside the pool's arena; release
-    // them before destroying the pool that owns the parsed tree.
-    input_release_auxiliary_resources(state->input);
+    // the pool releases the Input it holds, registries included (D4.2.6)
     if (pool) pool_destroy(pool);
     state->input = NULL;
 }

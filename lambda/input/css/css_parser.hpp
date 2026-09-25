@@ -204,6 +204,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_INDETERMINATE, // :indeterminate
     CSS_SELECTOR_PSEUDO_VALID,         // :valid
     CSS_SELECTOR_PSEUDO_INVALID,       // :invalid
+    CSS_SELECTOR_PSEUDO_OPEN,          // :open
 
     // Pseudo-classes (CSS4+)
     CSS_SELECTOR_PSEUDO_HAS,            // :has()

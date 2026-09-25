@@ -1997,6 +1997,39 @@ static MIR_reg_t emit_null_item_reg(MirTranspiler* mt) {
     return r;
 }
 
+// The implicit-context registers for `~`, `~key`, `~~` and the traversal root
+// (S10.1.3). A construct that rebinds `~` saves them first and restores them
+// once its scope ends, so an enclosing pipe sees its own bindings again.
+struct MirPipeContext {
+    bool in_pipe;
+    MIR_reg_t item, index, parent, root;
+};
+
+static MirPipeContext mir_pipe_context_save(MirTranspiler* mt) {
+    return {mt->in_pipe, mt->pipe_item_reg, mt->pipe_index_reg,
+        mt->pipe_parent_reg, mt->pipe_root_reg};
+}
+
+static void mir_pipe_context_restore(MirTranspiler* mt, const MirPipeContext& saved) {
+    mt->in_pipe = saved.in_pipe;
+    mt->pipe_item_reg = saved.item;
+    mt->pipe_index_reg = saved.index;
+    mt->pipe_parent_reg = saved.parent;
+    mt->pipe_root_reg = saved.root;
+}
+
+// `~` bound to one subject as a constraint binds its candidate: `~~` stays the
+// enclosing parent and the enclosing traversal keeps its root, while outside
+// any context the subject roots a fresh one. `~key` is left to the caller.
+static MirPipeContext mir_bind_subject(MirTranspiler* mt, MIR_reg_t subject) {
+    MirPipeContext saved = mir_pipe_context_save(mt);
+    mt->pipe_item_reg = subject;
+    mt->pipe_parent_reg = saved.in_pipe ? saved.parent : emit_null_item_reg(mt);
+    mt->pipe_root_reg = saved.in_pipe ? saved.root : subject;
+    mt->in_pipe = true;
+    return saved;
+}
+
 // A direct shape-2 call crosses the expression API as a first-lane register,
 // while MirEmitter retains the companion ownership fact.  Recover that fact at
 // the first ordinary-Item consumer instead of teaching every AST helper a
@@ -14616,25 +14649,13 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
 
             // Base type matches — evaluate constraint with ~ bound to ct_value
             emit_label(mt, lbl_check);
-            MIR_reg_t old_pipe_item = mt->pipe_item_reg;
-            MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
-            MIR_reg_t old_pipe_root = mt->pipe_root_reg;
-            bool old_in_pipe = mt->in_pipe;
-            mt->pipe_item_reg = ct_value;
-            mt->pipe_parent_reg = old_in_pipe ? old_pipe_parent : emit_null_item_reg(mt);
-            mt->pipe_root_reg = old_in_pipe ? old_pipe_root : ct_value;
-            mt->in_pipe = true;
-
+            MirPipeContext saved = mir_bind_subject(mt, ct_value);
             MIR_reg_t constraint_val = transpile_box_item(mt, constrained_node->constraint);
             MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, truthy)));
-
-            mt->pipe_item_reg = old_pipe_item;
-            mt->pipe_parent_reg = old_pipe_parent;
-            mt->pipe_root_reg = old_pipe_root;
-            mt->in_pipe = old_in_pipe;
+            mir_pipe_context_restore(mt, saved);
 
             emit_label(mt, lbl_end);
             return publish(result, VALUE_REP_I64);
@@ -15321,23 +15342,11 @@ static void emit_single_pattern_test(MirTranspiler* mt, AstNode* pattern, MIR_re
                 MIR_new_reg_op(mt->ctx, base_match)));
 
             // Base type matches — evaluate constraint with ~ bound to scrutinee
-            MIR_reg_t old_pipe_item = mt->pipe_item_reg;
-            MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
-            MIR_reg_t old_pipe_root = mt->pipe_root_reg;
-            bool old_in_pipe = mt->in_pipe;
-            mt->pipe_item_reg = boxed_scrut;
-            mt->pipe_parent_reg = old_in_pipe ? old_pipe_parent : emit_null_item_reg(mt);
-            mt->pipe_root_reg = old_in_pipe ? old_pipe_root : boxed_scrut;
-            mt->in_pipe = true;
-
+            MirPipeContext saved = mir_bind_subject(mt, boxed_scrut);
             MIR_reg_t constraint_val = transpile_box_item(mt, ct->constraint);
             MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, constraint_val)));
-
-            mt->pipe_item_reg = old_pipe_item;
-            mt->pipe_parent_reg = old_pipe_parent;
-            mt->pipe_root_reg = old_pipe_root;
-            mt->in_pipe = old_in_pipe;
+            mir_pipe_context_restore(mt, saved);
 
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fail),
                 MIR_new_reg_op(mt->ctx, truthy)));
@@ -15416,16 +15425,13 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     // Restore tail position for arm bodies
     mt->in_tail_position = saved_tail;
 
-    // Set ~ (current item) to the scrutinee value for match bodies
-    bool old_in_pipe = mt->in_pipe;
-    MIR_reg_t old_pipe_item = mt->pipe_item_reg;
-    MIR_reg_t old_pipe_index = mt->pipe_index_reg;
-    MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
-    MIR_reg_t old_pipe_root = mt->pipe_root_reg;
+    // Set ~ (current item) to the scrutinee value for match bodies; `~~` is the
+    // enclosing item here, not the enclosing parent a constraint keeps
+    MirPipeContext saved = mir_pipe_context_save(mt);
     mt->in_pipe = true;
     mt->pipe_item_reg = boxed_scrut;
-    mt->pipe_parent_reg = old_in_pipe ? old_pipe_item : emit_null_item_reg(mt);
-    mt->pipe_root_reg = old_in_pipe ? old_pipe_root : boxed_scrut;
+    mt->pipe_parent_reg = saved.in_pipe ? saved.item : emit_null_item_reg(mt);
+    mt->pipe_root_reg = saved.in_pipe ? saved.root : boxed_scrut;
 
     MIR_reg_t result = new_reg(mt, "match", MIR_T_I64);
     MIR_label_t l_end = new_label(mt);
@@ -15477,11 +15483,7 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     emit_label(mt, l_end);
 
     // Restore old pipe state
-    mt->in_pipe = old_in_pipe;
-    mt->pipe_item_reg = old_pipe_item;
-    mt->pipe_index_reg = old_pipe_index;
-    mt->pipe_parent_reg = old_pipe_parent;
-    mt->pipe_root_reg = old_pipe_root;
+    mir_pipe_context_restore(mt, saved);
 
     // Every arm joins through the Item result slot; the semantic arm type is
     // preserved separately from that physical carrier (D2.4.1–D2.4.3).
@@ -20106,9 +20108,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      declared_lane_desc.kind == LANE_STORAGE_BOOL ||
                      declared_lane_desc.kind == LANE_STORAGE_FLOAT64 ||
                      declared_lane_desc.kind == LANE_STORAGE_POINTER);
-                bool declared_range_contract = declared_value_type &&
-                    declared_value_type->type_id == LMD_TYPE_RANGE &&
-                    declared_value_type->kind == TYPE_KIND_RANGE;
+                bool declared_range_contract = lambda_type_is_range(declared_value_type);
                 // Use the variable's declared type if available, otherwise the expression type.
                 // But if the expression is boxed ANY (e.g. captured variable), the declared
                 // type from AST is stale — use ANY to match the actual runtime value.
@@ -20120,9 +20120,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     ? declared_lane_desc.base_contract->type_id
                     : (declared_value_type ? declared_value_type->type_id : expr_tid);
                 bool union_contract_boxed = false;
+                // a range contract keeps the initializer's carrier chosen above
                 if (declared_value_type && declared_value_type->type_id == LMD_TYPE_TYPE &&
                         declared_value_type->kind != TYPE_KIND_SIMPLE &&
-                        !declared_nullable_scalar_lane) {
+                        !declared_nullable_scalar_lane && !declared_range_contract) {
                     // A union/structural annotation is semantic metadata, not a
                     // runtime `type` object. Keeping its compact TypeId selected
                     // the container unbox path and turned `int^` locals into raw
@@ -30610,6 +30611,32 @@ static MIR_reg_t emit_start_result(MirTranspiler* mt, AstStartNode* start_node) 
 // Pipe expressions
 // ============================================================================
 
+// S10.1.5v3: `x that p` reads x as one item -- a collection is not walked --
+// and answers with x when p is truthy of it, null otherwise. Mirrors
+// eval_that_proviso: `~` is bound as a constraint binds its candidate, and
+// `~key` is null because x is no member of a walk.
+static MirValue emit_that_proviso_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
+    AstNode* node = (AstNode*)pipe_node;
+    MIR_reg_t subject = transpile_box_item(mt, pipe_node->left);
+    MirPipeContext saved = mir_bind_subject(mt, subject);
+    mt->pipe_index_reg = emit_null_item_reg(mt);
+    MIR_reg_t truthy = em_lower_condition(&mt->em, pipe_node->right);
+    mir_pipe_context_restore(mt, saved);
+
+    MIR_reg_t result = new_reg(mt, "that_proviso", MIR_T_I64);
+    uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+    MIR_label_t l_done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_done),
+        MIR_new_reg_op(mt->ctx, truthy)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, subject)));
+    emit_label(mt, l_done);
+    return mir_value_from_reg(mt, node, result, VALUE_REP_ITEM, node->type,
+        mir_expr_semantic_type(node));
+}
+
 static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
     AstNode* node = (AstNode*)pipe_node;
     auto publish = [mt, node](MIR_reg_t reg, ValueRep rep) -> MirValue {
@@ -30707,7 +30734,7 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right)), VALUE_REP_ITEM);
     }
 
-    // Iterating pipe (uses ~ or WHERE/THAT) - generate inline loop
+    // Iterating pipe (a mapping that uses ~, or a `|:` filter) - generate inline loop
     // Create result array
     MIR_reg_t result_arr = emit_call_0(mt, "array", MIR_T_P);
 
@@ -30912,42 +30939,31 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
     emit_label(mt, l_got_item);
 
     // Save old pipe state and set new
-    bool old_in_pipe = mt->in_pipe;
-    MIR_reg_t old_pipe_item = mt->pipe_item_reg;
-    MIR_reg_t old_pipe_index = mt->pipe_index_reg;
-    MIR_reg_t old_pipe_parent = mt->pipe_parent_reg;
-    MIR_reg_t old_pipe_root = mt->pipe_root_reg;
+    MirPipeContext saved = mir_pipe_context_save(mt);
     mt->in_pipe = true;
     mt->pipe_item_reg = pipe_item;
     mt->pipe_index_reg = pipe_index;
     mt->pipe_parent_reg = boxed_left;
-    mt->pipe_root_reg = old_in_pipe ? old_pipe_root : boxed_left;
+    mt->pipe_root_reg = saved.in_pipe ? saved.root : boxed_left;
 
-    // Evaluate right-side expression
-    MirValue right_value = transpile_expr_value(mt, pipe_node->right);
-    // The lowered descriptor distinguishes a native predicate from a boxed
-    // value whose AST contract happens to be bool (D2.4.1-D2.4.3).
-    TypeId right_tid = mir_value_carrier_type(right_value);
-    MIR_reg_t boxed_right = em_require_rep(&mt->em, right_value, VALUE_REP_ITEM).reg;
+    // Evaluate right-side expression. A filter body is lowered as a condition,
+    // as `if` lowers one, so its truthiness is read from the lowered descriptor
+    // (a nullable bool lane's null is false); a mapping pushes the boxed value.
+    bool filter = pipe_node->op == OPERATOR_FILTER;
+    MIR_reg_t truthy = 0;
+    MIR_reg_t boxed_right = 0;
+    if (filter) {
+        truthy = em_lower_condition(&mt->em, pipe_node->right);
+    } else {
+        MirValue right_value = transpile_expr_value(mt, pipe_node->right);
+        boxed_right = em_require_rep(&mt->em, right_value, VALUE_REP_ITEM).reg;
+    }
 
     // Restore old pipe state
-    mt->in_pipe = old_in_pipe;
-    mt->pipe_item_reg = old_pipe_item;
-    mt->pipe_index_reg = old_pipe_index;
-    mt->pipe_parent_reg = old_pipe_parent;
-    mt->pipe_root_reg = old_pipe_root;
+    mir_pipe_context_restore(mt, saved);
 
-    if (pipe_node->op == OPERATOR_WHERE) {
+    if (filter) {
         // Filter: only push original item if predicate is truthy
-        MIR_reg_t truthy;
-        if (right_tid == LMD_TYPE_BOOL) {
-            // right_val is already native Bool (0/1), use directly
-            truthy = em_require_rep(&mt->em, right_value, VALUE_REP_I64).reg;
-        } else {
-            // Need to box and check truthiness
-            truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_right)));
-        }
         MIR_label_t l_skip = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_skip),
             MIR_new_reg_op(mt->ctx, truthy)));
@@ -30971,8 +30987,8 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
     emit_call_void_1(mt, "symbol_key_list_free",
         MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
 
-    // The collection keeps its source's kind (S10.1.2v2, S10.1.5v2): a list,
-    // scalar, or null source collapses, anything else stays an array.
+    // A sequence source, a list included, gives an array (S10.1.2v4; `|:` by
+    // reference, S10.1.6); a scalar or null source collapses.
     MIR_reg_t final = emit_call_2(mt, "pipe_end", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, result_arr),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
@@ -32986,6 +33002,7 @@ static MirValue transpile_start(MirTranspiler* mt, AstStartNode* start) {
 }
 
 static MirValue transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe) {
+    if (pipe->op == OPERATOR_THAT) return emit_that_proviso_value(mt, pipe);
     return emit_pipe_value(mt, pipe);
 }
 

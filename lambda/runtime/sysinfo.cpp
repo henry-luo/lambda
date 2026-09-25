@@ -99,12 +99,8 @@ static void* sysinfo_cache_construct(EvalContext* owner) {
 static void sysinfo_cache_destroy(void* capsule) {
     SysinfoCache* cache = (SysinfoCache*)capsule;
     if (!cache || !cache->input) return;
-    // Input's auxiliary registries and arena outlive its pool allocation.
-    input_release_auxiliary_resources(cache->input);
-    if (cache->input->arena) {
-        mem_arena_destroy(cache->input->arena);
-        cache->input->arena = nullptr;
-    }
+    // D4.2.6: release the Input's whole context; its pool cleanup is idempotent.
+    input_release_document_resources(cache->input);
     cache->input = nullptr;
 }
 

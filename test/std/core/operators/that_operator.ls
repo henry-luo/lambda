@@ -1,5 +1,5 @@
-// Test: That Operator (Constraint/Filter)
-// Layer: 2 | Category: operator | Covers: that as type constraint and pipe filter
+// Test: That Operator (Constraint) and the |: Filter
+// Layer: 2 | Category: operator | Covers: that as type constraint, |: as pipe filter
 
 // ===== Type-level constraint =====
 type Positive = int that (~ > 0);
@@ -51,9 +51,9 @@ grade(75)
 grade(65)
 grade(55);
 
-// ===== that as filter (same as where) =====
-[1, 2, 3, 4, 5] that (~ > 3);
-[1, 2, 3, 4, 5, 6] that (~ % 2 == 0);
+// ===== |: filter (S10.1.6; the filter spelled `that` before) =====
+[1, 2, 3, 4, 5] |: (~ > 3);
+[1, 2, 3, 4, 5, 6] |: (~ % 2 == 0);
 
 // ===== Combined results =====
 [

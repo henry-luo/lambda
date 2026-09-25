@@ -65,7 +65,7 @@ pub fn validate_params(spec, path, method, params) {
             else null
         }];
         // filter out nulls
-        let real_errors = errors that (~ != null);
+        let real_errors = errors |: (~ != null);
         {valid: len(real_errors) == 0, errors: real_errors}
     }
 }
@@ -171,8 +171,8 @@ fn check_object(schema_obj, value, all_schemas, path) {
         } else [];
 
         // combine errors, filtering nulls
-        let all_errors = [req_errors that (~ != null), type_errors that (~ != null)];
-        all_errors that (~ != null)
+        let all_errors = [req_errors |: (~ != null), type_errors |: (~ != null)];
+        all_errors |: (~ != null)
     }
 }
 
@@ -209,8 +209,8 @@ fn check_array(schema_obj, value, all_schemas, path) {
             }]
         } else [];
 
-        [len_errors that (~ != null), item_errors that (~ != null)]
-            that (~ != null)
+        [len_errors |: (~ != null), item_errors |: (~ != null)]
+            |: (~ != null)
     }
 }
 
@@ -282,7 +282,7 @@ fn check_primitive(schema_obj, value, path) {
                      expected: "maxLength " ++ (max_len),
                      actual: string(len(value))}
                 else null
-            ] that (~ != null)
+            ] |: (~ != null)
         } else [];
         // check numeric constraints
         let num_errors = if ((expected == "integer" or expected == "number")
@@ -300,9 +300,9 @@ fn check_primitive(schema_obj, value, path) {
                      expected: "maximum " ++ (maximum),
                      actual: string(value)}
                 else null
-            ] that (~ != null)
+            ] |: (~ != null)
         } else [];
-        [str_errors, num_errors] that (~ != null)
+        [str_errors, num_errors] |: (~ != null)
     }
     else
         [{path: path, message: "type mismatch",

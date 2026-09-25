@@ -140,15 +140,29 @@ console.log(importedMain !== main);
 console.log(importedMain.id);
 console.log(importedMain.firstChild.id);
 var docAppend = document.createElement("section");
-console.log(document.appendChild(docAppend) === docAppend);
+var docAppendRejected = false;
+try {
+    document.appendChild(docAppend);
+} catch (error) {
+    docAppendRejected = error.name === "HierarchyRequestError";
+}
+console.log(docAppendRejected);
+document.documentElement.appendChild(docAppend);
 console.log(docAppend.parentNode === document.documentElement);
 var adoptedDocAppend = document.adoptNode(docAppend);
 console.log(adoptedDocAppend === docAppend);
 console.log(docAppend.parentNode === null);
 var docTextA = document.createTextNode("x");
 var docTextB = document.createTextNode("y");
-document.appendChild(docTextA);
-document.appendChild(docTextB);
+var docTextRejected = false;
+try {
+    document.appendChild(docTextA);
+} catch (error) {
+    docTextRejected = error.name === "HierarchyRequestError";
+}
+console.log(docTextRejected);
+document.documentElement.appendChild(docTextA);
+document.documentElement.appendChild(docTextB);
 document.normalize();
 console.log(docTextA.data);
 console.log(docTextB.parentNode === null);

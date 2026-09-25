@@ -3237,10 +3237,11 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         }
         Item document_item = dom_document_proxy_for_doc_bridge((void*)doc);
         DomNode* other = (DomNode*)dom_unwrap_element_impl(args[0]);
-        // Document inherits Node; attachment checks used by jQuery must include
-        // the documentElement itself and every descendant in the live tree.
+        // Document inherits Node, so containment includes its doctype and
+        // other top-level children as well as documentElement descendants.
+        DomNode* document_node = (DomNode*)doc->js.doc_node;
         bool contained = args[0].item == document_item.item ||
-            (root && other && radiant_dom_node_contains((DomNode*)root, other));
+            (document_node && other && radiant_dom_node_contains(document_node, other));
         *out = (Item){.item = b2it(contained ? 1 : 0)};
         return 1;
     }
@@ -3453,20 +3454,13 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             *out = ItemNull;
             return 1;
         }
-        if (!doc->root && child->is_element()) {
-            if (child->parent) {
-                // document root bootstrap must detach through adoptNode bookkeeping before re-rooting.
-                dom_adopt_node_bridge(args[0]);
-            }
-            doc->root = child->as_element();
-            *out = args[0];
-            return 1;
-        }
-        if (doc->root) {
-            *out = dom_append_child_bridge((void*)doc->root, args[0]);
-            return 1;
-        }
-        *out = args[0];
+        // The document node owns every top-level child. Appending to root
+        // instead makes comments and PIs descendants of documentElement and
+        // corrupts Range boundary ordering in foreign XML documents.
+        DomElement* document_node = (DomElement*)doc->js.doc_node;
+        *out = document_node
+            ? dom_append_child_bridge((void*)document_node, args[0])
+            : ItemNull;
         return 1;
     }
 

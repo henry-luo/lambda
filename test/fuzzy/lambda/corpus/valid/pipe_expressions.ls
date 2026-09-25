@@ -34,21 +34,21 @@ let chain3 = reverse(sort([5, 3, 1, 4, 2]));
 let records = [1, 2, 3] |> {id: ~, squared: ~ ** 2};
 
 // Where clause - basic filtering
-let positive = [-2, -1, 0, 1, 2] that (~ > 0);
-let large = [1, 5, 10, 15, 20] that (~ >= 10);
-let even = [1, 2, 3, 4, 5, 6] that (~ % 2 == 0);
-let odd = [1, 2, 3, 4, 5, 6] that (~ % 2 != 0);
+let positive = [-2, -1, 0, 1, 2] |: (~ > 0);
+let large = [1, 5, 10, 15, 20] |: (~ >= 10);
+let even = [1, 2, 3, 4, 5, 6] |: (~ % 2 == 0);
+let odd = [1, 2, 3, 4, 5, 6] |: (~ % 2 != 0);
 
 // Where with field access
-let adults = users that (~.age >= 18);
-let named_alice = users that (~.name == "Alice");
+let adults = users |: (~.age >= 18);
+let named_alice = users |: (~.name == "Alice");
 
 // Combined pipe and where
-let filtered_doubled = [1, 2, 3, 4, 5] |> ~ * 2 that (~ > 5);
-let pipe_filter_sum = sum([1, 2, 3, 4, 5] |> ~ ** 2 that (~ > 10));
+let filtered_doubled = [1, 2, 3, 4, 5] |> ~ * 2 |: (~ > 5);
+let pipe_filter_sum = sum([1, 2, 3, 4, 5] |> ~ ** 2 |: (~ > 10));
 
 // Chained pipe transformations with filter
-let complex1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] |> ~ * 2 that (~ > 6 and ~ < 15);
+let complex1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] |> ~ * 2 |: (~ > 6 and ~ < 15);
 
 // Pipe with nested field access
 let nested_data = [{user: {name: "A", score: 100}}, {user: {name: "B", score: 85}}];
@@ -72,7 +72,7 @@ let products = [
     {name: "Gadget", price: 50, qty: 30},
     {name: "Gizmo", price: 15, qty: 200}
 ];
-let expensive = products that (~.price > 20) |> ~.name;
+let expensive = products |: (~.price > 20) |> ~.name;
 let total_value = sum(products |> ~.price * ~.qty);
 
 // Empty and single-element cases

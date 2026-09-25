@@ -68,7 +68,7 @@ fn greet(name: string) string {
 }
 
 fn process(data) {
-    let filtered = data that ~ > 0;
+    let filtered = data |: ~ > 0;
     let doubled = filtered |> ~ * 2;
     doubled
 }
@@ -507,10 +507,10 @@ add1_then_double(5)   // 12 (double(add1(5)))
 ### Common Higher-Order Patterns
 
 ```lambda
-// Filter -- `that` is the filter operator (S10.1.5)
-fn filter(arr, pred) => arr that pred(~)
+// Filter -- `|:` is the filter stage (S10.1.6)
+fn filter(arr, pred) => arr |: pred(~)
 
-// Filter and transform in one pass -- the `for` body does what `that` alone cannot
+// Filter and transform in one pass -- the `for` body does what `|:` alone cannot
 fn filter_shift(arr, pred) => [for (x in arr where pred(x)) x + 2]
 
 // Map -- the free `~` makes this a mapping pipe (S10.1.2)

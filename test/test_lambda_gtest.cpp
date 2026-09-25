@@ -394,6 +394,9 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/match_string_pattern.ls", "test/lambda/match_string_pattern.txt"},
     {"test/lambda/proc/proc_nullable_native_i64_map.ls",
      "test/lambda/proc/proc_nullable_native_i64_map.txt"},
+    // S11.1.3 (LR03-18, LR03-14): a range type admits its members inside a
+    // union, map or array type and at a parameter, on every tier (D3.1.1v4).
+    {"test/lambda/range_type_membership.ls", "test/lambda/range_type_membership.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
