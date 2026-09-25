@@ -862,6 +862,11 @@ static bool dom_node_contains(DomNode* ancestor, DomNode* node) {
     return false;
 }
 
+static Item dom_insertion_ancestor_error() {
+    return dom_raise_named("HierarchyRequestError",
+                           "The new child contains the parent.");
+}
+
 static bool dom_node_is_connected(DomNode* node) {
     if (!node) return false;
     DomDocument* doc = nullptr;
@@ -14222,6 +14227,10 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         log_error("dom_append_child_bridge: argument is not a DOM node");
         return ItemNull;
     }
+    if (dom_node_contains(child_node, (DomNode*)elem)) {
+        // reject an ancestor before either tree can acquire a parent cycle.
+        return dom_insertion_ancestor_error();
+    }
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
@@ -14291,6 +14300,9 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
         // insertBefore(node, node) must stay a no-op; detaching first drops
         // keyed reconciler children and changes live-range behavior.
         return new_child_arg;
+    }
+    if (dom_node_contains(new_child, parent_node)) {
+        return dom_insertion_ancestor_error();
     }
     if (ref_child && ref_child->parent != parent_node) {
         log_error("dom_insert_before_bridge: reference node is not a child of target parent");
@@ -14509,6 +14521,9 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         dom_pre_remove(old_child);
         return old_child_arg;
     }
+    if (dom_node_contains(new_child, (DomNode*)elem)) {
+        return dom_insertion_ancestor_error();
+    }
     if (new_child->is_element() &&
         dom_is_document_fragment_element(new_child->as_element())) {
         // DOM Standard replace inserts a fragment's children at the old
@@ -14522,6 +14537,12 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         return old_child_arg;
     }
     if (!dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+    if (new_child->parent == (DomNode*)elem) {
+        // remove a moved sibling from both trees before replacement rewires its
+        // links; otherwise the old position can form a sibling cycle.
+        dom_pre_remove(new_child);
+        if (!dom_remove_backed_child(elem, new_child)) return ItemNull;
+    }
 
     // Replacing a backed CharacterData node with a backed Element must update
     // the Lambda child list too; the generic DOM-only fallback leaves the
@@ -14573,14 +14594,6 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
                     !dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
                 }
-            } else if (new_child->parent == (DomNode*)elem) {
-                // DOM replacement removes an existing sibling before inserting
-                // it at the old node's position; recompute the old index after
-                // that removal because the backing array may have shifted.
-                dom_pre_remove(new_child);
-                if (!dom_remove_backed_child(elem, new_child)) return ItemNull;
-                old_index = dom_backed_child_index(elem, old_elem);
-                if (old_index < 0) return ItemNull;
             }
             if (!new_text->native_string) new_text->native_string = replacement_string;
             dom_pre_remove(old_child);
@@ -14863,6 +14876,9 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
+            if (dom_node_contains(child_node, (DomNode*)elem)) {
+                return dom_insertion_ancestor_error();
+            }
             if (child_node->is_element()) {
                 DomElement* child_elem = child_node->as_element();
                 if (child_elem->tag_name &&
@@ -14910,6 +14926,9 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
+            if (dom_node_contains(child_node, (DomNode*)elem)) {
+                return dom_insertion_ancestor_error();
+            }
             if (child_node->is_element() &&
                 dom_is_document_fragment_element(child_node->as_element())) {
                 if (!dom_insert_fragment_children_before(elem,
