@@ -1324,6 +1324,7 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style);
  * @return Number of declarations applied
  */
 int dom_element_apply_inline_style(DomElement* element, const char* style_text);
+const char* dom_inline_style_declaration_end(const char* text);
 
 /**
  * Get inline style text from an element

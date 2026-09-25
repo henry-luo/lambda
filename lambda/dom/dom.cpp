@@ -2891,7 +2891,18 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
 
     Item exp_map = expando_get_or_create_map((DomNode*)stub_v);
     if (exp_map.item == ITEM_NULL) return value;
-    dom_realm_set(exp_map, prop_name, value);
+    RootFrame roots(4);
+    Rooted<Item> exp_map_root(roots, exp_map);
+    Rooted<Item> prop_root(roots, prop_name);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> document_root(roots, js_get_document_object_value());
+    dom_realm_set(exp_map_root.get(), prop_root.get(), value_root.get());
+    const char* handler_name = fn_to_cstr(prop_root.get());
+    if (handler_name && handler_name[0] == 'o' && handler_name[1] == 'n') {
+        // Document event attributes share the listener registry with addEventListener.
+        dom_event_handler_property_set(document_root.get(), handler_name,
+                                       (int)strlen(handler_name), value_root.get());
+    }
     return value;
 }
 
@@ -5314,8 +5325,7 @@ static bool dom_style_decl_value(const char* style_text,
 
     const char* seg = style_text;
     while (*seg) {
-        const char* end = strchr(seg, ';');
-        if (!end) end = seg + strlen(seg);
+        const char* end = dom_inline_style_declaration_end(seg);
 
         const char* colon = nullptr;
         if (dom_style_decl_name_matches(seg, end, prop_name, &colon)) {
@@ -5358,8 +5368,7 @@ static bool dom_update_inline_style_attribute(DomElement* elem,
 
     const char* seg = old_style ? old_style : "";
     while (*seg) {
-        const char* end = strchr(seg, ';');
-        if (!end) end = seg + strlen(seg);
+        const char* end = dom_inline_style_declaration_end(seg);
         if (!dom_style_decl_name_matches(seg, end, prop_name)) {
             while (seg < end && dom_ascii_space(*seg)) seg++;
             while (end > seg && dom_ascii_space(end[-1])) end--;
@@ -7269,9 +7278,11 @@ extern "C" Item dom_click_method_bridge(Item elem_item) {
             return make_js_undefined();
         }
     }
-    // click() synthesizes a JS MouseEvent and dispatches through the existing event system.
-    Item ev = js_create_click_mouse_event();
-    return dom_dispatch_event(elem_item, ev);
+    // D5.3.3: MouseEvent construction and dispatch can collect both JS carriers.
+    RootFrame roots(2);
+    Rooted<Item> element_root(roots, elem_item);
+    Rooted<Item> event_root(roots, js_create_click_mouse_event());
+    return dom_dispatch_event(element_root.get(), event_root.get());
 }
 
 #define JS_DOM_EVENT_LISTENER_BRIDGE(name, operation) \
@@ -11254,13 +11265,18 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // Real attribute reflection is handled by the explicit reflected setters
     // above, and setAttribute() remains the DOM attribute mutation path.
     {
-        expando_set_property((DomNode*)elem, prop_name, value);
-        if (prop[0] == 'o' && prop[1] == 'n' && prop[2] != '\0') {
+        RootFrame roots(2);
+        Rooted<Item> prop_root(roots, prop_name);
+        Rooted<Item> value_root(roots, value);
+        expando_set_property((DomNode*)elem, prop_root.get(), value_root.get());
+        const char* handler_name = fn_to_cstr(prop_root.get());
+        if (handler_name && handler_name[0] == 'o' && handler_name[1] == 'n' &&
+            handler_name[2] != '\0') {
             // DOM host setters store on* values in the expando side table;
-            // register the same write in the listener list so assignment
-            // order relative to addEventListener() remains observable.
+            // D5.3.3: expando allocation can collect the handler key before
+            // registration; use the rooted key after that allocation.
             dom_event_handler_property_set_for_node(
-                elem, prop, (int)strlen(prop), value);
+                elem, handler_name, (int)strlen(handler_name), value_root.get());
         }
     }
     return value;

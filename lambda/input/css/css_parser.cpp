@@ -32,11 +32,14 @@ static char* css_parser_unescape_url_component(const char* str, size_t len, Pool
         ESCAPE_CSS_EOF_REPLACEMENT, true, true);
 }
 
-static const char* css_unicode_skip_ignorable(const char* p, const char* end) {
+static const char* css_unicode_skip_ignorable(const char* p, const char* end,
+                                              bool allow_whitespace) {
     if (!p || !end) return p;
     for (;;) {
-        while (p < end && (p[0] == ' ' || p[0] == '\t' || p[0] == '\n' ||
-                           p[0] == '\r' || p[0] == '\f')) p++;
+        if (allow_whitespace) {
+            while (p < end && (p[0] == ' ' || p[0] == '\t' || p[0] == '\n' ||
+                               p[0] == '\r' || p[0] == '\f')) p++;
+        }
         if (p + 1 >= end || p[0] != '/' || p[1] != '*') break;
         p += 2;
         while (p < end && p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
@@ -102,10 +105,11 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
     if (p >= end || (p[0] != 'u' && p[0] != 'U')) return false;
     p++;
 
-    p = css_unicode_skip_ignorable(p, end);
+    // Comments disappear during tokenization; whitespace separates these tokens.
+    p = css_unicode_skip_ignorable(p, end, false);
     if (p >= end || p[0] != '+') return false;
     p++;
-    p = css_unicode_skip_ignorable(p, end);
+    p = css_unicode_skip_ignorable(p, end, false);
 
     char start_chars[7];
     int start_count = 0;
@@ -114,7 +118,7 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
         p++;
     }
 
-    p = css_unicode_skip_ignorable(p, end);
+    p = css_unicode_skip_ignorable(p, end, false);
     int wildcard_count = 0;
     while (p < end && p[0] == '?') {
         wildcard_count++;
@@ -122,12 +126,12 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
     }
     if (start_count + wildcard_count == 0 || start_count + wildcard_count > 6) return false;
 
-    p = css_unicode_skip_ignorable(p, end);
+    p = css_unicode_skip_ignorable(p, end, false);
     uint32_t start = css_unicode_parse_hex(start_chars, start_count);
     if (wildcard_count > 0) {
         // a wildcard range must end at the declaration/rule boundary.
         const char* rest = p;
-        rest = css_unicode_skip_ignorable(rest, end);
+        rest = css_unicode_skip_ignorable(rest, end, true);
         if (rest < end && rest[0] != ';' && rest[0] != '}') return false;
 
         for (int i = 0; i < wildcard_count; i++) start <<= 4;
@@ -142,12 +146,12 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
     // more than six leading hex digits are not a valid unicode-range.
     if (p < end && str_is_hex(p[0])) return false;
 
-    p = css_unicode_skip_ignorable(p, end);
+    p = css_unicode_skip_ignorable(p, end, false);
     bool has_range = p < end && p[0] == '-';
     uint32_t finish = start;
     if (has_range) {
         p++;
-        p = css_unicode_skip_ignorable(p, end);
+        p = css_unicode_skip_ignorable(p, end, false);
         char end_chars[7];
         int end_count = 0;
         while (p < end && str_is_hex(p[0]) && end_count < 6) {
@@ -159,7 +163,7 @@ static bool css_parse_unicode_range_parts(const char* input, size_t length,
         finish = css_unicode_parse_hex(end_chars, end_count);
     }
 
-    p = css_unicode_skip_ignorable(p, end);
+    p = css_unicode_skip_ignorable(p, end, true);
     if (p < end && p[0] != ';' && p[0] != '}') return false;
     *out_start = start;
     *out_end = finish;
@@ -2055,6 +2059,31 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
     return selector;
 }
 
+// A standard property can defer validation when its entire value is one
+// {} block containing var(); adjacent tokens make the declaration invalid.
+static bool css_value_is_single_var_block(const CssToken* tokens, int start, int end) {
+    start = css_skip_whitespace_tokens(tokens, start, end);
+    while (end > start && (tokens[end - 1].type == CSS_TOKEN_WHITESPACE ||
+                           tokens[end - 1].type == CSS_TOKEN_COMMENT)) end--;
+    if (end - start < 3 || tokens[start].type != CSS_TOKEN_LEFT_BRACE ||
+        tokens[end - 1].type != CSS_TOKEN_RIGHT_BRACE) return false;
+
+    int depth = 0;
+    bool has_var = false;
+    for (int i = start; i < end; i++) {
+        if (tokens[i].type == CSS_TOKEN_LEFT_BRACE) depth++;
+        else if (tokens[i].type == CSS_TOKEN_RIGHT_BRACE) {
+            depth--;
+            if (depth < 0 || (depth == 0 && i != end - 1)) return false;
+        } else if (depth > 0 && tokens[i].type == CSS_TOKEN_FUNCTION &&
+                   tokens[i].length == 4 &&
+                   strncmp(tokens[i].start, "var(", 4) == 0) {
+            has_var = true;
+        }
+    }
+    return depth == 0 && has_var;
+}
+
 // Helper: Parse CSS declaration from tokens
 CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
@@ -2201,10 +2230,11 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
 
-    // css syntax §5.5.6 consumes nested simple blocks before dropping an
-    // invalid declaration. Standard properties cannot use a {} block here;
-    // rejecting only after consumption preserves the enclosing rule boundary.
-    if (!is_custom_prop && (has_top_level_colon || has_brace_block)) {
+    // CSS Syntax permits a single var-bearing block as a deferred value.
+    // Other blocks remain invalid for standard properties after consumption.
+    int value_end = value_end_before_important >= 0 ? value_end_before_important : *pos;
+    if (!is_custom_prop && (has_top_level_colon ||
+        (has_brace_block && !css_value_is_single_var_block(tokens, value_start, value_end)))) {
         log_debug("[CSS Parser] Dropping malformed declaration '%s' after consuming its value", property_name);
         return NULL;
     }

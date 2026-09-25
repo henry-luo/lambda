@@ -181,6 +181,7 @@ Item dom_engine_caret_operation(Item a, Item b, Item c);
 Item dom_engine_pointer_selection(Item a, Item b);
 Item dom_engine_clear_ime_preedit(Item a);
 Item dom_engine_clipboard_text(void);
+Item dom_engine_clipboard_copy_event(void);
 Item dom_engine_edit_selection_text(Item a, Item b);
 Item dom_engine_edit_selection_html(Item a, Item b);
 Item dom_engine_edit_clipboard_write(Item a, Item b, Item c, Item d);

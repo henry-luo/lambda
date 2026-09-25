@@ -236,6 +236,7 @@ DOM_OP(CORE, ime_preedit,      input, 1, "fn(n: any) -> any",                   
 DOM_OP(CORE, set_ime_preedit,  input, 3, "pn(n: any, text: any, caret: int) -> bool",       dom_engine_set_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, clear_ime_preedit, input, 1, "pn(n: any) -> bool",                             dom_engine_clear_ime_preedit, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, clipboard_text,   input, 0, "fn() -> string|null",                             dom_engine_clipboard_text, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, clipboard_copy_event, input, 0, "pn() -> bool",                                  dom_engine_clipboard_copy_event, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 // Selection serialization and clipboard writing are capability-checked DOM
 // mechanisms.  The behavior package chooses copy/cut policy and representations.
 DOM_OP(CORE, edit_selection_text, editing, 2, "fn(host: any, invocation: int) -> string|null", dom_engine_edit_selection_text, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
