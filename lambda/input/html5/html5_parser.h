@@ -166,6 +166,11 @@ typedef struct Html5Parser {
     // Memory management
     Pool* pool;
     Arena* arena;
+    // Token strings (tag and attribute names, text runs, comment and doctype
+    // text), which the tree builder copies: a private scratch arena during
+    // html5_parse/html5_parse_ex, reset between tokens; the Input arena for
+    // a fragment parser, which has no end of parse to release it.
+    Arena* token_arena;
     Input* input;
 
     // Input processing

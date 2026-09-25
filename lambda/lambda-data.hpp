@@ -396,13 +396,16 @@ static inline bool shape_field_name_equals(const ShapeEntry* entry,
     return true;
 }
 
-// A1: Property hash table — inline open-addressing table for O(1) property lookup.
-// For objects with ≤32 hash-indexed properties (covers >99% of JS objects), uses
-// a small fixed table indexed by FNV-1a hash. Each slot stores a ShapeEntry
-// pointer. The shape chain remains authoritative when the table is not populated
-// or saturates.
-#define TYPEMAP_HASH_CAPACITY 32
-#define TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY 32768
+// A1v2: Property hash table — open-addressing table (FNV-1a hash, linear probe)
+// for O(1) property lookup; each slot stores a ShapeEntry pointer. It lives out
+// of line, allocated from the owning pool when first populated and sized to the
+// shape: a power of two at least twice the field count. The shape chain
+// remains authoritative when the table is absent or saturated.
+// A1 kept 32 slots inline in every TypeMap: 256 bytes that shared JS shapes
+// amortize but every private type pays again -- each element of a parsed
+// document has one (320K of them on a 13 MiB HTML page).
+#define TYPEMAP_HASH_MIN_CAPACITY 8
+#define TYPEMAP_HASH_MAX_CAPACITY 32768
 
 // JS adds an immutable semantic refinement without coupling core shapes to
 // the JS runtime's metadata and operation-table definitions.
@@ -424,12 +427,12 @@ typedef struct TypeMap : Type {
     ShapeEntry* shape;  // first shape entry of the map
     ShapeEntry* last;  // last shape entry of the map
     const char* struct_name;  // C struct name for direct access (NULL if anonymous)
-    // A1: property hash table for O(1) lookup. Small maps use the inline table;
-    // larger maps may attach a pool-owned dynamic table.
-    ShapeEntry* field_index[TYPEMAP_HASH_CAPACITY];  // hash table slots (NULL = empty)
-    ShapeEntry** field_index_dynamic;  // NULL = use inline field_index
+    // A1v2: pool-owned property hash table, NULL until first populated. A struct
+    // copy shares it, so a copied TypeMap rebuilds its own (typemap_hash_prepare)
+    // before inserting.
+    ShapeEntry** field_index;  // field_capacity slots (NULL = empty slot)
     uint16_t field_count;  // number of hash slots used (0 = not populated)
-    uint16_t field_capacity;  // 0 = inline capacity, otherwise dynamic slot count
+    uint16_t field_capacity;  // slots in field_index (0 while it is NULL)
     // Optional fixed-slot index used by ordinary transition shapes.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
@@ -677,42 +680,38 @@ static inline bool typemap_ptr_is_plausible(void* p) {
 }
 
 static inline ShapeEntry** typemap_hash_slots(TypeMap* tm) {
-    if (!tm) return NULL;
-    return (tm->field_index_dynamic && tm->field_capacity > 0)
-        ? tm->field_index_dynamic
-        : tm->field_index;
+    return tm ? tm->field_index : NULL;
 }
 
 static inline int typemap_hash_capacity(TypeMap* tm) {
-    if (!tm) return 0;
-    return (tm->field_index_dynamic && tm->field_capacity > 0)
-        ? (int)tm->field_capacity
-        : TYPEMAP_HASH_CAPACITY;
+    return tm && tm->field_index ? (int)tm->field_capacity : 0;
 }
 
+// a power of two at least twice the fields, so probes stay short; 0 for none
 static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
-    if (expected_fields <= TYPEMAP_HASH_CAPACITY) return TYPEMAP_HASH_CAPACITY;
+    if (expected_fields <= 0) return 0;
     int64_t target = expected_fields * 2;
-    if (target < expected_fields) target = TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY;
-    int capacity = TYPEMAP_HASH_CAPACITY;
-    while ((int64_t)capacity < target && capacity < TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY) {
+    if (target < expected_fields) target = TYPEMAP_HASH_MAX_CAPACITY;
+    int capacity = TYPEMAP_HASH_MIN_CAPACITY;
+    while ((int64_t)capacity < target && capacity < TYPEMAP_HASH_MAX_CAPACITY) {
         capacity <<= 1;
     }
     return capacity;
 }
 
+// Allocates a fresh empty table for `expected_fields`. Any previous table is
+// left to the pool: a struct copy of this TypeMap may still share it.
 static inline void typemap_hash_prepare(TypeMap* tm, Pool* pool, int64_t expected_fields) {
     if (!tm) return;
-    tm->field_index_dynamic = NULL;
+    tm->field_index = NULL;
     tm->field_capacity = 0;
-    memset(tm->field_index, 0, sizeof(tm->field_index));
     tm->field_count = 0;
 
     int capacity = typemap_hash_recommended_capacity(expected_fields);
-    if (capacity > TYPEMAP_HASH_CAPACITY && pool) {
-        ShapeEntry** dynamic_slots = (ShapeEntry**)pool_calloc(pool, (size_t)capacity * sizeof(ShapeEntry*));
-        if (dynamic_slots) {
-            tm->field_index_dynamic = dynamic_slots;
+    if (capacity > 0 && pool) {
+        ShapeEntry** slots = (ShapeEntry**)pool_calloc(pool, (size_t)capacity * sizeof(ShapeEntry*));
+        if (slots) {
+            tm->field_index = slots;
             tm->field_capacity = (uint16_t)capacity;
         }
     }

@@ -33,21 +33,15 @@ static bool html5_has_template_on_stack(Html5Parser* parser) {
 static void html5_merge_attributes_into_element(Html5Parser* parser,
                                                 Html5Token* token,
                                                 Element* element) {
-    if (!parser || !token || !token->attributes || !element) return;
+    if (!parser || !token || !element) return;
 
-    MapReader attr_reader(token->attributes);
-    MapReader::EntryIterator it = attr_reader.entries();
-    const char* key;
-    ItemReader value;
-    while (it.next(&key, &value)) {
-        if (!key || element->has_attr(key)) continue;
-        Item attr_value = value.isString()
-            ? Item{.item = s2it(value.asString())}
-            : Item{.item = ITEM_NULL};
+    for (uint32_t i = 0; i < token->attr_count; i++) {
+        const char* key = token->attrs[i].name->chars;
+        if (element->has_attr(key)) continue;
         // html parsing merges only missing attributes; empty attributes still
         // carry presence semantics (for example, contenteditable="").
         MarkEditor editor(parser->input);
-        editor.elmt_update_attr(Item{.element = element}, key, attr_value);
+        editor.elmt_update_attr(Item{.element = element}, key, token->attrs[i].value);
     }
 }
 
@@ -319,6 +313,31 @@ static void html5_process_in_after_body_mode(Html5Parser* parser, Html5Token* to
 static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token);
 
+// Token strings go to a private scratch arena for the parse. It is reset once
+// it holds more than this and no token is in flight (the tokenizer has emitted
+// the last one), so token text stops accumulating in the document's arena.
+#define HTML5_TOKEN_ARENA_RESET_BYTES ((size_t)64 * 1024)
+
+static void html5_begin_token_scratch(Html5Parser* parser) {
+    Arena* scratch = arena_create(ARENA_LARGE_CHUNK_SIZE, ARENA_LARGE_CHUNK_SIZE);
+    if (scratch) parser->token_arena = scratch;
+}
+
+// after a token is processed and released
+static void html5_recycle_token_scratch(Html5Parser* parser) {
+    if (parser->token_arena != parser->arena && !parser->current_token &&
+            arena_total_used(parser->token_arena) > HTML5_TOKEN_ARENA_RESET_BYTES) {
+        arena_reset(parser->token_arena);
+    }
+}
+
+static void html5_end_token_scratch(Html5Parser* parser) {
+    if (parser->token_arena != parser->arena) {
+        arena_destroy(parser->token_arena);
+        parser->token_arena = parser->arena;
+    }
+}
+
 // main entry point for parsing HTML
 Element* html5_parse(Input* input, const char* html) {
     // note: empty string is valid HTML input - produces implicit <html><head><body>
@@ -334,6 +353,7 @@ Element* html5_parse(Input* input, const char* html) {
     parser->length = strlen(html);
     parser->pos = 0;
     parser->tokenizer_state = HTML5_TOK_DATA;
+    html5_begin_token_scratch(parser);
 
     // HTML5 §13.2.3.1: Skip leading UTF-8 BOM (U+FEFF = EF BB BF)
     if (parser->length >= 3 &&
@@ -360,11 +380,13 @@ Element* html5_parse(Input* input, const char* html) {
         if (token->type == HTML5_TOKEN_EOF) {
             break;
         }
+        html5_recycle_token_scratch(parser);
     }
 
     // Flush any remaining pending text (both normal and foster)
     html5_flush_pending_text(parser);
     html5_flush_foster_text(parser);
+    html5_end_token_scratch(parser);
 
     log_debug("html5: parse complete, mode=%d, open_elements=%zu",
               parser->mode, parser->open_elements->length);
@@ -385,6 +407,7 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
     parser->length = strlen(html);
     parser->pos = 0;
     parser->tokenizer_state = HTML5_TOK_DATA;
+    html5_begin_token_scratch(parser);
 
     // apply options
     if (opts) {
@@ -416,10 +439,12 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
         if (token->type == HTML5_TOKEN_EOF) {
             break;
         }
+        html5_recycle_token_scratch(parser);
     }
 
     html5_flush_pending_text(parser);
     html5_flush_foster_text(parser);
+    html5_end_token_scratch(parser);
 
     log_debug("html5: parse_ex complete, mode=%d, open_elements=%zu",
               parser->mode, parser->open_elements->length);
@@ -1379,7 +1404,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 // Run adoption agency algorithm for "a"
                 MarkBuilder builder(parser->input);
                 String* a_name = builder.createString("a");
-                Html5Token* fake_end_tag = html5_token_create_end_tag(parser->pool, parser->arena, a_name);
+                Html5Token* fake_end_tag = html5_token_create_end_tag(parser->arena, a_name);
                 html5_run_adoption_agency(parser, fake_end_tag);
 
                 // If still in the list, remove it (AAA may have failed)
@@ -1449,7 +1474,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 // Run adoption agency algorithm for "nobr"
                 MarkBuilder builder(parser->input);
                 String* nobr_name = builder.createString("nobr");
-                Html5Token* fake_end_tag = html5_token_create_end_tag(parser->pool, parser->arena, nobr_name);
+                Html5Token* fake_end_tag = html5_token_create_end_tag(parser->arena, nobr_name);
                 html5_run_adoption_agency(parser, fake_end_tag);
                 html5_reconstruct_active_formatting_elements(parser);
             }
@@ -1607,7 +1632,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             // create and insert br element
             MarkBuilder builder(parser->input);
             String* br_name = builder.createString("br");
-            Html5Token* fake_br = html5_token_create_start_tag(parser->pool, parser->arena, br_name);
+            Html5Token* fake_br = html5_token_create_start_tag(parser->arena, br_name);
             html5_insert_html_element(parser, fake_br);
             html5_pop_element(parser);  // br is void element
             return;
@@ -1677,7 +1702,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 // No <p> in scope: create an empty <p> element and insert it
                 MarkBuilder builder(parser->input);
                 String* p_name = builder.createString("p");
-                Html5Token* fake_p_token = html5_token_create_start_tag(parser->pool, parser->arena, p_name);
+                Html5Token* fake_p_token = html5_token_create_start_tag(parser->arena, p_name);
                 html5_insert_html_element(parser, fake_p_token);
             }
             html5_close_p_element(parser);
@@ -2054,7 +2079,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
             // insert implicit <colgroup>
             MarkBuilder builder(parser->input);
             String* colgroup_name = builder.createString("colgroup");
-            Html5Token* fake_token = html5_token_create_start_tag(parser->pool, parser->arena, colgroup_name);
+            Html5Token* fake_token = html5_token_create_start_tag(parser->arena, colgroup_name);
             html5_insert_html_element(parser, fake_token);
             parser->mode = HTML5_MODE_IN_COLUMN_GROUP;
             html5_process_token(parser, token);  // reprocess
@@ -2075,7 +2100,7 @@ static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token) 
             // insert implicit <tbody>
             MarkBuilder builder(parser->input);
             String* tbody_name = builder.createString("tbody");
-            Html5Token* fake_token = html5_token_create_start_tag(parser->pool, parser->arena, tbody_name);
+            Html5Token* fake_token = html5_token_create_start_tag(parser->arena, tbody_name);
             html5_insert_html_element(parser, fake_token);
             parser->mode = HTML5_MODE_IN_TABLE_BODY;
             html5_process_token(parser, token);  // reprocess
@@ -2183,7 +2208,7 @@ static void html5_process_in_table_body_mode(Html5Parser* parser, Html5Token* to
             // insert implicit <tr>
             MarkBuilder builder(parser->input);
             String* tr_name = builder.createString("tr");
-            Html5Token* fake_token = html5_token_create_start_tag(parser->pool, parser->arena, tr_name);
+            Html5Token* fake_token = html5_token_create_start_tag(parser->arena, tr_name);
             html5_insert_html_element(parser, fake_token);
             parser->mode = HTML5_MODE_IN_ROW;
             html5_process_token(parser, token);  // reprocess

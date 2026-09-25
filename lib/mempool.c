@@ -16,12 +16,15 @@
 #define POOL_DEFAULT_EXTENT_SIZE ((size_t)1024)
 #define POOL_MIN_EXTENT_SIZE ((size_t)1024)
 #define POOL_VM_THRESHOLD ((size_t)4096)
+// A VM extent's commit step grows with what it has committed, up to this
+// cap. One page per step cost an mprotect per 16 KiB -- 6% of a large HTML
+// parse; committed pages stay non-resident until first touched.
+#define POOL_COMMIT_STEP_MAX ((size_t)1024 * 1024)
 #define POOL_MIN_PAYLOAD ((size_t)16)
 #define POOL_VALID_MARKER 0xDEADBEEF
 #define POOL_BLOCK_MAGIC 0x50424C4Bu
 #define POOL_EXTENT_MAGIC 0x50455854u
 #define POOL_ALIGNMENT 16u
-#define POOL_BLOCK_ALLOCATED 0x01u
 #define POOL_BIN_COUNT 32u
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -97,18 +100,33 @@ MEMPOOL_WEAK size_t mem_vm_region_reserved_bytes(const MemVmRegion* region) {
 typedef struct PoolBlock PoolBlock;
 typedef struct PoolExtent PoolExtent;
 
-// PoolBlock is the physical boundary tag and the free-list link record. The
+// PoolBlock is the physical boundary tag, 32 bytes ahead of every payload. The
 // Pool owns the containing extent, so no global pointer index is required.
+// A free block keeps its free-list links in its own payload (POOL_MIN_PAYLOAD
+// holds them) and is marked free by requested == 0: a live block always has
+// requested >= 1, because pool_alloc refuses size 0. With the links and a
+// flags word in every header it was 64 bytes -- on a parsed HTML document,
+// 64 MB of headers beside 175 MB of data.
 struct PoolBlock {
     uint32_t magic;
-    uint32_t flags;
+    uint32_t requested;   // the caller's size, 0 while free (SIZE_LIMIT fits)
     size_t span;
     size_t prev_span;
-    size_t requested;
     PoolExtent* extent;
-    PoolBlock* free_prev;
-    PoolBlock* free_next;
 };
+
+typedef struct PoolFreeLinks {
+    PoolBlock* prev;
+    PoolBlock* next;
+} PoolFreeLinks;
+
+#if defined(__cplusplus)
+static_assert(POOL_MIN_PAYLOAD >= sizeof(PoolFreeLinks), "a free block's payload holds its links");
+static_assert(SIZE_LIMIT <= UINT32_MAX, "requested is 32 bits");
+#else
+_Static_assert(POOL_MIN_PAYLOAD >= sizeof(PoolFreeLinks), "a free block's payload holds its links");
+_Static_assert(SIZE_LIMIT <= UINT32_MAX, "requested is 32 bits");
+#endif
 
 struct PoolExtent {
     uint32_t magic;
@@ -134,6 +152,9 @@ struct Pool {
     PoolExtent* extents;
     PoolExtent* last_extent;
     PoolBlock* free_bins[POOL_BIN_COUNT];
+    // bit i set iff free_bins[i] is non-empty: the search jumps to the next
+    // non-empty bin instead of testing each empty head above the request's
+    uint32_t free_bin_mask;
     size_t next_extent_size;
     size_t reserved_bytes;
     size_t committed_bytes;
@@ -159,6 +180,11 @@ static size_t pool_align_up(size_t value) {
 
 static size_t block_header_size(void) {
     return pool_align_up(sizeof(PoolBlock));
+}
+
+// only meaningful while the block is free
+static PoolFreeLinks* pool_block_links(PoolBlock* block) {
+    return (PoolFreeLinks*)((uint8_t*)block + block_header_size());
 }
 
 static size_t pool_page_size(void) {
@@ -220,7 +246,7 @@ static bool pool_block_can_hold(size_t span, size_t required) {
 }
 
 static bool pool_block_is_free(const PoolBlock* block) {
-    return block && (block->flags & POOL_BLOCK_ALLOCATED) == 0;
+    return block && block->requested == 0;
 }
 
 // floor(log2(span)) capped at the last bin, 0 below 2. Counting leading zeros
@@ -297,31 +323,37 @@ static PoolBlock* pool_block_prev(const PoolBlock* block) {
 
 static void pool_free_list_insert(Pool* pool, PoolBlock* block) {
     unsigned index = pool_bin_index(block->span);
-    block->free_prev = NULL;
-    block->free_next = pool->free_bins[index];
-    if (block->free_next) block->free_next->free_prev = block;
+    PoolFreeLinks* links = pool_block_links(block);
+    links->prev = NULL;
+    links->next = pool->free_bins[index];
+    if (links->next) pool_block_links(links->next)->prev = block;
     pool->free_bins[index] = block;
+    pool->free_bin_mask |= 1u << index;
 }
 
 static void pool_free_list_remove(Pool* pool, PoolBlock* block) {
     unsigned index = pool_bin_index(block->span);
-    if (block->free_prev) block->free_prev->free_next = block->free_next;
-    else if (pool->free_bins[index] == block) pool->free_bins[index] = block->free_next;
-    if (block->free_next) block->free_next->free_prev = block->free_prev;
-    block->free_prev = NULL;
-    block->free_next = NULL;
+    PoolFreeLinks* links = pool_block_links(block);
+    if (links->prev) pool_block_links(links->prev)->next = links->next;
+    else if (pool->free_bins[index] == block) pool->free_bins[index] = links->next;
+    if (links->next) pool_block_links(links->next)->prev = links->prev;
+    if (!pool->free_bins[index]) pool->free_bin_mask &= ~(1u << index);
 }
 
 static PoolBlock* pool_find_suitable(Pool* pool, size_t required) {
     unsigned first = pool_bin_index(required);
-    for (unsigned index = first; index < POOL_BIN_COUNT; index++) {
+    // the same bins in the same order as testing each one, empty ones skipped
+    uint32_t mask = pool->free_bin_mask & (UINT32_MAX << first);
+    while (mask) {
+        unsigned index = (unsigned)(63 - math_clz64((uint64_t)(mask & (0u - mask))));
+        mask &= mask - 1;
         PoolBlock* block = pool->free_bins[index];
         while (block) {
             if (pool_block_is_free(block) &&
                 pool_block_can_hold(block->span, required)) {
                 return block;
             }
-            block = block->free_next;
+            block = pool_block_links(block)->next;
         }
     }
     return NULL;
@@ -402,6 +434,7 @@ static void pool_release_extent(Pool* pool, PoolExtent* extent) {
 
 static void pool_clear_free_bins(Pool* pool) {
     memset(pool->free_bins, 0, sizeof(pool->free_bins));
+    pool->free_bin_mask = 0;
 }
 
 static bool pool_append_committed_range(Pool* pool, PoolExtent* extent,
@@ -438,8 +471,12 @@ static bool pool_commit_more(Pool* pool, PoolExtent* extent, size_t required) {
     if (extent->reserved <= extent->committed) return false;
 
     size_t minimum = pool_max_size(POOL_VM_THRESHOLD, required);
+    size_t step = extent->committed < POOL_COMMIT_STEP_MAX
+        ? extent->committed : POOL_COMMIT_STEP_MAX;
     size_t commit_size = 0;
-    if (!math_size_round_up(minimum, pool_page_size(), &commit_size)) return false;
+    if (!math_size_round_up(pool_max_size(minimum, step), pool_page_size(), &commit_size)) {
+        return false;
+    }
     size_t available = extent->reserved - extent->committed;
     if (commit_size > available) commit_size = available;
     if (commit_size == 0 || commit_size % pool_page_size() != 0) return false;
@@ -561,8 +598,7 @@ static PoolBlock* pool_find_block(Pool* pool, void* ptr) {
     // the pointer is already proven inside committed storage; validating the
     // header's lower bound is sufficient because range validation checks the
     // complete block span, including a payload ending at the extent boundary.
-    if ((block->flags & POOL_BLOCK_ALLOCATED) == 0 ||
-        !pool_block_range_valid(block, extent)) {
+    if (block->requested == 0 || !pool_block_range_valid(block, extent)) {
         return NULL;
     }
     return block;
@@ -591,10 +627,7 @@ static PoolBlock* pool_take_block(Pool* pool, size_t required,
     if (!block) return NULL;
     pool_free_list_remove(pool, block);
     pool_split_block(pool, block, required);
-    block->flags = POOL_BLOCK_ALLOCATED;
-    block->requested = requested;
-    block->free_prev = NULL;
-    block->free_next = NULL;
+    block->requested = (uint32_t)requested;  // >= 1 marks the block live
     return block;
 }
 
@@ -745,7 +778,6 @@ void pool_free(Pool* pool, void* ptr) {
     }
 
     size_t requested = block->requested;
-    block->flags = 0;
     block->requested = 0;
     pool->live_bytes = pool->live_bytes >= requested
         ? pool->live_bytes - requested : 0;
@@ -779,7 +811,7 @@ static void pool_shrink_block(Pool* pool, PoolBlock* block, size_t required,
         if (next) next->prev_span = remainder->span;
         pool_coalesce_free(pool, remainder);
     }
-    block->requested = new_size;
+    block->requested = (uint32_t)new_size;
 }
 
 static bool pool_grow_block_in_place(Pool* pool, PoolBlock* block,
@@ -811,7 +843,7 @@ static bool pool_grow_block_in_place(Pool* pool, PoolBlock* block,
         PoolBlock* after = pool_block_next(block);
         if (after) after->prev_span = block->span;
     }
-    block->requested = new_size;
+    block->requested = (uint32_t)new_size;
     return true;
 }
 
