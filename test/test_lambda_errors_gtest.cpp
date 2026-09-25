@@ -1997,6 +1997,20 @@ TEST_F(NegativeScriptTest, SemanticError_DynamicProcedureCallFromFunction) {
         "call: cannot call a procedure (pn) from a function (fn)");
 }
 
+// S12.1.1v2 (LR03-24): every `that` predicate is `fn` context -- a declared
+// type, a field and an object-level constraint, and an inline arm in a `pn`.
+// The colour walk never entered a type expression, so the JIT ran the effect
+// inside `is` while T0's allow-list answered `false`.
+TEST_F(NegativeScriptTest, SemanticError_PredicateIsFnContext) {
+    static const char* const sites[] = {"7:21", "8:24", "8:42", "11:19"};
+    for (const char* site : sites) {
+        char expected[160];
+        snprintf(expected, sizeof(expected), "predicate_calls_pn.ls:%s: error[E224]: "
+            "'eff' is a procedure (pn) and cannot be called from a function (fn)", site);
+        ExpectErrorMessage("test/lambda/negative/semantic/predicate_calls_pn.ls", expected);
+    }
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ArityMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/arity_mismatch.ls");
 }

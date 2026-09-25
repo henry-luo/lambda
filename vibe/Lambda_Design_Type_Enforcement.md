@@ -15,7 +15,7 @@ no longer owns an optional caret. Rev 5 (2026-08-06) assigns the handler-local e
 (`^`, `^.field`, `^[index]`) and leaves `~` under its existing current-value rules.
 **Date:** 2026-07-29; revised 2026-07-30; TE-15 and TE-16 added 2026-08-01;
 postfix grammar revised 2026-08-12; legacy syntax retirement landed and two-arm handler
-syntax decided 2026-08-17
+syntax decided 2026-08-17; TE-20 (`that` predicates) decided and landed 2026-09-26
 **Scope:** making declared types *binding* — statically checked where provable, runtime-enforced
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
@@ -2211,6 +2211,74 @@ against one in the c2m port (`temp/r46/`, deltablue2 `c_choose_method`).
 
 **Spec linkage.** TE-19 → S11.4.10, D3.2.6, D3.2.4v4; handle-carried facts → D4.4.4v4 /
 CW37 (`Lambda_Design_Runtime_COW.md` §11.14). Not implemented; the proposal is Tune29.
+
+---
+
+### TE-20 — A `that` predicate is an `fn` body over the scope it is written in (decided 2026-09-26, user)
+
+**The ruling (S11.4.11).** A constraint — in a `type` declaration, an inline type, a field or
+object-level constraint, or a match arm, inside a `pn` included — is `fn` context: a statically
+known `pn` callee is E224 and a dynamic callee is colour-checked at run time. Its bare names
+resolve where it is written, however far away the type is named. Every tier evaluates the whole
+body with no step budget, and a falsy or error answer fails the test.
+
+**What forced the ruling ([LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>)).** T0 ran a
+`that` body under `EvalMode::PREDICATE` (AI17) only when every node passed an allow-list:
+literals, `~` and `~key`, a set of operators, `if`, indexing, member access and 22 pure system
+functions, within a 1,024-step budget. Anything else — a `let` read, a user function, a
+container, a pipe, a comprehension — answered `false` without an error. The JIT compiled the
+same body inline and in full. So `let lim = 3; type Big = int that ~ > lim` gave `5 is Big`
+`false` on T0 and `true` on the JIT, and under `auto` a hot `fn check(x) => x is Big` answered
+`false` four times, then `true` once promoted. S1.6 makes that a bug by definition; the choice
+was which way both tiers go.
+
+**Two options.** (a) Reject such a predicate at compile time on both tiers, making the allow-list
+the language. (b) Evaluate it on both. (b) won:
+
+- S10.1.5v3 says the proviso `x that p` and the constraint `T that p` are "the same predicate,
+  binding, and word", and T0 already ran the proviso in full. Under (a) the same `p` would be
+  legal in one and illegal in the other.
+- S10.1.7v2 already decides how a bare name in a type constraint resolves, scope names first,
+  which presumes predicates read scope names.
+- The allow-list was stricter than what it protected. AI17 asked for a *pure* predicate, and
+  Lambda's purity is the `fn`/`pn` bit (D6.1.2 names it the soundness gate): a `let` read and an
+  `fn` call are pure. The static check delivers the purity; an evaluator restriction only made
+  one tier wrong.
+- (a) would have rejected predicates that work on the JIT today, `~ > lim` first among them.
+
+**Why `fn` context everywhere, a `pn` body included.** A type is a value: `is` runs its
+predicate for whichever caller names it, an `fn` included, so a `pn` call inside would perform an
+effect in `fn` context. An inline arm constraint written in a `pn` body is a type expression
+too, and one rule is simpler than a rule with a positional exception. The proviso is an
+expression, not a type, so it keeps its enclosing context. Before this ruling nothing checked a
+constraint body at all: the colour walk never entered a type expression, so
+`type Bad = int that eff(~) > 3` compiled, the JIT ran the effect inside `5 is Bad`, and T0's
+allow-list answered `false`.
+
+**Why the scope is the written one.** Both tiers evaluate a predicate inline at the `is` site,
+so the site can be a nested closure, an importer, or the predicate itself re-entered through a
+call. Lexical scope decides each case:
+
+- a local type named in a nested closure makes the closure capture what the predicate reads;
+- an imported type's predicate reads its own module's slab, constants and functions
+  ([LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>): T0 had read the importer's constants);
+- the names a predicate binds itself (a `for` variable, a group `let`) belong to the evaluation.
+  On T0 they take a window that each evaluation reserves in the evaluating frame, so a
+  re-entering call gets its own. Declaring-frame slots or module-slab slots were the two wrong
+  homes tried first: the first failed in a closure, the second on re-entry.
+
+**Why no step budget.** The JIT has none, so a budget turns an expensive predicate into an
+observable `false` on T0 alone. Non-termination is the program's own bug, as in any `fn`. Fault
+timing stays exempt from S1.6 (S7.11.4).
+
+**Residue.** The JIT inlines an imported predicate in the importer, where the declaring module's
+names are undefined and its private functions fail to link
+([LR03-27](Lambda_Issue_Ledger.md#lr03-27)). Doing it right needs the predicate evaluated as a
+function of its declaring module, which also answers a predicate that names its own type: today
+that crashes compilation on both tiers ([LR03-28](Lambda_Issue_Ledger.md#lr03-28)).
+
+**Spec linkage.** TE-20 → S11.4.11; the mechanism revises AI17 to AI17v2
+(`Lambda_Design_Ast_Interpreter.md` §6.2).
 
 ## 8. Phasing
 

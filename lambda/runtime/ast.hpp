@@ -97,23 +97,32 @@ static inline TypeConstrained* ast_constrained_type(AstNode* node) {
     return lambda_type_is_constrained(type) ? (TypeConstrained*)type : NULL;
 }
 
-// The `that` predicates a constrained type owes, innermost base first: `type
+// The `that` layers a constrained type owes, innermost base first: `type
 // Small = Pos that ~ < 10` owes Pos's before its own. Returns the count, or -1
 // for a cyclic chain or a layer with no predicate, which no check may pass.
-static inline int ast_constrained_type_predicates(TypeConstrained* type,
-        AstNode** out) {
+static inline int ast_constrained_type_layers(TypeConstrained* type,
+        TypeConstrained** out) {
     int count = 0;
     for (Type* link = (Type*)type; lambda_type_is_constrained(link);
             link = type_field_unwrap_simple_decl(((TypeConstrained*)link)->base)) {
-        AstNode* predicate = ((TypeConstrained*)link)->constraint;
-        if (count == LAMBDA_CONSTRAINT_CHAIN_MAX || !predicate) return -1;
-        out[count++] = predicate;
+        TypeConstrained* layer = (TypeConstrained*)link;
+        if (count == LAMBDA_CONSTRAINT_CHAIN_MAX || !layer->constraint) return -1;
+        out[count++] = layer;
     }
     for (int i = 0, j = count - 1; i < j; i++, j--) {
-        AstNode* outer = out[i];
+        TypeConstrained* outer = out[i];
         out[i] = out[j];
         out[j] = outer;
     }
+    return count;
+}
+
+// The predicates of those layers, in the same order.
+static inline int ast_constrained_type_predicates(TypeConstrained* type,
+        AstNode** out) {
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(type, layers);
+    for (int i = 0; i < count; i++) out[i] = layers[i]->constraint;
     return count;
 }
 

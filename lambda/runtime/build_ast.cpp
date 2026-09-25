@@ -2102,6 +2102,64 @@ static void capture_indexed_outer_binding(Transpiler* tp, AstFuncNode* fn_node,
     if (is_mutable) mark_capture_mutable(&fn_node->captures, name);
 }
 
+// Both tiers run a constrained type's predicates inline where `is` or a match
+// arm names the type, so a function naming a local constrained type from an
+// enclosing scope captures each outer binding those predicates read, as if the
+// predicate text were written in its body (S10.1.7v2: bare names are lexical).
+// Names a predicate binds itself stay put; a nested constrained type's own
+// predicates are followed, each type once per function, so types that name
+// each other cannot recurse without bound.
+typedef struct PredicateCaptureScan {
+    Transpiler* tp;
+    AstFuncNode* fn_node;
+    NameScope* global_scope;
+    AstNodeId predicate_id;
+    ArrayList* seen;          // TypeConstrained* already scanned; lazily made
+} PredicateCaptureScan;
+
+static void capture_constraint_reads(PredicateCaptureScan* scan, AstNode* named);
+
+static bool capture_predicate_read_visit(const AstIndex* index, AstNodeId node_id,
+        void* context) {
+    PredicateCaptureScan* scan = (PredicateCaptureScan*)context;
+    AstNode* node = index->nodes[node_id];
+    if (!node || node->node_type != AST_NODE_IDENT) return true;
+    NameEntry* entry = ast_index_binding(index, index->node_bindings[node_id]);
+    AstNodeId definition = entry ? ast_index_find(index, entry->node)
+        : AST_NODE_ID_INVALID;
+    if (!entry || (definition != AST_NODE_ID_INVALID &&
+            ast_index_node_descends(index, definition, scan->predicate_id))) {
+        return true;
+    }
+    capture_indexed_outer_binding(scan->tp, scan->fn_node, scan->global_scope,
+        entry->name, entry, false);
+    capture_constraint_reads(scan, node);
+    return true;
+}
+
+static void capture_constraint_reads(PredicateCaptureScan* scan, AstNode* named) {
+    TypeConstrained* constrained = ast_constrained_type(named);
+    if (!constrained) return;
+    if (!scan->seen) scan->seen = arraylist_new(4);
+    for (int i = 0; scan->seen && i < scan->seen->length; i++) {
+        if (scan->seen->data[i] == constrained) return;
+    }
+    if (!scan->seen || !arraylist_append(scan->seen, constrained)) return;
+    AstNode* predicates[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_predicates(constrained, predicates);
+    AstIndex* index = &scan->tp->ast_index;
+    AstNodeId saved_predicate = scan->predicate_id;
+    for (int i = 0; i < count; i++) {
+        // an imported type's predicate is not in this index; it reads only
+        // its own module's names, which are never captures
+        scan->predicate_id = ast_index_find(index, predicates[i]);
+        if (scan->predicate_id == AST_NODE_ID_INVALID) continue;
+        ast_index_visit_subtree(index, scan->predicate_id,
+            capture_predicate_read_visit, scan);
+    }
+    scan->predicate_id = saved_predicate;
+}
+
 static void finish_capture_analysis(Transpiler* tp, AstFuncNode* fn_node) {
     if (!fn_node->analysis) {
         fn_node->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
@@ -2135,6 +2193,11 @@ static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
     uint32_t reference_count = 0;
     const AstFunctionReference* references = ast_index_function_references(index,
         function_id, &reference_count);
+    PredicateCaptureScan predicate_scan = {};
+    predicate_scan.tp = tp;
+    predicate_scan.fn_node = fn_node;
+    predicate_scan.global_scope = global_scope;
+    predicate_scan.predicate_id = AST_NODE_ID_INVALID;
     for (uint32_t i = 0; references && i < reference_count; i++) {
         const AstFunctionReference* reference = &references[i];
         if (!(reference->flags & AST_FUNCTION_REF_FREE)) continue;
@@ -2142,7 +2205,11 @@ static bool analyze_captures(Transpiler* tp, AstFuncNode* fn_node,
         capture_indexed_outer_binding(tp, fn_node, global_scope,
             entry ? entry->name : NULL, entry,
             (reference->flags & AST_FUNCTION_REF_WRITE) != 0);
+        if (!(reference->flags & AST_FUNCTION_REF_WRITE)) {
+            capture_constraint_reads(&predicate_scan, index->nodes[reference->node_id]);
+        }
     }
+    if (predicate_scan.seen) arraylist_free(predicate_scan.seen);
     uint32_t child_count = 0;
     const AstFunctionId* children = ast_index_function_children(index, function_id,
         &child_count);
@@ -7818,6 +7885,8 @@ static void colour_walk_call(CallColourWalk* walk, AstCallNode* call) {
     call->fn_colour_guard = guard;
 }
 
+static void colour_walk_constraint(Transpiler* tp, AstNode* constraint);
+
 static bool colour_walk_visit(AstNode* node, void* data) {
     CallColourWalk* walk = (CallColourWalk*)data;
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
@@ -7827,11 +7896,37 @@ static bool colour_walk_visit(AstNode* node, void* data) {
         walk_lambda_ast(fn->body, colour_walk_visit, &inner, true);
         return false;
     }
+    if (node->node_type == AST_NODE_OBJECT_TYPE) {
+        for (AstNode* constraint = ((AstObjectTypeNode*)node)->constraints;
+                constraint; constraint = constraint->next) {
+            colour_walk_constraint(walk->tp, constraint);
+        }
+    }
     bool in_proc = walk->function && walk->function->node_type == AST_NODE_PROC;
     if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
         colour_walk_call(walk, (AstCallNode*)node);
     }
     return true;
+}
+
+// S12.1.1v2: a `that` constraint is `fn` context wherever it is written, a `pn`
+// body included, because `is` runs it for any caller. The walk above never
+// enters a type expression, so every constrained type this module resolved is
+// walked from the type list, and an object type's own constraints where the
+// walk meets the type.
+static void colour_walk_constraint(Transpiler* tp, AstNode* constraint) {
+    CallColourWalk walk = {tp, NULL};
+    walk_lambda_ast(constraint, colour_walk_visit, &walk, true);
+}
+
+static void colour_walk_constrained_types(Transpiler* tp) {
+    for (int i = 0; tp->type_list && i < tp->type_list->length; i++) {
+        Type* type = (Type*)tp->type_list->data[i];
+        // an import re-registers some aliases here; its owner checked them
+        if (!lambda_type_is_constrained(type) ||
+                ((TypeConstrained*)type)->module != tp->script_owner) continue;
+        colour_walk_constraint(tp, ((TypeConstrained*)type)->constraint);
+    }
 }
 
 static bool lambda_ast_analyze_indexed_captures(Transpiler* tp, AstScript* script) {
@@ -7859,6 +7954,7 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
     if (tp->error_count != 0) return false;
     CallColourWalk colour_walk = {tp, NULL};
     walk_lambda_ast((AstNode*)script, colour_walk_visit, &colour_walk, true);
+    colour_walk_constrained_types(tp);
     if (tp->error_count != 0) return false;
     for (AstNode* item = script->child; item; item = item->next) {
         validate_top_level_enforcing_calls(tp, item);
@@ -15183,6 +15279,7 @@ static void resolve_constrained(Transpiler* tp, AstConstrainedTypeNode* node) {
     base_type = unwrap_simple_type_type(base_type);
     type->base = base_type ? base_type : &TYPE_ANY;
     type->constraint = constraint;
+    type->module = tp->script_owner;
     node->type = (Type*)type;
     arraylist_append(tp->type_list, node->type);
     type->type_index = tp->type_list->length - 1;

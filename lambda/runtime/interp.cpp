@@ -353,23 +353,11 @@ InterpRunStats* interp_run_stats(void) { return &g_interp_stats; }
 void interp_run_stats_reset(void) { memset(&g_interp_stats, 0, sizeof(g_interp_stats)); }
 
 #define INTERP_DEFAULT_DEPTH 10000
-#define INTERP_DEFAULT_PREDICATE_FUEL 1024
 #define INTERP_DEFAULT_CONST_FUEL 1024
 #define INTERP_CONST_FRAME_SLOTS 4096
 
-// A predicate is a bounded decision, not an unbounded second execution path.
-// Invalid knob values keep the reviewed default rather than weakening the
-// no-effect boundary through an accidental unlimited budget (AI17).
-static uint32_t interp_predicate_fuel_budget(void) {
-    const char* env = getenv("LAMBDA_PREDICATE_FUEL");
-    if (!env || !*env) return INTERP_DEFAULT_PREDICATE_FUEL;
-    long value = strtol(env, NULL, 10);
-    if (value < 1 || value > 1000000L) return INTERP_DEFAULT_PREDICATE_FUEL;
-    return (uint32_t)value;
-}
-
 // a constant fold is a bounded compiler attempt, not a second unbounded
-// evaluator. Invalid knobs retain the reviewed default just as predicates do.
+// evaluator. Invalid knobs retain the reviewed default.
 static uint32_t interp_const_fuel_budget(void) {
     const char* env = getenv("LAMBDA_CONST_FUEL");
     if (!env || !*env) return INTERP_DEFAULT_CONST_FUEL;
@@ -532,42 +520,6 @@ public:
     bool valid() const { return active_; }
     InterpVargsGuard(const InterpVargsGuard&) = delete;
     InterpVargsGuard& operator=(const InterpVargsGuard&) = delete;
-};
-
-// Saves the ordinary runtime mode around an isolated `that` attempt.  Nested
-// constrained checks retain the enclosing fuel counter, so a predicate cannot
-// manufacture a fresh budget by spelling `~ is OtherConstrainedType` (AI17).
-class InterpEvalModeGuard {
-    InterpState* st_;
-    EvalMode saved_mode_;
-    uint32_t saved_fuel_;
-    bool saved_exhausted_;
-    bool saved_rejected_;
-    bool owns_mode_;
-public:
-    InterpEvalModeGuard(InterpState* st, EvalMode mode, uint32_t fuel)
-            : st_(st), saved_mode_(st->mode), saved_fuel_(st->mode_fuel),
-              saved_exhausted_(st->mode_exhausted),
-              saved_rejected_(st->mode_rejected),
-              owns_mode_(st->mode == EvalMode::RUNTIME) {
-        if (!owns_mode_) return;
-        st_->mode = mode;
-        st_->mode_fuel = fuel;
-        st_->mode_exhausted = false;
-        st_->mode_rejected = false;
-    }
-    ~InterpEvalModeGuard() {
-        if (!owns_mode_) return;
-        st_->mode = saved_mode_;
-        st_->mode_fuel = saved_fuel_;
-        st_->mode_exhausted = saved_exhausted_;
-        st_->mode_rejected = saved_rejected_;
-    }
-    bool completed() const {
-        return !st_->mode_exhausted && !st_->mode_rejected;
-    }
-    InterpEvalModeGuard(const InterpEvalModeGuard&) = delete;
-    InterpEvalModeGuard& operator=(const InterpEvalModeGuard&) = delete;
 };
 
 // One frame-relative Item home, held across a child eval or a MAY_GC call.
@@ -934,6 +886,15 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
         // reads it, so the Item is taken as-is (immortal) rather than re-homed.
         return owned_item_slot_read(f->env, f->env_count, cap, true);
     }
+    if (entry->binding_storage == BINDING_STORAGE_PREDICATE) {
+        if ((uint32_t)entry->slot >= f->predicate_window_count) {
+            log_error("interp: predicate binding '%.*s' read outside its window",
+                entry->name ? (int)entry->name->len : 0,
+                entry->name ? entry->name->chars : "");
+            return ItemError;
+        }
+        return (Item){.item = f->predicate_window[entry->slot]};
+    }
     if ((uint32_t)entry->slot >= f->scratch_base) {
         log_error("interp: binding slot %d out of window (%u) for '%.*s'",
             entry->slot, f->scratch_base,
@@ -996,6 +957,12 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
             : entry->import_owner;
         if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
         interp_write_module_slot(owner, entry->slot, value);
+        return;
+    }
+    if (entry->binding_storage == BINDING_STORAGE_PREDICATE) {
+        if ((uint32_t)entry->slot < f->predicate_window_count) {
+            f->predicate_window[entry->slot] = value.item;
+        }
         return;
     }
     if ((uint32_t)entry->slot < f->scratch_base) f->slots[entry->slot] = value.item;
@@ -2920,6 +2887,10 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
     EvalSignal saved_signal = f->signal;
     uint64_t saved_signal_payload = f->slots[f->signal_index];
     const AstNode* saved_cur = f->cur;
+    // a faulting `that` predicate leaves its module and window switched in
+    Script* saved_module = f->module;
+    uint64_t* saved_predicate_window = f->predicate_window;
+    uint32_t saved_predicate_window_count = f->predicate_window_count;
 
     if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery)) {
         Item fault = ItemError;
@@ -2941,6 +2912,9 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
         f->signal = saved_signal;
         f->slots[f->signal_index] = saved_signal_payload;
         f->cur = saved_cur;
+        f->module = saved_module;
+        f->predicate_window = saved_predicate_window;
+        f->predicate_window_count = saved_predicate_window_count;
         return fault;
     }
     if (!lambda_recovery_frame_arm(recovery)) {
@@ -3008,25 +2982,59 @@ static void interp_subject_slots(InterpFrame* f, Scratch& subject, Scratch& inde
     root_slot.set(outer && outer->root ? (Item){.item = *outer->root} : subject.get());
 }
 
-// Runs an admitted `that` body with the candidate installed as `~`.  The
-// predicate does not signal a language error when it is unsupported, faults,
-// or exhausts fuel: that check simply fails, as the JIT predicate path's false
-// branch does.  Object constraints remain on their separate S11.4.6 path.
-static bool interp_eval_constrained_predicate(InterpFrame* f,
-        AstNode* constraint, Scratch& subject) {
-    if (!constraint || !interp_predicate_supported(constraint)) return false;
+// S10.1.7v2: a predicate's bare names are those of the module that declares
+// it, so an imported type's predicate reads that module's slab, constants and
+// functions. The declaring Script may be a cache template whose instance runs
+// here. NULL when this Runtime has not loaded it.
+static Script* interp_constrained_module(InterpFrame* f,
+        const TypeConstrained* layer) {
+    Script* owner = layer->module;
+    Script* current = f->module;
+    if (!owner || !current || current == owner || current->cache_template == owner) {
+        return current;
+    }
+    Runtime* runtime = f->st->runtime ? f->st->runtime
+        : (f->st->ctx ? f->st->ctx->runtime : NULL);
+    for (int i = 0; runtime && runtime->scripts && i < runtime->scripts->length; i++) {
+        Script* script = (Script*)runtime->scripts->data[i];
+        if (script && (script == owner || script->cache_template == owner)) return script;
+    }
+    return NULL;
+}
 
-    InterpEvalModeGuard mode(f->st, EvalMode::PREDICATE,
-        interp_predicate_fuel_budget());
+// Runs one `that` layer with the candidate installed as `~`. The body is an
+// ordinary `fn` expression (S12.1.1v2), evaluated as the proviso's is
+// (S10.1.5v3) and with no step budget, since the JIT inlines it whole. The
+// names it binds itself live in a window reserved here, so the frame may be
+// any one that names the type, and a call that re-enters the predicate gets
+// its own. A falsy or error answer fails the check without signalling, as
+// the JIT's branch does. Object constraints remain on their S11.4.6 path.
+static bool interp_eval_constrained_predicate(InterpFrame* f,
+        TypeConstrained* layer, Scratch& subject) {
+    Script* module = interp_constrained_module(f, layer);
+    if (!module) {
+        log_error("interp: constrained type's declaring module is not loaded");
+        return false;
+    }
     Scratch index_slot(f);
     Scratch parent_slot(f);
     Scratch root_slot(f);
     interp_subject_slots(f, subject, index_slot, parent_slot, root_slot, false);
     InterpContextGuard bound(f->st, subject.home(), index_slot.home(),
         parent_slot.home(), root_slot.home());
-    Item result = eval_expr(f, constraint);
-    return !interp_frame_pending(f) && mode.completed() &&
-        is_truthy(result) == BOOL_TRUE;
+    ScratchSpan window(f, layer->predicate_slots);
+    if (!window.valid()) return false;
+    uint64_t* outer_window = f->predicate_window;
+    uint32_t outer_window_count = f->predicate_window_count;
+    Script* caller_module = f->module;
+    f->predicate_window = window.words();
+    f->predicate_window_count = layer->predicate_slots;
+    f->module = module;
+    Item result = eval_expr(f, layer->constraint);
+    f->module = caller_module;
+    f->predicate_window = outer_window;
+    f->predicate_window_count = outer_window_count;
+    return !interp_frame_pending(f) && is_truthy(result) == BOOL_TRUE;
 }
 
 // S11.2.1: a constrained type named by `is` or a match arm admits its base
@@ -3036,12 +3044,12 @@ static bool interp_eval_constrained_predicate(InterpFrame* f,
 // innermost first. Mirrors emit_constrained_type_test.
 static bool interp_constrained_type_matches(InterpFrame* f,
         TypeConstrained* constrained, Scratch& subject) {
-    AstNode* predicates[LAMBDA_CONSTRAINT_CHAIN_MAX];
-    int count = ast_constrained_type_predicates(constrained, predicates);
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(constrained, layers);
     if (count < 0 || fn_is(subject.get(),
             interp_ptr_item((Type*)constrained)) != BOOL_TRUE) return false;
     for (int i = 0; i < count; i++) {
-        if (!interp_eval_constrained_predicate(f, predicates[i], subject)) return false;
+        if (!interp_eval_constrained_predicate(f, layers[i], subject)) return false;
     }
     return true;
 }

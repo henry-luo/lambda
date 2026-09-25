@@ -1102,6 +1102,13 @@ typedef struct TypeConstrained : Type {
     struct AstNode* constraint; // constraint expression AST (for error messages)
     int type_index;             // index in the type list
     ConstraintFn constraint_fn; // compiled constraint check function
+    // the declaring module: the predicate reads its names wherever `is` runs
+    // it, an importer's included (S10.1.7v2)
+    Script* module;
+    // T0 frame-plan facts: the window of names the predicate binds itself
+    // (BINDING_STORAGE_PREDICATE), reserved afresh by each evaluation
+    uint16_t predicate_slots;
+    bool predicate_planned;
 } TypeConstrained;
 
 // A binder appears only in a function parameter contract.  `bound` is the

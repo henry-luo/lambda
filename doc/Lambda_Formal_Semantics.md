@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 40.0.1 (2026-09-25)
+**Spec version:** 41.0.0 (2026-09-26)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -26,7 +26,7 @@ Appendix B lists open design issues.
 int v5 ([`Lambda_Semantics_Int_Type.md`](../vibe/Lambda_Semantics_Int_Type.md));
 the number model
 ([`Lambda_Semantics_Number_Model.md`](../vibe/Lambda_Semantics_Number_Model.md));
-TE-1–TE-18
+TE-1–TE-20
 ([`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md));
 ER-D1–D13 ([`Lambda_Design_Exec_Recovery.md`](../vibe/Lambda_Design_Exec_Recovery.md));
 REH-D1–D14
@@ -1593,7 +1593,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ### S11.4 Declared types are contracts
 
-Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md) (TE-1–TE-18).
+Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_Enforcement.md) (TE-1–TE-20).
 
 - **S11.4.1v3** An annotation is a contract on the binding, not a hint.
   **Three outcomes, never a fourth**: statically proven, statically
@@ -1682,6 +1682,19 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   value at the binding site** (the soft form of S11.4.2); the binding is not
   established. Host-built values are outside this rule until they cross a
   boundary that admits them. [TE-19, D3.2.6; 2026-09-17, user]
+- **S11.4.11*** **A `that` predicate is an `fn` body over the scope it is
+  written in.** Wherever a constraint appears — a `type` declaration, an
+  inline type, a field or object-level constraint, a match arm, inside a `pn`
+  included — it is `fn` context (S12.1.1v2), because `is` runs it for any
+  caller: a statically known `pn` callee is E224, and a callee known only at
+  run time is colour-checked there. Its bare names resolve where it is written
+  (S10.1.7v2), wherever the type is named: an imported type's predicate reads
+  its own module, and a local type named in a nested closure reads what that
+  closure captured. Every tier evaluates the whole body, with no step budget
+  (S1.6) — no tier answers for a body it declined to evaluate. A falsy or
+  error answer fails the test. The proviso `x that p` evaluates the same body
+  the same way, in its own enclosing context (S10.1.5v3). [TE-20; 2026-09-26,
+  user]
 
 ---
 
@@ -2505,8 +2518,9 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.3 | `any \ error` has no working surface spelling (the `!` exclusion operator is broken for general types); it exists as the unwritten default only. |
 | S11.4.5 | **Conformant (verified 2026-09-23, both tiers):** an ANY-held `3.0` crossing an `int` boundary is admitted as `3`, and `3.5` fails with E201. The type-directional reject this row used to record is gone. |
 | S11.1.6v2, S11.4.5 (native nullable lanes) | **Conformant as of 2026-09-23, both tiers:** a `float?` or `float \| null` contract admits an int as `float` does, re-represented (`5` becomes `5.0`), and `int?` admits an exactly integral float (`2.0` becomes `2`). The JIT had failed MIR verification on `let x: float? = 5`, and T0 had kept the int. A union of several numeric arms still admits by membership (`5` stays an int in `int \| float \| null`). Fixture: `proc/nullable_float_lane_admission.ls`. **Residue:** the sized and wide optionals (`i8?` to `u32?`, `i64?`) still admit by membership on both tiers, so `let t: i32? = 5` is rejected where `let t: i32 = 5` is admitted. |
-| S11.4.6 | **Base admission conformant as of 2026-09-25, both tiers.** `fn_is`, the validator, `is` and match arms all admit a constrained type's base as `x is <base>` does. Both tiers had compared the base's TypeId, so a union, occurrence, array, `float`, `any` or `number` base refused every value and a map, element or nominal base took any container of its kind; the generic `fn_is` admitted anything for a union, occurrence or array base; and the validator refused every element of `Pos[]` ([LR03-22](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-22>), [LR13-11](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-11>)). Predicates run where the type is named statically: `is` and match arms, inline, by name, or through an alias chain, innermost predicate first ([LR03-23](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-23>)). Everywhere else the interim holds and only the base is enforced: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). Fixture `constrained_type_base.ls`. **Residue:** T0 evaluates a predicate only within its PREDICATE allow-list and answers `false` otherwise, where the JIT evaluates it ([LR03-24](../vibe/Lambda_Issue_Ledger.md#lr03-24)); T0 reads an imported predicate's constants from the importing module ([LR03-25](../vibe/Lambda_Issue_Ledger.md#lr03-25)); an inline pattern island never compiles as a base ([LR03-26](../vibe/Lambda_Issue_Ledger.md#lr03-26)). |
+| S11.4.6 | **Base admission conformant as of 2026-09-25, both tiers.** `fn_is`, the validator, `is` and match arms all admit a constrained type's base as `x is <base>` does. Both tiers had compared the base's TypeId, so a union, occurrence, array, `float`, `any` or `number` base refused every value and a map, element or nominal base took any container of its kind; the generic `fn_is` admitted anything for a union, occurrence or array base; and the validator refused every element of `Pos[]` ([LR03-22](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-22>), [LR13-11](<../vibe/Lambda_Issue_Ledger (fixed).md#lr13-11>)). Predicates run where the type is named statically: `is` and match arms, inline, by name, or through an alias chain, innermost predicate first ([LR03-23](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-23>)). Everywhere else the interim holds and only the base is enforced: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). Fixture `constrained_type_base.ls`. How a predicate evaluates is S11.4.11's row. **Residue:** an inline pattern island never compiles as a base ([LR03-26](../vibe/Lambda_Issue_Ledger.md#lr03-26)). |
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
+| S11.4.11 | **Ruled and implemented 2026-09-26 on both tiers, but for the residue.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. T0 evaluates a predicate in full, in its declaring module, and the names the predicate binds itself take a window that each evaluation reserves in the evaluating frame. A function that names a local constrained type captures what its predicate reads, on both tiers. Before, T0 evaluated only an allow-list under a step budget and answered `false` otherwise, so `auto` flipped a hot function's answer on promotion, and it read an imported predicate's constants in the importer ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>), [LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)). Fixtures `constrained_type_predicate.ls`, pinned in `kTune27TierParity`, and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5928/5929; every golden 981/982 with the tier pinned to `jit` and to `interp`; compiling all 2,027 tracked `.ls` files gives the same first errors before and after. The one failure in each run, `proc_markup_mutation`, is environmental to worktrees. **Residue:** the JIT inlines an imported type's predicate in the importer, where the declaring module's names are undefined and its private functions fail to link ([LR03-27](../vibe/Lambda_Issue_Ledger.md#lr03-27)); a predicate that names its own type crashes compilation on both tiers ([LR03-28](../vibe/Lambda_Issue_Ledger.md#lr03-28)). Design record: TE-20. |
 | S12.1.4v3 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.4.6) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
@@ -2661,7 +2675,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
-| S11 types | C7, C8.5c, C20; TE-1–TE-18; OB13; Type_Pattern §1.3; Design_Syntax §7.28 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md` |
+| S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |

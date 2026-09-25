@@ -810,6 +810,30 @@ type Adult = {age: int} that (age >= 18);   // same as (~.age >= 18)
 [{age: 20} is Adult, {age: 5} is Adult]     // [true, false]
 ```
 
+A predicate is an ordinary `fn` expression (S11.4.11). It may read the bindings
+in scope where it is written and call functions, and it gives the same answer
+wherever the type is used — in another function, a closure, or a module that
+imports the type:
+
+```lambda
+let limit = 3;
+fn double(x) => x * 2;
+type Big = int that (~ > limit);
+type BigDouble = int that (double(~) > limit * 2);
+fn check(x) => x is Big;
+[5 is Big, 2 is Big, 4 is BigDouble, check(5)]   // [true, false, true, true]
+```
+
+Because `is` may run it from any function, a predicate is always `fn`
+context, even when written inside a `pn`: calling a procedure in it is a
+compile error.
+
+```lambda error=E224
+pn log_value(x) { print(x); x }
+type Logged = int that (log_value(~) > 0);
+5 is Logged
+```
+
 The empty string `""` is a real `string` value with length 0, so a non-empty
 string constraint is useful when blank text should be rejected. The empty symbol
 literal `''` is invalid; symbols are solid identifier values.

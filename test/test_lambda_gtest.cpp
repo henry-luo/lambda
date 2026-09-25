@@ -406,6 +406,12 @@ static const TierParityFixture kTune27TierParity[] = {
     // S10.1.3: `~key` is null in a single-subject body. The JIT read an
     // enclosing pipe's index or failed to compile; T0 segfaulted in a value arm.
     {"test/lambda/current_key_subject.ls", "test/lambda/current_key_subject.txt"},
+    // S11.4.6/S10.1.7v2 (LR03-24, LR03-25): a predicate is an ordinary `fn`
+    // expression over its declaring scope. T0 answered `false` outside an
+    // allow-list and read an imported predicate's constants in the importer,
+    // so `auto` flipped a hot function's answer when the JIT took over.
+    {"test/lambda/constrained_type_predicate.ls",
+     "test/lambda/constrained_type_predicate.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

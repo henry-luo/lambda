@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
 **Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. General loop OSR, JS P2 promotion, and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI22** remains the design record; the formal rulings named above win on disagreement.
-**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v10**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S15.3.
+**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v10**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v2), S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
 
@@ -482,15 +482,24 @@ as directional evidence, not as a benchmark ranking.
 enum class EvalMode : uint8_t {
     RUNTIME,     // full language, effects allowed per fn/pn checking
     CONST,       // build-time folding: pure subset only, fuel-budgeted, no pn, no I/O
-    PREDICATE,   // `that` clauses & match guards: pure, fuel-budgeted, ~-bound
 };
 ```
 
+A `that` predicate has no mode of its own (AI17v2, §6.2): it runs under `RUNTIME`.
+
 `EvalMode::CONST` **is** the const-folder D8.1.1 sanctioned: same walker, restricted to the pure core subset with the `fn`/`pn` purity bit as the soundness gate — D6.1.2 names that bit *"the const-folder's soundness gate"* verbatim, and U26 §12.3's estimate (*"~95% of argument 4 at ~5% of an interpreter's cost"*) inverts once the interpreter exists anyway: the folder becomes a mode flag, not a second engine. Folding runs in the pass manager over literal-typed subtrees, with a fuel budget and a strict no-effect, no-fault discipline (a folding attempt that raises or exhausts fuel simply doesn't fold). The MIR-cache folding hazard (`Lambda_Design_MIR_Cache_L3.md` — folded data-item REFs kill value-based patching) is a constraint on what folded *pointers* may flow into lowering, inherited as-is.
 
-### 6.2 `that` predicates without the JIT
+### 6.2 `that` predicates without the JIT (AI17v2, revised 2026-09-26)
 
-Constrained-type checks today JIT-compile `TypeObject::constraint_fn` per constrained type and call it from `fn_is`/the validator. `EvalMode::PREDICATE` evaluates `TypeObject::constraint` (already an `AstNode*`) directly, binding `~` per §4.7 — removing the JIT dependency from `lambda.exe validate` and from every `is` on a constrained type in T0. Shipped behavior is unchanged: S11.4.6 rules constrained types *"enforce the base only, for now"*, and this design does not alter that — it changes the *mechanism* available where predicates are already evaluated, and it is the enabling prerequisite if S11.4.6's base-only interim is ever revisited (SO9 stays open, untouched here).
+T0 evaluates a constrained type's `that` body (`TypeConstrained::constraint`, an `AstNode*`) directly, binding `~` per §4.7, so no `is` on a constrained type in T0 needs the JIT. It is an ordinary `fn` expression (S11.4.11): the walker runs it under `RUNTIME`, as it runs the proviso (S10.1.5v3), with no allow-list and no step budget, because the JIT inlines the same body whole and S1.6 leaves no room for either tier to answer for a body it declined. Purity is enforced statically instead: the colour walk checks every constraint body as `fn` context (E224; dynamic callees colour-guarded).
+
+Three facts make the inline evaluation lexically right wherever `is` names the type:
+
+- **Declaring module.** `TypeConstrained::module` records the module that resolved the layer, and the walker switches the frame's module to its execution instance for the layer's evaluation (`interp_constrained_module`), so an imported predicate reads its owner's slab, constants and functions.
+- **Captures.** Capture analysis treats a function's reference to a local constrained type as a read of what the type's predicates read (`capture_constraint_reads`, `build_ast.cpp`), so a nested closure has those values on both tiers.
+- **Predicate window.** The names a predicate binds itself are planned as `BINDING_STORAGE_PREDICATE` slots of a per-layer window (`plan_predicate_windows`). Each evaluation reserves the window in the evaluating frame's scratch, so the frame may be any one that names the type, and a call that re-enters the predicate gets a fresh window. The use-site scratch plan counts it (`plan_constrained_type_need`).
+
+S11.4.6's base-only interim for the generic path is unchanged (SO9 stays open): a first-class type value, a declaration boundary and the validator still enforce only the base. The superseded AI17 wording is in Appendix S.
 
 ### 6.3 The executable spec
 
@@ -688,7 +697,7 @@ policy because backedge promotion is deferred until the next entry.
 - **P0 — skeleton + evidence. ✅ LANDED 2026-08-15.** Frame-plan pass; `InterpFrame`/side-stack integration; walker for the pure L1 core (literals, ident, unary/binary, if, let, call, list/array/map); `LAMBDA_TIER=interp` behind a flag; measurement report (turnaround + memory on the corpus). *Gate met: 81 of 279 corpus scripts run entirely under T0 with golden-identical output, 198 counted fallbacks, **0 divergences**; clean under forced GC.* Measured: **1.69×** faster turnaround on the real-workload subset and **9.4×** on a 1 000-line REPL history (both against native codegen), **11.9–28.5×** on 1k–20k-line run-once scripts against forced native codegen, and resident memory **58× lower** at 20k lines (5.38 GB of MIR IR → 92 MB). Note that the shipped default path routes modules over 100 000 MIR instructions to MIR-interp rather than codegen, so the two largest C2 rows carry a mode column and a separate forced-native baseline. The design's compile-dominance premise is confirmed on the Lambda side; see `vibe/impl/Lambda_Impl_Ast_Interp.md` §6.
 - **P1 — full coverage.** Remaining constructs per §4.9 (for-clauses, match, elements, patterns, paths, pn statements, imports/module slabs, sys funcs); error/fault channels; recursion budget. *Gate: validation gate 1 (full baseline differential) + gate 2 (GC stress).*
 - **P2 — tiering.** Promotion cells, `LAMBDA_INTERPRETED` entry ABI, satellite lowering contract (§5.2), Script-scoped analysis persistence, entry swap. *Gate: promoted-function outputs identical to interp; perf floor gate 5.*
-- **P3 — one-engine unification.** `EvalMode::CONST` folder in the pass manager; `EvalMode::PREDICATE` for `that`; validator de-JIT. *Gate: fold-on/fold-off differential; `validate` runs with JIT never initialized.*
+- **P3 — one-engine unification.** `EvalMode::CONST` folder in the pass manager; `EvalMode::PREDICATE` for `that` (retired by AI17v2: predicates now run under `RUNTIME`); validator de-JIT. *Gate: fold-on/fold-off differential; `validate` runs with JIT never initialized.*
 - **P4 — REPL/shell persistent environment.** Script-alive-across-lines, appended statements, persistent slab + counters. *Gate: REPL latency flat in history length.*
 - **P5 — default flip + spec. ✅ LANDED 2026-08-24.** `auto` is the unset default; MIR-interp remains diagnostic and `jit` remains the explicit eager path. The release `test_lambda_gtest` corpus is green under the default AUTO policy (**758/758**), including the P2 scalar-module, dynamic-argument, object/procedure, and var-call regressions. **D8.1.1v5 + the implementation-doc status update record the current selector, threshold, tail-handoff rule, and gate** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
 
@@ -739,7 +748,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 | **AI14** | `return`/`break`/`continue` travel as `EvalSignal` through the walker; `longjmp` is fault-only | **confirmed** |
 | **AI15** | Implicit contexts (`~`, `~#`, `last`, `^`, pipe injection, handlers) are explicit slot-backed stacks in `InterpState` | **confirmed** |
 | **AI16** | The sanctioned const-folder is this engine under `EvalMode::CONST`, purity-gated (D6.1.2), fuel-budgeted — one engine, two modes | **confirmed** |
-| **AI17** | `that` predicates evaluate under `EvalMode::PREDICATE` instead of JIT-compiled `constraint_fn`; S11.4.6 base-only shipped behavior unchanged | **confirmed** |
+| **AI17v2** | `that` predicates evaluate in T0 as ordinary `fn` expressions, in full and in their declaring scope (declaring module, captured locals, a per-evaluation window for the names they bind); purity is the static `fn`/`pn` check, not an evaluator mode (S11.4.11, TE-20). Revised 2026-09-26; v1 in Appendix S | **confirmed** |
 | **AI18** | The U26-KIV reference interpreter is subsumed: T0 is the executable-spec oracle, differentially gated on every baseline run | **confirmed** |
 | **AI19** | MIR-interp demotes to codegen diagnostic at P5; `mir_policy.hpp` size thresholds retire | **confirmed** |
 | **AI20** | REPL/shell route through T0 now; persistent top-level environment (P4) supersedes incremental-compilation caching as the REPL end state | **confirmed** |
@@ -760,3 +769,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 - **`doc/dev/js/`** — JS_00 §3 + JS_01 §6 when stage 2 lands.
 - **`doc/Lambda_Formal_Design.md`** — D6.2.1 implementation footnote when `Function::def` materializes definition-site identity (AI7); the Appendix A D8.1.1v2 row updates per phase.
 - **`doc/Lambda_Formal_Semantics.md`** — no ruling changes required: S1.6/SI3 already state tier invisibility, S7.11.4 already carves out fault timing. (This is the design's quiet strength: the semantics spec never assumed a compiler.)
+
+## Appendix S — Superseded rulings
+
+- ~~**AI17** — `that` predicates evaluate under `EvalMode::PREDICATE` instead of JIT-compiled `constraint_fn`; S11.4.6 base-only shipped behavior unchanged.~~ Superseded 2026-09-26 by **AI17v2** (§6.2, §14). The mode admitted a predicate only when every node passed an allow-list (literals, `~`/`~key`, a set of operators, 22 pure system functions) within a 1,024-step `LAMBDA_PREDICATE_FUEL` budget, and answered `false` otherwise. The JIT evaluated the same body in full, so the tiers disagreed and `auto` flipped a hot function's answer on promotion ([LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>)). Purity is now the static `fn`/`pn` check (S11.4.11, TE-20).

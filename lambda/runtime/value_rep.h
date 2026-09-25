@@ -49,6 +49,9 @@ typedef enum BindingStorage {
     BINDING_STORAGE_SCOPE_ENV,
     BINDING_STORAGE_MODULE,
     BINDING_STORAGE_PERSISTENT,
+    // a name a `that` predicate binds itself: a slot of the window each T0
+    // evaluation of the predicate reserves in the evaluating frame
+    BINDING_STORAGE_PREDICATE,
 } BindingStorage;
 typedef enum FnEntryKind {
     FN_ENTRY_PUBLIC_WRAPPER = 0,
