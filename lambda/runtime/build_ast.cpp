@@ -5137,12 +5137,60 @@ static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) 
     return type_nominal_record(inner) ? (TypeObject*)inner : NULL;
 }
 
+// S11.4.10, S11.4.1v3: an object literal is a nominal binding, so each field
+// meets its declared contract. A value that cannot fit is a compile error, and
+// so is a required field left without a value; a value the compiler cannot
+// prove is admitted at construction (deferred_fields). A spread supplies its
+// fields at run time, so they are always deferred.
+static void check_object_literal_fields(Transpiler* tp, AstObjectLiteralNode* object,
+        String* type_name, TypeObject* object_type) {
+    bool has_spread = ast_object_literal_spread_value(object) != NULL;
+    int index = 0;
+    for (ShapeEntry* field = object_type->shape; field && index < object_type->length;
+            field = field->next, index++) {
+        if (!field->name || !field->type) continue;
+        AstNode* value = ast_object_literal_value_for_shape(object, field);
+        AstNode* source = value ? value : has_spread ? NULL : field->default_value;
+        StaticBoundaryResult relation;
+        if (source) {
+            relation = static_boundary_relation(source->type, field->type);
+        } else if (has_spread) {
+            relation = STATIC_BOUNDARY_DEFERRED;
+        } else {
+            // an omitted field holds null, a member only of an optional contract
+            relation = lambda_type_accepts_null(field->type)
+                ? STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
+        }
+        if (relation == STATIC_BOUNDARY_DEFERRED) {
+            object->deferred_fields |= object_field_deferred_bit(index);
+            continue;
+        }
+        if (relation != STATIC_BOUNDARY_REJECTED) continue;
+        int line = (int)ast_node_start_point(tp, value ? value : (AstNode*)object).row + 1;
+        if (!source) {
+            record_type_error_code(tp, line, ERR_UNDEFINED_FIELD,
+                "object '%.*s' is missing required field '%.*s'",
+                (int)type_name->len, type_name->chars,
+                (int)field->name->length, field->name->str);
+            continue;
+        }
+        char expected_name[128];
+        char actual_name[128];
+        lambda_type_format_contract_name(field->type, expected_name, sizeof(expected_name));
+        lambda_type_format_name(source->type, actual_name, sizeof(actual_name));
+        record_type_error(tp, line, "field '%.*s' of object '%.*s' expects %s, but got %s",
+            (int)field->name->length, field->name->str,
+            (int)type_name->len, type_name->chars, expected_name, actual_name);
+    }
+}
+
 static void fill_object_literal(Transpiler* tp, AstObjectLiteralNode* object,
         String* type_name, TypeObject* object_type, AstNode* children) {
     object->type_name = type_name;
     object->type = (Type*)object_type;
     object->item = NULL;
     object->content = NULL;
+    object->deferred_fields = 0;
 
     AstNode* prev = NULL;
     for (AstNode* raw = children; raw;) {
@@ -5166,6 +5214,7 @@ static void fill_object_literal(Transpiler* tp, AstObjectLiteralNode* object,
         }
         raw = next;
     }
+    check_object_literal_fields(tp, object, type_name, object_type);
 }
 
 static bool join_expr_mentions_name(AstNode* node, String* name) {
@@ -14842,6 +14891,9 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
         shape_entry_set_type(entry, parent->type);
+        // an inherited field keeps its default; without it a derived literal
+        // stored null in the field, which a required contract cannot hold
+        entry->default_value = parent->default_value;
         entry->byte_offset = r->object_byte_offset;
         if (!r->object_type->shape) r->object_type->shape = entry;
         else r->object_shape_tail->next = entry;

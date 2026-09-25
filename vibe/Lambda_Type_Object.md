@@ -376,6 +376,14 @@ Method calls use dot syntax: `obj.method(args)`. The runtime:
 2. Binds `~` (and implicit field scope) to the object
 3. Dispatches the call
 
+> **Implicit fields (S10.1.7, ruled 2026-09-25).** A method body is the model
+> *single-subject* body: the type's declared fields are names of its scope,
+> so they are read bare and shadow outer bindings — the OOP receiver
+> convention. Object-level `that` constraints and the `that` proviso
+> (S10.1.5v3) follow the same convention; the pipe family (`|>`, `|:`) never
+> does, and always spells `~`. Reasoning and the resolution orders:
+> [Expr_Pipe §F.7](Lambda_Expr_Pipe.md).
+
 If no method is found on the object's type, falls back to:
 - Inherited methods (walking the parent chain)
 - Standalone functions (UFCS — Uniform Function Call Syntax): `obj.f(args)` ≡ `f(obj, args)`

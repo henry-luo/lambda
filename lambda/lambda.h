@@ -2653,6 +2653,12 @@ extern "C" {
     Object* object_content_fill_items(Object* obj, const Item* values, int count);
     // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
     Object* object_fill_items(Object* obj, const Item* values, int value_count);
+    // S11.4.10: admit a literal's deferred fields (the T0 walker, from its
+    // rooted span) or admit then fill (the JIT); each returns the failure's
+    // error, or ItemNull when every field is admitted.
+    Item object_literal_admit_fields(const struct TypeObject* type, Item* values, int count,
+        uint64_t deferred);
+    Item object_fill_checked(Object* obj, uint64_t deferred, ...);
 
     // these getters use the runtime number side stack
     Item array_get(Array *array, int64_t index);

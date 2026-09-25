@@ -397,6 +397,9 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.1.3 (LR03-18, LR03-14): a range type admits its members inside a
     // union, map or array type and at a parameter, on every tier (D3.1.1v4).
     {"test/lambda/range_type_membership.ls", "test/lambda/range_type_membership.txt"},
+    // S11.4.10 (LR03-20): an object literal admits each field against its
+    // declared contract; construction stored any value unchecked.
+    {"test/lambda/object_field_admission.ls", "test/lambda/object_field_admission.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

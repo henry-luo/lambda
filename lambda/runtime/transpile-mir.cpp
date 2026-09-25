@@ -33924,11 +33924,22 @@ static MirValue transpile_object_literal_value(MirTranspiler* mt,
         values[value_index++] = MIR_new_reg_op(mt->ctx, value);
     }
     object = load_gc_root_slot(mt, object_root, "object_live");
-    MIR_reg_t filled = emit_vararg_call(mt, "object_fill", MIR_T_P, 1,
-        MIR_T_P, MIR_new_reg_op(mt->ctx, object), value_index, values);
-    // object_fill returns its argument, so object_root stays valid.
-    (void)filled;
-    filled = emit_object_content_phase(mt, literal, object_root);
+    if (literal->deferred_fields) {
+        // S11.4.10: admit the fields the compiler could not prove, then fill.
+        // A failure leaves as a failed map spread does, so the object below is
+        // always admitted and typed readers may trust its layout (D3.2.6).
+        MIR_reg_t failure = emit_vararg_call_2(mt, "object_fill_checked", MIR_T_I64, 1,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, object),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)literal->deferred_fields),
+            value_index, values);
+        emit_return_if_item_error(mt, failure);
+    } else {
+        MIR_reg_t filled = emit_vararg_call(mt, "object_fill", MIR_T_P, 1,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, object), value_index, values);
+        // object_fill returns its argument, so object_root stays valid.
+        (void)filled;
+    }
+    MIR_reg_t filled = emit_object_content_phase(mt, literal, object_root);
     return mir_value_from_reg(mt, (AstNode*)literal, filled,
         VALUE_REP_RAW_GC_POINTER, ((AstNode*)literal)->type,
         ((AstNode*)literal)->type->type_id);

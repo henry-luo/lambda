@@ -1721,6 +1721,34 @@ TEST_F(NegativeScriptTest, RangeValueArgumentIsStaticError) {
         "argument 1 expected 1 to 5, got range");
 }
 
+// S11.4.10, S11.4.1v3 (LR03-20): an object literal admits each field against
+// its declared contract. Construction stored any value unchecked, so a string's
+// pointer read back from an int field and a range field took any int.
+TEST_F(NegativeScriptTest, ObjectRangeFieldRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/object_field_range.ls",
+        false, "type check at field 'a' of Obj failed: expected 1 to 5, got int 9");
+}
+
+TEST_F(NegativeScriptTest, ObjectFieldChecksDynamicValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/object_field_dynamic.ls",
+        false, "type check at field 'a' of Obj failed: expected int, got string 'x'");
+}
+
+TEST_F(NegativeScriptTest, ObjectSpreadFieldIsAdmittedOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/object_field_spread.ls",
+        false, "type check at field 'a' of Pair failed: expected int, got string 'no'");
+}
+
+TEST_F(NegativeScriptTest, ObjectFieldMismatchIsStaticError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/object_field_static.ls",
+        "field 'a' of object 'Obj' expects int, but got string");
+}
+
+TEST_F(NegativeScriptTest, ObjectMissingRequiredFieldIsStaticError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/object_field_missing.ls",
+        "object 'Obj' is missing required field 'a'");
+}
+
 TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongLengthOnEveryTier) {
     ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_flat_contract.ls",
         false, "error[E201]: type check at declaration 'a' failed: expected int[3]");

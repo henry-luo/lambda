@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 37.0.3 (2026-09-25)
+**Spec version:** 37.1.0 (2026-09-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1324,7 +1324,8 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   same predicate, binding, and word as the type constraint `T that cond`
   (S11), with one difference of channel: the expression *asks* and answers
   with the value or nothing, the type contract *asserts* and fails as a type
-  contract does. It sits at the pipe precedence tier, left-associative, so
+  contract does. A bare name in `p` may read a field of `x` (S10.1.7). It
+  sits at the pipe precedence tier, left-associative, so
   `c |> f that p` applies the proviso to the piped result. Filtering the
   members of a sequence is `|:` (S10.1.6): the former filter reading of
   `that` (S10.1.5v2) is superseded, and an old filter site `xs that p` is
@@ -1344,7 +1345,8 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `~` is a compile error — `xs |: is_even` is rejected, the idiom is
   `xs |: is_even(~)` — because `|>` reads a `~`-free body as whole-value
   application (S10.1.2v4) and the two pipes must not read the same text two
-  ways. Pipe precedence tier, left-associative: `c |: p |> f |: q` chains left
+  ways; for the same reason its body never reads a bare name as a field
+  (S10.1.7). Pipe precedence tier, left-associative: `c |: p |> f |: q` chains left
   to right. The spelling is set-builder "such that" (`{x ∈ S | P(x)}`,
   `{x ∈ S : P(x)}`), which it shares with the type-position `that`; the
   arrow is deliberately absent because a filter selects and does not
@@ -1352,6 +1354,21 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `int[]`, map or element → `any[]`), text → its kind, scalar → `T?`; sound
   for a list source too, since the result is an array. [Expr_Pipe §F.2–§F.4,
   §F.6]
+- **S10.1.7*** **A single-subject body may leave `~` implicit; the pipe family
+  always spells it.** A body about one subject — a method (S8.2.3), an
+  object-level `that` constraint (S11), the `that` proviso (S10.1.5v3) — may
+  read a field of that subject by its bare name, the OOP receiver
+  convention: `user that age >= 18` reads `~.age`. Declared fields (a method,
+  an object constraint) are names of the body's scope and shadow outer
+  bindings; the proviso's subject has no declared shape, so there a bare
+  name is the member `~.name` (S12.3.3v2) only when no binding claims it. An
+  implicit read never supplies a callee: `xs that len(~) > 2` calls `len`,
+  not `~.len`. A pipe-family body (`|>`, `|:`) reads bare names as ordinary
+  names, even nested in a single-subject body: `|>` tells mapping from
+  application by the `~` its text spells (S10.1.2v4) and `|:` must read that
+  text the same way (S10.1.6) — a field supplied behind the text would also
+  let a misspelled `xs |: is_evne` pass E238 as a silent `[]`.
+  [Expr_Pipe §F.7]
 
 ### S10.2 Vectorization
 
@@ -2462,7 +2479,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S12.3.7 | **Conformant as of 2026-08-27.** Module-local bindings win over same-named system functions, including non-callable shadows, and the compiler emits the required warning; explicit `lambda.sys.*` qualification remains the escape from that shadow under S17.2.2. Regression and implementation record: [LR02-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr02-15>). |
 | S2.5.7v2, S7.10.1v3, S7.10.5v3 | **Implemented 2026-09-25 on both tiers.** Reverses the list half of P2 of the list fixes (row above): every function and pipe returns an array for a list input. `take((10, 20, 30), 1)` is `[10]` and `take(…, 0)` is `[]`; `sort`/`reverse`/`unique`/`take`/`drop`/`slice`/`[i to j]`/`zip`/`fill`, the vectorized sys funcs (`math.pow` included, though it shares `**`), `\|>` and `\|:` finish through `seq_finish_array`, which clears the spread bit. `+ - * /`, unary `-`/`+`, the mask comparisons and `++` keep P2's operand-kind rule (`seq_finish_kind`). The checker lost its list branches too: `pipe_collection_result_type` types a list source's pipe and filter as arrays, and `SYS_RESULT_SELECTION_OF_ARGUMENT`, added by P2 only to leave a list selection open, is gone (`unique`/`take`/`drop` are collection transforms again). `varg()`, `content(e)`, `split` and `find` already returned arrays. The P2 fixtures that pinned list results flipped to arrays: `list_kind_transform`, `list_collapse_void`, `pipe_that_kind`, `pipe_spread`, `query`. Verified: `make test-lambda-baseline` 5902/5904, both failures environmental (`proc_markup_mutation` run from a worktree; a JS stdout/stderr interleaving flake that passes standalone); every golden 968/969 with the tier pinned to `jit` and to `interp`; the corpus compile scan unchanged. **Residue:** the set operators `\| & !` keep P2's rule (a list only for two lists), which S2.5.7v2 does not settle (SO48). Design record: [Expr_Pipe §F.6](../vibe/Lambda_Expr_Pipe.md). |
-| S10.1.2v4, S10.1.5v3, S10.1.6, S10.3.1v3 | **Implemented 2026-09-25 on both tiers.** The lexer takes `\|:` by longest match beside `\|` and `\|>`; `grammar.js` gains a `\|:` row on the pipe tier beside `that`. `OPERATOR_FILTER` (`\|:`) and `OPERATOR_THAT` (the proviso) replace `OPERATOR_WHERE`. A `\|:` body with no free `~` is E238, by the same test `\|>` uses for its mode (`has_current_item_ref`). The proviso binds `~` as a constraint binds its candidate, with `~key` null, and is typed `T?`. The infix-`where` diagnostic names `\|:`. A called bare name is never an implicit field, so `xs that len(~) > 2` calls `len`; the old rule read it as `~.len` in every `that` body. Migration: all 133 `that`-filter sites in 27 files (fixtures and the `chart`, `openapi` and `latex` packages) became `\|:` with byte-identical output on both tiers, except `that_implicit_name.ls`, rewritten for the proviso. Fixtures `pipe_filter.ls`, `that_proviso.ls`; negatives `filter_body_no_current.ls` (E238), `where_filter_retired.ls`, `pipe_filter_glued_case.ls`. A list source gives an array through both pipes, `(1, 2, 3) \|: ~ > 2` being `[3]` (the S2.5.7v2 row). **Residue:** implicit field access in a `\|:` body is SO47. A binding from a proviso aliases its operand without copy-on-write, as `or` and `if` do ([LR12-35](../vibe/Lambda_Issue_Ledger.md)). Design record: [Expr_Pipe §F](../vibe/Lambda_Expr_Pipe.md). |
+| S10.1.2v4, S10.1.5v3, S10.1.6, S10.1.7, S10.3.1v3 | **Implemented 2026-09-25 on both tiers.** The lexer takes `\|:` by longest match beside `\|` and `\|>`; `grammar.js` gains a `\|:` row on the pipe tier beside `that`. `OPERATOR_FILTER` (`\|:`) and `OPERATOR_THAT` (the proviso) replace `OPERATOR_WHERE`. A `\|:` body with no free `~` is E238, by the same test `\|>` uses for its mode (`has_current_item_ref`). The proviso binds `~` as a constraint binds its candidate, with `~key` null, and is typed `T?`. The infix-`where` diagnostic names `\|:`. A called bare name is never an implicit field, so `xs that len(~) > 2` calls `len`; the old rule read it as `~.len` in every `that` body. Migration: all 133 `that`-filter sites in 27 files (fixtures and the `chart`, `openapi` and `latex` packages) became `\|:` with byte-identical output on both tiers, except `that_implicit_name.ls`, rewritten for the proviso. Fixtures `pipe_filter.ls`, `that_proviso.ls`; negatives `filter_body_no_current.ls` (E238), `where_filter_retired.ls`, `pipe_filter_glued_case.ls`. A list source gives an array through both pipes, `(1, 2, 3) \|: ~ > 2` being `[3]` (the S2.5.7v2 row). Implicit fields follow S10.1.7 (ruled 2026-09-25): a `\|:` body switches them off even inside a `that`, and an implicit read never supplies a callee. **Residue:** S10.1.7 is partial — the resolver's `that` scope still reaches a `\|>` body nested in a single-subject body, so `user that len(items \|> price) == 2` reads `price` as `~.price` of each item where S10.1.2v4's syntactic test makes the body the application `price(items)`. A binding from a proviso aliases its operand without copy-on-write, as `or` and `if` do ([LR12-35](../vibe/Lambda_Issue_Ledger.md)). Design record: [Expr_Pipe §F](../vibe/Lambda_Expr_Pipe.md). |
 | S16.8.9 | **Ruled 2026-09-05, not implemented.** Grammar `_key` (covers `map_item` and `attr_name`), the C parser's `parse_map`/`parse_element` and the two lookahead predicates (`braced_expression_is_map`, `element_attribute_starts`) that must skip one balanced `[…]` group, and a computed variant of the key-expression AST node lowered on both tiers through the keyed-spread path. Design record: [Design_Syntax §7.26](../vibe/Lambda_Design_Syntax.md). |
 | S17.2.1, S17.2.2 | **Conformant as of 2026-09-08.** `lambda.sys.*` resolves to the existing system-function registry, including the S12.3.7 shadow escape; `lambda.math`/`lambda.io` share the built-in module rows with their bare aliases; the shipped package tree uses the canonical `lambda.*` paths with math typesetting under `lambda.doc.math`; and `lambda` is rejected as a binding name by the direct lexer reservation check. Regression: `test/lambda/lambda_namespace.ls` plus `test/lambda/negative/semantic/lambda_namespace_root.ls`; focused probes passed on qualified built-ins and the document package. |
 | S16.10 | **Conformant in both front ends as of 2026-09-24**, with one C residue. The C parser has enforced S16.10.1v2 since 2026-08-27: E201 at every binding site for the whole K.1 set and the reserved root `lambda`, a parse error for a keyword import alias, and keyword tags, attributes, keys and member steps. The reference grammar reserves the K.1 words (tree-sitter `reserved`, CLI 0.25.10), so a barred word is a syntax error in binding and value positions and a data name through `_keyword_name`; `lambda` is an identifier there, barred by E201 only. S16 harnesses with the new S16.10 cases: C 343/343, reference grammar 330/330. Corpus differential (1934 files): the grammar newly rejects only negative tests, five of which C rejects too; the other two rely on the unnamed `fn` that C misparses (LR02-21). Residue: C still reads `fn`, `view`, `edit`, `state` and `apply` as values ([LR02-21](../vibe/Lambda_Issue_Ledger.md)). Unruled edges: named-argument names, `not` and the named values ([LR02-23](../vibe/Lambda_Issue_Ledger.md)). History: [LR02-14](<../vibe/Lambda_Issue_Ledger (fixed).md>). |
@@ -2577,14 +2594,6 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   unaffected, since `function` is a base type name. [S11.1.5v2,
   S11.1.6v2]
 - **SO46** How an element pattern spells *content must be empty*. S11.1.6v3 leaves content unconstrained when a pattern has no content section, and today an empty section, `<div;>`, parses to the same thing; a present-but-empty content pattern would mean *no children*, but no spelling is ruled — `<div;>`, `<div; ()>` and `<div; null>` are candidates. Until ruled, an empty section stays unconstrained. [Shape_Transitions §7]
-- **SO47** Whether a `|:` filter body reads a bare unbound name as
-  `~.name`, as a `that` body does. Implicit field access has no ruling of its
-  own: it is the documented behaviour of `that` bodies (the proviso and
-  object-level constraints), carried over from the old `that` filter. Until
-  ruled, a `|:` body resolves names as a `|>` body does, so a field is
-  written `~.name`; a body of implicit fields alone has no `~` and is E238
-  under S10.1.6 either way. A called name is a function in every body, as
-  S10.1.5v3's own `xs that len(~) > 2` requires. [S10.1.5v3, S10.1.6]
 - **SO48** What the value set operators `|`, `&` and `!` return for list
   operands. S2.5.7v2 says operators keep the operand kind, but grounds that
   in "no operator shrinks", naming only `+ - * /`, the masks and `++`; union
@@ -2594,6 +2603,14 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   the function rule, an array always. `**` is unnamed too: it never shrinks,
   yet it already returns an array for a list operand, unlike `+ - * /`.
   [S2.5.7v2, S10.1.1, S10.2.1]
+- **SO49** Whether a type-position `T that cond` outside an object type — a
+  binding or parameter annotation, a match arm — reads a bare name as a
+  field of `~`, as the proviso does. S10.1.7 lists the single-subject bodies
+  that do (methods, object-level constraints, the proviso); these do not
+  today, so `case {a: int} that a > 1` reads an unbound `a`, not `~.a`, even
+  though S10.1.5v3 calls the proviso the same predicate as the type
+  constraint. Until ruled they read bare names as ordinary names.
+  [S10.1.5v3, S10.1.7, S11]
 
 ## Appendix C — Decision-Record Index
 
@@ -2608,7 +2625,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
-| S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.5 (`|:` filter stage, `that` proviso) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
+| S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
 | S11 types | C7, C8.5c, C20; TE-1–TE-18; OB13; Type_Pattern §1.3; Design_Syntax §7.28 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |

@@ -536,18 +536,19 @@ data | slice(0, 10)    // slice(data, 0, 10)
 > `|:`), and **S2.5.7v2** (a list is built, never computed — §F.6), with
 > S7.10.1v3/S7.10.5v3 following; cross-refs S2.5.5v2, S2.5.8, S8.2.4,
 > S8.3.1v3, S8.4.1v2, S10.1.3, S10.2.1, S10.6.1, SO38.
-> **Implemented 2026-09-25 (spec v36.0.4)** on both tiers: the `|:` token and
+> **Implemented 2026-09-25 (spec v37.0.3)** on both tiers: the `|:` token and
 > `grammar.js` row, `OPERATOR_FILTER`/`OPERATOR_THAT` in place of
 > `OPERATOR_WHERE`, E238 for a `|:` body with no free `~`, the `where`
 > diagnostic, and the migration of 133 `that`-filter sites in 27 files (the
 > earlier "152 fixtures" count was not reproducible; a parser census found 133).
 > The §F.6 array result landed the same day with the whole S2.5.7v2 row: both
 > pipes and every sequence function return an array for a list source, while
-> the broadcast operators keep the operand kind. Points the rulings left open
-> were settled in the implementation and are flagged: a `|:` body gets no
-> implicit field access (SO47); a called bare name is never an implicit field
-> in a `that` body, which S10.1.5v3's `xs that len(~) > 2` needs; and the set
-> operators `| & !` keep P2's operand-kind rule until SO48 is ruled.
+> the broadcast operators keep the operand kind. The implicit-field question
+> the rulings left open (SO47) was ruled the same day as **S10.1.7** (spec
+> v37.1.0, §F.7): a single-subject body may leave `~` implicit, the pipe
+> family always spells it, and an implicit read never supplies a callee —
+> which S10.1.5v3's own `xs that len(~) > 2` needs. The set operators
+> `| & !` keep P2's operand-kind rule until SO48 is ruled.
 
 ### §F.1 What was wrong with `that`
 
@@ -794,6 +795,103 @@ The line is therefore not "operators vs functions" by fiat — it is "can it
 shrink?", and operators happen to be precisely the sequence operations that
 cannot. Text is untouched throughout (S2.5.8): a text kind is a *type*, not
 a bit.
+
+### §F.7 Implicit fields: single-subject bodies only (ruled 2026-09-25)
+
+> **Ruling:** option (A) below, USER 2026-09-25, formalized as **S10.1.7**
+> (spec v37.1.0); closes SO47.
+
+**The question.** The old `that` filter carried a convenience over from
+object constraints: in its body an unbound bare name read as a field of `~`
+(`users that age >= 18`). Once the filter moved to `|:` (§F.3) the
+convenience had to go somewhere — to `|:`, to the proviso `that`, to both,
+or to neither. The method body already answers "must a field be reached
+through `~`?" one way: inside `type P { x: int, fn get() => x }` a field is
+spoken bare, the OOP receiver convention.
+
+| Option | `\|:` body | `that` body | Method body | Verdict |
+|---|---|---|---|---|
+| **(A) single-subject bodies only** | `~` required | implicit fields | implicit fields | **ruled** |
+| (B) `~` wherever a `~` exists | `~` required | `~` required | implicit fields | rejected — splits the proviso from the object constraint and methods it sits beside |
+| (C) `~` optional everywhere | implicit fields | implicit fields | implicit fields | rejected — `\|>` cannot join, so it is not uniform, and it reopens E238 |
+
+**Why the pipe family always spells `~`.**
+
+1. **`|>` cannot have implicit fields at all.** S10.1.2v4 tells mapping from
+   whole-value application by whether the body's *text* spells a free `~`.
+   If an unbound name could supply a `~` behind the text, the mode would
+   depend on binding state: `xs |> age` is `age(xs)` while a function `age`
+   is in scope, and silently becomes the mapping `xs |> ~.age` when it is
+   renamed or deleted. So "same family, same rule" has one consistent
+   reading: both pipes spell `~`.
+2. **Single-mode was the point of `|:` (S10.1.6).** `xs |: active` reading
+   `~.active` beside `xs |> active` reading `active(xs)` is exactly the one
+   text read two ways that S10.1.6 exists to prevent.
+3. **E238 depends on it.** The free-`~` check runs on the resolved body.
+   With implicit fields on, a misspelled `xs |: is_evne` would resolve to
+   `~.is_evne`, pass the check, read `null` for every member and filter to a
+   silent `[]`. With them off, it is E238 at compile time.
+4. **A pipe body is about every member, and pipes nest.** In
+   `orders |: len(~.lines |: qty > 0) > 0`, which `~` would a bare `qty`
+   read? S10.1.3's innermost-wins answers, but the reader has to work it
+   out; `~.qty` says it.
+
+**Why the proviso keeps them.** A method, an object-level constraint and the
+proviso are each *about one subject*, as a method is about its receiver.
+S10.1.5v3 makes the proviso "the same predicate, binding, and word" as the
+type constraint, and the object-level constraint
+`type User { name: string, that name != "admin" }` sits beside the methods
+in a type body and reads `name` as they do. Requiring `~` in the expression
+`that` alone would give one keyword two name rules by position — the §F.1
+defect again, in another dimension.
+
+**Why not (C).** It buys only the `~.` of a filter body. It cannot be
+uniform, because `|>` is excluded structurally (point 1), so it would make
+`|:` the one member of its family with implicit fields, and it reopens the
+E238 hole (point 3).
+
+**Two resolution orders, one principle.** Where the subject's fields are
+*declared* — a method, an object constraint — they are names of the body's
+scope and shadow outer bindings, as members shadow globals in Java or C++:
+with a module-level `let x = 100`, `P.get()` above returns the field. The
+proviso's subject has no declared shape — `x that p` takes any value — so a
+bare name there is the member `~.name` only when no binding claims it:
+`{x: 5} that x == 5` compares the module's `x`, 100. Letting a dynamic field
+shadow outer bindings would make every outer name capturable by whatever
+keys a value happens to carry.
+
+**Callee names.** An implicit read never supplies a callee. Before the
+ruling, the rewrite turned the callee of `len(~)` into `~.len`, so a `that`
+body could not call a function its scope did not bind: the old filter
+`xs that len(~) > 2` kept nothing, and the proviso could never hold. The
+resolver now leaves a bare callee to ordinary lookup. (A declared field
+holding a function is an ordinary scope name in a method body, so calling it
+calls that field; this rule is about the implicit read only.)
+
+**Nesting.** A `|:` body switches implicit fields off even inside a `that`
+body — `x that (~.items |: flag(~))` reads `flag` as a name; a `that` inside
+a `|:` body reads its own subject — `[{a: 3}] |: (~ that a > 2) != null`
+reads `~.a` of each member.
+
+**Open ends.**
+
+- A `|>` body nested in a single-subject body still receives implicit fields:
+  the resolver's `that` scope reaches it, so
+  `user that len(items |> price) == 2` reads `price` as `~.price` of each
+  item where the syntactic test of S10.1.2v4 makes it the application
+  `price(items)`. Recorded as S10.1.7's conformance gap; the fix is the one
+  `|:` already has — switch the scope off for a `|>` body.
+- Type-position `T that cond` outside an object type — an annotation, a
+  match arm — reads bare names as ordinary names: `case {a: int} that a > 1`
+  never reads `~.a`. Whether it joins the proviso is SO49.
+- Implicit reads are unchecked: a misspelled field in a `that` body reads
+  `null`. That is a checker question — reject an implicit name the
+  subject's static shape cannot have — not a question of which bodies allow
+  implicit fields.
+- The data-processing design (PD13) held bare column names in verb arguments
+  as a possible later extension "via the implicit-field rule". Verb
+  arguments are a pipe body, so under S10.1.7 that extension would need the
+  ruling revised.
 
 ## Grammar Changes
 

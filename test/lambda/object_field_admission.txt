@@ -1,0 +1,6 @@
+[1, float, 3, "B"]
+[3, int]
+[null, 4, true]
+[4, "four"]
+true
+[2, true]
