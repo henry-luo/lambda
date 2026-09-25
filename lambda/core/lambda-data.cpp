@@ -1136,6 +1136,8 @@ Item typeditem_to_item(TypedItem *titem) {
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return {.item = x2it((String*)ptr_val)};
     case LMD_TYPE_COMPLEX:
+    case LMD_TYPE_PATH:
+        // paths also retain their direct pointer carrier in TypedItem fields.
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
