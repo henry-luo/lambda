@@ -1,7 +1,7 @@
 # Element Type Sharing — Implementation Plan
 
 **Date:** 2026-09-25
-**Status:** P0 and P1 DONE 2026-09-25; P2–P3 not started.
+**Status:** P0–P2 DONE 2026-09-25; P3 not started.
 **Design:** [Lambda_Design_Shape_Transitions.md](../Lambda_Design_Shape_Transitions.md) §7 (E1–E7). **Rulings:** D3.4.3v2 (elements share through the transition tree; the shape pool retires), D2.6.6v3 (`content_list` holds a declared type's content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot). **Closes:** [LR13-9](<../Lambda_Issue_Ledger (fixed).md#lr13-9>) (closed by P0). **Open, not blocking:** SO46 (the *must be empty* spelling), DO31 (`type <B>`).
 **Goal:** one `TypeElmt` per distinct tag, namespace and attribute sequence instead of one per element (about 64 MB of the 13 MiB HTML benchmark's 233 MB peak), declared content validated, and the shape pool gone.
 
@@ -70,6 +70,20 @@ Each phase lands on its own, green on the gates below, before the next starts.
 
 ### P2 — Attribute changes follow map rebuilds (E3)
 
+**DONE 2026-09-25.**
+
+**The bug, confirmed first.** `MarkEditorTest.MapUpdateInlineKeepsSharedTypeIntact` builds two maps by the same adds, so they share a tree type, and adds then retypes a field on one inline. Before the fix the sibling's type claimed two fields and its `name` and `age` read garbage: `container_rebuild_with_new_shape` rewrote any registered type in place, and a tree node or a literal's compile-time type is registered but shared. `ElementUpdateAttrKeepsSharedTypeAndTagId` showed the element rebuild dropping `name_id` (0 where `div` is 46).
+
+**What landed.**
+- **Tree rebuilds.** `container_rebuild_with_new_shape` turns the builder's field list into `TypeTreeStep`s — a kept field carries its old record (`like`), a new one a pooled key — and follows them from the container's root: `type_tree_root_like` (the plain-map root, or the element's tag root, found and never made) and `type_tree_follow`. The transition lookup was refactored around a `TransitionKey` so a step keyed by a record matches exactly the edge a string key made; a record-keyed mint copies the record (`shape_entry_copy_as`). All attribute writers that go through `MarkEditor` — the HTML5 parser's merges onto `<html>`/`<body>`, the DOM's `setAttribute`/`removeAttribute`, Radiant editing — follow.
+- **Owned types only in place.** A declined tree leaves a fresh type flagged `is_private_clone` with a chain of its own (never pooled, so a later in-place append cannot reach another type); only such a type is edited in place.
+- Element rebuilds keep `name_id` and `ns`; map rebuilds keep `js_meta` (D3.4.7).
+
+**Results.** 17,230 HTML files, 99 test inputs and 84 formatter outputs identical to P1; peaks unchanged (86.2 and 120.3 MB). Lambda baseline 5,869/5,869; `test_mark_editor_gtest` 44/45, the failure being `LaneStorageResolverTests.TableAndProjectionsAgree`, which the base binary fails too; Radiant baseline green run alone. Run chained after the Lambda baseline, the page suite twice failed `page_facatology` with identical scores; the page fetches icons, a manifest and font CSS from the network, and alone it passes on every build, so the failure is environmental.
+
+**Not done here.** Runtime-built elements (`elmt_put` without an `Input`) stay private. `elmt_rename` still keeps the old tag, as it always has; it has no callers.
+
+**Planned work:**
 - Audit and convert: the HTML5 tree builder's attribute merge onto `<html>`/`<body>`; runtime `elmt_put` callers (group-by, dynamic elements); DOM `setAttribute`/`removeAttribute` (`lambda/dom/dom.cpp`) and Radiant callers; `MarkEditor::container_rebuild_with_new_shape` for maps and elements, and the tag rename. An add follows one edge; a remove, retype or rename replays the sequence from the root. The in-place map rewrite retires.
 - Gates: the Radiant DOM editing fixtures (`todo_*`), `test_ui_automation_gtest`, the editor GTests.
 

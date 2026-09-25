@@ -1481,3 +1481,51 @@ TEST(LaneStorageResolverTests, ShapeBuilderHasNoFieldLimit) {
     shape_pool_release(shapes);
     pool_destroy(pool);
 }
+
+//==============================================================================
+// SHARED TYPES (D3.4.3v2): an edit never rewrites a type another value uses
+//==============================================================================
+
+// Two maps built by the same adds share one transition-tree TypeMap. An inline
+// edit that changes the layout of one must leave the other's type untouched.
+TEST_F(MarkEditorTest, MapUpdateInlineKeepsSharedTypeIntact) {
+    MarkBuilder builder(input);
+    Item m1 = builder.map().put("name", "a").final();
+    Item m2 = builder.map().put("name", "b").final();
+    ASSERT_EQ(m1.map->type, m2.map->type) << "same adds should share a type";
+    TypeMap* shared = (TypeMap*)m2.map->type;
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item added = editor.map_update(m1, "age", editor.builder()->createInt(25));
+    ASSERT_EQ(get_type_id(added), LMD_TYPE_MAP);
+    Item retyped = editor.map_update(added, "name", editor.builder()->createInt(7));
+    ASSERT_EQ(get_type_id(retyped), LMD_TYPE_MAP);
+    EXPECT_EQ(retyped.map->get("age").type_id(), LMD_TYPE_INT);
+    EXPECT_EQ(retyped.map->get("name").type_id(), LMD_TYPE_INT);
+
+    EXPECT_EQ(m2.map->type, shared) << "the sibling keeps its type";
+    EXPECT_EQ(shared->length, 1);
+    EXPECT_EQ(m2.map->get("name").type_id(), LMD_TYPE_STRING);
+    EXPECT_EQ(m2.map->get("age").type_id(), LMD_TYPE_NULL);
+}
+
+// Element attribute edits take a new type; that type must keep the tag's
+// identity, which the HTML5 parser compares by name_id.
+TEST_F(MarkEditorTest, ElementUpdateAttrKeepsSharedTypeAndTagId) {
+    MarkBuilder builder(input);
+    Item e1 = builder.element("div").attr("id", "a").final();
+    Item e2 = builder.element("div").attr("id", "b").final();
+    ASSERT_EQ(e1.element->type, e2.element->type) << "same tag and attributes should share a type";
+    TypeElmt* shared = (TypeElmt*)e2.element->type;
+    NameId div_id = shared->name_id;
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item updated = editor.elmt_update_attr(e1, "class", editor.builder()->createStringItem("x"));
+    ASSERT_EQ(get_type_id(updated), LMD_TYPE_ELEMENT);
+    TypeElmt* updated_type = (TypeElmt*)updated.element->type;
+    EXPECT_EQ(updated_type->name_id, div_id);
+    EXPECT_EQ(updated_type->length, 2);
+
+    EXPECT_EQ(e2.element->type, shared) << "the sibling keeps its type";
+    EXPECT_EQ(shared->length, 1);
+}

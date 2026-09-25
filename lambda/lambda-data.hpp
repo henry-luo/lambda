@@ -1468,6 +1468,20 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
 TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns);
 void elmt_put_tree(Element* elmt, String* key, Item value, Input* input);
 
+// A field an editor rebuild adds to a tree type: replay an existing field's
+// identity (`like`), or add one under `key`, at `type_id`.
+typedef struct TypeTreeStep {
+    const ShapeEntry* like;
+    String* key;
+    TypeId type_id;
+} TypeTreeStep;
+
+// D3.4.3v2: a rebuilt type comes from the tree too. The root a container's
+// rebuild starts from (NULL: the container stays private), and the node
+// reached by adding `steps` from `start` (NULL: the tree declined).
+TypeMap* type_tree_root_like(Input* input, Map* container);
+TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* steps, int count);
+
 // Borrowed scalar read: boxed int64/float/uint64 Items point into ArrayNum storage.
 // Use only while the source ArrayNum is alive and not being mutated.
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset);

@@ -444,17 +444,65 @@ static void transition_graph_count(Input* input, bool element) {
     }
 }
 
-static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
-        TypeId type_id, Input* input, ShapeEntry** out_entry) {
-    if (out_entry) *out_entry = NULL;
-    if (!parent || !key || !input || !input->pool || !input->type_list) return NULL;
+// A field's identity on a transition edge (D3.4.4v2): its NameId, or for an
+// id-less Input name its bytes, plus its key kind. A new edge's entry is made
+// from `key`, or copied from `like` when an editor rebuild replays a field.
+typedef struct TransitionKey {
+    NameId name_id;
+    uint8_t key_kind;
+    const char* name;
+    uint32_t name_len;
+    String* key;
+    const ShapeEntry* like;
+} TransitionKey;
+
+static TransitionKey transition_key_of_string(String* key) {
     // D4.6.1v2: a pooled name's identity is its NameId. The record side below
     // stores name_id for every entry but keeps `name` only for the id-less
     // Input seam, so matching on `name` alone could never hit for a
     // runtime-created property — which is why two objects that added the same
     // fields in the same order never shared a shape.
-    NameId key_name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
-    uint8_t key_kind = property_key_kind(key);
+    TransitionKey k = {};
+    k.name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
+    k.key_kind = property_key_kind(key);
+    k.name = key->chars;
+    k.name_len = (uint32_t)key->len;
+    k.key = key;
+    return k;
+}
+
+static TransitionKey transition_key_of_entry(const ShapeEntry* like) {
+    TransitionKey k = {};
+    k.name_id = like->name_id;
+    k.key_kind = like->key_kind;
+    k.name = like->name->str;
+    k.name_len = (uint32_t)like->name->length;
+    k.like = like;
+    return k;
+}
+
+// The entry a replayed field adds: `like`'s identity at a new type. The name
+// is shared, as clone_shape_entries shares it, since both live in the Input.
+ShapeEntry* shape_entry_copy_as(Pool* pool, const ShapeEntry* like,
+        TypeId type_id, ShapeEntry* prev_entry) {
+    ShapeEntry* entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+    if (!entry) return NULL;
+    entry->name = like->name;
+    entry->name_hash = like->name_hash;
+    entry->name_id = like->name_id;
+    entry->key_kind = like->key_kind;
+    entry->ns = like->ns;
+    shape_entry_set_type(entry, type_info[type_id].type);
+    if (prev_entry) prev_entry->next = entry;
+    return entry;
+}
+
+static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* k,
+        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!parent || !k || !input || !input->pool || !input->type_list) return NULL;
+    NameId key_name_id = k->name_id;
+    uint8_t key_kind = k->key_kind;
     // The list is scanned per add, so it is bounded: a shape with more outgoing
     // edges than this is a dictionary-shaped site (parsed data, per-record
     // keys) where sharing cannot pay for a linear walk on every property.
@@ -477,8 +525,8 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
             // select a runtime-created property that merely spells the same.
             same_name = key_name_id == NAME_ID_NONE &&
                 tr->key_kind == NAME_KEY_STRING && tr->name &&
-                tr->name_len == (uint32_t)key->len &&
-                memcmp(tr->name, key->chars, key->len) == 0;
+                tr->name_len == k->name_len &&
+                memcmp(tr->name, k->name, k->name_len) == 0;
         }
         if (!same_name) continue;
         if (map_transition_prefix_matches_parent(parent, tr->target)) {
@@ -505,7 +553,9 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     ShapeEntry* last_clone = NULL;
     ShapeEntry* first = clone_shape_chain_for_transition(input->pool, parent, &last_clone);
     if (parent->shape && !first) return NULL;
-    ShapeEntry* added = alloc_shape_entry(input->pool, key, type_id, last_clone);
+    ShapeEntry* added = k->key
+        ? alloc_shape_entry(input->pool, k->key, type_id, last_clone)
+        : shape_entry_copy_as(input->pool, k->like, type_id, last_clone);
     if (!added) return NULL;
     added->byte_offset = parent->byte_size;
     if (!first) first = added;
@@ -565,6 +615,14 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 
     if (out_entry) *out_entry = added;
     return child;
+}
+
+static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
+        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!key) return NULL;
+    TransitionKey k = transition_key_of_string(key);
+    return transition_target_for_key(parent, &k, type_id, input, out_entry);
 }
 
 // The transition graph needs a shared root, otherwise the first add on a fresh
@@ -891,18 +949,21 @@ static void elmt_root_table_insert(TypeElmt** table, int cap, TypeElmt* root) {
     }
 }
 
+static TypeElmt* elmt_tree_root_find(Input* input, const char* name, const Target* ns) {
+    if (!input || !input->element_root_cap || !name) return NULL;
+    uint64_t mask = (uint64_t)input->element_root_cap - 1;
+    for (uint64_t i = elmt_root_slot_hash(name, ns) & mask;; i = (i + 1) & mask) {
+        TypeElmt* root = input->element_roots[i];
+        if (!root) return NULL;
+        if (root->name.str == name && root->ns == ns) return root;
+    }
+}
+
 TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns) {
     if (!input || !input->pool || !input->type_list || !tag_name ||
             !string_is_pooled(tag_name)) return NULL;
     const char* name = tag_name->chars;
-    if (input->element_root_cap) {
-        uint64_t mask = (uint64_t)input->element_root_cap - 1;
-        for (uint64_t i = elmt_root_slot_hash(name, ns) & mask;; i = (i + 1) & mask) {
-            TypeElmt* root = input->element_roots[i];
-            if (!root) break;
-            if (root->name.str == name && root->ns == ns) return root;
-        }
-    }
+    if (TypeElmt* root = elmt_tree_root_find(input, name, ns)) return root;
     if (!transition_graph_has_room(input, true)) return NULL;
     // keep the table at most half full; a replaced table is left to the pool
     if ((input->element_root_count + 1) * 2 > input->element_root_cap) {
@@ -956,6 +1017,43 @@ void elmt_put_tree(Element* elmt, String* key, Item value, Input* input) {
         }
     }
     elmt_put(elmt, key, value, input ? input->pool : NULL);
+}
+
+// D3.4.3v2: the tree root a container's rebuilt type starts from — the plain
+// map root, or the element's tag root. An element root exists only for a
+// pooled tag, so it is found, never made; NULL keeps the container private.
+TypeMap* type_tree_root_like(Input* input, Map* container) {
+    if (!input || !container || !container->type) return NULL;
+    TypeMap* type = (TypeMap*)container->type;
+    if (container->type_id == LMD_TYPE_ELEMENT) {
+        return (TypeMap*)elmt_tree_root_find(input, ((TypeElmt*)type)->name.str,
+            ((TypeElmt*)type)->ns);
+    }
+    if (container->type_id == LMD_TYPE_MAP && container->map_kind == MAP_KIND_PLAIN) {
+        return map_shape_transition_root(input, type->js_meta);
+    }
+    return NULL;
+}
+
+// The tree node reached from `start` by adding `steps` in order, minting the
+// edges that are missing. Only ordinary named data fields take edges, as in
+// map_put; NULL when the tree declines any step.
+TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* steps, int count) {
+    TypeMap* node = start;
+    for (int i = 0; node && i < count; i++) {
+        const TypeTreeStep* step = &steps[i];
+        TransitionKey k;
+        if (step->like) {
+            if (!step->like->name || step->like->flags != 0 ||
+                    step->like->key_kind != NAME_KEY_STRING) return NULL;
+            k = transition_key_of_entry(step->like);
+        } else {
+            if (!step->key || property_key_requires_identity(step->key)) return NULL;
+            k = transition_key_of_string(step->key);
+        }
+        node = transition_target_for_key(node, &k, step->type_id, input, NULL);
+    }
+    return node;
 }
 
 // ========== Shape Finalization ==========
