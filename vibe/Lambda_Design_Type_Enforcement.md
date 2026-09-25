@@ -1622,6 +1622,12 @@ executes and normal completion continues after the handler. The complete two-arm
 remains primary-like at the member-access/postfix tier, so, for example,
 `e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
 
+> **Implicit fields (S10.1.7, ruled 2026-09-25).** The value arm binds `~` to
+> one value, as a `match` arm does, so it is a single-subject body: a bare
+> field name reads `~.name` of the result, as in `find(id) ^ { 0 } ~ { total }`,
+> unless a binding claims the name. The error arm binds `^` and keeps the
+> outer `~`. Reasoning: [Expr_Pipe §F.7](Lambda_Expr_Pipe.md).
+
 `match` remains the long-term canonical and extensible branching form; the two-arm handler is
 compact syntax for the frequent binary outcome split:
 

@@ -510,7 +510,7 @@ type User {
     that (~.name != "admin")               // Object-level constraint
 }
 
-// In 'that' clauses, bare identifiers resolve to ~.name implicitly:
+// An object-level 'that' reads a field by its bare name, as a method does:
 type User2 {
     name: string that (len(~) > 0),        // ~ needed for scalar field value
     age: int that (~ > 0),
@@ -802,6 +802,14 @@ int that (5 < ~ < 10)              // Integer between 5 and 10 (exclusive)
 string that (len(~) > 0)           // Non-empty string
 ```
 
+When the value is a map or an element, a bare field name in the predicate
+reads that field of `~`, as in a `that` proviso (S10.1.7):
+
+```lambda
+type Adult = {age: int} that (age >= 18);   // same as (~.age >= 18)
+[{age: 20} is Adult, {age: 5} is Adult]     // [true, false]
+```
+
 The empty string `""` is a real `string` value with length 0, so a non-empty
 string constraint is useful when blank text should be rejected. The empty symbol
 literal `''` is invalid; symbols are solid identifier values.
@@ -890,7 +898,7 @@ type Config {
 }
 ```
 
-In object-level `that` clauses, bare identifiers that are not in scope resolve to `~.name` implicitly:
+In an object-level `that` clause, a field is read by its bare name, as in the type's methods (S10.1.7). A declared field shadows an outer binding of the same name; any other name that is not in scope resolves to `~.name`:
 
 ```lambda
 type User2 {

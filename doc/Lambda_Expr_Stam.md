@@ -458,8 +458,9 @@ left-associative, so filters and mappings chain left to right.
 A `|:` body must mention `~`: `xs |: is_even` is a compile error (E238), and
 the idiom is `xs |: is_even(~)`. The rule exists because `|>` reads a `~`-free
 body as whole-value application (`data |> sum`), and the two pipes must not
-read the same text two ways. Unlike a `that` body, a `|:` body reads bare names
-as ordinary names — write `~.field` for a field of the current item.
+read the same text two ways. Like a `|>` body and unlike a `that` body, a `|:`
+body reads bare names as ordinary names — write `~.field` for a field of the
+current item (S10.1.7).
 
 > **Note:** A `|:` (or `|>`) condition needs no parentheses around the
 > relational operators `<`, `>`, `<=`, `>=` — `items |: ~ > 0` is fine, and
@@ -503,12 +504,25 @@ user that (age >= 18 and name != "admin")
 ```
 
 Name resolution order inside a `that` clause:
-1. Names in scope (`let`, `var`, `fn`, `pn`, `type` definitions)
+1. Names in scope (`let`, `var`, `fn`, `pn`, `type` definitions), `import math`
+   constants such as `pi`, and module prefixes such as `math.` or an import alias
 2. Stored field on the current item `~` (map/object/element)
 3. System properties of the current item `~`
 
 A name that is called is a function, never a field: in `user that len(name) > 2`,
-`len` is the system function and `name` is `~.name`.
+`len` is the system function and `name` is `~.name`. An assignment target is
+never a field either.
+
+The same rule holds in every body that binds `~` to one value: a
+[match arm](#current-item-reference-), a handler's value arm
+`e ^ { … } ~ { … }`, and a type constraint `T that cond` (S10.1.7). Each reads
+its own current item. The innermost body wins, and the outer current item is
+back when that body ends.
+
+A pipe body inside a `that` body — `|>` or `|:` — reads bare names as ordinary
+names, as it does everywhere (S10.1.7). In
+`order that len(lines |: ~.qty > 0) > 0`, `lines` is the order's `~.lines`,
+while the filter body spells `~.qty` for each line.
 
 ```lambda
 let min_age = 18
@@ -1079,6 +1093,23 @@ fn check_range(n: int) => match n {
     case int: if (~ > 0) "positive" else "negative"
 }
 ```
+
+As in a `that` body, `~` may be left implicit: a bare field name in an arm
+reads that field of the matched value (S10.1.7).
+
+```lambda
+fn greet(user) => match user {
+    case {age: int}: if (age >= 18) name ++ " (adult)" else name
+    default: "unknown"
+}
+```
+
+A binding claims its name first, so a `let` or a parameter named `age` would
+win over `~.age`. The current item is scoped to its arm. In a nested `match`,
+bare names read the inner matched value, and after the inner `match` they
+read the outer one again. A `~` in an arm is the arm's own, so it never makes
+an enclosing `|>` a mapping: `xs |> match (1) { case int: ~ * 10 }` applies
+the match's value to `xs`, and does not map over it.
 
 ### Mixed Expression and Statement Arms
 

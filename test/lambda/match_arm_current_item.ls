@@ -1,22 +1,25 @@
-// LR02-5: has_current_item_ref walked a match node's arm list without
-// inspecting anything — the loop body was empty and it fell through to false.
-// A pipe therefore never established the current-item context an arm needed,
-// and `xs |> match (1) { case int: (~) * 10 }` evaluated to `error`.
+// `~` inside a match arm is the MATCHED VALUE (S11.2.1): the arm binds it, for
+// its pattern and its body, and outside the arm the enclosing current item is
+// back (S10.1.3, S10.1.7). So a `~` in an arm is never the enclosing pipe's,
+// and it never makes that pipe a mapping.
 //
-// Per doc/Lambda_Expr_Stam.md, `~` inside an arm body is the MATCHED VALUE, so
-// the arm rebinds it and the arm PATTERN is deliberately not walked — a
-// `that` constraint's `~` is the match subject too, the same shadowing the
-// handler case models.
+// History: LR02-5 (2026-08-25) fixed an empty loop in has_current_item_ref by
+// counting arm bodies, which made `xs |> match (1) { case int: (~) * 10 }` map
+// to [10, 10, 10]. S10.1.7 (2026-09-25) reversed that: the arm's `~` is the
+// constant 1, so the pipe body has no free `~` and is whole-value application
+// of a non-callable value (S10.1.2v4). Counting arm bodies would also let a
+// bare field name, which S10.1.7 reads as `~.name` in an arm, flip the pipe's
+// mode by binding state.
 let xs = [1, 2, 3]
 
 let out = {
     // the scrutinee carries `~`, so the arm sees each piped item in turn
     subject_is_item: xs |> match (~) { case int: (~) * 10
                                        default: 0 },
-    // the scrutinee is a constant, so the arm's `~` is that constant for every
-    // piped item — this is the shape that used to fail outright
-    subject_is_const: xs |> match (1) { case int: (~) * 10
-                                        default: 0 },
+    // the arm's `~` is the constant 1; the `~` after the match is the pipe
+    // item again, and it is what makes the pipe a mapping
+    outer_restored: xs |> (match (1) { case int: (~) * 10
+                                       default: 0 }) + ~,
     // an arm body with no reference at all
     no_ref: xs |> match (~) { case int: 7
                               default: 0 },
