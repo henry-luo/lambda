@@ -87,7 +87,7 @@ pub fn scale_apply(sc, value) {
         let pad = sc.padding;
         let band_w = sc.bandwidth;
         let idx = [for (i in 0 to (n - 1))
-            if (categories[i] == value) i else null] that (~ != null);
+            if (categories[i] == value) i else null] |: (~ != null);
         (if (len(idx) > 0) (let i = idx[0], range_lo + pad + float(i) * (band_w + pad))
         else range_lo)
     } else if sc.kind == "point" {
@@ -97,7 +97,7 @@ pub fn scale_apply(sc, value) {
         let pad = sc.padding;
         let step = sc.step;
         let idx = [for (i in 0 to (n - 1))
-            if (categories[i] == value) i else null] that (~ != null);
+            if (categories[i] == value) i else null] |: (~ != null);
         (if (len(idx) > 0) (range_lo + pad + float(idx[0]) * step)
         else range_lo)
     } else if sc.kind == "ordinal" {
@@ -105,7 +105,7 @@ pub fn scale_apply(sc, value) {
         let range_values = sc.range;
         let n = len(categories);
         let idx = [for (i in 0 to (n - 1))
-            if (categories[i] == value) i else null] that (~ != null);
+            if (categories[i] == value) i else null] |: (~ != null);
         (if (len(idx) > 0) range_values[idx[0] % len(range_values)]
         else range_values[0])
     } else if sc.kind == "sequential-color" {

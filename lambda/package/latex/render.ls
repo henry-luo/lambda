@@ -398,7 +398,7 @@ fn render_maketitle(info) {
     let title_div = render_maketitle_div("title", info.title_el, info.title, info)
     let author_div = render_maketitle_div("author", info.author_el, info.author, info)
     let date_div = render_maketitle_div("date", info.date_el, info.date, info)
-    let parts = [title_div, author_div, date_div] that (~ != null);
+    let parts = [title_div, author_div, date_div] |: (~ != null);
     <header class: "latex-title",
         for c in parts { c }
     >
@@ -509,7 +509,7 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
     if (i >= n) {
         // flush remaining children as a paragraph
         if (len(current_children) > 0) {
-            let items = current_children that (~ != null)
+            let items = current_children |: (~ != null)
             if (len(items) > 0) acc ++ flush_as_paragraph(items)
             else acc
         }
@@ -518,7 +518,7 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
     else if (el[i] is symbol and string(el[i]) == "parbreak") {
         // flush current group and start new one
         if (len(current_children) > 0) {
-            let items = current_children that (~ != null)
+            let items = current_children |: (~ != null)
             if (len(items) > 0) {
                 split_parbreaks_rec(el, i + 1, n, [], acc ++ flush_as_paragraph(items), info)
             }

@@ -21,7 +21,7 @@ pub fn apply_stack(data, y_field, group_field, x_field, mode) {
 
 fn find_index(arr, val) {
     let matches = [for (i in 0 to (len(arr) - 1))
-        if (arr[i] == val) i else null] that (~ != null)
+        if (arr[i] == val) i else null] |: (~ != null)
     if (len(matches) > 0) matches[0] else 0
 }
 
@@ -32,8 +32,8 @@ fn sum_preceding(data, x_field, x_val, group_field, groups, y_field, g_idx) {
 }
 
 fn get_group_y(data, x_field, x_val, group_field, group_val, y_field) {
-    let by_x = data that (~[x_field] == x_val)
-    let matches = by_x that (~[group_field] == group_val)
+    let by_x = data |: (~[x_field] == x_val)
+    let matches = by_x |: (~[group_field] == group_val)
     if (len(matches) > 0) float(matches[0][y_field]) else 0.0
 }
 
@@ -43,7 +43,7 @@ fn add_stack_fields(row, y0, y1) {
 }
 
 fn get_x_max_y1(stacked, x_field, x_val) {
-    let by_x = stacked that (~[x_field] == x_val)
+    let by_x = stacked |: (~[x_field] == x_val)
     let y1_vals = by_x |> float(~["_y1"])
     if (len(y1_vals) > 0) max(y1_vals) else 0.0
 }

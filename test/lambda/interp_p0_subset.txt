@@ -219,6 +219,7 @@ test/lambda/phase2_operator_comparability.ls	direct
 test/lambda/phase6_elementwise_compare.ls	direct
 test/lambda/phase6_pipe_union.ls	direct
 test/lambda/phase7_pattern_sort.ls	direct
+test/lambda/pipe_filter.ls	direct
 test/lambda/pipe_spread.ls	direct
 test/lambda/pipe_sysfunc.ls	direct
 test/lambda/pipe_type_infer.ls	direct
@@ -284,6 +285,7 @@ test/lambda/sys_func_native_math.ls	direct
 test/lambda/tail_call.ls	direct
 test/lambda/test_string_pattern_integration.ls	direct
 test/lambda/that_implicit_name.ls	direct
+test/lambda/that_proviso.ls	direct
 test/lambda/transpile_bitwise.ls	direct
 test/lambda/transpile_error_ret_types.ls	direct
 test/lambda/transpile_float_tco_cross_call.ls	direct

@@ -40,12 +40,12 @@ fn apply_filter(data, filter_el) {
     let value = filter_el.value;
 
     if field and op and value != null {
-        (if (op == "==") (data that ~[field] == value)
-         else if (op == "!=") (data that ~[field] != value)
-         else if (op == ">") (data that float(~[field]) > float(value))
-         else if (op == ">=") (data that float(~[field]) >= float(value))
-         else if (op == "<") (data that float(~[field]) < float(value))
-         else if (op == "<=") (data that float(~[field]) <= float(value))
+        (if (op == "==") (data |: ~[field] == value)
+         else if (op == "!=") (data |: ~[field] != value)
+         else if (op == ">") (data |: float(~[field]) > float(value))
+         else if (op == ">=") (data |: float(~[field]) >= float(value))
+         else if (op == "<") (data |: float(~[field]) < float(value))
+         else if (op == "<=") (data |: float(~[field]) <= float(value))
          else data)
     } else {
         data
@@ -107,7 +107,7 @@ fn do_aggregate(data, group_fields, agg_specs) {
     } else {
         let gkeys = util.unique_vals(data |> group_key_str(~, group_fields));
         [for (gk in gkeys) (
-            let items = data that group_key_str(~, group_fields) == gk,
+            let items = data |: group_key_str(~, group_fields) == gk,
             build_agg_row(items, group_fields, agg_specs)
         )]
     }

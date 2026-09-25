@@ -13,11 +13,11 @@ let data = [
 data |> ~.name
 
 // Filter by age
-data that (~.age >= 30) |> ~.name
+data |: (~.age >= 30) |> ~.name
 
 // Count
 len(data)
-len(data that (~.dept == "eng"))
+len(data |: (~.dept == "eng"))
 
 // Average age
 avg(data |> ~.age)

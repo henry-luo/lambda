@@ -1,0 +1,1 @@
+error[E100]: 'where' is not a filter operator; write '|:' (e.g. items |: ~ > 0). 'where' is only a 'for' header clause

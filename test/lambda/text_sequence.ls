@@ -12,7 +12,7 @@
 "-- a binary walks as its bytes, and rebuilds as a binary --";
 [take(b'\x010203', 2), drop(b'\x010203', 1), slice(b'\x010203', 1, 3), b'\x010203'[0], b'\x010203'[3] == null]
 "-- filter --";
-["abc" that ~ != "b", type("abc" that ~ != "b"), "abc" that ~ == "z", ("abc" that ~ == "z") == ""]
+["abc" |: ~ != "b", type("abc" |: ~ != "b"), "abc" |: ~ == "z", ("abc" |: ~ == "z") == ""]
 "-- mapping pipe: text when every result is text, else an array --";
 ["abc" |> upper(~), "abc" |> ~ ++ "-", "abc" |> ord(~), "abc" |> if (~ == "b") 1 else ~];
 [type("abc" |> upper(~)), type("abc" |> ord(~))]

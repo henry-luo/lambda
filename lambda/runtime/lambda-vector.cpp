@@ -1105,7 +1105,7 @@ static Item vec_cmp_dispatch(Item a, Item b, int op) {
 
 Item vec_cmp(Item a, Item b, int op) {
     GUARD_ERROR2(a, b);
-    // S7.10.5v2: a mask keeps its operands' kind (S2.5.7)
+    // S2.5.7v2: a mask comparison is an operator, so it keeps its operands' kind
     bool as_list = seq_operands_are_lists(a, b);
     return seq_finish_kind(vec_cmp_dispatch(a, b, op), as_list);
 }
@@ -1666,8 +1666,9 @@ static Item vec_model_dispatch(Item left, Item right, int op) {
 }
 
 static Item vec_model_op(Item left, Item right, int op) {
-    // S7.10.5v2: same kind out as in -- a list when every vector operand is a
-    // list (S2.5.7). Decided before the operation, which may move the operands.
+    // S2.5.7v2: arithmetic is an operator, so it keeps its operands' kind -- a
+    // list when every vector operand is a list. Decided before the operation,
+    // which may move the operands.
     bool as_list = seq_operands_are_lists(left, right);
     return seq_finish_kind(vec_model_dispatch(left, right, op), as_list);
 }
@@ -1751,8 +1752,6 @@ static Item vector_cumulative_model(Item item, int op) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return (Item){.array = array()};
-    // S7.10.5v2: same kind out as in (S2.5.7)
-    bool as_list = item_is_list(item);
 
     LambdaNumericKind kind = vector_static_numeric_kind(item);
     LambdaNumericDecision decision = lambda_numeric_classify(
@@ -1776,7 +1775,8 @@ static Item vector_cumulative_model(Item item, int op) {
     int ndim = get_type_id(rooted_source.get()) == LMD_TYPE_ARRAY_NUM ?
         get_shape_strides(rooted_source.get().array_num, shape, strides) : 1;
     if (ndim < 1) return ItemError;
-    return seq_finish_kind(vector_finalize_result(&rooted_result, typed, ndim, shape), as_list);
+    // S7.10.5v3: sequence in, array out -- a list input gives an array
+    return seq_finish_array(vector_finalize_result(&rooted_result, typed, ndim, shape));
 }
 
 Item fn_math_cumsum(Item item) {
@@ -1852,13 +1852,13 @@ Item fn_fill(Item n_item, Item value) {
         return ItemError;
     }
     if (item_is_list(value)) {
-        // S2.5.7: fill follows its item -- a list splices n times into a list,
-        // `fill(2, (1, 2))` is `(1, 2, 1, 2)`, and none collapses to null
+        // S2.5.7v2: a list item splices n times into an array -- `fill(2, (1, 2))`
+        // is `[1, 2, 1, 2]` -- which never collapses; none is `[]`
         RootFrame roots(2);
         Rooted<Item> rooted_value(roots, value);
         Rooted<Array*> rooted_result(roots, array());
         for (int64_t i = 0; i < n; i++) array_push(rooted_result.get(), rooted_value.get());
-        return list_collapse_value({ .array = rooted_result.get() });
+        return seq_finish_array({ .array = rooted_result.get() });
     }
     if (n == 0) {
         Array *result = (Array *)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -2163,7 +2163,6 @@ Item fn_math_quantile(Item item, Item p_item) {
 
 // Helper: apply unary math function element-wise
 static Item vec_unary_math(Item item, double (*func)(double), const char* name) {
-    bool as_list = item_is_list(item);  // read before the result allocation
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
@@ -2180,8 +2179,8 @@ static Item vec_unary_math(Item item, double (*func)(double), const char* name) 
             result->float_items[i] = func(val);
         }
     }
-    // S7.10.5v2: same kind out as in (S2.5.7)
-    return seq_finish_kind({ .array_num = result }, as_list);
+    // S7.10.5v3: sequence in, array out -- a list input gives an array
+    return seq_finish_array({ .array_num = result });
 }
 
 typedef Item (*ComplexUnaryMathFn)(Item item);
@@ -2209,21 +2208,22 @@ static Item index_to_item(int64_t index) {
     return { .item = i2it(index) };
 }
 
-// S10.1.2v2/S10.1.5v2: a mapping pipe or `that` keeps its source's kind
-// (S2.5.7). A list, a scalar, or null walks as a list, so its result collapses
-// (S2.5.5v2): `5 |> ~ + 1` is 6, and `5 that ~ > 9` or a list filtered to
-// nothing is null. Text gives back its own kind when every result item belongs
-// to it, `""` when empty (S2.5.8). An array, range, map, or element gives an
-// array, `[]` when empty.
+// S10.1.2v4: the mapping pipe returns an array for every sequence source, a
+// list included (S2.5.7v2: a list is built, never computed), and a `|:` filter
+// takes that rule by reference (S10.1.6): `(1, 2, 3) |: ~ > 2` is `[3]` and
+// never collapses, `[]` when none survive. Text gives back its own kind when
+// every result item belongs to it, `""` when empty (S2.5.8). A non-sequence
+// scalar or null is one member or none, so it collapses: `5 |> ~ + 1` is 6,
+// and `5 |: ~ > 9` is null.
 Item pipe_end(Array* result, Item source) {
     TypeId type_id = get_type_id(source);
     if (!item_is_list(source) && is_sequence_text_type_id(type_id)) {
         return seq_finish_text_kind(array_end(result), type_id);
     }
-    bool walks_as_list = item_is_list(source) ||
-        !(is_container_type_id(type_id) || type_id == LMD_TYPE_PATH);
-    if (walks_as_list) return list_collapse_value({.array = result});
-    return array_end(result);
+    if (!(is_container_type_id(type_id) || type_id == LMD_TYPE_PATH)) {
+        return list_collapse_value({.array = result});
+    }
+    return seq_finish_array(array_end(result));
 }
 
 static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
@@ -2408,7 +2408,9 @@ DEFINE_MATH_UNARY(fn_math_log2, log2, NULL)
 
 // pow(base, exp) - math module power function (delegates to fn_pow)
 Item fn_math_pow(Item item_a, Item item_b) {
-    return fn_pow(item_a, item_b);
+    // S7.10.5v3: the function is sequence-in, array-out, while the `**`
+    // operator it shares keeps the operand kind (S2.5.7v2)
+    return seq_finish_array(fn_pow(item_a, item_b));
 }
 
 // cbrt(vec) - element-wise cube root
@@ -2507,7 +2509,6 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
     }
     GUARD_NULL1(item);  // S7.10.5v3: null in is null out; the bounds stay checked
     TypeId type = get_type_id(item);
-    bool as_list = item_is_list(item);  // read before the result allocation
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         if (std::isnan(val)) return push_d(NAN);
@@ -2535,8 +2536,8 @@ Item fn_clip(Item item, Item lo_item, Item hi_item) {
             result->float_items[i] = val;
         }
     }
-    // S7.10.5v2: same kind out as in (S2.5.7)
-    return seq_finish_kind({ .array_num = result }, as_list);
+    // S7.10.5v3: sequence in, array out -- a list input gives an array
+    return seq_finish_array({ .array_num = result });
 }
 
 // hypot(y, x) - Euclidean distance sqrt(y*y + x*x)
@@ -2563,7 +2564,6 @@ Item fn_math_log1p(Item item) {
 Item fn_sign(Item item) {
     GUARD_ERROR1(item);
     GUARD_NULL1(item);
-    bool as_list = item_is_list(item);  // read before the result allocation
     TypeId type = get_type_id(item);
     if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
@@ -2587,8 +2587,8 @@ Item fn_sign(Item item) {
             result->items[i] = (val > 0) ? 1 : (val < 0) ? -1 : 0;
         }
     }
-    // S7.10.5v2: same kind out as in (S2.5.7)
-    return seq_finish_kind({ .array_num = result }, as_list);
+    // S7.10.5v3: sequence in, array out -- a list input gives an array
+    return seq_finish_array({ .array_num = result });
 }
 
 // math.random(seed) - pure functional PRNG using SplitMix64
@@ -2619,7 +2619,7 @@ Item fn_math_random(Item seed_item) {
 // string/symbol passthrough: strings are singular, not iterable
 // A selection's fresh result: the source's items [start, end), in order or
 // reversed, each stored as one item (D2.6.5v3). Source and result stay rooted
-// across the growth safepoints; the caller decides the kind (S2.5.7).
+// across the growth safepoints; the caller finishes it as an array (S2.5.7v2).
 static Item vector_select_items(Item source, int64_t start, int64_t end, bool reversed) {
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source);
@@ -2638,13 +2638,12 @@ Item fn_reverse(Item item) {
     VECTOR_TEXT_ITEMS(item, fn_reverse(item));  // S2.5.8
     TypeId type = get_type_id(item);
 
-    // S2.5.7: a list reverses to a list, an array or range to an array
-    bool as_list = item_is_list(item);
+    // S2.5.7v2: a list, array or range reverses to an array
     if (type == LMD_TYPE_ARRAY_NUM) {
-        return seq_finish_kind(array_num_reverse_result(item), as_list);
+        return seq_finish_array(array_num_reverse_result(item));
     }
     int64_t len = vector_length(item);
-    return seq_finish_kind(vector_select_items(item, 0, len > 0 ? len : 0, true), as_list);
+    return seq_finish_array(vector_select_items(item, 0, len > 0 ? len : 0, true));
 }
 
 // sort(vec) - sort in ascending order
@@ -2655,11 +2654,10 @@ Item fn_sort1(Item item) {
     VECTOR_TEXT_ITEMS(item, fn_sort1(item));  // S2.5.8
     TypeId type = get_type_id(item);
 
-    // S2.5.7: a list sorts to a list, an array or range to an array
-    bool as_list = item_is_list(item);
+    // S2.5.7v2: a list, array or range sorts to an array
     int64_t len = vector_length(item);
     if (type == LMD_TYPE_ARRAY_NUM) {
-        return seq_finish_kind(array_num_sort_result(item, len, false), as_list);
+        return seq_finish_array(array_num_sort_result(item, len, false));
     }
     if (len == 0) {
         Array* result = array();
@@ -2672,7 +2670,7 @@ Item fn_sort1(Item item) {
     Array* result = vector_to_plain_array(item, len);
     if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, false);
-    return seq_finish_kind({ .array = result }, as_list);
+    return seq_finish_array({ .array = result });
 }
 
 // sort_by_keys(values, keys, descending) - sort values array in-place by corresponding keys
@@ -2733,8 +2731,7 @@ Item fn_sort2(Item item, Item dir_item) {
     VECTOR_TEXT_ITEMS(item, fn_sort2(item, dir_item));  // S2.5.8
     TypeId type = get_type_id(item);
 
-    // S2.5.7: a list sorts to a list, an array or range to an array
-    bool as_list = item_is_list(item);
+    // S2.5.7v2: a list, array or range sorts to an array
     int64_t len = vector_length(item);
     if (type == LMD_TYPE_ARRAY_NUM && len == 0) {
         return array_num_sort_result(item, len, false);
@@ -2854,23 +2851,23 @@ Item fn_sort2(Item item, Item dir_item) {
         mem_free(key_slots);
 
         if (type == LMD_TYPE_ARRAY_NUM) {
-            return seq_finish_kind(array_num_from_items(
+            return seq_finish_array(array_num_from_items(
                 rooted_source.get().array_num->get_elem_type(),
-                rooted_result.get(), rooted_source.get().array_num->rep_cert), as_list);
+                rooted_result.get(), rooted_source.get().array_num->rep_cert));
         }
         // A key callback changes only order. Its result owns the same elements,
         // so the source contract remains exact after the sort.
         array_transform_copy_cert(rooted_source.get(), rooted_result.get());
-        return seq_finish_kind({ .array = rooted_result.get() }, as_list);
+        return seq_finish_array({ .array = rooted_result.get() });
     }
 
     if (type == LMD_TYPE_ARRAY_NUM) {
-        return seq_finish_kind(array_num_sort_result(item, len, descending), as_list);
+        return seq_finish_array(array_num_sort_result(item, len, descending));
     }
     Array* result = vector_to_plain_array(item, len);
     if (!result) return ItemError;
     stable_sort_items_by_total_order(result->items, len, descending);
-    return seq_finish_kind({ .array = result }, as_list);
+    return seq_finish_array({ .array = result });
 }
 
 // reduce(collection, fn) - fold/accumulate a collection using a binary function
@@ -2921,9 +2918,8 @@ Item fn_unique(Item item) {
     TypeId type = get_type_id(item);
 
     int64_t len = vector_length(item);
-    // S2.5.7: a list keeps its kind and collapses when one item is left
-    // (S2.5.5v2); an array or range gives an array
-    bool as_list = item_is_list(item);
+    // S2.5.7v2: a list, array or range gives an array, which never collapses
+    // when one item is left
 
     if (len == 0) {
         if (type == LMD_TYPE_ARRAY_NUM) {
@@ -2956,9 +2952,9 @@ Item fn_unique(Item item) {
                 array_push_verbatim(result, rooted_elem.get());
             }
         }
-        return seq_finish_kind(array_num_from_items(
+        return seq_finish_array(array_num_from_items(
             rooted_source.get().array_num->get_elem_type(),
-            rooted_result.get(), rooted_source.get().array_num->rep_cert), as_list);
+            rooted_result.get(), rooted_source.get().array_num->rep_cert));
     }
 
     // generic path: use fn_eq for type-aware comparison (handles strings, symbols, etc.)
@@ -2981,7 +2977,7 @@ Item fn_unique(Item item) {
         }
     }
     array_transform_copy_cert(rooted_source.get(), rooted_result.get());
-    return seq_finish_kind({ .array = rooted_result.get() }, as_list);
+    return seq_finish_array({ .array = rooted_result.get() });
 }
 
 // Take/drop counts are explicit (C15): an integer-valued, non-negative number,
@@ -2998,15 +2994,15 @@ static bool vector_count_arg(Item n_item, const char* name, int64_t* n) {
     return true;
 }
 
-// Items [start, end) of a sequence, finished in its kind: a list selects to a
-// list that collapses at one item or none (S2.5.5v2, S2.5.7), an array or
-// range to an array.
+// Items [start, end) of a sequence as an array, whatever its kind: `take`,
+// `drop`, `slice` and `[i to j]` over a list give an array that never
+// collapses at one item or none (S2.5.7v2, S7.10.1v3) -- `take((1, 2, 3), 1)`
+// is `[1]`.
 static Item vector_select_range(Item vec, int64_t start, int64_t end) {
-    bool as_list = item_is_list(vec);
     if (get_type_id(vec) == LMD_TYPE_ARRAY_NUM) {
-        return seq_finish_kind(array_num_slice_result(vec, start, end - start), as_list);
+        return seq_finish_array(array_num_slice_result(vec, start, end - start));
     }
-    return seq_finish_kind(vector_select_items(vec, start, end, false), as_list);
+    return seq_finish_array(vector_select_items(vec, start, end, false));
 }
 
 // take(vec, n) - first n elements
@@ -5208,10 +5204,9 @@ Item fn_zip(Item a, Item b) {
         rooted_left.set(ItemNull);
         rooted_right.set(ItemNull);
     }
-    // S2.5.7: pairs are arrays; the outer sequence is a list only when both
-    // operands are lists
-    return seq_finish_kind({ .array = rooted_result.get() },
-        seq_operands_are_lists(rooted_a.get(), rooted_b.get()));
+    // S2.5.7v2: pairs are arrays, and so is the outer sequence -- `zip` over
+    // two lists is an array of pairs
+    return seq_finish_array({ .array = rooted_result.get() });
 }
 
 // range(start, end, step) - generate range with step

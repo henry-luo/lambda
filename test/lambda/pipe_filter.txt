@@ -1,0 +1,34 @@
+"-- walk --"
+[3, 4, 5]
+[3, 6, 9]
+[1, 3]
+["a", "c"]
+["bnn"]
+"-- key and index --"
+[20, 30]
+[1, 3]
+"-- empty and scalar sources --"
+[]
+[]
+[""]
+7
+[null]
+[null]
+"-- a list source gives an array (S2.5.7v2) --"
+[2, 3]
+[3]
+[]
+[2, 4, 6]
+"-- chains left to right at the pipe tier --"
+[40, 60]
+[2, 3]
+["b", "c"]
+"-- a line may begin with |: (S16.2.2v3) --"
+["b", "c"]
+"-- nested: the innermost ~ wins (S10.1.3) --"
+[[3, 4, 5]]
+[[1], [3]]
+"-- typed sources --"
+[2, 4, 6]
+[1.5, 2.5]
+[2, 4, 6]

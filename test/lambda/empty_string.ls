@@ -33,9 +33,9 @@ let data = [
     {name: "Bob", value: ""},
     {name: "Charlie", value: "world"}
 ]
-let non_empty = data that (~.value != "")
+let non_empty = data |: (~.value != "")
 for (x in non_empty) x.name
-let only_empty = data that (~.value == "")
+let only_empty = data |: (~.value == "")
 for (x in only_empty) x.name
 
 '=== data-derived empty string ==='

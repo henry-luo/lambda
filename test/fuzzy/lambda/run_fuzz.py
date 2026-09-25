@@ -67,7 +67,7 @@ TOKEN_FRAGMENTS = (
     "let", "var", "fn", "pn", "view", "edit", "state", "on",
     "if", "else", "match", "case", "default", "for", "while",
     "raise", "apply", "where", "order", "group", "int", "string",
-    "?", "^", "|>", "++", "**", ".?", "~~", "\\.", "...",
+    "?", "^", "|>", "|:", "++", "**", ".?", "~~", "\\.", "...",
     "(", ")", "[", "]", "{", "}", ";", ",", ":", "=>",
 )
 INSERT_FRAGMENTS = (

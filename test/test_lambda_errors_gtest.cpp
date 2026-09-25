@@ -1891,6 +1891,24 @@ TEST_F(NegativeScriptTest, SyntaxError_LetOutsideList) {
         "'let' binds as an expression only inside a parenthesized list");
 }
 
+TEST_F(NegativeScriptTest, SyntaxError_WhereFilterNamesPipeFilter) {
+    // S10.3.1v3: the retired infix `where` points at the filter stage `|:`
+    ExpectErrorMessage("test/lambda/negative/syntax/where_filter_retired.ls",
+        "error[E100]: 'where' is not a filter operator; write '|:'");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_PipeFilterGluedToArmColon) {
+    // S10.1.6: longest match lexes `|:` in `case int |: …`, which stays an error
+    ExpectErrorMessage("test/lambda/negative/syntax/pipe_filter_glued_case.ls",
+        "error[E100]: expected ':' or '{' after match arm");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_FilterBodyWithoutCurrentItem) {
+    // S10.1.6: a `|:` body must mention `~`; `|>` would read it as application
+    ExpectErrorMessage("test/lambda/negative/semantic/filter_body_no_current.ls",
+        "error[E238]: filter body must mention `~`");
+}
+
 TEST_F(NegativeScriptTest, SyntaxError_SignatureReturnLineStart) {
     ExpectErrorCode("test/lambda/negative/syntax/fn_signature_return_line_start.ls",
         "error[E100]");

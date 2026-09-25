@@ -892,8 +892,6 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
         const char* function_name) {
     int64_t length = vector_length(item);
     if (length < 0) return ItemError;
-    // S7.10.5v2: same kind out as in (S2.5.7)
-    bool as_list = item_is_list(item);
 
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
@@ -917,7 +915,8 @@ static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
         }
         rooted_result.get()->float_items[i] = value;
     }
-    return seq_finish_kind({.array_num = rooted_result.get()}, as_list);
+    // S7.10.5v3: sequence in, array out -- a list input gives an array
+    return seq_finish_array({.array_num = rooted_result.get()});
 }
 
 Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out) {
@@ -1410,7 +1409,7 @@ Item fn_neg(Item item) {
                 return ItemError;
             }
         }
-        // S7.10.5v2: same kind out as in (S2.5.7)
+        // S2.5.7v2: unary minus is an operator, so it keeps the operand kind
         return seq_finish_kind({ .array_num = result }, as_list);
     }
     else if (is_text_type_id(get_type_id(item))) {

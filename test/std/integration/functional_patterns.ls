@@ -15,7 +15,7 @@ double_fn(5)
 triple_fn(5)
 
 // Pipeline chain
-let evens = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] that (~ % 2 == 0)
+let evens = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] |: (~ % 2 == 0)
 let squares = evens |> ~ * ~
 sum(squares);
 

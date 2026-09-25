@@ -958,19 +958,19 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
-     /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ NULL, /* may_error */ true,
-     /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
+     /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_zip", FPTR(fn_zip), NULL, NULL, false, 0},

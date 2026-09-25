@@ -1070,8 +1070,8 @@ users |> ~.name;            // ["Alice", "Bob", ...]
     |> ~ + 1;                // add 1
 // Result: [2, 5, 10, 17, 26]
 
-// Filter with that
-[1, 2, 3, 4, 5] that ~ > 3   // [4, 5]
+// Filter with |:
+[1, 2, 3, 4, 5] |: ~ > 3     // [4, 5]
 ```
 
 ---
@@ -1262,7 +1262,7 @@ A document has three tiers, and they do not mix.
 
 | Tier | Forms | Sees | Writes |
 |---|---|---|---|
-| 1 — read | `let`, `for`, `#`, `input`, pipes, `that` | the **head** version | nothing |
+| 1 — read | `let`, `for`, `#`, `input`, pipes (`\|>`, `\|:`), `that` | the **head** version | nothing |
 | 2 — value | `var`, `=`, copy-on-write | a snapshot taken at binding | the binding only |
 | 3 — update | `put`, `del`, `output`; `commit`, `rollback`; `open { }` | nothing | the **next** version |
 

@@ -14,7 +14,7 @@ pub fn render_annotations(annotation_el, x_scale, y_scale, plot_w, plot_h, theme
                          let child = annotation_el[i]
                          where child != null)
         render_one(child, x_scale, y_scale, plot_w, plot_h, theme)
-    ] that (~ != null);
+    ] |: (~ != null);
     svg.group_class("annotations", elements)
 }
 

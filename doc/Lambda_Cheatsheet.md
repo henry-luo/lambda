@@ -342,21 +342,29 @@ Pipe `|>` with current item `~`:
 | `users \|> ~.age` | [12,20,62] - extract field |
 | `['a','b'] \|> {i:~key, v:~}` | `~key` = index/key |
 
-Filter with `that`:
+Filter with `|:` (the body must mention `~`):
 
 | Form | Meaning |
 |---|---|
-| `[1,2,3,4,5] that (~ > 3)` | [4,5] |
-| `users that (age >= 18) \|> ~.name` | filter then map |
-| `[1,2,3] \|> ~ ** 2 that (~ > 5) \|> sum` | 13 (4+9) |
+| `[1,2,3,4,5] \|: (~ > 3)` | [4,5] |
+| `users \|: ~.age >= 18 \|> ~.name` | filter then map |
+| `[1,2,3] \|> ~ ** 2 \|: (~ > 3) \|> sum` | 13 (4+9) |
 
-Spreading in Array Literals: pipe and filter results flatten
+Proviso with `that` (one value, never walked):
 
 | Form | Meaning |
 |---|---|
-| `[1, [2,3] \|> ~, 4, 5]` | [1, 2, 3, 4, 5] |
-| `[0, [1,2,3] \|> ~ * 10, 99]` | [0, 10, 20, 30, 99] |
-| `[1, [3,5,7] that (~ > 4), 9]` | [1, 5, 7, 9] |
+| `5 that ~ > 3` | 5 |
+| `5 that ~ > 9` | null |
+| `[1,2,3] that len(~) > 2` | [1,2,3] - the whole array |
+
+Pipe and filter results in array literals: an array result is one item
+
+| Form | Meaning |
+|---|---|
+| `[1, [2,3] \|> ~, 4, 5]` | [1, [2, 3], 4, 5] |
+| `[0, *([1,2,3] \|> ~ * 10), 99]` | [0, 10, 20, 30, 99] - `*` splices |
+| `[1, [3,5,7] \|: (~ > 4), 9]` | [1, [5, 7], 9] |
 
 ## Query Expressions
 
@@ -813,7 +821,7 @@ pn main() {                     // print is a pn: only a pn may call it
 9. `or` - Logical OR
 10. `to` - Range
 11. `is` `in` - Type operations (`is nan` for NaN detection)
-12. `|>` `that` - Pipe and Filter
+12. `|>` `|:` `that` - Pipe, Filter and Proviso
 
 ## Quick Examples
 
