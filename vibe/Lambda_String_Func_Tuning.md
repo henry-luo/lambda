@@ -259,7 +259,7 @@ Each item names the location as of `8491fe595`, what the code does now, the tech
 
 Fix these first. Items 1–3 were reproduced on both tiers and filed in the [Issue Ledger](Lambda_Issue_Ledger.md) on 2026-09-24. Item 4 waits on §8-1, and item 5 needs verifying before it is filed.
 
-1. **`str_rfind_byte` returns a position past the real last match** (`lib/str.c:266`). **verified**; filed as [LR05-14](Lambda_Issue_Ledger.md#lr05-14).
+1. **`str_rfind_byte` returns a position past the real last match** (`lib/str.c:266`). **verified**; filed as [LR05-14](<Lambda_Issue_Ledger (fixed).md#lr05-14>).
    - **Cause:** the SWAR false positive of technique D.
    - **Reproducers:**
      - `last_index_of("dir/.hidden", "/")` returns 4 in Lambda.
@@ -268,7 +268,7 @@ Fix these first. Items 1–3 were reproduced on both tiers and filed in the [Iss
      - Node-compatible `Buffer.lastIndexOf` goes through the same function.
    - **Why tests missed it:** every match in `test/lib/test_str_gtest.cpp` sits in the scalar tail.
    - **Fix:** the exact zero-byte mask (Appendix A.3), plus both reproducers as tests.
-2. **Indexing a non-ASCII symbol returns a broken one-byte symbol.** **verified**; filed as [LR05-15](Lambda_Issue_Ledger.md#lr05-15).
+2. **Indexing a non-ASCII symbol returns a broken one-byte symbol.** **verified**; filed as [LR05-15](<Lambda_Issue_Ledger (fixed).md#lr05-15>).
    - `'café'[3]` returns `'\xC3'`, while `len('café')` is 4 and `"café"[3]` is `"é"`.
    - `item_at` treats every symbol as ASCII (`lambda/runtime/lambda-data-runtime.cpp`, `item_at`). This violates S2.5.8.
    - The text sequence operations that read through `item_at` inherit it: `reverse('café')` is `'\xC3fac'` and `sort('bé')` is `'b\xC3'`.

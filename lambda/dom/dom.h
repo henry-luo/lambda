@@ -70,6 +70,7 @@ Item dom_make_rect_in(struct DomDocument* doc,
  * This predicate never performs style resolution or layout.
  */
 bool dom_has_committed_geometry_snapshot(void* dom_doc);
+bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
 
 /**
  * Return the topmost painted SVG element at viewport coordinates, or NULL.

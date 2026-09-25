@@ -67,8 +67,9 @@ pn make_cumulative(probs) {
     return cum
 }
 
-// seed is mutable via array trick: seed_arr[0]
-pn random_fasta(id, desc, chars, probs, count, seed_arr) {
+// the seed lives in seed_arr[0]; a `var` parameter is the only way the next
+// call sees this call's writes (S9.1.3) -- a plain one is a snapshot
+pn random_fasta(id, desc, chars, probs, count, var seed_arr) {
     print(">" ++ id ++ " " ++ desc ++ "\n")
     var cum = make_cumulative(probs)
     var num_chars = len(chars)

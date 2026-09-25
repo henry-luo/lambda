@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-25
 **Status:** ALL PHASES DONE 2026-09-25 (P0–P3).
-**Design:** [Lambda_Design_Shape_Transitions.md](../Lambda_Design_Shape_Transitions.md) §7 (E1–E7). **Rulings:** D3.4.3v2 (elements share through the transition tree; the shape pool retires), D2.6.6v3 (`content_list` holds a declared type's content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot). **Closes:** [LR13-9](<../Lambda_Issue_Ledger (fixed).md#lr13-9>) (closed by P0). **Open, not blocking:** SO46 (the *must be empty* spelling), DO31 (`type <B>`).
+**Design:** [Lambda_Design_Shape_Transitions.md](../Lambda_Design_Shape_Transitions.md) §7 (E1–E7). **Rulings:** D3.4.3v2 (elements share through the transition tree; the shape pool retires), D2.6.6v3 (`content_list` holds a declared type's content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot). **Closes:** [LR13-10](<../Lambda_Issue_Ledger (fixed).md#lr13-10>) (closed by P0). **Open, not blocking:** SO46 (the *must be empty* spelling), DO31 (`type <B>`).
 **Goal:** one `TypeElmt` per distinct tag, namespace and attribute sequence instead of one per element (about 64 MB of the 13 MiB HTML benchmark's 233 MB peak), declared content validated, and the shape pool gone.
 
 ## Phases
@@ -16,7 +16,7 @@ Each phase lands on its own, green on the gates below, before the next starts.
 **Results.**
 - Lambda baseline 5,869/5,869 (the new fixture included), input suites green (HTML5 WPT 364, CommonMark 1,335, YAML 391); validator GTests 58/58 (features), 38/38 (AST), 44/44, 14/14 (input), 18/18 (path reporting); `test_html_gtest` 52/52.
 - `test_validator_integration` fails `ValidateXMLDocumentWithUnwrapping` and `ValidateEmptyMap` exactly as the base binary does: their schema strings end in `;`, which the parser rejects as a trailing separator, so the schema never loads. Pre-existing, outside every gate.
-- Every LR13-9 reproducer now answers correctly on both tiers, and the validator CLI accepts three `<li>` against `<li>*`/`<li>+` and reports a per-position tag mismatch against `<li>, <li>, <li>` given `<p>` children.
+- Every LR13-10 reproducer now answers correctly on both tiers, and the validator CLI accepts three `<li>` against `<li>*`/`<li>+` and reports a per-position tag mismatch against `<li>, <li>, <li>` given `<p>` children.
 
 **Two defects found under the same symptom, fixed here.**
 - **Structural slots reduced to a TypeId.** `array_pattern_simple_type_matches` answered a slot of kind `element`, `map` or `array` by TypeId alone, so `[<li "a">] is [<p>]`, `[{x: 1}] is [{y: int}]` and `[[1, 2]] is [[int, int, int]]` were all true — in bracket patterns before this work, and in element content once it used the same matcher. Only bare kinds (`element`, `map`, `array`, `function`) take the shortcut now; concrete shapes (`lambda_type_is_concrete_attr_shape`), array patterns other than the `TYPE_ARRAY`/`TYPE_LIST` singletons, and function signatures validate in full.
@@ -39,7 +39,7 @@ Each phase lands on its own, green on the gates below, before the next starts.
 - `lambda/validator/validate.cpp`: both the fast verdict and the reporting path match the element's content against `content_list` with `array_pattern_runs_match` (reuse the array path's slot and run helpers over an element's children); NULL skips.
 - Writers of the per-instance count, all removed: `mark_builder.cpp` `ElementBuilder::final`, `mark_editor.cpp` (its content edits no longer touch the type; `elmt_copy_with_new_children` no longer needs a new type), `input.cpp` clone (copy the pointer), `input-mark.cpp`, `input-graph.cpp`, `lambda-data-runtime.cpp` (group type), `lambda-eval.cpp` rebuilds, and the markup parsers: both `increment_element_content_length` definitions and their 122 calls; `block_table.cpp` reads the list length instead.
 - Tests: `test_html_gtest` (content starts at 0), the validator GTests (content patterns of N `any` slots or runs, instead of counts), and a new fixture `test/lambda/element_content_pattern.ls` + `.txt`: runs (`<li>*`, `<li>+`, `<li>?`), literal items, open content (`any*`), a bare `<div>`, nominal content, and the merged-string case.
-- Docs at landing: S11.1.6 and S2.1.3 footnote rows, the D2.6.6 rows, LR13-9 to the fixed archive, LR_03 §4 and LR_11 §2.1.
+- Docs at landing: S11.1.6 and S2.1.3 footnote rows, the D2.6.6 rows, LR13-10 to the fixed archive, LR_03 §4 and LR_11 §2.1.
 
 ### P1 — Elements on the tree (E2)
 

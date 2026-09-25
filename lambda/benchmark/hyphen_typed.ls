@@ -147,7 +147,7 @@ pn hyphenate_text(tables: HyphenTables, text: string, var results: WordCache, va
                     index = index + 1
                 } else { break }
             }
-            let word: string = slice(text, word_start, index)
+            let word: string = slice(text, word_start, index) or ""
             result = result ++ slice(text, unchanged_start, word_start) ++
                 hyphenate_word(tables, word, results, markers)
             unchanged_start = index

@@ -13,10 +13,23 @@ TS_CLI="$ROOT/node_modules/.bin/tree-sitter"
 export TREE_SITTER_LIBDIR="$ROOT/temp/tree-sitter-lib"
 mkdir -p "$WORK"
 pass=0; fail=0
+no_tree_shown=0
 run() {
   local exp="$1" name="$2" src="$3"
   printf '%b' "$src" > "$WORK/case.ls"
   out=$(cd "$G" && "$TS_CLI" parse "$WORK/case.ls" 2>&1)
+  # A verdict needs a parse tree. Without one the CLI never parsed the case --
+  # the grammar failed to compile (a stale src/parser.c, or a CLI older than
+  # the grammar's ABI) or the CLI itself failed -- and the error grep below
+  # would read that as an accept. Such a case fails; the cause prints once.
+  if ! printf '%s\n' "$out" | grep -qE '^\([A-Za-z_]+ \[[0-9]+, [0-9]+\] - \['; then
+    fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=no parse tree\n' "$name" "$exp"
+    if [ "$no_tree_shown" = 0 ]; then
+      no_tree_shown=1
+      printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | head -6 | sed 's/^/       | /'
+    fi
+    return
+  fi
   if echo "$out" | grep -qE 'ERROR|MISSING|Unexpected'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi
@@ -361,7 +374,7 @@ run R "no while as a value"                'let a = while\n'
 run R "no pn as a value"                   'let a = pn\n'
 run R "no var as an array item"            'let a = [var, 1]\n'
 run R "an arrow body cannot break"         'let f = (x) => break\n'
-# C still reads these four as values (Lambda_Issue_Ledger LR02-20), so they
+# C still reads these four as values (Lambda_Issue_Ledger LR02-21), so they
 # are not mirrored in c_s16_conformance.sh yet.
 run R "no fn as a value"                   'let a = fn\n'
 run R "no view as a value"                 'let a = view\n'
@@ -401,6 +414,22 @@ run A "keyword map-type field"             'type M = {if: int}\n1\n'
 run A "keyword method names"               'type T { a: int, fn if() => 1, fn state() => a, pn open() { 1 } }\n1\n'
 run A "keyword module segment"             'import .lib.string\n1\n'
 run A "base-type loop index type"          'let a = [1]\nlet z = for (i: int, x in a) x\nz\n'
+
+echo "--- LR02-20/26: C parser gaps ---"
+# S16.2.2v2: `?` only continues, so a line-start `?` extends a complete type
+run A "line-start ? continues a type alias"   'type T = int\n?\n1\n'
+run A "line-start ? continues an annotation"  'let x: int\n? = null\nx\n'
+run A "line-start ? in a parameter type"      'fn f(a: int\n?) { a }\nf(null)\n'
+# S2.5.1v2, S2.5.5v2: no item limit (a 65-argument call parses; the 16-argument
+# source limit is a later semantic check, D6.2.2v2)
+items65="$(seq -s ', ' 0 64 | sed 's/, *$//')"
+attrs70="$(for i in $(seq 0 69); do printf 'a%d: %d, ' "$i" "$i"; done | sed 's/, $//')"
+names70="$(for i in $(seq 0 69); do printf 'n%d, ' "$i"; done | sed 's/, $//')"
+items70="$(seq -s ', ' 0 69 | sed 's/, *$//')"
+run A "65-item list literal"                  "let l = ($items65)\nlen(l)\n"
+run A "65 call arguments"                     "fn f(...) => len(varg())\nf($items65)\n"
+run A "70 element attributes"                 "let e = <e $attrs70>\ne\n"
+run A "70 decomposition names"                "let $names70 = [$items70]\nn0\n"
 
 echo
 echo "pass=$pass fail=$fail"

@@ -852,7 +852,7 @@ Regression: `test/lambda/proc/dense_for_range.ls` covers the proven arm, an
 array shorter than the range, a negative start, an empty range, a store
 through a `var` parameter, and nested `for` loops. It counts matches rather
 than summing, because adding an absent element to a declared `int` raises
-E201 and would pin [LR12-22](../Lambda_Issue_Ledger.md#lr12-22) instead of the
+E201 and would pin [LR12-22](<../Lambda_Issue_Ledger (fixed).md#lr12-22>) instead of the
 proof under test.
 
 ### 10.12 Pinning the round: which mechanisms had no test
@@ -880,7 +880,7 @@ Two behavioural fixtures were added alongside (§10.11):
 for the counted-`for` proof.
 
 Writing `tune30_leaf_div_cast` surfaced a second instance of
-[LR12-23](../Lambda_Issue_Ledger.md#lr12-23): `int(r * (r + 1) div 2)` with a
+[LR12-23](<../Lambda_Issue_Ledger (fixed).md#lr12-23>): `int(r * (r + 1) div 2)` with a
 saturating `r` prints `inf` on the JIT while T0 abandons the statement. The
 fixture stays in band so it pins the inlining, not the divergence.
 

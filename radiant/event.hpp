@@ -1558,6 +1558,8 @@ bool editing_controller_animation_tick(UiContext* uicon,
 //
 // All public functions are safe to call when no layout has been performed
 // yet — they simply return false / empty results in that case.
+extern "C" DomNode* dom_range_child_at_boundary_offset(DomElement* elem,
+                                                        uint32_t offset);
 
 
 

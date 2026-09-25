@@ -24,7 +24,7 @@ static inline MirConstructionPlan mir_plan_static_construction(TypeMap* shape) {
 static inline bool mir_plan_static_field(TypeMap* shape, String* name,
         MirFieldAccessPlan* plan) {
     if (!shape || !name || !plan) return false;
-    ShapeEntry* field = find_shape_field_by_name(shape, name->chars, name->len);
+    ShapeEntry* field = find_shape_read_field_by_name(shape, name->chars, name->len);
     if (!field) return false;
     *plan = {mir_plan_static_construction(shape), field, field->byte_offset, -1};
     return true;

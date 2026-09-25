@@ -501,8 +501,26 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
     }
     DomDocument* doc = node_owning_doc(r->start.node);
     if (!doc) doc = node_owning_doc(r->end.node);
-    if ((!doc || dom_has_committed_geometry_snapshot(doc)) &&
-            dom_range_resolve_layout(r)) {
+    if (!doc || dom_ensure_geometry_snapshot(doc)) {
+        DomNode* selected = nullptr;
+        if (r->start.node == r->end.node &&
+            r->end.offset == r->start.offset + 1 && r->start.node &&
+            r->start.node->is_element()) {
+            selected = dom_range_child_at_boundary_offset(
+                r->start.node->as_element(), r->start.offset);
+        }
+        // A selected element contributes its border box even when layout
+        // skips its descendants under content-visibility.
+        if (selected && selected->is_element() &&
+            selected->view_type != RDT_VIEW_NONE &&
+            selected->as_element()->display.outer != CSS_VALUE_CONTENTS) {
+            float x = 0.0f;
+            float y = 0.0f;
+            float w = 0.0f;
+            float h = 0.0f;
+            view_get_visual_bounds(static_cast<View*>(selected), &x, &y, &w, &h);
+            js_range_collect_rect(x, y, w, h, &collector);
+        }
         dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
     }
     collector.array = array_root.get();

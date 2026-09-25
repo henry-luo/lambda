@@ -216,19 +216,33 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
  */
 Item fn_error(Item message) {
     const char* msg = "Error";
+    LambdaErrorCode code = ERR_USER_ERROR;
     if (get_type_id(message) == LMD_TYPE_STRING) {
         String* str = it2s(message);
         if (str) {
             msg = str->chars;
         }
+    } else if (get_type_id(message) == LMD_TYPE_MAP) {
+        // S7.4.4's parameter-map constructor, error({code, message}): it had no
+        // branch, so every map built code 318 "Error" (LR10-7). A field that
+        // is absent or not of its documented type keeps the default.
+        Item code_item = item_attr(message, "code");
+        if (get_type_id(code_item) == LMD_TYPE_INT) {
+            double value = lambda_int_unbox_double(code_item.item);
+            if (value >= INT32_MIN && value <= INT32_MAX) code = (LambdaErrorCode)(int32_t)value;
+        }
+        Item message_item = item_attr(message, "message");
+        if (get_type_id(message_item) == LMD_TYPE_STRING && it2s(message_item)) {
+            msg = it2s(message_item)->chars;
+        }
     }
-    set_runtime_error(ERR_USER_ERROR, "%s", msg);
+    set_runtime_error(code, "%s", msg);
     if (context && context->heap && context->heap->gc) {
         SourceLocation loc = {0};
         if (context->current_file) {
             loc.file = context->current_file;
         }
-        LambdaError* error = err_create_heap(ERR_USER_ERROR, msg, &loc);
+        LambdaError* error = err_create_heap(code, msg, &loc);
         if (error) {
             error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
                 LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
@@ -1879,9 +1893,14 @@ static bool runtime_contract_uses_binder(Type* type, int depth = 0) {
 }
 
 static bool literal_type_matches_item(Type* expected, Item item) {
-    if (!expected || !expected->is_literal ||
-            (expected->type_id != LMD_TYPE_STRING && expected->type_id != LMD_TYPE_SYMBOL)) {
-        return false;
+    if (!expected || !expected->is_literal) return false;
+    if (expected->type_id != LMD_TYPE_STRING && expected->type_id != LMD_TYPE_SYMBOL) {
+        // S11.2.1: a numeric literal type is the singleton of its value, matched
+        // by `==` as a literal match arm is; the TypeId alone admitted 3 into
+        // `1 | 2` on every tier (LR03-11)
+        Item literal;
+        if (!lambda_literal_contract_value(expected, &literal)) return false;
+        return IS_NUMERIC_ID(get_type_id(item)) && fn_eq(item, literal) == BOOL_TRUE;
     }
     TypeId actual_id = get_type_id(item);
     if (actual_id != expected->type_id) return false;
@@ -1906,8 +1925,10 @@ bool lambda_type_matches(Item item, Type* expected) {
     if (type_is_any_without_null(expected)) return actual_id != LMD_TYPE_NULL;
     if (expected->type_id == LMD_TYPE_ANY) return true;
     // Literal aliases used to enter the pattern builder; compare their content directly now that literal-only forms are ordinary type values.
+    Item literal_value;
     if (expected->is_literal &&
-            (expected->type_id == LMD_TYPE_STRING || expected->type_id == LMD_TYPE_SYMBOL)) {
+            (expected->type_id == LMD_TYPE_STRING || expected->type_id == LMD_TYPE_SYMBOL ||
+             lambda_literal_contract_value(expected, &literal_value))) {
         return literal_type_matches_item(expected, item);
     }
     // S11.3.1v2: a nominal expectation is answered by the record chain, ahead of
@@ -2040,7 +2061,7 @@ static Item lambda_type_error_with_validation(Item actual, Type* expected,
     char actual_summary[192];
     char message[512];
     char validation_detail[320] = {};
-    lambda_type_format_name(expected, expected_name, sizeof(expected_name));
+    lambda_type_format_contract_name(expected, expected_name, sizeof(expected_name));
     runtime_value_summary(actual, actual_summary, sizeof(actual_summary));
     runtime_validation_detail(validation, validation_detail, sizeof(validation_detail));
     snprintf(message, sizeof(message),
@@ -5279,11 +5300,14 @@ Item fn_parse_html_fragment1(Item str_item) {
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
 
-String* fn_format2(Item item, Item type) {
-    if (get_type_id(item) == LMD_TYPE_ERROR || get_type_id(type) == LMD_TYPE_ERROR) {
-        log_debug("fn_format2: error item received");
-        return &STR_ERROR;
-    }
+// D6.4.1: format returns an Item, so a failure is an error value, never text.
+// It returned String*: an error operand became the text "<error>" on both
+// tiers, and a bad format argument's NULL read as error on T0 but null on the
+// JIT (LR07-18).
+Item fn_format2(Item item, Item type) {
+    // an error operand is the result (S7.10.4)
+    if (get_type_id(item) == LMD_TYPE_ERROR) return item;
+    if (get_type_id(type) == LMD_TYPE_ERROR) return type;
     // datetime formatting: format(dt) or format(dt, pattern)
     TypeId item_type_id = get_type_id(item);
     if (item_type_id == LMD_TYPE_DTIME) {
@@ -5322,7 +5346,7 @@ String* fn_format2(Item item, Item type) {
         size_t len = buf->length;
         String* result = heap_strcpy(buf->str, len);
         strbuf_free(buf);
-        return result;
+        return (Item){.item = s2it(result)};
     }
 
     TypeId type_id = get_type_id(type);
@@ -5375,20 +5399,23 @@ String* fn_format2(Item item, Item type) {
         }
     }
     else {
-        log_debug("format type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
-        return NULL;  // todo: push error
+        set_runtime_error(ERR_FORMAT_ERROR,
+            "format: the format must be a string, symbol, or map, got %s", get_type_name(type_id));
+        return ItemError;
     }
 
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     String* result = format_data(item, type_str, flavor_str, context->heap->pool);
-    if (result) {
-         // re-allocate as GC-tracked string (format_data uses pool directly, no GCHeader)
-         result = heap_strcpy(result->chars, result->len);
+    if (!result) {
+        set_runtime_error(ERR_FORMAT_ERROR, "format: could not format a %s value",
+            get_type_name(get_type_id(item)));
+        return ItemError;
     }
-    return result;
+    // re-allocate as GC-tracked string (format_data uses pool directly, no GCHeader)
+    return (Item){.item = s2it(heap_strcpy(result->chars, result->len))};
 }
 
-String* fn_format1(Item item) {
+Item fn_format1(Item item) {
     return fn_format2(item, ItemNull);
 }
 
@@ -5808,17 +5835,18 @@ Item fn_member(Item item, Item key) {
         const char* k = key.get_chars();
         if (!k) return item;  // error propagation
 
+        // S7.4.4: an error value carries its own code and message. Only the
+        // payload-less ItemError sentinel falls back to context->last_error,
+        // its diagnostic copy; reading that for every error made each one
+        // report whichever error was built last (LR10-7).
+        LambdaError* err = it2err(item);
+        if (!err && context) err = context->last_error;
         if (strcmp(k, "code") == 0) {
-            // return error code from context->last_error
-            if (context && context->last_error) {
-                return {.item = i2it(context->last_error->code)};
-            }
-            return {.item = i2it(ERR_USER_ERROR)};  // default error code
+            return {.item = i2it(err ? err->code : ERR_USER_ERROR)};
         }
         if (strcmp(k, "message") == 0) {
-            // return error message from context->last_error
-            if (context && context->last_error && context->last_error->message) {
-                String* msg = heap_strcpy(context->last_error->message, strlen(context->last_error->message));
+            if (err && err->message) {
+                String* msg = heap_strcpy(err->message, strlen(err->message));
                 return {.item = s2it(msg)};
             }
             String* msg = heap_create_name("Error");
@@ -8368,6 +8396,49 @@ static void convert_specialized_to_generic(Array* arr) {
     // Widening through an open write abandons the exact declared-array proof.
     arr->rep_cert = NULL;
     log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
+}
+
+// S9.1.1: `push(b, v)` is `b' = b ++ [v]`. An open packed array (one with no
+// declared contract) keeps its lane when every appended item fits it exactly
+// and otherwise widens in place to a generic Array, as an index write does
+// (fn_array_set); array_push then spreads a list (D2.6.5v3). Refusing here left
+// `push` onto an unannotated number literal a silent no-op (LR12-27). A view or
+// an N-D array cannot grow, as splice refuses them.
+Item array_num_push_open(Item owner, Item value) {
+    ArrayNum* packed = owner.array_num;
+    if (!packed || packed->is_view || packed->is_ndim) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "push cannot grow an array view or an N-D array; copy() or ravel() first");
+        return ItemError;
+    }
+    if (value.item == ITEM_NULL_SPREADABLE) return owner;
+    RootFrame roots(2);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_value(roots, value);
+    TypeId value_type = get_type_id(value);
+    bool spread = (value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM) &&
+        value.array && value.array->is_spreadable;
+    int64_t count = spread ? value.array->length : 1;
+    bool fits = true;
+    for (int64_t j = 0; j < count && fits; j++) {
+        fits = array_num_admits_value(packed,
+            spread ? item_at(rooted_value.get(), j) : rooted_value.get());
+    }
+    if (fits) {
+        int64_t length = packed->length;
+        packed = array_num_reserve_capacity(packed, length + count);
+        if (!packed) return ItemError;
+        rooted_owner.set({.array_num = packed});
+        for (int64_t j = 0; j < count; j++) {
+            array_num_store_admitted(packed, length + j,
+                spread ? item_at(rooted_value.get(), j) : rooted_value.get());
+        }
+        packed->length = length + count;
+        return rooted_owner.get();
+    }
+    convert_specialized_to_generic(rooted_owner.get().array);
+    array_push(rooted_owner.get().array, rooted_value.get());
+    return rooted_owner.get();
 }
 
 // S2.5.6: a list written into a sequence slot (`a[i] = v`) splices there --
@@ -12142,7 +12213,14 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         // Checking lambda_type_matches first left an int-tagged value at a
         // float boundary, after which a native float body could unbox it as
         // the wrong physical lane.
-        return lambda_numeric_boundary_admit(value, numeric_contract, converted);
+        if (!lambda_numeric_boundary_admit(value, numeric_contract, converted)) return false;
+        // S11.2.1: a literal contract then admits its one value only; the
+        // carrier admission alone let `x: 1` take any int (LR03-11)
+        Item literal;
+        if (lambda_literal_contract_value(numeric_contract, &literal)) {
+            return fn_eq(*converted, literal) == BOOL_TRUE;
+        }
+        return true;
     }
 
     // An array annotation is a complete rank-and-element contract, not a

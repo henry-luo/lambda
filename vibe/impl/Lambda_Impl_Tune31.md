@@ -200,7 +200,7 @@ specialization and boundary fixes.
    `mir_premark_loop_cow_bindings`, `MirCowJoin` and `MirCowLoopJoin`.
    Distinguish scalar element reads from escaping container aliases.
    Refine the transfer/join rules; do not revert the
-   [LR12-17 correctness fix](../Lambda_Issue_Ledger.md#lr12-17).
+   [LR12-17 correctness fix](<../Lambda_Issue_Ledger (fixed).md#lr12-17>).
 4. Pair that fixture with capture-after-store, conditional detach,
    zero-iteration, nested-loop and real-alias cases. Pin absence of repeated
    ownership checks in the proven unique body, and their retention where

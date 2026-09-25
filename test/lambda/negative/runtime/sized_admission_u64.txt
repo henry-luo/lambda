@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'a' failed: expected u64, got int -1

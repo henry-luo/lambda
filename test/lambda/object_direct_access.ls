@@ -42,10 +42,10 @@ let s = <Stats min: 10, max: 50>;
 
 // Test 5: fn method accessing bool field in condition
 type Gate {
-    open: bool,
-    fn status() => if (open) "open" else "closed"
+    is_open: bool,
+    fn status() => if (is_open) "open" else "closed"
 }
-let g1 = <Gate open: true>
-let g2 = <Gate open: false>
+let g1 = <Gate is_open: true>
+let g2 = <Gate is_open: false>
 g1.status()
 g2.status()

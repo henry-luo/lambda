@@ -24,10 +24,10 @@
 > disciplines, one kind flag), S1.6/SI1 (tier parity, representation
 > invisible), S9.3.1 (construction captures by value), D1.6 (MIR Direct only)
 >
-> **Ledger:** [LR05-10](../Lambda_Issue_Ledger.md#lr05-10) (umbrella),
-> [LR05-11](../Lambda_Issue_Ledger.md#lr05-11), [LR05-12](../Lambda_Issue_Ledger.md#lr05-12),
-> [LR12-28](../Lambda_Issue_Ledger.md#lr12-28), [LR03-12](../Lambda_Issue_Ledger.md#lr03-12),
-> [LR05-9](../Lambda_Issue_Ledger.md#lr05-9) (`++` bit reinterpretation);
+> **Ledger:** [LR05-10](<../Lambda_Issue_Ledger (fixed).md#lr05-10>) (umbrella),
+> [LR05-11](<../Lambda_Issue_Ledger (fixed).md#lr05-11>), [LR05-12](<../Lambda_Issue_Ledger (fixed).md#lr05-12>),
+> [LR12-28](<../Lambda_Issue_Ledger (fixed).md#lr12-28>), [LR03-12](<../Lambda_Issue_Ledger (fixed).md#lr03-12>),
+> [LR05-9](<../Lambda_Issue_Ledger (fixed).md#lr05-9>) (`++` bit reinterpretation);
 > the S2.2.3/S2.6.x and S2.5.x rows of semantics Appendix A
 
 ---
@@ -479,7 +479,7 @@ to the archive's own historical appendix, not to central-ledger moves — §15.)
 |---|---|---|---|---|
 | P0 fixtures | **done 2026-09-22** | 11 in `ext/`, 2 in `proc-ext/`, 2 negative | n/a (ext, red by design) | goldens from the rulings; all parse except `type_families` (P5 syntax) |
 | P1 kind bit + appends + finish modes + library migration | **done 2026-09-22, committed `fc3153b3b`** (see §7–§9; residue §10) | `list_kind_literal` green both tiers and moved to the baseline; new baseline fixtures `list_positional_verbatim`, `list_declarations`; `list_var_mutation` blocked by LR12-27 (§9); `list_collapse_void` green except its P2 `take` lines; new baseline fixture `ndim_sequence_ops` | official `make test-lambda-baseline`: every remaining failure fails on HEAD, flakes, or arrived with the 17:15 upstream rebase (§9) | library + test migration (§8); positional sites, S2.5.4 declarations, type names (§9) |
-| P2 transforms | **done in the working tree 2026-09-22** (see §11) | `list_kind_transform`, `list_kind_for_clauses`, `pipe_that_kind`, `list_collapse_void` green both tiers and under forced GC; moved to the baseline | official `make test-lambda-baseline`: only the pre-existing failures (§11) | 24 goldens followed the rulings (grouping-only diffs); query result kind unruled ([LR05-13](../Lambda_Issue_Ledger.md#lr05-13)) |
+| P2 transforms | **done in the working tree 2026-09-22** (see §11) | `list_kind_transform`, `list_kind_for_clauses`, `pipe_that_kind`, `list_collapse_void` green both tiers and under forced GC; moved to the baseline | official `make test-lambda-baseline`: only the pre-existing failures (§11) | 24 goldens followed the rulings (grouping-only diffs); query result kind unruled ([LR05-13](<../Lambda_Issue_Ledger (fixed).md#lr05-13>)) |
 | P3 landing + content writes | **done in the working tree 2026-09-23** (see §12) | `list_kind_landing`, `content_normalize` green both tiers and under forced GC, moved to the baseline; `content_writes` likewise, to `test/lambda/proc`; `list_var_mutation` green except its three LR12-27 lines | official `make test-lambda-baseline`: only the pre-existing failures (§12) | image = one-level copy (`slot_image`); 2 goldens and 2 scripts followed the rulings |
 | P4 text, `++`, `*` | **done in the working tree 2026-09-23** (see §13) | `text_sequence`, `concat_table`, `spread_star` green on interp, jit and auto and under forced GC, moved to the baseline; `spread_star` pinned in the tier-parity table | official `make test-lambda-baseline`: **5826 passed, 0 failed** | LR05-9 fixed with the `++` table; 9 proc scripts migrated off `++` string interpolation; 3 fixtures pinned retired rules and were rewritten |
 | P5 type families + migration | **done in the working tree 2026-09-23** (see §14) | `type_families` green on interp, jit and auto and under forced GC, moved to the baseline; both negative fixtures registered in `test_lambda_errors_gtest` | official `make test-lambda-baseline`: only the upstream `dom_module_props` golden (see §14) | grammar regenerated; 18 retired spellings in `type_pattern.ls`, the occurrence suite and five island fixtures migrated |
@@ -816,7 +816,7 @@ re-homes a wide scalar held in the dying container (D2.5.2v2).
   sequence append, and the root printer all read the bit on both
   representations. §1.5's "lists stay generic" still holds for list producers.
 - Query results (`e[T]`, `e?T`) still carry the bit at any length. Their kind
-  is unruled ([LR05-13](../Lambda_Issue_Ledger.md#lr05-13)), and a pipe or
+  is unruled ([LR05-13](<../Lambda_Issue_Ledger (fixed).md#lr05-13>)), and a pipe or
   `that` over one now yields a collapsing list where it used to yield an array
   (`page?<p> |> len(~)` prints as content).
 

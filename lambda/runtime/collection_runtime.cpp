@@ -287,8 +287,8 @@ Item pn_push(Item arr_item, Item value) {
             cert->array_contract, "push");
     }
     if (tid != LMD_TYPE_ARRAY) {
-        log_error("push: an uncertified ArrayNum has no append contract");
-        return ItemError;
+        // no declared contract: keep the lane or widen, as an index write does
+        return array_num_push_open(arr_item, value);
     }
     // Open growth is allowed to change the element set; it cannot retain a
     // proof that was not re-established by a typed append boundary.
@@ -298,31 +298,25 @@ Item pn_push(Item arr_item, Item value) {
 }
 
 Item pn_push_cow(Item owner, Item value) {
-    TypeId tid = get_type_id(owner);
     // This entry is reached only from a binding with no declared array
-    // contract, so an Array's certificate here is a past read admission
-    // through some alias -- including one stamped on a producer-inferred
-    // pointer lane, which an open append is free to widen. ArrayNum keeps the
-    // checked entry: its packed lane carries no boxed slot to widen into.
-    if (tid == LMD_TYPE_ARRAY_NUM &&
-            owner.array->rep_cert && owner.array->rep_cert->array_contract) {
-        return lambda_array_push_checked(owner, value,
-            owner.array->rep_cert->array_contract, "push");
-    }
+    // contract, so a certificate here is a past read admission through some
+    // alias -- including one stamped on a producer-inferred pointer lane. It is
+    // not the open binding's write contract (SI3v2): an Array widens, and an
+    // ArrayNum keeps its lane or widens as array_num_push_open does. Checking
+    // a packed array against it made `push(u, "s")` fail once some `int[]`
+    // parameter had admitted `u` (LR12-27).
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
-    // A boxed certificate records a past admission, not an open binding's
-    // write contract. Detach before clearing it to preserve aliases (D3.3.3v3).
-    if (get_type_id(replacement) == LMD_TYPE_ARRAY)
-        lambda_array_clear_rep_cert(replacement);
+    // Detach before clearing the certificate to preserve aliases (D3.3.3v3).
+    lambda_array_clear_rep_cert(replacement);
     return pn_push(replacement, value);
 }
 
-// The ordinary open push path must reject an uncertified ArrayNum: it cannot
-// decide whether a later value should widen the physical lane. MIR reaches
-// this entry only after its append-builder proof has closed every writer to a
-// total int producer. Preserve COW before growth, then store with the native
-// lane's own admission check (D3.2.1, D3.3.1, S9.2.2).
+// The ordinary open push path keeps an uncertified ArrayNum's lane or widens it
+// (array_num_push_open). MIR reaches this entry only after its append-builder
+// proof has closed every writer to a total int producer, so it skips that
+// decision. Preserve COW before growth, then store with the native lane's own
+// admission check (D3.2.1, D3.3.1, S9.2.2).
 Item lambda_array_int_push_inferred_cow(Item owner, Item value) {
     if (get_type_id(owner) != LMD_TYPE_ARRAY_NUM ||
             (get_type_id(value) != LMD_TYPE_INT &&

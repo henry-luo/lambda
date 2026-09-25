@@ -169,8 +169,14 @@ const LONG_RUNNING_TESTS = new Set([
     'test_js_test262_gtest',
 ]);
 const LONG_RUNNING_IDLE_TIMEOUT_MS = 600 * 1000;
+// the DOM nodes suite includes WPT cases marked timeout=long that run millions of
+// array-like property reads before producing any test output.
+const WPT_DOM_NODES_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 
 function getTestIdleTimeoutMs(baseName) {
+    if (baseName === 'test_wpt_dom_nodes_gtest') {
+        return Math.max(IDLE_TIMEOUT_MS, WPT_DOM_NODES_IDLE_TIMEOUT_MS);
+    }
     if (LONG_RUNNING_TESTS.has(baseName)) {
         return Math.max(IDLE_TIMEOUT_MS, LONG_RUNNING_IDLE_TIMEOUT_MS);
     }

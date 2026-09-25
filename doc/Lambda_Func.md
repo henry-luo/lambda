@@ -176,6 +176,9 @@ create_user("Bob", 25)               // active defaults to true
 - Positional arguments must come before named arguments
 - Named arguments can appear in any order
 - Cannot provide the same argument both positionally and by name
+- Named arguments need a statically known callee. A call through a function
+  value — a `let`-bound function, a function parameter, a map field — takes
+  positional arguments only, and naming one is a compile error (`E212`)
 
 ### Variadic Parameters
 
@@ -183,11 +186,11 @@ Use `...` to accept any number of additional arguments:
 
 ```lambda
 fn sum_all(...) => sum(varg())
-fn printf(fmt: string, ...) => format(fmt, varg())
+fn tagged(tag: string, ...) => [tag, len(varg())]
 
 sum_all(1, 2, 3, 4, 5)       // 15
 sum_all()                     // 0
-printf("%s is %d", "x", 42)  // "x is 42"
+tagged("x", 42, 7)           // ["x", 2]
 ```
 
 Access variadic arguments with `varg()`:

@@ -14,7 +14,7 @@ import util: .util
 //
 // spec: parsed OpenAPI spec map
 // returns: JSON string
-pub fn openapi_json(spec) => format(spec, 'json')
+pub fn openapi_json(spec) => format(spec, 'json') or ""
 
 // Generate a Swagger UI HTML page that loads the spec from
 // the given spec_url endpoint.

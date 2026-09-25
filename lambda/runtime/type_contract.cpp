@@ -987,7 +987,7 @@ static const Type* contract_display_unwrap_type(const Type* type) {
 }
 
 static void lambda_type_format_name_inner(const Type* type, char* buffer,
-        size_t capacity, int depth) {
+        size_t capacity, int depth, bool literal_values) {
     if (!buffer || capacity == 0) return;
     type = contract_display_unwrap_type(type);
     if (!type) {
@@ -1010,7 +1010,7 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
         const TypeUnary* unary = (const TypeUnary*)type;
         char operand_name[128];
         lambda_type_format_name_inner(unary->operand, operand_name,
-            sizeof(operand_name), depth + 1);
+            sizeof(operand_name), depth + 1, literal_values);
         // S11.1.6v2 splits the spellings: brackets are the array family
         // (`T[]`, `T[n]`), braces count a run (`T{n}`, `T{n,m}`, `T{n+}`)
         if (unary->op == OPERATOR_ARRAY) {
@@ -1053,10 +1053,26 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
             char left_name[128];
             char right_name[128];
             lambda_type_format_name_inner(binary->left, left_name,
-                sizeof(left_name), depth + 1);
+                sizeof(left_name), depth + 1, literal_values);
             lambda_type_format_name_inner(binary->right, right_name,
-                sizeof(right_name), depth + 1);
+                sizeof(right_name), depth + 1, literal_values);
             snprintf(buffer, capacity, "%s%s%s", left_name, spelling, right_name);
+            return;
+        }
+    }
+    // a literal contract names its value, not its carrier: rejections read
+    // "expected int | int" for `1 | 2` and "expected string" for `"a"` (LR03-11).
+    // Only a contract renders so; a literal source keeps its carrier name.
+    Item literal;
+    if (literal_values && lambda_literal_contract_value(type, &literal)) {
+        if (type->type_id == LMD_TYPE_INT) {
+            snprintf(buffer, capacity, "%lld", (long long)((const TypeInt64*)type)->int64_val);
+            return;
+        }
+        if (type->type_id == LMD_TYPE_STRING || type->type_id == LMD_TYPE_SYMBOL) {
+            const char* quote = type->type_id == LMD_TYPE_STRING ? "\"" : "'";
+            snprintf(buffer, capacity, "%s%.*s%s", quote, (int)literal.get_len(),
+                literal.get_chars(), quote);
             return;
         }
     }
@@ -1064,7 +1080,11 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
 }
 
 void lambda_type_format_name(const Type* type, char* buffer, size_t capacity) {
-    lambda_type_format_name_inner(type, buffer, capacity, 0);
+    lambda_type_format_name_inner(type, buffer, capacity, 0, false);
+}
+
+void lambda_type_format_contract_name(const Type* type, char* buffer, size_t capacity) {
+    lambda_type_format_name_inner(type, buffer, capacity, 0, true);
 }
 
 static uint8_t contract_top_exclusions(Type* type) {

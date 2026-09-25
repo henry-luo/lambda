@@ -1235,18 +1235,28 @@ static inline bool type_is_any_without_null(const Type* type) {
     return type == &TYPE_ANY_NO_NULL || type == &TYPE_ANY_NO_ERROR_OR_NULL;
 }
 
+// Numeric contract names a TypeId cannot tell apart. The abstract contracts
+// share LMD_TYPE_TYPE with the `type` value, so they keep their canonical
+// pointer identity; every sized type shares LMD_TYPE_NUM_SIZED, whose
+// diagnostics read "num_sized" instead of `u8` (LR03-11).
+static inline const char* type_numeric_contract_name(const Type* type) {
+    if (type == &TYPE_INTEGER) return "integer";
+    if (type == &TYPE_NUMBER) return "number";
+    if (type && type->type_id == LMD_TYPE_NUM_SIZED) {
+        return get_num_sized_type_name(type_num_sized_kind(type));
+    }
+    return NULL;
+}
+
 static inline const char* type_contract_display_name(const Type* type) {
     if (type == &TYPE_ANY_NO_ERROR) return "any \\ error";
     if (type == &TYPE_ANY_NO_NULL) return "any \\ null";
     if (type == &TYPE_ANY_NO_ERROR_OR_NULL) return "any \\ {error, null}";
-    // Abstract numeric contracts share LMD_TYPE_TYPE with the `type` value,
-    // so contract diagnostics must preserve their canonical pointer identity.
-    if (type == &TYPE_INTEGER) return "integer";
+    if (const char* numeric = type_numeric_contract_name(type)) return numeric;
     // a function contract names its colour; bare `function` falls through
     if (TypeFunc* signature = lambda_type_func_signature((Type*)type)) {
         return signature->is_proc ? "pn" : "fn";
     }
-    if (type == &TYPE_NUMBER) return "number";
     return type ? get_type_name(type->type_id) : "unknown";
 }
 

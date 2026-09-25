@@ -1,1 +1,1 @@
-error[E201]: type check at typed array mask assignment failed: expected num_sized, got int 300
+error[E201]: type check at typed array mask assignment failed: expected u8, got int 300

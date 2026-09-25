@@ -1,0 +1,7 @@
+[true, true, true, true, true, true]
+[true, true, true, true, true, true]
+[true, true, true, true, true, true]
+[true, "el"]
+["dflt", "he"]
+["el", 'ab', "lo", "axc", "A", 1]
+

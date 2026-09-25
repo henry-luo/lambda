@@ -1031,6 +1031,20 @@ static bool sys_operand_base_is(AstNode* operand, TypeId type_id) {
     return base && base->type_id == type_id;
 }
 
+static bool ast_constant_integer_value(Transpiler* tp, AstNode* node, int64_t* out);
+
+// Every argument from `first` on is a constant integer. An `int` variable is no
+// such proof: the domain includes inf and nan (S4.1.1), which offsets reject.
+static bool sys_trailing_args_are_constant_ints(Transpiler* tp, AstNode* arguments,
+        AstNode* injected_argument, int first) {
+    for (int index = first; ; index++) {
+        AstNode* arg = sys_func_argument_at(arguments, injected_argument, index);
+        if (!arg) return true;
+        int64_t value = 0;
+        if (!ast_constant_integer_value(tp, arg, &value)) return false;
+    }
+}
+
 static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
         AstNode* arguments, AstNode* injected_argument) {
     if (!info || !info->may_return_error) return false;
@@ -1083,6 +1097,32 @@ static bool sys_func_call_may_return_error(Transpiler* tp, SysFuncInfo* info,
             (sys_operand_is_materialized_sequence(first_arg) ||
              sys_operand_base_is(first_arg, LMD_TYPE_NULL)));
     }
+    // LR07-18 rows. Each proof rules out the row's only rejection branches,
+    // so a provably clean call keeps its success type.
+    case SYSFUNC_SLICE:
+    case SYSFUNC_TAKE:
+    case SYSFUNC_DROP:
+        // only a fractional or non-finite offset or count rejects a text,
+        // materialized or range source
+        return !((sys_operand_is_clean_text_or_null(first_arg, true) ||
+                  sys_operand_is_materialized_sequence(first_arg) ||
+                  sys_operand_base_is(first_arg, LMD_TYPE_RANGE)) &&
+            sys_trailing_args_are_constant_ints(tp, arguments, injected_argument, 1));
+    case SYSFUNC_REPLACE:
+        // only a non-text argument rejects
+        for (int index = 0; index < 3; index++) {
+            AstNode* arg = sys_func_argument_at(arguments, injected_argument, index);
+            if (!sys_operand_base_is(arg, LMD_TYPE_STRING) &&
+                    !sys_operand_base_is(arg, LMD_TYPE_SYMBOL)) return true;
+        }
+        return false;
+    case SYSFUNC_REAL:
+    case SYSFUNC_IMAG:
+        return !sys_operand_base_is(first_arg, LMD_TYPE_COMPLEX);
+    case SYSFUNC_CHR:
+    case SYSFUNC_NDIM:
+        // an error operand is the only rejection (S7.10.4)
+        return !sys_operand_excludes_error(first_arg);
     default:
         return true;
     }
@@ -1662,6 +1702,15 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
         if (lambda_type_func_is_proc(source) != lambda_type_func_is_proc(target)) {
             return STATIC_BOUNDARY_REJECTED;
         }
+    }
+    // S11.2.1: a literal contract names one value, and a type proves only its
+    // carrier: a carrier that fits leaves the value to the runtime check, one
+    // that cannot fit rejects. Proving by TypeId let `x: 1 | 2` take any int
+    // and let the JIT drop the check on `x: "a"` (LR03-11).
+    Item target_literal;
+    if (lambda_literal_contract_value(target, &target_literal)) {
+        return types_compatible_with_full(source, target, target) ?
+            STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_REJECTED;
     }
     return types_compatible_with_full(source, target, target) ?
         STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
@@ -2962,7 +3011,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         if (arg->type && !compatible) {
             char expected_name[128];
             char actual_name[128];
-            lambda_type_format_name(full_type, expected_name, sizeof(expected_name));
+            lambda_type_format_contract_name(full_type, expected_name, sizeof(expected_name));
             lambda_type_format_name(arg->type, actual_name, sizeof(actual_name));
             if (!line) line = source_span_start_line(tp, diagnostic_span);
             record_type_error_code(tp, line, ERR_ARGUMENT_TYPE_MISMATCH,
@@ -4221,13 +4270,7 @@ static bool ast_is_explicit_type_value(AstNode* node) {
         return true;
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
-        AstNode* declaration = ident->entry ? ident->entry->node : NULL;
-        return declaration && (declaration->node_type == AST_NODE_TYPE_STAM ||
-            declaration->node_type == AST_NODE_OBJECT_TYPE ||
-            (declaration->node_type == AST_NODE_VARIABLE_DECLARATOR &&
-                ((AstDeclaratorNode*)declaration)->is_type_definition) ||
-            declaration->node_type == AST_NODE_STRING_PATTERN ||
-            declaration->node_type == AST_NODE_SYMBOL_PATTERN);
+        return ast_definition_denotes_type(ident->entry ? ident->entry->node : NULL);
     }
     default:
         return false;
@@ -9190,6 +9233,23 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 call->type = &TYPE_ERROR;
             }
             call->is_proc_method = true;
+        }
+    }
+    // S12.3.2, D6.2.2v2: a call through a function value has no declaration
+    // to bind names against, and both tiers passed its named arguments by
+    // position. Named arguments need a statically known callee.
+    if (!info && !user_method_found && !ast_direct_call_function(call) &&
+            !ast_called_type_target(call->function)) {
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (arg->node_type != AST_NODE_NAMED_ARG) continue;
+            AstNamedNode* named = (AstNamedNode*)arg;
+            record_semantic_error_span(tp, arg->source_span, ERR_INVALID_CALL,
+                "named argument '%.*s' needs a statically known callee: a call "
+                "through a function value binds only by position (S12.3.2)",
+                named->name ? (int)named->name->len : 0,
+                named->name ? named->name->chars : "");
+            call->type = &TYPE_ERROR;
+            break;
         }
     }
     if (!lambda_ast_validate_call_arguments(tp, call, span,

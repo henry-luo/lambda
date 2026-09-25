@@ -245,7 +245,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis);
 static Item dom_svg_create_matrix(void);
 static Item dom_svg_create_point(void);
 extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem);
-static bool dom_ensure_geometry_snapshot(DomDocument* doc);
+extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc);
 
 // ============================================================================
 // Thread-local DOM document context
@@ -700,7 +700,7 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 
 static thread_local bool dom_geometry_flush_in_progress = false;
 
-static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
+extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     if (!doc) return false;
     // Host event turns expose their last committed tree. Re-entering layout
     // from a callback advances geometry before that turn has settled and
@@ -860,6 +860,11 @@ static bool dom_node_contains(DomNode* ancestor, DomNode* node) {
         if (cur == ancestor) return true;
     }
     return false;
+}
+
+static Item dom_insertion_ancestor_error() {
+    return dom_raise_named("HierarchyRequestError",
+                           "The new child contains the parent.");
 }
 
 static bool dom_node_is_connected(DomNode* node) {
@@ -5495,10 +5500,18 @@ static float dom_scrollable_extent(DomElement* elem, bool width_axis) {
     float extent = max(width_axis ? elem->content_width : elem->content_height,
                        width_axis ? elem->width : elem->height);
     float origin = width_axis ? elem->x : elem->y;
+    float descendant_extent = 0.0f;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        extent = max(extent,
-                     dom_scrollable_descendant_extent(child, width_axis, origin));
+        descendant_extent = max(descendant_extent,
+            dom_scrollable_descendant_extent(child, width_axis, origin));
     }
+    // Scrollable overflow includes the padding after overflowing descendants.
+    // Flex boxes with overflow: clip otherwise lose that padding because their
+    // cached content size stops at the child edge.
+    float padding_end = elem->bound
+        ? (width_axis ? elem->boundary()->padding.right
+                      : elem->boundary()->padding.bottom) : 0.0f;
+    extent = max(extent, descendant_extent + padding_end);
     return extent;
 }
 
@@ -7162,7 +7175,8 @@ static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
 }
 JS_FORWARD_ITEM(dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
 
-static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
+static void dom_queue_scroll_into_view(DomElement* elem, bool center,
+                                       bool if_needed = false) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
     if (doc->pending_scroll_into_view_target) {
@@ -7174,6 +7188,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
     doc->pending_scroll_into_view_target = nullptr;
     doc->pending_scroll_into_view_target_id = 0;
     doc->pending_scroll_into_view_center = false;
+    doc->pending_scroll_into_view_if_needed = false;
     DomNodeRef ref = dom_node_ref((DomNode*)elem);
     if (!dom_node_ref_validate(doc, ref) ||
         !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
@@ -7182,6 +7197,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
     doc->pending_scroll_into_view_target = elem;
     doc->pending_scroll_into_view_target_id = ref.expected_id;
     doc->pending_scroll_into_view_center = center;
+    doc->pending_scroll_into_view_if_needed = if_needed;
     if (doc->state) doc_state_request_reflow(doc->state);
 }
 
@@ -9833,14 +9849,18 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it(dom_geometry_dimension(elem, false))};
     }
 
-    // clientWidth / clientHeight — border box minus borders
+    // clientWidth / clientHeight — padding box in the element's CSS pixels.
+    // Layout stores zoomed coordinates, so remove the effective zoom after
+    // subtracting the zoomed border widths.
     if (prop_id == JS_DOM_PROP_CLIENT_WIDTH) {
         dom_ensure_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
         }
-        return (Item){.item = i2it((int64_t)llroundf(elem->width - bw))};
+        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        return (Item){.item = i2it((int64_t)llroundf(
+            (elem->width - bw) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
     if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
         dom_ensure_geometry_snapshot(elem->doc);
@@ -9848,7 +9868,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
-        return (Item){.item = i2it((int64_t)llroundf(elem->height - bh))};
+        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        return (Item){.item = i2it((int64_t)llroundf(
+            (elem->height - bh) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
     // CSSOM View §6: clientTop/clientLeft expose the border's start width.
     if (prop_id == JS_DOM_PROP_CLIENT_TOP) {
@@ -14222,6 +14244,10 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         log_error("dom_append_child_bridge: argument is not a DOM node");
         return ItemNull;
     }
+    if (dom_node_contains(child_node, (DomNode*)elem)) {
+        // reject an ancestor before either tree can acquire a parent cycle.
+        return dom_insertion_ancestor_error();
+    }
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
@@ -14291,6 +14317,9 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
         // insertBefore(node, node) must stay a no-op; detaching first drops
         // keyed reconciler children and changes live-range behavior.
         return new_child_arg;
+    }
+    if (dom_node_contains(new_child, parent_node)) {
+        return dom_insertion_ancestor_error();
     }
     if (ref_child && ref_child->parent != parent_node) {
         log_error("dom_insert_before_bridge: reference node is not a child of target parent");
@@ -14509,6 +14538,9 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         dom_pre_remove(old_child);
         return old_child_arg;
     }
+    if (dom_node_contains(new_child, (DomNode*)elem)) {
+        return dom_insertion_ancestor_error();
+    }
     if (new_child->is_element() &&
         dom_is_document_fragment_element(new_child->as_element())) {
         // DOM Standard replace inserts a fragment's children at the old
@@ -14522,6 +14554,12 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
         return old_child_arg;
     }
     if (!dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+    if (new_child->parent == (DomNode*)elem) {
+        // remove a moved sibling from both trees before replacement rewires its
+        // links; otherwise the old position can form a sibling cycle.
+        dom_pre_remove(new_child);
+        if (!dom_remove_backed_child(elem, new_child)) return ItemNull;
+    }
 
     // Replacing a backed CharacterData node with a backed Element must update
     // the Lambda child list too; the generic DOM-only fallback leaves the
@@ -14573,14 +14611,6 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
                     !dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
                 }
-            } else if (new_child->parent == (DomNode*)elem) {
-                // DOM replacement removes an existing sibling before inserting
-                // it at the old node's position; recompute the old index after
-                // that removal because the backing array may have shifted.
-                dom_pre_remove(new_child);
-                if (!dom_remove_backed_child(elem, new_child)) return ItemNull;
-                old_index = dom_backed_child_index(elem, old_elem);
-                if (old_index < 0) return ItemNull;
             }
             if (!new_text->native_string) new_text->native_string = replacement_string;
             dom_pre_remove(old_child);
@@ -14863,6 +14893,9 @@ extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc)
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
+            if (dom_node_contains(child_node, (DomNode*)elem)) {
+                return dom_insertion_ancestor_error();
+            }
             if (child_node->is_element()) {
                 DomElement* child_elem = child_node->as_element();
                 if (child_elem->tag_name &&
@@ -14910,6 +14943,9 @@ extern "C" Item dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int argc
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)dom_unwrap_element(args[i]);
         if (child_node) {
+            if (dom_node_contains(child_node, (DomNode*)elem)) {
+                return dom_insertion_ancestor_error();
+            }
             if (child_node->is_element() &&
                 dom_is_document_fragment_element(child_node->as_element())) {
                 if (!dom_insert_fragment_children_before(elem,
@@ -15014,6 +15050,14 @@ extern "C" Item dom_core_has_child_nodes(Item n) {
 extern "C" Item dom_core_scroll_into_view_op(Item n) {
     DomElement* elem = dom_op_element(n);
     return elem ? dom_scroll_into_view_bridge((void*)elem) : ItemNull;
+}
+
+extern "C" Item dom_core_scroll_into_view_if_needed_op(Item n,
+                                                         Item center_if_needed) {
+    DomElement* elem = dom_op_element(n);
+    if (!elem) return ItemNull;
+    dom_queue_scroll_into_view(elem, center_if_needed.item != ITEM_FALSE, true);
+    return make_js_undefined();
 }
 
 // Node-level: valid on text and comment receivers too, so no element check.

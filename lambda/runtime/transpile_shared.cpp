@@ -115,16 +115,29 @@ void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import) {
     strbuf_append_str_n(strbuf, name->chars, name->len);
 }
 
-ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
-    ShapeEntry* field = map_type->shape;
-    while (field) {
+// A literal shape keeps a repeated key's entries in source order. The runtime
+// reader (_map_get_keyed) and the checker's member oracle take the last one,
+// while fn_map_set writes the first, so a static slot must be the entry its
+// runtime counterpart would pick (S1.6).
+static ShapeEntry* find_shape_field_named(TypeMap* map_type, const char* name,
+        int name_len, bool last) {
+    ShapeEntry* found = NULL;
+    for (ShapeEntry* field = map_type->shape; field; field = field->next) {
         if (field->name && (int)field->name->length == name_len &&
             strncmp(field->name->str, name, name_len) == 0) {
-            return field;
+            found = field;
+            if (!last) break;
         }
-        field = field->next;
     }
-    return NULL;
+    return found;
+}
+
+ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
+    return find_shape_field_named(map_type, name, name_len, false);
+}
+
+ShapeEntry* find_shape_read_field_by_name(TypeMap* map_type, const char* name, int name_len) {
+    return find_shape_field_named(map_type, name, name_len, true);
 }
 
 AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
@@ -223,6 +236,29 @@ bool static_literal_item_from_type(Type* type, Item* out) {
         out->item = u2it(&value->uint64_val);
         return true;
     }
+    default:
+        return false;
+    }
+}
+
+bool lambda_literal_contract_value(const Type* type, Item* out) {
+    if (!type || !out || !type->is_literal) return false;
+    // the shared markers are plain Types: no payload field exists to read
+    if (type == &LIT_NULL || type == &LIT_BOOL || type == &LIT_INT ||
+            type == &LIT_INT64 || type == &LIT_FLOAT || type == &LIT_COMPLEX ||
+            type == &LIT_DECIMAL || type == &LIT_STRING || type == &LIT_DTIME ||
+            type == &LIT_NUM_SIZED || type == &LIT_UINT64 || type == &LIT_TYPE) {
+        return false;
+    }
+    switch (type->type_id) {
+    case LMD_TYPE_INT:
+        // a pooled int literal carries its payload (parse_type_pattern.cpp)
+        out->item = i2it(((const TypeInt64*)type)->int64_val);
+        return true;
+    case LMD_TYPE_INT64: case LMD_TYPE_FLOAT: case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_NUM_SIZED:
+    case LMD_TYPE_UINT64:
+        return static_literal_item_from_type((Type*)type, out);
     default:
         return false;
     }

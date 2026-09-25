@@ -107,6 +107,11 @@ ValueRep lambda_canonical_rep_for_type_id(TypeId type_id);
 MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
         const TypeMap* expected);
 
+// The one value a value-bearing literal contract names (S11.2.1: literal types
+// are singletons). The shared LIT_* markers type literal expressions and carry
+// no payload, so they answer false, as does every non-literal type.
+bool lambda_literal_contract_value(const Type* type, Item* out);
+
 // Compare one proven expression result with a map field contract without
 // exposing the relation's recursive implementation to the MIR transpiler.
 bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expected);
@@ -172,6 +177,9 @@ Type* lambda_type_remove_exclusions(Pool* pool, Type* type, uint8_t exclusions);
 // Type values use LMD_TYPE_TYPE as an internal carrier, so callers must not
 // derive a user-facing name from TypeId alone.
 void lambda_type_format_name(const Type* type, char* buffer, size_t capacity);
+// The same, for the expected side of a boundary diagnostic: a literal contract
+// names its value (`1 | 2`, `"a"`) rather than its carrier.
+void lambda_type_format_contract_name(const Type* type, char* buffer, size_t capacity);
 
 // Re-represent an exactly admitted numeric value for a concrete boundary
 // contract. This is deliberately separate from `lambda_type_matches()`, whose
