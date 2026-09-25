@@ -1919,6 +1919,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_VALID;
                 } else if (strcmp(pseudo_name, "invalid") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_INVALID;
+                } else if (strcmp(pseudo_name, "open") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_OPEN;
                 } else if (strcmp(pseudo_name, "required") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_REQUIRED;
                 } else if (strcmp(pseudo_name, "optional") == 0) {

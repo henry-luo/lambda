@@ -175,7 +175,8 @@ static Item blob_append_part(StrBuf* sb, Item part) {
     }
     if (tid == LMD_TYPE_MAP) {
         // Blob? Pull _text.
-        if (js_class_id(part) == JS_CLASS_BLOB) {
+        if (js_class_id(part) == JS_CLASS_BLOB ||
+            js_class_id(part) == JS_CLASS_FILE) {
             size_t n = 0;
             const char* t = str_prop_get(part, "_text", &n);
             if (t && n > 0) strbuf_append_str_n(sb, t, n);

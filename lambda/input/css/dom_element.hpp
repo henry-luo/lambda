@@ -1090,6 +1090,17 @@ struct DomElement : DomNode {
 
 };
 
+// A node is connected only while its parent chain reaches the owning root.
+inline bool dom_element_is_connected(const DomElement* element) {
+    if (!element || !element->doc || !element->doc->root) return false;
+    const DomNode* node = element;
+    while (node) {
+        if (node == element->doc->root) return true;
+        node = node->parent;
+    }
+    return false;
+}
+
 // Generated layout nodes share the live sibling chain but are not DOM element
 // children for CSS structural pseudo-classes.
 static inline bool dom_is_css_element_child(const DomNode* node) {
@@ -1252,6 +1263,7 @@ static_assert(offsetof(DomElement, elmt) % 8 == 0,
 #define PSEUDO_STATE_PLACEHOLDER_SHOWN (1 << 22)  // input showing placeholder
 #define PSEUDO_STATE_DRAG           (1 << 23)  // element being dragged
 #define PSEUDO_STATE_DRAG_OVER      (1 << 24)  // element is a drag-over target
+#define PSEUDO_STATE_OPEN           (1 << 25)  // open disclosure or picker
 
 // ============================================================================
 // DOM Document Creation and Destruction

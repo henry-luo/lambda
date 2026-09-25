@@ -834,6 +834,7 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
     var aeTag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : "";
     var isTC = (aeTag === "INPUT" || aeTag === "TEXTAREA");
     if (isTC) {
+        if (!_wpt_control_accepts_keyboard_edit(ae)) return;
         if (code === 0xE013 && _wpt_spin_number_control(ae, +1)) return; // ArrowUp
         if (code === 0xE015 && _wpt_spin_number_control(ae, -1)) return; // ArrowDown
         var v = ae.value || "";
@@ -2953,6 +2954,7 @@ function _wpt_spin_number_control(el, delta) {
     try { tag = String(el.tagName || "").toUpperCase(); } catch (_) {}
     try { type = String(el.type || el.getAttribute("type") || "").toLowerCase(); } catch (_) {}
     if (tag !== "INPUT" || type !== "number") return false;
+    if (!_wpt_control_accepts_keyboard_edit(el)) return true;
     if (!_wpt_dispatch_input_event(el, "beforeinput", "insertReplacementText", null)) {
         return true;
     }
@@ -2970,8 +2972,13 @@ function _wpt_spin_number_control(el, delta) {
     return true;
 }
 
+function _wpt_control_accepts_keyboard_edit(el) {
+    // The synthetic driver must honor the control's native editing gate.
+    return !!el && !el.disabled && !el.readOnly;
+}
+
 function _wpt_insert_text_in_control(el, text) {
-    if (!el) return false;
+    if (!_wpt_control_accepts_keyboard_edit(el)) return false;
     var v = el.value || "";
     var ss = el.selectionStart;
     var se = el.selectionEnd;

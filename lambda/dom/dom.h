@@ -424,6 +424,9 @@ void dom_foreign_documents_release_context(void);
 bool dom_is_disabled(void* dom_elem);
 bool dom_is_connected(void* dom_elem);
 
+/** Construct a File with its Blob bytes and File prototype for DOM consumers. */
+Item js_file_new(Item parts, Item name, Item options);
+
 /** Activation bridges invoked after the UA tier claims an event. */
 Item dom_focus_method_bridge(void* dom_elem, bool focus);
 Item dom_scroll_into_view_bridge(void* dom_elem);

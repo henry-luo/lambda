@@ -797,48 +797,39 @@ static int64_t now_epoch_ms() {
 // (not a File), returns a new File wrapping it with name=filename.
 // If filename is undefined and value is a Blob (not File), returns a File named "blob".
 static Item fd_blob_to_file(Item value, Item filename_item) {
-    // value must be a Blob/File MAP at this point
-    bool has_filename = (get_type_id(filename_item) != LMD_TYPE_UNDEFINED);
-    bool is_file = (js_class_id(value) == JS_CLASS_FILE);
-
-    Item file = dom_realm_new_object_of_class(JS_CLASS_FILE);
-
-    Item sz = prop_get(value, "size");
-    prop_set(file, "size", get_type_id(sz) == LMD_TYPE_INT ? sz : make_int_item(0));
-
-    Item ty = prop_get(value, "type");
-    prop_set(file, "type", get_type_id(ty) == LMD_TYPE_STRING ? ty : make_str(""));
-
-    const char* fname = nullptr;
-    if (has_filename) fname = fn_to_cstr(filename_item);
-    else if (is_file) {
-        Item nm = prop_get(value, "name");
-        if (get_type_id(nm) == LMD_TYPE_STRING) fname = fn_to_cstr(nm);
+    // Reuse File construction so converted entries retain bytes and [[Prototype]].
+    RootFrame roots(5);
+    Rooted<Item> blob_root(roots, value);
+    Rooted<Item> filename_root(roots, filename_item);
+    Rooted<Item> parts_root(roots, js_array_new(0));
+    Rooted<Item> options_root(roots, js_new_object());
+    Rooted<Item> name_root(roots, ItemNull);
+    js_array_push(parts_root.get(), blob_root.get());
+    Item type = prop_get(blob_root.get(), "type");
+    prop_set(options_root.get(), "type",
+        get_type_id(type) == LMD_TYPE_STRING ? type : make_str(""));
+    Item modified = prop_get(blob_root.get(), "lastModified");
+    prop_set(options_root.get(), "lastModified",
+        get_type_id(modified) == LMD_TYPE_INT ? modified : make_int_item(now_epoch_ms()));
+    if (get_type_id(filename_root.get()) != LMD_TYPE_UNDEFINED) {
+        name_root.set(js_to_string(filename_root.get()));
+    } else if (js_class_id(blob_root.get()) == JS_CLASS_FILE) {
+        name_root.set(prop_get(blob_root.get(), "name"));
+    } else {
+        name_root.set(make_str("blob"));
     }
-    if (!fname) fname = is_file ? "" : "blob";
-    prop_set(file, "name", make_str(fname));
-
-    int64_t lm = 0;
-    Item lm_item = prop_get(value, "lastModified");
-    if (get_type_id(lm_item) == LMD_TYPE_INT) lm = it2i(lm_item);
-    else lm = now_epoch_ms();
-    prop_set(file, "lastModified", make_int_item(lm));
-
-    Item ctor = prop_get(dom_realm_global(), "File");
-    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(file, "constructor", ctor);
-    return file;
+    return js_file_new(parts_root.get(), name_root.get(), options_root.get());
 }
 
 // Create a File stub for an empty file input.
 static Item fd_make_file_stub() {
-    Item obj = dom_realm_new_object_of_class(JS_CLASS_FILE);
-    prop_set(obj, "size",           make_int_item(0));
-    prop_set(obj, "name",           make_str(""));
-    prop_set(obj, "type",           make_str("application/octet-stream"));
-    prop_set(obj, "lastModified",   make_int_item(now_epoch_ms()));
-    Item ctor = prop_get(dom_realm_global(), "File");
-    if (get_type_id(ctor) != LMD_TYPE_UNDEFINED) prop_set(obj, "constructor", ctor);
-    return obj;
+    RootFrame roots(3);
+    Rooted<Item> parts_root(roots, js_array_new(0));
+    Rooted<Item> options_root(roots, js_new_object());
+    Rooted<Item> name_root(roots, make_str(""));
+    prop_set(options_root.get(), "type", make_str("application/octet-stream"));
+    prop_set(options_root.get(), "lastModified", make_int_item(now_epoch_ms()));
+    return js_file_new(parts_root.get(), name_root.get(), options_root.get());
 }
 
 static void fd_append_submitter_entry(Item entries, DomElement* elem) {

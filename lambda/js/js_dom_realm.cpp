@@ -156,6 +156,17 @@ static void _install_nodelist_for_each(Item global) {
         // WebIDL identity and VArray carrier (D7.4.5v2).
         js_set_key_cstr(node_list_proto, "forEach", array_for_each);
     }
+    // NodeList's keys/values/entries use the same live indexed iterator
+    // machinery as arrays; its VArray backend supplies length and item reads.
+    if (get_type_id(node_list_proto) == LMD_TYPE_MAP) {
+        static const char* methods[] = {"keys", "values", "entries"};
+        for (size_t i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
+            Item method = js_get_key_cstr(array_proto, methods[i]);
+            if (!js_is_callable(method)) continue;
+            js_set_key_cstr(node_list_proto, methods[i], method);
+            js_mark_non_enumerable(node_list_proto, js_name_item(methods[i]));
+        }
+    }
 }
 
 static void _link_iface_proto(Item global, const char* name, const char* base_name) {

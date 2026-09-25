@@ -890,7 +890,8 @@ static bool dom_node_is_connected(DomNode* node) {
     return false;
 }
 
-static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
+static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
+                                  bool release_external = true) {
     DocState* st = dom_state_for_nodes(child, child ? child->parent : nullptr);
     if (st && child) {
         dom_mutation_pre_remove(st, child);
@@ -936,11 +937,20 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
         dom_node_contains(child, (DomNode*)js_document_active_element)) {
         js_document_active_element = nullptr;
     }
-    view_pool_release_detached_subtree(child);
+    // A same-document move keeps the node's embedded browsing context and
+    // media handles alive while its DOM parent changes.
+    if (release_external) view_pool_release_detached_subtree(child);
     if (record_mutation) {
         dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
                                       child ? child->parent : nullptr, 0);
     }
+}
+
+static void dom_pre_remove_for_move(DomElement* parent, DomNode* child) {
+    if (!parent || !child || !child->parent) return;
+    bool same_document = parent->doc &&
+        dom_node_owner_document(child->parent) == parent->doc;
+    dom_pre_remove(child, true, !same_document);
 }
 
 static bool dom_detach_dom_node(DomNode* node) {
@@ -1637,16 +1647,7 @@ extern "C" bool dom_is_disabled(void* dom_elem) {
 // the document's root element. Newly-created elements that haven't been
 // inserted into the tree are not connected.
 extern "C" bool dom_is_connected(void* dom_elem) {
-    DomElement* e = (DomElement*)dom_elem;
-    if (!e || !e->doc) return false;
-    DomElement* root = e->doc->root;
-    if (!root) return false;
-    DomNode* cur = (DomNode*)e;
-    while (cur) {
-        if (cur == (DomNode*)root) return true;
-        cur = cur->parent;
-    }
-    return false;
+    return dom_element_is_connected((DomElement*)dom_elem);
 }
 
 // ============================================================================
@@ -8790,14 +8791,13 @@ static bool dom_is_constraint_control(DomElement* elem) {
            str_icmp_cstr(elem->tag_name, "button") == 0;
 }
 
-static void dom_dispatch_invalid_event(Item target_item, bool include_bubbles) {
-    Item ev_obj = js_new_object();
-    dom_realm_set_cstr(ev_obj, "type", js_name_item("invalid"));
-    if (include_bubbles) {
-        dom_realm_set_cstr(ev_obj, "bubbles", (Item){.item = ITEM_FALSE});
-    }
-    dom_realm_set_cstr(ev_obj, "cancelable", (Item){.item = ITEM_TRUE});
-    dom_dispatch_event(target_item, ev_obj);
+static void dom_dispatch_invalid_event(Item target_item) {
+    // Event target assignment uses the native Event record during dispatch.
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target_item);
+    Rooted<Item> event_root(roots,
+        js_create_event("invalid", /*bubbles=*/false, /*cancelable=*/true));
+    dom_dispatch_event(target_root.get(), event_root.get());
 }
 
 static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
@@ -8809,7 +8809,7 @@ static void dom_check_form_control_descendants(DomNode* node, bool* all_valid) {
                 Item vf = dom_realm_get_cstr(vs, "valid");
                 if (!dom_validity_item_is_valid(vf)) {
                     if (all_valid) *all_valid = false;
-                    dom_dispatch_invalid_event(dom_wrap_element(elem), false);
+                    dom_dispatch_invalid_event(dom_wrap_element(elem));
                 }
             }
             dom_check_form_control_descendants(elem->first_child, all_valid);
@@ -8832,6 +8832,7 @@ extern "C" Item dom_form_reset_bridge(Item form_item) {
 }
 
 static Item dom_check_or_report_validity(Item elem_item, bool report) {
+    (void)report;
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem || !elem->tag_name) return (Item){.item = ITEM_TRUE};
 
@@ -8846,7 +8847,7 @@ static Item dom_check_or_report_validity(Item elem_item, bool report) {
     Item valid_flag = dom_realm_get_cstr(vs, "valid");
     bool is_valid = dom_validity_item_is_valid(valid_flag);
     if (!is_valid) {
-        dom_dispatch_invalid_event(elem_item, !report);
+        dom_dispatch_invalid_event(elem_item);
     }
     return (Item){.item = b2it(is_valid)};
 }
@@ -13755,7 +13756,7 @@ static bool dom_append_backed_element(DomElement* parent, DomNode* child) {
     parent = dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     if (child->parent == (DomNode*)parent && parent->last_child == child) return true;
-    if (child->parent) dom_pre_remove(child);
+    dom_pre_remove_for_move(parent, child);
     DomElement* child_elem = child->as_element();
     int64_t backed_index = dom_backed_child_index(parent, child_elem);
     if (backed_index >= 0) {
@@ -14031,7 +14032,7 @@ static bool dom_insert_before_child(DomElement* parent, DomNode* child,
 
     // a same-parent reorder changes Element::items as well as sibling links;
     // otherwise HTMLCollection keeps reporting the source order after insertBefore().
-    if (child->parent) dom_pre_remove(child);
+    dom_pre_remove_for_move(parent, child);
     bool inserted = child->is_element()
         ? dom_insert_backed_element(parent, child, ref_child)
         : child->is_text()
@@ -14252,6 +14253,60 @@ static bool dom_replace_document_element(DomElement* old_root,
     return true;
 }
 
+static bool dom_is_document_element_child(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DomElement* element = node->as_element();
+    const char* tag = element->tag_name;
+    // Processing instructions retain their target as tag_name but the Mark
+    // backing uses '?' to distinguish them from document elements.
+    const Element* backing = dom_element_to_element(element);
+    const TypeElmt* backing_type = backing ? (const TypeElmt*)backing->type : nullptr;
+    if (backing_type && backing_type->name.str &&
+            backing_type->name.str[0] == '?') return false;
+    return tag && tag[0] != '?' && tag[0] != '!' &&
+        strcmp(tag, "#document-fragment") != 0 && strcmp(tag, "#document") != 0;
+}
+
+static void dom_document_refresh_root(DomElement* parent) {
+    if (!parent || !parent->doc || parent->doc->js.doc_node != parent) return;
+    parent->doc->root = nullptr;
+    for (DomNode* node = parent->first_child; node; node = node->next_sibling) {
+        if (dom_is_document_element_child(node)) {
+            parent->doc->root = node->as_element();
+            return;
+        }
+    }
+}
+
+static bool dom_document_can_append(DomElement* parent, DomNode* child) {
+    if (!parent || !parent->doc || parent->doc->js.doc_node != parent) return true;
+    DomNode* current_element = nullptr;
+    DomNode* current_doctype = nullptr;
+    for (DomNode* node = parent->first_child; node; node = node->next_sibling) {
+        if (dom_is_document_element_child(node)) current_element = node;
+        if (node->node_type == DOM_NODE_DOCTYPE) current_doctype = node;
+    }
+
+    if (child->is_text() || child->node_type == DOM_NODE_DOCUMENT) return false;
+    if (child->is_element() && child->as_element()->tag_name &&
+            strcmp(child->as_element()->tag_name, "#document-fragment") == 0) {
+        int element_count = 0;
+        for (DomNode* node = child->as_element()->first_child; node;
+             node = node->next_sibling) {
+            if (node->is_text() || node->node_type == DOM_NODE_DOCTYPE) return false;
+            if (dom_is_document_element_child(node)) element_count++;
+        }
+        return element_count <= 1 && (!element_count || !current_element);
+    }
+    if (dom_is_document_element_child(child)) {
+        return !current_element || current_element == child;
+    }
+    if (child->node_type == DOM_NODE_DOCTYPE) {
+        return (!current_doctype || current_doctype == child) && !current_element;
+    }
+    return true;
+}
+
 extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
@@ -14264,10 +14319,15 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         // reject an ancestor before either tree can acquire a parent cycle.
         return dom_insertion_ancestor_error();
     }
+    if (!dom_document_can_append(elem, child_node)) {
+        return dom_raise_named("HierarchyRequestError",
+            "Document cannot have this child");
+    }
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
             if (!dom_append_fragment_children(elem, child_elem)) return ItemNull;
+            dom_document_refresh_root(elem);
             return child_arg;
         }
     }
@@ -14284,6 +14344,7 @@ extern "C" Item dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         return ItemNull;
     }
     dom_post_insert((DomNode*)elem, child_node);
+    dom_document_refresh_root(elem);
     if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
         elem->tag() == MARKUP_NAME_SELECT) {
         _select_ask_for_reset(elem);
@@ -14313,6 +14374,7 @@ extern "C" Item dom_remove_child_bridge(void* parent_ptr, Item child_arg) {
     }
     dom_pre_remove(child_node);
     if (!dom_remove_backed_child(elem, child_node)) return ItemNull;
+    dom_document_refresh_root(elem);
     if (child_node->is_element() && child_node->as_element()->tag() == MARKUP_NAME_OPTION &&
         elem->tag() == MARKUP_NAME_SELECT) {
         _select_ask_for_reset(elem);
@@ -14415,14 +14477,8 @@ extern "C" Item dom_location_navigate_bridge(void* doc_ptr, Item next_url_item,
 extern "C" Item dom_document_open_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     if (!doc) return js_get_document_object_value();
-    DocState* state = doc->state ? doc->state : dom_current_state();
-    if (state) {
-        const char* exc = nullptr;
-        if (!state_store_set_selection(state, NULL, NULL, &exc)) {
-            log_debug("js_document_open: selection clear rejected: %s",
-                      exc ? exc : "?");
-        }
-    }
+    // document.open() reuses the Document and its Selection. Tree mutation
+    // below retargets live Range boundaries as children are removed.
     DomElement* body = dom_document_body_element(doc);
     if (body) {
         clear_element_children_for_navigation(body);
@@ -15760,6 +15816,31 @@ extern "C" Item dom_core_select_add(Item n, Item new_item, Item before_item) {
             new_item, dom_wrap_element(before_elem));
     }
     return ItemNull;
+}
+
+extern "C" Item dom_core_select_show_picker(Item n) {
+    DomElement* elem = dom_op_element(n);
+    if (!elem || !_is_tag(elem, "select")) return ItemNull;
+    DocState* state = elem->doc ? elem->doc->state : dom_current_state();
+    if (form_control_is_disabled(state, static_cast<View*>(elem))) {
+        return dom_raise(js_name_item("InvalidStateError"),
+            js_name_item("showPicker: select is disabled"));
+    }
+
+    // Multiple and sized selects render as listboxes; they have no picker to
+    // show. The operation still succeeds for a mutable listbox.
+    const char* size_attr = elem->get_attribute("size");
+    long size = size_attr ? strtol(size_attr, nullptr, 10) : 0;
+    if (elem->has_attribute("multiple") || size > 1) {
+        return make_js_undefined();
+    }
+    if (state && dom_is_connected(elem)) {
+        tc_ensure_init(elem);
+        if (elem->form) {
+            doc_state_open_dropdown(state, static_cast<View*>(elem));
+        }
+    }
+    return make_js_undefined();
 }
 
 // remove() is one operation with two meanings: HTMLSelectElement.remove(index)
