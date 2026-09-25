@@ -379,7 +379,6 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
             Item child = parse_paragraph(parser, content_line);
             if (child.item != ItemNull.item && child.item != ITEM_ERROR && child.item != ITEM_UNDEFINED) {
                 list_push((List*)quote, child);
-                increment_element_content_length(quote);
             }
         }
 
@@ -642,7 +641,6 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
 
             if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
                 list_push((List*)quote, block_item);
-                increment_element_content_length(quote);
             }
         }
 

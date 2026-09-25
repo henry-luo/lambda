@@ -2215,7 +2215,6 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
             array_append((Array*)group, members->items[m], active_runtime->pool, NULL);
         }
         group = rooted_group.get();
-        group_type->content_length = group->length;
         array_push_verbatim(rooted_out.get(), (Item){.element = group});
         rooted_group.set((Element*)NULL);
     }

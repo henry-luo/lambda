@@ -104,10 +104,8 @@ Item parse_asciidoc_admonition(MarkupParser* parser, const char* line) {
             Item inline_content = parse_inline_spans(parser, content);
             if (inline_content.item != ITEM_ERROR && inline_content.item != ITEM_UNDEFINED) {
                 list_push((List*)para, inline_content);
-                increment_element_content_length(para);
             }
             list_push((List*)admonition, Item{.item = (uint64_t)para});
-            increment_element_content_length(admonition);
         }
     }
 
@@ -139,10 +137,8 @@ Item parse_asciidoc_admonition(MarkupParser* parser, const char* line) {
             Item inline_content = parse_inline_spans(parser, next_line);
             if (inline_content.item != ITEM_ERROR && inline_content.item != ITEM_UNDEFINED) {
                 list_push((List*)para, inline_content);
-                increment_element_content_length(para);
             }
             list_push((List*)admonition, Item{.item = (uint64_t)para});
-            increment_element_content_length(admonition);
         }
         parser->current_line++;
     }
@@ -230,12 +226,10 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
                 Item term_content = parse_inline_spans(parser, term_text);
                 if (term_content.item != ITEM_ERROR && term_content.item != ITEM_UNDEFINED) {
                     list_push((List*)dt, term_content);
-                    increment_element_content_length(dt);
                 }
                 mem_free(term_text);
             }
             list_push((List*)dl, Item{.item = (uint64_t)dt});
-            increment_element_content_length(dl);
         }
 
         // Create definition element
@@ -246,11 +240,9 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
                 Item def_content = parse_inline_spans(parser, p);
                 if (def_content.item != ITEM_ERROR && def_content.item != ITEM_UNDEFINED) {
                     list_push((List*)dd, def_content);
-                    increment_element_content_length(dd);
                 }
             }
             list_push((List*)dl, Item{.item = (uint64_t)dd});
-            increment_element_content_length(dl);
         }
 
         parser->current_line++;

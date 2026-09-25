@@ -31,11 +31,6 @@ static inline Symbol* create_symbol(MarkupParser* parser, const char* text) {
     return parser->builder.createSymbol(text);
 }
 
-static inline void increment_element_content_length(Element* elem) {
-    TypeElmt* elmt_type = (TypeElmt*)elem->type;
-    elmt_type->content_length++;
-}
-
 static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
                                             const char* key, const char* val) {
     String* k = parser->builder.createString(key);

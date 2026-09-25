@@ -15,8 +15,8 @@
 
 ## Archive index
 
-This archive contains **105 historical records**: 104 RESOLVED entries and one
-CLOSED design decision. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The six newest are the list/array kind records closed
+This archive contains **106 historical records**: 105 RESOLVED entries and one
+CLOSED design decision. LR13-9, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) on 2026-09-25. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The six newest are the list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -928,6 +928,18 @@ containing map type is available. The option explicitly suppresses both
 population and reporting. Regression:
 `LambdaValidator.TypeMismatchSuggestionsAreAttachedAndReported` verifies the
 hint appears and that disabling the option omits it.
+
+
+<a id="lr13-9"></a>**LR13-9 · Element content is checked by pattern-item count, never matched against the pattern · FIXED 2026-09-25 (found 2026-09-25)**
+`validate_against_element_type` checks an element's content only by comparing its child count with the type's `TypeElmt::content_length` (`validate.cpp:826` in the fast verdict, `:871` on the reporting path). For a type pattern that field counts the items of the content pattern (`parse_type_pattern.cpp:1510`), so an occurrence stands for exactly one child. The children themselves are never validated: neither their types nor their own content patterns are checked. `is` reaches the same check through `fn_is` → `schema_validator_validate_type` (`lambda-eval.cpp:2248`). Reproduced on both tiers with a build of `293b7a175`; none of the code involved has changed since.
+- With `a = <ul <li "a"> <li "b"> <li "c">>`, `a is <ul; <li>*>` is `false`, but `a is <ul; <p>, <p>, <p>>` is `true`.
+- `<ul> is <ul; <li>?>` is `false`: an empty run still needs one child.
+- `validate` of an XML file holding three `<li>` fails against `<document; <li>*>` and `<document; <li>+>` ("Element content length mismatch: expected 1, got 3"), while a file holding three `<p>` passes `<document; <li>, <li>, <li>>`. XML input wraps its top-level elements in `document`.
+- The [Validator Guide](../doc/Lambda_Validator_Guide.md)'s own `Page` schema relies on runs (`<meta …>*`, `<h1>+`, `<p>*`). Under this check a run counts as one child, and the nested patterns are never reached.
+
+**Why it went unnoticed:** the validator GTests build `TypeElmt`s by hand with `content_length` set to the exact child count they want (`test_validator_features_gtest.cpp`, `test_ast_validator_gtest.cpp`); no Lambda test puts an occurrence inside element content; and the validator targets run outside the baseline (the validator's LR12-1, in the [active ledger](Lambda_Issue_Ledger.md)'s §13.1). The S2.1.3 and D2.6.6 implementation footnotes (Appendix A of each formal spec) and that LR12-1 entry all record the count check as implemented, without this caveat.
+
+*Fixed 2026-09-25 ([Impl_Element_Type_Sharing P0](<impl/Lambda_Impl_Element_Type_Sharing.md>)):* S11.1.6v3 ruled element content a sequence-pattern slot. The content section now resolves to `TypeElmt::content_list`, a typed `TypeList` filled as a bracket pattern is, and `validate_against_element_type` matches the children with `array_pattern_runs_match` in the fast verdict and with the shared `validate_sequence_pattern` on the reporting path. A second defect under the same symptom: the per-slot shortcut `array_pattern_simple_type_matches` reduced a structural slot (`<p>`, `{y: int}`, `[int, int]`) to a TypeId test, so `[<li>]` matched `[<p>]` as well; only bare kinds take it now. Every reproducer above now answers correctly on both tiers. Tests: `test/lambda/element_content_pattern.ls`; the validator GTests use content patterns instead of counts.
 
 
 ## 13.1 Verification-pass records (LR_03 and ledger hygiene)

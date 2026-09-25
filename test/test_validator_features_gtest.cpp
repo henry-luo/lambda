@@ -19,6 +19,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/stringbuf.h"
 #include "../lib/test_utils.h"
+#include "test_validator_patterns.hpp"
 
 // Test fixture for validator features
 class ValidatorFeaturesTest : public ::testing::Test {
@@ -1412,7 +1413,6 @@ TEST_F(ValidatorFeaturesTest, Element_BasicValidation) {
     const char* tag = "div";
     div_type->name = (StrView){tag, strlen(tag)};
     div_type->shape = nullptr;  // No attributes
-    div_type->content_length = 0;
 
     // Create element using MarkBuilder
     MarkBuilder builder(input);
@@ -1434,7 +1434,6 @@ TEST_F(ValidatorFeaturesTest, Element_TagMismatch) {
     const char* tag = "span";
     span_type->name = (StrView){tag, strlen(tag)};
     span_type->shape = nullptr;
-    span_type->content_length = 0;
 
     // Create element with wrong tag using MarkBuilder
     MarkBuilder builder(input);
@@ -1467,7 +1466,6 @@ TEST_F(ValidatorFeaturesTest, Element_WithAttributes) {
     href_entry->byte_offset = 0;
     href_entry->next = nullptr;
     link_type->shape = href_entry;
-    link_type->content_length = 0;
 
     // Create element with attribute using MarkBuilder
     MarkBuilder builder(input);
@@ -1500,7 +1498,6 @@ TEST_F(ValidatorFeaturesTest, Element_AttributeTypeMismatch) {
     maxlength_entry->byte_offset = 0;
     maxlength_entry->next = nullptr;
     input_type->shape = maxlength_entry;
-    input_type->content_length = 0;
 
     // Create element with string attribute instead of int
     MarkBuilder builder(input);
@@ -1523,7 +1520,7 @@ TEST_F(ValidatorFeaturesTest, Element_ContentLengthValidation) {
     const char* tag = "ul";
     list_type->name = (StrView){tag, strlen(tag)};
     list_type->shape = nullptr;
-    list_type->content_length = 3;  // Expect exactly 3 children
+    list_type->content_list = test_any_content_pattern(pool, 3);  // exactly 3 children
 
     // Create element with 3 children using MarkBuilder
     MarkBuilder builder(input);
@@ -1551,7 +1548,7 @@ TEST_F(ValidatorFeaturesTest, Element_ContentLengthMismatch) {
     const char* tag = "table";
     table_type->name = (StrView){tag, strlen(tag)};
     table_type->shape = nullptr;
-    table_type->content_length = 5;  // Expect exactly 5 children
+    table_type->content_list = test_any_content_pattern(pool, 5);  // exactly 5 children
 
     // Create element with 3 children (wrong count) using MarkBuilder
     MarkBuilder builder(input);
@@ -1580,7 +1577,6 @@ TEST_F(ValidatorFeaturesTest, Element_TypeMismatch) {
     const char* tag = "div";
     div_type->name = (StrView){tag, strlen(tag)};
     div_type->shape = nullptr;
-    div_type->content_length = 0;
 
     // Create string item instead of element
     String* str = create_string(pool, "not an element");

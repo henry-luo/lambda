@@ -529,13 +529,8 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 
 //------------------------------------------------------------------------------
 Item ElementBuilder::final() {
-    // Set content_length to match the number of children in the element
-    // This is required for the formatter to properly access children
     if (elmt_ && elmt_->type) {
         TypeElmt* elmt_type = (TypeElmt*)elmt_->type;
-        List* list = (List*)elmt_;
-        elmt_type->content_length = list->length;
-
         // finalize shape before returning - deduplicate via shape pool
         if (builder_->input()) {
             elmt_finalize_shape(elmt_type, builder_->input());

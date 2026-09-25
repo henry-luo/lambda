@@ -914,7 +914,11 @@ static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,
 typedef struct TypeElmt : TypeMap {
     StrView name;  // local name of the element
     NameId name_id;  // generated element identity; NAME_ID_NONE for custom names.
-    int64_t content_length;  // no. of content items, needed for element type
+    // D2.6.6v3: a DECLARED element type's content pattern, matched against the
+    // children as a sequence pattern (S11.1.6v3); NULL leaves content
+    // unconstrained. Instance and literal types never carry one, so it plays
+    // no part in type sharing (D3.4.3v2).
+    TypeList* content_list;
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
 
@@ -951,16 +955,15 @@ typedef struct TypeNominal {
     int method_count;
     struct AstNode* constraint;   // object-level that(...) AST, NULL if none
     ConstraintFn constraint_fn;   // JIT-compiled constraint checker, NULL if none
-    int64_t content_length;       // declared content arity
     TypeId struct_kind;           // the one structural kind this type declares
 } TypeNominal;
 
 // D2.6.6v2 phase 2: an object's shape extends TypeElmt, not TypeMap. A nominal
 // type declares ONE structural kind (S2.1.3v2) — map or element — and this shape
 // serves both: a nominal map simply leaves the element fields unused, while a
-// nominal element needs `name`/`content_length`/`ns` at TypeElmt's own offsets
+// nominal element needs `name`/`content_list`/`ns` at TypeElmt's own offsets
 // so every element code path reads it correctly. Before this, an object's shape
-// was a TypeMap and element readers reached `content_length` at the wrong
+// was a TypeMap and element readers reached the element fields at the wrong
 // offset, working only by accident where `type_name` happened to alias `name`.
 typedef struct TypeObject : TypeElmt {
     StrView type_name;          // nominal type name ("Point", "Circle"); mirrors TypeElmt::name

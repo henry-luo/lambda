@@ -365,7 +365,7 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->js_meta = tm->js_meta;
     clone->has_array_index_shape = tm->has_array_index_shape;
     clone->name = tm->name;
-    clone->content_length = tm->content_length;
+    clone->content_list = tm->content_list;
     clone->ns = tm->ns;
 
     ShapeEntry* last_clone = NULL;

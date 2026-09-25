@@ -1495,17 +1495,6 @@ and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
 `log_*`. Also `error->actual.item` truthiness treats a `0`/null actual as
 "absent", which can misreport a legitimately-null value.
 
-<a id="lr13-9"></a>**LR13-9 · Element content is checked by pattern-item count, never matched against the pattern · OPEN (found 2026-09-25)**
-`validate_against_element_type` checks an element's content only by comparing its child count with the type's `TypeElmt::content_length` (`validate.cpp:826` in the fast verdict, `:871` on the reporting path). For a type pattern that field counts the items of the content pattern (`parse_type_pattern.cpp:1510`), so an occurrence stands for exactly one child. The children themselves are never validated: neither their types nor their own content patterns are checked. `is` reaches the same check through `fn_is` → `schema_validator_validate_type` (`lambda-eval.cpp:2248`). Reproduced on both tiers with a build of `293b7a175`; none of the code involved has changed since.
-- With `a = <ul <li "a"> <li "b"> <li "c">>`, `a is <ul; <li>*>` is `false`, but `a is <ul; <p>, <p>, <p>>` is `true`.
-- `<ul> is <ul; <li>?>` is `false`: an empty run still needs one child.
-- `validate` of an XML file holding three `<li>` fails against `<document; <li>*>` and `<document; <li>+>` ("Element content length mismatch: expected 1, got 3"), while a file holding three `<p>` passes `<document; <li>, <li>, <li>>`. XML input wraps its top-level elements in `document`.
-- The [Validator Guide](../doc/Lambda_Validator_Guide.md)'s own `Page` schema relies on runs (`<meta …>*`, `<h1>+`, `<p>*`). Under this check a run counts as one child, and the nested patterns are never reached.
-
-**Why it went unnoticed:** the validator GTests build `TypeElmt`s by hand with `content_length` set to the exact child count they want (`test_validator_features_gtest.cpp`, `test_ast_validator_gtest.cpp`); no Lambda test puts an occurrence inside element content; and the validator targets run outside the baseline (the validator's LR12-1 in §13.1). The S2.1.3 and D2.6.6 implementation footnotes (Appendix A of each formal spec) and that LR12-1 entry all record the count check as implemented, without this caveat.
-
-**Ruled 2026-09-25 (S11.1.6v3): element content is a sequence-pattern slot.** The children are matched as `[c, d]` matches an array — runs included, the whole content — so the count check goes. Fix: resolve the content section into `TypeElmt::content_list` (a typed `TypeList`, replacing `content_length`) and match the children with the bracket-pattern matcher `array_pattern_runs_match`; planned as phase P0 of [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Sharing.md).
-
 
 ## 13.1 Ledger hygiene observations (not issues)
 

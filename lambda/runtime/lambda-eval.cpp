@@ -9843,7 +9843,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         TypeElmt* new_element = (TypeElmt*)new_type;
         new_element->name = old_element->name;
         new_element->name_id = old_element->name_id;
-        new_element->content_length = old_element->content_length;
+        new_element->content_list = old_element->content_list;
         new_element->ns = old_element->ns;
     }
     void* new_data = heap_data_calloc(new_size > 0 ? (size_t)new_size : 1);
@@ -11343,7 +11343,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_et->length = field_count;
         new_et->byte_size = new_byte_size;
         new_et->name = old_et->name;
-        new_et->content_length = old_et->content_length;
+        new_et->content_list = old_et->content_list;
         new_et->ns = old_et->ns;
         // S2.1.4/OB16: a nominal instance is OPEN — extending it with a field is
         // an ordinary member addition, and every shape reached that way must

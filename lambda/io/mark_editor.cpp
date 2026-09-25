@@ -725,7 +725,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
         if (is_element) {
             TypeElmt* elmt_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
             elmt_type->name = ((TypeElmt*)old_type)->name;
-            elmt_type->content_length = ((TypeElmt*)old_type)->content_length;
+            elmt_type->content_list = ((TypeElmt*)old_type)->content_list;
             new_type = (TypeMap*)elmt_type;
         } else {
             new_type = (TypeMap*)alloc_type(pool_, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -744,7 +744,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
         arraylist_append(type_list_, new_type);
         result->type = new_type;
     } else {
-        // In-place: an element's `name` and `content_length` are not touched by
+        // In-place: an element's `name` and `content_list` are not touched by
         // a shape change, so its descriptor carries them across unchanged.
         old_type->shape = new_shape;
         old_type->length = builder->field_count;
@@ -1195,10 +1195,6 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child,
         elmt->items[index] = child;
         elmt->length = new_length;
 
-        // Update TypeElmt content_length
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = new_length;
-
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
 
@@ -1298,9 +1294,6 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
 
         elmt->length = new_length;
 
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = new_length;
-
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
 
@@ -1350,9 +1343,6 @@ Item MarkEditor::elmt_delete_child(Item element, int index) {
         }
 
         elmt->length--;
-
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = elmt->length;
 
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
@@ -1405,9 +1395,6 @@ Item MarkEditor::elmt_delete_children(Item element, int start, int end) {
         }
 
         elmt->length = new_length;
-
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = new_length;
 
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
@@ -1477,16 +1464,10 @@ Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_childr
     new_elmt->length = new_length;
     new_elmt->capacity = new_length;
 
-    // Need new TypeElmt with updated content_length
+    // Only the content changed, so the copy keeps the old element's type (the
+    // memcpy above): an element type carries no content count (D3.4.3v2), and
+    // attribute edits always take a fresh TypeElmt, so nothing writes it.
     TypeElmt* old_type = (TypeElmt*)old_elmt->type;
-    TypeElmt* new_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!new_type) return ItemError;
-
-    memcpy(new_type, old_type, sizeof(TypeElmt));
-    new_type->content_length = new_length;
-    new_type->type_index = type_list_->length;
-    typemap_hash_build((TypeMap*)new_type, pool_);
-    arraylist_append(type_list_, new_type);
 
     // Copy attribute data (if any)
     if (old_type->byte_size > 0) {
@@ -1495,8 +1476,6 @@ Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_childr
         memcpy(new_elmt->data, old_elmt->data, old_type->byte_size);
         new_elmt->data_cap = old_type->byte_size;
     }
-
-    new_elmt->type = new_type;
 
     return {.element = new_elmt};
 }

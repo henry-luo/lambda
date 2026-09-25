@@ -23000,62 +23000,59 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
             MIR_T_P, MIR_new_reg_op(mt->ctx, el), ai, attr_ops);
     }
 
-    // Fill content if present
-    if (type->content_length) {
-        if (elmt_node->content) {
-            AstListNode* content_list = (AstListNode*)elmt_node->content;
-            AstNode* content_item = content_list->item;
+    // Fill content if present. The count comes from the literal's own content
+    // node: an element type carries no per-literal count (D3.4.3v2).
+    AstListNode* content_node = (AstListNode*)elmt_node->content;
+    int64_t literal_content_count = content_node && content_node->list_type
+        ? content_node->list_type->length : 0;
+    if (literal_content_count) {
+        AstNode* content_item = content_node->item;
 
-            if (type->content_length < 10) {
-                // Use list_fill(el, count, val1, val2, ...) for small content
-                // Count content items
-                int content_count = em_linked_node_count(content_item);
-                AstNode* cscan = content_item;
+        if (literal_content_count < 10) {
+            // Use list_fill(el, count, val1, val2, ...) for small content
+            // Count content items
+            int content_count = em_linked_node_count(content_item);
+            AstNode* cscan = content_item;
 
-                MIR_op_t* content_ops = LAMBDA_ALLOCA(content_count, MIR_op_t);
-                int* content_roots = LAMBDA_ALLOCA(content_count, int);
-                for (int i = 0; i < content_count; i++) content_roots[i] = -1;
-                int ci = 0;
-                cscan = content_item;
-                while (cscan) {
-                    mir_note_value_captured(mt, cscan);  // S9.3.1
-                    // content children are item positions (S2.5.5v2)
-                    MIR_reg_t val = mir_box_sequence_item(mt, cscan);
-                    content_roots[ci] = create_gc_root_slot(mt, val);
-                    content_ops[ci++] = MIR_new_reg_op(mt->ctx, val);
-                    cscan = cscan->next;
-                }
-                for (int i = 0; i < ci; i++) {
-                    if (content_roots[i] >= 0) {
-                        MIR_reg_t live_content = load_gc_root_slot(mt, content_roots[i], "el_content");
-                        content_ops[i] = MIR_new_reg_op(mt->ctx, live_content);
-                    }
-                }
-                el = load_gc_root_slot(mt, el_root, "el_live");
-
-                // list_fill(el, count, items...) — returns Item
-                emit_vararg_call_2(mt, "list_fill", MIR_T_I64, 1,
-                    MIR_T_P, MIR_new_reg_op(mt->ctx, el),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, content_count),
-                    ci, content_ops);
-            } else {
-                // Use list_push_spread for each content item, then list_end
-                while (content_item) {
-                    mir_note_value_captured(mt, content_item);  // S9.3.1
-                    MIR_reg_t val = mir_box_sequence_item(mt, content_item);
-                    int content_root = create_gc_root_slot(mt, val);
-                    val = load_gc_root_slot(mt, content_root, "el_content");
-                    el = load_gc_root_slot(mt, el_root, "el_live");
-                    emit_call_void_2(mt, "list_push_spread",
-                        MIR_T_P, MIR_new_reg_op(mt->ctx, el),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                    content_item = content_item->next;
-                }
-                el = load_gc_root_slot(mt, el_root, "el_live");
-                emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+            MIR_op_t* content_ops = LAMBDA_ALLOCA(content_count, MIR_op_t);
+            int* content_roots = LAMBDA_ALLOCA(content_count, int);
+            for (int i = 0; i < content_count; i++) content_roots[i] = -1;
+            int ci = 0;
+            cscan = content_item;
+            while (cscan) {
+                mir_note_value_captured(mt, cscan);  // S9.3.1
+                // content children are item positions (S2.5.5v2)
+                MIR_reg_t val = mir_box_sequence_item(mt, cscan);
+                content_roots[ci] = create_gc_root_slot(mt, val);
+                content_ops[ci++] = MIR_new_reg_op(mt->ctx, val);
+                cscan = cscan->next;
             }
+            for (int i = 0; i < ci; i++) {
+                if (content_roots[i] >= 0) {
+                    MIR_reg_t live_content = load_gc_root_slot(mt, content_roots[i], "el_content");
+                    content_ops[i] = MIR_new_reg_op(mt->ctx, live_content);
+                }
+            }
+            el = load_gc_root_slot(mt, el_root, "el_live");
+
+            // list_fill(el, count, items...) — returns Item
+            emit_vararg_call_2(mt, "list_fill", MIR_T_I64, 1,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, el),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, content_count),
+                ci, content_ops);
         } else {
-            // content_length but no content node — just list_end
+            // Use list_push_spread for each content item, then list_end
+            while (content_item) {
+                mir_note_value_captured(mt, content_item);  // S9.3.1
+                MIR_reg_t val = mir_box_sequence_item(mt, content_item);
+                int content_root = create_gc_root_slot(mt, val);
+                val = load_gc_root_slot(mt, content_root, "el_content");
+                el = load_gc_root_slot(mt, el_root, "el_live");
+                emit_call_void_2(mt, "list_push_spread",
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, el),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                content_item = content_item->next;
+            }
             el = load_gc_root_slot(mt, el_root, "el_live");
             emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }

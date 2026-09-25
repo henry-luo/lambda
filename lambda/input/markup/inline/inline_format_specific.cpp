@@ -64,7 +64,6 @@ Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text) 
         String* code_str = create_string(parser, content);
         if (code_str) {
             list_push((List*)code_elem, Item{.item = s2it(code_str)});
-            increment_element_content_length(code_elem);
         }
         mem_free(content);
     }
@@ -136,7 +135,6 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
     String* link_text = create_string(parser, ref_text);
     if (link_text) {
         list_push((List*)ref_elem, Item{.item = s2it(link_text)});
-        increment_element_content_length(ref_elem);
     }
 
     mem_free(ref_text);
@@ -224,7 +222,6 @@ Item parse_rst_inline_link(MarkupParser* parser, const char** text) {
         String* text_str = create_string(parser, link_text);
         if (text_str) {
             list_push((List*)link_elem, Item{.item = s2it(text_str)});
-            increment_element_content_length(link_elem);
         }
         mem_free(link_text);
     }
@@ -307,7 +304,6 @@ Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
     String* text_str = create_string(parser, ref_name);
     if (text_str) {
         list_push((List*)link_elem, Item{.item = s2it(text_str)});
-        increment_element_content_length(link_elem);
     }
 
     mem_free(ref_name);
@@ -360,7 +356,6 @@ Item parse_asciidoc_inline(MarkupParser* parser, const char* text) {
     String* content = create_string(parser, text);
     if (content) {
         list_push((List*)span, Item{.item = s2it(content)});
-        increment_element_content_length(span);
     }
 
     return Item{.item = (uint64_t)span};
@@ -485,7 +480,6 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
             String* content_str = create_string(parser, content);
             if (content_str) {
                 list_push((List*)elem, Item{.item = s2it(content_str)});
-                increment_element_content_length(elem);
             }
             mem_free(content);
         }
@@ -496,7 +490,6 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
             Item inner = parse_inline_spans(parser, content);
             if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
                 list_push((List*)elem, inner);
-                increment_element_content_length(elem);
             }
             mem_free(content);
         }
@@ -587,7 +580,6 @@ Item parse_org_link(MarkupParser* parser, const char** text) {
         Item inner = parse_inline_spans(parser, link_text);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
             list_push((List*)link, inner);
-            increment_element_content_length(link);
         }
         mem_free(link_text);
     }
@@ -683,13 +675,11 @@ Item parse_man_font_escape(MarkupParser* parser, const char** text) {
         Item inner = parse_inline_spans(parser, content);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
             list_push((List*)elem, inner);
-            increment_element_content_length(elem);
         } else {
             // Fallback: just add as text
             String* content_str = create_string(parser, content);
             if (content_str) {
                 list_push((List*)elem, Item{.item = s2it(content_str)});
-                increment_element_content_length(elem);
             }
         }
         mem_free(content);
@@ -773,7 +763,6 @@ Item parse_asciidoc_link(MarkupParser* parser, const char** text) {
             Item inner = parse_inline_spans(parser, link_text);
             if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
                 list_push((List*)anchor, inner);
-                increment_element_content_length(anchor);
             }
             mem_free(link_text);
         }
@@ -934,7 +923,6 @@ Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
             Item inner = parse_inline_spans(parser, link_text);
             if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
                 list_push((List*)anchor, inner);
-                increment_element_content_length(anchor);
             }
             mem_free(link_text);
         }
@@ -945,7 +933,6 @@ Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
             String* text_str = create_string(parser, anchor_text);
             if (text_str) {
                 list_push((List*)anchor, Item{.item = s2it(text_str)});
-                increment_element_content_length(anchor);
             }
             mem_free(anchor_text);
         }

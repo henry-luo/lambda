@@ -209,12 +209,6 @@ static void add_child_to_graph_element(Input* input, Element* graph, Element* ch
     if (!graph || !child) return;
 
     array_append((Array*)graph, (Item){.element = child}, input->pool, input->arena);
-    TypeElmt* graph_type = graph->type ? (TypeElmt*)graph->type : NULL;
-    if (graph_type && graph_type->type_id == LMD_TYPE_ELEMENT) {
-        // Graph parsers append children after ElementBuilder::final(); keep the
-        // finalized type's content count aligned with the list length.
-        graph_type->content_length = ((List*)graph)->length;
-    }
 }
 
 // Helper function to add a node to a graph (as direct child)

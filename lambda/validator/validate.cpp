@@ -69,6 +69,15 @@ static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, boo
         return validator_numeric_item_embeds(item.to_const(), expected);
     }
     if (expected->kind != TYPE_KIND_SIMPLE) return false;
+    // Only a bare kind (`element`, `map`, `array`, `function`) reduces to a
+    // TypeId test. A structural pattern -- `<p>`, `{y: int}`, `[int, int]`,
+    // `int[]`, `fn (int) int` -- shares its kind's TypeId but must be validated
+    // in full: testing the TypeId alone let `[<li>]` match `[<p>]`, and element
+    // content match any children of the right kinds (S11.1.6v3).
+    if (lambda_type_is_concrete_attr_shape(expected)) return false;
+    if (expected->type_id == LMD_TYPE_ARRAY && expected != &TYPE_LIST &&
+            expected != (Type*)&TYPE_ARRAY) return false;
+    if (lambda_type_func_signature(expected)) return false;
     *handled = true;
     TypeId actual = get_type_id(item);
     if (expected->type_id == LMD_TYPE_ANY) return actual != LMD_TYPE_ERROR;
@@ -230,6 +239,57 @@ static bool array_pattern_literal_matches(Item item, Item pattern) {
     }
     default:
         return item.item == pattern.item;
+    }
+}
+
+// Match a sequence against a sequence pattern's slots: an array's items, or an
+// element's children against its declared content pattern (S11.1.6v3). An
+// occurrence is a *run* of the sequence's items and zero items is void --
+// `[1, int*, 2]` matches `[1, 2]` and `[1, 5, 6, 2]`. Every other slot consumes
+// exactly one item, so a pattern with no run keeps the exact-length check and
+// reports each mismatching position. `what` names the sequence in errors.
+static void validate_sequence_pattern(SchemaValidator* validator,
+        ValidationResult* result, ArrayReader& seq, int64_t length,
+        const TypeArray* pattern, const char* what) {
+    if (array_pattern_has_run(pattern)) {
+        if (!array_pattern_runs_match(validator, seq, length, pattern, 0, 0)) {
+            add_constraint_error_fmt(result, validator,
+                "%s does not match the sequence pattern", what);
+        }
+        return;
+    }
+    if (length != pattern->length) {
+        add_constraint_error_fmt(result, validator,
+            "%s length mismatch: expected %lld, got %lld",
+            what, (long long)pattern->length, (long long)length);
+        return;
+    }
+
+    auto iter = seq.items();
+    ItemReader child;
+    int64_t index = 0;
+    while (iter.next(&child)) {
+        PathScope scope(validator, index);
+        Item child_item = child.item();
+        if (pattern->item_is_type_pattern && pattern->item_is_type_pattern[index]) {
+            bool handled = false;
+            bool matched = array_pattern_simple_type_matches(
+                child_item, pattern->item_patterns[index].type, &handled);
+            if (handled) {
+                if (!matched) add_constraint_error_fmt(result, validator,
+                    "%s item does not match positional type pattern", what);
+            } else {
+                ValidationResult* item_result = validate_against_type(
+                    validator, child_item.to_const(), pattern->item_patterns[index].type);
+                if (item_result && !item_result->valid) merge_errors(result, item_result, validator);
+            }
+        }
+        else if (!array_pattern_literal_matches(child_item, pattern->item_patterns[index])) {
+            // validator DLLs do not link the evaluator; exact tuple literals must compare locally.
+            add_constraint_error_fmt(result, validator,
+                "%s item does not match positional pattern", what);
+        }
+        index++;
     }
 }
 
@@ -493,53 +553,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     log_debug("Validating array with length: %ld", length);
 
     if (array_type->item_patterns) {
-        // S11.1.6v2: an occurrence in a sequence-pattern slot is a *run* of the
-        // sequence's items, and zero items is void -- `[1, int*, 2]` matches
-        // `[1, 2]` and `[1, 5, 6, 2]`. Every other slot consumes exactly one
-        // item, so a pattern with no run keeps the exact-length check below.
-        if (array_pattern_has_run(array_type)) {
-            result->valid = array_pattern_runs_match(validator, array, length,
-                array_type, 0, 0);
-            if (!result->valid) {
-                add_constraint_error(result, validator,
-                    "Array does not match the sequence pattern");
-            }
-            return result;
-        }
-        if (length != array_type->length) {
-            char error_msg[256];
-            snprintf(error_msg, sizeof(error_msg),
-                    "Array length mismatch: expected %lld, got %lld",
-                    (long long)array_type->length, (long long)length);
-            add_validation_error(result, create_validation_error(
-                AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool()));
-            return result;
-        }
-
-        auto iter = array.items();
-        ItemReader child;
-        int64_t index = 0;
-        while (iter.next(&child)) {
-            PathScope scope(validator, index);
-            Item child_item = child.item();
-            if (array_type->item_is_type_pattern && array_type->item_is_type_pattern[index]) {
-                bool handled = false;
-                bool matched = array_pattern_simple_type_matches(
-                    child_item, array_type->item_patterns[index].type, &handled);
-                if (handled) {
-                    if (!matched) add_constraint_error(result, validator, "Array item does not match positional type pattern");
-                } else {
-                    ValidationResult* item_result = validate_against_type(
-                        validator, child_item.to_const(), array_type->item_patterns[index].type);
-                    if (item_result && !item_result->valid) merge_errors(result, item_result, validator);
-                }
-            }
-            else if (!array_pattern_literal_matches(child_item, array_type->item_patterns[index])) {
-                // validator DLLs do not link the evaluator; exact tuple literals must compare locally.
-                add_constraint_error(result, validator, "Array item does not match positional pattern");
-            }
-            index++;
-        }
+        validate_sequence_pattern(validator, result, array, length, array_type, "Array");
         if (result->error_count == 0) result->valid = true;
         return result;
     }
@@ -823,9 +837,14 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
                     false, false)) {
             return validation_verdict(false);
         }
-        if (element_type->content_length > 0 &&
-                fast_elem.childCount() != element_type->content_length) {
-            return validation_verdict(false);
+        // S11.1.6v3: the declared content pattern is a sequence-pattern slot;
+        // the run matcher also decides a run-free pattern exactly
+        if (element_type->content_list) {
+            ArrayReader children((Array*)fast_elem.element());
+            if (!array_pattern_runs_match(validator, children, fast_elem.childCount(),
+                    element_type->content_list, 0, 0)) {
+                return validation_verdict(false);
+            }
         }
         return validation_verdict(true);
     }
@@ -867,16 +886,12 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
             false, false, false);
     }
 
-    // Validate element content length
-    if (element_type->content_length > 0) {
-        int64_t actual_length = element.childCount();
-
-        if (actual_length != element_type->content_length) {
-            PathScope scope(validator, PATH_ELEMENT, (StrView){"content", 7});
-            add_constraint_error_fmt(result, validator,
-                "Element content length mismatch: expected %lld, got %lld",
-                element_type->content_length, actual_length);
-        }
+    // S11.1.6v3: match the children against the declared content pattern
+    if (element_type->content_list) {
+        PathScope scope(validator, PATH_ELEMENT, (StrView){"content", 7});
+        ArrayReader children((Array*)element.element());
+        validate_sequence_pattern(validator, result, children, element.childCount(),
+            element_type->content_list, "Element content");
     }
 
     return result;

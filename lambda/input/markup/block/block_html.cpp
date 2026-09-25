@@ -440,7 +440,6 @@ Item parse_html_block(MarkupParser* parser, const char* line) {
     String* content = parser->builder.createString(sb->str->chars, sb->length);
     Item content_item = {.item = s2it(content)};
     list_push((List*)html_elem, content_item);
-    increment_element_content_length(html_elem);
 
     return Item{.item = (uint64_t)html_elem};
 }
