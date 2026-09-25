@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <limits.h>
 #include <time.h>
 
 #ifdef _WIN32
@@ -734,13 +735,19 @@ int64_t file_size(const char* path) {
     return (int64_t)st.st_size;
 }
 
+bool file_getcwd_into(char* buffer, size_t capacity) {
+    if (!buffer || capacity == 0) return false;
+#ifdef _WIN32
+    if (capacity > INT_MAX) return false;
+    return _getcwd(buffer, (int)capacity) != NULL;
+#else
+    return getcwd(buffer, capacity) != NULL;
+#endif
+}
+
 char* file_getcwd(void) {
     char buf[4096];
-#ifdef _WIN32
-    if (!_getcwd(buf, sizeof(buf))) return NULL;
-#else
-    if (!getcwd(buf, sizeof(buf))) return NULL;
-#endif
+    if (!file_getcwd_into(buf, sizeof(buf))) return NULL;
     return mem_strdup(buf, MEM_CAT_TEMP);
 }
 

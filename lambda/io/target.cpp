@@ -287,6 +287,19 @@ void* target_to_local_path(Target* target, Url* cwd) {
             return NULL;
         }
 
+        if (url->scheme == URL_SCHEME_FILE) {
+            // URL pathnames are encoded; the filesystem needs decoded bytes.
+            char* local_path = url_to_local_path(url);
+            if (!local_path) {
+                strbuf_free(path_buf);
+                return NULL;
+            }
+            strbuf_append_str(path_buf, local_path);
+            mem_free(local_path);
+            log_debug("target_to_local_path: result='%s'", path_buf->str);
+            return path_buf;
+        }
+
         const char* pathname = url->pathname->chars;
 
 #ifdef _WIN32
@@ -419,31 +432,19 @@ bool target_is_dir(Target* target) {
     if (!target_is_local(target)) return false;
 
     if (target->type == TARGET_TYPE_URL && target->url) {
-        const char* pathname = url_get_pathname(target->url);
-        if (!pathname) return false;
-
-#ifdef _WIN32
-        // Windows: handle /C:/path format
-        if (pathname[0] == '/' &&
-            ((pathname[1] >= 'A' && pathname[1] <= 'Z') ||
-             (pathname[1] >= 'a' && pathname[1] <= 'z')) &&
-            pathname[2] == ':') {
-            pathname++;
-        }
-#endif
-
-        if (file_is_dir(pathname)) {
-            return true;
-        }
+        StrBuf* path_buf = (StrBuf*)target_to_local_path(target, NULL);
+        if (!path_buf) return false;
+        bool is_dir = file_is_dir(path_buf->str);
+        strbuf_free(path_buf);
+        return is_dir;
     }
-    else if (target->type == TARGET_TYPE_PATH && target->path) {
+    if (target->type == TARGET_TYPE_PATH && target->path) {
         StrBuf* path_buf = strbuf_new();
         path_to_os_path(path_qualify_default(path_get_pool(), target->path), path_buf);
         bool is_dir = file_is_dir(path_buf->str);
         strbuf_free(path_buf);
         return is_dir;
     }
-
     return false;
 }
 
@@ -462,29 +463,19 @@ bool target_exists(Target* target) {
     }
 
     if (target->type == TARGET_TYPE_URL && target->url) {
-        const char* pathname = url_get_pathname(target->url);
-        if (!pathname) return false;
-
-#ifdef _WIN32
-        // Windows: handle /C:/path format
-        if (pathname[0] == '/' &&
-            ((pathname[1] >= 'A' && pathname[1] <= 'Z') ||
-             (pathname[1] >= 'a' && pathname[1] <= 'z')) &&
-            pathname[2] == ':') {
-            pathname++;
-        }
-#endif
-
-        return file_exists(pathname);
+        StrBuf* path_buf = (StrBuf*)target_to_local_path(target, NULL);
+        if (!path_buf) return false;
+        bool exists = file_exists(path_buf->str);
+        strbuf_free(path_buf);
+        return exists;
     }
-    else if (target->type == TARGET_TYPE_PATH && target->path) {
+    if (target->type == TARGET_TYPE_PATH && target->path) {
         StrBuf* path_buf = strbuf_new();
         path_to_os_path(path_qualify_default(path_get_pool(), target->path), path_buf);
         bool exists = file_exists(path_buf->str);
         strbuf_free(path_buf);
         return exists;
     }
-
     return false;
 }
 

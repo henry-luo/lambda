@@ -86,7 +86,7 @@ The original Phase 2 planned 19 datatype test files. We need to rebuild these **
 | null | ✅ | — | ✅ | ✅ | — | Truthiness (falsy) | `null_basic.ls` |
 | bool | ✅ | ✅ | ✅ | ✅ | ✅ | Truthiness (truthy/falsy) | `boolean_basic.ls` |
 | int | ✅ | ✅ | ✅ | ✅ | ✅ | Truthiness (0 is truthy), `int[]` typed arrays | `integer_basic.ls` |
-| int64 | ✅ | ✅ | ⚠️ | ❌ | ❌ | `int64()` conversion, large values | `integer64_basic.ls` |
+| int64 | ✅ | ✅ | ⚠️ | ❌ | ❌ | `i64()` conversion, large values | `integer64_basic.ls` |
 | float | ✅ | ✅ | ✅ | ✅ | ✅ | `float[]` typed arrays, `inf`/`nan`/`-inf` | `float_basic.ls` |
 | decimal | ✅ | ✅ | ✅ | ❌ | ❌ | `123.456n` literal, `decimal()` | `decimal_basic.ls` |
 | string | ✅ | ✅ | ✅ | ✅ | ✅ | **Empty string → null**, patterns, method calls | `string_basic.ls` |
@@ -154,7 +154,7 @@ Rebuild the 16 original function tests + add 14 new function categories:
 | Stats basic | `sum`, `avg`, `mean`, `median` | 1 file existed | `prod()` | `stats_basic.ls` |
 | Stats advanced | `variance`, `deviation`, `quantile`, `prod` | **Not in std** | **All 4 functions** | `stats_advanced.ls` (**NEW**) |
 | Vector algebra | `dot`, `norm`, `cumsum`, `cumprod`, `argmin`, `argmax` | **Not in std** | **All 6 functions** | `vector_algebra.ls` (**NEW**) |
-| Type conversion | `int()`, `float()`, `string()`, `symbol()`, `binary()`, `number()`, `decimal()`, `int64()` | 1 file existed | **All 8 converters, edge cases** | `type_conversion.ls` |
+| Type conversion | `int()`, `float()`, `string()`, `symbol()`, `binary()`, `number()`, `decimal()`, `i64()` | 1 file existed | **All 8 converters, edge cases** | `type_conversion.ls` |
 | Type inspection | `type()`, `name()`, `len()` | **Not in std** | **All 3 functions** | `type_inspection.ls` (**NEW**) |
 | Map/filter/reduce | `map()`, `filter()`, `reduce()` | 1 file existed | **`map()` constructor**, `all()`, `any()` | `map_filter_reduce.ls` |
 | Variadic | `varg()`, `varg(n)` | **Not in std** | **Define variadic fn, test varg** | `variadic_args.ls` (**NEW**) |
@@ -908,7 +908,7 @@ These are features that have organic tests but lack structured, specification-dr
 | Null-safe member access chain | Low — tested incidentally | `null_basic.ls` |
 | Safe index access (OOB → null) | Low — tested in negative | `array_basic.ls` |
 | Negative array indexing | Low — tested incidentally | `array_basic.ls` |
-| `int64()` conversion function | Medium — large number handling | `type_conversion.ls` |
+| `i64()` conversion function | Medium — large number handling | `type_conversion.ls` |
 | `prod()` function | Low — simple multiplication | `stats_basic.ls` |
 | `sign()` function | Low — simple | `math_basic.ls` |
 
@@ -1160,9 +1160,11 @@ All issues are categorized by root cause. Each issue lists the affected files an
 
 ### Issue #9: `0L` int64 literal suffix not supported
 
+The constructor examples use the current `i64` spelling (S17.5.1).
+
 **Error**: `Unexpected syntax near '0L'` / `Unexpected syntax near 'L'`
-**Root cause**: Lambda does not support `L` suffix for int64 literals. Use `int64()` constructor.
-**Fix**: Replace `42L` with `int64(42)`.
+**Root cause**: Lambda does not support `L` suffix for int64 literals. Use `i64()` constructor.
+**Fix**: Replace `42L` with `i64(42)`.
 
 | Affected file | Error message |
 |---------------|---------------|
@@ -1517,7 +1519,7 @@ Some negative tests fail as **expected** (producing errors is their purpose). Ot
 | **P2-MED** | #4 | `map()` → pipe or comprehension | 3 | Rewrite expressions |
 | **P2-MED** | #5 | `reduce()` → sum/recursion | 2 | Rewrite logic |
 | **P2-MED** | #7 | `slice()`/`concat()` → range indexing/`++` | 3 | API replacement |
-| **P2-MED** | #9 | `42L` → `int64(42)` | 1 | Simple replacement |
+| **P2-MED** | #9 | `42L` → `i64(42)` | 1 | Simple replacement |
 | **P2-MED** | #10 | `x'...'` binary prefix | 1 | Syntax correction |
 | **P2-MED** | #11 | `0xFF` → `255` decimal | 1 | Convert literals |
 | **P2-MED** | #13 | `if` without `else` | 1 | Add `else null` |
@@ -1549,7 +1551,7 @@ Some negative tests fail as **expected** (producing errors is their purpose). Ot
 
 | Category | Fix Type | Est. Files | Est. Time |
 |----------|----------|-----------|-----------|
-| Simple find-replace | `fn(x) =>` → `(x) =>`, `&` → `++`, `0L` → `int64()`, etc. | ~20 | 30 min |
+| Simple find-replace | `fn(x) =>` → `(x) =>`, `&` → `++`, `0L` → `i64()`, etc. | ~20 | 30 min |
 | Expression rewrite | `filter()` → `where`, `map()` → comprehension, `reduce()` → recursion | ~15 | 1 hour |
 | Syntax restructure | `that` constraints, object defaults, string patterns, procedural blocks | ~15 | 1.5 hours |
 | Negative test fixes | `.expected` generation for error-producing tests | ~5 | 15 min |

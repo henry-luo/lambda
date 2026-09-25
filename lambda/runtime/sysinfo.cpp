@@ -14,8 +14,9 @@
 #include "../lambda-data.hpp"
 #include "../input/input.hpp"
 #include "../io/mark_builder.hpp"
+#include "context_capsule.h"
 #include "../../lib/log.h"
-#include "../../lib/memtrack.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/str.h"
 #include "../../lib/file.h"
@@ -48,8 +49,6 @@
 
 // Thread-local eval context (defined in runner.cpp)
 extern __thread EvalContext* context;
-
-// External functions
 extern "C" Pool* eval_context_get_pool(void);
 
 // Helper to convert ConstItem to Item (same memory layout)
@@ -63,21 +62,16 @@ static inline Item to_item(ConstItem ci) {
 
 struct SysinfoCache {
     Input* input;           // dedicated Input for sysinfo data
-    Item root;              // cached root map {os, cpu, memory, ...}
     Item os_info;           // cached sys.os map
     Item cpu_info;          // cached sys.cpu map
     Item memory_info;       // cached sys.memory map
     Item proc_info;         // cached sys.proc map
-    Item time_info;         // cached sys.time map
     Item lambda_info;       // cached sys.lambda map
-    time_t root_time;
     time_t os_time;
     time_t cpu_time;
     time_t memory_time;
     time_t proc_time;
-    time_t time_time;
     time_t lambda_time;
-    bool initialized;
 };
 
 // Cache TTLs (in seconds)
@@ -85,7 +79,42 @@ static const int TTL_STATIC = 3600;   // 1 hour - static info (OS, CPU)
 static const int TTL_MEMORY = 1;      // 1 second - dynamic
 static const int TTL_PROC = 5;        // 5 seconds - semi-static
 
-static __thread SysinfoCache* g_cache = nullptr;
+static void sysinfo_cache_destroy(void* capsule);
+
+static void* sysinfo_cache_construct(EvalContext* owner) {
+    if (!owner || context != owner) return nullptr;
+    Pool* pool = eval_context_get_pool();
+    if (!pool) return nullptr;
+    SysinfoCache* cache = (SysinfoCache*)pool_calloc(pool, sizeof(SysinfoCache));
+    if (!cache) return nullptr;
+    cache->input = Input::create(pool, nullptr, nullptr);
+    if (!cache->input || !cache->input->arena || !cache->input->name_pool ||
+            !cache->input->type_list) {
+        sysinfo_cache_destroy(cache);
+        return nullptr;
+    }
+    return cache;
+}
+
+static void sysinfo_cache_destroy(void* capsule) {
+    SysinfoCache* cache = (SysinfoCache*)capsule;
+    if (!cache || !cache->input) return;
+    // D4.2.6: release the Input's whole context; its pool cleanup is idempotent.
+    input_release_document_resources(cache->input);
+    cache->input = nullptr;
+}
+
+static const ContextCapsuleOps sysinfo_cache_ops = {
+    "sysinfo", CONTEXT_CAPSULE_LIFETIME_REALM, 0,
+    sysinfo_cache_construct, nullptr, sysinfo_cache_destroy
+};
+
+static SysinfoCache* sysinfo_cache(bool create) {
+    if (!context) return nullptr;
+    return (SysinfoCache*)(create
+        ? context_capsule_ensure(context, CONTEXT_CAPSULE_SYSINFO, &sysinfo_cache_ops)
+        : context_capsule(context, CONTEXT_CAPSULE_SYSINFO));
+}
 
 // Global storage for command line arguments (set once at startup)
 static int g_argc = 0;
@@ -96,7 +125,6 @@ static char** g_argv = nullptr;
 // ============================================================================
 
 static bool cache_valid(time_t cached_at, int ttl);
-static Input* sysinfo_create_input(Pool* pool);
 static int collect_path_segments(Path* path, const char** segments, int max_segments);
 static Item resolve_root(void);
 static Item resolve_os(void);
@@ -112,7 +140,7 @@ static Item resolve_temp(void);
 // Initialization
 // ============================================================================
 
-extern "C" void sysinfo_set_args(int argc, char** argv) {
+extern "C" void sysinfo_set_argv(int argc, char** argv) {
     g_argc = argc;
     g_argv = argv;
 }
@@ -121,69 +149,27 @@ extern "C" int sysinfo_get_argc(void) { return g_argc; }
 extern "C" char** sysinfo_get_argv(void) { return g_argv; }
 
 extern "C" void sysinfo_init(void) {
-    if (g_cache && g_cache->initialized) return;
-
-    if (!g_cache) {
-        g_cache = (SysinfoCache*)mem_calloc(1, sizeof(SysinfoCache), MEM_CAT_SYSTEM);
-    }
-    if (g_cache) {
-        // Create a dedicated Input for sysinfo using eval context's pool
-        if (context) {
-            Pool* pool = eval_context_get_pool();
-            if (pool) {
-                g_cache->input = sysinfo_create_input(pool);
-                log_info("sysinfo_init: created input %p", g_cache->input);
-            }
-        }
-        g_cache->initialized = true;
-        log_info("sysinfo_init: initialized");
-    }
+    sysinfo_cache(true);
 }
 
 extern "C" void sysinfo_shutdown(void) {
-    if (g_cache) {
-        // Input will be freed when pool is destroyed
-        mem_free(g_cache);
-        g_cache = nullptr;
-        log_info("sysinfo_shutdown: complete");
-    }
+    if (context) context_capsule_drop(context, CONTEXT_CAPSULE_SYSINFO);
 }
 
 extern "C" void sysinfo_invalidate_cache(void) {
-    if (g_cache) {
-        g_cache->root = ItemNull;
-        g_cache->os_info = ItemNull;
-        g_cache->cpu_info = ItemNull;
-        g_cache->memory_info = ItemNull;
-        g_cache->proc_info = ItemNull;
-        g_cache->time_info = ItemNull;
-        g_cache->lambda_info = ItemNull;
-        g_cache->root_time = 0;
-        g_cache->os_time = 0;
-        g_cache->cpu_time = 0;
-        g_cache->memory_time = 0;
-        g_cache->proc_time = 0;
-        g_cache->time_time = 0;
-        g_cache->lambda_time = 0;
+    SysinfoCache* cache = sysinfo_cache(false);
+    if (cache) {
+        cache->os_info = ItemNull;
+        cache->cpu_info = ItemNull;
+        cache->memory_info = ItemNull;
+        cache->proc_info = ItemNull;
+        cache->lambda_info = ItemNull;
+        cache->os_time = 0;
+        cache->cpu_time = 0;
+        cache->memory_time = 0;
+        cache->proc_time = 0;
+        cache->lambda_time = 0;
     }
-}
-
-// D4.2.6: the cache is per thread, but its Input and every Item cached from it
-// live in the eval context's pool. When that pool is released, forget both;
-// otherwise a later runtime on this thread builds into and reads freed memory.
-static void sysinfo_pool_released(void* arg) {
-    (void)arg;
-    sysinfo_invalidate_cache();
-    if (g_cache) g_cache->input = nullptr;
-}
-
-static Input* sysinfo_create_input(Pool* pool) {
-    Input* input = Input::create(pool, nullptr, nullptr);
-    if (input && !pool_add_cleanup(pool, sysinfo_pool_released, nullptr)) {
-        log_error("sysinfo: failed to tie the cache to its pool");
-        return nullptr;
-    }
-    return input;
 }
 
 // ============================================================================
@@ -234,20 +220,8 @@ static int collect_path_segments(Path* path, const char** segments, int max_segm
  * Initializes cache if needed.
  */
 static Input* get_input(void) {
-    if (!g_cache || !g_cache->initialized) {
-        sysinfo_init();
-    }
-    if (!g_cache) return nullptr;
-
-    // Re-create Input if context changed
-    if (!g_cache->input && context) {
-        Pool* pool = eval_context_get_pool();
-        if (pool) {
-            g_cache->input = sysinfo_create_input(pool);
-        }
-    }
-
-    return g_cache->input;
+    SysinfoCache* cache = sysinfo_cache(true);
+    return cache ? cache->input : nullptr;
 }
 
 // ============================================================================
@@ -580,14 +554,16 @@ static const char* get_temp_dir(void) {
 // Category resolvers using MarkBuilder
 // ============================================================================
 
-static Item resolve_root(void) {
-    if (!g_cache) sysinfo_init();
-    if (!g_cache) return ItemNull;
+// Builder calls copy OS and process source strings into the sysinfo Input.
+static Item create_cwd_item(MarkBuilder& builder) {
+    char cwd[4096];
+    return file_getcwd_into(cwd, sizeof(cwd))
+        ? builder.createStringItem(cwd) : ItemNull;
+}
 
-    // Root map is always valid (sub-maps have their own TTLs)
-    if (get_type_id(g_cache->root) == LMD_TYPE_MAP) {
-        return g_cache->root;
-    }
+static Item resolve_root(void) {
+    SysinfoCache* cache = sysinfo_cache(true);
+    if (!cache) return ItemNull;
 
     Input* input = get_input();
     if (!input) return ItemNull;
@@ -595,7 +571,7 @@ static Item resolve_root(void) {
     MarkBuilder builder(input);
     MapBuilder root = builder.map();
 
-    // Add category maps - resolve them directly for now
+    // Rebuild the root so time and TTL-based child snapshots stay current.
     root.put("os", resolve_os());
     root.put("cpu", resolve_cpu());
     root.put("memory", resolve_memory());
@@ -605,19 +581,16 @@ static Item resolve_root(void) {
     root.put("home", resolve_home());
     root.put("temp", resolve_temp());
 
-    g_cache->root = root.final();
-    g_cache->root_time = time(nullptr);
-
-    return g_cache->root;
+    return root.final();
 }
 
 static Item resolve_os(void) {
-    if (!g_cache) sysinfo_init();
-    if (!g_cache) return ItemNull;
+    SysinfoCache* cache = sysinfo_cache(true);
+    if (!cache) return ItemNull;
 
-    if (cache_valid(g_cache->os_time, TTL_STATIC) &&
-        get_type_id(g_cache->os_info) == LMD_TYPE_MAP) {
-        return g_cache->os_info;
+    if (cache_valid(cache->os_time, TTL_STATIC) &&
+        get_type_id(cache->os_info) == LMD_TYPE_MAP) {
+        return cache->os_info;
     }
 
     Input* input = get_input();
@@ -642,20 +615,20 @@ static Item resolve_os(void) {
     os.put("platform", "unknown");
 #endif
 
-    g_cache->os_info = os.final();
-    g_cache->os_time = time(nullptr);
+    cache->os_info = os.final();
+    cache->os_time = time(nullptr);
 
     log_debug("sysinfo_resolve_os: resolved os map");
-    return g_cache->os_info;
+    return cache->os_info;
 }
 
 static Item resolve_cpu(void) {
-    if (!g_cache) sysinfo_init();
-    if (!g_cache) return ItemNull;
+    SysinfoCache* cache = sysinfo_cache(true);
+    if (!cache) return ItemNull;
 
-    if (cache_valid(g_cache->cpu_time, TTL_STATIC) &&
-        get_type_id(g_cache->cpu_info) == LMD_TYPE_MAP) {
-        return g_cache->cpu_info;
+    if (cache_valid(cache->cpu_time, TTL_STATIC) &&
+        get_type_id(cache->cpu_info) == LMD_TYPE_MAP) {
+        return cache->cpu_info;
     }
 
     Input* input = get_input();
@@ -668,20 +641,20 @@ static Item resolve_cpu(void) {
     cpu.put("threads", (int64_t)get_cpu_threads());
     cpu.put("arch", get_machine_arch());
 
-    g_cache->cpu_info = cpu.final();
-    g_cache->cpu_time = time(nullptr);
+    cache->cpu_info = cpu.final();
+    cache->cpu_time = time(nullptr);
 
     log_debug("sysinfo_resolve_cpu: resolved cpu map");
-    return g_cache->cpu_info;
+    return cache->cpu_info;
 }
 
 static Item resolve_memory(void) {
-    if (!g_cache) sysinfo_init();
-    if (!g_cache) return ItemNull;
+    SysinfoCache* cache = sysinfo_cache(true);
+    if (!cache) return ItemNull;
 
-    if (cache_valid(g_cache->memory_time, TTL_MEMORY) &&
-        get_type_id(g_cache->memory_info) == LMD_TYPE_MAP) {
-        return g_cache->memory_info;
+    if (cache_valid(cache->memory_time, TTL_MEMORY) &&
+        get_type_id(cache->memory_info) == LMD_TYPE_MAP) {
+        return cache->memory_info;
     }
 
     Input* input = get_input();
@@ -698,25 +671,25 @@ static Item resolve_memory(void) {
     mem.put("free", free_mem);
     mem.put("used", used);
 
-    g_cache->memory_info = mem.final();
-    g_cache->memory_time = time(nullptr);
+    cache->memory_info = mem.final();
+    cache->memory_time = time(nullptr);
 
     log_debug("sysinfo_resolve_memory: resolved memory map");
-    return g_cache->memory_info;
+    return cache->memory_info;
 }
 
 static Item resolve_proc(const char** segments, int count) {
-    if (!g_cache) sysinfo_init();
-    if (!g_cache) return ItemNull;
+    SysinfoCache* cache = sysinfo_cache(true);
+    if (!cache) return ItemNull;
 
     Input* input = get_input();
     if (!input) return ItemNull;
 
     // sys.proc - return map with "self" sub-path
     if (count == 0) {
-        if (cache_valid(g_cache->proc_time, TTL_PROC) &&
-            get_type_id(g_cache->proc_info) == LMD_TYPE_MAP) {
-            return g_cache->proc_info;
+        if (cache_valid(cache->proc_time, TTL_PROC) &&
+            get_type_id(cache->proc_info) == LMD_TYPE_MAP) {
+            return cache->proc_info;
         }
 
         MarkBuilder builder(input);
@@ -726,17 +699,14 @@ static Item resolve_proc(const char** segments, int count) {
         MapBuilder self = builder.map();
         self.put("pid", (int64_t)getpid());
 
-        char* cwd = file_getcwd();
-        if (cwd) {
-            self.put("cwd", cwd);
-            mem_free(cwd);
-        }
+        Item cwd = create_cwd_item(builder);
+        if (get_type_id(cwd) == LMD_TYPE_STRING) self.put("cwd", cwd);
 
         proc.put("self", self.final());
 
-        g_cache->proc_info = proc.final();
-        g_cache->proc_time = time(nullptr);
-        return g_cache->proc_info;
+        cache->proc_info = proc.final();
+        cache->proc_time = time(nullptr);
+        return cache->proc_info;
     }
 
     // sys.proc.self
@@ -747,11 +717,8 @@ static Item resolve_proc(const char** segments, int count) {
             MapBuilder self = builder.map();
             self.put("pid", (int64_t)getpid());
 
-            char* cwd = file_getcwd();
-            if (cwd) {
-                self.put("cwd", cwd);
-                mem_free(cwd);
-            }
+            Item cwd = create_cwd_item(builder);
+            if (get_type_id(cwd) == LMD_TYPE_STRING) self.put("cwd", cwd);
 
             return self.final();
         }
@@ -761,32 +728,27 @@ static Item resolve_proc(const char** segments, int count) {
             const char* field = segments[1];
 
             if (strcmp(field, "pid") == 0) {
-                return Item{.item = i2it(getpid())};
+                MarkBuilder builder(input);
+                return builder.createInt(getpid());
             }
 
             if (strcmp(field, "cwd") == 0) {
-                char* cwd = file_getcwd();
-                if (cwd) {
-                    MarkBuilder builder(input);
-                    Item result = builder.createStringItem(cwd);
-                    mem_free(cwd);
-                    return result;
-                }
-                return ItemNull;
+                MarkBuilder builder(input);
+                return create_cwd_item(builder);
             }
 
-            if (strcmp(field, "args") == 0) {
-                // sys.proc.self.args - return command line arguments as array
+            if (strcmp(field, "argv") == 0) {
+                // expose the compacted process argument vector under its public name.
                 MarkBuilder builder(input);
-                ArrayBuilder args = builder.array();
+                ArrayBuilder argv = builder.array();
 
                 if (g_argv) {
                     for (int i = 0; i < g_argc; i++) {
-                        args.append(builder.createStringItem(g_argv[i]));
+                        argv.append(builder.createStringItem(g_argv[i]));
                     }
                 }
 
-                return args.final();
+                return argv.final();
             }
 
             if (strcmp(field, "env") == 0) {
@@ -846,12 +808,12 @@ static Item resolve_time(void) {
 }
 
 static Item resolve_lambda(void) {
-    if (!g_cache) sysinfo_init();
-    if (!g_cache) return ItemNull;
+    SysinfoCache* cache = sysinfo_cache(true);
+    if (!cache) return ItemNull;
 
-    if (cache_valid(g_cache->lambda_time, TTL_STATIC) &&
-        get_type_id(g_cache->lambda_info) == LMD_TYPE_MAP) {
-        return g_cache->lambda_info;
+    if (cache_valid(cache->lambda_time, TTL_STATIC) &&
+        get_type_id(cache->lambda_info) == LMD_TYPE_MAP) {
+        return cache->lambda_info;
     }
 
     Input* input = get_input();
@@ -862,11 +824,11 @@ static Item resolve_lambda(void) {
 
     lambda.put("version", "0.1.0");  // TODO: get from config
 
-    g_cache->lambda_info = lambda.final();
-    g_cache->lambda_time = time(nullptr);
+    cache->lambda_info = lambda.final();
+    cache->lambda_time = time(nullptr);
 
     log_debug("sysinfo_resolve_lambda: resolved lambda map");
-    return g_cache->lambda_info;
+    return cache->lambda_info;
 }
 
 static Item resolve_home(void) {

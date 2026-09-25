@@ -837,21 +837,19 @@ Item path_resolve_for_iteration(Path* path) {
         return ITEM_NULL;
     }
     
-    // Already resolved?
-    if (path->result != 0) {
-        return path->result;
-    }
-    
-    // Handle sys.* paths via sysinfo module
+    // sys.* values can expire independently; the sysinfo cache owns their TTL.
     PathScheme scheme = path_get_scheme(path);
     if (scheme == PATH_SCHEME_SYS) {
         Item result = sysinfo_resolve_path(path);
-        // Only cache if resolution succeeded (non-null, non-error)
-        // This allows unresolvable sys paths like sys.config to print as paths
-        if (result != ITEM_NULL && result != ITEM_ERROR) {
-            path->result = result;
-        }
+        // Path formatting reads this result after the force operation returns.
+        if (result != ITEM_NULL && result != ITEM_ERROR) path->result = result;
+        else path->result = 0;
         return result;
+    }
+
+    // Already resolved?
+    if (path->result != 0) {
+        return path->result;
     }
     
     // Handle wildcards specially

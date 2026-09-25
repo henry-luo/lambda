@@ -52,6 +52,8 @@ typedef enum ContextCapsuleId {
     // peer of their capsules, not a field of the JS semantic realm state.
     CONTEXT_CAPSULE_RUNTIME_RESOURCES,
     CONTEXT_CAPSULE_JS_RUNTIME,
+    // sys.* Mark data lives in the owning evaluation context's Input.
+    CONTEXT_CAPSULE_SYSINFO,
     CONTEXT_CAPSULE_COUNT
 } ContextCapsuleId;
 

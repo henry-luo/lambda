@@ -346,11 +346,36 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
     size_t pos = 0;
 
     while (pos < html.size()) {
-        size_t tag_start = html.find("<script", pos);
+        size_t tag_start = html.find('<', pos);
         if (tag_start == std::string::npos) break;
-
-        size_t tag_end = html.find('>', tag_start);
-        if (tag_end == std::string::npos) break;
+        if (html.compare(tag_start, 4, "<!--") == 0) {
+            size_t comment_end = html.find("-->", tag_start + 4);
+            if (comment_end == std::string::npos) break;
+            pos = comment_end + 3;
+            continue;
+        }
+        // A srcdoc attribute may contain literal <script> text. Skip its
+        // enclosing tag before looking for page scripts.
+        size_t tag_end = tag_start + 1;
+        char quote = 0;
+        for (; tag_end < html.size(); tag_end++) {
+            char ch = html[tag_end];
+            if (quote) {
+                if (ch == quote) quote = 0;
+            } else if (ch == '\'' || ch == '"') {
+                quote = ch;
+            } else if (ch == '>') {
+                break;
+            }
+        }
+        if (tag_end == html.size()) break;
+        if (html.compare(tag_start, 7, "<script") != 0 ||
+                (tag_start + 7 < html.size() &&
+                 html[tag_start + 7] != ' ' && html[tag_start + 7] != '\t' &&
+                 html[tag_start + 7] != '\n' && html[tag_start + 7] != '>')) {
+            pos = tag_end + 1;
+            continue;
+        }
 
         std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
         std::string src = extract_attr(tag, "src");

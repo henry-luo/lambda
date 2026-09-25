@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 37.0.3 (2026-09-25)
+**Spec version:** 39.1.0 (2026-09-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2393,6 +2393,30 @@ governs how an under-determined case here is resolved.
   Qualification is unnecessary for the reserved core (`int`, `string`,
   `type`), which S16.10.1v2 already makes un-shadowable. [S12.3.7, D7.2.4]
 
+### S17.3 Process information
+
+- **S17.3.1** **`sys.proc.self.argv` is the sole argument-vector path.** It
+  returns an array of the live command-line strings after Lambda's startup
+  option filtering, beginning with the executable name; a subcommand and
+  script path remain in their command-line positions when present.
+  No alias is defined. [Lambda_IO_Sysinfo §2; IL2-I25]
+
+### S17.4 String search positions
+
+- **S17.4.1** **A text search result uses its source's code-point index
+  domain.** The `index` field of every `find` match in a string or symbol,
+  whether from a literal or a pattern, is its zero-based start position, compatible
+  with `index_of`, string subscripts, and `slice`: `find("éabc", "abc")[0].index`
+  is `1`. UTF-8 byte offsets are internal only. [S2.5.8, S7.2.1, C15b.1]
+
+### S17.5 Sized integer conversions
+
+- **S17.5.1** **Sized integer conversions use the type names as callable
+  constructors.** The spellings are `i8(x)`, `i16(x)`, `i32(x)`, `i64(x)`,
+  `u8(x)`, `u16(x)`, `u32(x)`, and `u64(x)`. `i64(x)` is the sole signed
+  full-width conversion spelling.
+  [S2.1.1v4, Type_Int_Sized §1 decision 5, IL2-I11]
+
 ---
 
 ## Appendix A — Implementation Footnotes
@@ -2615,7 +2639,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 | S16 surface syntax | Design_Syntax §3–§7 (39 decided points) | `Lambda_Design_Syntax.md` |
-| S17 system library | C18 | `Lambda_Semantics_Formal2.md` |
+| S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md` |
 
 The decision records preserve the full deliberations — every alternative that
 lost and the arguments that did not persuade. This specification is their
