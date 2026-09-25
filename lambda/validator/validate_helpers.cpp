@@ -68,9 +68,15 @@ void add_type_mismatch_error_ex(
     char error_msg[256];
     const char* actual_type_name = (actual_item.type_id() >= 0 && actual_item.type_id() < 32)
         ? type_info[actual_item.type_id()].name : "unknown";
+    // a range contract is named by its bounds; its tag alone would read `type`
+    char range_name[128];
+    if (lambda_type_is_range(expected_type)) {
+        lambda_type_format_contract_name(expected_type, range_name, sizeof(range_name));
+    }
     snprintf(error_msg, sizeof(error_msg),
             "Expected type '%s', but got '%s'",
-            type_to_string(expected_type), actual_type_name);
+            lambda_type_is_range(expected_type) ? range_name : type_to_string(expected_type),
+            actual_type_name);
 
     ValidationError* error = create_validation_error(
         AST_VALID_ERROR_TYPE_MISMATCH, error_msg,

@@ -2304,6 +2304,16 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
             return state_get_bool(state, view, STATE_VALID);
         case PSEUDO_STATE_INVALID:
             return state_get_bool(state, view, STATE_INVALID);
+        case PSEUDO_STATE_OPEN:
+            if (view->is_element()) {
+                DomElement* elem = lam::dom_require_element(view);
+                if (elem && elem->tag_name &&
+                    str_icmp_cstr(elem->tag_name, "select") == 0) {
+                    return state && state->open_dropdown == view;
+                }
+                return selector_element_is_open_disclosure(elem);
+            }
+            return false;
         case PSEUDO_STATE_PLACEHOLDER_SHOWN:
             return state_get_bool(state, view, STATE_PLACEHOLDER);
         case PSEUDO_STATE_SELECTED:
@@ -2346,6 +2356,8 @@ static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseud
             // Same owner as above; dom_option_is_selected falls back to the
             // content attribute itself when nothing has set live selectedness.
             return dom_option_is_selected(element);
+        case PSEUDO_STATE_OPEN:
+            return selector_element_is_open_disclosure(element);
         default:
             return false;
     }
@@ -4873,6 +4885,11 @@ bool form_control_is_disabled(DocState* state, View* view) {
     DomElement* element = lam::dom_require_element(view);
     if (!form_element_supports_disabled_state(element)) return false;
 
+    // Detached clones can retain a StateStore snapshot after an IDL attribute write.
+    if (!dom_element_is_connected(element)) {
+        return element->has_attribute("disabled") ||
+            form_control_is_disabled_by_fieldset(element);
+    }
     ViewState* view_state = form_view_state_get(state, view);
     bool directly_disabled = view_state
         ? view_state->data.form.disabled != 0

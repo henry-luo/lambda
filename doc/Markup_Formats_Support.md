@@ -765,7 +765,7 @@ A local directory path can be treated as an input, producing an array of file-in
 
 ```lambda
 let files = input("./src", 'dir')
-files that ~.ext == ".cpp" |> ~.name     // list all .cpp filenames
+files |: ~.ext == ".cpp" |> ~.name       // list all .cpp filenames
 ```
 
 ---

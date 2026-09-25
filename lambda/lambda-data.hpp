@@ -1208,6 +1208,23 @@ extern Type TYPE_ANY_NO_ERROR;
 extern Type TYPE_ANY_NO_NULL;
 extern Type TYPE_ANY_NO_ERROR_OR_NULL;
 
+// D3.1.1v4: a range type `X to Y` is a type-kind node under the shared
+// LMD_TYPE_TYPE tag. It must never wear LMD_TYPE_RANGE, the tag of a range
+// VALUE, or every tag-driven consumer reads "an int from 1 to 5" as "a range"
+// (LR03-18, LR03-14).
+static inline bool lambda_type_is_range(const Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_RANGE;
+}
+
+// The domain a range type draws its members from (S11.1.3): `int` for an
+// integer range, `string` for a character range. It serves static carrier
+// checks only. A member keeps its own representation (`3.0` is a member of
+// `1 to 5`), so the domain never selects a native lane.
+static inline Type* lambda_range_type_domain(const Type* type) {
+    if (!lambda_type_is_range(type)) return NULL;
+    return ((const TypeRange*)type)->is_char ? &TYPE_STRING : &TYPE_INT;
+}
+
 // S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
 // union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
 // so a caller that needs a signature must ask here rather than cast on the id.

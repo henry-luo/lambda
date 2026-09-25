@@ -108,7 +108,8 @@ typedef enum LambdaErrorCode {
     ERR_BINDER_FORWARD_REF = 235,     // a binder name is used before its site
     ERR_BINDER_IN_RETURN = 236,       // binders are not valid in return contracts
     ERR_BINDER_TRAILING_THAT = 237,   // `that` follows an `as T` binder
-    
+    ERR_FILTER_BODY_NO_CURRENT = 238, // S10.1.6: a `|:` body must mention `~`
+
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors
     // -------------------------------------------------------------------------

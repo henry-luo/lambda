@@ -315,6 +315,19 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
     return result;
 }
 
+// S11.1.3: a range type admits the values between its bounds. It needs its own
+// arm: its LMD_TYPE_TYPE tag names no carrier, and the TypeType fallback would
+// read its lower bound as a nested Type pointer.
+static ValidationResult* validate_against_range_type(SchemaValidator* validator,
+        ConstItem item, Type* range_type) {
+    bool ok = lambda_range_type_contains(range_type, (Item){.item = item.item});
+    if (validator->is_fast_mode()) return validation_verdict(ok);
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    result->valid = ok;
+    if (!ok) add_type_mismatch_error_ex(result, validator, range_type, item);
+    return result;
+}
+
 ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
     // A compact global meta-type (`number`, `integer`, `type`) carries ONLY the
     // two-byte Type prefix -- there is no TypeType payload, so reading
@@ -354,6 +367,9 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         }
         if (fast_base->kind == TYPE_KIND_BINARY) {
             return validate_binary_type(validator, item, (TypeBinary*)fast_base);
+        }
+        if (lambda_type_is_range(fast_base)) {
+            return validate_against_range_type(validator, item, fast_base);
         }
         if (fast_base == &TYPE_NUMBER) {
             return validation_verdict(IS_NUMERIC_ID(item.type_id()));
@@ -425,6 +441,10 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
     // Handle Pattern type (string/symbol pattern)
     if (base_type->kind == TYPE_KIND_PATTERN) {
         return validate_against_pattern_type(validator, item, (TypePattern*)base_type);
+    }
+
+    if (lambda_type_is_range(base_type)) {
+        return validate_against_range_type(validator, item, base_type);
     }
 
     if (base_type == &TYPE_NUMBER) {
@@ -982,6 +1002,8 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
                 result = validate_binary_type(validator, item, (TypeBinary*)type);
             } else if (type->kind == TYPE_KIND_PATTERN) {
                 result = validate_against_pattern_type(validator, item, (TypePattern*)type);
+            } else if (type->kind == TYPE_KIND_RANGE) {
+                result = validate_against_range_type(validator, item, type);
             } else {
                 result = validate_against_base_type(validator, item, (TypeType*)type);
             }

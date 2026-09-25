@@ -80,7 +80,7 @@ pub fn process_environmental_data(sensor_readings) {
                     risk_level: if (heat_index > 105.0) "extreme" else "caution"
                 }
                 else null
-            )] that (~ != null),
+            )] |: (~ != null),
             comfort_score: (
                 let ideal_temp = 22.0,
                 let ideal_humidity = 50.0,

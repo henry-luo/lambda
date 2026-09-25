@@ -149,7 +149,7 @@ const char radiant_dom_interface_decl[] =
     "    id: string, class_name: string, child_element_count: int, children: any,\n"
     "    attributes: any, first_element_child: dom_node, last_element_child: dom_node,\n"
     "    next_element_sibling: dom_node, previous_element_sibling: dom_node,\n"
-    "    disabled: bool, required: bool, read_only: bool, readonly: bool,\n"
+    "    disabled: bool, required: bool,\n"
     "    no_validate: bool, form_no_validate: bool, open: bool, autofocus: bool,\n"
     "    max_length: int, min_length: int, src: string, href: string,\n"
     "    protocol: string, host: string, hostname: string, pathname: string,\n"
@@ -205,6 +205,7 @@ const char radiant_dom_interface_decl[] =
     "    get_ctm: fn() any, get_screen_ctm: fn() any\n"
     "}\n"
     "type input_element : html_element {\n"
+    "    read_only: bool, readonly: bool,\n"
     "    default_checked: bool, size: int, width: int, height: int,\n"
     "    multiple: bool, checked: bool, 'type': string, value: string,\n"
     "    value_as_number: float, value_as_date: any, files: any,\n"
@@ -216,9 +217,11 @@ const char radiant_dom_interface_decl[] =
     "type select_element : html_element {\n"
     "    multiple: bool, size: int, value: string, selected_index: int, length: int,\n"
     "    options: any, selected_options: any, 'type': string,\n"
-    "    named_item: fn(a0: any) any, add: fn(a0: any, a1: any) any, remove: fn(a0: any) any\n"
+    "    named_item: fn(a0: any) any, add: fn(a0: any, a1: any) any, remove: fn(a0: any) any,\n"
+    "    show_picker: fn() any\n"
     "}\n"
     "type textarea_element : html_element {\n"
+    "    read_only: bool, readonly: bool,\n"
     "    rows: int, cols: int, wrap: string, value: string, selection_start: string,\n"
     "    selection_end: string, selection_direction: string, default_value: string\n"
     "}\n"
@@ -1218,8 +1221,6 @@ static const JubeMemberBind radiant_dom_html_element_members[] = {
     BIND_FIELD("previous_element_sibling", radiant_dom_member_previous_element_sibling),
     BIND_FIELD_SET("disabled", radiant_html_disabled_get, radiant_html_disabled_set),
     BIND_FIELD_SET("required", radiant_html_required_get, radiant_html_required_set),
-    BIND_FIELD_SET_JS("read_only", "readOnly", radiant_html_read_only_get, radiant_html_read_only_set),
-    BIND_FIELD_SET("readonly", radiant_html_readonly_get, radiant_html_readonly_set),
     BIND_FIELD_SET_JS("no_validate", "noValidate", radiant_html_no_validate_get, radiant_html_no_validate_set),
     BIND_FIELD_SET_JS("form_no_validate", "formNoValidate", radiant_html_form_no_validate_get, radiant_html_form_no_validate_set),
     BIND_FIELD_SET("open", radiant_html_open_get, radiant_html_open_set),
@@ -1294,6 +1295,9 @@ static const JubeMemberBind radiant_dom_svg_element_members[] = {
 };
 
 static const JubeMemberBind radiant_dom_input_element_members[] = {
+    // Keep this off HTMLElement so `readOnly in button` follows the IDL surface.
+    BIND_FIELD_SET_JS("read_only", "readOnly", radiant_html_read_only_get, radiant_html_read_only_set),
+    BIND_FIELD_SET("readonly", radiant_html_readonly_get, radiant_html_readonly_set),
     BIND_FIELD_SET_JS("default_checked", "defaultChecked", radiant_dom_m4b_default_checked_get, radiant_dom_m4b_default_checked_set),
     BIND_FIELD_SET("multiple", radiant_dom_m4b_multiple_get, radiant_dom_m4b_multiple_set),
     BIND_FIELD_SET("size", radiant_dom_m4b_size_get, radiant_dom_m4b_size_set),
@@ -1344,6 +1348,8 @@ static const JubeMemberBind radiant_dom_select_element_members[] = {
 };
 
 static const JubeMemberBind radiant_dom_textarea_element_members[] = {
+    BIND_FIELD_SET_JS("read_only", "readOnly", radiant_html_read_only_get, radiant_html_read_only_set),
+    BIND_FIELD_SET("readonly", radiant_html_readonly_get, radiant_html_readonly_set),
     BIND_FIELD_SET("rows", radiant_dom_m4b_rows_get, radiant_dom_m4b_rows_set),
     BIND_FIELD_SET("cols", radiant_dom_m4b_cols_get, radiant_dom_m4b_cols_set),
     BIND_FIELD_SET("wrap", radiant_dom_m4b_wrap_get, radiant_dom_m4b_wrap_set),

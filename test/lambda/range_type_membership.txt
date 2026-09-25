@@ -1,0 +1,7 @@
+[true, true, false, true, true]
+[true, false, true, false]
+[true, true, false]
+[true, false, true, false, false]
+[6, 11, "b!", 3, 2, 102, 4, 3]
+[true, false, true, true, false, true]
+["out", "in", "in", "out"]

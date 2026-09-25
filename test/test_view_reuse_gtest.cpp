@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/view.hpp"
+#include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
@@ -106,27 +107,42 @@ class DomRetirementTest : public ::testing::Test {
 protected:
     Input input = {};
     DomDocument doc;
+    Element* backing = nullptr;
 
     void SetUp() override {
         ASSERT_TRUE(doc.init(&input));
+        backing = elmt_arena(doc.node_arena);
+        ASSERT_NE(backing, nullptr);
     }
 
     void TearDown() override {
         doc.destroy();
     }
 
-    DomElement* root() {
-        DomElement* value = DomElement::create(&doc, "root", nullptr);
+    DomElement* element(const char* tag) {
+        // retirement fixtures need backed nodes; null backing marks layout-only nodes synthetic.
+        DomElement* value = DomElement::create(&doc, tag, backing);
         EXPECT_NE(value, nullptr);
+        if (value) EXPECT_FALSE(value->is_synthetic());
+        return value;
+    }
+
+    DomElement* root() {
+        DomElement* value = element("root");
         doc.root = value;
         return value;
+    }
+
+    bool attach(DomElement* parent, DomElement* child) {
+        // lifecycle tests link the DOM chain without editing Lambda content.
+        return static_cast<DomNode*>(parent)->append_child(child);
     }
 };
 
 TEST_F(DomRetirementTest, UnpinnedDetachedNodeRetiresAndRejectsStaleRef) {
     DomElement* parent = root();
-    DomElement* child = DomElement::create(&doc, "child", nullptr);
-    ASSERT_TRUE(parent->append_child(child));
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
     DomNodeRef ref = dom_node_ref(child);
 
     ASSERT_TRUE(parent->remove_child(child));
@@ -142,8 +158,8 @@ TEST_F(DomRetirementTest, UnpinnedDetachedNodeRetiresAndRejectsStaleRef) {
 
 TEST_F(DomRetirementTest, PinBlocksRetirementUntilReleased) {
     DomElement* parent = root();
-    DomElement* child = DomElement::create(&doc, "child", nullptr);
-    ASSERT_TRUE(parent->append_child(child));
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
     DomNodeRef ref = dom_node_ref(child);
     ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_WRAPPER));
 
@@ -156,22 +172,22 @@ TEST_F(DomRetirementTest, PinBlocksRetirementUntilReleased) {
 
 TEST_F(DomRetirementTest, ReinsertionCancelsDetachedCandidate) {
     DomElement* parent = root();
-    DomElement* child = DomElement::create(&doc, "child", nullptr);
-    ASSERT_TRUE(parent->append_child(child));
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
     DomNodeRef ref = dom_node_ref(child);
 
     ASSERT_TRUE(parent->remove_child(child));
-    ASSERT_TRUE(parent->append_child(child));
+    ASSERT_TRUE(attach(parent, child));
     EXPECT_EQ(dom_retire_sweep(&doc), 0u);
     EXPECT_EQ(dom_node_ref_validate(&doc, ref), child);
 }
 
 TEST_F(DomRetirementTest, PinnedDescendantBlocksBottomUpSubtreeRetirement) {
     DomElement* outer = root();
-    DomElement* branch = DomElement::create(&doc, "branch", nullptr);
-    DomElement* leaf = DomElement::create(&doc, "leaf", nullptr);
-    ASSERT_TRUE(outer->append_child(branch));
-    ASSERT_TRUE(branch->append_child(leaf));
+    DomElement* branch = element("branch");
+    DomElement* leaf = element("leaf");
+    ASSERT_TRUE(attach(outer, branch));
+    ASSERT_TRUE(attach(branch, leaf));
     DomNodeRef leaf_ref = dom_node_ref(leaf);
     ASSERT_TRUE(dom_node_pin(&doc, leaf_ref, DOM_NODE_PIN_RANGE));
 
@@ -202,8 +218,8 @@ TEST_F(DomRetirementTest, GeneratedTextPayloadIsFreedWithItsNode) {
 TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
     DomElement* parent = root();
     for (int i = 0; i < 128; i++) {
-        DomElement* child = DomElement::create(&doc, "child", nullptr);
-        ASSERT_TRUE(parent->append_child(child));
+        DomElement* child = element("child");
+        ASSERT_TRUE(attach(parent, child));
         ASSERT_TRUE(parent->remove_child(child));
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     }
@@ -212,11 +228,11 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
 
     uint32_t last_id = 0;
     for (int i = 0; i < 10000; i++) {
-        DomElement* child = DomElement::create(&doc, "child", nullptr);
+        DomElement* child = element("child");
         uint32_t node_id = static_cast<DomNode*>(child)->id;
         ASSERT_GT(node_id, last_id);
         last_id = node_id;
-        ASSERT_TRUE(parent->append_child(child));
+        ASSERT_TRUE(attach(parent, child));
         ASSERT_TRUE(parent->remove_child(child));
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     }
@@ -230,11 +246,11 @@ TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {
     DomElement* parent = root();
     DomNodeRef refs[DOM_JS_MUTATION_RECORD_CAP * 4] = {};
     for (int i = 0; i < DOM_JS_MUTATION_RECORD_CAP * 4; i++) {
-        DomElement* child = DomElement::create(&doc, "held", nullptr);
+        DomElement* child = element("held");
         refs[i] = dom_node_ref(child);
         DomNodePinReason reason = (DomNodePinReason)(i % DOM_NODE_PIN_REASON_COUNT);
         ASSERT_TRUE(dom_node_pin(&doc, refs[i], reason));
-        ASSERT_TRUE(parent->append_child(child));
+        ASSERT_TRUE(attach(parent, child));
         ASSERT_TRUE(parent->remove_child(child));
     }
     EXPECT_EQ(dom_retire_sweep(&doc), 0u);
@@ -288,10 +304,13 @@ TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     doc.root = root;
     DomElement* storage = DomElement::create_in(input_arena);
     ASSERT_NE(storage, nullptr);
+    Element* backing = elmt_arena(input_arena);
+    ASSERT_NE(backing, nullptr);
     DomElement* child = DomElement::create_in(
-        storage, &doc, "child", nullptr);
+        storage, &doc, "child", backing);
     ASSERT_NE(child, nullptr);
-    ASSERT_TRUE(root->append_child(child));
+    ASSERT_FALSE(child->is_synthetic());
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(child));
     ASSERT_TRUE(root->remove_child(child));
 
     ArenaStats before = {};

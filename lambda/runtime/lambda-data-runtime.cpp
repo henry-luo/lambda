@@ -1579,16 +1579,20 @@ bool item_is_list(Item value) {
     return false;
 }
 
-Item seq_finish_kind(Item result, bool as_list) {
-    if (as_list) return list_collapse_value(result);
+Item seq_finish_array(Item result) {
     TypeId type_id = get_type_id(result);
     if (type_id == LMD_TYPE_ARRAY && result.array) result.array->is_spreadable = 0;
     else if (type_id == LMD_TYPE_ARRAY_NUM && result.array_num) result.array_num->is_spreadable = 0;
     return result;
 }
 
+Item seq_finish_kind(Item result, bool as_list) {
+    return as_list ? list_collapse_value(result) : seq_finish_array(result);
+}
+
 // 1 = a list, -1 = a sequence of array kind (array, range, map, element, text),
-// 0 = null or a scalar, which leaves the kind to the other operand (S2.5.7).
+// 0 = null or a scalar, which leaves the kind to the other operand (S2.5.7v2's
+// operator rule).
 static int seq_operand_kind(Item value) {
     if (item_is_list(value)) return 1;
     TypeId type_id = get_type_id(value);

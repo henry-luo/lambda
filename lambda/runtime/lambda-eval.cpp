@@ -878,24 +878,37 @@ static bool range_contains_item(Range* range, Item item) {
         range->start <= value && value <= range->end;
 }
 
-static bool range_type_contains_item(TypeRange* range, Item item) {
-    if (!range) return false;
+bool lambda_range_type_bounds(const Type* range_type, int64_t* start, int64_t* end) {
+    if (!lambda_type_is_range(range_type) || !start || !end) return false;
+    const TypeRange* range = (const TypeRange*)range_type;
     if (range->is_char) {
-        uint32_t start = 0;
-        uint32_t end = 0;
-        uint32_t value = 0;
-        if (!item_single_string_codepoint(range->start, &start) ||
-                !item_single_string_codepoint(range->end, &end) ||
-                !item_single_string_codepoint(item, &value)) return false;
-        return start <= value && value <= end;
+        uint32_t first = 0;
+        uint32_t last = 0;
+        if (!item_single_string_codepoint(range->start, &first) ||
+                !item_single_string_codepoint(range->end, &last)) return false;
+        *start = first;
+        *end = last;
+        return true;
     }
+    return lambda_item_to_int64_exact(range->start, start) &&
+        lambda_item_to_int64_exact(range->end, end);
+}
+
+// The one membership test for a range type: `is`, boundary admission and the
+// schema validator all answer through it (S11.1.3).
+bool lambda_range_type_contains(const Type* range_type, Item item) {
     int64_t start = 0;
     int64_t end = 0;
+    if (!lambda_range_type_bounds(range_type, &start, &end)) return false;
     int64_t value = 0;
-    return lambda_item_to_int64_exact(range->start, &start) &&
-        lambda_item_to_int64_exact(range->end, &end) &&
-        lambda_item_to_int64_exact(item, &value) &&
-        start <= value && value <= end;
+    if (((const TypeRange*)range_type)->is_char) {
+        uint32_t codepoint = 0;
+        if (!item_single_string_codepoint(item, &codepoint)) return false;
+        value = codepoint;
+    } else if (!lambda_item_to_int64_exact(item, &value)) {
+        return false;
+    }
+    return start <= value && value <= end;
 }
 
 // One owner for the bad-range-bound diagnosis. The JIT's counted-range lowering
@@ -1964,8 +1977,8 @@ bool lambda_type_matches(Item item, Type* expected) {
         }
         return pattern_full_match_chars(pattern, item.get_chars(), item.get_len());
     }
-    if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
-        return range_type_contains_item((TypeRange*)expected, item);
+    if (lambda_type_is_range(expected)) {
+        return lambda_range_type_contains(expected, item);
     }
     if ((expected->type_id == LMD_TYPE_TYPE &&
             (expected->kind == TYPE_KIND_BINARY || expected->kind == TYPE_KIND_UNARY)) ||
@@ -2270,11 +2283,11 @@ Bool fn_is(Item a, Item b) {
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
 
+    // a range type may arrive bare (type lists register it raw) or wrapped
     TypeType* type_b = (TypeType*)b_type;
-    if (type_b->type && type_b->type->type_id == LMD_TYPE_RANGE &&
-            type_b->type->kind == TYPE_KIND_RANGE) {
-        return range_type_contains_item((TypeRange*)type_b->type, a)
-            ? BOOL_TRUE : BOOL_FALSE;
+    Type* range_type = lambda_type_is_range(b_type) ? b_type : type_b->type;
+    if (lambda_type_is_range(range_type)) {
+        return lambda_range_type_contains(range_type, a) ? BOOL_TRUE : BOOL_FALSE;
     }
     if (type_b->type->is_literal &&
             (type_b->type->type_id == LMD_TYPE_STRING || type_b->type->type_id == LMD_TYPE_SYMBOL)) {

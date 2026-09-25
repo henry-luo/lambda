@@ -151,9 +151,10 @@ p is Point                                // true (nominal)
 | Kind | Expression | Result / meaning |
 |---|---|---|
 | Pipe | `[1, 2, 3] \|> ~ * 2` | `[2, 4, 6]` |
-| | `users \|> ~.name that (len(~) > 3)` | filter and transform |
-| Pipe/filter spread | `[1, [2, 3] \|> ~, 4, 5]` | `[1, 2, 3, 4, 5]` |
-| | `[0, items that (~ > 3), 9]` | flattened into the enclosing array |
+| Filter | `users \|> ~.name \|: len(~) > 3` | transform, then keep the names longer than 3 |
+| Proviso | `x that ~ > 0` | `x` if the test holds, else `null` |
+| Pipe/filter in an array | `[1, [2, 3] \|> ~, 4, 5]` | `[1, [2, 3], 4, 5]` — an array result is one item |
+| | `[0, *(items \|: ~ > 3), 9]` | `*` splices the filtered items |
 | Query — recursive | `html?<img>` | all `<img>` at any depth |
 | | `html?<div class: string>` | `<div>` with a class attribute |
 | | `data?int` | all int values in the tree |
@@ -409,7 +410,7 @@ let data = input("sales.json", 'json');
 let total = data.sales |> ~.amount |> sum;
 
 // Filter high-value sales
-let high_value = data.sales that ~.amount > 1000;
+let high_value = data.sales |: ~.amount > 1000;
 
 // Summarize by region — each group `g` is a <group> element
 // (grouping key becomes an attribute, members become children)

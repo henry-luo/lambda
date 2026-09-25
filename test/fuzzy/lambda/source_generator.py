@@ -120,10 +120,11 @@ class LambdaSourceGenerator:
     def _array_pipeline(self) -> GeneratedSource:
         values = self._name("values")
         self.scope.declare_value(values)
+        # S10.1.6: a `|:` stage keeps members; an empty survivor set sums to 0
         return GeneratedSource(
             f"let {values} = {self._array()}\n"
-            f"sum({values} |> ~ * {self._integer()})\n",
-            "pipeline", ("declare-array", "pipe-current-item", "sysfunc-sum"), True)
+            f"sum({values} |: ~ > {self._integer()} |> ~ * {self._integer()})\n",
+            "pipeline", ("declare-array", "pipe-filter", "pipe-current-item", "sysfunc-sum"), True)
 
     def _map_path(self) -> GeneratedSource:
         record = self._name("record")

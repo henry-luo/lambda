@@ -118,7 +118,8 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_UNSUPPORTED_DYNAMIC_ABI, "UNSUPPORTED_DYNAMIC_ABI", "Unsupported dynamic call ABI"},
     {ERR_FUNCTION_ARGUMENT_LIMIT, "FUNCTION_ARGUMENT_LIMIT", "Function argument limit exceeded"},
     {ERR_INVALIDATED_BINDING, "INVALIDATED_BINDING", "Binding read follows a hidden cross-frame mutation"},
-    
+    {ERR_FILTER_BODY_NO_CURRENT, "FILTER_BODY_NO_CURRENT", "Filter body does not mention ~"},
+
     // 3xx - Runtime Errors
     {ERR_RUNTIME_ERROR, "RUNTIME_ERROR", "Runtime error"},
     {ERR_NULL_REFERENCE, "NULL_REFERENCE", "Null reference"},

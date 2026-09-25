@@ -350,7 +350,7 @@ the generated Lambda CST is built only for `lambda-cst` verification.
 The grammar (`grammar.js`) defines:
 
 - **Literals**: integers, floats, decimals, base64, datetime, time, strings
-- **Binary operators**: arithmetic (`+`, `-`, `*`, `/`, `div`, `%`, `^`), comparison (`==`, `!=`, `<`, `<=`, `>=`, `>`), logical (`and`, `or`), pipe (`|>`), range (`to`), set operations (`|`, `&`, `!`), type (`is`, `in`), filter (`that`)
+- **Binary operators**: arithmetic (`+`, `-`, `*`, `/`, `div`, `%`, `^`), comparison (`==`, `!=`, `<`, `<=`, `>=`, `>`), logical (`and`, `or`), pipe (`|>`), filter (`|:`), range (`to`), set operations (`|`, `&`, `!`), type (`is`, `in`), proviso (`that`)
 - **Type expressions**: union (`|`), intersection (`&`), exclusion (`!`)
 - **Attribute context handling**: relational operators excluded when inside element tags to avoid ambiguity
 

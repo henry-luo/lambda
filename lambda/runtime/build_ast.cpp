@@ -903,23 +903,18 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     case SYS_RESULT_ARRAY_OF_ARGUMENT:
         // An open source cannot instantiate a concrete `T[]` relation; keep
         // the row's open result as required by S11.4.9. A list argument is
-        // spliced, not wrapped (`fill` follows its item, S2.5.7), so an
-        // argument that may be a list keeps the result open too.
+        // spliced, not wrapped (`fill(2, (1, 2))` is `[1, 2, 1, 2]`,
+        // S2.5.7v2), so an argument that may be a list leaves the item type,
+        // and with it the result, open.
         if (source->type_id != LMD_TYPE_ANY && !lambda_type_may_hold_list(source)) {
             if (Type* result = sys_func_array_of_argument_type(tp, source)) return result;
         }
         if (lambda_type_may_hold_list(source)) return set_type_any(tp, ANY_LIST);
         break;
     case SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT:
-        if (Type* result = sys_func_collection_result_type(tp, source, false, false)) {
-            return result;
-        }
-        break;
-    case SYS_RESULT_SELECTION_OF_ARGUMENT:
     case SYS_RESULT_SLICE_OF_ARGUMENT: {
-        // A selection from a list is that item or null at one item or none
-        // (S2.5.5v2), not a container, so such a source keeps the result open.
-        if (lambda_type_may_hold_list(source)) return set_type_any(tp, ANY_LIST);
+        // S2.5.7v2: a function over a list returns an array, so a selection
+        // that drops items keeps the source's collection type, never an item
         bool slice = info->result_kind == SYS_RESULT_SLICE_OF_ARGUMENT;
         if (Type* result = sys_func_collection_result_type(tp, source, slice, slice)) {
             return result;
@@ -1672,6 +1667,19 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             return STATIC_BOUNDARY_DEFERRED;
         }
     }
+    // S11.1.3: a range contract, like a literal one (S11.2.1), proves only its
+    // members' domain. A source whose carrier fits the domain leaves
+    // membership to the runtime check; one that cannot fit rejects. A range
+    // source is never PROVEN either: its members keep their own carriers
+    // (`3.0` is in `1 to 5`), so no native lane may skip admission.
+    if (Type* domain = lambda_range_type_domain(target)) {
+        return static_boundary_relation(source, domain) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
+    if (Type* domain = lambda_range_type_domain(source)) {
+        return static_boundary_relation(domain, target) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
     // A parameter/member can carry an occurrence or optional wrapper as its
     // effective AST type. Its structural relation is not represented by the
     // compact Type prefix, so defer to the runtime matcher instead of
@@ -1823,10 +1831,6 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
 static bool check_declaration_static_boundary(Transpiler* tp, AstDeclaratorNode* declaration,
         Type* expected, int line) {
     if (!declaration || !declaration->init || !expected) return false;
-    if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
-        // Range annotations are checked by value membership at the MIR boundary, not by TypeId equality.
-        return false;
-    }
     Type* actual = declaration->init->type;
     StaticBoundaryResult result = static_boundary_relation(actual, expected);
     if (result == STATIC_BOUNDARY_REJECTED) {
@@ -4076,9 +4080,8 @@ bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
     else if (strview_equal(&op, "to")) { *op_out = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { *op_out = OPERATOR_UNION; }
     else if (strview_equal(&op, "|>")) { *op_out = OPERATOR_PIPE; }
-    else if (strview_equal(&op, "where") || strview_equal(&op, "that")) {
-        *op_out = OPERATOR_WHERE;
-    }
+    else if (strview_equal(&op, "|:")) { *op_out = OPERATOR_FILTER; }
+    else if (strview_equal(&op, "that")) { *op_out = OPERATOR_THAT; }
     else if (strview_equal(&op, "&")) { *op_out = OPERATOR_INTERSECT; }
     else if (strview_equal(&op, "!")) { *op_out = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { *op_out = OPERATOR_IS; }
@@ -8105,8 +8108,7 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
     }
     bool literal_alias = (definition->type_id == LMD_TYPE_STRING ||
         definition->type_id == LMD_TYPE_SYMBOL) && definition->is_literal;
-    bool range_alias = definition->type_id == LMD_TYPE_RANGE &&
-        definition->kind == TYPE_KIND_RANGE;
+    bool range_alias = lambda_type_is_range(definition);
     if (!literal_alias && !range_alias) return;
 
     // Named literal/range aliases are first-class type values. Keep the
@@ -8252,22 +8254,23 @@ static Type* direct_open_binary_result_type(Transpiler* tp, AnyReason reason,
     return &TYPE_ANY;
 }
 
-// S10.1.2v2/S10.1.5v2: a mapping pipe or `that` keeps its source's kind. A
-// scalar source is one member (`5 |> ~ + 1` is 6, `5 that p` is 5 or null),
-// null has none, and a list source collapses when a filter leaves one item or
-// none (S2.5.5v2), so only a definite array-kind source gives a container.
+// S10.1.2v4: the mapping pipe returns an array for every sequence source, a
+// list included (S2.5.7v2), and a `|:` filter takes that rule by reference
+// (S10.1.6). A scalar source is one member (`5 |> ~ + 1` is 6, `5 |: p` is 5
+// or null) and null has none, so only an open source leaves the result open.
 static Type* pipe_collection_result_type(Transpiler* tp, Operator op,
         Type* source, Type* body) {
     TypeId source_id = source ? source->type_id : LMD_TYPE_ANY;
     if (source_id == LMD_TYPE_NULL) return &TYPE_NULL;
     if (source_id >= LMD_TYPE_BOOL && source_id <= LMD_TYPE_DTIME) {
-        return op == OPERATOR_WHERE
+        return op == OPERATOR_FILTER
             ? lambda_type_nullable_normalized(tp->pool, source) : body;
     }
     bool text = is_sequence_text_type_id(source_id);
-    bool array_kind = source_id == LMD_TYPE_RANGE ||
-        source_id == LMD_TYPE_VARRAY || is_map_family_type_id(source_id);
-    if (op == OPERATOR_WHERE) {
+    bool sequence = source_id == LMD_TYPE_ARRAY || source_id == LMD_TYPE_ARRAY_NUM ||
+        source_id == LMD_TYPE_RANGE || source_id == LMD_TYPE_VARRAY ||
+        is_map_family_type_id(source_id);
+    if (op == OPERATOR_FILTER) {
         // S2.5.8: a filter over text keeps that kind -- its items are the
         // source's own characters, so they always rebuild it. The canonical
         // kind, not the source type: a filtered literal is a different value.
@@ -8275,23 +8278,29 @@ static Type* pipe_collection_result_type(Transpiler* tp, Operator op,
             return source_id == LMD_TYPE_STRING ? (Type*)&TYPE_STRING :
                 source_id == LMD_TYPE_SYMBOL ? (Type*)&TYPE_SYMBOL : (Type*)&TYPE_BINARY;
         }
-        // a range, map or element filters to an array; an array type may hold
-        // a list, which can collapse
-        return array_kind ? (Type*)&TYPE_ARRAY : set_type_any(tp, ANY_LIST);
+        // the survivors of any other sequence are an array, one the runtime
+        // may pack (array_end), so it is typed as the generic array
+        return sequence ? (Type*)&TYPE_ARRAY : set_type_any(tp, ANY_PIPE);
     }
     // S2.5.8: a mapping over text gives that kind only when every result item
     // belongs to it, and an array otherwise -- no static type decides which
-    if (text) return set_type_any(tp, ANY_PIPE);
-    // a mapping never shrinks a list, so an array-typed source still maps to
-    // a container; a body that may yield a list splices it, opening the items
-    if (!array_kind && source_id != LMD_TYPE_ARRAY && source_id != LMD_TYPE_ARRAY_NUM) {
-        return set_type_any(tp, ANY_LIST);
-    }
+    if (text || !sequence) return set_type_any(tp, ANY_PIPE);
     TypeArray* mapped = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
         sizeof(TypeArray));
+    // a body that may yield a list splices it, opening the items
     mapped->nested = lambda_type_may_hold_list(body) ? &TYPE_ANY : body;
     mapped->type_index = -1;
     return (Type*)mapped;
+}
+
+// S10.1.5v3: a proviso answers with its left operand or null, so it is `T?`.
+// An error-carrying `T` keeps its error arm, which the nullable form leaves
+// alone, so the null arm is joined explicitly.
+static Type* that_proviso_result_type(Transpiler* tp, Type* source) {
+    if (source->type_id == LMD_TYPE_NULL) return &TYPE_NULL;
+    Type* nullable = lambda_type_nullable_normalized(tp->pool, source);
+    return lambda_type_accepts_null(nullable) ? nullable
+        : lambda_type_union_normalized(tp->pool, nullable, &TYPE_NULL);
 }
 
 static Type* direct_binary_result_type(Transpiler* tp, Operator op,
@@ -8325,7 +8334,8 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
         Type* clean = lambda_type_remove_error_and_null(tp->pool, lt);
         return lambda_type_union_normalized(tp->pool, clean, rt);
     }
-    if (op == OPERATOR_PIPE || op == OPERATOR_WHERE) {
+    if (op == OPERATOR_THAT) return that_proviso_result_type(tp, lt);
+    if (op == OPERATOR_PIPE || op == OPERATOR_FILTER) {
         if (op == OPERATOR_PIPE && !has_current_item_ref(right)) return rt;
         return pipe_collection_result_type(tp, op, lt, rt);
     }
@@ -8442,8 +8452,19 @@ static void resolve_binary(Transpiler* tp, AstBinaryNode* node) {
         node->type = &TYPE_ERROR;
         return;
     }
-    if (node->op == OPERATOR_PIPE || node->op == OPERATOR_WHERE) {
+    if (node->op == OPERATOR_PIPE || node->op == OPERATOR_FILTER ||
+            node->op == OPERATOR_THAT) {
         node->node_type = AST_NODE_PIPE;
+    }
+    // S10.1.6: `|:` is single-mode. `|>` reads a body with no free `~` as
+    // whole-value application, so the filter rejects that text instead of
+    // reading it a second way; the test is the one the mapping pipe uses.
+    if (node->op == OPERATOR_FILTER && !has_current_item_ref(right)) {
+        record_semantic_error_span(tp, right ? right->source_span : span,
+            ERR_FILTER_BODY_NO_CURRENT,
+            "filter body must mention `~` (write `xs |: is_even(~)`, not `xs |: is_even`)");
+        node->type = &TYPE_ERROR;
+        return;
     }
     if (node->op == OPERATOR_PIPE && !has_current_item_ref(right)) {
         AstNode* promoted = direct_promote_bare_pipe_sysfunc(tp, right);
@@ -9615,10 +9636,10 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     bool invalid_annotation = declared && declared->type_id == LMD_TYPE_ERROR;
     if (declared && !invalid_annotation) {
         assignment->declared_type = declared;
-        // Range annotations are membership contracts, not a storage lane.
-        // Preserve the initializer's concrete type so a string range value is
-        // not emitted as a raw Range pointer.
-        assignment->type = declared->type_id == LMD_TYPE_RANGE && value &&
+        // Range annotations are membership contracts, not a storage lane: a
+        // member keeps its own carrier, so the binding keeps the initializer's
+        // concrete type rather than the contract's LMD_TYPE_TYPE tag.
+        assignment->type = lambda_type_is_range(declared) && value &&
                 value->type ? value->type : declared;
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
         check_declaration_static_boundary(tp, assignment, declared, line);
@@ -13486,8 +13507,9 @@ enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_TAIL };
 // LSF_CONTENT: the body of a braced `if`/`else` branch, which has a scope.
 enum { LSF_CONTENT_BRANCH = 1u << 0 };
 
-// LSF_BINARY: `that`, whose right side reads a bare name as a field.
-enum { LSF_BINARY_THAT = 1u << 0 };
+// LSF_BINARY: `that`, whose right side reads a bare name as a field, and `|:`,
+// a pipe stage whose right side never does (S10.1.6).
+enum { LSF_BINARY_THAT = 1u << 0, LSF_BINARY_FILTER = 1u << 1 };
 
 static void syntax_record_part(LambdaSyntaxSink* sink, void** parts_slot,
         uint8_t kind, AstNode* node) {
@@ -14496,6 +14518,8 @@ static AstNode* syntax_reduce(LambdaSyntaxSink* sink,
         node->op_str = direct_token_text(tp, reduction->detail_token);
         if (reduction->detail_token.kind == LAMBDA_TOK_THAT) {
             node->syntax_flags |= LSF_BINARY_THAT;
+        } else if (reduction->detail_token.kind == LAMBDA_TOK_PIPE_FILTER) {
+            node->syntax_flags |= LSF_BINARY_FILTER;
         }
         return (AstNode*)node;
     }
@@ -14605,10 +14629,12 @@ static void resolver_handler_end(LambdaResolver* r) {
     r->tp->building_handler_body = r->handler_context[--r->handler_context_depth];
 }
 
-static void resolver_that_begin(LambdaResolver* r) {
+// in_that_clause turns an unbound bare name into `~.name`: on for a `that`
+// body, off for a `|:` body even when it sits inside a `that` (S10.1.6)
+static void resolver_that_begin(LambdaResolver* r, bool in_that) {
     if (r->that_context_depth >= 64) return resolver_fail(r, "that context overflow");
     r->that_context[r->that_context_depth++] = r->tp->in_that_clause;
-    r->tp->in_that_clause = true;
+    r->tp->in_that_clause = in_that;
 }
 
 static void resolver_that_end(LambdaResolver* r) {
@@ -15674,10 +15700,11 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_BINARY: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
         bool that = (node->syntax_flags & LSF_BINARY_THAT) != 0;
+        bool scoped = that || (node->syntax_flags & LSF_BINARY_FILTER) != 0;
         resolve_walk(r, binary->left);
-        if (that) resolver_that_begin(r);
+        if (scoped) resolver_that_begin(r, that);
         resolve_walk(r, binary->right);
-        if (that) resolver_that_end(r);
+        if (scoped) resolver_that_end(r);
         resolve_diagnostics(r, node);
         resolve_binary(tp, binary);
         break;
@@ -15708,12 +15735,21 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_handler(tp, handler);
         break;
     }
-    case LSF_CALL:
-        resolve_walk(r, ((AstCallNode*)node)->function);
-        resolve_walk_chain(r, ((AstCallNode*)node)->argument);
+    case LSF_CALL: {
+        AstCallNode* call = (AstCallNode*)node;
+        // A bare callee names a function, never an implicit field of `~`: that
+        // rule reads values only. Rewriting it made `len(~)` in a `that` body
+        // call the absent field `~.len` (S10.1.5v3's `xs that len(~) > 2`).
+        AstNode* callee = ast_unwrap_primary(call->function);
+        bool in_that = tp->in_that_clause;
+        if (callee && callee->node_type == AST_NODE_IDENT) tp->in_that_clause = false;
+        resolve_walk(r, call->function);
+        tp->in_that_clause = in_that;
+        resolve_walk_chain(r, call->argument);
         resolve_diagnostics(r, node);
-        resolve_call(tp, (AstCallNode*)node);
+        resolve_call(tp, call);
         break;
+    }
     case LSF_CONSTRAINED:
         resolve_walk(r, ((AstConstrainedTypeNode*)node)->base);
         resolve_walk(r, ((AstConstrainedTypeNode*)node)->constraint);

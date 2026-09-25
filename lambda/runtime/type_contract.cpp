@@ -79,6 +79,11 @@ static Type* canonical_contract_base(Type* type, int depth) {
         // register carrier is valid until admission has selected that member.
         return NULL;
     }
+    if (lambda_type_is_range(type)) {
+        // a range member keeps its own carrier (`3.0` is in `1 to 5`), so the
+        // contract has no raw register; its tag would claim a Type pointer
+        return NULL;
+    }
     return type;
 }
 
@@ -306,6 +311,15 @@ static bool contract_semantics_equal(const Type* left, const Type* right) {
             contract_semantics_equal(left_binary->left, right_binary->left) &&
             contract_semantics_equal(left_binary->right, right_binary->right);
     }
+    if (lambda_type_is_range(left)) {
+        // two ranges are one contract only over the same domain and bounds;
+        // the tag test below would equate `1 to 9` with `1 to 5`
+        int64_t left_start = 0, left_end = 0, right_start = 0, right_end = 0;
+        return ((const TypeRange*)left)->is_char == ((const TypeRange*)right)->is_char &&
+            lambda_range_type_bounds(left, &left_start, &left_end) &&
+            lambda_range_type_bounds(right, &right_start, &right_end) &&
+            left_start == right_start && left_end == right_end;
+    }
     return left->type_id != LMD_TYPE_MAP && left->type_id != LMD_TYPE_ARRAY &&
         left->type_id != LMD_TYPE_ELEMENT;
 }
@@ -432,6 +446,30 @@ static bool contract_map_is_subtype(const TypeMap* candidate,
     return true;
 }
 
+// S11.1.4v2 over range types (S11.1.3). A range with no members is below every
+// type. Otherwise a range is below a same-domain range that contains its
+// bounds, and below any other type that admits its whole domain; a literal is
+// below a range that contains its value. A range spread across several union
+// arms (`1 to 2 <: 1 | 2`) is not recognised: each arm is tried whole.
+static bool contract_range_is_subtype(Type* candidate, Type* expected, int depth) {
+    if (!lambda_type_is_range(candidate)) {
+        Item literal;
+        return lambda_literal_contract_value(candidate, &literal) &&
+            lambda_range_type_contains(expected, literal);
+    }
+    int64_t start = 0;
+    int64_t end = 0;
+    if (!lambda_range_type_bounds(candidate, &start, &end) || start > end) return true;
+    if (lambda_type_is_range(expected)) {
+        int64_t outer_start = 0;
+        int64_t outer_end = 0;
+        return ((TypeRange*)candidate)->is_char == ((TypeRange*)expected)->is_char &&
+            lambda_range_type_bounds(expected, &outer_start, &outer_end) &&
+            outer_start <= start && end <= outer_end;
+    }
+    return contract_type_is_subtype(lambda_range_type_domain(candidate), expected, depth + 1);
+}
+
 static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth) {
     if (depth > 64) return false;
     candidate = contract_subtype_unwrap(candidate);
@@ -450,6 +488,9 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
         TypeBinary* union_type = (TypeBinary*)expected;
         return contract_type_is_subtype(candidate, union_type->left, depth + 1) ||
             contract_type_is_subtype(candidate, union_type->right, depth + 1);
+    }
+    if (lambda_type_is_range(candidate) || lambda_type_is_range(expected)) {
+        return contract_range_is_subtype(candidate, expected, depth);
     }
 
     // S11.1.6v2: a run admits `null` at zero, a bare T at one, and a sequence of
@@ -1059,6 +1100,25 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
             snprintf(buffer, capacity, "%s%s%s", left_name, spelling, right_name);
             return;
         }
+    }
+    // S11.1.3: a range contract is named by its bounds. Its tag alone reads
+    // `type`, and the old range-value tag read `range`, which its members are
+    // not (LR03-14).
+    int64_t range_start = 0;
+    int64_t range_end = 0;
+    if (lambda_range_type_bounds(type, &range_start, &range_end)) {
+        const TypeRange* range = (const TypeRange*)type;
+        if (range->is_char) {
+            Item first = range->start;
+            Item last = range->end;
+            snprintf(buffer, capacity, "\"%.*s\" to \"%.*s\"",
+                (int)first.get_len(), first.get_chars(),
+                (int)last.get_len(), last.get_chars());
+        } else {
+            snprintf(buffer, capacity, "%lld to %lld",
+                (long long)range_start, (long long)range_end);
+        }
+        return;
     }
     // a literal contract names its value, not its carrier: rejections read
     // "expected int | int" for `1 | 2` and "expected string" for `"a"` (LR03-11).

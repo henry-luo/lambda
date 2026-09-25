@@ -1,0 +1,1 @@
+error[E238]: filter body must mention `~` (write `xs |: is_even(~)`, not `xs |: is_even`)

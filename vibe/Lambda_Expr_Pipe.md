@@ -1,8 +1,8 @@
 # Lambda Set-Oriented Pipe Operator Proposal
 
-> **Status (2026-09-23):** the pipe shipped as `|>` (S10.1.1, S10.1.2v2) and the
-> filter has been respelled twice — `where` → `that` (S10.1.5v2) → **`|:`**,
-> with `that` kept as the single-value proviso. The ruling and its reasoning are
+> **Status (2026-09-25):** the pipe shipped as `|>` (S10.1.1, S10.1.2v2) and the
+> filter has been respelled twice — `where` → `that` (S10.1.5v2) → **`|:`**
+> (implemented 2026-09-25), with `that` kept as the single-value proviso. The ruling and its reasoning are
 > in *Filter Stage `|:` and the `that` Proviso* below; the original `|`/`where`
 > text in the body is kept as history and the superseded filter section is in
 > Appendix S. Read `|` in the older examples as `|>`.
@@ -536,9 +536,18 @@ data | slice(0, 10)    // slice(data, 0, 10)
 > `|:`), and **S2.5.7v2** (a list is built, never computed — §F.6), with
 > S7.10.1v3/S7.10.5v3 following; cross-refs S2.5.5v2, S2.5.8, S8.2.4,
 > S8.3.1v3, S8.4.1v2, S10.1.3, S10.2.1, S10.6.1, SO38.
-> Implementation pending: lexer, `grammar.js` operator table, the
-> `OPERATOR_WHERE` consumers, the `lambda_parser.c` retirement diagnostic,
-> 152 fixtures.
+> **Implemented 2026-09-25 (spec v36.0.4)** on both tiers: the `|:` token and
+> `grammar.js` row, `OPERATOR_FILTER`/`OPERATOR_THAT` in place of
+> `OPERATOR_WHERE`, E238 for a `|:` body with no free `~`, the `where`
+> diagnostic, and the migration of 133 `that`-filter sites in 27 files (the
+> earlier "152 fixtures" count was not reproducible; a parser census found 133).
+> The §F.6 array result landed the same day with the whole S2.5.7v2 row: both
+> pipes and every sequence function return an array for a list source, while
+> the broadcast operators keep the operand kind. Points the rulings left open
+> were settled in the implementation and are flagged: a `|:` body gets no
+> implicit field access (SO47); a called bare name is never an implicit field
+> in a `that` body, which S10.1.5v3's `xs that len(~) > 2` needs; and the set
+> operators `| & !` keep P2's operand-kind rule until SO48 is ruled.
 
 ### §F.1 What was wrong with `that`
 

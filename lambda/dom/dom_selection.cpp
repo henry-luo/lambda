@@ -611,9 +611,8 @@ static Item js_range_wrap_boundary_node(DomNode* node) {
     if (!node) return ItemNull;
     if (node->is_element()) {
         DomElement* element = node->as_element();
-        if (element->doc && element->doc->root == element) {
-            // The native document root is an element-shaped storage node, but
-            // Range boundaries at that root must preserve Document proxy identity.
+        if (element->doc && element->doc->js.doc_node == element) {
+            // The synthetic document node uses element storage; <html> is a real element.
             return dom_owner_document_for_node(node);
         }
     }
@@ -656,6 +655,8 @@ extern "C" Item js_selection_add_range(Item self_v, Item range_v) {
     DomSelection* s = selection_from(self_v); if (!s) return make_undef();
     DomRange* r = range_from(range_v);
     if (!r) return throw_dom_exception("TypeError", "argument is not a Range");
+    // Script Selection exposes one Range; extra native ranges belong to table-cell editing.
+    if (dom_selection_range_count(s) != 0) return make_undef();
     // Per spec: if range's root is not the document associated with this,
     // return (do nothing). The WPT tests assert rangeCount is unchanged.
     if (!node_in_active_document(r->start.node, s) ||
@@ -800,12 +801,10 @@ extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
         }
         return make_undef();
     }
-    // Per spec: if node's root is not the document, abort (no-op).
+    // A foreign or detached root is a no-op. Its offset is irrelevant because
+    // this Selection cannot form a boundary there.
     if (!node_in_active_document(n, s)) {
         return make_undef();
-    }
-    if (s->range_count == 0 || !s->ranges[0]) {
-        return throw_from_dom_exc("InvalidStateError", "Selection.extend failed");
     }
     if (n->node_type == DOM_NODE_DOCTYPE) {
         return throw_dom_exception("InvalidNodeTypeError",
@@ -819,6 +818,9 @@ extern "C" Item js_selection_extend(Item self_v, Item node_v, Item offset_v) {
                  "Failed to execute 'extend' on 'Selection': The offset %u is larger than the node's length (%u).",
                  off, node_len);
         return throw_dom_exception("IndexSizeError", msg);
+    }
+    if (s->range_count == 0 || !s->ranges[0]) {
+        return throw_from_dom_exc("InvalidStateError", "Selection.extend failed");
     }
     const char* exc = nullptr;
     DomBoundary anchor = dom_selection_anchor_boundary(s);
@@ -850,30 +852,19 @@ extern "C" Item js_selection_set_base_and_extent(Item self_v, Item anchor_node_v
     }
     DomNode* an = node_arg(anchor_node_v);
     DomNode* fn = node_arg(focus_node_v);
-    if (!an && get_type_id(anchor_node_v) == LMD_TYPE_NULL) {
-        const char* exc = nullptr;
-        if (!selection_state_clear(s, &exc)) {
-            return throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
-        }
-        selection_sync_props(self_v, s);
-        return make_undef();
-    }
     if ((an && an->node_type == DOM_NODE_DOCTYPE) ||
         (fn && fn->node_type == DOM_NODE_DOCTYPE)) {
         return throw_dom_exception("InvalidNodeTypeError",
                                    "setBaseAndExtent: node must not be a DocumentType");
     }
-    if (an && !fn && get_type_id(focus_node_v) == LMD_TYPE_NULL) {
-        uint32_t off = selection_text_offset_from_item(an, anchor_off_v);
-        const char* exc = nullptr;
-        DomBoundary caret = { an, off };
-        if (!selection_state_set(s, &caret, &caret, &exc)) {
-            return throw_from_dom_exc(exc, "setBaseAndExtent collapse failed");
-        }
-        selection_sync_props(self_v, s);
-        return make_undef();
-    }
     if (!an || !fn) return throw_dom_exception("TypeError", "node is not a Node");
+    // Web IDL converts offsets to unsigned long; negative values wrap and
+    // must fail the boundary-length check instead of clamping to zero.
+    if (item_to_int(anchor_off_v) < 0 ||
+        item_to_int(focus_off_v) < 0) {
+        return throw_dom_exception("IndexSizeError",
+                                   "setBaseAndExtent: offset is out of bounds");
+    }
     // Per spec: if either node isn't a descendant of the document, abort
     // (selection is left empty — do not add a range).
     if (!node_in_active_document(an, s) || !node_in_active_document(fn, s)) {

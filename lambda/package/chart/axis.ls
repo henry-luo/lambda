@@ -82,7 +82,7 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
                 >
             >
         else null)
-    ] that (~ != null);
+    ] |: (~ != null);
 
     // title
     let title_el = if (title_text)
@@ -117,7 +117,7 @@ pub fn x_axis_grid(sc, pw, ph, config) {
                   stroke: cfg.grid_color, 'stroke-width': 1,
                   'stroke-dasharray': "4,4">
         else null)
-    ] that (~ != null);
+    ] |: (~ != null);
 
     svg.group_class("grid x-grid", grid_lines)
 }
@@ -150,7 +150,7 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
                 >
             >
         else null)
-    ] that (~ != null);
+    ] |: (~ != null);
 
     // title (rotated 90 degrees)
     let title_el = if (title_text)
@@ -186,7 +186,7 @@ pub fn y_axis_grid(sc, pw, ph, config) {
                   stroke: cfg.grid_color, 'stroke-width': 1,
                   'stroke-dasharray': "4,4">
         else null)
-    ] that (~ != null);
+    ] |: (~ != null);
 
     svg.group_class("grid y-grid", grid_lines)
 }

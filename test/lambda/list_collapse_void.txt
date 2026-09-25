@@ -16,12 +16,12 @@
 "-- two items stay a list --"
 [list, true, true]
 [5, 6, 1]
-"-- the n = 1 edge (S8.3.1v3) --"
-[10, 0, true, 1]
-[2, 10, 2]
-[true, 0, 1]
-[]
+"-- the n = 1 edge: a function result never collapses (S7.10.1v3) --"
+[[10], 1, false, 1]
+[2, 10, 1]
+[false, 0, 1]
 [10]
+[[10]]
 "-- collapse never drops an item --"
 [2, 2]
 [null, null]
