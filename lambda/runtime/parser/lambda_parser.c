@@ -42,7 +42,7 @@ static const char* const error_incomplete_primary_type = "incomplete primary typ
 static const char* const error_expected_expression = "expected an expression";
 static const char* const error_unexpected_trailing_input = "unexpected trailing input";
 static const char* const error_retired_value_where =
-    "'where' is not a filter operator; write 'that' (e.g. items that ~ > 0). "
+    "'where' is not a filter operator; write '|:' (e.g. items |: ~ > 0). "
     "'where' is only a 'for' header clause";
 // PTH47: `~word` is a closed accessor table, not an open binding lookup, so an
 // unknown accessor names the table instead of failing as an unbound name.
@@ -1639,7 +1639,8 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
 }
 
 static const int infix_bp[LAMBDA_TOK_ELLIPSIS + 1] = {
-    [LAMBDA_TOK_PIPE_FORWARD] = LAMBDA_BP_PIPE, [LAMBDA_TOK_THAT] = LAMBDA_BP_PIPE,
+    [LAMBDA_TOK_PIPE_FORWARD] = LAMBDA_BP_PIPE, [LAMBDA_TOK_PIPE_FILTER] = LAMBDA_BP_PIPE,
+    [LAMBDA_TOK_THAT] = LAMBDA_BP_PIPE,
     [LAMBDA_TOK_OR] = LAMBDA_BP_OR, [LAMBDA_TOK_AND] = LAMBDA_BP_AND,
     [LAMBDA_TOK_IS] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_IN] = LAMBDA_BP_MEMBERSHIP,
     [LAMBDA_TOK_AT] = LAMBDA_BP_MEMBERSHIP, [LAMBDA_TOK_SUBTYPE] = LAMBDA_BP_MEMBERSHIP,
@@ -1816,7 +1817,8 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
         if (left_is_element && parser->stop_at_element_close && parser->current.kind == LAMBDA_TOK_LT) {
             break;
         }
-        // binary `where` was retired in favour of `that`. It carries no infix
+        // binary `where` is the retired filter spelling; the filter is `|:`
+        // (S10.3.1v3). It carries no infix
         // binding power, so without this it would quietly end the expression and
         // start a new statement: the operand stayed unfiltered while `where`
         // parsed as an unbound name (it is a legal binding per S16.10.1v2),
@@ -1825,7 +1827,7 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
         // a `for` header, where `where` is still a clause word.
         if (parser->current.kind == LAMBDA_TOK_WHERE && !parser->current.nl_before &&
             !parser->for_header_depth) {
-            parser_set_error(parser, error_retired_value_where, LAMBDA_TOK_THAT);
+            parser_set_error(parser, error_retired_value_where, LAMBDA_TOK_PIPE_FILTER);
             parser->expression_depth--;
             return 0;
         }

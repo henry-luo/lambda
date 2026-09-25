@@ -150,6 +150,15 @@ TEST(LambdaRdLexerPoc, RecognizesOpaquePatternAndPathBuildingBlocks) {
         expected, (int)(sizeof(expected) / sizeof(expected[0])));
 }
 
+TEST(LambdaRdLexerPoc, LexesPipeFamilyByLongestMatch) {
+    // S10.1.6: `|:` is one token; a spaced `| :` stays a union and a colon
+    static const LambdaTokenKind expected[] = {
+        LAMBDA_TOK_PIPE_FORWARD, LAMBDA_TOK_PIPE_FILTER, LAMBDA_TOK_PIPE,
+        LAMBDA_TOK_COLON, LAMBDA_TOK_PIPE, LAMBDA_TOK_EOF,
+    };
+    expect_kinds("|> |: | : |", expected, (int)(sizeof(expected) / sizeof(expected[0])));
+}
+
 TEST(LambdaRdLexerPoc, KeepsUnicodeAndEscapedIdentifiersAsOneToken) {
     static const LambdaTokenKind expected[] = {
         LAMBDA_TOK_IDENTIFIER, LAMBDA_TOK_IDENTIFIER, LAMBDA_TOK_EOF,

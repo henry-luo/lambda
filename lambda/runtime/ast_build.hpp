@@ -91,7 +91,7 @@ typedef enum LambdaSyntaxForm : uint8_t {
     LSF_ORDER_SPEC,           // ORDER_SPEC
     LSF_GROUP_KEY,            // GROUP_KEY
     LSF_GROUP_CLAUSE,         // GROUP_CLAUSE
-    LSF_BINARY,               // BINARY (PIPE for `|>` / `that`)
+    LSF_BINARY,               // BINARY (PIPE for `|>`, `|:` and `that`)
     LSF_MEMBER,               // MEMBER_EXPR; may resolve to a constant or import
     LSF_INDEX,                // INDEX_EXPR
     LSF_QUERY,                // QUERY_EXPR

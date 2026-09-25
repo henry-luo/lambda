@@ -136,6 +136,9 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_HASH,
     LAMBDA_TOK_PIPE,
     LAMBDA_TOK_PIPE_FORWARD,
+    // S10.1.6: `|:` is the filter stage of the pipe family. Like `|>` it can
+    // only continue an expression, so a line may begin with it (S16.2.2v3).
+    LAMBDA_TOK_PIPE_FILTER,
     LAMBDA_TOK_BANG,
     LAMBDA_TOK_EQ,
     LAMBDA_TOK_EQ_EQ,

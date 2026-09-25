@@ -240,7 +240,7 @@ fn render_layered(spec) {
     // color channel: use parent encoding first, else pick from first layer that has color
     let parent_color_ch = parse.get_channel(enc, "color");
     let all_layer_color_chs = [for (ls in layer_specs, let l_enc = ls.encoding) parse.get_channel(l_enc, "color")];
-    let first_layer_color_ch = (all_layer_color_chs that (~ != null))[0];
+    let first_layer_color_ch = (all_layer_color_chs |: (~ != null))[0];
     let color_ch = if (parent_color_ch) parent_color_ch else first_layer_color_ch;
     let x_field = if (x_ch) x_ch.field else null;
     let y_field = if (y_ch) y_ch.field else null;
@@ -478,7 +478,7 @@ fn apply_histogram_transform(data, x_ch, y_ch) {
         // aggregate: count per bin
         let bin_keys = util.unique_vals(binned |> string(~[bin_field]));
         let counted = [for (bk in bin_keys) (
-            let items = binned that string(~[bin_field]) == bk,
+            let items = binned |: string(~[bin_field]) == bk,
             map([bin_field, items[0][bin_field], bin_end, items[0][bin_end], "_count", len(items)])
         )];
         // override channels: x→nominal on bin_field, y→quantitative on _count
@@ -625,7 +625,7 @@ fn render_faceted(spec) {
     // render each facet cell
     let cells = [for (i in 0 to (n - 1),
          let fk = facet_keys[i],
-         let cell_data = data that ~[facet_field] == fk,
+         let cell_data = data |: ~[facet_field] == fk,
          let cell_spec = {*:spec, data: cell_data, facet: null, title: null},
          let cell_svg = dispatch(cell_spec),
          let pos = layout.facet_cell_pos(flay, i))

@@ -1,0 +1,28 @@
+"-- scalar --"
+5
+[null]
+["x"]
+"-- a collection is one item --"
+[1, 2, 3]
+[null]
+{
+  name: "a",
+  age: 30
+}
+[1, 2, 3]
+[null]
+"-- composes with or and if --"
+0
+["kept", "dropped"]
+"-- pipe tier, left-associative --"
+[2, 4, 6]
+[2, 3, 4]
+[50, 60]
+"-- ~ is the operand; ~key is null (S10.1.3) --"
+5
+[5, 10]
+[null, [1, 2]]
+"-- typed operands --"
+8
+[null]
+5

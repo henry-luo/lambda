@@ -2981,6 +2981,21 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
 // Match
 // ---------------------------------------------------------------------------
 
+// Fills the context slots for `~` bound to one subject -- a match scrutinee, a
+// constraint candidate, or a `that` proviso operand (S10.1.3). The subject is
+// no member of a walk, so `~key` is null; `~~` is the enclosing item for a
+// match and the enclosing parent otherwise, and the enclosing traversal keeps
+// its root (a fresh one is rooted at the subject). The caller owns the slots
+// and the guard.
+static void interp_subject_slots(InterpFrame* f, Scratch& subject, Scratch& index_slot,
+        Scratch& parent_slot, Scratch& root_slot, bool parent_is_outer_item) {
+    InterpContext* outer = f->st->contexts;
+    uint64_t* parent = !outer ? NULL : parent_is_outer_item ? outer->item : outer->parent;
+    index_slot.set(ItemNull);
+    parent_slot.set(parent ? (Item){.item = *parent} : ItemNull);
+    root_slot.set(outer && outer->root ? (Item){.item = *outer->root} : subject.get());
+}
+
 // Runs an admitted `that` body with the candidate installed as `~`.  The
 // predicate does not signal a language error when it is unsupported, faults,
 // or exhausts fuel: that check simply fails, as the JIT predicate path's false
@@ -2993,19 +3008,9 @@ static bool interp_eval_constrained_predicate(InterpFrame* f,
     InterpEvalModeGuard mode(f->st, EvalMode::PREDICATE,
         interp_predicate_fuel_budget());
     Scratch index_slot(f);
-    index_slot.set(ItemNull);
     Scratch parent_slot(f);
     Scratch root_slot(f);
-    if (f->st->contexts && f->st->contexts->parent) {
-        parent_slot.set((Item){.item = *f->st->contexts->parent});
-    } else {
-        parent_slot.set(ItemNull);
-    }
-    if (f->st->contexts && f->st->contexts->root) {
-        root_slot.set((Item){.item = *f->st->contexts->root});
-    } else {
-        root_slot.set(subject.get());
-    }
+    interp_subject_slots(f, subject, index_slot, parent_slot, root_slot, false);
     InterpContextGuard bound(f->st, subject.home(), index_slot.home(),
         parent_slot.home(), root_slot.home());
     Item result = eval_expr(f, constrained->constraint);
@@ -3057,19 +3062,9 @@ static Item eval_match(InterpFrame* f, AstMatchNode* node) {
     Scratch scrut(f);
     scrut.set(value);
     Scratch index_slot(f);
-    index_slot.set(ItemNull);
     Scratch parent_slot(f);
     Scratch root_slot(f);
-    if (f->st->contexts && f->st->contexts->item) {
-        parent_slot.set((Item){.item = *f->st->contexts->item});
-    } else {
-        parent_slot.set(ItemNull);
-    }
-    if (f->st->contexts && f->st->contexts->root) {
-        root_slot.set((Item){.item = *f->st->contexts->root});
-    } else {
-        root_slot.set(scrut.get());
-    }
+    interp_subject_slots(f, scrut, index_slot, parent_slot, root_slot, true);
     InterpContextGuard bound(f->st, scrut.home(), index_slot.home(),
         parent_slot.home(), root_slot.home());
 
@@ -3126,10 +3121,30 @@ static Item interp_iter_val_at(Item source, SymbolKeyList* keys, int64_t index,
     return key_only ? value : interp_preserve_array_u64(source, index, value);
 }
 
-// Mirrors transpile_pipe: `a | b` maps b over a's members with `~`/`~#` bound,
-// `a where b` filters a by b, and a `~`-free `a | f(x)` injects a as f's first
+// S10.1.5v3: `x that p` reads x as one item -- a collection is not walked --
+// and answers with x when p is truthy of it, null otherwise. Mirrors
+// emit_that_proviso_value; `~` is bound as a constraint binds its candidate.
+static Item eval_that_proviso(InterpFrame* f, AstBinaryNode* node) {
+    Item left_value = eval_expr(f, node->left);
+    if (interp_frame_pending(f)) return left_value;
+    Scratch subject(f);
+    subject.set(left_value);
+    Scratch index_slot(f);
+    Scratch parent_slot(f);
+    Scratch root_slot(f);
+    interp_subject_slots(f, subject, index_slot, parent_slot, root_slot, false);
+    InterpContextGuard bound(f->st, subject.home(), index_slot.home(),
+        parent_slot.home(), root_slot.home());
+    Item held = eval_expr(f, node->right);
+    if (interp_frame_pending(f)) return held;
+    return is_truthy(held) ? subject.get() : ItemNull;
+}
+
+// Mirrors transpile_pipe: `a |> b` maps b over a's members with `~`/`~#` bound,
+// `a |: b` filters a by b, and a `~`-free `a |> f(x)` injects a as f's first
 // argument. A scalar left operand is lifted to a one-element stream.
 static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
+    if (node->op == OPERATOR_THAT) return eval_that_proviso(f, node);
     Item left_value = eval_expr(f, node->left);
     if (interp_frame_pending(f)) return left_value;
     Scratch left(f);
@@ -3181,8 +3196,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         is_scalar = true;
     }
 
-    // A plain accumulator: pipe_end gives it the source's kind once the walk
-    // is done, as transpile_pipe does.
+    // A plain accumulator: pipe_end finishes it once the walk is done -- an
+    // array for any sequence source (S10.1.2v4) -- as transpile_pipe does.
     Scratch out(f);
     out.set(interp_ptr_item(array()));
     Scratch item_slot(f);
@@ -3220,7 +3235,7 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
             if (interp_frame_pending(f)) break;
             Array* result = (Array*)(uintptr_t)out.get().item;   // re-read: may collect
             if (!result) break;
-            if (node->op == OPERATOR_WHERE) {
+            if (node->op == OPERATOR_FILTER) {
                 if (is_truthy(produced)) array_push(result, item_slot.get());
             } else {
                 array_push(result, produced);
@@ -3228,7 +3243,8 @@ static Item eval_pipe(InterpFrame* f, AstBinaryNode* node) {
         }
     }
     if (keys) symbol_key_list_free(keys);
-    // the collection keeps its source's kind (S10.1.2v2, S10.1.5v2)
+    // a sequence source gives an array, a scalar or null collapses (S10.1.2v4;
+    // `|:` by reference, S10.1.6)
     return pipe_end((Array*)(uintptr_t)out.get().item, left.get());
 }
 

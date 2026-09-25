@@ -1250,7 +1250,7 @@ fn greet(name: string) => "Hello, " ++ name  // Returns string
 
 // Complex inference
 fn process(items: int[]) => {
-    let filtered = items that ~ > 0
+    let filtered = items |: ~ > 0
     let doubled = filtered |> ~ * 2
     sum(doubled)
 }  // Returns int

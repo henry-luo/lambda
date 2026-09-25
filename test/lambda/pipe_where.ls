@@ -1,5 +1,5 @@
-// Pipe and Where Operator Test Suite
-// Tests the pipe (|) and where operators with ~ (current item) and ~key (current index)
+// Pipe and Filter Operator Test Suite
+// Tests the pipe (|>) and filter (|:) operators with ~ (current item) and ~key (current index)
 
 "===== PIPE OPERATOR BASIC TESTS ====="
 
@@ -44,32 +44,32 @@
 "--- Filter arrays ---";
 
 // Filter even numbers
-[1, 2, 3, 4, 5, 6] that (~ % 2 == 0);
+[1, 2, 3, 4, 5, 6] |: (~ % 2 == 0);
 
 // Filter numbers greater than 2
-[1, 2, 3, 4, 5] that (~ > 2);
+[1, 2, 3, 4, 5] |: (~ > 2);
 
 // Filter numbers less than 4
-[1, 2, 3, 4, 5] that (~ < 4);
+[1, 2, 3, 4, 5] |: (~ < 4);
 
 // Filter by equality
-[1, 2, 3, 2, 1] that (~ == 2);
+[1, 2, 3, 2, 1] |: (~ == 2);
 
 // Filter negative condition
-[1, 2, 3, 4, 5] that (~ != 3)
+[1, 2, 3, 4, 5] |: (~ != 3)
 
 "--- Filter arrays with index ---";
 
 // Filter by index (even indices)
-["a", "b", "c", "d", "e"] that (~key % 2 == 0);
+["a", "b", "c", "d", "e"] |: (~key % 2 == 0);
 
 // Filter by index (first 3 items)
-[100, 200, 300, 400, 500] that (~key < 3)
+[100, 200, 300, 400, 500] |: (~key < 3)
 
 "--- Filter maps ---"
 
 // Filter map entries by value
-{ a: 1, b: 5, c: 2, d: 8 } that (~ > 3)
+{ a: 1, b: 5, c: 2, d: 8 } |: (~ > 3)
 
 "===== CHAINED PIPE AND WHERE ====="
 
@@ -84,17 +84,17 @@
 "--- Where after pipe ---";
 
 // Transform then filter
-[1, 2, 3, 4, 5] |> ~ * 2 that (~ > 5)
+[1, 2, 3, 4, 5] |> ~ * 2 |: (~ > 5)
 
 "--- Pipe after where ---";
 
 // Filter then transform
-[1, 2, 3, 4, 5] that (~ > 2) |> ~ * 10
+[1, 2, 3, 4, 5] |: (~ > 2) |> ~ * 10
 
 "--- Complex chains ---";
 
 // Multiple filter and transform operations
-[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] that (~ % 2 == 0) |> ~ * 3 that (~ > 10)
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] |: (~ % 2 == 0) |> ~ * 3 |: (~ > 10)
 
 "===== PIPE WITH COMPLEX EXPRESSIONS ====="
 
@@ -121,31 +121,31 @@
 // Empty array pipe
 [] |> ~ * 2;
 
-// Empty array where
-[] that (~ > 0)
+// Empty array filter
+[] |: (~ > 0)
 
 "--- Single element ---";
 
 // Single element array pipe
 [42] |> ~ * 2;
 
-// Single element that (matches)
-[5] that (~ > 0);
+// Single element filter (matches)
+[5] |: (~ > 0);
 
-// Single element that (no match)
-[5] that (~ > 10)
+// Single element filter (no match)
+[5] |: (~ > 10)
 
 // Single key map pipe
 { only: 100 } |> ~ + 1
 
 "--- All elements filtered ---";
 
-// Where returns empty when nothing matches
-[1, 2, 3] that (~ > 100)
+// A filter returns empty when nothing matches
+[1, 2, 3] |: (~ > 100)
 
 "--- No elements filtered ---";
 
-// Where returns all when everything matches
-[1, 2, 3] that (~ >= 1)
+// A filter returns all when everything matches
+[1, 2, 3] |: (~ >= 1)
 
 "===== END PIPE AND WHERE TESTS ====="

@@ -663,6 +663,13 @@ LambdaToken lambda_lexer_next(LambdaLexer* lexer) {
             lexer_advance_byte(lexer);
             return lexer_make_token(LAMBDA_TOK_PIPE_FORWARD, start, line, column, lexer->offset);
         }
+        // S10.1.6: longest match makes `|:` the filter stage. A union directly
+        // followed by `:` has no right operand, so it was never valid (the
+        // glued `case a |: …` arm stays an error)
+        if (lexer_peek(lexer, 0) == ':') {
+            lexer_advance_byte(lexer);
+            return lexer_make_token(LAMBDA_TOK_PIPE_FILTER, start, line, column, lexer->offset);
+        }
         return lexer_make_token(LAMBDA_TOK_PIPE, start, line, column, lexer->offset);
     }
     if (ch == '=') {

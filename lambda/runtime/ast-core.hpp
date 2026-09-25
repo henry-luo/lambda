@@ -217,7 +217,8 @@ typedef enum Operator {
 
     // pipe operators
     OPERATOR_PIPE,
-    OPERATOR_WHERE,
+    OPERATOR_FILTER,    // `|:` keeps the members for which the body is truthy (S10.1.6)
+    OPERATOR_THAT,      // `x that p` is x when p holds of it, else null (S10.1.5v3)
     OPERATOR_PIPE_FILE,
     OPERATOR_PIPE_APPEND,
 
