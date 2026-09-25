@@ -20103,9 +20103,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      declared_lane_desc.kind == LANE_STORAGE_BOOL ||
                      declared_lane_desc.kind == LANE_STORAGE_FLOAT64 ||
                      declared_lane_desc.kind == LANE_STORAGE_POINTER);
-                bool declared_range_contract = declared_value_type &&
-                    declared_value_type->type_id == LMD_TYPE_RANGE &&
-                    declared_value_type->kind == TYPE_KIND_RANGE;
+                bool declared_range_contract = lambda_type_is_range(declared_value_type);
                 // Use the variable's declared type if available, otherwise the expression type.
                 // But if the expression is boxed ANY (e.g. captured variable), the declared
                 // type from AST is stale — use ANY to match the actual runtime value.
@@ -20117,9 +20115,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     ? declared_lane_desc.base_contract->type_id
                     : (declared_value_type ? declared_value_type->type_id : expr_tid);
                 bool union_contract_boxed = false;
+                // a range contract keeps the initializer's carrier chosen above
                 if (declared_value_type && declared_value_type->type_id == LMD_TYPE_TYPE &&
                         declared_value_type->kind != TYPE_KIND_SIMPLE &&
-                        !declared_nullable_scalar_lane) {
+                        !declared_nullable_scalar_lane && !declared_range_contract) {
                     // A union/structural annotation is semantic metadata, not a
                     // runtime `type` object. Keeping its compact TypeId selected
                     // the container unbox path and turned `int^` locals into raw

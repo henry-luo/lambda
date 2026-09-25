@@ -1416,8 +1416,10 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstBinaryNode* ast_node = (AstBinaryNode*)node;
         resolve_type_pattern(tp, ast_node->left);
         resolve_type_pattern(tp, ast_node->right);
-        TypeRange* range_type = (TypeRange*)alloc_type(tp->pool, LMD_TYPE_RANGE, sizeof(TypeRange));
-        range_type->kind = TYPE_KIND_RANGE;
+        // D3.1.1v4: a range type shares the LMD_TYPE_TYPE tag and is told apart
+        // by its kind; the range VALUE tag made it read as a range (LR03-18)
+        TypeRange* range_type = (TypeRange*)alloc_type_kind(tp->pool, TYPE_KIND_RANGE,
+            sizeof(TypeRange));
         range_type->start = ItemNull;
         range_type->end = ItemNull;
         range_type->is_char = false;

@@ -15,12 +15,12 @@
 
 ## Archive index
 
-This archive contains **138 historical records**: 133 fixed or resolved entries,
+This archive contains **140 historical records**: 135 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -380,7 +380,7 @@ Annotations already handle the range. `parse_annotation_type_slot_value_mode` re
 
 The rulings put C in the wrong. S11.1.6v2 makes `is` a boundary-type position, and S11.1.3 applies the range type's membership rule there. The user precedence table (`doc/Lambda_Expr_Stam.md`, "Operator Precedence") also binds `to` (10) tighter than `is` (11). An S16 accept case cannot pin the fix, since C already accepts the text. It needs a `test/lambda` golden instead: `3 is 1 to 5` is `true`, and `9 is 1 to 5` is `false`.
 
-*Fixed 2026-09-25:* `parse_type_slot_mode` now reads two literals joined by `to` as one atom, as the grammar makes `range_type` a `primary_type`. A literal here is a non-null one (`LAMBDA_TOK_INTEGER` through `LAMBDA_TOK_NAMED_VALUE`, the grammar's `_non_null_literal`). So `x is 1 to 5` tests membership, `x is 1 to 5 and y` stops at `and`, and a union of ranges stays one type. `to` continues across a line break (S16.2.2v2). A bound that is not a literal (`x is 1 to n`) makes no range type in either parser, so that form still reads `(x is 1) to n`. Literal ranges in annotations and match arms now take the same atom instead of the annotation path's `to` arm; an AST dump of all 1,952 tracked `.ls` files changed only one census line (`match_expr.ls`). Fixture `test/lambda/is_range_type.ls` (all tiers). Found on the way: [LR03-18](Lambda_Issue_Ledger.md#lr03-18), where `is` never matches a range inside a union.
+*Fixed 2026-09-25:* `parse_type_slot_mode` now reads two literals joined by `to` as one atom, as the grammar makes `range_type` a `primary_type`. A literal here is a non-null one (`LAMBDA_TOK_INTEGER` through `LAMBDA_TOK_NAMED_VALUE`, the grammar's `_non_null_literal`). So `x is 1 to 5` tests membership, `x is 1 to 5 and y` stops at `and`, and a union of ranges stays one type. `to` continues across a line break (S16.2.2v2). A bound that is not a literal (`x is 1 to n`) makes no range type in either parser, so that form still reads `(x is 1) to n`. Literal ranges in annotations and match arms now take the same atom instead of the annotation path's `to` arm; an AST dump of all 1,952 tracked `.ls` files changed only one census line (`match_expr.ls`). Fixture `test/lambda/is_range_type.ls` (all tiers). Found on the way: [LR03-18](#lr03-18), where `is` never matches a range inside a union.
 
 <a id="lr02-26"></a>**LR02-26 · The C parser ends a type at a line-start `?` (S16.2.2v2, S16.2.1) · FIXED 2026-09-25 (found 2026-09-24)**
 S16.2.2v2 puts `?` in the continue-only set, so after a complete expression a line-start `?` continues it. The reference grammar applies this in types: its scanner never opens a statement at `?` (`classify_start`, `scanner.c:296`). So `type T = int` ⏎ `?` is `type T = int?`.
@@ -436,6 +436,49 @@ literal-union contract is not checked at all (a string literal union such as
 - **Diagnostics.** `type_numeric_contract_name` names sized types (`expected u8`, not `num_sized`) in contract and validator messages, and `lambda_type_format_contract_name` prints a literal contract's value on the expected side (`expected 1 | 2`, `expected "a"`).
 
 Fixtures: `negative/runtime/sized_admission_{param,declaration,u32_lane,u64}.ls` and `literal_admission_{union,string_param}.ls` (`ExpectRejectedOnEveryTier`); `sized_admission_values.ls` and `type_literal_admission.ls` in `kTune27TierParity`. `tune21_u32_decl_lane.mir-check` now counts the one cold-arm call instead of forbidding it. Found on the way: [LR03-15](Lambda_Issue_Ledger.md#lr03-15), [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
+
+<a id="lr03-14"></a>**LR03-14 · A range-typed parameter rejects every integer, and the tiers split on a range argument (S11.1.3, S1.6) · FIXED 2026-09-25**
+A parameter declared with a range type, such as `fn f(x: 1 to 5) { x }`, is wrong on both tiers. An alias (`type R = 1 to 5`, `fn f(x: R)`) behaves the same:
+
+| Call | Interpreter (and the default `auto` tier) | JIT |
+|---|---|---|
+| `f(3)` | rejected at compile time: `error[E207]: argument 1 expected range, got int` | same |
+| `f(1 to 5)` | passes the static check, then fails at run time: "type check at argument 1 of _f_0 failed: expected range, got range" | admitted: `f` returns the range, and `[type(r), r is error]` is `[range, false]` |
+
+S11.1.3 applies the range type's membership rule "in annotations, match arms, and value expressions". Under it, `f(3)` must be admitted and `f(1 to 5)` rejected, since a range is not an integer member. Every other boundary follows the rule: `let y: 1 to 5 = 3` is admitted and `= 9` is rejected, on both tiers; `3 is R` is `true`; and `case 1 to 5:` matches. The parameter boundary is the only one that doesn't. The static check treats the parameter as the `range` container kind, and so does the JIT's argument check. The interpreter's run-time check does reject the range argument, but it never sees an integer, because the static check has already refused it. So no call succeeds on the interpreter, and on the JIT only the wrong one does.
+
+The static rejection comes from `lambda_ast_validate_call_arguments` (`build_ast.cpp`), whose `lambda_static_boundary_relation` (`build_ast.cpp:1708`) rejects `int` against the parameter's range type. The root cause of that, and of the JIT's admission of a range, is not yet located.
+
+The diagnostics add confusion. Each one names the membership type `range`, the same word as the container kind, so even the correct `let` failure reads "expected range, got int 9". No test or package declares a range-typed parameter.
+
+*Fixed 2026-09-25, with [LR03-18](#lr03-18), which has the cause:* a range type wore the range value's tag. On every tier, `f(3)` and `f(3.0)` are now admitted, `f(9)` fails at run time with "expected 1 to 5, got int 9", and `f(1 to 5)` is a compile error ("argument 1 expected 1 to 5, got range"). The static relation now treats a range contract as it treats a literal one (S11.2.1): an argument whose carrier fits the range's domain is left to the run-time check, and any other is rejected. Diagnostics name a range by its bounds: `expected 1 to 5`, `expected "a" to "e"`.
+
+<a id="lr03-18"></a>**LR03-18 · `is` never matches a range inside a union type (S11.1.3) · FIXED 2026-09-25**
+```
+type R = 1 to 5 | 10
+let a = [3 is R, 10 is R, 7 is R]    // [false, true, false]
+let b = 3 is 1 to 5 | 10 to 20       // false
+```
+`3 is R` should be `true`: S11.1.3 applies a range type's membership rule in annotations, match arms and value expressions alike. The other two positions agree with it. `let v: R = 3` is admitted, and `match 3 { case 1 to 5 | 10: … }` takes the arm, because a match arm splits a union and tests each member. A range alone is right too: `3 is 1 to 5` is `true`. So the fault is in `is` against the union type, where the range member never matches. Both tiers give the same result, and so did the binary from before LR02-24's fix, through a type alias.
+
+*Fixed 2026-09-25.* The fault was not in `is` or in unions. `parse_type_pattern.cpp` built a range type with `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag, told apart by its kind. Six sites special-cased the pair (`fn_is`, `lambda_type_matches`, the `let` static exemption, alias wrapping, a declared `let`'s AST type, the JIT's `let` carrier). Everything that dispatched on the tag read "an int between the bounds" as "a range", on both tiers:
+- **Schema validator.** It had no range case ("Unsupported type for validation: 16"), so `is` failed whenever the range sat inside a union, map or array type (`{a: 3} is {a: 1 to 5}` and `[3, 4] is (1 to 5)[]` were `false`), and `lambda.exe validate` rejected range-typed fields.
+- **Map layout.** A range-typed field was laid out as a pointer to a range. Passing `{a: 3}` to `fn f(p: {a: 1 to 5})` segfaulted: admission rebuilt the map in the contract's layout, and the validator read the int 3 as a `Container*` (`map_field_to_item`). `let p: {a: 1 to 5} = {a: 3}` was a static E201, and a nominal `type Gauge { level: 1 to 5 }` read `null`.
+- **Static checks and the JIT's argument lane.** Both read a range-typed parameter as a range ([LR03-14](#lr03-14)); a `(1 to 5)[]` parameter rejected `[3, 3]`.
+- **Subtyping.** `<:` compared tags, so `R <: int` was `false` and every range was below every other (`(1 to 9) <: (1 to 5)` was `true`).
+
+The fix builds the range type with `alloc_type_kind(…, TYPE_KIND_RANGE, …)`. Two helpers in `lambda-data.hpp` (`lambda_type_is_range`, `lambda_range_type_domain`) and one membership test in `lambda-eval.cpp` (`lambda_range_type_contains`, over `lambda_range_type_bounds`) serve every consumer:
+- `fn_is` and `lambda_type_matches` test the kind.
+- The validator has a range case (`validate_against_range_type`). The retag makes it mandatory, since the TypeType fallback would read the lower bound as a nested `Type*`.
+- `static_boundary_relation` treats a range contract as it treats a literal one (S11.2.1). A range source is never PROVEN, since its members keep their own carriers.
+- `<:` relates ranges by their members (S11.1.4v2), and `contract_semantics_equal` compares bounds; the tag alone equated `1 to 9` with `1 to 5` and would have let a map shape skip admission.
+- The contract formatter names a range by its bounds.
+
+A member keeps its own carrier: `3.0 is 1 to 5` is `true`. So a range contract has no native lane. Fields and parameters hold the boxed Item, as unions do; `lambda_canonical_rep` returns the Item rep, where the new tag would have claimed a Type pointer; a `let` keeps its initializer's carrier, as before. The `let`-only static exemption is gone, and the other special cases test the kind.
+
+Fixtures: `range_type_membership.ls`, pinned in `kTune27TierParity`; `negative/runtime/range_admission_{param,range_value,field,char}.ls` (`ExpectRejectedOnEveryTier`) and `negative/semantic/range_argument_static.ls`. All 971 goldens pass with `LAMBDA_TIER=jit` and with `interp`, and compiling all 1,955 tracked `.ls` files reports the same errors before and after.
+
+*Residue:* `<:` tries each arm of a union whole, so `1 to 5 <: (1 to 3 | 4 to 5)` is `false` ([LR03-21](Lambda_Issue_Ledger.md#lr03-21)). Found on the way, all older than this fix: [LR03-19](Lambda_Issue_Ledger.md#lr03-19), [LR03-20](Lambda_Issue_Ledger.md#lr03-20), [LR07-30](Lambda_Issue_Ledger.md#lr07-30), and two more symptoms of [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
 
 ## 4. Numbers, decimal & datetime (LR_04)
 

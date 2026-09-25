@@ -199,7 +199,7 @@ The survey's other correctness claims are not yet reproduced; they stay in the p
 The 2026-09-24 grammar work noted five disagreements between the two front ends without filing them. Each was re-run at `293b7a175` on `lambda.exe` and on the reference grammar, regenerated with the pinned tree-sitter CLI 0.25.10 (S16 harnesses: 343/343 C, 330/330 Tree-sitter). Under D8.1.2v3, each is judged against the rulings.
 - **Four reproduce** and are filed as [LR02-24](<Lambda_Issue_Ledger (fixed).md#lr02-24>)–[LR02-27](#lr02-27). LR02-24 and LR02-26 were fixed on 2026-09-25, with LR02-20.
 - **The fifth no longer reproduces.** The grammar had lexed keywords as type names (`let x: if = 1`, `fn f() pn { 1 }`). Since 538dca7b0 reserved them, both front ends reject every probe.
-- **Checking LR02-24 found [LR03-14](#lr03-14).**
+- **Checking LR02-24 found [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>), and fixing it found [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>).** Both had one cause and were fixed later on 2026-09-25 (see "Range type fix" below).
 
 Setup note: the checkout first needed `npm install`. `node_modules` still held CLI 0.24.7, although `package.json` pins 0.25.10. The untracked ABI 14 `src/parser.c` then failed to compile against the committed ABI 15 `parser.h`. `test/ts_s16_conformance.sh` classifies a case by grepping for `ERROR|MISSING|Unexpected`, so it reads that compile failure as an accept.
 
@@ -229,6 +229,16 @@ The first, per-file sweep also flagged 109 fixtures that are not JIT defects:
 - **11 fixtures outside the baseline directories** (`ext/`, `sem/`, `wip/`, `jube/`, `proc-ext/`) fail identically on every tier.
 
 Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inferred element lane after a store widens it, and [LR03-17](#lr03-17), a repeated literal key whose write and read reach different entries.
+
+### Range type fix — 2026-09-25
+
+[LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) (`is` against a union holding a range) and [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>) (range-typed parameters) had one cause: a range type wore `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag. The same cause made a range-typed map field segfault at a call boundary. All three are fixed on every tier; the two records are archived, and LR03-18's describes the segfault. Checking the fix found three older defects, each reproduced on the binary from before it, and left one residue:
+- [LR03-19](#lr03-19): in a nominal object type, a union- or range-typed field that is not last reads back a wrong value.
+- [LR03-20](#lr03-20): object construction does not check its field contracts.
+- [LR07-30](#lr07-30): a range-typed `var` changes its member's representation on the JIT.
+- [LR03-21](#lr03-21), the residue: `<:` does not split a range across union arms.
+
+[LR03-16](#lr03-16) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
 
 ---
 
@@ -497,25 +507,12 @@ a declaration's is (`test/lambda/fn_type_curried_call.ls`), so curried
 contracts now behave the same way; before, a curried call typed as a
 function and crashed a map literal instead.
 
-<a id="lr03-14"></a>**LR03-14 · A range-typed parameter rejects every integer, and the tiers split on a range argument (S11.1.3, S1.6) · OPEN (found 2026-09-25, while verifying LR02-24)**
-A parameter declared with a range type, such as `fn f(x: 1 to 5) { x }`, is wrong on both tiers. An alias (`type R = 1 to 5`, `fn f(x: R)`) behaves the same:
-
-| Call | Interpreter (and the default `auto` tier) | JIT |
-|---|---|---|
-| `f(3)` | rejected at compile time: `error[E207]: argument 1 expected range, got int` | same |
-| `f(1 to 5)` | passes the static check, then fails at run time: "type check at argument 1 of _f_0 failed: expected range, got range" | admitted: `f` returns the range, and `[type(r), r is error]` is `[range, false]` |
-
-S11.1.3 applies the range type's membership rule "in annotations, match arms, and value expressions". Under it, `f(3)` must be admitted and `f(1 to 5)` rejected, since a range is not an integer member. Every other boundary follows the rule: `let y: 1 to 5 = 3` is admitted and `= 9` is rejected, on both tiers; `3 is R` is `true`; and `case 1 to 5:` matches. The parameter boundary is the only one that doesn't. The static check treats the parameter as the `range` container kind, and so does the JIT's argument check. The interpreter's run-time check does reject the range argument, but it never sees an integer, because the static check has already refused it. So no call succeeds on the interpreter, and on the JIT only the wrong one does.
-
-The static rejection comes from `lambda_ast_validate_call_arguments` (`build_ast.cpp`), whose `lambda_static_boundary_relation` (`build_ast.cpp:1708`) rejects `int` against the parameter's range type. The root cause of that, and of the JIT's admission of a range, is not yet located.
-
-The diagnostics add confusion. Each one names the membership type `range`, the same word as the container kind, so even the correct `let` failure reads "expected range, got int 9". No test or package declares a range-typed parameter.
-
 <a id="lr03-15"></a>**LR03-15 · `5u8 is (u8 | string)` is false (S11.1) · OPEN (found 2026-09-25)**
 `validate_against_base_type` (`lambda/validator/validate.cpp`) reads a type's `kind` without checking that its TypeId is `LMD_TYPE_TYPE`. A sized type keeps its `NumSizedType` in `kind`, and `NUM_INT16`, `NUM_INT32` and `NUM_UINT8` share values with the unary, binary and pattern kinds, so a sized arm of a union is read as a larger struct than the 2-byte global it is. `5u8 is (u8 | string)` and `5i16 is (i16 | string)` are `false` on both tiers, while `5u8 is u8` is `true`. Reported by the LR03-11 investigation, reproduced 2026-09-25.
 
 <a id="lr03-16"></a>**LR03-16 · A literal type alias used as a value prints a pointer · OPEN (found 2026-09-25)**
 `type One = 1` then `[One]` prints a large integer on both tiers (`[4403549872]` on T0): the alias's `Type` pointer read as an int. The investigation also saw `type F = 1.5` print `2.1e-314`. A type alias is a first-class type value (S11); printing or comparing it must not expose its address. Reported by the LR03-11 investigation, reproduced 2026-09-25.
+*Also found 2026-09-25, while fixing [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>):* the alias is not usable as a type either. With `type Three = 3`, `3 is Three` is `false`, `Three <: int` is an error and `type(Three)` is `int`, on both tiers. A string literal alias works (`type A = "a"`, `A <: string` is `true`): `direct_finalize_type_alias` (`build_ast.cpp`) wraps only string and symbol literal aliases as type values.
 
 <a id="lr03-17"></a>**LR03-17 · A repeated key in a map literal keeps both entries; a write updates the first, a read takes the last · OPEN (found 2026-09-25)**
 ```
@@ -528,13 +525,19 @@ pn main() {
 ```
 Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's member oracle, fixture `map_duplicate_key_lookup.ls`), but `fn_map_set` updates the first matching entry, so a write is invisible to the next read. `len`, printing and iteration all count both entries. The runtime comment beside the spread walk assumes map keys are unique except through a spread. No S# ruling covers a repeated literal key: collapsing it at construction (one key, first position, last value) and rejecting it are both open. The tiers agree since [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>).
 
-<a id="lr03-18"></a>**LR03-18 · `is` never matches a range inside a union type (S11.1.3) · OPEN (found 2026-09-25, while fixing LR02-24)**
+<a id="lr03-19"></a>**LR03-19 · In a nominal object type, a union- or range-typed field that is not last reads back a wrong value (S1.6) · OPEN (found 2026-09-25, while fixing LR03-18)**
 ```
-type R = 1 to 5 | 10
-let a = [3 is R, 10 is R, 7 is R]    // [false, true, false]
-let b = 3 is 1 to 5 | 10 to 20       // false
+type Obj { a: int | string, b: string }
+let o = <Obj a: 3, b: "b">
+let r = [o.a, o]    // [inf, <Obj a: inf, b: "b">] on both tiers
 ```
-`3 is R` should be `true`: S11.1.3 applies a range type's membership rule in annotations, match arms and value expressions alike. The other two positions agree with it. `let v: R = 3` is admitted, and `match 3 { case 1 to 5 | 10: … }` takes the arm, because a match arm splits a union and tests each member. A range alone is right too: `3 is 1 to 5` is `true`. So the fault is in `is` against the union type, where the range member never matches. Both tiers give the same result, and so did the binary from before LR02-24's fix, through a type alias.
+The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix gave it the union's boxed slot: `{ a: 1 to 5, b: string }` reads `-inf`, and `{ a: 1 to 5, b: int }` reads `0` (before that fix, a range field read `null` in every position). The value is right when the boxed field is last (`{ b: string, a: int | string }`), and a map-type alias is right in every position, whether built with `{…}` or with `<P …>` (`type P = {a: int | string, b: string}`). So the object type's layout and its construction disagree about a boxed field followed by another field. The union case reproduces on the binary from before the LR03-18 fix. Not yet traced.
+
+<a id="lr03-20"></a>**LR03-20 · Object construction does not check its field contracts (S11.4.10) · OPEN (found 2026-09-25, while fixing LR03-18)**
+`type Obj { a: int }` then `<Obj a: "x">` is admitted on both tiers and prints `<Obj a: 4317266544>`, the string's pointer read from the int field. A literal or range field admits any value: `type Obj { a: 1 | 2 }` and `type Obj { a: 1 to 5 }` both accept `<Obj a: 9>`. S11.4.10 verifies a declared type when the value crosses it, and lists the nominal binding of an element among the crossings. A map-type alias checks its fields: with `type P = {a: 1 to 5}`, `let p: P = {a: 9}` fails with E201. Reproduces on the binary from before the LR03-18 fix.
+
+<a id="lr03-21"></a>**LR03-21 · `<:` does not split a range across union arms (S11.1.4v2) · OPEN (found 2026-09-25, residue of LR03-18)**
+With `type R = 1 to 2` and `type OneTwo = 1 | 2`, `R <: OneTwo` is `false`. Every member of `1 to 2` is admitted by `1 | 2`, so S11.1.4v2 ("`A <: B` holds exactly when every value admitted by `A` is admitted by `B`") makes it `true`. The same holds for `1 to 5` against `(1 to 3) | (4 to 5)`. `contract_type_is_subtype` (`type_contract.cpp`) tries each arm of an expected union whole, and since the LR03-18 fix a range is below an arm only if that arm alone admits all its members. Deciding the split case means covering the range with the arms' members. The reverse direction is right: `OneTwo <: R` is `true`. Before the fix, `<:` compared a range type's tag, so every range was below every other (`(1 to 9) <: (1 to 5)` was `true`); the second example gave `true` then only by that accident.
 
 ---
 
@@ -735,6 +738,16 @@ Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them 
 - **An imported module's parse error is printed twice by T0** (`import_parse_error_driver`).
 
 Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation fallback". The negative gtests check only an exit status and a substring, and no harness compares these fixtures' `.txt` files, which have drifted (`Error[E201]` against `error[E201]`).
+
+<a id="lr07-30"></a>**LR07-30 · A range-typed `var` changes its member's representation on the JIT (S1.6) · OPEN (found 2026-09-25, while fixing LR03-18)**
+```
+pn main() {
+    var v: 1 to 5 = 3
+    v = 4.0
+    print([v, type(v)])    // interpreter [4, float], JIT [4, int]
+}
+```
+A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
 
 ## 8. Memory management & GC (LR_08)
 

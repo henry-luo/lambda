@@ -1672,6 +1672,19 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             return STATIC_BOUNDARY_DEFERRED;
         }
     }
+    // S11.1.3: a range contract, like a literal one (S11.2.1), proves only its
+    // members' domain. A source whose carrier fits the domain leaves
+    // membership to the runtime check; one that cannot fit rejects. A range
+    // source is never PROVEN either: its members keep their own carriers
+    // (`3.0` is in `1 to 5`), so no native lane may skip admission.
+    if (Type* domain = lambda_range_type_domain(target)) {
+        return static_boundary_relation(source, domain) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
+    if (Type* domain = lambda_range_type_domain(source)) {
+        return static_boundary_relation(domain, target) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
     // A parameter/member can carry an occurrence or optional wrapper as its
     // effective AST type. Its structural relation is not represented by the
     // compact Type prefix, so defer to the runtime matcher instead of
@@ -1823,10 +1836,6 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
 static bool check_declaration_static_boundary(Transpiler* tp, AstDeclaratorNode* declaration,
         Type* expected, int line) {
     if (!declaration || !declaration->init || !expected) return false;
-    if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
-        // Range annotations are checked by value membership at the MIR boundary, not by TypeId equality.
-        return false;
-    }
     Type* actual = declaration->init->type;
     StaticBoundaryResult result = static_boundary_relation(actual, expected);
     if (result == STATIC_BOUNDARY_REJECTED) {
@@ -8105,8 +8114,7 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
     }
     bool literal_alias = (definition->type_id == LMD_TYPE_STRING ||
         definition->type_id == LMD_TYPE_SYMBOL) && definition->is_literal;
-    bool range_alias = definition->type_id == LMD_TYPE_RANGE &&
-        definition->kind == TYPE_KIND_RANGE;
+    bool range_alias = lambda_type_is_range(definition);
     if (!literal_alias && !range_alias) return;
 
     // Named literal/range aliases are first-class type values. Keep the
@@ -9614,10 +9622,10 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     bool invalid_annotation = declared && declared->type_id == LMD_TYPE_ERROR;
     if (declared && !invalid_annotation) {
         assignment->declared_type = declared;
-        // Range annotations are membership contracts, not a storage lane.
-        // Preserve the initializer's concrete type so a string range value is
-        // not emitted as a raw Range pointer.
-        assignment->type = declared->type_id == LMD_TYPE_RANGE && value &&
+        // Range annotations are membership contracts, not a storage lane: a
+        // member keeps its own carrier, so the binding keeps the initializer's
+        // concrete type rather than the contract's LMD_TYPE_TYPE tag.
+        assignment->type = lambda_type_is_range(declared) && value &&
                 value->type ? value->type : declared;
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
         check_declaration_static_boundary(tp, assignment, declared, line);
