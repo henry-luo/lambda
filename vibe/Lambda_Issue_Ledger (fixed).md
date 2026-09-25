@@ -15,12 +15,12 @@
 
 ## Archive index
 
-This archive contains **143 historical records**: 138 fixed or resolved entries,
+This archive contains **147 historical records**: 142 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR02-28, filed and resolved by the S10.1.7 implicit-field ruling the same day, followed. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR03-20, which that fix found, was fixed the same day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. LR03-22, LR03-23, LR07-31 and LR13-11 were found and fixed together by the constrained type and `~key` fix pass of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR02-28, filed and resolved by the S10.1.7 implicit-field ruling the same day, followed. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR03-20, which that fix found, was fixed the same day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -520,6 +520,16 @@ Found on the way: a derived object type dropped its base fields' defaults (`reso
 
 Fixtures: `object_field_admission.ls`, pinned in `kTune27TierParity`; `negative/runtime/object_field_{range,dynamic,spread}.ls` (`ExpectRejectedOnEveryTier`) and `negative/semantic/object_field_{static,missing}.ls`. All 974 goldens pass with `LAMBDA_TIER=jit` and with `interp`, and compiling every tracked `.ls` file raises the new diagnostics nowhere else.
 
+<a id="lr03-22"></a>**LR03-22 · A constrained type's base was tested by its TypeId, or not at all (S11.2.1, S11.3.1v2) · FIXED 2026-09-25 (found 2026-09-25)**
+`x is T` for a named `T = B that p`, and a `case B that p:` arm, compared the value's TypeId with the base's, on both tiers. A union, occurrence or array base carries the shared type tag, so it refused every value: with `type U = int | string that true`, `5 is U` was `false`, and `int?`, `int[]`, `any` and `number` bases did the same, as did a `float` base for `5`. A map, element or nominal base took any container of its kind, so `{a: "x"}` passed `{a: int} that true` and a plain map passed a `Point` base. The generic `fn_is`, reached by a first-class type value and a named match arm, returned `true` for a union, occurrence or array base without testing anything, and compared TypeIds otherwise.
+
+*Fixed 2026-09-25.* The base admits as `x is <base>` does, through `fn_is` on the constrained type's own value. `fn_is` peels every `that` layer (`lambda_constrained_type_base`) and rebuilds the operand `x is <base>` receives (`is_operand_type_value`): the published singleton for a base-type word, the type itself for an extended kind, and a TypeType around a structural type. The JIT's `emit_constrained_type_test` and T0's `interp_constrained_type_matches` call it before the predicates, one helper per tier for `is` and match arms alike, where each tier had kept two copies of the TypeId check. The generic path stays base-only, as S11.4.6 has it. Fixture `constrained_type_base.ls` §1–§5 and §7, pinned in `kTune27TierParity`.
+
+<a id="lr03-23"></a>**LR03-23 · A match arm naming a constrained type skipped its predicate, and an alias chain lost its inner ones (S11.2.1) · FIXED 2026-09-25 (found 2026-09-25)**
+With `type Pos = int that ~ > 0`, `-5 is Pos` was `false` but `match -5 { case Pos: … }` took the arm: only an inline `case int that …` ran its predicate, and a named arm reached the generic `fn_is`. With `type U = int | string that false`, `case U:` matched `true`, `5` and `[1]`. `type P2 = Pos` lost the predicate under `is` as well, since only a declaration whose initializer was itself a constrained node resolved, and `type Small = Pos that ~ < 10` was always `false`, its base being a constrained type, whose TypeId is the type tag.
+
+*Fixed 2026-09-25.* `ast_constrained_type` (`ast.hpp`) resolves the constrained type a position names statically, inline or through any alias, and `ast_constrained_type_predicates` lists the predicates on its alias chain, innermost first. `is` and both tiers' match arms use them, so `case Pos:` tests exactly as `x is Pos` does. T0's frame plan costs a named arm as it costs the inline form (`plan_constrained_type_need`); with one slot the frame overflowed. Fixture `constrained_type_base.ls` §6.
+
 ## 4. Numbers, decimal & datetime (LR_04)
 
 <a id="lr04-1"></a>**LR04-1 · "Unlimited" decimal is a 200-digit cap · RESOLVED 2026-08-28**
@@ -989,6 +999,10 @@ With `type Row = {value: i64?}`, `var t: Row = {value: 7i64}; t.value = null; t.
 
 *Fixed 2026-09-25:* a persistent `i64?` field is a TypedItem, the wide-optional layout (D2.5.2v3, D2.6.4v3), but `shape_entry_storage_type_id` reports its value domain, int64. The typed-record direct store in member assignment wrote `it2l(null)`, then a raw 8, over the TypedItem, and the next read found an invalid tag. The typed direct read already refused such lanes. `mir_direct_field_lane_supported` now states the one rule both directions follow: a nullable native lane is accessed directly only for containers (null is the zero pointer) and `int` (`INT_LANE_NULL`). `bool?`, `float?`, `i64?` and `u64?` stores take the checked setter. Representation follows the full contract, never the TypeId (D2.5.1).
 
+<a id="lr07-31"></a>**LR07-31 · `~key` in a single-subject body read a stale register, and a value arm hid a nested pipe's `~` (S10.1.3, S1.6) · FIXED 2026-09-25 (found 2026-09-25)**
+A match arm, a constraint predicate, a handler's value arm and a method bind `~` to one subject, so `~key` is null there; T0 had it so for arms and constraints. The JIT left `pipe_index_reg` as it found it (`mir_bind_subject`, `transpile_match`, the method prologue). Inside a pipe, `~key` read the pipe's index, so `[5, 6] |> match ~ { case int: ~key }` was `[0, 1]`. Outside any pipe the function did not compile ("undeclared reg 0"), for `match 5 { case int: ~key }` and for a method reading `~key`. In a handler's value arm the JIT read the pipe's index or `0`, and T0 dereferenced the arm context's missing key slot and segfaulted. With no walk at all (top level, a view's model) the JIT read `0` where T0 read null. The JIT also bound the value arm's `~` with a flag that outranked the pipe context, so a pipe nested in the arm read the handled value as its own `~`: `[1, 2] ^ {0} ~ { ~ |> ~ * 10 }` was `[[10, 20], [10, 20]]`.
+
+*Fixed 2026-09-25.* Each of those JIT bindings sets `~key` to null, and so does `~key` outside any binding. The value arm binds its `~` through the pipe context, saved and restored around the arm, and the `in_handler_value` flag is gone. T0 reads a missing key slot as null, and its value arm now roots at the operand, as the JIT's does, so a proviso nested in the arm agrees on its root. Fixture `current_key_subject.ls`, pinned in `kTune27TierParity`.
 
 ## 8. Memory management & GC (LR_08)
 
@@ -1556,6 +1570,10 @@ hint appears and that disabling the option omits it.
 
 *Fixed 2026-09-25 ([Impl_Element_Type_Sharing P0](<impl/Lambda_Impl_Element_Type_Sharing.md>)):* S11.1.6v3 ruled element content a sequence-pattern slot. The content section now resolves to `TypeElmt::content_list`, a typed `TypeList` filled as a bracket pattern is, and `validate_against_element_type` matches the children with `array_pattern_runs_match` in the fast verdict and with the shared `validate_sequence_pattern` on the reporting path. A second defect under the same symptom: the per-slot shortcut `array_pattern_simple_type_matches` reduced a structural slot (`<p>`, `{y: int}`, `[int, int]`) to a TypeId test, so `[<li>]` matched `[<p>]` as well; only bare kinds take it now. Every reproducer above now answers correctly on both tiers. Tests: `test/lambda/element_content_pattern.ls`; the validator GTests use content patterns instead of counts.
 
+<a id="lr13-11"></a>**LR13-11 · The validator refused every element of a constrained element type (S11.4.6) · FIXED 2026-09-25 (found 2026-09-25)**
+The validator enforces a constrained type's base, TE-10's interim. Reached directly, a `TypeConstrained` is read as a TypeType, whose `type` field its `base` overlays. Wrapped in a TypeType, as an element of `Pos[]` or a field of `{v: Pos[]}` is, it stayed a constrained type after `unwrap_type`, and a TypeId compare refused every element: `[1, 2] is Pos[]` was `false` while `let xs: Pos[] = [1, 2]` was admitted.
+
+*Fixed 2026-09-25.* `unwrap_type` (`validator_internal.hpp`) peels constrained layers to the base. The predicate is still not evaluated there (SO9), so `[-1] is Pos[]` is `true`. Fixture `constrained_type_base.ls` §8.
 
 ## 13.1 Verification-pass records (LR_03 and ledger hygiene)
 

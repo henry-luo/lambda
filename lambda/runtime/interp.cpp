@@ -720,8 +720,8 @@ static bool interp_promote_function_from_tail(Function* fn);
 static uint32_t interp_jit_threshold(void);
 static void interp_format_parameter_boundary(char* boundary, size_t capacity,
     const AstFuncNode* fn_node, const char* fallback_name, int index);
-static bool interp_eval_constrained_predicate(InterpFrame* f,
-    AstConstrainedTypeNode* constrained, Scratch& subject);
+static bool interp_constrained_type_matches(InterpFrame* f,
+    TypeConstrained* constrained, Scratch& subject);
 
 // Multi-axis ArrayNum operations use one stack-local coordinate buffer. The
 // admitted syntax permits only scalar coordinates, but each expression still
@@ -1470,20 +1470,16 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     }
 
     // Whole-module lowering already emits constrained `is` as a base test
-    // followed by the AST predicate.  Do not route it through fn_is: that
-    // helper intentionally retains S11.4.6's base-only generic behavior.
-    AstConstrainedTypeNode* constrained = node->op == OPERATOR_IS
-        ? ast_constrained_type_node(node->right) : NULL;
+    // followed by the AST predicates.  A bare fn_is would stop at the base:
+    // that generic path keeps S11.4.6's base-only behavior.
+    TypeConstrained* constrained = node->op == OPERATOR_IS
+        ? ast_constrained_type(node->right) : NULL;
     if (constrained) {
         Item left_value = eval_expr(f, node->left);
         if (interp_frame_pending(f)) return left_value;
         Scratch lhs(f);
         lhs.set(left_value);
-        TypeConstrained* type = (TypeConstrained*)constrained->type;
-        if (!type || !type->base || get_type_id(lhs.get()) != type->base->type_id) {
-            return (Item){.item = b2it(BOOL_FALSE)};
-        }
-        return (Item){.item = b2it(interp_eval_constrained_predicate(f, constrained, lhs)
+        return (Item){.item = b2it(interp_constrained_type_matches(f, constrained, lhs)
             ? BOOL_TRUE : BOOL_FALSE)};
     }
 
@@ -2981,7 +2977,10 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
     }
 
     if (handler->value_body) {
-        InterpContextGuard value_scope(f->st, operand.home(), NULL);
+        // one subject roots a fresh context, as emit_handler_result binds it: a
+        // proviso or match nested in the arm keeps the operand as its root
+        InterpContextGuard value_scope(f->st, operand.home(), NULL, NULL,
+            operand.home());
         Item value = eval_expr(f, handler->value_body);
         return handler->is_statement && !item_is_error(value)
             ? ItemNull : value;
@@ -3013,9 +3012,8 @@ static void interp_subject_slots(InterpFrame* f, Scratch& subject, Scratch& inde
 // or exhausts fuel: that check simply fails, as the JIT predicate path's false
 // branch does.  Object constraints remain on their separate S11.4.6 path.
 static bool interp_eval_constrained_predicate(InterpFrame* f,
-        AstConstrainedTypeNode* constrained, Scratch& subject) {
-    if (!constrained || !constrained->constraint ||
-            !interp_predicate_supported(constrained->constraint)) return false;
+        AstNode* constraint, Scratch& subject) {
+    if (!constraint || !interp_predicate_supported(constraint)) return false;
 
     InterpEvalModeGuard mode(f->st, EvalMode::PREDICATE,
         interp_predicate_fuel_budget());
@@ -3025,16 +3023,33 @@ static bool interp_eval_constrained_predicate(InterpFrame* f,
     interp_subject_slots(f, subject, index_slot, parent_slot, root_slot, false);
     InterpContextGuard bound(f->st, subject.home(), index_slot.home(),
         parent_slot.home(), root_slot.home());
-    Item result = eval_expr(f, constrained->constraint);
+    Item result = eval_expr(f, constraint);
     return !interp_frame_pending(f) && mode.completed() &&
         is_truthy(result) == BOOL_TRUE;
 }
 
+// S11.2.1: a constrained type named by `is` or a match arm admits its base
+// through fn_is on the type's own value -- the test `x is <base>` makes, where
+// a TypeId compare had refused every union or array base and taken any map
+// for a shaped one -- then owes each `that` predicate on its alias chain,
+// innermost first. Mirrors emit_constrained_type_test.
+static bool interp_constrained_type_matches(InterpFrame* f,
+        TypeConstrained* constrained, Scratch& subject) {
+    AstNode* predicates[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_predicates(constrained, predicates);
+    if (count < 0 || fn_is(subject.get(),
+            interp_ptr_item((Type*)constrained)) != BOOL_TRUE) return false;
+    for (int i = 0; i < count; i++) {
+        if (!interp_eval_constrained_predicate(f, predicates[i], subject)) return false;
+    }
+    return true;
+}
+
 // One arm's pattern test. Mirrors emit_single_pattern_test: a type pattern uses
-// fn_is, a range pattern fn_in, anything else fn_eq — and a constrained pattern
-// checks its base TypeId then evaluates the `that` clause with `~` bound to the
-// scrutinee. Constrained arms remain base-plus-predicate, which is the shipped
-// behaviour S11.4.6 describes; this changes no ruling.
+// fn_is, a range pattern fn_in, anything else fn_eq — and a constrained arm,
+// inline or named, tests exactly as `is` does. Only the arms that name a
+// constrained type run its predicates; S11.4.6 keeps the generic fn_is path
+// base-only.
 static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& scrut) {
     if (!pattern) return false;
 
@@ -3047,14 +3062,8 @@ static bool interp_pattern_matches(InterpFrame* f, AstNode* pattern, Scratch& sc
         }
     }
 
-    if (pattern->node_type == AST_NODE_CONSTRAINED_TYPE) {
-        AstConstrainedTypeNode* ct = (AstConstrainedTypeNode*)pattern;
-        TypeConstrained* constrained = (TypeConstrained*)ct->type;
-        if (constrained && constrained->base) {
-            if (get_type_id(scrut.get()) != constrained->base->type_id) return false;
-            return interp_eval_constrained_predicate(f, ct, scrut);
-        }
-    }
+    TypeConstrained* constrained = ast_constrained_type(pattern);
+    if (constrained) return interp_constrained_type_matches(f, constrained, scrut);
 
     Item pattern_value = eval_expr(f, pattern);
     if (interp_frame_pending(f)) return false;
@@ -5103,7 +5112,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return f->st->contexts
             ? (Item){.item = *f->st->contexts->item} : ItemNull;
     case AST_NODE_CURRENT_INDEX:
-        return f->st->contexts
+        // a subject that is no member of a walk (a handler's value arm, a
+        // view's model) has no key slot; `~key` there is null, not a segfault
+        return f->st->contexts && f->st->contexts->index
             ? (Item){.item = *f->st->contexts->index} : ItemNull;
     case AST_NODE_LAST_INDEX:
         if (!f->st->last_index_item) {

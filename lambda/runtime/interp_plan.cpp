@@ -1211,6 +1211,23 @@ static void plan_link_call_shape(AstCallNode* call) {
 // builder, so they cost 1 regardless of element count.
 static uint32_t plan_need(AstNode* node);
 
+// A constrained type that `is` or a match arm names -- inline, by name, or
+// through an alias chain -- holds three occurrence homes (index, parent,
+// root) while each of its predicates runs, one after another
+// (interp_constrained_type_matches). Zero when the node names none.
+static uint32_t plan_constrained_type_need(AstNode* node) {
+    TypeConstrained* constrained = ast_constrained_type(node);
+    if (!constrained) return 0;
+    AstNode* predicates[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_predicates(constrained, predicates);
+    uint32_t best = 0;
+    for (int i = 0; i < count; i++) {
+        uint32_t need = plan_need(predicates[i]);
+        if (need > best) best = need;
+    }
+    return 3 + best;
+}
+
 // Pattern testing is not ordinary expression evaluation: a non-constrained
 // leaf materializes its value and keeps that value live while fn_is/fn_eq runs,
 // whereas a constrained leaf owns three occurrence homes for its predicate.
@@ -1226,10 +1243,10 @@ static uint32_t plan_match_pattern_need(AstNode* pattern) {
             return left > right ? left : right;
         }
     }
-    if (pattern->node_type == AST_NODE_CONSTRAINED_TYPE) {
-        AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)pattern;
-        return 3 + plan_need(constrained->constraint);
-    }
+    // a named arm (`case Pos:`) runs its predicates too, so it is costed as
+    // the inline form; one slot overflowed the frame
+    uint32_t constrained = plan_constrained_type_need(pattern);
+    if (constrained) return constrained;
     uint32_t value = plan_need(pattern);
     return value > 1 ? value : 1;
 }
@@ -1283,6 +1300,11 @@ static uint32_t plan_need(AstNode* node) {
         // The mapping context owns five additional homes beside the source
         // while its right side runs; nested pipes retain the enclosing homes.
         uint32_t r = 6 + plan_need(b->right);
+        // `x is T` for a named constrained T keeps x while T's predicates run
+        if (node->node_type == AST_NODE_BINARY && b->op == OPERATOR_IS) {
+            uint32_t constrained = plan_constrained_type_need(b->right);
+            if (constrained && 1 + constrained > r) r = 1 + constrained;
+        }
         // Mapping pipes retain the source, result, item, index, parent, and
         // root occurrence homes while evaluating each right-hand expression.
         uint32_t at_call = 6;

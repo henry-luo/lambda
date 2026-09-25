@@ -133,7 +133,7 @@ static inline bool interp_frame_pending(const InterpFrame* f) {
 // pointers to those slots, never Items of its own.
 struct InterpContext {
     uint64_t* item;            // `~`  — current item
-    uint64_t* index;           // `~#` — current index/key
+    uint64_t* index;           // `~key` — current index/key, when present
     uint64_t* parent;          // parent occurrence of `~`, when present
     uint64_t* root;            // root occurrence of `~`, when present
     InterpContext* prev;

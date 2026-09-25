@@ -1,0 +1,17 @@
+"1 scalar bases"
+[true, true, true, true, false]
+"2 union and nullable bases"
+[true, true, false, true, true, false]
+"3 array base"
+[true, false, false]
+"4 map, element and nominal bases"
+[true, false, false, true, false, true, false]
+"5 inline match arms test their base the same way"
+["scalar", "scalar", "shaped", "other"]
+"6 named arms, aliases and chains"
+["small", "pos", "other", "other", "other"]
+[true, false, false, false]
+"7 first-class type values"
+[false, true, false]
+"8 constrained elements"
+[true, true, true, false, true]
