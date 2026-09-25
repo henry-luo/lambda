@@ -186,7 +186,10 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 // Shared AST/MIR helpers.
 bool has_typed_params(AstFuncNode* fn_node);
+// The entry fn_map_set writes for `name` (a repeated literal key's first).
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
+// The entry a member read resolves (a repeated literal key's last, S1.6).
+ShapeEntry* find_shape_read_field_by_name(TypeMap* map_type, const char* name, int name_len);
 // Object literals carry only the supplied named fields.  Construction must
 // align each value with its declared ShapeEntry so omitted fields can run their
 // declared defaults instead of being shifted into a later storage lane.

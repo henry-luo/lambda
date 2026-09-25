@@ -460,9 +460,9 @@ const char* type_to_string(Type* type) {
     // already special-cased; `integer` was not, and a real `integer` field
     // rejection therefore reported "Expected type 'type', but got 'decimal'" --
     // which reads as a different bug than the one that occurred and sent this
-    // investigation down a wrong path (Tune19 §12.9).
-    if (type == &TYPE_NUMBER) return "number";
-    if (type == &TYPE_INTEGER) return "integer";
+    // investigation down a wrong path (Tune19 §12.9). Sized types share one
+    // TypeId the same way.
+    if (const char* numeric = type_numeric_contract_name(type)) return numeric;
     return get_type_name(type->type_id);
 }
 

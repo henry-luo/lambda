@@ -1002,31 +1002,22 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
 }
 
 // A declared numeric lane is a runtime admission boundary even when static
-// checking accepted the source. The compact and u64 coercers are conversion
-// operations (including sized wraparound); every other numeric contract uses
-// lambda_type_check's shared conversion/rejection policy.
+// checking accepted the source. Every numeric contract, the sized ones
+// included, takes lambda_type_check's shared value-aware admission (S11.4.5;
+// D8.3.5: admission is not a cast). The sized/u64 coercers had served here
+// too, so `x: u8` admitted -1 as 255 on T0 while the JIT rejected it
+// (LR03-11); they remain the explicit `u8(v)` conversion only.
 static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
         Type* declared_type, const char* boundary) {
     if (!f || item_is_error(value)) return value;
     Type* target = unwrap_simple_type_type(declared_type);
     if (!target) return value;
-    bool compact_or_u64 = target->type_id == LMD_TYPE_NUM_SIZED ||
-        target->type_id == LMD_TYPE_UINT64;
-    if (!compact_or_u64 &&
+    if (target->type_id != LMD_TYPE_NUM_SIZED && target->type_id != LMD_TYPE_UINT64 &&
             lambda_numeric_kind_from_type(target) == LAMBDA_NUM_INVALID) {
         return value;
     }
     Scratch source_root(f);
     source_root.set(value);
-    if (target->type_id == LMD_TYPE_NUM_SIZED) {
-        // lambda_type_check correctly rejects out-of-range admission, but
-        // explicit i8/u8/etc. conversions wrap before this binding boundary.
-        return coerce_num_sized(source_root.get(),
-            (int64_t)type_num_sized_kind(target));
-    }
-    if (target->type_id == LMD_TYPE_UINT64) {
-        return coerce_uint64(source_root.get());
-    }
     return lambda_type_check(source_root.get(), target, boundary);
 }
 
@@ -2010,12 +2001,19 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
                 target_type->type_id == LMD_TYPE_UINT64)) {
             Item source = eval_expr(f, node->argument);
             if (interp_frame_pending(f)) return ItemNull;
+            if (item_is_error(source)) return source;
             // A type AST evaluates to a Type value, not a Function.  MIR
             // intercepts these one-argument calls and uses the shared numeric
             // coercion helpers, so T0 must do likewise before dynamic call
-            // dispatch treats the Type value as a non-callable target.
-            return interp_coerce_declared_numeric(f, source, target_type,
-                "numeric conversion");
+            // dispatch treats the Type value as a non-callable target. An
+            // explicit conversion wraps; a declared binding admits instead.
+            Scratch source_root(f);
+            source_root.set(source);
+            if (target_type->type_id == LMD_TYPE_NUM_SIZED) {
+                return coerce_num_sized(source_root.get(),
+                    (int64_t)type_num_sized_kind(target_type));
+            }
+            return coerce_uint64(source_root.get());
         }
     }
 
@@ -6621,6 +6619,11 @@ static AstDeclaratorNode* interp_const_binding_decl(AstNode* node) {
     if (!node || node->node_type != AST_NODE_IDENT) return NULL;
     NameEntry* entry = ((AstIdentNode*)node)->entry;
     if (!entry || entry->is_mutable || entry->is_parameter) return NULL;
+    // LR07-17: an imported name points at the provider's own declaration, whose
+    // literal spans and fold handles index the provider's source and constant
+    // pool, not this unit's. Folding it read the importer's bytes (an imported
+    // `pub let A = 10` came out 0 on the JIT); read the module slot instead.
+    if (entry->import) return NULL;
     AstNode* decl = entry->node;
     if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
     AstDeclaratorNode* declarator = (AstDeclaratorNode*)decl;

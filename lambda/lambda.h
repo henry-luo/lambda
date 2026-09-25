@@ -3074,6 +3074,7 @@ extern "C" {
     Item pn_splice(Item arr, Item start, Item count); // remove count elements at start, in place
     Item pn_push_cow(Item owner, Item value);
     Item pn_splice_cow(Item owner, Item start, Item count);
+    Item array_num_push_open(Item owner, Item value);  // push onto an uncontracted packed array
 
     // image stencil engine: slide a Kh×Kw window over the spatial dims of `in`
     // (2-D H×W, or 3-D H×W×C applied per-channel) and reduce at each position.
@@ -3251,8 +3252,8 @@ extern "C" {
     Item fn_parse1(Item str);
     Item fn_parse2(Item str, Item options);
     Item fn_parse_html_fragment1(Item str);
-    String* fn_format1(Item item);
-    String* fn_format2(Item item, Item options);
+    Item fn_format1(Item item);
+    Item fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
     Symbol* fn_symbol1(Item item);  // convert to symbol
     Item fn_symbol2(Item name, Item url);  // create namespaced symbol

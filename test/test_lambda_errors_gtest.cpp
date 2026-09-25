@@ -1407,6 +1407,13 @@ TEST_F(NegativeScriptTest, RetiredCountAfterArraySuffixNamesItsReplacement) {
         "are retired: write `T{n+}` or `T{n,m}` for a run of T");
 }
 
+// S12.3.2 / D6.2.2v2 (LR07-16): a dynamic call has no declaration to bind
+// names against; both tiers had silently passed named arguments by position.
+TEST_F(NegativeScriptTest, NamedArgumentsNeedStaticallyKnownCallee) {
+    ExpectErrorMessage("test/lambda/negative/semantic/named_arg_dynamic_call.ls",
+        "error[E212]");
+}
+
 // S16.8.6v3: the open count is `T{n+}`, not regex's trailing comma. A habit
 // that writes `{n,}` is told, rather than reading as an exact count.
 TEST_F(NegativeScriptTest, RegexOpenCountNamesTheOpenSpelling) {
@@ -1574,7 +1581,7 @@ TEST_F(NegativeScriptTest, TypeEnforcementRuntimeNegativeGoldensPinDiagnostics) 
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_ndim_array_write.ls",
         "error[E201]: type check at typed multi-dimensional array assignment failed: expected int, got string 'not an integer'");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_mask_array_write.ls",
-        "error[E201]: type check at typed array mask assignment failed: expected num_sized, got int 300");
+        "error[E201]: type check at typed array mask assignment failed: expected u8, got int 300");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_arity.ls",
         "error[E206]: fn_call_into: function 'add' expects 2 arguments, got 1");
     ExpectRuntimeErrorMessage("test/lambda/negative/runtime/type_enforcement_dynamic_declaration.ls",
@@ -1649,6 +1656,42 @@ TEST_F(NegativeScriptTest, NonLaneArrayContractRejectsNdArrayOnEveryTier) {
 // three arrays of two). Once S11.1.6v2 made a counted bracket an array layer,
 // the admission fast paths proved it from lane and rank alone, so a wrong
 // length on any axis -- flat, a nested row, a packed shape -- was admitted.
+// S11.4.5 / S11.4.1v3 (LR03-11): a sized-int boundary admits by value on every
+// tier. T0 coerced (-1 into `u8` was 255, 300 into `i8` was 44); the JIT's
+// rejections named the contract "num_sized", and its u32 lane gave none.
+TEST_F(NegativeScriptTest, SizedIntParameterAdmitsByValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/sized_admission_param.ls",
+        false, "failed: expected u8, got int -1");
+}
+
+TEST_F(NegativeScriptTest, SizedIntDeclarationAdmitsByValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/sized_admission_declaration.ls",
+        false, "error[E201]: type check at declaration 'x' failed: expected i8, got int 300");
+}
+
+TEST_F(NegativeScriptTest, NativeU32LaneRejectionReportsOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/sized_admission_u32_lane.ls",
+        false, "error[E201]: type check at declaration 'x' failed: expected u32, got int -1");
+}
+
+TEST_F(NegativeScriptTest, U64DeclarationAdmitsByValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/sized_admission_u64.ls",
+        false, "error[E201]: type check at declaration 'a' failed: expected u64, got int -1");
+}
+
+// S11.2.1 (LR03-11): a literal type admits its one value. An integer literal
+// union admitted any int on both tiers, and the static relation proved a
+// string argument against `"a"` by TypeId, so the JIT dropped its check.
+TEST_F(NegativeScriptTest, IntegerLiteralUnionAdmitsItsValuesOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/literal_admission_union.ls",
+        false, "failed: expected 1 | 2, got int 3");
+}
+
+TEST_F(NegativeScriptTest, StringLiteralParameterKeepsItsCheckOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/literal_admission_string_param.ls",
+        false, "failed: expected \"a\", got string 'c'");
+}
+
 TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongLengthOnEveryTier) {
     ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_flat_contract.ls",
         false, "error[E201]: type check at declaration 'a' failed: expected int[3]");
@@ -1752,6 +1795,23 @@ TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
         << "Expected import failure diagnostic.\nOutput: " << result.output;
     EXPECT_EQ(strstr(result.output.c_str(), "\"DRIVER_RAN\""), nullptr)
         << "Importer executed after imported module parse failure.\nOutput: " << result.output;
+}
+
+// D7.2.2 (LR07-17): a module whose init ends in an ordinary error never
+// becomes importable. The JIT had dropped the init result and run the importer
+// against the module's half-set slots.
+TEST_F(NegativeScriptTest, ImportInitErrorBlocksExecution) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (const char* tier : tiers) {
+        ScriptResult result = run_lambda_script(
+            "test/lambda/negative/import_init_error_driver.ls", false, tier);
+        EXPECT_NE(result.exit_code, 0) << "tier=" << tier;
+        EXPECT_NE(strstr(result.output.c_str(), "error[E201]"), nullptr)
+            << "tier=" << tier << "\nOutput: " << result.output;
+        EXPECT_EQ(strstr(result.output.c_str(), "DRIVER_RAN"), nullptr)
+            << "Importer executed after its module's init failed, tier=" << tier
+            << "\nOutput: " << result.output;
+    }
 }
 
 //==============================================================================

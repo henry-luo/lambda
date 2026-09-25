@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 36.0.1 (2026-09-24)
+**Spec version:** 36.0.2 (2026-09-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2569,8 +2569,11 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   `fn (x: int)?`, `fn ()[]`. S11.1.5v2 makes the return type optional, so
   after a return-less signature the suffix could only bind to the function
   type — while in `fn () int?` the same `?` belongs to the return type.
-  Until ruled, both front ends reject the direct suffix (C had accepted
-  only `fn[]`) and grouping spells it: `(fn (x: int))?`, `(fn)[]`. `function?` is
+  Until ruled, the C parser rejects every direct suffix (it had accepted
+  only `fn[]`), and grouping spells it: `(fn (x: int))?`, `(fn)[]`. The
+  reference grammar rejects `?`, `+`, `*` and `[…]` there too, but reads a
+  tight exact count as the type followed by a block statement: `fn (){2}` is
+  `fn ()` then `{2}`, a silent misparse tracked as LR02-25. `function?` is
   unaffected, since `function` is a base type name. [S11.1.5v2,
   S11.1.6v2]
 

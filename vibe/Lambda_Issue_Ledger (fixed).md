@@ -15,8 +15,11 @@
 
 ## Archive index
 
-This archive contains **105 historical records**: 104 RESOLVED entries and one
-CLOSED design decision. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The six newest are the list/array kind records closed
+This archive contains **115 historical records**: 114 RESOLVED entries and one
+CLOSED design decision. LR03-11, LR07-16, LR07-17 and LR10-7, from the
+wrong-value group, were fixed on 2026-09-25 (see the central ledger's
+"Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The six newest are the list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -234,6 +237,22 @@ binds tight and never applies to a return type (a spaced or return-position
 brace is a body), and the old `max_count != 0` "was it set" sentinel had to
 go, since `int[0]` is a legitimate zero-length array. Record:
 [plan §14](<impl/Lambda_List_Fixes (done).md>).
+
+<a id="lr03-11"></a>**LR03-11 · Sized-int and literal-union contracts admit wrong values · FIXED 2026-09-25**
+`fn f(x: u8) { x }; f(-1)` returns `255` and `fn g(x: 1 | 2) { x }; g(3)`
+returns `3`, on both tiers. `let x: i8 = 300` is `44` on the interpreter; the
+JIT rejects it, but with the internal name `expected num_sized, got int 300`.
+A sized boundary wraps where **S11.4.5** requires value-aware admission and
+**S11.4.1v3** forbids a wrong value (see also **S4.2.4**); an integer
+literal-union contract is not checked at all (a string literal union such as
+`"a" | "b"` is).
+
+*Fixed 2026-09-25:* three causes, all ruled by S11.4.5, S11.4.1v3 and S11.2.1.
+- **Sized ints.** T0's `interp_coerce_declared_numeric` sent every `i8`…`u32` and `u64` binding contract through the wrapping conversion (`coerce_num_sized`, `coerce_uint64`). Binding boundaries now take `lambda_type_check`'s value-aware admission, as the JIT already did (D8.3.5: admission is not a cast); only an explicit `u8(v)` wraps. The JIT's native `u32` boundary rejected with a bare `ITEM_ERROR`; its cold arm now runs the shared check, so the rejection carries its E201.
+- **Literal types.** A numeric literal contract was admitted by its carrier, and the static relation proved any literal contract by TypeId, so the JIT also dropped the check on `x: "a"`. `lambda_literal_contract_value` (`transpile_shared.cpp`) recovers a literal contract's value (never from the shared `LIT_*` markers). Admission, `lambda_type_matches` (by `==`, as a literal match arm is), the validator's primitive branch and `static_boundary_relation` (deferred, never proven by TypeId) use it.
+- **Diagnostics.** `type_numeric_contract_name` names sized types (`expected u8`, not `num_sized`) in contract and validator messages, and `lambda_type_format_contract_name` prints a literal contract's value on the expected side (`expected 1 | 2`, `expected "a"`).
+
+Fixtures: `negative/runtime/sized_admission_{param,declaration,u32_lane,u64}.ls` and `literal_admission_{union,string_param}.ls` (`ExpectRejectedOnEveryTier`); `sized_admission_values.ls` and `type_literal_admission.ls` in `kTune27TierParity`. `tune21_u32_decl_lane.mir-check` now counts the one cold-arm call instead of forbidding it. Found on the way: [LR03-15](Lambda_Issue_Ledger.md#lr03-15), [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
 
 ## 4. Numbers, decimal & datetime (LR_04)
 
@@ -643,6 +662,67 @@ That gap is now closed by `test/lambda/element_content_axes.ls`, which pins both
 
 **Still open, and worth a ruling of its own:** a `group by … into g` binds an element whose attributes are the group key, so `len(g)` now counts the key alongside the members and member count must be spelled `len(content(g))`. That is correct under S8.3.1v2 but is an ergonomic wart on the group-by surface.
 
+<a id="lr07-16"></a>**LR07-16 · Dynamic calls ignore argument names · FIXED 2026-09-25**
+`fn f(a, b) => a - b; let g = f` then `g(b: 1, a: 5)` returns `-4` on both
+tiers where the direct call `f(b: 1, a: 5)` returns `4`: a call through a value
+binds named arguments positionally, silently. `ast_resolve_call_args` needs the
+callee's declaration, which a dynamic call does not have. Either reject named
+arguments on a dynamic callee or resolve them against the runtime signature
+(`Function::fn_type`).
+
+*Fixed 2026-09-25:* S12.3.2 and D6.2.2v2 already rule it: a dynamic call with named arguments is rejected. `resolve_call_body` (`build_ast.cpp`) now reports E212 at the first named argument when the callee is neither a system function, a resolved object method, a direct function (`ast_direct_call_function`) nor a type conversion. Every shape that had bound positionally — a `let`-bound function, an arrow, a `fn` parameter, a map-field function, an immediately invoked arrow — is rejected on both tiers; direct and module-aliased calls still bind by name. A compile scan of all 1,934 tracked `.ls` files found no caller relying on the old binding, and `doc/Lambda_Func.md` now states the rule. Fixture `test/lambda/negative/semantic/named_arg_dynamic_call.ls` (`NegativeScriptTest.NamedArgumentsNeedStaticallyKnownCallee`). A statically resolved object method still binds named arguments by position: [LR07-19](Lambda_Issue_Ledger.md#lr07-19).
+
+<a id="lr07-17"></a>**LR07-17 · JIT: an imported `pub let` holding an int literal reads `0` · FIXED 2026-09-25**
+A module with `pub let A = 10` and `pub let B = 1 + 2`, imported with
+`import .m`, gives `[A, B]` = `[0, 3]` on the JIT and `[10, 3]` on the
+interpreter. Computed values, floats, strings, and arrays import correctly, and
+`A` reads correctly inside the module's own functions. Probable site:
+`load_module_var_slots` (`transpile-mir.cpp:7733`) — the literal never reaches
+its slot. The survey also reports, unverified here, that a module whose
+annotated init fails is still importable on the JIT (reads `0`, exit 0) while
+the interpreter aborts, contradicting **D7.2.2**. Violates **S1.6**.
+
+*Fixed 2026-09-25:* the fault was the importer's const-fold pass, not `load_module_var_slots`. An imported name points at the provider's own declaration, and `interp_const_binding_decl` (`interp.cpp`) accepted it, so `interp_const_init_value` read the provider's literal span out of the *importer's* source text (a comment line added above the import changed the value read) or looked its fold handle up in the importer's constant pool; a large module could read past the importer's buffer. Int, negative, hex, bool and `x: int = 5` literals were affected; floats, strings and computed values were not. An imported name is now never a const binding, so the read goes through the module slot, as `B` already did. The secondary claim reproduced as a separate defect: `run_script_mir` (`transpile-mir.cpp`) discarded each imported module's init result, so a module whose init ended in an ordinary error (`pub let C: int = g("s")`) still ran its importer on the JIT, exit 0. It now publishes the error and stops, as T0's `interp_execute` does (D7.2.2). The existing `test/lambda/import_vars.ls` had been wrong on the JIT all along (`version` read 0); goldens run on `auto`, which starts in T0. Fixtures: `import_const_exports.ls` (with `mod_const_exports.ls`) and `import_vars.ls` in `kTune27TierParity`; `negative/import_init_error_driver.ls` (`NegativeScriptTest.ImportInitErrorBlocksExecution`, all three tiers). Found on the way: [LR07-20](Lambda_Issue_Ledger.md#lr07-20).
+
+<a id="lr07-21"></a>**LR07-21 · JIT: a `for` over `[true, false]` takes the true branch for `false` · FIXED 2026-09-25**
+```
+pn main() {
+  var hits = []
+  for (b in [true, false]) {
+    if (b) { push(hits, "t") } else { push(hits, "f") }
+  }
+  print(hits)
+}
+```
+T0 prints `["t", "f"]`; the JIT prints `["t", "t"]`: a wrong value with no error (S1.6). Reported by the LR12-14 investigation, reproduced 2026-09-25; root cause not located.
+
+*Fixed 2026-09-25:* the loop variable was declared `bool` while its register still held the boxed element. `iter_val_at` returns an Item, and the for-in binder (`transpile-mir.cpp`) unboxed only int, int64, uint64, float and string. A variable's reads take their carrier from its TypeId (`mir_value_from_var_entry`), so a `bool` variable was read as bool's 0/1 lane, and `bf` tested the whole tagged word, which is nonzero for `false`. S3.1 puts `false` in the falsy set. `if`, `not`, `where`, group-by keys, join sources (both sides, left joins included), indexed pairs and nested loops all read every element as true; the index read `xs[1]` was right. Boxing consumers (`print(b)`, `b and x`) escaped because the bool boxer keeps only the low byte, and pointer-typed elements escaped because their consumers accept a tagged or a raw pointer. The same hand-kept list was duplicated in the join, group-by and `open` alias binder, which also read the raw `type_id` instead of `mir_value_type_id`, so an occurrence contract (`T?`) there was bound as the meta-type (the LR07-7 hazard). Both copies are now one binder, `mir_bind_item_var`. It unboxes every type in `is_native_param_type_id`, the parameter binder's set with bool included, into the carrier `lambda_canonical_rep_for_type_id` names. A JIT-tier sweep of the 999 goldened fixtures against the pre-fix binary found none that passed before and fails now. Fixture: `test/lambda/proc/for_in_bool_truthiness.ls`, pinned in `kTune27TierParity`; it fails on the pre-fix JIT and passes on `auto`, which starts in T0 and hid the defect.
+
+<a id="lr07-23"></a>**LR07-23 · JIT: a method's `_b` wrapper re-boxed its Item result · FIXED 2026-09-25 (found the same day)**
+`type Counter { value: int, fn double() => value * 2 }` with `<Counter value: 5>.double()` is `10` on T0 and `inf` on the JIT. Six goldens segfaulted on the JIT (`object_method_receiver`, `proc/map_object_robustness`, `proc/object_direct_access`, `proc/object_method_write`, `proc/object_mutation`, `proc/proc_object_counter`) and six returned wrong values (`object_method_value`, `object_nominal`, `import_pub_types`, `proc/object_open_instance`, `proc/proc_keyword_object_members`, `proc/typed_param_direct_access`). Found by running every golden with `LAMBDA_TIER=jit`; goldens run on `auto`, which starts in T0.
+
+*Fixed 2026-09-25:* the forward-declare prepass pre-registered native call facts with `is_method = false` ("in prepass, method_owner is not set"), so a method whose return type infers as a scalar got a native-return NativeFuncInfo. `transpile_func_def` never gives a method a native body, because methods dispatch through their `_b` entry. The body therefore returned a checked Item, while `emit_boxed_abi_wrapper`, built from the stale NativeFuncInfo, read that Item as a raw int lane and tagged it again. The forward-declare walk now sets `mt->method_owner` for object methods, as the define walk already did (both through `mir_object_type_owner`), and pre-registration asks `mt->method_owner != nullptr`, as final lowering does (S1.6). `object_method_receiver.ls`, whose header says tier parity is its point, had been identical on both tiers when LR07-15 was fixed and regressed unseen; it is now pinned in `kTune27TierParity`. The skip-listed `object`, `object_inherit`, `object_update` and `map_object_robustness` now pass on all three tiers as well.
+
+<a id="lr07-24"></a>**LR07-24 · JIT: a widened bool array's read folded the new value to `false` · FIXED 2026-09-25 (found the same day)**
+`var mixed = fill(3, true); mixed[2] = "mixed"; mixed[2]` is `"mixed"` on T0 and `false` on the JIT (`proc/proc_fill.ls`, `proc/proc_fill_bool_lane.ls`).
+
+*Fixed 2026-09-25:* the index read of an array whose inferred element type is bool (`nested_bool` in `emit_generic_array_index_value`) guards the packed ELEM_BOOL layout and falls back to `item_at`. T21-1c made that read publish a native bool, folding the slow arm's Item to its low bit; the store had already turned the array into a generic one, so the slow arm held the string. The read is now a native bool only when every arm yields one (`mir_array_bool_elements_proven`): a declared rank-one bool lane, or a binding witness, which is installed only when no store can retag the lane (for bool, `mir_store_may_change_elem_type` rejects every value not proven bool). Otherwise it uses `MIR_INDEX_RESULT_BOXED_BOOL`: the fast arm's byte is boxed, and the slow arm's Item is kept. Inference must never change a result (D3.3.1v2, D3.3.3v3). The declared `bool[]` fast paths that T21-1c's gates measured (`sieve2`, `primes2`) are unchanged. The same flaw in other consumers is [LR07-28](Lambda_Issue_Ledger.md#lr07-28).
+
+<a id="lr07-25"></a>**LR07-25 · JIT: a repeated literal key read its first entry · FIXED 2026-09-25 (found the same day)**
+`{a: 1, a: 2, b: 3}.a` is `2` on T0 and `1` on the JIT (`map_duplicate_key_lookup.ls`, four rows).
+
+*Fixed 2026-09-25:* a literal shape keeps a repeated key's entries in source order. The runtime reader (`_map_get_keyed`) and the checker's member oracle take the last entry, but the JIT's static field planner used `find_shape_field_by_name`, which returns the first. `find_shape_read_field_by_name` (`transpile_shared.cpp`) now returns the entry a read resolves, and `mir_plan_static_field` uses it (S1.6). `find_shape_field_by_name` still returns the entry `fn_map_set` writes, because the guarded store's fast arm must write the slot its `fn_map_set` fallback writes. LambdaJS shares the planner, but its literals deduplicate keys, so its output is unchanged. The write side's own inconsistency, on both tiers, is [LR03-17](Lambda_Issue_Ledger.md#lr03-17).
+
+<a id="lr07-26"></a>**LR07-26 · JIT: a string-pattern `case` compared with `==` · FIXED 2026-09-25 (found the same day)**
+With `type digits = \(d+)`, `match "123" { case digits: "number" default: "other" }` is `"number"` on T0 and `"other"` on the JIT (`match_string_pattern.ls`, seven rows; `symbol_pattern.ls`, two).
+
+*Fixed 2026-09-25:* `emit_single_pattern_test` uses `fn_is` for a type-valued pattern and `fn_eq` otherwise. `mir_is_type_value_node` counted a name as a type only when it named a type declaration or an object type, so a pattern name's carrier fell through to its string lane, and the arm compared the string with the pattern. T0 decides by the pattern's runtime value. The rule for which definitions denote a type (a `type` statement, an object type, a type-definition declarator, a string or symbol pattern) is now `ast_definition_denotes_type` in `ast-core.hpp`, shared by the checker's `ast_is_explicit_type_value` and by `mir_is_type_value_node` (S1.6, rule 13).
+
+<a id="lr07-27"></a>**LR07-27 · JIT: a direct store wrote a raw int64 over an `i64?` field · FIXED 2026-09-25 (found the same day)**
+With `type Row = {value: i64?}`, `var t: Row = {value: 7i64}; t.value = null; t.value = 8i64; t.value` is `8` on T0 and `error` on the JIT (`proc/proc_nullable_native_i64_map.ls`).
+
+*Fixed 2026-09-25:* a persistent `i64?` field is a TypedItem, the wide-optional layout (D2.5.2v3, D2.6.4v3), but `shape_entry_storage_type_id` reports its value domain, int64. The typed-record direct store in member assignment wrote `it2l(null)`, then a raw 8, over the TypedItem, and the next read found an invalid tag. The typed direct read already refused such lanes. `mir_direct_field_lane_supported` now states the one rule both directions follow: a nullable native lane is accessed directly only for containers (null is the zero pointer) and `int` (`INT_LANE_NULL`). `bool?`, `float?`, `i64?` and `u64?` stores take the checked setter. Representation follows the full contract, never the TypeId (D2.5.1).
+
 
 ## 8. Memory management & GC (LR_08)
 
@@ -888,6 +968,16 @@ frontier falls back to an empty range rather than labeling unrelated native
 code. Regression:
 `LambdaJitDebugInfo.FinalFunctionRangeUsesJitAllocationFrontier` emits a final
 function larger than 64 KiB and resolves an address beyond the old boundary.
+
+<a id="lr10-7"></a>**LR10-7 · Error values do not own their `code` / `message` · FIXED 2026-09-25**
+`let a = error("A"); let b = error("B"); [a.message, b.message]` is
+`["B", "B"]` on both tiers: the `.code` and `.message` members read
+`context->last_error`, not the value (`lambda-eval.cpp:5617`–`5630`), so every
+error reports whichever error was constructed last. Contradicts **S7.4.4**
+(an error carries its code, message, and source location). The survey also
+found `error({code: 42, message: "m"})` reading back as `318` / `"Error"`.
+
+*Fixed 2026-09-25:* an error Item already points at a GC-traced `LambdaError` payload; `fn_member`'s error branch (`lambda-eval.cpp`) read `context->last_error` instead. It now reads `it2err(item)` and falls back to `last_error` only for the payload-less `ItemError` sentinel. `fn_error` gained the parameter-map branch, `error({code, message})` (S7.4.4, `doc/Lambda_Error_Handling.md`); a field that is absent or of the wrong type keeps its default (318, `"Error"`). Three goldens had pinned the stale read: `conc/cancel_parked`, `cancel_before_run` and `cancel_nested_cleanup` printed `Error` for a cancelled task's `"task cancelled"`. Fixture `test/lambda/error_value_payload.ls` (both tiers and forced GC). The other S7.4.4 gaps found on the way are [LR10-10](Lambda_Issue_Ledger.md#lr10-10).
 
 ---
 

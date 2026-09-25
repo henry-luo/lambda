@@ -13,10 +13,23 @@ TS_CLI="$ROOT/node_modules/.bin/tree-sitter"
 export TREE_SITTER_LIBDIR="$ROOT/temp/tree-sitter-lib"
 mkdir -p "$WORK"
 pass=0; fail=0
+no_tree_shown=0
 run() {
   local exp="$1" name="$2" src="$3"
   printf '%b' "$src" > "$WORK/case.ls"
   out=$(cd "$G" && "$TS_CLI" parse "$WORK/case.ls" 2>&1)
+  # A verdict needs a parse tree. Without one the CLI never parsed the case --
+  # the grammar failed to compile (a stale src/parser.c, or a CLI older than
+  # the grammar's ABI) or the CLI itself failed -- and the error grep below
+  # would read that as an accept. Such a case fails; the cause prints once.
+  if ! printf '%s\n' "$out" | grep -qE '^\([A-Za-z_]+ \[[0-9]+, [0-9]+\] - \['; then
+    fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=no parse tree\n' "$name" "$exp"
+    if [ "$no_tree_shown" = 0 ]; then
+      no_tree_shown=1
+      printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | head -6 | sed 's/^/       | /'
+    fi
+    return
+  fi
   if echo "$out" | grep -qE 'ERROR|MISSING|Unexpected'; then got=R; else got=A; fi
   if [ "$got" = "$exp" ]; then pass=$((pass+1)); printf '  ok   %-42s [%s]\n' "$name" "$exp";
   else fail=$((fail+1)); printf 'FAIL   %-42s exp=%s got=%s\n' "$name" "$exp" "$got"; fi

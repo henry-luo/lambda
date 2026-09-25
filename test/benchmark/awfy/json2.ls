@@ -222,7 +222,7 @@ pn p_pause_capture(var p: Parser) any {
     var end: int = idx - 1
     var inp: string = (p.inp)
     var cs: int = (p.cs)
-    var sub: string = slice(inp, cs, end + 1)
+    var sub: string = slice(inp, cs, end + 1) or ""
     var cbf: int = (p.cbf)
     if (cbf == 0) {
         p.cb = sub
@@ -245,7 +245,7 @@ pn p_end_capture(var p: Parser) string {
     }
     var inp: string = (p.inp)
     var cs: int = (p.cs)
-    var sub: string = slice(inp, cs, end + 1)
+    var sub: string = slice(inp, cs, end + 1) or ""
     var cbf: int = (p.cbf)
     var captured: string = sub
     if (cbf != 0) {

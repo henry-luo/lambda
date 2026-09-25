@@ -1295,6 +1295,25 @@ typedef struct AstSpreadNode : AstNode {
     AstNode* argument;
 } AstSpreadNode;
 
+// A name bound by one of these definitions reads as a type value: `type T =`,
+// an object type, or a string/symbol pattern. The checker's type-value test
+// and MIR lowering classify names by this one rule (rule 13); a MIR arm that
+// missed patterns compared `case digits:` with `==` instead of `is`.
+static inline bool ast_definition_denotes_type(const AstNode* definition) {
+    if (!definition) return false;
+    switch (definition->node_type) {
+    case AST_NODE_TYPE_STAM:
+    case AST_NODE_OBJECT_TYPE:
+    case AST_NODE_STRING_PATTERN:
+    case AST_NODE_SYMBOL_PATTERN:
+        return true;
+    case AST_NODE_VARIABLE_DECLARATOR:
+        return ((const AstDeclaratorNode*)definition)->is_type_definition;
+    default:
+        return false;
+    }
+}
+
 static inline struct NameEntry* ast_open_alias_entry(const AstOpenNode* node) {
     AstNode* decl = node ? node->alias_decl : NULL;
     return decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR

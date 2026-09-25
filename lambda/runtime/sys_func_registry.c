@@ -333,11 +333,15 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_COMPLEX2, "complex", 2, &TYPE_COMPLEX, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_complex2", FPTR(fn_complex2), NULL, NULL, false, 0},
 
+    // LR07-18: a non-complex operand returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_REAL, "real", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_real", FPTR(fn_real), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_real", FPTR(fn_real), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_FLOAT, /* may_error */ true},
 
+    // LR07-18: a non-complex operand returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_IMAG, "imag", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_imag", FPTR(fn_imag), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_imag", FPTR(fn_imag), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_FLOAT, /* may_error */ true},
 
     {SYSFUNC_CONJ, "conj", 1, &TYPE_COMPLEX, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_conj", FPTR(fn_conj), NULL, NULL, false, 0},
@@ -359,8 +363,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, true, true, LMD_TYPE_ANY, false,
      C_RET_SYMBOL, NULL, "fn_symbol1", FPTR(fn_symbol), NULL, NULL, false, 0},
 
+    // LR07-18: an invalid operand returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_SYMBOL2, "symbol", 2, &TYPE_SYMBOL, false, true, false, LMD_TYPE_ANY, false,
-     C_RET_ITEM, NULL, "fn_symbol2", FPTR(fn_symbol2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_symbol2", FPTR(fn_symbol2), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_SYMBOL, /* may_error */ true},
 
     // ========================================================================
     // DateTime functions — overloaded with arg count suffix
@@ -398,14 +404,16 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_set", NULL, NULL, NULL, false, 0},  // variadic, unimplemented
 
+    // LR07-18: a fractional or non-finite offset returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_SLICE, "slice", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_slice2", FPTR(fn_slice2), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_SLICE_OF_ARGUMENT},
 
+    // LR07-18: a fractional or non-finite offset returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_slice3", FPTR(fn_slice3), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_SLICE_OF_ARGUMENT},
 
     {SYSFUNC_VIEW, "subview", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -422,9 +430,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SHAPE, "shape", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_shape", FPTR(fn_shape), NULL, NULL, false, 0},
 
+    // LR07-18: an error operand returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_NDIM, "ndim", 1, &TYPE_INT, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_ndim", FPTR(fn_ndim), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ &TYPE_INT, /* may_error */ false,
+     /* is_async */ false, /* success */ &TYPE_INT, /* may_error */ true,
      /* result */ SYS_RESULT_FIXED},
 
     {SYSFUNC_TRANSPOSE, "transpose", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -605,11 +614,15 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "fn_input2", FPTR(fn_input2), NULL, NULL, false, 0},
 
+    // LR07-18: an error operand or a bad format returns an error (D6.4.1), so
+    // a call types `string | error` and stays boxed (S7.8.1)
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_STRING, NULL, "fn_format1", FPTR(fn_format1), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_format1", FPTR(fn_format1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
     {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_STRING, NULL, "fn_format2", FPTR(fn_format2), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_format2", FPTR(fn_format2), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
     {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_error", FPTR(fn_error), NULL, NULL, false, 0},
@@ -669,8 +682,10 @@ SysFuncInfo sys_func_defs[] = {
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
+    // LR07-18: an unresolvable url returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false,
-     C_RET_ITEM, NULL, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_url_resolve", FPTR(fn_url_resolve), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
     {SYSFUNC_SPLIT, "split", 2, (Type*)&TYPE_ARRAY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_split2", FPTR(fn_split), NULL, NULL, false, 0,
@@ -685,14 +700,16 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_JOIN, "join", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_join2", FPTR(fn_join2), NULL, NULL, false, 0},
 
+    // LR07-18: a non-text argument returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_replace3", FPTR(fn_replace), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
+    // LR07-18: a non-text argument returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_REPLACE4, "replace", 4, &TYPE_ANY, false, true, true, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_replace4", FPTR(fn_replace4), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_TEXT_SAME_AS_ARGUMENT},
 
     {SYSFUNC_FIND, "find", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
@@ -704,8 +721,10 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_ORD, "ord", 1, &TYPE_INT, false, false, false, LMD_TYPE_STRING, false,
      C_RET_ITEM, NULL, "fn_ord", FPTR(fn_ord), NULL, NULL, false, 0},
 
+    // LR07-18: an error operand returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_CHR, "chr", 1, &TYPE_STRING, false, false, false, LMD_TYPE_INT, false,
-     C_RET_ITEM, NULL, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0},
+     C_RET_ITEM, NULL, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
     // ========================================================================
     // Vector/array functions — math module
@@ -930,9 +949,10 @@ SysFuncInfo sys_func_defs[] = {
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
+    // LR07-18: an invalid operand returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_sort2", FPTR(fn_sort2), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -940,14 +960,16 @@ SysFuncInfo sys_func_defs[] = {
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
 
+    // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
 
+    // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_drop", FPTR(fn_drop), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_SELECTION_OF_ARGUMENT},
 
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,

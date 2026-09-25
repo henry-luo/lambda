@@ -3175,9 +3175,12 @@ block (`if f is fn () { 1 }`), as it is after every return type (§7.28).
 
 **Left open: a suffix after a signature (SO45).** With the return type
 optional, the `?` in `fn (x: int)?` could only bind to the function type,
-while in `fn () int?` it binds to the return type. Until that is ruled, both
-front ends reject a suffix directly on a function type — bare `fn?` and
-`fn[]` included — and grouping spells it: `(fn (x: int))?`.
+while in `fn () int?` it binds to the return type. Until that is ruled, the
+C parser rejects a suffix directly on a function type — bare `fn?` and
+`fn[]` included — and grouping spells it: `(fn (x: int))?`. The reference
+grammar rejects `?`, `+`, `*` and `[…]` there as well, but reads a tight exact
+count as the type followed by a block statement (`fn (){2}` is `fn ()` then
+`{2}`); that misparse is [LR02-25](<Lambda_Issue_Ledger.md#lr02-25>).
 
 **Not decided here.** Lambda_Type.md's positional form `fn (int) int` (types
 without parameter names) is a separate, older disagreement: the C parser

@@ -1,0 +1,9 @@
+TF-n 3
+ftffw
+tft falsy
+["T", "F"]["kept"]["negated"]
+["TT", "TF", "FT", "FF"]["T0", "F1"]
+[["yes", 1], ["no", 2]]
+["AB", "ab"]["Ab", "ab"]
+[[0, 1, 0], [0, 1, 0]]["on", "off"]["and", false, true, "or"]
+

@@ -159,8 +159,8 @@ This is consistent with CLAUDE.md rule 14.
 A seven-area survey of runtime behaviour against `doc/Lambda_Formal_Semantics.md`
 (probes under `temp/spec_survey/`) surfaced eight defects that return a **wrong
 value with no error**. Each was re-reproduced on both tiers before filing:
-[LR03-11](#lr03-11), [LR04-9](#lr04-9), [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR07-17](#lr07-17),
-[LR07-18](#lr07-18), [LR10-7](#lr10-7), [LR10-8](#lr10-8), [LR12-27](#lr12-27).
+[LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>), [LR04-9](#lr04-9), [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>),
+[LR07-18](#lr07-18), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>), [LR10-8](#lr10-8), [LR12-27](#lr12-27).
 The survey's spec gaps (behaviour no `S#` ruling covers) are not filed here —
 they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
 (S2.5.6–S2.5.8, S10.6.1, S11.1.6v2 and companions, semantics 29.0.0) and filed as
@@ -193,6 +193,42 @@ A survey of byte-level text processing (the [string function tuning proposal](La
 - [LR09-31](#lr09-31): `format()` drops large text in markup output.
 
 The survey's other correctness claims are not yet reproduced; they stay in the proposal and are not filed here. *Later on 2026-09-24:* P0 of [the implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) fixed LR05-14 and LR05-15, and both moved to the fixed archive.
+
+### Grammar/C disagreement pass — 2026-09-25
+
+The 2026-09-24 grammar work noted five disagreements between the two front ends without filing them. Each was re-run at `293b7a175` on `lambda.exe` and on the reference grammar, regenerated with the pinned tree-sitter CLI 0.25.10 (S16 harnesses: 343/343 C, 330/330 Tree-sitter). Under D8.1.2v3, each is judged against the rulings.
+- **Four reproduce** and are filed as [LR02-24](#lr02-24)–[LR02-27](#lr02-27).
+- **The fifth no longer reproduces.** The grammar had lexed keywords as type names (`let x: if = 1`, `fn f() pn { 1 }`). Since 538dca7b0 reserved them, both front ends reject every probe.
+- **Checking LR02-24 found [LR03-14](#lr03-14).**
+
+Setup note: the checkout first needed `npm install`. `node_modules` still held CLI 0.24.7, although `package.json` pins 0.25.10. The untracked ABI 14 `src/parser.c` then failed to compile against the committed ABI 15 `parser.h`. `test/ts_s16_conformance.sh` classifies a case by grepping for `ERROR|MISSING|Unexpected`, so it reads that compile failure as an accept.
+
+### Wrong-value fix pass — 2026-09-25
+
+The "wrong value, no error" group was triaged against the rulings; each defect a ruling covers was fixed on both tiers, and the rest wait on a decision.
+- **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
+- **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
+- **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](#lr10-8), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
+- **Found on the way, all reproduced:** [LR03-15](#lr03-15), [LR03-16](#lr03-16), [LR07-19](#lr07-19)–[LR07-22](#lr07-22), [LR10-10](#lr10-10), [LR12-31](#lr12-31)–[LR12-34](#lr12-34). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
+
+Three goldens had pinned wrong values and were corrected (`conc/cancel_*`), and several fixtures that are wrong only on the JIT had been hidden because goldens run on `auto`, which starts in T0. The new fixtures are pinned on every tier.
+
+### JIT golden sweep — 2026-09-25
+
+Goldens run on `auto`, which starts in T0, so a wrong value that only the JIT produces can pass the baseline. Running all 955 goldens through the harness with `LAMBDA_TIER=jit` found 18 failures (`LAMBDA_TIER=interp`: none). They came from five defects, all fixed and archived; each has a fixture pinned in `kTune27TierParity`, and the 955 goldens now pass on both tiers.
+- [LR07-23](<Lambda_Issue_Ledger (fixed).md#lr07-23>): a method's boxed wrapper re-boxed its Item result (12 goldens, six of them segfaults).
+- [LR07-24](<Lambda_Issue_Ledger (fixed).md#lr07-24>): a widened bool array's read folded the new value to `false`.
+- [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>): a repeated literal key read its first entry.
+- [LR07-26](<Lambda_Issue_Ledger (fixed).md#lr07-26>): a string-pattern `case` compared with `==`.
+- [LR07-27](<Lambda_Issue_Ledger (fixed).md#lr07-27>): a direct store wrote a raw int64 over an `i64?` field.
+
+The first, per-file sweep also flagged 109 fixtures that are not JIT defects:
+- **80 negative fixtures.** No harness compares their `.txt` files, which have drifted. Comparing the two tiers' output instead, 11 of the 159 negatives differ: [LR07-29](#lr07-29) and [LR10-11](#lr10-11).
+- **13 sweep artifacts.** Twelve math and LaTeX fixtures timed out under the sweep's parallel load, and `conc/conc_worker_mod.ls` was run without `run`.
+- **5 fixtures on the harness's MIR skip list** (`MIR_SKIP_TESTS`), which the baseline never runs. `object`, `object_inherit`, `object_update` and `map_object_robustness` now pass on all three tiers. `object_direct_access` fails on all three: its field `open` is now a keyword. The first four, together with `object_default`, `object_pattern`, `object_constraint` and `typed_param_direct_access`, which already passed on every tier, were removed from the skip list the same day, and the baseline now runs them (5892/5892).
+- **11 fixtures outside the baseline directories** (`ext/`, `sem/`, `wip/`, `jube/`, `proc-ext/`) fail identically on every tier.
+
+Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inferred element lane after a store widens it, and [LR03-17](#lr03-17), a repeated literal key whose write and read reach different entries.
 
 ---
 
@@ -530,6 +566,62 @@ neither behaviour is ruled.
   `NAMED_VALUE`, and the grammar reserves the five words without admitting
   them as data names. Rule whether S16.10.2's "keywords" covers them.
 
+<a id="lr02-24"></a>**LR02-24 · The C parser reads `x is 1 to 5` as `(x is 1) to 5` (S11.1.3, S11.1.6v2) · OPEN (found 2026-09-24)**
+Both front ends accept `let r = x is 1 to 5`, but they read it differently.
+- **Reference grammar:** `is` takes a `_type_pattern` on its right (`grammar.js:144`), which reads `1 to 5` as a `range_type` (`:1351`). So `r` is a membership test.
+- **C:** builds `(x is 1) to 5`, a range whose start is a bool. The script compiles with no diagnostic and fails at run time ("Script execution failed"; in an array literal the item is `[error]`).
+
+The cause is the `is` arm of the Pratt loop, which reads its right side with the bare `parse_type_slot` (`lambda_parser.c:1848`). `parse_type_slot_mode` has no `to` case, so the slot ends after `1`. `to` binds tighter than `is` (`LAMBDA_BP_SET` 50 against `LAMBDA_BP_MEMBERSHIP` 40), so the loop then folds it over the finished `is` node.
+
+Annotations already handle the range. `parse_annotation_type_slot_value_mode` reads a trailing `to` into `LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE` (:796). So `type R = 1 to 5`, `let y: 1 to 5 = 3` and `case 1 to 5:` all work. `x is (1 to 5)` is `true`, and `x in 1 to 5` is unaffected.
+
+The rulings put C in the wrong. S11.1.6v2 makes `is` a boundary-type position, and S11.1.3 applies the range type's membership rule there. The user precedence table (`doc/Lambda_Expr_Stam.md`, "Operator Precedence") also binds `to` (10) tighter than `is` (11). An S16 accept case cannot pin the fix, since C already accepts the text. It needs a `test/lambda` golden instead: `3 is 1 to 5` is `true`, and `9 is 1 to 5` is `false`.
+
+<a id="lr02-25"></a>**LR02-25 · The reference grammar reads a tight count after a suffix as a new block (S11.1.6v2, SO45) · OPEN (found 2026-09-24)**
+The two front ends split on `type T = int?{2}`:
+- **C** reads it as a count chained onto `?` and rejects it with E103 "invalid type pattern", per the no-chaining rule (Type_Pattern §1.3).
+- **The reference grammar** parses `type T = int?` followed by a separate block statement `{2}`. This is a silent misparse.
+
+A 2026-09-25 sweep of `type T = int<suffix>{2}` over eleven suffixes (`? + * [] [2] {2} {2,3} {2+} []? ?[] [2][3]`) gives the same split every time: type plus block in the grammar, E103 in C. Only a bare name takes a count (`int{2}` is accepted by both). The split also shows in two other places:
+- **In a condition:** `if x is int?{1}` takes `{1}` as the grammar's `if` body.
+- **On a function type:** C rejects `type F = fn (){2}` with SO45's "a function type takes no suffix", while the grammar reads a type plus a block. SO45 had said "both front ends reject the direct suffix", which holds for `?`, `+`, `*` and `[…]` but not for an exact count. Its wording was corrected in spec 36.0.2 (2026-09-25).
+
+The cause is in the scanner. It emits the zero-width `OCCURRENCE_LBRACE` only when the grammar can take a count (`valid_symbols[OCCURRENCE_LBRACE]`, `scanner.c:539`). No chain in `suffix_chain` (`grammar.js:195`) takes a count after a suffix, so the tight brace falls through to a statement start.
+
+The rulings put the grammar in the wrong. S11.1.6v2's spelling note says a `{` count binds tight, and that "a spaced brace opens a body or a block". C's `parser_at_counted_run` (`lambda_parser.c:641`) accordingly reads a tight integer brace after any type as a count. The fix must make a tight integer brace after a suffixed type a syntax error, not a statement boundary. Neither S16 script has a chained-count case; pin the fix with mirrored reject cases (`int?{2}`, `int[]{2}`, `fn (){2}`) in both.
+
+<a id="lr02-26"></a>**LR02-26 · The C parser ends a type at a line-start `?` (S16.2.2v2, S16.2.1) · OPEN (found 2026-09-24)**
+S16.2.2v2 puts `?` in the continue-only set, so after a complete expression a line-start `?` continues it. The reference grammar applies this in types: its scanner never opens a statement at `?` (`classify_start`, `scanner.c:296`). So `type T = int` ⏎ `?` is `type T = int?`.
+
+C rejects every such form:
+
+| Source | C diagnostic |
+|---|---|
+| `type T = int` ⏎ `?` | E100 "expected an expression" at the `?` |
+| `let x: int` ⏎ `? = null` | "expected '=' after let binding" |
+| `fn f(a: int` ⏎ `?) { a }` | "expected ')' after parameters" |
+
+The last rejection also breaks S16.2.1, which binds the next line inside an unclosed bracket.
+
+The cause is in `parse_type_slot_mode` (`lambda_parser.c:683`), which continues across a line break only for `| & !`. Its `nesting` counter counts only brackets opened inside the slot, not an enclosing parameter list. Inside a type's own brackets, C does continue (both accept `type T = [int` ⏎ `?]`). The ruling puts C in the wrong. Neither S16 script has a line-start `?` in a type; add mirrored accept cases for the three forms.
+
+<a id="lr02-27"></a>**LR02-27 · Function-type parameters without `: T`: C admits them untyped, the grammar rejects them (S11.1.5v2, S16.10.1v2) · OPEN, needs a ruling (found 2026-09-24)**
+The two front ends read a function-type parameter differently.
+- **C** (`parse_fn_type`, `parse_type_pattern.cpp:749`) takes any word as the parameter name, and `: T` is optional. So `type F = fn (x) int` declares an untyped parameter. `fn (int) int` declares one untyped parameter *named* `int`, although S16.10.1v2 bars that word as a name everywhere else (`fn g(int) { 1 }` is E201). The contract then checks nothing. With `let f: fn (int) int = (x) => x`, `f("s")` returns `"s"`, where `fn (x: int) int` reports E207 at the call.
+- **The reference grammar** requires `name: T` in every slot (`fn_param`, `grammar.js:1332`), so it rejects `fn (int) int`, `pn (int) int` and `fn (x) int`.
+
+The positional form is documented and used:
+- `doc/Lambda_Type.md` describes `fn (int) int` as "Takes int, returns int", in its function-type table (:404–:412) and in `apply_fn` (:455).
+- `doc/Doc_Convention.md` uses it in its `type`-marker example (:214, :232).
+- The S11.1.5v2 fixture `test/lambda/proc/fn_pn_function_types.ls` spells it on five lines (`PureUnary`, `ProcUnary`, `apply_fn`, `apply_pn`, and the `is` checks).
+
+S11.1.5v2 shows only named parameters, and Design_Syntax §7.29 leaves the form "Not decided here". Under D8.1.2v3, no ruling yet says which side is wrong.
+
+**Needs a ruling:** may a signature spell a parameter by its type alone?
+- **If it may,** C must read `int` as a type, and the grammar must accept the form.
+- **If it may not,** C must reject it, and the docs and the fixture must migrate to `fn (x: int) int`.
+- **Either way,** rule whether an untyped name (`fn (x) int`) is allowed.
+
 **LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
 S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
 first from the whole keyword table to *capture-real* words only (the full ban
@@ -566,15 +658,6 @@ unproven Item to NaN. It is retained for callers that have already established a
 numeric source; migrating every such native/guest call to a fallible boundary is
 separate work.
 
-<a id="lr03-11"></a>**LR03-11 · Sized-int and literal-union contracts admit wrong values · OPEN (found 2026-09-21)**
-`fn f(x: u8) { x }; f(-1)` returns `255` and `fn g(x: 1 | 2) { x }; g(3)`
-returns `3`, on both tiers. `let x: i8 = 300` is `44` on the interpreter; the
-JIT rejects it, but with the internal name `expected num_sized, got int 300`.
-A sized boundary wraps where **S11.4.5** requires value-aware admission and
-**S11.4.1v3** forbids a wrong value (see also **S4.2.4**); an integer
-literal-union contract is not checked at all (a string literal union such as
-`"a" | "b"` is).
-
 <a id="lr03-13"></a>**LR03-13 · A function contract's return type is trusted, never checked · OPEN (found 2026-09-24)**
 `let h: fn (y: int) int = (y) => "s"` is admitted, and so is a function
 declared `string`: admission tests the colour (**S11.1.5v2**), not the return.
@@ -590,6 +673,37 @@ or both. Since 2026-09-24 a signature's return contract is the value type, as
 a declaration's is (`test/lambda/fn_type_curried_call.ls`), so curried
 contracts now behave the same way; before, a curried call typed as a
 function and crashed a map literal instead.
+
+<a id="lr03-14"></a>**LR03-14 · A range-typed parameter rejects every integer, and the tiers split on a range argument (S11.1.3, S1.6) · OPEN (found 2026-09-25, while verifying LR02-24)**
+A parameter declared with a range type, such as `fn f(x: 1 to 5) { x }`, is wrong on both tiers. An alias (`type R = 1 to 5`, `fn f(x: R)`) behaves the same:
+
+| Call | Interpreter (and the default `auto` tier) | JIT |
+|---|---|---|
+| `f(3)` | rejected at compile time: `error[E207]: argument 1 expected range, got int` | same |
+| `f(1 to 5)` | passes the static check, then fails at run time: "type check at argument 1 of _f_0 failed: expected range, got range" | admitted: `f` returns the range, and `[type(r), r is error]` is `[range, false]` |
+
+S11.1.3 applies the range type's membership rule "in annotations, match arms, and value expressions". Under it, `f(3)` must be admitted and `f(1 to 5)` rejected, since a range is not an integer member. Every other boundary follows the rule: `let y: 1 to 5 = 3` is admitted and `= 9` is rejected, on both tiers; `3 is R` is `true`; and `case 1 to 5:` matches. The parameter boundary is the only one that doesn't. The static check treats the parameter as the `range` container kind, and so does the JIT's argument check. The interpreter's run-time check does reject the range argument, but it never sees an integer, because the static check has already refused it. So no call succeeds on the interpreter, and on the JIT only the wrong one does.
+
+The static rejection comes from `lambda_ast_validate_call_arguments` (`build_ast.cpp`), whose `lambda_static_boundary_relation` (`build_ast.cpp:1708`) rejects `int` against the parameter's range type. The root cause of that, and of the JIT's admission of a range, is not yet located.
+
+The diagnostics add confusion. Each one names the membership type `range`, the same word as the container kind, so even the correct `let` failure reads "expected range, got int 9". No test or package declares a range-typed parameter.
+
+<a id="lr03-15"></a>**LR03-15 · `5u8 is (u8 | string)` is false (S11.1) · OPEN (found 2026-09-25)**
+`validate_against_base_type` (`lambda/validator/validate.cpp`) reads a type's `kind` without checking that its TypeId is `LMD_TYPE_TYPE`. A sized type keeps its `NumSizedType` in `kind`, and `NUM_INT16`, `NUM_INT32` and `NUM_UINT8` share values with the unary, binary and pattern kinds, so a sized arm of a union is read as a larger struct than the 2-byte global it is. `5u8 is (u8 | string)` and `5i16 is (i16 | string)` are `false` on both tiers, while `5u8 is u8` is `true`. Reported by the LR03-11 investigation, reproduced 2026-09-25.
+
+<a id="lr03-16"></a>**LR03-16 · A literal type alias used as a value prints a pointer · OPEN (found 2026-09-25)**
+`type One = 1` then `[One]` prints a large integer on both tiers (`[4403549872]` on T0): the alias's `Type` pointer read as an int. The investigation also saw `type F = 1.5` print `2.1e-314`. A type alias is a first-class type value (S11); printing or comparing it must not expose its address. Reported by the LR03-11 investigation, reproduced 2026-09-25.
+
+<a id="lr03-17"></a>**LR03-17 · A repeated key in a map literal keeps both entries; a write updates the first, a read takes the last · OPEN (found 2026-09-25)**
+```
+pn main() {
+    var d = {a: 1, a: 2, b: 3}
+    d.a = 5
+    print([d.a, len(d)])   // [2, 3] on both tiers
+    print(d)               // {a: 5, a: 2, b: 3}
+}
+```
+Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's member oracle, fixture `map_duplicate_key_lookup.ls`), but `fn_map_set` updates the first matching entry, so a write is invisible to the next read. `len`, printing and iteration all count both entries. The runtime comment beside the spread walk assumes map keys are unique except through a spread. No S# ruling covers a repeated literal key: collapsing it at construction (one key, first position, last value) and rejecting it are both open. The tiers agree since [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>).
 
 ---
 
@@ -627,7 +741,7 @@ Division-by-zero and invalid decimal results can still collapse to a generic
 are the finest precision. Out-of-range construction yields
 `DATETIME_MAKE_ERROR()`.
 
-<a id="lr04-9"></a>**LR04-9 · `int()` truncates to 32 bits, returns non-`int` kinds, and splits by tier · OPEN (found 2026-09-21)**
+<a id="lr04-9"></a>**LR04-9 · `int()` truncates to 32 bits, returns non-`int` kinds, and splits by tier · PARTIAL (found 2026-09-21; in-band values fixed 2026-09-25)**
 `int("3000000000")` is `-1294967296` and `int("9007199254740991")` is `-1`:
 the string arm parses into an `int32_t` (`lambda-eval-num.cpp:1525`, in
 `fn_int` at `:1465`). `int("3.7")` returns a `decimal` (the unparsed tail
@@ -637,6 +751,9 @@ falls back to `decimal_from_string`). Out-of-band floats diverge by tier —
 `float`. Contradicts **S4.1.1** (in-band values are exact), the S4 ingress
 rule (a failed cast reports `error()`), and **S1.6**. The result type,
 rounding, and accepted string grammar of `int()` are themselves unruled.
+
+*Fixed 2026-09-25 (the ruled part):* `fn_int` (`lambda-eval-num.cpp`) still had the pre-v5 int32 bound. Every branch now keeps an in-band value exact (S4.1.1): `int("3000000000")` is `3000000000`, `int("9007199254740991")` is 2⁵³ − 1, and `type(int(1e10))` is `int` on T0. `inf`, `-inf` and `nan` pass through, since they are int values (S4.1.1, S4.2.2), so T0's `int(nan)` is no longer `0`; the float branch no longer casts a double of 2⁶³ or more to `int64_t` (undefined behaviour, the source of `9223372036854776000`). Fixture `test/lambda/int_conversion_band.ls` (tier parity).
+*Residue, unruled:* an out-of-band finite value — `int(1e20)` is `1e20` (float) on T0 and `inf` on the JIT; an out-of-band string keeps the decimal fallback — and the rounding and accepted string grammar (`int("3.7")` is a decimal).
 
 ---
 
@@ -733,31 +850,60 @@ the semantic-promotion consolidation.
 ---
 
 
-<a id="lr07-16"></a>**LR07-16 · Dynamic calls ignore argument names · OPEN (found 2026-09-18)**
-`fn f(a, b) => a - b; let g = f` then `g(b: 1, a: 5)` returns `-4` on both
-tiers where the direct call `f(b: 1, a: 5)` returns `4`: a call through a value
-binds named arguments positionally, silently. `ast_resolve_call_args` needs the
-callee's declaration, which a dynamic call does not have. Either reject named
-arguments on a dynamic callee or resolve them against the runtime signature
-(`Function::fn_type`).
-
-<a id="lr07-17"></a>**LR07-17 · JIT: an imported `pub let` holding an int literal reads `0` · OPEN (found 2026-09-21)**
-A module with `pub let A = 10` and `pub let B = 1 + 2`, imported with
-`import .m`, gives `[A, B]` = `[0, 3]` on the JIT and `[10, 3]` on the
-interpreter. Computed values, floats, strings, and arrays import correctly, and
-`A` reads correctly inside the module's own functions. Probable site:
-`load_module_var_slots` (`transpile-mir.cpp:7733`) — the literal never reaches
-its slot. The survey also reports, unverified here, that a module whose
-annotated init fails is still importable on the JIT (reads `0`, exit 0) while
-the interpreter aborts, contradicting **D7.2.2**. Violates **S1.6**.
-
-<a id="lr07-18"></a>**LR07-18 · JIT turns error values into the string `"<error>"` · OPEN (found 2026-09-21)**
+<a id="lr07-18"></a>**LR07-18 · JIT turns error values into the string `"<error>"` · PARTIAL (found 2026-09-21; rows fixed 2026-09-25)**
 `let m = max(["b","a","c"]); [type(m), m is error]` is `[string, false]` on the
 JIT and `[error, true]` on the interpreter; `slice("hello", 1.5, 3)` does the
 same. An error reaching a string-typed unboxing adapter becomes the static
 7-character string `"<error>"` (`lambda/core/lambda-data.cpp:562`, `it2s`; the
 same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
 (errors are never ordinary values) and **S1.6**.
+
+*Fixed 2026-09-25:* the `max` case had been fixed by a20e59b4f. The rest were registry rows that return an ordinary error but declared `may_error=false`, so a call typed as its success shape and the JIT unboxed the error: `slice` (both arities), `take`, `drop`, `replace` (both), `url_resolve`, `symbol/2`, `chr`, `real`, `imag`, `ndim` and `sort/2` (a string became `"<error>"`, a symbol null, a float `nan`, an int `0`). They now declare it (S11.4.9, D6.1.3), and `sys_func_call_may_return_error` keeps provably clean calls clean: constant integer offsets on a text, materialized or range source; all-text `replace`; a complex `real`/`imag`; an error-free `chr` or `ndim` operand. `format` returned `String*`; it now returns an Item (D6.4.1), so an error operand stays an error instead of the text `"<error>"`, and a bad format is an error on both tiers. The string builders keep their in-place appends: a `string | error` part of an owned chain or a flattened leaf takes a cold error edge or the all-string guard (hyphen2's append profile is unchanged at 11,092 calls). Corpus: three typed benchmark bindings (`hyphen_typed.ls`, `json2.ls`) and `openapi_json` rescue with `or ""`, and `Lambda_Func.md`'s variadic `printf` example, which never worked (`format` has no printf mode), was replaced. Fixture `test/lambda/proc/sysfunc_text_error_lane.ls`; `slice_float_indices.ls` is now pinned on every tier (it was wrong on the JIT, hidden by `auto`).
+*Residue:*
+- **An error assigned to an inferred `string` variable.** `var line = "a"; line = line ++ slice(s, 1.5, 3)` binds the error on T0 and continues; the JIT returns the error from the function, because its `string` lane cannot hold one (before, it continued with the text `"<error>"`). Parity needs such a variable boxed at its declaration, as numeric lanes are, which costs the in-place append in fasta, the crypto ports and hyphen: a performance-versus-parity decision.
+- **Unproven `int` offsets.** `fn f(s: string, i: int) => slice(s, i, i + 1)` is now E208, because `int` admits `nan` and `inf` and a non-finite offset errors. Whether such an offset should clamp or read as absent (S7.10.2 admission) is unruled; a ruling would let an `int`-typed offset prove the call clean.
+- **`format`.** A function returning `format(x, 'json')` is E208 too: formatting a value that holds a complex number fails.
+
+<a id="lr07-19"></a>**LR07-19 · Named arguments to an object method bind by position · OPEN (found 2026-09-25)**
+`type T { k: int, fn m(a, b) => a - b + k }` with `let t = <T k: 100>`: `t.m(b: 1, a: 5)` is `96`, not `104`, on both tiers. T0 refuses a method call with named arguments at plan time (`interp_plan.cpp`), so the script runs on the JIT, which lowers the call through a bound closure (`fn_member`) with a positional argument list. The method is statically resolved (`TypeMethod::ast_def`), so S12.3.2's rejection of dynamic calls does not apply; it should bind by name, as a direct call does (`doc/Lambda_Func.md`). A build-time reorder against `ast_def` works when the named arguments leave no gap; skipping an optional parameter by name needs a ruling on whether an absent optional equals an explicit `null`. Found while fixing LR07-16.
+
+<a id="lr07-20"></a>**LR07-20 · JIT: an imported function's default arguments are not applied · OPEN (found 2026-09-25)**
+A module with `pub fn h(a, b = 42) => [a, b]`, imported with `import .mod.dm`: `h(1)` is `[1, 42]` on T0 and `[1, null]` on the JIT (S1.6). Reported by the LR07-17 investigation, reproduced 2026-09-25.
+
+<a id="lr07-22"></a>**LR07-22 · JIT: a list spliced into a float array is read back as raw bits · OPEN (found 2026-09-25)**
+`var d = [1.5, 2.5]; d[0] = (7, 8)` splices the list (S2.5.6) on both tiers, but `[d[0], d[1], len(d)]` is then `[7, 8, 3]` on T0 and `[1.344974619049454e-284, 1.3449746190494543e-284, 3]` on the JIT, which keeps reading the old float lane. The investigation points at `mir_store_may_change_elem_type`, which misses a list right-hand side. S1.6. Reported by the LR12-27 investigation, reproduced 2026-09-25.
+
+<a id="lr07-28"></a>**LR07-28 · JIT: an untyped array keeps its initializer's element lane after a store widens it · OPEN (found 2026-09-25)**
+```
+fn get(flags, i) => flags[i]
+fn dyn(v) => v
+pn main() {
+    var m = fill(3, true)
+    m[2] = "x"
+    print(get(m, 2))              // T0 "x"; JIT false
+    for (b in m) { print(b) }     // T0 true true x; JIT true true true
+    var nums = [1, 2, 3]
+    nums[2] = "x"
+    for (k in nums) { print(k) }  // T0 1 2 x; JIT 1 2 0
+    var n = fill(3, 1)
+    n[2] = dyn("y")
+    print(n[2])                   // T0 "y"; JIT inf (a float fill reads raw bits)
+}
+```
+A store may widen an unannotated `var` array (S9.1.6), but the array's inferred element type stays its initializer's, and three JIT consumers still trust it:
+- the for-in binder unboxes each element by that type;
+- a call to an inferred `T[]` specialization skips the argument's admission on the static type (`mir_boundary_is_redundant`), and the specialized body reads the packed lane unguarded;
+- `fill(n, v)`'s unguarded element witness (P4-3.1) survives a store whose value type is unknown, because `mir_store_may_change_elem_type` admits unknown values for int and float (it rejects them only for bool).
+
+Inference must not change a result (D3.3.1v2), and an inferred narrowing belongs to its binding only while no store can retag the lane (D3.3.3v3). The fix is a design choice between widening the binding's type at such a store and guarding these reads, which costs the numeric loops the "provably converts" rule protects. Pre-existing on HEAD. [LR07-24](<Lambda_Issue_Ledger (fixed).md#lr07-24>) fixed the bool index read, which had the same flaw.
+
+<a id="lr07-29"></a>**LR07-29 · Negative fixtures report different diagnostics per tier · OPEN (found 2026-09-25)**
+Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them fail on both tiers except `stack_overflow.ls` ([LR10-11](#lr10-11)).
+- **Different boundary names for the same E201.** "argument 1 of _takes3_317" (T0) against "typed array call argument" (JIT) in `array_count_resized_binding`; "typed array element assignment" against "typed array representation fallback" in `nullable_array_reject_null` and `type_enforcement_array_write`; "argument 1 of" against "parameter 'value' of" in `type_enforce_static_float_to_int_parameter`; a declaration-level check (`validator at .cells`) against a field-level one in `typed_literal_required_array_null` and `typed_literal_required_dynamic_null`.
+- **Calling a non-function.** T0 prints only "Error: Script execution failed"; the JIT prints `error[E212]: fn_call2: cannot call non-function value` (`test_call_nonfunc`, `test_deep_call_stack`, `sysfunc_shadow_not_callable`).
+- **An imported module's parse error is printed twice by T0** (`import_parse_error_driver`).
+
+Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation fallback". The negative gtests check only an exit status and a substring, and no harness compares these fixtures' `.txt` files, which have drifted (`Error[E201]` against `error[E201]`).
 
 ## 8. Memory management & GC (LR_08)
 
@@ -833,14 +979,6 @@ The markup formatters skip any text string above a size cap, log an error and ca
 
 ## 10. Error handling (LR_10)
 
-<a id="lr10-7"></a>**LR10-7 · Error values do not own their `code` / `message` · OPEN (found 2026-09-21)**
-`let a = error("A"); let b = error("B"); [a.message, b.message]` is
-`["B", "B"]` on both tiers: the `.code` and `.message` members read
-`context->last_error`, not the value (`lambda-eval.cpp:5617`–`5630`), so every
-error reports whichever error was constructed last. Contradicts **S7.4.4**
-(an error carries its code, message, and source location). The survey also
-found `error({code: 42, message: "m"})` reading back as `318` / `"Error"`.
-
 <a id="lr10-8"></a>**LR10-8 · JIT: `raise` of a non-error value escapes the declared return type · OPEN (found 2026-09-21)**
 `fn f(x) int^ { if (x < 0) raise "s" else x }; let v = f(-1) ^ { 0 }` binds
 `v = "s"` (`string`) on the JIT. The interpreter rejects the value at the
@@ -870,6 +1008,24 @@ test/package files and 63 in the docs. `doc/Lambda_Error_Handling.md`
 "Handling System Function Errors" (`error=E228`) fails `check_doc_blocks.py`
 until this is fixed: its `io.mkdir` example moved into a `pn` with LR12-30, and
 neither remaining ❌ line is reported.
+
+<a id="lr10-10"></a>**LR10-10 · S7.4.4's other error members and the two-argument constructor are missing · OPEN (found 2026-09-25)**
+Found while fixing LR10-7, both tiers (S7.4.4: an error carries code, message and source location; constructors `error(msg)`, `error(msg, source)`, `error({...})`):
+- `error(msg, source)` is not registered (`sys_func_registry.c` has arity 1 only): the JIT calls a non-function value (E212), and T0 logs "call target is not a function".
+- `.source`, `.file`, `.line` and `.column` fall through to returning the error itself, so `error("outer").source is error` and `.line is error` are both `true`. The `^.source.message` example in `doc/Lambda_Error_Handling.md` cannot work.
+- A payload-less sentinel error still reads `context->last_error`: after `error("outer")`, `int("abc").message` is `"outer"`. Producers that return the bare `ItemError` need real payloads.
+- `context->last_error` is not a GC root, yet it can hold a GC-heap error.
+
+<a id="lr10-11"></a>**LR10-11 · T0 binds a stack overflow into a `let` instead of faulting · OPEN (found 2026-09-25)**
+```
+fn f(n) => n + f(n + 1)
+pn main() {
+    let x = f(0)
+    print("after ")
+    print(type(x))
+}
+```
+T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack overflow` and exits 1. A stack overflow is a fault, never a call result (S7.11.1v2), and faults pass through `fn` frames to their boundary (S7.11.2). T0 instead turns it into an ordinary error value, so an unused binding hides it: `negative/runtime/stack_overflow.ls` (`let x = f(0)` at top level) exits 0 on T0. `RuntimeError_StackOverflow` checks only that the script does not crash; `RuntimeError_StackOverflowJit` pins the JIT.
 
 ## 11. Mark data API (LR_11)
 
@@ -998,6 +1154,8 @@ the caller's write instead. Needs the place-borrow home of CW33 cost item 2
 (`vibe/Lambda_Design_Runtime_COW.md` §11.10). Repro: `cell_alias` in
 `temp/varparam_more.ls` (expected 550, prints 5050).
 
+*Scoped 2026-09-25:* the residue is broader than `cell_alias`. Seven place-borrow shapes fail in three ways — a copy sees the write (a record, `int[]` on T0), a rebind is lost (`c = {…}`, `int[]`), or the caller loses the write (`int[]` on the JIT, untyped and `Cell?` parameters) — and a scalar place (`inc(b.size)`) is skipped on T0 and errors on the JIT. CW33 item 2's mechanism cannot be built as written: `&parent->items[i]` is not a stable home under D4.3.1 (array items and map field buffers move) or CW37/D4.4.4v4 (data-zone pointers are never facts), and record fields are packed typed lanes, not Item words. It needs a designer amendment (CW33 item 2 v2: a caller-owned rooted Item home, with a reinstall after the call) and a ruling on scalar places. Record: `temp/wv/LR12-10/`. Found on the way: [LR12-32](#lr12-32), [LR12-33](#lr12-33).
+
 <a id="lr12-11"></a>**LR12-11 · A callee that returns its parameter aliased the argument · FIXED 2026-09-17**
 S9.1.2 / S9.1.3. `pn keep(p: Box) Box { return p }` then
 `var r = keep(b); b.size = 9` printed `r.size == 9` on both tiers (found while
@@ -1098,6 +1256,8 @@ row[2] = 4       // m[0][2] reads 4
 The place-copy rule should mark `row` because its place is written while the
 copy is alive, but both writes are visible through the other name. Repro:
 `temp/t29/packed_probe.ls` (`row_copy_loop`, expected 9110, prints 9944).
+
+*Investigated 2026-09-25:* only a packed matrix leaks. `[fill(3, 1), …]` is promoted to a 2-D ArrayNum, and `m[0]` returns a mutable view onto its buffer (`make_leading_axis_view`, `is_mutable_view = 1`). The place-copy facts are right and both tiers mark the bind, but a view owns no storage: `clone_mutable_array_num` hands back the view itself, so the detach writes the base. A push-built matrix, a generic array of rows and a map of arrays are correct; `row_copy_loop`'s expected value is 9141, not 9110. The fix direction, copying a view into an owned array at a place-copy bind (S9.2.2), is the eager view-alias clone CW32v2 item 6 lists, but item 6 leaves mutable views OPEN/TODO by designer ruling, so it waits on that ruling. The other value boundaries (capture, push, parameter snapshot, call result, reassignment) leak the same view. Record: `temp/wv/LR12-14/`.
 
 <a id="lr12-15"></a>**LR12-15 · An out-of-range nested store is logged, not raised · CLOSED 2026-09-18 — consolidated into [LR12-24](#lr12-24)**
 S7.1.3v2. `var m = [fill(2, 0), fill(2, 0)]; m[2][0] = 1; return 5` returns 5
@@ -1388,7 +1548,7 @@ context breaks three reliance sites: `lambda/package/dom/edit_history.ls`
 `test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the
 module top level's colour, which no S#/D# point states (see C20.6).
 
-<a id="lr12-27"></a>**LR12-27 · `push` onto an unannotated number array is a silent no-op; out-of-range writes do not raise · OPEN (found 2026-09-21)**
+<a id="lr12-27"></a>**LR12-27 · `push` onto an unannotated number array is a silent no-op; out-of-range writes do not raise · PARTIAL (found 2026-09-21; push fixed 2026-09-25)**
 In a `pn`, `var a = [1, 2, 3]; push(a, 4)` leaves `a` as `[1, 2, 3]` on both
 tiers: the literal is an uncertified `ArrayNum` and `push` returns a soft error
 that nothing surfaces (`collection_runtime.cpp:240`, "an uncertified ArrayNum
@@ -1397,6 +1557,9 @@ Likewise `var b = [1]; b[5] = 2` only logs "index 5 out of bounds"
 (`lambda-eval.cpp:8200`) and the procedure continues with exit 0. Both
 contradict **S7.1.3v2** (writes are checked and raise through the `T^`
 channel).
+
+*Fixed 2026-09-25 (push):* S9.1.1 makes `push(b, v)` mean `b' = b ++ [v]`, and index writes already keep an open packed array's lane or widen it in place. `array_num_push_open` (`lambda-eval.cpp`) does the same for push: it appends in the lane when every item fits and otherwise converts to a generic Array, then spreads a list (D2.6.5v3); a view or an N-D array refuses, as splice does. `pn_push_cow` no longer checks an open binding against a past admission's certificate (SI3v2): after `pn g(x: int[])` had admitted `u`, `push(u, "s")` had failed. `proc/jit_tail_if_push_error` now fails its push on a matrix, and `proc-ext/list_var_mutation`, green at last, moved to the baseline. Fixture `test/lambda/proc/push_open_packed.ls`.
+*Residue (blocked):* `b[5] = 2` still only logs. Raising it on both tiers needs [LR12-24](#lr12-24)'s store class: a callee with a native return lane would publish the error as `inf` on the JIT while T0 raises, a new split. And whether a plain `pn`'s write error survives a statement-position call is unruled (S7.4.3 against TE-18 "What pn adds").
 
 <a id="lr12-29"></a>**LR12-29 · The interpreter ran `on` handler bodies as functional blocks (S12.1.3, S2.5.3) · FIXED 2026-09-22**
 An `on` handler is a `pn` (S12.1.3), so its body yields its last value
@@ -1433,6 +1596,20 @@ NULL; any call fails with "import of undefined item pn_today"), while the
 0-argument `datetime()` and `justnow()` read the same clock but are registered
 `fn`, and the `log_*` family is `fn` although it writes the log. Which of these
 are effects is unruled.
+
+<a id="lr12-31"></a>**LR12-31 · A row assignment into a packed matrix flattens it · OPEN (found 2026-09-25)**
+`var q = [[1, 2], [3, 4]]; q[0] = [9, 9]` leaves `q` as `[[9, 9], 2, 3, 4]` on both tiers, where `[[9, 9], [3, 4]]` is right: the literal is packed into a 2-D ArrayNum, and the write widens it through `convert_specialized_to_generic`, which flattens N-D storage. Reported by the LR12-27 investigation, reproduced 2026-09-25.
+
+<a id="lr12-32"></a>**LR12-32 · T0 corrupts the caller on a tail place borrow (S9.1.3) · OPEN (found 2026-09-25)**
+`pn walk(var n, d: int) { if (d > 0) { n.k = d; walk(n.next, d - 1) } }`: `walk(x, 2)` on a three-node chain gives `x.k=2 x.next.k=1 x.next.next.k=0` on the JIT, while T0 replaces `x` with the deepest node (`x.k=0`, the rest empty). A bare tail re-borrow is fine. The LR12-10 scoping suggests `plan_mark_tail_calls` (`interp_plan.cpp`) must not mark a self-call that passes a place at a `var` position. S1.6. Probe `temp/wv/LR12-10/p_tco.ls`.
+
+<a id="lr12-33"></a>**LR12-33 · A plain parameter sees a `var` write through the same argument (S9.1.3) · OPEN (found 2026-09-25)**
+`pn h(var x: Box, p: Box) { x.size = 50; print(p.size) }` called as `h(b, b)` prints `50` on both tiers. A plain parameter is a snapshot taken before any borrow's mutation, so it should print `5`. Reported by the LR12-10 scoping, reproduced 2026-09-25.
+
+<a id="lr12-34"></a>**LR12-34 · Reassigning from a place aliases it; the JIT does not capture a place stored into a field · OPEN (found 2026-09-25)**
+- `var row = [0]; row = m[0]; m[0][1] = 9` shows the 9 through `row` on both tiers, even for a push-built (generic) matrix. D4.4.6's place-copy rule covers declarations only, and both tiers mark reassignments from plain names only, so the fix needs the rule extended to reassignment (S9.1.2).
+- `r.x = m[0]; m[0][1] = 9` shows the 9 through `r.x` on the JIT only: T0 captures the row (`ast_expr_insertion_needs_capture`), while `mir_emit_value_capture` returns early unless the value is a plain name (S9.3.1, S1.6).
+Reported by the LR12-14 investigation, reproduced 2026-09-25.
 
 ## 13. Schema validator (LR_13)
 
@@ -1798,7 +1975,7 @@ together, not individually.
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
-| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
+| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-24–LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 
 ---

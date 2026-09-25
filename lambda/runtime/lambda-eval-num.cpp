@@ -1448,56 +1448,64 @@ Item fn_neg(Item item) {
     }
 }
 
+// S4.1.1 (v5): the int domain is the int53 band, so every in-band value
+// converts exactly. Callers keep their prior fallback for an out-of-band
+// finite value: whether int() saturates it or reports error() is not yet
+// ruled (LR04-9). The retired int32 bound here had turned in-band values into
+// floats and wrapped parsed text.
+static bool int_box_if_in_band(int64_t value, Item* out) {
+    if (value < INT53_MIN || value > INT53_MAX) return false;
+    *out = (Item){.item = i2it(value)};
+    return true;
+}
+
+static Item int_from_double(double dval) {
+    // inf, -inf and nan are themselves int values (S4.1.1, S4.2.2)
+    if (!isfinite(dval)) return (Item){.item = lambda_int_box_double(dval)};
+    dval = trunc(dval);  // drop any fractional part
+    if (dval >= (double)INT53_MIN && dval <= (double)INT53_MAX) {
+        return (Item){.item = i2it((int64_t)dval)};
+    }
+    return push_d(dval);
+}
+
 Item fn_int(Item item) {
     GUARD_ERROR1(item);
-    double dval;  int64_t ival;
+    Item boxed;
     if (get_type_id(item) == LMD_TYPE_INT) {
         return item;
     }
     else if (get_type_id(item) == LMD_TYPE_INT64) {
-        dval = item.get_int64();
-        goto CHECK_DVAL;
+        int64_t ival = item.get_int64();
+        if (int_box_if_in_band(ival, &boxed)) return boxed;
+        return push_d((double)ival);
     }
     else if (get_type_id(item) == LMD_TYPE_FLOAT) {
-        // cast down to int
-        dval = item.get_double();
-        ival = (int64_t)dval;
-        dval = (double)ival;  // truncate any fractional part
-        CHECK_DVAL:
-        if (dval > INT32_MAX || dval < INT32_MIN) {
-            // keep as double
-            return push_d(dval);
-        }
-        return {.item = i2it((int32_t)dval)};
+        return int_from_double(item.get_double());
     }
     else if (get_type_id(item) == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
-            dval = item.get_num_sized_as_double();
-            ival = (int64_t)dval;
-            dval = (double)ival;
-            goto CHECK_DVAL;
+            return int_from_double(item.get_num_sized_as_double());
         }
-        ival = item.get_num_sized_as_int64();
-        if (ival > INT32_MAX || ival < INT32_MIN) return box_int64_value(ival);
-        return {.item = i2it((int32_t)ival)};
+        int64_t ival = item.get_num_sized_as_int64();
+        if (int_box_if_in_band(ival, &boxed)) return boxed;
+        return box_int64_value(ival);
     }
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
         uint64_t uval = item.get_uint64();
         // Do not reinterpret a wide unsigned value as negative merely because
         // it crossed INT64_MAX; ordinary numeric conversion preserves value.
         if (uval > (uint64_t)INT64_MAX) return decimal_from_uint64(uval);
-        if (uval > (uint64_t)INT32_MAX) return box_int64_value((int64_t)uval);
-        return {.item = i2it((int32_t)uval)};
+        if (int_box_if_in_band((int64_t)uval, &boxed)) return boxed;
+        return box_int64_value((int64_t)uval);
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
         // truncate fractional part and convert to int64
         int64_t result = 0;
         if (!decimal_try_to_int64(item, &result)) return ItemError;
-        if (result > INT32_MAX || result < INT32_MIN) {
-            return box_int64_value(result);
-        }
-        return {.item = i2it((int32_t)result)};
+        if (int_box_if_in_band(result, &boxed)) return boxed;
+        return box_int64_value(result);
     }
     else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
@@ -1506,19 +1514,19 @@ Item fn_int(Item item) {
             return ItemError;
         }
         char* endptr;
-        // try to parse as int32 first
         errno = 0;  // clear errno before calling strtoll
-        int32_t val = strtol(chars, &endptr, 10);
+        long long val = strtoll(chars, &endptr, 10);
         if (endptr == chars) {
             log_debug("Cannot convert string '%s' to int", chars);
             return ItemError;
         }
-        // check for overflow - if errno is set or we couldn't parse the full string
-        if (errno == ERANGE || (*endptr != '\0')) {
-            // try to parse as decimal
+        // an overflowing or partial parse, and an out-of-band value, take the
+        // decimal parse
+        if (errno == ERANGE || (*endptr != '\0') ||
+                !int_box_if_in_band((int64_t)val, &boxed)) {
             return decimal_from_string(chars);
         }
-        return (Item) { .item = i2it(val) };
+        return boxed;
     }
     else {
         log_debug("Cannot convert type %d to int", get_type_id(item));

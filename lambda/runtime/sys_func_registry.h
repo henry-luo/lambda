@@ -31,7 +31,7 @@ typedef enum CRetType {
     C_RET_INT64,       // returns raw int64_t (fn_len, bitwise, and machine operations)
     C_RET_DOUBLE,      // returns raw double (pn_clock)
     C_RET_BOOL,        // returns Bool/uint8_t (fn_contains, fn_starts_with, etc.)
-    C_RET_STRING,      // returns String* (fn_string, fn_format1/2)
+    C_RET_STRING,      // returns String* (fn_string)
     C_RET_SYMBOL,      // returns Symbol* (fn_name, fn_symbol1)
     C_RET_DTIME,       // returns DateTime/uint64_t (datetime funcs)
     C_RET_TYPE_PTR,    // returns Type* (fn_type)
@@ -361,7 +361,7 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     case SYSFUNC_EXISTS:
         return LMD_TYPE_BOOL;
     // C functions returning String*
-    case SYSFUNC_STRING: case SYSFUNC_FORMAT1: case SYSFUNC_FORMAT2:
+    case SYSFUNC_STRING:
         return LMD_TYPE_STRING;
     // C functions returning Symbol*
     case SYSFUNC_NAME: case SYSFUNC_SYMBOL:

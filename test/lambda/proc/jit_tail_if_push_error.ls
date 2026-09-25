@@ -17,7 +17,7 @@ pn nested_tail(a, flag) {
 pn push_then_len(var t, key) {
     var vals = t.vals
     if (key == 1) { vals[0] = 100; t.vals = vals; return 100 }
-    push(vals, key)          // t.vals is a numeric array: push fails softly
+    push(vals, key)          // fails softly when t.vals is an N-D matrix
     t.vals = vals
     return len(vals)
 }
@@ -35,6 +35,11 @@ pn main() {
     let r1 = push_then_len(t, 1)
     let r2 = push_then_len(t, 2)
     print(r1, " ", r2, " ", t.vals, " ", type(r2), "\n")
+    // LR12-27: a push onto an open numeric array now succeeds (S9.1.1), so the
+    // failing push of (2) takes a matrix, which cannot grow
+    var w = {vals: [[1, 2], [3, 4]]}
+    let r3 = push_then_len(w, 2)
+    print(r3, " ", w.vals, " ", type(r3), "\n")
     var u = {vals: [1, 2, 3]}
     print(splice_then_len(u), " ", u.vals, "\n")
 }

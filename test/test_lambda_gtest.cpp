@@ -48,15 +48,11 @@ static const size_t NUM_PROCEDURAL_TEST_DIRECTORIES = sizeof(PROCEDURAL_TEST_DIR
 //==============================================================================
 
 static const char* MIR_SKIP_TESTS[] = {
-    "object",           // object methods not yet supported in MIR transpiler
-    "object_inherit",   // object inheritance not yet supported in MIR transpiler
-    "object_default",   // object default values not yet supported in MIR transpiler
-    "object_update",    // object update syntax not yet supported in MIR transpiler
-    "object_pattern",   // object pattern matching not yet supported in MIR transpiler
-    "object_constraint", // object constraint checking not yet supported in MIR transpiler
+    // object, object_inherit, object_default, object_update, object_pattern,
+    // object_constraint, typed_param_direct_access and map_object_robustness
+    // re-enabled 2026-09-25: each matches its golden on interp, jit and auto
+    // now that a method's `_b` wrapper no longer re-boxes its result (LR07-23).
     "object_direct_access", // object direct struct access is not implemented in MIR Direct
-    "typed_param_direct_access", // typed object parameters are not implemented in MIR Direct
-    "map_object_robustness", // comprehensive map/object robustness (uses object features not in MIR)
     // benchmark tests not yet passing in MIR Direct
     // awfy_list2 re-enabled 2026-07-29: it now prints "List: PASS" under MIR Direct,
     // matching golden awfy/list2.txt
@@ -381,6 +377,49 @@ static const TierParityFixture kTune27TierParity[] = {
     // the BOOL_ERROR of contains/starts_with as truth; interp kept the Item.
     {"test/lambda/proc/sysfunc_bool_error_lane.ls",
      "test/lambda/proc/sysfunc_bool_error_lane.txt"},
+    // S4.1.1/S4.2.2 (LR04-9): int() keeps in-band values exact and passes
+    // inf/nan through. T0 wrapped parsed text to int32, returned in-band
+    // floats beyond int32 as floats, and read int(nan) as 0.
+    {"test/lambda/int_conversion_band.ls", "test/lambda/int_conversion_band.txt"},
+    // S7.4.4 (LR10-7): an error value owns its code and message. Both tiers
+    // read context->last_error, so every error reported the last one built.
+    {"test/lambda/error_value_payload.ls", "test/lambda/error_value_payload.txt"},
+    // S1.6 (LR07-17): the JIT's const fold read an imported literal's span in
+    // the importer's own source, so `pub let A = 10` imported as 0. The
+    // baseline runs goldens on `auto` only, which hid it in import_vars too.
+    {"test/lambda/import_const_exports.ls", "test/lambda/import_const_exports.txt"},
+    {"test/lambda/import_vars.ls", "test/lambda/import_vars.txt"},
+    // S11.4.5 (LR03-11): in-range sized admission and wrapping conversions.
+    {"test/lambda/sized_admission_values.ls", "test/lambda/sized_admission_values.txt"},
+    // S11.2.1 (LR03-11): literal types are singletons in `is` and admission.
+    {"test/lambda/type_literal_admission.ls", "test/lambda/type_literal_admission.txt"},
+    // S9.1.1 (LR12-27): push onto an open numeric array appends, keeping the
+    // lane or widening; it had been a silent no-op on every tier.
+    {"test/lambda/proc/push_open_packed.ls", "test/lambda/proc/push_open_packed.txt"},
+    // S7.10.2/S11.4.9/S1.6 (LR07-18): rows that return an error declare it, so
+    // the JIT keeps the error instead of unboxing it into "<error>", nan or 0.
+    {"test/lambda/proc/sysfunc_text_error_lane.ls",
+     "test/lambda/proc/sysfunc_text_error_lane.txt"},
+    // The same defect was already pinned here, hidden because the baseline
+    // runs goldens on `auto`, which starts in T0.
+    {"test/lambda/slice_float_indices.ls", "test/lambda/slice_float_indices.txt"},
+    // S3.1 (LR07-21): a for-in over bool elements bound the fetched Item in
+    // bool's 0/1 lane, so the JIT's `if`, `not` and `where` read `false` as
+    // true; `auto` starts in T0 and hid it.
+    {"test/lambda/proc/for_in_bool_truthiness.ls",
+     "test/lambda/proc/for_in_bool_truthiness.txt"},
+    // S1.6 (LR07-23..27): goldens that failed only on the JIT, found by running
+    // every golden with LAMBDA_TIER=jit. A method's `_b` wrapper re-boxed its
+    // Item result (six segfaults), a widened bool array's slow read folded "x"
+    // to false (D3.3.1v2), a repeated literal key read its first entry, a
+    // string-pattern `case` compared with `==`, and a direct store wrote a raw
+    // int64 over an `i64?` field's TypedItem.
+    {"test/lambda/object_method_receiver.ls", "test/lambda/object_method_receiver.txt"},
+    {"test/lambda/proc/proc_fill_bool_lane.ls", "test/lambda/proc/proc_fill_bool_lane.txt"},
+    {"test/lambda/map_duplicate_key_lookup.ls", "test/lambda/map_duplicate_key_lookup.txt"},
+    {"test/lambda/match_string_pattern.ls", "test/lambda/match_string_pattern.txt"},
+    {"test/lambda/proc/proc_nullable_native_i64_map.ls",
+     "test/lambda/proc/proc_nullable_native_i64_map.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
