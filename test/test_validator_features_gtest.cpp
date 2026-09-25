@@ -39,7 +39,7 @@ protected:
     }
 
     void TearDown() override {
-        if (input) arraylist_free(input->type_list);
+        // the pool releases the Input it holds (D4.2.6)
         if (validator) schema_validator_destroy(validator);
         tu_teardown_pool(pool);
     }

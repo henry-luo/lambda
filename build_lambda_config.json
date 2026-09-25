@@ -3404,6 +3404,22 @@
             "icon": "\ud83c\udfd7\ufe0f"
           },
           {
+            "source": "test_npm_package_json_gtest.cpp",
+            "name": " npm package.json Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "lambda/module/npm/npm_package_json.cpp"
+            ],
+            "binary": "test_npm_package_json_gtest.exe",
+            "icon": "\ud83d\udce6"
+          },
+          {
             "source": "test_mark_builder_deepcopy_gtest.cpp",
             "name": "MarkBuilder Deep Copy Tests",
             "dependencies": [

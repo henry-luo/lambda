@@ -16008,6 +16008,12 @@ static bool lambda_rd_prepare_transpiler(Transpiler* tp, const char* source) {
         tp->url = input->url;
         tp->path = input->path;
         tp->root = input->root;
+        // The transpiler — the Script it becomes — takes the registries over
+        // and releases them itself; left on the Input too, the pool's release
+        // of the Input (D4.2.6) freed them a second time. The Input keeps its
+        // context and arena, which go with the pool.
+        input->name_pool = nullptr;
+        input->type_list = nullptr;
     }
     return true;
 }

@@ -801,10 +801,7 @@ StrBuf* radiant_state_dump_mark(DocState* state) {
     StrBuf* out = strbuf_new_cap(1024);
     if (out) print_root_item(out, doc_item);
 
-    if (input->type_list) {
-        arraylist_free(input->type_list);
-        input->type_list = NULL;
-    }
+    // the pool releases the Input it holds (D4.2.6)
     mem_pool_destroy(scratch_pool);
     return out;
 }

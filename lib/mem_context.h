@@ -235,6 +235,14 @@ void mem_reparent(MemNode* node, MemNode* new_parent);
 uint32_t mem_node_id(const MemNode* node);
 uint32_t mem_node_child_count(const MemNode* node);
 void*    mem_node_allocator(const MemNode* node);
+// The context that owns `node` (NULL for a NULL node).
+MemContext* mem_node_owner(const MemNode* node);
+
+// True while the calling thread is inside a cascade teardown
+// (mem_context_destroy / mem_context_shutdown). The registry lock is then held,
+// so code reached from a destroy callback must not call mem_context_* — for
+// example a pool cleanup (D4.2.6) that would release a context.
+bool mem_context_in_teardown(void);
 
 // ---- Document URL registry (process-global) ----
 

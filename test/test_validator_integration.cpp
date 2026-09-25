@@ -45,14 +45,7 @@ protected:
     }
 
     void TearDown() override {
-        if (input) {
-            if (input->name_pool) {
-                name_pool_release(input->name_pool);
-            }
-            if (input->type_list) {
-                arraylist_free(input->type_list);
-            }
-        }
+        // the pool releases the Input it holds (D4.2.6)
         if (validator) {
             schema_validator_destroy(validator);
         }

@@ -1260,12 +1260,9 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
             fprintf(stderr, "Error: Script execution failed: %s\n", script_path);
         }
 
-        // Clean up the error output (it has its own pool)
-        // The Input struct was allocated from its own pool, so we just destroy the pool
-        if (output_input->pool) {
-            input_release_auxiliary_resources(output_input);
-            pool_destroy(output_input->pool);
-        }
+        // The error output has its own pool, which also releases the Input
+        // it holds (D4.2.6).
+        if (output_input->pool) pool_destroy(output_input->pool);
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
         return 1;  // failure
     }
@@ -1288,12 +1285,9 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     }
     strbuf_free(output);
 
-    // The result itself is rooted in the Runtime heap, so the wrapper Input
-    // can release its registries and pool after printing.
-    if (output_input->pool) {
-        input_release_auxiliary_resources(output_input);
-        pool_destroy(output_input->pool);
-    }
+    // The result itself is rooted in the Runtime heap, so the wrapper Input's
+    // pool — which releases the Input with it (D4.2.6) — can go after printing.
+    if (output_input->pool) pool_destroy(output_input->pool);
     return 0;  // success
 }
 
