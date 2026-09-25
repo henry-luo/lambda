@@ -197,7 +197,7 @@ The survey's other correctness claims are not yet reproduced; they stay in the p
 ### Grammar/C disagreement pass — 2026-09-25
 
 The 2026-09-24 grammar work noted five disagreements between the two front ends without filing them. Each was re-run at `293b7a175` on `lambda.exe` and on the reference grammar, regenerated with the pinned tree-sitter CLI 0.25.10 (S16 harnesses: 343/343 C, 330/330 Tree-sitter). Under D8.1.2v3, each is judged against the rulings.
-- **Four reproduce** and are filed as [LR02-24](#lr02-24)–[LR02-27](#lr02-27).
+- **Four reproduce** and are filed as [LR02-24](<Lambda_Issue_Ledger (fixed).md#lr02-24>)–[LR02-27](#lr02-27). LR02-24 and LR02-26 were fixed on 2026-09-25, with LR02-20.
 - **The fifth no longer reproduces.** The grammar had lexed keywords as type names (`let x: if = 1`, `fn f() pn { 1 }`). Since 538dca7b0 reserved them, both front ends reject every probe.
 - **Checking LR02-24 found [LR03-14](#lr03-14).**
 
@@ -364,39 +364,6 @@ change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
 
-<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.2v3) · OPEN (found 2026-09-24)**
-`lambda_parser.c` gathers the children of a flat reduction in fixed
-proof-of-concept stack buffers, so it rejects valid source the reference
-grammar accepts. `parse_group_or_arrow` (`children[64]`, :1127) fails a
-65-item list literal `(0, 1, …, 64)` with E100 "too many grouped expressions
-in parser POC"; `parse_element` (`children[64]`, :943) caps attributes plus
-the content child (:970, :1010); `parser_parse_postfix_delimited`
-(`children[65]`, :1625) caps call arguments and index dimensions (:1631); and
-`parse_assignment_clause` (`LambdaToken names[64]`, :1467) caps decomposition
-names (:1484). A 65-item array parses, because `parse_array` builds its items
-as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.2v3
-the C side is wrong; `lambda-cst` reports such a list as `missing` (grammar
-accepts, RD rejects). It surfaced once LR02-18 gave the grammar list
-literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
-`parse_crud_statement` caps comma-joined `put`/`del` edits at
-`LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
-confirm it is unintended before lifting it.
-*Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
-`children` by pointer and count to a synchronous sink, `syntax_sink_reduce`
-(`build_ast.cpp`), whose GROUP/ELEMENT/POSTFIX/LET handlers walk
-`child_count` (the reduction tape that copied them is retired, LC3.9).
-A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
-(rest parameters exempt), whose `binder_env`/`resolved` arrays are
-bounds-checked. A growable buffer with inline storage keeps every reduction
-byte-identical; switching to `parser_list_append` chains would change the
-GROUP/ELEMENT/CALL shapes that `build_ast` and the `child_count` assertions in
-`test/test_lambda_parser_poc_gtest.cpp` rely on. The parser links only libc
-(`lambda-cst` and the parser POC gtest build the parser sources alone), and a
-heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
-`children[65]` (:1674) only ever uses slot 0. Pin the fix with mirrored accept
-cases (a 65-item list literal, 65 call arguments) in both S16 conformance
-scripts.
-
 <a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · OPEN (found 2026-09-24)**
 `token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
 `apply`, `view` and `edit` as identifiers since the parser's first version
@@ -448,17 +415,6 @@ neither behaviour is ruled.
   `NAMED_VALUE`, and the grammar reserves the five words without admitting
   them as data names. Rule whether S16.10.2's "keywords" covers them.
 
-<a id="lr02-24"></a>**LR02-24 · The C parser reads `x is 1 to 5` as `(x is 1) to 5` (S11.1.3, S11.1.6v2) · OPEN (found 2026-09-24)**
-Both front ends accept `let r = x is 1 to 5`, but they read it differently.
-- **Reference grammar:** `is` takes a `_type_pattern` on its right (`grammar.js:144`), which reads `1 to 5` as a `range_type` (`:1351`). So `r` is a membership test.
-- **C:** builds `(x is 1) to 5`, a range whose start is a bool. The script compiles with no diagnostic and fails at run time ("Script execution failed"; in an array literal the item is `[error]`).
-
-The cause is the `is` arm of the Pratt loop, which reads its right side with the bare `parse_type_slot` (`lambda_parser.c:1848`). `parse_type_slot_mode` has no `to` case, so the slot ends after `1`. `to` binds tighter than `is` (`LAMBDA_BP_SET` 50 against `LAMBDA_BP_MEMBERSHIP` 40), so the loop then folds it over the finished `is` node.
-
-Annotations already handle the range. `parse_annotation_type_slot_value_mode` reads a trailing `to` into `LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE` (:796). So `type R = 1 to 5`, `let y: 1 to 5 = 3` and `case 1 to 5:` all work. `x is (1 to 5)` is `true`, and `x in 1 to 5` is unaffected.
-
-The rulings put C in the wrong. S11.1.6v2 makes `is` a boundary-type position, and S11.1.3 applies the range type's membership rule there. The user precedence table (`doc/Lambda_Expr_Stam.md`, "Operator Precedence") also binds `to` (10) tighter than `is` (11). An S16 accept case cannot pin the fix, since C already accepts the text. It needs a `test/lambda` golden instead: `3 is 1 to 5` is `true`, and `9 is 1 to 5` is `false`.
-
 <a id="lr02-25"></a>**LR02-25 · The reference grammar reads a tight count after a suffix as a new block (S11.1.6v2, SO45) · OPEN (found 2026-09-24)**
 The two front ends split on `type T = int?{2}`:
 - **C** reads it as a count chained onto `?` and rejects it with E103 "invalid type pattern", per the no-chaining rule (Type_Pattern §1.3).
@@ -471,21 +427,6 @@ A 2026-09-25 sweep of `type T = int<suffix>{2}` over eleven suffixes (`? + * [] 
 The cause is in the scanner. It emits the zero-width `OCCURRENCE_LBRACE` only when the grammar can take a count (`valid_symbols[OCCURRENCE_LBRACE]`, `scanner.c:539`). No chain in `suffix_chain` (`grammar.js:195`) takes a count after a suffix, so the tight brace falls through to a statement start.
 
 The rulings put the grammar in the wrong. S11.1.6v2's spelling note says a `{` count binds tight, and that "a spaced brace opens a body or a block". C's `parser_at_counted_run` (`lambda_parser.c:641`) accordingly reads a tight integer brace after any type as a count. The fix must make a tight integer brace after a suffixed type a syntax error, not a statement boundary. Neither S16 script has a chained-count case; pin the fix with mirrored reject cases (`int?{2}`, `int[]{2}`, `fn (){2}`) in both.
-
-<a id="lr02-26"></a>**LR02-26 · The C parser ends a type at a line-start `?` (S16.2.2v2, S16.2.1) · OPEN (found 2026-09-24)**
-S16.2.2v2 puts `?` in the continue-only set, so after a complete expression a line-start `?` continues it. The reference grammar applies this in types: its scanner never opens a statement at `?` (`classify_start`, `scanner.c:296`). So `type T = int` ⏎ `?` is `type T = int?`.
-
-C rejects every such form:
-
-| Source | C diagnostic |
-|---|---|
-| `type T = int` ⏎ `?` | E100 "expected an expression" at the `?` |
-| `let x: int` ⏎ `? = null` | "expected '=' after let binding" |
-| `fn f(a: int` ⏎ `?) { a }` | "expected ')' after parameters" |
-
-The last rejection also breaks S16.2.1, which binds the next line inside an unclosed bracket.
-
-The cause is in `parse_type_slot_mode` (`lambda_parser.c:683`), which continues across a line break only for `| & !`. Its `nesting` counter counts only brackets opened inside the slot, not an enclosing parameter list. Inside a type's own brackets, C does continue (both accept `type T = [int` ⏎ `?]`). The ruling puts C in the wrong. Neither S16 script has a line-start `?` in a type; add mirrored accept cases for the three forms.
 
 <a id="lr02-27"></a>**LR02-27 · Function-type parameters without `: T`: C admits them untyped, the grammar rejects them (S11.1.5v2, S16.10.1v2) · OPEN, needs a ruling (found 2026-09-24)**
 The two front ends read a function-type parameter differently.
@@ -586,6 +527,14 @@ pn main() {
 }
 ```
 Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's member oracle, fixture `map_duplicate_key_lookup.ls`), but `fn_map_set` updates the first matching entry, so a write is invisible to the next read. `len`, printing and iteration all count both entries. The runtime comment beside the spread walk assumes map keys are unique except through a spread. No S# ruling covers a repeated literal key: collapsing it at construction (one key, first position, last value) and rejecting it are both open. The tiers agree since [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>).
+
+<a id="lr03-18"></a>**LR03-18 · `is` never matches a range inside a union type (S11.1.3) · OPEN (found 2026-09-25, while fixing LR02-24)**
+```
+type R = 1 to 5 | 10
+let a = [3 is R, 10 is R, 7 is R]    // [false, true, false]
+let b = 3 is 1 to 5 | 10 to 20       // false
+```
+`3 is R` should be `true`: S11.1.3 applies a range type's membership rule in annotations, match arms and value expressions alike. The other two positions agree with it. `let v: R = 3` is admitted, and `match 3 { case 1 to 5 | 10: … }` takes the arm, because a match arm splits a union and tests each member. A range alone is right too: `3 is 1 to 5` is `true`. So the fault is in `is` against the union type, where the range member never matches. Both tiers give the same result, and so did the binary from before LR02-24's fix, through a type alias.
 
 ---
 
@@ -1601,7 +1550,7 @@ together, not individually.
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
-| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-24–LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
+| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-25, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 
 ---

@@ -43,7 +43,8 @@
       "Bash(timeout 2s ./test/test_own_tagged.exe --gtest_list_tests)",
       "Bash(echo \"exit=$?\")",
       "Bash(cd /Users/henryluo/Projects/lambda; sed -n '/---\\\\*\\\\//,$p' test/js262/test/annexB/language/statements/for-in/nonstrict-initializer.js)",
-      "Bash(cd /Users/henryluo/Projects/lambda; sed -n '/---\\\\*\\\\//,$p' test/js262/test/language/expressions/yield/star-throw-is-null.js; sed -n '/---\\\\*\\\\//,$p' test/js262/test/language/expressions/yield/star-rhs-iter-thrw-violation-no-rtrn.js)"
+      "Bash(cd /Users/henryluo/Projects/lambda; sed -n '/---\\\\*\\\\//,$p' test/js262/test/language/expressions/yield/star-throw-is-null.js; sed -n '/---\\\\*\\\\//,$p' test/js262/test/language/expressions/yield/star-rhs-iter-thrw-violation-no-rtrn.js)",
+      "Bash(rm build_temp/build_temp && rmdir build_temp/re2-noabsl/cmake_build build_temp/re2-noabsl build_temp && ln -s /Users/henryluo/Projects/Lambda-opus/build_temp build_temp && ls -la build_temp && ls build_temp/ | head)"
     ]
   }
 }

@@ -149,6 +149,9 @@ static const char* SKIP_SUBSTRINGS[] = {
     "focus-event-document-move",
     "no-focus-events-at-clicking-editable-content-in-link",
 
+    // Range text rects need layout fragments, which content-visibility: hidden skips.
+    "getBoundingClientRect-content-visibility-hidden.html",
+
     // Pointer events -- depend on full PointerEvent + pointer capture.
     "pointer-event-document-move",
 

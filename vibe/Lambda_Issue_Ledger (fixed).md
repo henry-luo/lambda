@@ -15,12 +15,12 @@
 
 ## Archive index
 
-This archive contains **135 historical records**: 130 fixed or resolved entries,
+This archive contains **138 historical records**: 133 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -333,6 +333,71 @@ block is `null` and splices nothing in an item position. No script or
 package in the corpus used a multi-item let-group or a lone-declaration
 group (instrumented scan, 2026-09-22). Fixture:
 `test/lambda/list_declarations.ls`.
+
+<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.2v3) · FIXED 2026-09-25 (found 2026-09-24)**
+`lambda_parser.c` gathers the children of a flat reduction in fixed
+proof-of-concept stack buffers, so it rejects valid source the reference
+grammar accepts. `parse_group_or_arrow` (`children[64]`, :1127) fails a
+65-item list literal `(0, 1, …, 64)` with E100 "too many grouped expressions
+in parser POC"; `parse_element` (`children[64]`, :943) caps attributes plus
+the content child (:970, :1010); `parser_parse_postfix_delimited`
+(`children[65]`, :1625) caps call arguments and index dimensions (:1631); and
+`parse_assignment_clause` (`LambdaToken names[64]`, :1467) caps decomposition
+names (:1484). A 65-item array parses, because `parse_array` builds its items
+as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.2v3
+the C side is wrong; `lambda-cst` reports such a list as `missing` (grammar
+accepts, RD rejects). It surfaced once LR02-18 gave the grammar list
+literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
+`parse_crud_statement` caps comma-joined `put`/`del` edits at
+`LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
+confirm it is unintended before lifting it.
+*Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
+`children` by pointer and count to a synchronous sink, `syntax_sink_reduce`
+(`build_ast.cpp`), whose GROUP/ELEMENT/POSTFIX/LET handlers walk
+`child_count` (the reduction tape that copied them is retired, LC3.9).
+A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
+(rest parameters exempt), whose `binder_env`/`resolved` arrays are
+bounds-checked. A growable buffer with inline storage keeps every reduction
+byte-identical; switching to `parser_list_append` chains would change the
+GROUP/ELEMENT/CALL shapes that `build_ast` and the `child_count` assertions in
+`test/test_lambda_parser_poc_gtest.cpp` rely on. The parser links only libc
+(`lambda-cst` and the parser POC gtest build the parser sources alone), and a
+heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
+`children[65]` (:1674) only ever uses slot 0. Pin the fix with mirrored accept
+cases (a 65-item list literal, 65 call arguments) in both S16 conformance
+scripts.
+
+*Fixed 2026-09-25:* the four fixed buffers are now `ParserGrowBuffer`s (`lambda_parser.c`). Each has 64 (or 65) inline slots and spills to the heap past them, so every reduction keeps the same children in the same order and the sink sees any count. A buffer is a local of one parse call, released by a thin wrapper around the old body (`parse_element_into`, `parse_group_or_arrow_into`, `parse_assignment_clause_into`, `parser_parse_postfix_delimited_into`), so no early return leaks it and no `parser_probe` copy shares it. The parser links only libc, so the spill uses `malloc`/`realloc`/`free` under `RAWALLOC_OK`. The "in parser POC" limit diagnostics and "too many decomposition names" are gone; a failed spill reports "out of memory while parsing". `parse_postfix` keeps its own buffer, sized to the three children its member, query and handler forms use rather than 65. A call over 16 arguments still meets the source-argument limit after parsing (E230, D6.2.2v2). The `put`/`del` cap of 32 (`LAMBDA_CRUD_MAX_CLAUSES`) is unchanged, since no PTH60v3 text rules on it. Fixtures: `test/lambda/parser_item_limits.ls` (70 list items, attributes and decomposition names, all tiers), `LambdaRdParserPoc.ReducesMoreThanSixtyFourChildren`, and mirrored accept cases in both S16 scripts (a 65-item list, 65 call arguments, 70 attributes, 70 names; 350/350 C, 337/337 Tree-sitter).
+
+<a id="lr02-24"></a>**LR02-24 · The C parser reads `x is 1 to 5` as `(x is 1) to 5` (S11.1.3, S11.1.6v2) · FIXED 2026-09-25 (found 2026-09-24)**
+Both front ends accept `let r = x is 1 to 5`, but they read it differently.
+- **Reference grammar:** `is` takes a `_type_pattern` on its right (`grammar.js:144`), which reads `1 to 5` as a `range_type` (`:1351`). So `r` is a membership test.
+- **C:** builds `(x is 1) to 5`, a range whose start is a bool. The script compiles with no diagnostic and fails at run time ("Script execution failed"; in an array literal the item is `[error]`).
+
+The cause is the `is` arm of the Pratt loop, which reads its right side with the bare `parse_type_slot` (`lambda_parser.c:1848`). `parse_type_slot_mode` has no `to` case, so the slot ends after `1`. `to` binds tighter than `is` (`LAMBDA_BP_SET` 50 against `LAMBDA_BP_MEMBERSHIP` 40), so the loop then folds it over the finished `is` node.
+
+Annotations already handle the range. `parse_annotation_type_slot_value_mode` reads a trailing `to` into `LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE` (:796). So `type R = 1 to 5`, `let y: 1 to 5 = 3` and `case 1 to 5:` all work. `x is (1 to 5)` is `true`, and `x in 1 to 5` is unaffected.
+
+The rulings put C in the wrong. S11.1.6v2 makes `is` a boundary-type position, and S11.1.3 applies the range type's membership rule there. The user precedence table (`doc/Lambda_Expr_Stam.md`, "Operator Precedence") also binds `to` (10) tighter than `is` (11). An S16 accept case cannot pin the fix, since C already accepts the text. It needs a `test/lambda` golden instead: `3 is 1 to 5` is `true`, and `9 is 1 to 5` is `false`.
+
+*Fixed 2026-09-25:* `parse_type_slot_mode` now reads two literals joined by `to` as one atom, as the grammar makes `range_type` a `primary_type`. A literal here is a non-null one (`LAMBDA_TOK_INTEGER` through `LAMBDA_TOK_NAMED_VALUE`, the grammar's `_non_null_literal`). So `x is 1 to 5` tests membership, `x is 1 to 5 and y` stops at `and`, and a union of ranges stays one type. `to` continues across a line break (S16.2.2v2). A bound that is not a literal (`x is 1 to n`) makes no range type in either parser, so that form still reads `(x is 1) to n`. Literal ranges in annotations and match arms now take the same atom instead of the annotation path's `to` arm; an AST dump of all 1,952 tracked `.ls` files changed only one census line (`match_expr.ls`). Fixture `test/lambda/is_range_type.ls` (all tiers). Found on the way: [LR03-18](Lambda_Issue_Ledger.md#lr03-18), where `is` never matches a range inside a union.
+
+<a id="lr02-26"></a>**LR02-26 · The C parser ends a type at a line-start `?` (S16.2.2v2, S16.2.1) · FIXED 2026-09-25 (found 2026-09-24)**
+S16.2.2v2 puts `?` in the continue-only set, so after a complete expression a line-start `?` continues it. The reference grammar applies this in types: its scanner never opens a statement at `?` (`classify_start`, `scanner.c:296`). So `type T = int` ⏎ `?` is `type T = int?`.
+
+C rejects every such form:
+
+| Source | C diagnostic |
+|---|---|
+| `type T = int` ⏎ `?` | E100 "expected an expression" at the `?` |
+| `let x: int` ⏎ `? = null` | "expected '=' after let binding" |
+| `fn f(a: int` ⏎ `?) { a }` | "expected ')' after parameters" |
+
+The last rejection also breaks S16.2.1, which binds the next line inside an unclosed bracket.
+
+The cause is in `parse_type_slot_mode` (`lambda_parser.c:683`), which continues across a line break only for `| & !`. Its `nesting` counter counts only brackets opened inside the slot, not an enclosing parameter list. Inside a type's own brackets, C does continue (both accept `type T = [int` ⏎ `?]`). The ruling puts C in the wrong. Neither S16 script has a line-start `?` in a type; add mirrored accept cases for the three forms.
+
+*Fixed 2026-09-25:* the type slot's line-break rule now continues at `?` as well as at `| & !`, the continue-only tokens a type can take (S16.2.2v2), so all three forms parse. The parameter-list form no longer depends on the slot's own bracket count. A line-start `+`, `*` or `[` still ends the type, since each can begin a statement (S16.2.3v3); the reference grammar likewise rejects a line-start dual-role token inside a bracket, as in `(1` ⏎ `+ 2)`. Fixture `test/lambda/type_line_start_optional.ls` (all tiers), and mirrored accept cases for the three forms in both S16 scripts.
 
 <a id="lr03-12"></a>**LR03-12 · Occurrence/array type families not implemented (S11.1.1v3, S11.1.6v2, S16.8.6v3) · FIXED 2026-09-23**
 The parser reads `T[n]`, `T[n+]`, `T[n, m]` as occurrence counts
