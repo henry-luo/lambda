@@ -99,7 +99,7 @@ Maps built the same way share one `TypeMap` (**D3.4.3v2**; the design and its hi
 
 A shared type (`typemap_is_shared_shape`) is never edited in place. An add with no usable edge clones first (`map_clone_typemap_for_mutation`), and runtime growth and type-changing writes build new types (`map_extend_open_shape`, `map_rebuild_for_type_change`; D3.4.5). The tree is bounded — 256 edges from the root, 16 from any other shape, 1,024 shapes per `Input` (`MAX_SHAPE_TRANSITIONS`, `MAX_SHAPE_GRAPH`) — and past a bound a map keeps a private type. Maps do not use the shape pool: `map_finalize_shape` is a no-op.
 
-Parsed elements do not share yet. Each gets a private `TypeElmt` from `ElementBuilder` (168 bytes plus a pool header), and `elmt_finalize_shape` pools only its attribute chain ([LR_08](LR_08_Memory_and_GC.md) §7). Their types already carry no per-instance content count (the child count lives only in `List::length`), and D3.4.3v2 rules that they adopt the tree, rooted per tag and namespace.
+Parsed elements share the same way (P1 of the element plan). `ElementBuilder` starts each element on its tag's root — `elmt_tree_root`, a pool-owned table keyed by the pooled tag name and namespace — and `putToElement` adds attributes through the tree (`elmt_put_tree`), so elements with one tag, namespace and attribute sequence share one `TypeElmt`; their types carry no per-instance content count (the child count lives only in `List::length`). Element nodes count against their own budget, 16,384 per `Input` (`MAX_ELEMENT_SHAPE_GRAPH`). Runtime-built elements (`elmt_put` without an `Input`) and elements past the budget keep private types, whose attribute chains `elmt_finalize_shape` still pools ([LR_08](LR_08_Memory_and_GC.md) §7).
 
 ---
 

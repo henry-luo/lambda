@@ -1,7 +1,7 @@
 # Element Type Sharing — Implementation Plan
 
 **Date:** 2026-09-25
-**Status:** P0 DONE 2026-09-25; P1–P3 not started.
+**Status:** P0 and P1 DONE 2026-09-25; P2–P3 not started.
 **Design:** [Lambda_Design_Shape_Transitions.md](../Lambda_Design_Shape_Transitions.md) §7 (E1–E7). **Rulings:** D3.4.3v2 (elements share through the transition tree; the shape pool retires), D2.6.6v3 (`content_list` holds a declared type's content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot). **Closes:** [LR13-9](<../Lambda_Issue_Ledger (fixed).md#lr13-9>) (closed by P0). **Open, not blocking:** SO46 (the *must be empty* spelling), DO31 (`type <B>`).
 **Goal:** one `TypeElmt` per distinct tag, namespace and attribute sequence instead of one per element (about 64 MB of the 13 MiB HTML benchmark's 233 MB peak), declared content validated, and the shape pool gone.
 
@@ -43,6 +43,27 @@ Each phase lands on its own, green on the gates below, before the next starts.
 
 ### P1 — Elements on the tree (E2)
 
+**DONE 2026-09-25.**
+
+**What landed.**
+- **Tag roots: a per-`Input` table, not a tag edge.** A tag edge would have to mint a node without appending a field, which the transition lookup cannot express, so `elmt_tree_root` keeps a pool-owned open-addressing table keyed by the pooled tag name and namespace pointers. A root is an empty `TypeElmt` flagged transition-shared and registered in the type list. Unpooled tag names get no root and keep private types.
+- **Attributes: `elmt_put_tree`.** `MarkBuilder::putToElement` now follows or mints the edge exactly as `map_put` does; `map_transition_target_for_add` mints a `TypeElmt`-sized child for an element parent, carrying its `name`, `name_id` and `ns`. Without a usable edge it falls back to `elmt_put`, which now detaches any shared type (a tree node or a pooled chain) before appending — the old guard missed a tree root, which has no chain yet.
+- **A separate element budget, 16,384 per `Input`.** Measured: a 13 MiB corpus of 77 real sites needs 5,093 element types (179 roots), a 13 MiB layout-test corpus 1,775 (154 roots); on the 1,024 map budget both would saturate early. An `Input` that reaches it logs `element_tree_budget` once. The map budget and its behaviour are unchanged.
+- `elmt_finalize_shape` returns early for a shared type; private fallback types still pool. `elmt_clone_type_for_mutation` now keeps `name_id`, which the HTML5 parser compares tags by — clones became common with detaching.
+
+**Results** (release builds; the old 13 MiB benchmark went with its worktree, so two 13 MiB corpora were rebuilt: `temp/perf/big.html` from the Readability test pages, `temp/perf/wpt.html` from `test/layout/data`):
+
+| Corpus | Elements | Types (P1) | Peak RSS P0 → P1 | Parse P0 → P1 |
+|---|---:|---:|---:|---:|
+| Readability pages | 58,197 | 5,093 | 109.6 → 86.3 MB | ~75 → ~75 ms |
+| Layout tests | 203,136 | 1,775 | 184.0 → 120.4 MB | ~1,750 → ~1,225 ms |
+
+- Differentials against P0: 17,230 HTML files, 99 test inputs, 84 formatter outputs (7 documents × 12 formats) — all identical.
+- Lambda baseline 5,869/5,869; validator and HTML GTests green; Radiant baseline green. One Radiant run failed `page_facatology` in the page suite (text 94.5% → 9.6%) while running directly after the Lambda baseline; the standalone page and a rerun of the suite pass, and P0 and P1 release binaries produce byte-identical view trees for it, so the failure was load-induced, as `nojs` has been before.
+
+**Not done here.** Runtime-built elements (`elmt_put` without an `Input`) keep private types; XML and Markdown peaks were not re-measured separately (their elements take the same `ElementBuilder` path the HTML corpora exercise).
+
+**Planned work:**
 - Tag roots: a tag edge from the per-`Input` root with a reserved key kind (one graph, one budget, the existing lookup), or a per-`Input` tag table if measurement says the root's fan-out bound gets in the way.
 - `ElementBuilder` starts an element on its tag root instead of allocating a `TypeElmt`; `elmt_put` follows or mints edges as `map_put_with_data_growth` does, with the same detach-on-no-edge rule; `elmt_finalize_shape` and the per-element type-list registration go.
 - Measure: HTML 13 MiB, XML 19 MiB and Markdown peaks and parse times (release A/B, interleaved medians); tree occupancy against the 1,024 budget on the HTML benchmark and the test262 batch peak.

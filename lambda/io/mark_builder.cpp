@@ -364,7 +364,7 @@ Item MarkBuilder::createMetaType(TypeId type_id) {
 //------------------------------------------------------------------------------
 
 void MarkBuilder::putToElement(lam::GcPtr<Element> elmt, String* key, Item value) {
-    elmt_put(elmt.get(), key, value, pool_);
+    elmt_put_tree(elmt.get(), key, value, input_);
 }
 
 void MarkBuilder::putToMap(lam::GcPtr<Map> map, String* key, Item value) {
@@ -394,7 +394,13 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
         element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
     }
 
-    if (element) {
+    // D3.4.3v2: start on the tag's root in the Input's transition tree, so
+    // elements with one tag and attribute sequence share one TypeElmt
+    TypeElmt* root = element ? elmt_tree_root(input, tag_name_, NULL) : NULL;
+    if (root) {
+        element->type = root;
+        elmt_ = element;
+    } else if (element) {
         TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
         if (element_type) {
             element->type = element_type;

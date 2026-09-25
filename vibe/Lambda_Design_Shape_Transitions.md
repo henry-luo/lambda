@@ -1,7 +1,7 @@
 # Lambda Shape Transitions — Design
 
 **Date:** 2026-09-25
-**Status:** RATIFIED 2026-09-25 as **D3.4.3v2** (Formal Design 13.0.0). Maps: implemented. Elements: design settled 2026-09-25 (§7); E1 and E4–E6 landed the same day (plan phase P0), E2, E3 and E7 not yet; the editor's map rebuilds and the shape pool's retirement are decided, not done. Plan: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Sharing.md).
+**Status:** RATIFIED 2026-09-25 as **D3.4.3v2** (Formal Design 13.0.0). Maps: implemented. Elements: design settled 2026-09-25 (§7); E1, E2 and E4–E6 landed the same day (plan phases P0, P1), E3 and E7 not yet; the editor's map rebuilds and the shape pool's retirement are decided, not done. Plan: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Sharing.md).
 **Scope:** how a map or element obtains its `TypeMap`, when that type is shared, and what may change a shared type. Out of scope: the shape pool's internals ([Lambda_Shape_Pool.md](Lambda_Shape_Pool.md)) and JavaScript property semantics ([JS_06](../doc/dev/js/JS_06_Objects_Properties_Prototypes.md)).
 **Spec linkage:** §2–§6 → D3.4.3v2. Within them, type identity (§3) → D3.4.2, D3.4.4v2, D3.4.7; "metadata, not a cache" (§3) → D8.4.1v2; layout-changing writes (§4) → D3.4.5. §7 → D3.4.3v2's element clause, D2.6.6v3 (the declared content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot), SO46 and DO31 (open).
 **Relation to prior docs:** distils the transition-tree decisions recorded in [JS Tune10](<jube/JS_Tune10_Fast_Paths (done).md>) §9.3–§9.9 (the add-transition choice, the reverted and re-enabled root, the bounds) and [Transpile_Js_Tune11](jube/Transpile_Js_Tune11_Callsite_Cache.md) (the edge table). Name identity on edges follows [Lambda_Design_Name_Identity.md](Lambda_Design_Name_Identity.md). Supersedes [Lambda_Shape_Pool.md](Lambda_Shape_Pool.md) as the sharing mechanism for maps (Appendix S).
@@ -54,10 +54,11 @@ Nothing edits a shared type in place:
 
 ## 5. Bounds
 
-The tree is bounded three ways. Past any bound a map keeps a private type, which is exactly the behaviour before the tree existed.
+The tree is bounded four ways. Past any bound a map or element keeps a private type, which is exactly the behaviour before the tree existed.
 - **Root fan-out: 256 edges.** The root's out-degree is the number of distinct first fields in everything the `Input` builds. Capped at 16 like other nodes, it saturated after about 835 adds, and every later map fell back to a private type (Tune10 §9.9).
 - **Interior fan-out: 16 edges.** A node with more outgoing edges is a dictionary-shaped site (per-record keys), where a linear walk of the edge list on every add would not pay.
 - **Graph budget: 1,024 shapes per `Input`.** The fan-out caps bound one node, not the graph. A long-lived `Input` running thousands of unrelated scripts (the test262 batch runner) kept minting shapes and reached 5.4 GB; with the budget its peak went from 5,662 to 891 MB.
+- **Element budget: 16,384 element types per `Input`, counted apart (P1, 2026-09-25).** One document's attribute variety runs to thousands of distinct sequences: a 13 MiB corpus of 77 real sites needs 5,093 element types (179 tag roots), a 13 MiB layout-test corpus 1,775. On the map budget either would saturate early and leave most elements private; the map budget stays at 1,024 because it guards the long-lived JS `Input`s it was sized for. An `Input` that reaches the element budget logs `element_tree_budget` once.
 
 ## 6. Why maps left the shape pool
 
@@ -69,9 +70,9 @@ On 2026-08-08 `map_finalize_shape` became a no-op, and since the shared root lan
 
 The pool still runs in two places: element attribute chains at `ElementBuilder::final()` (`elmt_finalize_shape`), and `MarkEditor` shape rebuilds, which intern through `ShapeBuilder` for maps and elements alike. Map rebuilds are ruled onto the tree (§8); element rebuilds follow elements (§7).
 
-## 7. Elements — design settled 2026-09-25; E1, E4–E6 implemented
+## 7. Elements — design settled 2026-09-25; E1, E2, E4–E6 implemented
 
-**Today.** Element literals share their compile-time type, but every parsed element gets a private `TypeElmt` from `ElementBuilder`, registered in the type list; `elmt_finalize_shape` swaps in a pooled attribute chain, but the `TypeElmt` itself is never shared. A `TypeElmt` is 168 bytes plus a 32-byte pool header; the 13 MiB HTML benchmark builds about 320K of them, roughly 64 MB of its 233 MB peak. Until P0 the one field that differed between two `<p class="x">` elements was `content_length`, a copy of the child count — a field with three meanings: the declared content arity on a type pattern or nominal type (read by the validator and by nominal-kind selection), the number of content expressions on an element literal's type (read by the transpiler), and that per-instance copy on parsed elements (written by every parser, read by the Markdown table parser and one test).
+**Before this design.** Element literals shared their compile-time type, but every parsed element got a private `TypeElmt` from `ElementBuilder`, registered in the type list; `elmt_finalize_shape` swapped in a pooled attribute chain, but the `TypeElmt` itself was never shared. A `TypeElmt` is 168 bytes plus a 32-byte pool header; the 13 MiB HTML benchmark built about 320K of them, roughly 64 MB of its 233 MB peak. P1 measured the change on two 13 MiB corpora: a real-site one fell from 109.6 to 86.3 MB and a layout-test one (203K elements sharing 1,775 types) from 184.0 to 120.4 MB, parsing 1.43× faster. Until P0 the one field that differed between two `<p class="x">` elements was `content_length`, a copy of the child count — a field with three meanings: the declared content arity on a type pattern or nominal type (read by the validator and by nominal-kind selection), the number of content expressions on an element literal's type (read by the transpiler), and that per-instance copy on parsed elements (written by every parser, read by the Markdown table parser and one test).
 
 **The design** (D3.4.3v2, D2.6.6v3, S11.1.6v3):
 - **E1 — Layout.** `TypeElmt` keeps its `TypeMap` part — the attribute layout and the sharing machinery are required — plus `name`, `name_id` and `ns`. `TypeList* content_list` replaces `content_length` at the same size. It holds a DECLARED type's content pattern: the resolved `<tag attrs; c, d>` section as a typed `TypeList`, its slots filled the way a bracket pattern's are (`resolve_array_type`). It is NULL on every instance and literal type. NULL means content unconstrained; a present but empty list would mean *no children*, whose spelling is open (SO46) — until ruled, an empty content section yields NULL too.

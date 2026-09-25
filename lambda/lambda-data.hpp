@@ -1387,6 +1387,13 @@ typedef struct Input {
     ShapePool* shape_pool;      // shape deduplication (NEW)
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
+    // D3.4.3v2: one empty root per element tag and namespace, a pool-owned
+    // open-addressing table keyed by the pooled tag-name pointer; element
+    // nodes (roots included) count against their own budget
+    struct TypeElmt** element_roots;
+    int element_root_cap;
+    int element_root_count;
+    int element_transition_shapes;    // bounded by MAX_ELEMENT_SHAPE_GRAPH
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)
@@ -1454,6 +1461,12 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 // Shape finalization - deduplicate map/element shapes using shape pool
 void map_finalize_shape(TypeMap* type_map, Input* input);
 void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
+
+// D3.4.3v2: element types share through the Input's transition tree. The root
+// for a tag and namespace (NULL: keep a private type), and the attribute add
+// that follows or mints an edge from an element's tree type.
+TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns);
+void elmt_put_tree(Element* elmt, String* key, Item value, Input* input);
 
 // Borrowed scalar read: boxed int64/float/uint64 Items point into ArrayNum storage.
 // Use only while the source ArrayNum is alive and not being mutated.
