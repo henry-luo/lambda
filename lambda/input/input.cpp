@@ -1056,70 +1056,6 @@ TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* step
     return node;
 }
 
-// ========== Shape Finalization ==========
-// Map ShapeEntry records stay map-owned because JavaScript descriptor flags are
-// mutable; sharing them from the shape pool would let one map alter another.
-
-void map_finalize_shape(TypeMap* type_map, Input* input) {
-    (void)type_map;
-    (void)input;
-    // map_put already built the authoritative per-map chain and hash index;
-    // retaining it avoids mutable JS descriptor state escaping into the shared
-    // shape pool and avoids allocating a second chain for every parsed map.
-}
-
-void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
-    if (!type_elmt) {
-        log_debug("missing element type");
-        return;  // safety check
-    }
-
-    if (!type_elmt->shape || type_elmt->length == 0) {
-        return;  // empty element, nothing to finalize
-    }
-    // a transition-tree node is already shared, and its chain is its own
-    if (typemap_is_shared_shape((TypeMap*)type_elmt)) return;
-
-    // collect attribute names and types from existing shape chain
-    size_t attr_count = type_elmt->length;
-    log_debug("elmt_finalize_shape: attr_count=%zu", attr_count);
-    const char** attr_names = (const char**)pool_alloc(input->pool, attr_count * sizeof(char*));
-    TypeId* attr_types = (TypeId*)pool_alloc(input->pool, attr_count * sizeof(TypeId));
-
-    if (!attr_names || !attr_types) {
-        return;  // allocation failed
-    }
-
-    // traverse existing shape chain to collect info
-    ShapeEntry* entry = type_elmt->shape;
-    for (size_t i = 0; i < attr_count && entry; i++) {
-        attr_names[i] = entry->name ? entry->name->str : nullptr;
-        attr_types[i] = entry->type->type_id;
-        entry = entry->next;
-    }
-
-    // get or create pooled shape (includes element name)
-    const char* element_name = type_elmt->name.str ? type_elmt->name.str : "";
-    struct ShapeEntry* pooled_shape = shape_pool_get_element_shape(
-        input->shape_pool, element_name, attr_names, attr_types, attr_count);
-
-    if (pooled_shape) {
-        // replace the shape chain with pooled version
-        type_elmt->shape = pooled_shape;
-
-        // find last entry in pooled chain
-        struct ShapeEntry* last = pooled_shape;
-        while (last->next) { last = last->next; }
-        type_elmt->last = last;
-        type_elmt->is_private_clone = false;
-    }
-
-    // free temporary arrays
-    pool_free(input->pool, attr_names);
-    pool_free(input->pool, attr_types);
-}
-
-
 typedef void (*InputParserFn)(Input* input, const char* source);
 
 struct MimeParserMapping {
@@ -1810,7 +1746,6 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     // document-tree parentage is intentionally unrelated to name identity.
     input->name_pool = mem_name_pool_create(dctx, pool, name_parent,
         MEM_ROLE_INPUT, "input.name_pool");
-    input->shape_pool = mem_shape_pool_create(dctx, pool, input->arena, NULL, "input.shape_pool");  // Initialize shape pool
     input->type_list = arraylist_new(16);
     // Input is pool_alloc'd, not pool_calloc'd: every field must be set here.
     // Leaving this one uninitialized made map_put dereference pool garbage.
@@ -1838,10 +1773,6 @@ void input_release_auxiliary_resources(Input* input) {
         name_pool_release(input->name_pool);
         input->name_pool = nullptr;
     }
-    if (input->shape_pool) {
-        shape_pool_release(input->shape_pool);
-        input->shape_pool = nullptr;
-    }
     if (input->type_list) {
         arraylist_free(input->type_list);
         input->type_list = nullptr;
@@ -1857,7 +1788,6 @@ void input_release_document_resources(Input* input) {
         mem_context_destroy((MemContext*)input->mem_ctx);
         input->mem_ctx = nullptr;
         input->arena = nullptr;
-        input->shape_pool = nullptr;
     }
 }
 

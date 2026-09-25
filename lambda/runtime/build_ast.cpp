@@ -15908,7 +15908,6 @@ static bool lambda_rd_prepare_transpiler(Transpiler* tp, const char* source) {
         tp->pool = input->pool;
         tp->arena = input->arena;
         tp->name_pool = input->name_pool;
-        tp->shape_pool = input->shape_pool;
         tp->type_list = input->type_list;
         tp->url = input->url;
         tp->path = input->path;

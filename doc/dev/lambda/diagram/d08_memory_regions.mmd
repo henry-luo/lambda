@@ -15,12 +15,11 @@ flowchart TB
     NN["raw number stack\nint64 / double / DateTime\nwatermark restored at frame exit"]
   end
 
-  subgraph POOL["Name & shape pools (arena/Pool-backed, ref-counted, hierarchical)"]
+  subgraph POOL["Name pool (arena/Pool-backed, ref-counted, hierarchical)"]
     NP["Name pool (interned identifiers)\nStrView-keyed, parent-chained"]
-    SP["Shape pool (ShapeEntry-chain dedup)\nShapeSignature-keyed, cap 64 fields"]
   end
 
-  ARENA["Arena (parser doc data, ShapeEntry chains)\nno GC header, bulk-freed at doc scope"]
+  ARENA["Arena (parser doc data)\nno GC header, bulk-freed at doc scope"]
 
   TAGS["tagged Item pointers"]
   TAGS -->|"stable: objects never move"| OZ

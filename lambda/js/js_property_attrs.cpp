@@ -113,7 +113,7 @@ extern "C" ShapeEntry* js_find_shape_entry_name_id(Item obj, NameId name_id) {
 //
 // Cloned ShapeEntry's share immutable name StrView*'s with the source (the
 // embedded StrView lives at end-of-entry on entries created via
-// shape_pool/create_shape_chain or alloc_type-based paths and is itself
+// alloc_shape_entry or alloc_type-based paths and is itself
 // immutable; entries created with separate StrView allocations carry an external
 // pointer that is also immutable). Sharing is safe because attribute mutation
 // only touches `flags`, never `name`.

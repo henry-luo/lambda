@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-// Suppress LeakSanitizer exit code - pool allocator internals (name_pool, shape_pool)
+// Suppress LeakSanitizer exit code - pool allocator internals (name_pool)
 // use malloc'd hashmaps with no per-instance free; leaks are expected in test fixtures.
 #ifdef __has_feature
 #if __has_feature(address_sanitizer)

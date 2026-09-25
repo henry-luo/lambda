@@ -535,13 +535,8 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 
 //------------------------------------------------------------------------------
 Item ElementBuilder::final() {
-    if (elmt_ && elmt_->type) {
-        TypeElmt* elmt_type = (TypeElmt*)elmt_->type;
-        // finalize shape before returning - deduplicate via shape pool
-        if (builder_->input()) {
-            elmt_finalize_shape(elmt_type, builder_->input());
-        }
-    }
+    // nothing to finalize: an element's type came from the transition tree, or
+    // is its own private type (D3.4.3v2)
     return (Item){.element = elmt_};
 }
 
@@ -646,10 +641,7 @@ MapBuilder& MapBuilder::put(String* key, bool value) {
 }
 
 Item MapBuilder::final() {
-    // finalize shape before returning - deduplicate via shape pool
-    if (map_type_ && builder_->input()) {
-        map_finalize_shape(map_type_, builder_->input());
-    }
+    // map_put already shared the type through the transition tree (D3.4.3v2)
     return (Item){.map = map_};
 }
 

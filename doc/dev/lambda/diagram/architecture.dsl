@@ -15,7 +15,7 @@ workspace "Lambda Runtime" "Core language runtime of Lambda Script" {
         mirdirect = component "MIR Direct transpiler" "AST lowered straight to MIR IR; inline boxing; root/number side frames." "transpile-mir.cpp"
         jit = component "JIT integration" "Import resolution, MIR_link and MIR_gen, debug table." "mir.c"
         valuemodel = component "Value and type model" "Tagged Item, containers, shapes, static Type family." "lambda-data.hpp, lambda.h, lambda.hpp"
-        memgc = component "Memory and GC" "Non-moving mark-sweep heap, nurseries, name and shape pools." "lib/gc, lambda-mem.cpp, name_pool, shape_pool"
+        memgc = component "Memory and GC" "Non-moving mark-sweep heap, nurseries, name pool." "lib/gc, lambda-mem.cpp, name_pool"
         builtins = component "Runtime builtins" "C-ABI support library and the system-function registry." "lambda-eval.cpp, sys_func_registry.c"
         numstr = component "Numbers, strings, vectors" "Numeric tower, decimal, datetime, UTF strings, ArrayNum." "lambda-eval-num.cpp, lambda-decimal.cpp, utf_string.cpp, lambda-vector.cpp"
         errors = component "Error handling" "ItemError and LambdaError, propagation, stack traces." "lambda-error.cpp"

@@ -1166,7 +1166,7 @@ TEST_F(MarkEditorTest, NestedExternalStructureDeepCopy) {
 }
 
 //==============================================================================
-// EXTERNAL INPUT TESTS - Deep copy with NamePool/ShapePool lifecycle
+// EXTERNAL INPUT TESTS - Deep copy with NamePool lifecycle
 //==============================================================================
 
 // Test deep copying an element from external Input that gets destroyed
@@ -1205,7 +1205,7 @@ TEST(ExternalInputTest, DeepCopyExternalElement) {
     ASSERT_EQ(copied_elem.type_id(), LMD_TYPE_ELEMENT);
     ASSERT_NE(copied_elem.element, nullptr);
 
-    // CRITICAL: Destroy the external pool (frees its NamePool and shape_pool)
+    // CRITICAL: Destroy the external pool (frees its NamePool)
     pool_destroy(external_pool);
 
     // Now try to access the copied element's attributes
@@ -1452,34 +1452,20 @@ TEST(LaneStorageResolverTests, TableAndProjectionsAgree) {
 }
 
 TEST(LaneStorageResolverTests, ShapeBuilderHasNoFieldLimit) {
-    Pool* pool = pool_create();
     Arena* arena = arena_create_default();
-    ShapePool* shapes = shape_pool_create(pool, arena, nullptr);
-    ASSERT_NE(shapes, nullptr);
 
-    // 200 fields: past the retired 64-slot cap, laid out by the resolver
-    ShapeBuilder builder = shape_builder_init_map(shapes);
+    // 200 fields: past the retired 64-slot cap
+    ShapeBuilder builder = shape_builder_init_map(arena);
     char* names = (char*)arena_alloc(arena, 200 * 8);
     for (int i = 0; i < 200; i++) {
         snprintf(names + i * 8, 8, "f%d", i);
         ASSERT_TRUE(shape_builder_add_field(&builder, names + i * 8, (i % 2) ? LMD_TYPE_INT : LMD_TYPE_BOOL));
     }
     EXPECT_EQ(shape_builder_field_count(&builder), 200u);
-    ShapeEntry* shape = shape_builder_finalize(&builder);
-    ASSERT_NE(shape, nullptr);
-    int count = 0;
-    int64_t offset = 0;
-    for (ShapeEntry* e = shape; e; e = e->next) {
-        EXPECT_EQ(e->byte_offset, offset) << "field " << count;
-        EXPECT_NE((int)e->storage.kind, (int)LANE_STORAGE_INVALID);
-        offset += shape_entry_storage_size(e);
-        count++;
-    }
-    EXPECT_EQ(count, 200);
+    EXPECT_TRUE(shape_builder_has_field(&builder, "f199"));
     EXPECT_LE(sizeof(ShapeBuilder), 64u);
 
-    shape_pool_release(shapes);
-    pool_destroy(pool);
+    arena_destroy(arena);
 }
 
 //==============================================================================
@@ -1528,4 +1514,37 @@ TEST_F(MarkEditorTest, ElementUpdateAttrKeepsSharedTypeAndTagId) {
 
     EXPECT_EQ(e2.element->type, shared) << "the sibling keeps its type";
     EXPECT_EQ(shared->length, 1);
+}
+
+// A rebuild lays its fields out by storage size and carries every value across,
+// however many fields there are: past the retired 64-slot builder cap.
+TEST_F(MarkEditorTest, RebuildLaysOutManyFields) {
+    MarkBuilder builder(input);
+    MapBuilder mb = builder.map();
+    char names[200][8];
+    for (int i = 0; i < 200; i++) {
+        snprintf(names[i], sizeof(names[i]), "f%d", i);
+        if (i % 2) mb.put(names[i], (int64_t)i);
+        else mb.put(names[i], (bool)(i % 4 == 0));
+    }
+    Item map = mb.final();
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item updated = editor.map_update(map, "extra", editor.builder()->createStringItem("x"));
+    ASSERT_EQ(get_type_id(updated), LMD_TYPE_MAP);
+    TypeMap* type = (TypeMap*)updated.map->type;
+    EXPECT_EQ(type->length, 201);
+    int count = 0;
+    int64_t offset = 0;
+    for (ShapeEntry* e = type->shape; e; e = e->next) {
+        EXPECT_EQ(e->byte_offset, offset) << "field " << count;
+        EXPECT_NE((int)e->storage.kind, (int)LANE_STORAGE_INVALID);
+        offset += shape_entry_storage_size(e);
+        count++;
+    }
+    EXPECT_EQ(count, 201);
+    EXPECT_EQ(type->byte_size, offset);
+    EXPECT_EQ(updated.map->get("f199").type_id(), LMD_TYPE_INT64);
+    EXPECT_EQ(updated.map->get("f4").type_id(), LMD_TYPE_BOOL);
+    EXPECT_EQ(updated.map->get("extra").type_id(), LMD_TYPE_STRING);
 }

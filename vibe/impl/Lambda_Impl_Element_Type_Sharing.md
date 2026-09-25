@@ -1,7 +1,7 @@
 # Element Type Sharing — Implementation Plan
 
 **Date:** 2026-09-25
-**Status:** P0–P2 DONE 2026-09-25; P3 not started.
+**Status:** ALL PHASES DONE 2026-09-25 (P0–P3).
 **Design:** [Lambda_Design_Shape_Transitions.md](../Lambda_Design_Shape_Transitions.md) §7 (E1–E7). **Rulings:** D3.4.3v2 (elements share through the transition tree; the shape pool retires), D2.6.6v3 (`content_list` holds a declared type's content pattern; a nominal name is not a tag), S11.1.6v3 (element content is a sequence-pattern slot). **Closes:** [LR13-9](<../Lambda_Issue_Ledger (fixed).md#lr13-9>) (closed by P0). **Open, not blocking:** SO46 (the *must be empty* spelling), DO31 (`type <B>`).
 **Goal:** one `TypeElmt` per distinct tag, namespace and attribute sequence instead of one per element (about 64 MB of the 13 MiB HTML benchmark's 233 MB peak), declared content validated, and the shape pool gone.
 
@@ -89,6 +89,23 @@ Each phase lands on its own, green on the gates below, before the next starts.
 
 ### P3 — Retire the shape pool (E7)
 
+**DONE 2026-09-25.**
+
+**What landed.** `lambda/core/shape_pool.cpp`/`.hpp` are deleted, with `Input::shape_pool`, `mem_shape_pool_create` and its registry node, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`, the editor's `shape_pool_` and the transpiler's unread copy of the pool pointer. `ShapeBuilder` stays as the editor's field list; its drafts now come from the editor's arena. `ElementBuilder::final` and `MapBuilder::final` have nothing left to do. `MEM_KIND_SHAPEPOOL` and `MEM_ROLE_TYPE_SHAPE` remain in `lib/mem_context.h`, unused, since report label tables index those enums.
+
+**Tests.** The pool-only `ShapePoolCollisionDoesNotAliasDifferentFieldNames` is gone; `ShapeBuilderHasNoFieldLimit` now checks the builder alone, and the new `RebuildLaysOutManyFields` checks that a 201-field rebuild lays out by storage size and carries every value.
+
+**Results — the whole plan against the pre-change build (P0 base), release, interleaved:**
+
+| Corpus (13 MiB) | Elements | Types | Peak RSS | Parse |
+|---|---:|---:|---:|---:|
+| Readability pages | 58,197 | 5,093 | 109.6 → 85.8 MB (−22%) | 77 → 55.5 ms (1.39×) |
+| Layout tests | 203,136 | 1,775 | 184.0 → 120.2 MB (−35%) | 1,790 → 1,260 ms (1.42×) |
+
+- 17,230 HTML files, 99 test inputs and 84 formatter outputs identical to the base build.
+- Lambda baseline 5,869/5,869; Radiant baseline green; test262 40,261/40,261 with no regressions; `test_mark_editor_gtest` 45/46 (the pre-existing `LaneStorageResolverTests.TableAndProjectionsAgree`); `test_namespace_gtest` 39/39; validator GTests green (`test_validator_integration`'s two trailing-`;` schema failures are pre-existing).
+
+**Planned work:**
 - Delete `lambda/core/shape_pool.cpp`/`.hpp`, the interning in `shape_builder.cpp` (the editor keeps a plain field-list builder), `Input::shape_pool`, the transpiler's unread `shape_pool` field, `mem_shape_pool_create` and its registry node.
 - Tests: `test_shape_pool_gtest`, the pool cases in `test_namespace_gtest`.
 - Docs: D3.4.2's signature clause, LR_08 §7, LR_11 §5, diagrams `d08_memory_regions` and `d11_mark_builder`, `Lambda_Shape_Pool.md` status.

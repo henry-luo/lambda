@@ -410,7 +410,7 @@ In practice, this means utility headers like `<type_traits>`, `<initializer_list
 | Constants / Enums / Macros | `UPPER_SNAKE_CASE` | `LMD_TYPE_NULL`, `ERR_RUNTIME_ERROR`, `GUARD_ERROR1`, `STR_NPOS` |
 | Member variables (private) | `snake_case_` (trailing underscore) | `input_`, `pool_`, `arena_`, `name_pool_` |
 | Member functions (C++ classes) | `camelCase` | `createName()`, `createElement()`, `createString()` |
-| File names | `snake_case` | `lambda_eval.cpp`, `mark_builder.hpp`, `shape_pool.cpp` |
+| File names | `snake_case` | `lambda_eval.cpp`, `mark_builder.hpp`, `name_pool.cpp` |
 | Inline comments | Start lowercase | `// process the next token` |
 
 ---

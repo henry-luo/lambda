@@ -45,7 +45,6 @@ class SchemaValidator;
 #undef min
 
 #include "core/name_pool.hpp"
-#include "core/shape_pool.hpp"
 #include "runtime/ast-core.hpp"
 
 // void *memcpy(void *dest, const void *src, size_t n);
@@ -1384,7 +1383,6 @@ typedef struct Input {
     Pool* pool;                 // memory pool
     Arena* arena;               // arena allocator
     NamePool* name_pool;        // centralized name management
-    ShapePool* shape_pool;      // shape deduplication (NEW)
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
     // D3.4.3v2: one empty root per element tag and namespace, a pool-owned
@@ -1457,10 +1455,6 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
 bool map_put_undefined_unique_absent_bulk_heap(Map* mp, String** keys, int count,
     Input* input, uint8_t shape_flags);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
-
-// Shape finalization - deduplicate map/element shapes using shape pool
-void map_finalize_shape(TypeMap* type_map, Input* input);
-void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
 
 // D3.4.3v2: element types share through the Input's transition tree. The root
 // for a tag and namespace (NULL: keep a private type), and the attribute add

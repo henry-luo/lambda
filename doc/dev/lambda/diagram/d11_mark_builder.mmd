@@ -20,8 +20,6 @@ flowchart TB
 
     subgraph Shapes["Type sharing (D3.4.3v2)"]
         TT["Input transition tree\nmaps: root + field edges\nelements: tag root + attribute edges\n(one type per add sequence)"]
-        FS1["elmt_finalize_shape()\n(private element types only)"]
-        SP["ShapePool\npooled attribute chain"]
     end
 
     MB --> EB & MapB & ArrB
@@ -37,8 +35,6 @@ flowchart TB
     CY --> Arena
 
     EB -- "element(tag), attr()" --> TT
-    EB -- "final()" --> FS1 --> SP
-    SP -. "dedup chain" .-> ELMT
     MapB -- "each put" --> TT
     TT -. "shared TypeMap" .-> MAP
     TT -. "shared TypeElmt" .-> ELMT

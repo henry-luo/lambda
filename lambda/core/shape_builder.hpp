@@ -1,36 +1,33 @@
 #pragma once
 
-#include "shape_pool.hpp"
 #include "../lambda.h"
 
+struct Arena;
+
 /**
- * ShapeBuilder - Incremental shape construction for maps and elements
+ * ShapeBuilder - the field list an editor rebuild lays out
  *
- * Provides a builder pattern for constructing ShapeEntry chains field-by-field,
- * useful for:
- * - Parsers that discover fields progressively
- * - CRUD operations that modify existing shapes
- * - Dynamic shape construction in runtime
+ * MarkEditor describes a map's or element's new fields with it -- import the
+ * old shape, then add, retype or remove -- and container_rebuild_with_new_shape
+ * turns the list into transition-tree steps, or a chain the container owns
+ * when the tree declines (D3.4.3v2). It makes no ShapeEntry itself.
  *
  * SCU10: drafts grow from the document. The builder embeds no field-count
- * limit; its draft arrays live in the shape pool's arena (Input lifetime, no
- * per-builder free), doubling as fields are added. A draft carries only what
- * the pool keys identity on (D3.4.2); a contract-carrying draft waits for the
- * contract-aware pool of SCUO1 rather than being written ahead of a producer.
+ * limit; its draft arrays live in the caller's arena (Input lifetime, no
+ * per-builder free), doubling as fields are added.
  *
  * USAGE:
- *   ShapeBuilder builder = shape_builder_init_map(pool);
- *   shape_builder_add_field(&builder, "name", LMD_TYPE_STRING);
+ *   ShapeBuilder builder = shape_builder_init_map(arena);
+ *   shape_builder_import_shape(&builder, type->shape);
  *   shape_builder_add_field(&builder, "age", LMD_TYPE_INT);
- *   ShapeEntry* shape = shape_builder_finalize(&builder);
  */
 typedef struct ShapeFieldDraft {
-    const char* name;   // must remain valid until finalization
-    TypeId type_id;     // pool identity key
+    const char* name;   // must remain valid while the builder is in use
+    TypeId type_id;
 } ShapeFieldDraft;
 
 typedef struct ShapeBuilder {
-    ShapePool* pool;              // Shape pool for deduplication (owns the draft arena)
+    struct Arena* arena;          // owns the draft array
     ShapeFieldDraft* fields;      // arena-owned drafts, capacity `capacity`
     size_t field_count;
     size_t capacity;
@@ -54,12 +51,12 @@ extern "C" {
 /**
  * Initialize builder for map shapes
  */
-ShapeBuilder shape_builder_init_map(ShapePool* pool);
+ShapeBuilder shape_builder_init_map(struct Arena* arena);
 
 /**
  * Initialize builder for element shapes (attributes)
  */
-ShapeBuilder shape_builder_init_element(ShapePool* pool, const char* element_name);
+ShapeBuilder shape_builder_init_element(struct Arena* arena, const char* element_name);
 
 // ========== Field Management ==========
 
@@ -94,20 +91,6 @@ bool shape_builder_has_field(ShapeBuilder* builder, const char* name);
  * Clears current builder content and imports all fields from shape
  */
 void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape);
-
-// ========== Finalization ==========
-
-/**
- * Finalize builder and get deduplicated shape from pool
- *
- * Returns ShapeEntry* from pool (owned by pool, don't free)
- * The returned shape may be:
- * - An existing identical shape from the pool (deduplicated)
- * - A newly created shape added to the pool
- *
- * @return ShapeEntry* from pool, or NULL on error
- */
-ShapeEntry* shape_builder_finalize(ShapeBuilder* builder);
 
 // ========== Utilities ==========
 

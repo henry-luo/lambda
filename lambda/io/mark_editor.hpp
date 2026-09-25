@@ -4,7 +4,6 @@
 #include "../lambda-data.hpp"
 #include "mark_builder.hpp"
 #include "../core/shape_builder.hpp"
-#include "../core/shape_pool.hpp"
 #include "../core/name_pool.hpp"
 #include <stdarg.h>
 
@@ -35,7 +34,7 @@ typedef struct EditVersion {
  * 
  * MEMORY MODEL:
  * - Editor is stack-allocated (RAII)
- * - Operates on Input's arena/pool/name_pool/shape_pool
+ * - Operates on Input's arena/pool/name_pool
  * - Inline mode: modifies structures in-place
  * - Immutable mode: creates new versions, shares unchanged data
  * 
@@ -51,7 +50,6 @@ private:
     Pool* pool_;                // Memory pool
     Arena* arena_;              // Arena allocator
     NamePool* name_pool_;       // String interning
-    ShapePool* shape_pool_;     // Shape deduplication
     ArrayList* type_list_;      // Type registry
     MarkBuilder* builder_;      // For creating new structures
     

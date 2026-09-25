@@ -185,7 +185,6 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , pool_(input->pool)
     , arena_(input->arena)
     , name_pool_(input->name_pool)
-    , shape_pool_(input->shape_pool)
     , type_list_(input->type_list)
     , mode_(mode)
     , ui_mode_(input->ui_mode)
@@ -638,10 +637,10 @@ static size_t container_header_size(const Map* container) {
 // so the builder has to be seeded from the right side of the shape pool.
 ShapeBuilder MarkEditor::container_shape_builder(const Map* container) {
     if (container->type_id == LMD_TYPE_ELEMENT) {
-        return shape_builder_init_element(shape_pool_,
+        return shape_builder_init_element(arena_,
             ((TypeElmt*)container->type)->name.str);
     }
-    return shape_builder_init_map(shape_pool_);
+    return shape_builder_init_map(arena_);
 }
 
 Map* MarkEditor::container_clone_header(const Map* container) {
@@ -1548,7 +1547,7 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
 
     // Build new shape with new element name. Note the rebuilt TypeElmt keeps
     // the OLD name — as it always has; only the shape's pool bucket moves.
-    ShapeBuilder builder = shape_builder_init_element(shape_pool_, new_tag_name);
+    ShapeBuilder builder = shape_builder_init_element(arena_, new_tag_name);
     shape_builder_import_shape(&builder, old_type->shape);
 
     bool is_inline = mode_ == EDIT_MODE_INLINE;
