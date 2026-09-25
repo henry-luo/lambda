@@ -128,6 +128,9 @@ char* file_realpath(const char* path);
 // Return current working directory as malloc'd string. Caller must free().
 char* file_getcwd(void);
 
+// Write current working directory into caller storage. Returns false on error.
+bool file_getcwd_into(char* buffer, size_t capacity);
+
 // ---------------------------------------------------------------------------
 // Streaming reads
 // ---------------------------------------------------------------------------

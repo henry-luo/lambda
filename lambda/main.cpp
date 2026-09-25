@@ -215,6 +215,7 @@ static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
 extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts);
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 static bool ascii_case_ext_equals(const char* ext, const char* end, const char* expected) {
     if (!ext || !end || !expected) return false;
@@ -373,6 +374,11 @@ static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
     }
     runtime->dom_doc = (void*)job->document;
     runtime->dom_ui_context = (void*)&job->session.uicon;
+    // Frame layout can leave an iframe evaluator bound; the batch script belongs to this runtime.
+    if (!radiant_eval_context_switch(runtime_get_eval_context(runtime))) {
+        js_batch_document_finish(runtime, job);
+        return false;
+    }
     return true;
 }
 
@@ -1254,12 +1260,9 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
             fprintf(stderr, "Error: Script execution failed: %s\n", script_path);
         }
 
-        // Clean up the error output (it has its own pool)
-        // The Input struct was allocated from its own pool, so we just destroy the pool
-        if (output_input->pool) {
-            input_release_auxiliary_resources(output_input);
-            pool_destroy(output_input->pool);
-        }
+        // The error output has its own pool, which also releases the Input
+        // it holds (D4.2.6).
+        if (output_input->pool) pool_destroy(output_input->pool);
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
         return 1;  // failure
     }
@@ -1282,12 +1285,9 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     }
     strbuf_free(output);
 
-    // The result itself is rooted in the Runtime heap, so the wrapper Input
-    // can release its registries and pool after printing.
-    if (output_input->pool) {
-        input_release_auxiliary_resources(output_input);
-        pool_destroy(output_input->pool);
-    }
+    // The result itself is rooted in the Runtime heap, so the wrapper Input's
+    // pool — which releases the Input with it (D4.2.6) — can go after printing.
+    if (output_input->pool) pool_destroy(output_input->pool);
     return 0;  // success
 }
 
@@ -2229,9 +2229,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
     _setmode(_fileno(stderr), _O_BINARY);
 #endif
 
-    // Store command line args for sys.proc.self.args access
-    sysinfo_set_args(argc, argv);
-
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
     apply_lambda_tier_env();
@@ -2278,6 +2275,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             i--;
         }
     }
+
+    // publish the compacted vector so sys.proc.self.argv uses its live count.
+    sysinfo_set_argv(argc, argv);
 
 #ifndef NDEBUG
     // suppress debug-build note in bash mode (test expected output was generated with release build)
@@ -2667,6 +2667,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     return lambda_main_finish(1);
                 }
                 runtime.dom_ui_context = (void*)&js_document_session.uicon;
+                // Frame layout can leave an iframe evaluator bound; the CLI script owns a separate realm.
+                if (!radiant_eval_context_switch(runtime_get_eval_context(&runtime))) {
+                    log_error("js-document: could not bind the top-level evaluator");
+                    mem_free(js_source);
+                    runtime_cleanup(&runtime);
+                    js_document_session_finish(&js_document_session);
+                    return lambda_main_finish(1);
+                }
                 log_debug("Loaded HTML document for JS: %s", html_file);
             }
 

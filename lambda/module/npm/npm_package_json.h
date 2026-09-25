@@ -64,6 +64,10 @@ typedef struct {
     // raw parsed data (for accessing fields not explicitly extracted)
     void* raw_item;         // the raw Item from JSON parse
 
+    // owns the parsed JSON that exports_item, imports_item and raw_item point
+    // into; destroyed by npm_package_json_free
+    struct Pool* parse_pool;
+
     // validity
     bool valid;
 } NpmPackageJson;

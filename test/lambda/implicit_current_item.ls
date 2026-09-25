@@ -1,4 +1,4 @@
-// S10.1.7: a body that binds `~` to one subject may leave `~` implicit, so a
+// S10.1.7v2: a body that binds `~` to one subject may leave `~` implicit, so a
 // bare field name reads `~.name` of that body's current item. A match arm, a
 // handler's value arm and a constrained arm (`T that cond`) align with the
 // `that` proviso: `~` is the current item, spelled or implicit, scoped to the

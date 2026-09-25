@@ -3115,7 +3115,7 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
     if (!entry) {
         // Name resolution order for an unbound name: 1) `import math`
         // constants, 2) `~.name` in a body that leaves `~` implicit, 3) system
-        // functions. The import is a binding, and S10.1.7 reads `~.name` only
+        // functions. The import is a binding, and S10.1.7v2 reads `~.name` only
         // when no binding claims the name, so `pi` in a match arm stays pi.
         // Global import: resolve math constants (pi, e) when `import math;` is active
         if (tp->builtin_import_math) {
@@ -3141,7 +3141,7 @@ static void resolve_identifier(Transpiler* tp, AstIdentNode* ast_node) {
             }
         }
         // a bare field name in a body whose `~` may stay implicit reads
-        // `~.name`, the innermost current item (S10.1.7)
+        // `~.name`, the innermost current item (S10.1.7v2)
         if (tp->in_that_clause) {
             // create ~ (current item) as the object
             AstNode* current_item = alloc_ast_node_from_span(tp,
@@ -4370,7 +4370,7 @@ bool has_current_item_ref(AstNode* node) {
         // (S11.2.1), as the handler's value arm binds its result above, so only
         // the scrutinee can read the enclosing current item. Counting arm
         // bodies (LR02-5) let an arm's `~` -- spelled, or a bare field name that
-        // S10.1.7 reads as `~.name` -- turn an enclosing `|>` into a mapping.
+        // S10.1.7v2 reads as `~.name` -- turn an enclosing `|>` into a mapping.
         return has_current_item_ref(((AstMatchNode*)node)->scrutinee);
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
@@ -5135,12 +5135,60 @@ static TypeObject* lookup_object_type_for_tag(Transpiler* tp, StrView tag_name) 
     return type_nominal_record(inner) ? (TypeObject*)inner : NULL;
 }
 
+// S11.4.10, S11.4.1v3: an object literal is a nominal binding, so each field
+// meets its declared contract. A value that cannot fit is a compile error, and
+// so is a required field left without a value; a value the compiler cannot
+// prove is admitted at construction (deferred_fields). A spread supplies its
+// fields at run time, so they are always deferred.
+static void check_object_literal_fields(Transpiler* tp, AstObjectLiteralNode* object,
+        String* type_name, TypeObject* object_type) {
+    bool has_spread = ast_object_literal_spread_value(object) != NULL;
+    int index = 0;
+    for (ShapeEntry* field = object_type->shape; field && index < object_type->length;
+            field = field->next, index++) {
+        if (!field->name || !field->type) continue;
+        AstNode* value = ast_object_literal_value_for_shape(object, field);
+        AstNode* source = value ? value : has_spread ? NULL : field->default_value;
+        StaticBoundaryResult relation;
+        if (source) {
+            relation = static_boundary_relation(source->type, field->type);
+        } else if (has_spread) {
+            relation = STATIC_BOUNDARY_DEFERRED;
+        } else {
+            // an omitted field holds null, a member only of an optional contract
+            relation = lambda_type_accepts_null(field->type)
+                ? STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_REJECTED;
+        }
+        if (relation == STATIC_BOUNDARY_DEFERRED) {
+            object->deferred_fields |= object_field_deferred_bit(index);
+            continue;
+        }
+        if (relation != STATIC_BOUNDARY_REJECTED) continue;
+        int line = (int)ast_node_start_point(tp, value ? value : (AstNode*)object).row + 1;
+        if (!source) {
+            record_type_error_code(tp, line, ERR_UNDEFINED_FIELD,
+                "object '%.*s' is missing required field '%.*s'",
+                (int)type_name->len, type_name->chars,
+                (int)field->name->length, field->name->str);
+            continue;
+        }
+        char expected_name[128];
+        char actual_name[128];
+        lambda_type_format_contract_name(field->type, expected_name, sizeof(expected_name));
+        lambda_type_format_name(source->type, actual_name, sizeof(actual_name));
+        record_type_error(tp, line, "field '%.*s' of object '%.*s' expects %s, but got %s",
+            (int)field->name->length, field->name->str,
+            (int)type_name->len, type_name->chars, expected_name, actual_name);
+    }
+}
+
 static void fill_object_literal(Transpiler* tp, AstObjectLiteralNode* object,
         String* type_name, TypeObject* object_type, AstNode* children) {
     object->type_name = type_name;
     object->type = (Type*)object_type;
     object->item = NULL;
     object->content = NULL;
+    object->deferred_fields = 0;
 
     AstNode* prev = NULL;
     for (AstNode* raw = children; raw;) {
@@ -5164,6 +5212,7 @@ static void fill_object_literal(Transpiler* tp, AstObjectLiteralNode* object,
         }
         raw = next;
     }
+    check_object_literal_fields(tp, object, type_name, object_type);
 }
 
 static bool join_expr_mentions_name(AstNode* node, String* name) {
@@ -13506,7 +13555,7 @@ enum { LSF_OBJECT_PARTS, LSF_OBJECT_BASE, LSF_OBJECT_TAIL };
 enum { LSF_CONTENT_BRANCH = 1u << 0 };
 
 // LSF_BINARY: `that`, whose right side reads a bare name as a field, and the
-// pipe stages `|>` and `|:`, whose right side never does (S10.1.7).
+// pipe stages `|>` and `|:`, whose right side never does (S10.1.7v2).
 enum { LSF_BINARY_THAT = 1u << 0, LSF_BINARY_PIPE_BODY = 1u << 1 };
 
 static void syntax_record_part(LambdaSyntaxSink* sink, void** parts_slot,
@@ -14633,7 +14682,7 @@ static void resolver_handler_end(LambdaResolver* r) {
 // proviso, a constraint, a match arm, a handler's value arm -- and off in a
 // `|>` or `|:` body, even nested in one of those. A field supplied behind the
 // text would flip `|>` between application and mapping by binding state
-// (S10.1.2v4) and let `xs |: typo` pass E238 (S10.1.7). Each body restores
+// (S10.1.2v4) and let `xs |: typo` pass E238 (S10.1.7v2). Each body restores
 // the outer setting when it ends, as `~` itself is restored.
 static void resolver_that_begin(LambdaResolver* r, bool in_that) {
     if (r->that_context_depth >= 64) return resolver_fail(r, "that context overflow");
@@ -14646,7 +14695,7 @@ static void resolver_that_end(LambdaResolver* r) {
     r->tp->in_that_clause = r->that_context[--r->that_context_depth];
 }
 
-// S10.1.7 reads a bare name as `~.name` only when no binding claims it. A
+// S10.1.7v2 reads a bare name as `~.name` only when no binding claims it. A
 // module or namespace prefix is such a binding, but no scope entry holds it:
 // resolve_field and resolve_call recognise `math.pi`, `m.sqrt(x)` (`import m:
 // math`), `ns.tag`, `lambda.sys.f(x)` and an import alias's `box.f` from the
@@ -14871,6 +14920,9 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
         shape_entry_set_type(entry, parent->type);
+        // an inherited field keeps its default; without it a derived literal
+        // stored null in the field, which a required contract cannot hold
+        entry->default_value = parent->default_value;
         entry->byte_offset = r->object_byte_offset;
         if (!r->object_type->shape) r->object_type->shape = entry;
         else r->object_shape_tail->next = entry;
@@ -15669,7 +15721,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolver_that_end(r);
         resolver_branch_begin(r);
         // the arm body's current item is the matched value, and a bare field
-        // name may leave that `~` implicit (S10.1.7, S11.2.1)
+        // name may leave that `~` implicit (S10.1.7v2, S11.2.1)
         resolver_that_begin(r, true);
         resolve_walk(r, arm->body);
         resolver_that_end(r);
@@ -15774,7 +15826,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_walk(r, handler->body);
         resolver_handler_end(r);
         // the value arm `~ { … }` binds the non-error result as its current
-        // item; the error arm binds `^` and keeps the outer `~` (S10.1.7)
+        // item; the error arm binds `^` and keeps the outer `~` (S10.1.7v2)
         resolver_that_begin(r, true);
         resolve_walk(r, handler->value_body);
         resolver_that_end(r);
@@ -15800,7 +15852,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
     case LSF_CONSTRAINED:
         resolve_walk(r, ((AstConstrainedTypeNode*)node)->base);
         // `T that cond` binds the candidate as the current item, in every
-        // position: annotation, alias, field, match arm (S10.1.7)
+        // position: annotation, alias, field, match arm (S10.1.7v2)
         resolver_that_begin(r, true);
         resolve_walk(r, ((AstConstrainedTypeNode*)node)->constraint);
         resolver_that_end(r);
@@ -15887,7 +15939,7 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_let_stam(tp, (AstLetNode*)node);
         break;
     case LSF_ASSIGN:
-        // S10.1.7 grants a bare name an implicit field READ; a write target
+        // S10.1.7v2 grants a bare name an implicit field READ; a write target
         // stays an ordinary name, or `x = 1` in a match arm would store into
         // the matched value instead of reporting that `x` has no binding
         resolver_that_begin(r, false);
@@ -16067,6 +16119,12 @@ static bool lambda_rd_prepare_transpiler(Transpiler* tp, const char* source) {
         tp->url = input->url;
         tp->path = input->path;
         tp->root = input->root;
+        // The transpiler — the Script it becomes — takes the registries over
+        // and releases them itself; left on the Input too, the pool's release
+        // of the Input (D4.2.6) freed them a second time. The Input keeps its
+        // context and arena, which go with the pool.
+        input->name_pool = nullptr;
+        input->type_list = nullptr;
     }
     return true;
 }

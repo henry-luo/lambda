@@ -1311,6 +1311,39 @@ bool DomElement::toggle_class(const char* class_name) {
  * Format: "property: value; property: value;"
  * Inline styles have specificity (1,0,0,0) - highest non-!important specificity
  */
+const char* dom_inline_style_declaration_end(const char* text) {
+    if (!text) return nullptr;
+    char quote = 0;
+    int parens = 0;
+    int brackets = 0;
+    int braces = 0;
+    const char* p = text;
+    for (; *p; p++) {
+        if (quote) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == quote) quote = 0;
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            p += 2;
+            while (*p && !(p[0] == '*' && p[1] == '/')) p++;
+            if (!*p) return p;
+            p++;
+            continue;
+        }
+        if (*p == '\\' && p[1]) { p++; continue; }
+        if (*p == '\'' || *p == '"') { quote = *p; continue; }
+        if (*p == '(') parens++;
+        else if (*p == ')' && parens > 0) parens--;
+        else if (*p == '[') brackets++;
+        else if (*p == ']' && brackets > 0) brackets--;
+        else if (*p == '{') braces++;
+        else if (*p == '}' && braces > 0) braces--;
+        else if (*p == ';' && parens == 0 && brackets == 0 && braces == 0) return p;
+    }
+    return p;
+}
+
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
     if (!element || !style_text || !element->doc) {
         return 0;
@@ -1326,27 +1359,12 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
         return 0;
     }
 
-    // Copy text for in-place modification, preserving CSS comments intact.
-    // Comments inside custom property values must be preserved per CSS spec.
-    // We split by semicolons that are NOT inside comments.
-    // Find semicolons not inside comments and replace them with NUL for splitting
-    {
-        size_t i = 0;
-        while (i < style_len) {
-            if (i + 1 < style_len && text_copy[i] == '/' && text_copy[i + 1] == '*') {
-                // inside comment — skip until closing */
-                i += 2;
-                while (i + 1 < style_len && !(text_copy[i] == '*' && text_copy[i + 1] == '/')) {
-                    i++;
-                }
-                if (i + 1 < style_len) i += 2; // skip */
-            } else if (text_copy[i] == ';') {
-                text_copy[i] = '\0';  // split point
-                i++;
-            } else {
-                i++;
-            }
-        }
+    // A quoted "/*" is string content, and nested blocks may contain semicolons.
+    for (size_t offset = 0; offset < style_len;) {
+        char* end = (char*)dom_inline_style_declaration_end(text_copy + offset);
+        if (!end || !*end) break;
+        *end = '\0';
+        offset = (size_t)(end - text_copy) + 1;
     }
 
     // Iterate over NUL-separated declarations

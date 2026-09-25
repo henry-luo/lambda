@@ -376,7 +376,7 @@ Method calls use dot syntax: `obj.method(args)`. The runtime:
 2. Binds `~` (and implicit field scope) to the object
 3. Dispatches the call
 
-> **Implicit fields (S10.1.7, ruled 2026-09-25).** A method body is the model
+> **Implicit fields (S10.1.7v2, ruled 2026-09-25).** A method body is the model
 > *single-subject* body: the type's declared fields are names of its scope,
 > so they are read bare and shadow outer bindings — the OOP receiver
 > convention. Object-level `that` constraints follow the same convention,

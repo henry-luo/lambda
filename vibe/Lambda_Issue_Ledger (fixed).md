@@ -15,12 +15,12 @@
 
 ## Archive index
 
-This archive contains **142 historical records**: 137 fixed or resolved entries,
+This archive contains **143 historical records**: 138 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR02-28, filed and resolved by the S10.1.7 implicit-field ruling the same day, followed. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR02-28, filed and resolved by the S10.1.7 implicit-field ruling the same day, followed. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR03-20, which that fix found, was fixed the same day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -181,14 +181,14 @@ Covered by `test/lambda/match_arm_current_item.ls` on both tiers — five shapes
 including the constraint and no-pipe controls, and verified to fail
 (`subject_is_const: error`) when the walk is emptied again.
 
-*Reversed 2026-09-25 by S10.1.7:* the ruling scopes the current item to its
+*Reversed 2026-09-25 by S10.1.7v2:* the ruling scopes the current item to its
 body, so an arm's `~`, spelled or a bare field name read as `~.name`, is never
 free in an enclosing pipe body. A handler's value arm was already treated that
 way. `has_current_item_ref` now walks only a match's scrutinee, so
 `xs |> match (1) { case int: (~) * 10 }` is whole-value application of a
 non-callable value ([LR02-29](Lambda_Issue_Ledger.md#lr02-29)). Counting arm
 bodies would also have let an implicit read flip the pipe's mode by binding
-state, which S10.1.7 forbids. In the fixture, `subject_is_const` became
+state, which S10.1.7v2 forbids. In the fixture, `subject_is_const` became
 `outer_restored`, `xs |> (match (1) { … }) + ~`, which maps to `[11, 12, 13]`.
 See [LR02-28](#lr02-28).
 
@@ -410,12 +410,12 @@ The cause is in `parse_type_slot_mode` (`lambda_parser.c:683`), which continues 
 
 *Fixed 2026-09-25:* the type slot's line-break rule now continues at `?` as well as at `| & !`, the continue-only tokens a type can take (S16.2.2v2), so all three forms parse. The parameter-list form no longer depends on the slot's own bracket count. A line-start `+`, `*` or `[` still ends the type, since each can begin a statement (S16.2.3v3); the reference grammar likewise rejects a line-start dual-role token inside a bracket, as in `(1` ⏎ `+ 2)`. Fixture `test/lambda/type_line_start_optional.ls` (all tiers), and mirrored accept cases for the three forms in both S16 scripts.
 
-<a id="lr02-28"></a>**LR02-28 · An implicit read under a nested `~` binder read that binder's `~`, not the body's subject (S10.1.7) · RESOLVED 2026-09-25 by ruling (found 2026-09-25)**
+<a id="lr02-28"></a>**LR02-28 · An implicit read under a nested `~` binder read that binder's `~`, not the body's subject (S10.1.7v2) · RESOLVED 2026-09-25 by ruling (found 2026-09-25)**
 `resolve_identifier` (`build_ast.cpp`) lowers an implicit field read to `~.name`, so it reads whichever `~` is innermost at run time. Three constructs rebind `~` inside a `that` body: a `match` arm (S11.2.1), a handler's value arm `e ^ { … } ~ { … }` (S7.6.1v4), and a constrained arm `case T that (…)`. Under one of them a bare name read that binder's value, so `{status: "open", total: 5} that (match status { case "open": total > 0 default: true })` read `"open".total` and was `null`. Methods were unaffected, because their declared fields bind to the receiver, not to `~`.
 
 S10.1.7, as first written, said such a body reads "a field of that subject", which pointed at the proviso's subject. It also glossed the rule as "reads `~.age`", which pointed at the innermost `~`. The entry asked which reading holds.
 
-*Ruled 2026-09-25 (USER):* the three binders align with the proviso. `~` binds the current item and may be omitted or spelled. The current item is scoped to the body, and outside the body the outer binding is back. So the innermost current item wins, which is what the lowering already did under a nested binder, and the example above is `null` by design. What changed is that these bodies now read implicit fields everywhere, not only inside a `that`: `match {age: 20} { case map: age > 18 }` reads `~.age`. S10.1.7 was extended in place (spec 38.0.0), which also closed SO49 (a type constraint reads implicit fields in any position).
+*Ruled 2026-09-25 (USER):* the three binders align with the proviso. `~` binds the current item and may be omitted or spelled. The current item is scoped to the body, and outside the body the outer binding is back. So the innermost current item wins, which is what the lowering already did under a nested binder, and the example above is `null` by design. What changed is that these bodies now read implicit fields everywhere, not only inside a `that`: `match {age: 20} { case map: age > 18 }` reads `~.age`. S10.1.7 had already reached master, so the extension is S10.1.7v2 (spec 40.0.0), which also closed SO49 (a type constraint reads implicit fields in any position).
 
 *Implemented 2026-09-25:*
 - **Implicit reads on:** the resolver turns them on for a match arm body, a handler's value arm and every `T that cond` body.
@@ -504,7 +504,21 @@ A member keeps its own carrier: `3.0 is 1 to 5` is `true`. So a range contract h
 
 Fixtures: `range_type_membership.ls`, pinned in `kTune27TierParity`; `negative/runtime/range_admission_{param,range_value,field,char}.ls` (`ExpectRejectedOnEveryTier`) and `negative/semantic/range_argument_static.ls`. All 971 goldens pass with `LAMBDA_TIER=jit` and with `interp`, and compiling all 1,955 tracked `.ls` files reports the same errors before and after.
 
-*Residue:* `<:` tries each arm of a union whole, so `1 to 5 <: (1 to 3 | 4 to 5)` is `false` ([LR03-21](Lambda_Issue_Ledger.md#lr03-21)). Found on the way, all older than this fix: [LR03-19](Lambda_Issue_Ledger.md#lr03-19), [LR03-20](Lambda_Issue_Ledger.md#lr03-20), [LR07-30](Lambda_Issue_Ledger.md#lr07-30), and two more symptoms of [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
+*Residue:* `<:` tries each arm of a union whole, so `1 to 5 <: (1 to 3 | 4 to 5)` is `false` ([LR03-21](Lambda_Issue_Ledger.md#lr03-21)). Found on the way, all older than this fix: [LR03-19](Lambda_Issue_Ledger.md#lr03-19), [LR03-20](#lr03-20), [LR07-30](Lambda_Issue_Ledger.md#lr07-30), and two more symptoms of [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
+
+<a id="lr03-20"></a>**LR03-20 · Object construction does not check its field contracts (S11.4.10) · FIXED 2026-09-25 (found 2026-09-25, while fixing LR03-18)**
+`type Obj { a: int }` then `<Obj a: "x">` is admitted on both tiers and prints `<Obj a: 4317266544>`, the string's pointer read from the int field. A literal or range field admits any value: `type Obj { a: 1 | 2 }` and `type Obj { a: 1 to 5 }` both accept `<Obj a: 9>`. S11.4.10 verifies a declared type when the value crosses it, and lists the nominal binding of an element among the crossings. A map-type alias checks its fields: with `type P = {a: 1 to 5}`, `let p: P = {a: 9}` fails with E201. Reproduces on the binary from before the [LR03-18](#lr03-18) fix.
+
+*Fixed 2026-09-25.* Construction wrote each value straight into its field's lane, on both tiers: `set_field_value` trusts its input, and `build_ast` typed the literal without looking at its fields. Each field now meets its contract under the three outcomes of S11.4.1v3:
+- **Statically rejected:** a compile error. `<Obj a: "x">` reads "field 'a' of object 'Obj' expects int, but got string", and so does `null` in a required field. A required field with neither a value nor a default is E205, "object 'Obj' is missing required field 'a'" (`check_object_literal_fields`, `build_ast.cpp`).
+- **Proven:** no check. An int still widens into a float field.
+- **Deferred:** marked in the literal's `deferred_fields` and admitted at construction by `object_literal_admit_fields` (`lambda-data-runtime.cpp`) through `lambda_type_check`, before the value reaches the fill. `<Obj a: 9>` against `1 to 5` fails with "type check at field 'a' of Obj failed: expected 1 to 5, got int 9", and an exactly integral `3.0` becomes int 3 (S11.4.5). A spread's fields are always deferred. The interpreter admits before it allocates the object; the JIT calls `object_fill_checked`, which roots the values first.
+
+S11.4.10 has a failure surface as an error value at the binding site. That is S7.7's contagion, which the spec's status table still lists as pending, and the JIT raises instead of it at every boundary. Typing the literal `T | error` instead would put E208 on every function that builds an object from an unproven value, which a call with a deferred parameter check does not. So a failure leaves as a failed declaration does today: the enclosing function returns the error, through the edge a failed map spread takes (`emit_return_if_item_error`, `interp_signal`), and its caller sees an error value (`make_grade(9) is error` is `true` in the fixture). An object that is constructed is therefore always admitted, and typed readers may trust its layout (D3.2.6).
+
+Found on the way: a derived object type dropped its base fields' defaults (`resolver_object_copy_base`), so with `type Dog : Animal { … }`, `<Dog name: "Rex">` stored null in an inherited `legs: int = 4` on both tiers. The copy now keeps the default. Tracing the fixture also found [LR03-19](Lambda_Issue_Ledger.md#lr03-19)'s cause.
+
+Fixtures: `object_field_admission.ls`, pinned in `kTune27TierParity`; `negative/runtime/object_field_{range,dynamic,spread}.ls` (`ExpectRejectedOnEveryTier`) and `negative/semantic/object_field_{static,missing}.ls`. All 974 goldens pass with `LAMBDA_TIER=jit` and with `interp`, and compiling every tracked `.ls` file raises the new diagnostics nowhere else.
 
 ## 4. Numbers, decimal & datetime (LR_04)
 

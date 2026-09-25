@@ -345,7 +345,7 @@ match event {
 }
 ```
 
-> **Implicit fields (S10.1.7, ruled 2026-09-25).** An arm body is a
+> **Implicit fields (S10.1.7v2, ruled 2026-09-25).** An arm body is a
 > single-subject body, so `~` may be left implicit:
 > `case {type: symbol, x: int, y: int}: handle_click(x, y)` reads `~.x` and
 > `~.y`, unless a binding claims the name first. A constrained arm's `that`

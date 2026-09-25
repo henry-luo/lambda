@@ -353,8 +353,12 @@ struct Initializer {
 static Initializer initializer;
 
 Type* alloc_type(Pool* pool, TypeId type, size_t size) {
-    Type* t;
-    t = (Type*)pool_calloc(pool, size);
+    return alloc_type_in(type_alloc_of_pool(pool), type, size);
+}
+
+Type* alloc_type_in(TypeAlloc alloc, TypeId type, size_t size) {
+    Type* t = (Type*)type_alloc_zeroed(alloc, size);
+    if (!t) return NULL;
     memset(t, 0, size);
     t->type_id = type;
     // Defensive check: verify the type was properly initialized
@@ -1132,6 +1136,8 @@ Item typeditem_to_item(TypedItem *titem) {
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return {.item = x2it((String*)ptr_val)};
     case LMD_TYPE_COMPLEX:
+    case LMD_TYPE_PATH:
+        // paths also retain their direct pointer carrier in TypedItem fields.
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:

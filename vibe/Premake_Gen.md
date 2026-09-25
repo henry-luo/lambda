@@ -75,7 +75,7 @@ sys.memory.available         // Available memory in bytes
 // Process information
 sys.proc.self.pid            // Current process ID
 sys.proc.self.cwd            // Current working directory
-sys.proc.self.args           // Command line arguments as array
+sys.proc.self.argv           // Command line arguments as array
 sys.proc.self.env            // Environment variables as map
 sys.proc.self.env.HOME       // Specific environment variable
 sys.proc.self.env.PATH       // Another environment variable
@@ -92,8 +92,11 @@ sys.lambda.version           // Lambda version string
 This addresses **all critical system access requirements**:
 - ✅ Platform detection via `sys.os.platform`
 - ✅ Environment variables via `sys.proc.self.env.*`
-- ✅ Command-line arguments via `sys.proc.self.args`
+- ✅ Command-line arguments via `sys.proc.self.argv`
 - ✅ Current directory via `sys.proc.self.cwd`
+
+S17.3.1 names the process argument vector `argv`; it includes the executable
+at index 0. Script-argument forwarding remains open under IL2-I3.
 
 ### ✅ Available via Directory Input
 
@@ -132,7 +135,7 @@ for entry in dir {
 | Feature | Python | Lambda | Status |
 |---------|--------|--------|--------|
 | Environment variables | `os.environ["VAR"]` | `sys.proc.self.env.VAR` | ✅ Available |
-| CLI arguments | `sys.argv` | `sys.proc.self.args` | ✅ Available |
+| CLI arguments | `sys.argv` | `sys.proc.self.argv` | ✅ Available |
 | File existence | `os.path.exists()` | `exists(path)` | ✅ Available |
 | Current directory | `os.getcwd()` | `sys.proc.self.cwd` | ✅ Available |
 
@@ -485,9 +488,9 @@ fn generate_main_program(state: GeneratorState) -> GeneratorState => {
 // =============================================================================
 
 pn main() {
-    // Get config path from CLI args or use default
-    let args = sys.proc.self.args
-    let config_path = if (len(args) > 1) args[1] else "build_lambda_config.json"
+    // Get config path from CLI argv or use default
+    let argv = sys.proc.self.argv
+    let config_path = if (len(argv) > 1) argv[1] else "build_lambda_config.json"
     
     // Initialize state with platform detection
     var state = create_state(config_path)
@@ -533,20 +536,20 @@ for k, v in all_env { ... }    // Iterate all variables
 ### ✅ Command-Line Arguments (Now Available)
 
 ```lambda
-// Access via sys.proc.self.args
-let args = sys.proc.self.args  // Returns array of strings
-args[0]                        // Program name (e.g., "./lambda.exe")
-args[1]                        // First argument
-len(args)                      // Number of arguments
+// Access via sys.proc.self.argv
+let argv = sys.proc.self.argv  // Returns array of strings
+argv[0]                        // Program name (e.g., "./lambda.exe")
+argv[1]                        // First argument
+len(argv)                      // Number of arguments
 
 // Example usage
 pn main() {
-    let args = sys.proc.self.args
-    if (len(args) < 2) {
+    let argv = sys.proc.self.argv
+    if (len(argv) < 2) {
         print("Usage: lambda run script.ls <config_file>")
         return
     }
-    let config_file = args[1]
+    let config_file = argv[1]
     // ...
 }
 ```
@@ -631,7 +634,7 @@ state with {content: state.content ++ new_lines}
 | Config parsing        | ✅ Excellent | `input("file.json", 'json)`   |
 | Platform detection    | ✅ Excellent | `sys.os.platform` native path |
 | Environment variables | ✅ Excellent | `sys.proc.self.env.*`         |
-| CLI arguments         | ✅ Excellent | `sys.proc.self.args` array    |
+| CLI arguments         | ✅ Excellent | `sys.proc.self.argv` array    |
 | Current directory     | ✅ Excellent | `sys.proc.self.cwd`           |
 | Directory listing     | ✅ Excellent | `input("./dir")`              |
 | String generation     | ✅ Excellent | Functional statements         |
@@ -643,7 +646,7 @@ state with {content: state.content ++ new_lines}
 
 All previously blocking features have been implemented:
 
-1. ✅ **CLI arguments** → `sys.proc.self.args` returns array
+1. ✅ **CLI arguments** → `sys.proc.self.argv` returns array
 2. ✅ **Environment variables** → `sys.proc.self.env.*` access
 3. ✅ **Platform detection** → `sys.os.platform` native path
 4. ✅ **File existence** → `exists()` function
@@ -657,7 +660,7 @@ The conversion can proceed with **full feature parity** to the Python version.
 
 ### Phase 1: Core Conversion (Ready Now)
 - ✅ Platform detection via `sys.os.platform`
-- ✅ CLI argument parsing via `sys.proc.self.args`
+- ✅ CLI argument parsing via `sys.proc.self.argv`
 - ✅ Environment access via `sys.proc.self.env.*`
 - ✅ JSON config loading via `input()`
 - ✅ File output via `|>` pipe operator
@@ -688,7 +691,7 @@ Converting `generate_premake.py` to Lambda Script is now **fully feasible** with
 | ------------------ | ------------------------ | ----------------------- | ------------------ |
 | Platform detection | `platform.system()`      | `sys.os.platform`       | ✅ Native           |
 | Environment vars   | `os.environ["VAR"]`      | `sys.proc.self.env.VAR` | ✅ Native           |
-| CLI arguments      | `sys.argv`               | `sys.proc.self.args`    | ✅ Native           |
+| CLI arguments      | `sys.argv`               | `sys.proc.self.argv`    | ✅ Native           |
 | JSON parsing       | `json.load()`            | `input(file, 'json)`    | ✅ Native           |
 | File output        | `open().write()`         | `data > file`           | ✅ Native           |
 | Classes            | `class PremakeGenerator` | State maps + functions  | ✅ Functional style |

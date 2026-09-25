@@ -12483,7 +12483,8 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
         TypeId arr_type = get_type_id(arr_item);
         if (!idx_found || !kind_found ||
             get_type_id(idx_item) != LMD_TYPE_INT || get_type_id(kind_item) != LMD_TYPE_INT ||
-            ((!arr_found || (arr_type != LMD_TYPE_ARRAY && arr_type != LMD_TYPE_UNDEFINED &&
+            ((!arr_found || (arr_type != LMD_TYPE_ARRAY && arr_type != LMD_TYPE_VARRAY &&
+              arr_type != LMD_TYPE_UNDEFINED &&
               arr_item.item != ITEM_JS_UNDEFINED)) &&
              (!tarr_found || !js_is_typed_array(tarr_item)))) {
             return js_throw_type_error("Array Iterator.prototype.next called on incompatible receiver");
@@ -12522,7 +12523,8 @@ Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
         }
         JS_ASSIGN_OR_RETURN(iter_len_item, js_array_iterator_source_length(arr_item));
         int64_t iter_len = it2i(iter_len_item);
-        if (!js_is_js_array(arr_item) || idx >= iter_len) {
+        if (!(js_is_js_array(arr_item) || get_type_id(arr_item) == LMD_TYPE_VARRAY) ||
+                idx >= iter_len) {
             // done — per ES §23.1.5.2.1 step 8.a: set [[IteratedObject]] to
             // undefined so subsequent calls keep returning done=true even if
             // new elements are pushed onto the original array afterwards.
@@ -26427,17 +26429,20 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
 
     // keys() — returns array iterator (kind=0: keys)
     if (operation == JS_ARRAY_INTRINSIC_KEYS) {
-        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
+        if (arr_type != LMD_TYPE_ARRAY && arr_type != LMD_TYPE_VARRAY)
+            return make_js_undefined();
         return js_create_array_iterator_object(arr, 0);
     }
     // values() — returns array iterator (kind=1: values)
     if (operation == JS_ARRAY_INTRINSIC_VALUES) {
-        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
+        if (arr_type != LMD_TYPE_ARRAY && arr_type != LMD_TYPE_VARRAY)
+            return make_js_undefined();
         return js_create_array_iterator_object(arr, 1);
     }
     // entries() — returns array iterator (kind=2: entries [index, value])
     if (operation == JS_ARRAY_INTRINSIC_ENTRIES) {
-        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
+        if (arr_type != LMD_TYPE_ARRAY && arr_type != LMD_TYPE_VARRAY)
+            return make_js_undefined();
         return js_create_array_iterator_object(arr, 2);
     }
 

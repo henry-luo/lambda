@@ -1,14 +1,14 @@
 // `~` inside a match arm is the MATCHED VALUE (S11.2.1): the arm binds it, for
 // its pattern and its body, and outside the arm the enclosing current item is
-// back (S10.1.3, S10.1.7). So a `~` in an arm is never the enclosing pipe's,
+// back (S10.1.3, S10.1.7v2). So a `~` in an arm is never the enclosing pipe's,
 // and it never makes that pipe a mapping.
 //
 // History: LR02-5 (2026-08-25) fixed an empty loop in has_current_item_ref by
 // counting arm bodies, which made `xs |> match (1) { case int: (~) * 10 }` map
-// to [10, 10, 10]. S10.1.7 (2026-09-25) reversed that: the arm's `~` is the
+// to [10, 10, 10]. S10.1.7v2 (2026-09-25) reversed that: the arm's `~` is the
 // constant 1, so the pipe body has no free `~` and is whole-value application
 // of a non-callable value (S10.1.2v4). Counting arm bodies would also let a
-// bare field name, which S10.1.7 reads as `~.name` in an arm, flip the pipe's
+// bare field name, which S10.1.7v2 reads as `~.name` in an arm, flip the pipe's
 // mode by binding state.
 let xs = [1, 2, 3]
 

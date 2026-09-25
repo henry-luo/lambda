@@ -1,7 +1,7 @@
 // Test: implicit ~.name resolution in a 'that' body
 // In a 'that' proviso (S10.1.5v3), a bare identifier not in scope resolves to
 // ~.name, where ~ is the proviso's left operand. A pipe-family body ('|>',
-// '|:') never does this, even inside a 'that': it names ~ explicitly (S10.1.7).
+// '|:') never does this, even inside a 'that': it names ~ explicitly (S10.1.7v2).
 // Name resolution order: 1) scope names, 2) ~.name, 3) system properties
 
 // ============================================================

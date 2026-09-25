@@ -24,6 +24,10 @@ sections remain historical rationale and are not current interface contracts.
 - `Arena` owns its direct memtrack blocks and no longer accepts or stores a
   backing `Pool*`. Its factory constructors are `mem_arena_create(ctx, role,
   label)` and `mem_arena_create_sized(ctx, initial, max, role, label)`.
+- A pool may own a non-block resource through a cleanup (`pool_add_cleanup`),
+  and every `Input` is owned by the pool it lives in (D4.2.6, 2026-09-25):
+  detaching the arena from its backing pool had left a URL-less `Input`'s
+  arena with no owner at all. See [§16](#16-input-ownership-d426).
 - GC object slabs, data blocks, bump extents, and large objects are owned by
   `MemVmRegion`/memtrack records. The runtime keeps a separate owner group for
   non-GC semantic allocations; GC itself has no Pool backing.
@@ -1048,6 +1052,42 @@ Most subsystems only need to **register a reclaimer**; the page-routing is conce
 | Q5 | Should watermarks be global or per-role (e.g. cap font memory independently of view memory)? | Start global per-context; add per-role sub-budgets ([§14.4](#14-additional-suggestions)) if a single role dominates pressure. |
 | Q6 | Interaction with rpmalloc's own thread caches holding freed-but-unreturned memory | A reclaimer can call `rpmalloc_thread_finalize`/trim on idle threads to return cached spans to the OS ([§P2](./Lambda_Design_Mem_Heap.md)). |
 | Q7 | Can the linked MIR build expose a custom allocator / code-size hook for exact JIT accounting? | If yes, route MIR code-page allocation through `mem_page_alloc` for exact bytes; if no, record an estimate from generated-function/module count on the `MEM_KIND_JIT` node. Either way JIT code becomes visible in snapshots ([§3.2](#32-jit-code-font--media-caches-also-centralized)). |
+
+---
+
+## 16. Input ownership (D4.2.6)
+
+**Status:** implemented 2026-09-25. Ruling: D4.2.6 (Formal Design 13.1.0).
+
+### 16.1 The leak
+
+Until the rpmalloc phase-out (`61d3d4083`, 2026-08-08) an `Input`'s arena drew its chunks from the `Input`'s pool (`mem_arena_create(dctx, pool, …)`, `c86d18910`), so it died with that pool whether or not anyone released the `Input`. Stage 2 made the arena a direct owner of its memtrack blocks, which kept its memory correct but removed its only owner:
+
+- An `Input` with a URL has a per-document context, and `input_release_document_resources` destroys it. Only `InputManager::reset_inputs` and Radiant's `free_document` call that.
+- An `Input` without a URL had no context. Its arena was registered in the root context, and nothing destroyed it before process exit. Every such `Input` kept its first 4 KB chunk plus everything built in it, and its `type_list` leaked too unless the creator freed it by hand.
+
+The URL-less creators are most of them: the JS runtime's input (one per Radiant page load), the runner's result `Input`, npm manifest parsing, PDF content streams, the direct-parser and AST-dump transpilers, the sysinfo cache, the edit bridge, Ruby and jube inputs, Radiant's state dump and SVG pictures. Of the 33 sites outside `InputManager`, only Radiant's HTML documents released their arena; the rest destroyed their pool and relied on that.
+
+### 16.2 Options
+
+1. **Back the arena with the pool again.** Rejected. It reverses the Stage 2 rule that an arena owns its direct blocks, brings back a second arena flavour in `lib/arena`, turns each 4–64 KB chunk into a pool block with its own header, and fixes only the arena: `type_list` still leaks.
+2. **A release call at every site.** Rejected. Each site already destroys its pool at the right moment, because the `Input` struct is one of that pool's blocks; restating that point per site duplicates it, and a wrong one is a use-after-free where the leak was only a leak. Some sites have no release point: `pdf_parse_content_stream_io` returns Items built in an `Input` nobody keeps, so the caller's pool is their only lifetime bound.
+3. **The pool owns the `Input`'s lifetime, not its memory.** Chosen. The arena stays a direct owner under a context; the pool's teardown releases that context.
+
+### 16.3 Mechanism
+
+- **Pool cleanups.** `pool_add_cleanup(pool, fn, arg)` records a callback in a pool block. `pool_destroy`, `pool_drain` and `pool_reset` run the cleanups once, newest first, before any block is released. A record is unlinked before its callback runs, so a cleanup that registers another one has it run in the same pass.
+- **A context for every `Input`.** `Input::create` always creates the `Input`'s context (`input.doc` with a URL, `input.local` without), under the context that owns the pool (`mem_node_owner(pool_get_mem_node(pool))`), and registers `input_pool_cleanup` on the pool. Release stays idempotent, so an `Input` released explicitly leaves the cleanup nothing to do.
+- **Cascades.** `mem_context_destroy` holds the registry lock while it runs destroy callbacks, so a pool destroyed by a cascade runs its cleanups under that lock. Because the `Input`'s context sits under the pool's context, the cascade has already destroyed it (children first). The cleanup checks `mem_context_in_teardown()` and then only releases the registry-free parts. The one cascade that destroys `Input`-hosting pools today is `mem_context_shutdown` at exit: every such pool is root-registered or untracked.
+
+### 16.4 What the change surfaced
+
+Arenas now die with their pool, as they did before 2026-08-08. Code written since then could rely on the leak; the audit of every creator found:
+
+- **npm `package.json`**: `npm_package_json_parse_string` kept `exports_item`, `imports_item` and `raw_item` — Items into the parsed JSON — and destroyed the pool. A string-valued `exports` survived only because the arena leaked; a map-valued one already read a map whose data buffer went back to the destroyed pool. The package now owns its parse pool, and `npm_package_json_free` destroys it. Regression: `NpmPackageJsonTest` (string and map `exports` resolved after parsing, no allocator left after free).
+- **sysinfo**: the per-thread cache holds an `Input` created on the eval context's pool and Items cached from it (TTL up to an hour). A later runtime on the same thread reused both after the pool was gone. A pool cleanup first invalidated it; later the same day the sysinfo rework (`1b9ef1527`, [Lambda_IO_Sysinfo.md](Lambda_IO_Sysinfo.md)) made the cache a context capsule owned by the `EvalContext`, released with it (`input_release_document_resources` on its `Input`), which replaces that cleanup. Regression: `SysInfoRuntimeTest.CacheIsRebuiltAfterEachRuntimeInOneProcess` runs one `sys.*` script three times in a `test-batch`; with the cleanup removed, the later runs print the first run's freed data.
+- **Script loading**: `lambda_rd_prepare_transpiler` gives a Transpiler without a pool a fresh `Input` and copied its name pool and type list into the Transpiler — the future Script — which releases them at teardown; the pool's release of the `Input` then freed them a second time. The Transpiler now takes them over and the `Input` clears its fields; it keeps its context and arena, which go with the pool.
+- **Manual releases before a pool's destruction** — workarounds for the missing owner — were removed where they duplicated the cleanup (`radiant_state_dump_mark`, the AST dump, the CLI's result `Input`), and where they would now double-free: four validator test fixtures and two direct-parser tests freed an `Input`'s `type_list` (one fixture also its name pool) without clearing the field.
 
 ---
 

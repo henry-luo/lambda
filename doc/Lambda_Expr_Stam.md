@@ -460,7 +460,7 @@ the idiom is `xs |: is_even(~)`. The rule exists because `|>` reads a `~`-free
 body as whole-value application (`data |> sum`), and the two pipes must not
 read the same text two ways. Like a `|>` body and unlike a `that` body, a `|:`
 body reads bare names as ordinary names — write `~.field` for a field of the
-current item (S10.1.7).
+current item (S10.1.7v2).
 
 > **Note:** A `|:` (or `|>`) condition needs no parentheses around the
 > relational operators `<`, `>`, `<=`, `>=` — `items |: ~ > 0` is fine, and
@@ -515,12 +515,12 @@ never a field either.
 
 The same rule holds in every body that binds `~` to one value: a
 [match arm](#current-item-reference-), a handler's value arm
-`e ^ { … } ~ { … }`, and a type constraint `T that cond` (S10.1.7). Each reads
+`e ^ { … } ~ { … }`, and a type constraint `T that cond` (S10.1.7v2). Each reads
 its own current item. The innermost body wins, and the outer current item is
 back when that body ends.
 
 A pipe body inside a `that` body — `|>` or `|:` — reads bare names as ordinary
-names, as it does everywhere (S10.1.7). In
+names, as it does everywhere (S10.1.7v2). In
 `order that len(lines |: ~.qty > 0) > 0`, `lines` is the order's `~.lines`,
 while the filter body spells `~.qty` for each line.
 
@@ -1095,7 +1095,7 @@ fn check_range(n: int) => match n {
 ```
 
 As in a `that` body, `~` may be left implicit: a bare field name in an arm
-reads that field of the matched value (S10.1.7).
+reads that field of the matched value (S10.1.7v2).
 
 ```lambda
 fn greet(user) => match user {

@@ -6,6 +6,9 @@
 #include "../lib/mempool.h"
 #include "../lib/log.h"
 #include "../lib/test_utils.h"
+#include "../lib/file.h"
+#include "../lib/shell.h"
+#include <unistd.h>
 #include <cstring>
 
 // Test fixture for system information functionality
@@ -123,4 +126,63 @@ TEST_F(SysInfoTest, test_invalid_sys_url) {
     // Test invalid sys URL
     ASSERT_FALSE(is_sys_url("invalid://url")) << "Should not detect invalid URL as sys://";
     ASSERT_FALSE(is_sys_url("sys:/incomplete")) << "Should not detect incomplete sys URL";
+}
+
+// The sys.* cache is per thread, but its Input and cached Items live in the
+// eval context's pool, which test-batch tears down after every script. Each
+// later script must rebuild the cache rather than read the first one's freed
+// Items (D4.2.6; vibe/Memory_Context.md §16.4).
+static const char* batch_section(const char* out, int index, size_t* len) {
+    const char* p = out;
+    for (int i = 0; i <= index; i++) {
+        p = strstr(p, "BATCH_START");
+        if (!p) return nullptr;
+        p += strlen("BATCH_START");
+    }
+    p = strchr(p, '\n');  // skip the script path
+    if (!p) return nullptr;
+    p++;
+    const char* end = strstr(p, "BATCH_END");
+    if (!end) return nullptr;
+    *len = (size_t)(end - p);
+    return p;
+}
+
+TEST(SysInfoRuntimeTest, CacheIsRebuiltAfterEachRuntimeInOneProcess) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    int generation = (int)getpid();
+    char script_path[128];
+    char manifest_path[128];
+    snprintf(script_path, sizeof(script_path), "temp/sysinfo_batch_%d.ls", generation);
+    snprintf(manifest_path, sizeof(manifest_path), "temp/sysinfo_batch_%d.txt", generation);
+    // os and cpu are cached for an hour, so later scripts would hit the cache
+    const char* script = "[sys.os.name, sys.os.platform, sys.cpu.cores, sys.lambda.version]\n";
+    ASSERT_EQ(write_binary_file(script_path, script, strlen(script)), 0);
+    char manifest[512];
+    snprintf(manifest, sizeof(manifest), "%s\n%s\n%s\n", script_path, script_path, script_path);
+    ASSERT_EQ(write_binary_file(manifest_path, manifest, strlen(manifest)), 0);
+
+    const char* lambda_exe = "./lambda.exe";
+    const char* args[] = {lambda_exe, "test-batch", "--no-log", "--timeout=10", NULL};
+    ShellOptions options = {};
+    options.stdin_path = manifest_path;
+    options.timeout_ms = 30000;
+    ShellResult result = shell_exec(lambda_exe, args, &options);
+    const char* out = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << out;
+
+    size_t first_len = 0;
+    const char* first = batch_section(out, 0, &first_len);
+    ASSERT_NE(first, nullptr) << out;
+    EXPECT_NE(strstr(out, "BATCH_END 0"), nullptr) << out;
+    for (int i = 1; i < 3; i++) {
+        size_t len = 0;
+        const char* section = batch_section(out, i, &len);
+        ASSERT_NE(section, nullptr) << "run " << i << ":\n" << out;
+        ASSERT_EQ(len, first_len) << "run " << i << ":\n" << out;
+        EXPECT_EQ(memcmp(section, first, len), 0) << "run " << i << ":\n" << out;
+    }
+    shell_result_free(&result);
+    unlink(script_path);
+    unlink(manifest_path);
 }

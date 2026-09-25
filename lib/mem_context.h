@@ -38,7 +38,6 @@ typedef enum MemKind {
     MEM_KIND_SCRATCH,      // lib/scratch_arena.c
     MEM_KIND_HEAP,         // gc_heap (Lambda runtime objects)
     MEM_KIND_NAMEPOOL,     // interned names
-    MEM_KIND_SHAPEPOOL,    // cached shapes
     MEM_KIND_JIT,          // MIR-generated executable code (mmap'd code pages)
     MEM_KIND_CACHE,        // self-managed cache (hashmap + LRU): font / image / vector
     MEM_KIND_VM_REGION,    // opaque platform VM extent (non-owning metadata)
@@ -50,7 +49,6 @@ typedef enum MemRole {
     MEM_ROLE_UNKNOWN = 0,
     MEM_ROLE_INPUT,        // input parser (JSON/XML/HTML/…)
     MEM_ROLE_AST,          // code AST (Lambda / Ruby / Python / JS)
-    MEM_ROLE_TYPE_SHAPE,   // TypeMap / ShapeEntry / type metadata
     MEM_ROLE_VIEW,         // Radiant view tree
     MEM_ROLE_NODE,         // DOM nodes
     MEM_ROLE_LAYOUT,       // layout scratch
@@ -235,6 +233,14 @@ void mem_reparent(MemNode* node, MemNode* new_parent);
 uint32_t mem_node_id(const MemNode* node);
 uint32_t mem_node_child_count(const MemNode* node);
 void*    mem_node_allocator(const MemNode* node);
+// The context that owns `node` (NULL for a NULL node).
+MemContext* mem_node_owner(const MemNode* node);
+
+// True while the calling thread is inside a cascade teardown
+// (mem_context_destroy / mem_context_shutdown). The registry lock is then held,
+// so code reached from a destroy callback must not call mem_context_* — for
+// example a pool cleanup (D4.2.6) that would release a context.
+bool mem_context_in_teardown(void);
 
 // ---- Document URL registry (process-global) ----
 

@@ -1518,7 +1518,19 @@ typedef struct AstObjectLiteralNode : AstMapNode {
     // type SHARES that type's TypeObject, so the per-literal content count
     // cannot live on the type — it is read from this node.
     AstNode* content;
+    // S11.4.10: the fields whose contract the compiler could not prove, which
+    // construction admits at run time; see object_field_deferred
+    uint64_t deferred_fields;
 } AstObjectLiteralNode;
+
+// Bit i marks field i; bit 63 stands for every field from 63 on.
+static inline uint64_t object_field_deferred_bit(int index) {
+    return 1ull << (index < 63 ? index : 63);
+}
+
+static inline bool object_field_deferred(uint64_t deferred_fields, int index) {
+    return (deferred_fields & object_field_deferred_bit(index)) != 0;
+}
 
 typedef struct AstYieldNode : AstNode {
     AstNode* argument;

@@ -2795,6 +2795,18 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
         if (interp_frame_pending(f)) return ItemNull;
     }
 
+    // S11.4.10: admit the fields the compiler could not prove before any
+    // object exists; a failure leaves as a failed spread does, and as the
+    // JIT's checked fill does
+    if (node->deferred_fields) {
+        Item failure = object_literal_admit_fields(object_type, values.items(),
+            field_count, node->deferred_fields);
+        if (get_type_id(failure) == LMD_TYPE_ERROR) {
+            interp_signal(f, EvalSignal::RETURNED, failure);
+            return failure;
+        }
+    }
+
     Object* fresh = object_with_tl(object_type->type_index, f->module->type_list);
     if (!fresh) return ItemError;
     Scratch object(f);

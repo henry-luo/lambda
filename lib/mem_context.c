@@ -528,6 +528,11 @@ uint32_t mem_node_child_count(const MemNode* node) {
 
 void* mem_node_allocator(const MemNode* node) { return node ? node->allocator : NULL; }
 
+// `owner` is set at registration and never changes, so no lock is needed.
+MemContext* mem_node_owner(const MemNode* node) { return node ? node->owner : NULL; }
+
+bool mem_context_in_teardown(void) { return g_in_teardown != 0; }
+
 // ============================================================================
 // Document URL registry
 // ============================================================================
@@ -885,7 +890,6 @@ const char* mem_kind_name(MemKind k) {
         case MEM_KIND_SCRATCH:   return "scratch";
         case MEM_KIND_HEAP:      return "heap";
         case MEM_KIND_NAMEPOOL:  return "namepool";
-        case MEM_KIND_SHAPEPOOL: return "shapepool";
         case MEM_KIND_JIT:       return "jit";
         case MEM_KIND_CACHE:     return "cache";
         case MEM_KIND_VM_REGION: return "vm_region";
@@ -898,7 +902,6 @@ const char* mem_role_name(MemRole r) {
     switch (r) {
         case MEM_ROLE_INPUT:        return "input";
         case MEM_ROLE_AST:          return "ast";
-        case MEM_ROLE_TYPE_SHAPE:   return "type_shape";
         case MEM_ROLE_VIEW:         return "view";
         case MEM_ROLE_NODE:         return "node";
         case MEM_ROLE_LAYOUT:       return "layout";

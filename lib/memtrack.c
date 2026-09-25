@@ -63,7 +63,6 @@ const char* memtrack_category_names[MEM_CAT_COUNT] = {
     [MEM_CAT_STRING]       = "string",
     [MEM_CAT_CONTAINER]    = "container",
     [MEM_CAT_NAMEPOOL]     = "namepool",
-    [MEM_CAT_SHAPEPOOL]    = "shapepool",
     [MEM_CAT_INPUT_JSON]   = "input-json",
     [MEM_CAT_INPUT_XML]    = "input-xml",
     [MEM_CAT_INPUT_HTML]   = "input-html",

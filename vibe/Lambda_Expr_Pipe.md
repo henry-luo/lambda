@@ -548,8 +548,9 @@ data | slice(0, 10)    // slice(data, 0, 10)
 > v37.1.0, §F.7): a single-subject body may leave `~` implicit, the pipe
 > family always spells it, and an implicit read never supplies a callee —
 > which S10.1.5v3's own `xs that len(~) > 2` needs. The same day it was
-> extended to match arms, handler value arms and type constraints (spec
-> v38.0.0; LR02-28, SO49 closed), and all of it is implemented. The set operators
+> extended to match arms, handler value arms and type constraints as
+> **S10.1.7v2** (spec v40.0.0; LR02-28, SO49 closed), and all of it is
+> implemented. The set operators
 > `| & !` keep P2's operand-kind rule until SO48 is ruled.
 
 ### §F.1 What was wrong with `that`
@@ -804,8 +805,8 @@ a bit.
 > (spec v37.1.0); closes SO47. **Extended the same day** (USER, on LR02-28):
 > a match arm, a handler's value arm and a constrained arm are single-subject
 > bodies too, and each reads its own current item. See "Every `~` binder is a
-> body" below. S10.1.7 was revised in place before it was published (spec
-> v38.0.0), which closed SO49.
+> body" below. The first form had already reached master, so the extension
+> is **S10.1.7v2** (spec v40.0.0), which also closed SO49.
 
 **The question.** The old `that` filter carried a convenience over from
 object constraints: in its body an unbound bare name read as a field of `~`
@@ -930,7 +931,7 @@ binding.* So:
   `that` body is a body of its own. A write target is never an implicit
   read (see "Callee names").
 
-The extension is a MAJOR revision (spec v38.0.0), because a working program
+The extension is a MAJOR revision (S10.1.7v2, spec v40.0.0), because a working program
 can change meaning in two ways:
 - `xs |> match (1) { … }` no longer maps.
 - A pipe body whose only `~` sits inside a nested `|>`, `|:` or `that` body
@@ -964,7 +965,7 @@ wrapper `(x) => len(x)` works in both versions.
   implicit fields.
 - The data-processing design (PD13) held bare column names in verb arguments
   as a possible later extension "via the implicit-field rule". Verb
-  arguments are a pipe body, so under S10.1.7 that extension would need the
+  arguments are a pipe body, so under S10.1.7v2 that extension would need the
   ruling revised.
 
 ## Grammar Changes

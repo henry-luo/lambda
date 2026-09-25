@@ -3068,6 +3068,50 @@ Object* object_fill_items(Object* obj, const Item* values, int value_count) {
     return obj;
 }
 
+// S11.4.10: an object literal admits the fields its compiler could not prove
+// (`deferred`, see object_field_deferred) against their declared contracts;
+// the fill below trusts its values, so nothing unadmitted may reach it. Each
+// admitted value replaces its source in the caller-rooted `values`. An error
+// value is kept only where the contract accepts error; elsewhere it is the
+// failure itself, keeping its diagnostic (S11.4.3).
+Item object_literal_admit_fields(const TypeObject* type, Item* values, int count,
+        uint64_t deferred) {
+    char boundary[192];
+    int index = 0;
+    for (ShapeEntry* field = type->shape; field && index < count;
+            field = field->next, index++) {
+        if (!field->type || !object_field_deferred(deferred, index)) continue;
+        if (get_type_id(values[index]) == LMD_TYPE_ERROR) {
+            if (lambda_type_accepts_error(field->type)) continue;
+            return values[index];
+        }
+        snprintf(boundary, sizeof(boundary), "field '%.*s' of %.*s",
+            field->name ? (int)field->name->length : 0, field->name ? field->name->str : "",
+            (int)type->type_name.length, type->type_name.str);
+        Item admitted = lambda_type_check(values[index], field->type, boundary);
+        if (get_type_id(admitted) == LMD_TYPE_ERROR) return admitted;
+        values[index] = admitted;
+    }
+    return ItemNull;
+}
+
+// The JIT's fill for a literal with deferred fields. Admission allocates, so
+// the values are rooted here first (the caller roots the object). Returns the
+// failure, or ItemNull once the object is filled.
+Item object_fill_checked(Object* obj, uint64_t deferred, ...) {
+    TypeObject* obj_type = (TypeObject*)obj->type;
+    int count = (int)obj_type->length;
+    RootSpan values((size_t)(count > 0 ? count : 1));
+    va_list args;
+    va_start(args, deferred);
+    for (int i = 0; i < count; i++) values.words()[i] = va_arg(args, uint64_t);
+    va_end(args);
+    Item failure = object_literal_admit_fields(obj_type, values.items(), count, deferred);
+    if (get_type_id(failure) == LMD_TYPE_ERROR) return failure;
+    object_fill_items(obj, values.items(), count);
+    return ItemNull;
+}
+
 // D2.6.6v2: an object wears its declared structural kind and reads its
 // attributes through the shared Map face, so this is map_get under a different
 // static parameter type. It keeps its own symbol because the system-function

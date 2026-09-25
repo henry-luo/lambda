@@ -60,12 +60,14 @@ public:
     friend void input_manager_destroy(InputManager* mgr);
 };
 
-// Release malloc-backed registries owned by an Input before its backing pool
-// or document context is destroyed.
+// Release the malloc-backed registries (name pool, type list) of an Input.
+// Idempotent. Callers only need it to free them before the pool dies.
 void input_release_auxiliary_resources(Input* input);
 
-// Release a completed document's Input-owned allocators. The caller still owns
-// the backing pool and URL carrier.
+// Release an Input's owned allocators (its context, arena and registries).
+// Idempotent. The pool the Input lives in calls it when the pool is destroyed
+// or reset (D4.2.6); call it directly only to release earlier. The caller
+// still owns the backing pool and URL carrier.
 void input_release_document_resources(Input* input);
 
 // ============================================================================
@@ -80,11 +82,14 @@ void input_manager_destroy(InputManager* mgr);
 // runtime-created private shape can safely outlive the transient JS key Item.
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id,
                               ShapeEntry* prev_entry);
+// The same, from a pool or an arena (a transition-tree entry takes the arena).
+ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
+                                 ShapeEntry* prev_entry);
 
 // A new entry with `like`'s identity (name, id, key kind, namespace) at a new
 // value type, linked after `prev_entry`; the name is shared, not copied, so
 // both must live in the same Input. Its byte_offset is the caller's to set.
-ShapeEntry* shape_entry_copy_as(Pool* pool, const ShapeEntry* like, TypeId type_id,
+ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like, TypeId type_id,
                                 ShapeEntry* prev_entry);
 
 #include "../io/mark_builder.hpp"

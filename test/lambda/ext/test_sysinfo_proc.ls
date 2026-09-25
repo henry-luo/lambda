@@ -9,11 +9,11 @@ sys.proc.self.pid
 "Current working directory (cwd):"
 sys.proc.self.cwd
 
-"Command line arguments (args):"
-sys.proc.self.args
+"Command line arguments (argv):"
+sys.proc.self.argv
 
-"Args count:"
-len(sys.proc.self.args)
+"Argv count:"
+len(sys.proc.self.argv)
 
 "=== sys.proc structure ==="
 "sys.proc:"

@@ -1197,7 +1197,7 @@ and loop reclaim, not a deletion prerequisite.
       check is unavailable — MIR must stay build-identical), negative-tested;
       and §5.8's INT64_ERROR gate was RUN — **not retired** (4 live compares,
       1 emitted), with the finding that deleting them would unmask an
-      `int64(<decimal>)` crash the surviving compare currently masks. See the
+      `i64(<decimal>)` crash the surviving compare currently masks. See the
       log entry; §5.8's step order is corrected there.
 - [x] P2.5 LambdaJS migration — landed 2026-08-17; Lambda/JS MIR emission
       48/48 + 21/21 and JS suite 351/351.
@@ -1937,7 +1937,9 @@ Gate **3859/3859**.
 work.** §5.8 asks to "grep-verify zero surviving `INT64_ERROR` compares",
 because the retired sentinel *is* `INT64_MAX`, which is now the `+inf` lane
 value. Result: **not retired.** 24 mentions; 4 live compares, of which one is
-on an emitted path (`box_int64_result_or_error`, reached from `int64()`).
+on an emitted path (`box_int64_result_or_error`, reached from `i64()`).
+
+The constructor examples use the current `i64` spelling (S17.5.1).
 
 Empirically the collision is dormant for ordinary values — a runtime `inf`
 propagates correctly through `div`/`+` (`%` gives `nan`) and never reads as an
@@ -1946,19 +1948,19 @@ error, because those paths use the lane-aware helpers, not the legacy
 carrying two of the sentinel returns).
 
 **But running the gate surfaced a crash, and the surviving compare is what
-hides it.** `int64(<decimal>)` SIGSEGVs — `Item::type_id()` dereferencing
+hides it.** `i64(<decimal>)` SIGSEGVs — `Item::type_id()` dereferencing
 `0x64`, i.e. the value `100` used as an Item pointer:
 
 ```
-pn main() { print([int64(100m)]); return 0 }     // exit 139
-pn main() { print(int64(100m));   return 0 }     // fine
-pn main() { let x = int64(100m); print([x]); return 0 }   // exit 139
+pn main() { print([i64(100m)]); return 0 }     // exit 139
+pn main() { print(i64(100m));   return 0 }    // fine
+pn main() { let x = i64(100m); print([x]); return 0 }   // exit 139
 ```
 
-`int64()` returns a **raw** `int64_t` while its type is `int64 | error`, which
+`i64()` returns a **raw** `int64_t` while its type is `i64 | error`, which
 lowers to ANY; a consumer that trusts "ANY means already an Item" reads the raw
 payload. `transpile_box_item` special-cases the direct call, but a binding
-loses the raw-ness before any consumer sees it. Note `int64(9223372036854775807m)`
+loses the raw-ness before any consumer sees it. Note `i64(9223372036854775807m)`
 does **not** crash — it returns `INT64_ERROR`, the surviving compare converts it
 to a proper `ItemError`, and the bug is masked. **Deleting the compare, as §5.8
 asks, would unmask this.**
@@ -1973,7 +1975,7 @@ was silently dropped on that path** — caught by the emission fixture, not by a
 value test. Reverted; the fixture is the reason to trust the revert.
 
 **Consequence for §5.8: its gate cannot be satisfied by deleting compares.**
-The order must be (1) give `int64()`-class sysfuncs a carrier that represents
+The order must be (1) give `i64()`-class sysfuncs a carrier that represents
 "raw int64 OR error" without stealing a domain value — which is precisely what
 shape 4's error lane exists for, so the answer is to route them through it —
 then (2) delete the compares. Recorded here because §5.8 currently reads as if

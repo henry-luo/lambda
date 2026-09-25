@@ -1622,7 +1622,7 @@ executes and normal completion continues after the handler. The complete two-arm
 remains primary-like at the member-access/postfix tier, so, for example,
 `e ^ { h } ~ { v }.field` means `(e ^ { h } ~ { v }).field`.
 
-> **Implicit fields (S10.1.7, ruled 2026-09-25).** The value arm binds `~` to
+> **Implicit fields (S10.1.7v2, ruled 2026-09-25).** The value arm binds `~` to
 > one value, as a `match` arm does, so it is a single-subject body: a bare
 > field name reads `~.name` of the result, as in `find(id) ^ { 0 } ~ { total }`,
 > unless a binding claims the name. The error arm binds `^` and keeps the

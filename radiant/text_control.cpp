@@ -117,6 +117,11 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
         f->control_type = FORM_CONTROL_SELECT;
     } else if (elem->tag_name && str_icmp_cstr(elem->tag_name, "button") == 0) {
         f->control_type = FORM_CONTROL_BUTTON;
+    } else if (elem->tag_name &&
+               (str_icmp_cstr(elem->tag_name, "fieldset") == 0 ||
+                str_icmp_cstr(elem->tag_name, "output") == 0)) {
+        // These expose setCustomValidity but have no editable control state.
+        f->control_type = FORM_CONTROL_NONE;
     } else {
         // This allocator is also the script-before-layout path; refuse a
         // non-control so state writers cannot fabricate a form owner.
@@ -124,7 +129,8 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
         return nullptr;
     }
     elem->form = f;
-    if (elem->role_kind() == DomElement::ROLE_NONE) {
+    if (f->control_type != FORM_CONTROL_NONE &&
+        elem->role_kind() == DomElement::ROLE_NONE) {
         elem->set_role_kind(DomElement::ROLE_FORM);
     }
     return f;

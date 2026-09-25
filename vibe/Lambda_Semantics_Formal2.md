@@ -1684,6 +1684,17 @@ limit-taking builtins follow the same contract: `{limit: n}` = first n,
 absence (omit/`null`), negative counts = `error()`. No function invents its own
 limit spelling.
 
+#### C15b.1 String-search index alignment (2026-09-25)
+
+S17.4.1 applies S2.5.8's code-point string index domain to every `find`
+match. Literal and pattern matches report the same zero-based index that
+`index_of`, string subscripts, and `slice` accept. For `"éabc"`, the match
+`"abc"` starts at index 1, though its UTF-8 byte offset is 2. RE2 and literal
+search still scan bytes internally; their result maps convert to code-point
+positions. A zero-width pattern advances by a whole code point so its next
+search starts at a valid text position. IL2-I12 records the prior byte-offset
+result.
+
 #### C14b Application (designer + review, 2026-07-06): division by zero never raises
 
 Designer challenge to the stale impl-plan line "machine-tier div-by-zero

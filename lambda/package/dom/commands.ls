@@ -285,7 +285,14 @@ pub pn exec(host, evt) {
     else {
         let descriptor = descriptor(evt.command);
         let target = invocation_host(host, evt, descriptor);
-        if (target == null) result.decline(true, false, "disabled", 0)
+        // D7.2.5: the package chooses the command; the engine dispatches its event.
+        if (target == null and descriptor.family == "copy") {
+            if (dom.clipboard_copy_event())
+                result.applied(true, true, false, false, false, 0,
+                               descriptor.history_class, false, "", null)
+            else result.decline(true, false, "disabled", 0)
+        }
+        else if (target == null) result.decline(true, false, "disabled", 0)
         else execute(target, evt, intent, evt.value)
     }
 }

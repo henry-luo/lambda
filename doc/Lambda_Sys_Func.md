@@ -54,7 +54,7 @@ Functions for type conversion and inspection.
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `int(x)` | Convert to integer | `int("42")` | `42` |
-| `int64(x)` | Convert to 64-bit integer (the explicit widening constructor; the only system function returning `int64`) | `int64("9999999999")` | `9999999999` |
+| `i64(x)` | Convert to signed 64-bit integer (the explicit widening constructor) | `i64("9999999999")` | `9999999999` |
 | `float(x)` | Convert to float | `float("3.14")` | `3.14` |
 | `decimal(x)` | Convert to arbitrary precision decimal | `decimal("123.456")` | `123.456m` |
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
@@ -62,10 +62,13 @@ Functions for type conversion and inspection.
 | `binary(x)` | Convert to immutable bytes | `binary("hello")` | `b'\x68656C6C6F'` |
 | `number(x)` | Convert to number (int or float) | `number("3.14")` | `3.14` |
 
+The callable sized-integer conversions are `i8(x)`, `i16(x)`, `i32(x)`,
+`i64(x)`, `u8(x)`, `u16(x)`, `u32(x)`, and `u64(x)` (S17.5.1).
+
 ### Return Type of Counts and Indices
 
 System functions that yield a **count** or a **position** return Lambda `int`, the unsized
-integer type — not `int64`:
+integer type — not `i64`:
 
 | Function | Returns |
 |----------|---------|
@@ -81,8 +84,8 @@ count, which is beyond any collection that can exist in a single address space. 
 `int` means ordinary arithmetic on a length (`9 - len(s)`) stays in the unsized integer lane
 instead of widening to another representation.
 
-`int64(x)` is the one deliberate exception: it is the explicit widening constructor, so it
-returns `int64` by definition. Use it when a value genuinely needs the wide lane.
+`i64(x)` is the one deliberate exception: it is the explicit widening constructor, so it
+returns `i64` by definition. Use it when a value genuinely needs the wide lane.
 
 > Planned change: `len()` will move to `integer` (arbitrary precision) in a future version, so
 > lengths of virtual or computed sequences are representable without a fixed ceiling. Code that
@@ -514,7 +517,7 @@ join(["x", "y"], "-")                // "x-y"
 
 ### find(str, pattern_or_string)
 
-Find all occurrences of a pattern or substring. Returns a list of match maps `{value, index}`.
+Find all occurrences of a pattern or substring. Returns an array of match maps `{value, index}`.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
@@ -523,7 +526,11 @@ Find all occurrences of a pattern or substring. Returns a list of match maps `{v
 
 Each match is a map with:
 - `value` — the matched substring
-- `index` — the start position (0-based) in the source string
+- `index` — the zero-based Unicode code-point position in the source string
+  (S17.4.1), suitable for string indexing and `slice`.
+
+For example, `find("éabc", "abc")[0].index` is `1`, so
+`slice("éabc", 1, 4)` returns `"abc"`.
 
 ```lambda
 type digits = \(d+)

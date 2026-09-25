@@ -1434,6 +1434,114 @@ TEST_F(MemoryPoolTest, InterleeavedReallocAndAlloc) {
 // Main Entry Point
 // ========================================================================
 
+// ========================================================================
+// Cleanups (D4.2.6): a pool owns a non-block resource and releases it at the
+// latest when its own blocks go
+// ========================================================================
+
+struct CleanupLog {
+    int order[8];
+    int count;
+};
+
+struct CleanupProbe {
+    CleanupLog* log;
+    int id;
+    const int* block;   // a pool block the cleanup reads, when set
+    int block_value;    // what it read
+    Pool* pool;         // registers `nested` on this pool, when set
+    CleanupProbe* nested;
+};
+
+static void record_cleanup(void* arg) {
+    CleanupProbe* probe = (CleanupProbe*)arg;
+    if (probe->block) probe->block_value = *probe->block;
+    if (probe->log->count < 8) probe->log->order[probe->log->count] = probe->id;
+    probe->log->count++;
+    if (probe->pool && probe->nested) {
+        pool_add_cleanup(probe->pool, record_cleanup, probe->nested);
+    }
+}
+
+TEST(PoolCleanupTest, DestroyRunsCleanupsNewestFirst) {
+    Pool* p = pool_create();
+    ASSERT_NE(p, nullptr);
+    CleanupLog log = {};
+    CleanupProbe probes[3] = {{&log, 1}, {&log, 2}, {&log, 3}};
+    for (CleanupProbe& probe : probes) {
+        ASSERT_TRUE(pool_add_cleanup(p, record_cleanup, &probe));
+    }
+    pool_destroy(p);
+    ASSERT_EQ(log.count, 3);
+    EXPECT_EQ(log.order[0], 3);
+    EXPECT_EQ(log.order[1], 2);
+    EXPECT_EQ(log.order[2], 1);
+}
+
+TEST(PoolCleanupTest, CleanupRunsWhileBlocksAreStillValid) {
+    Pool* p = pool_create();
+    ASSERT_NE(p, nullptr);
+    int* block = (int*)pool_alloc(p, sizeof(int));
+    ASSERT_NE(block, nullptr);
+    *block = 42;
+    CleanupLog log = {};
+    CleanupProbe probe = {&log, 1, block};
+    ASSERT_TRUE(pool_add_cleanup(p, record_cleanup, &probe));
+    pool_destroy(p);
+    EXPECT_EQ(log.count, 1);
+    EXPECT_EQ(probe.block_value, 42);
+}
+
+TEST(PoolCleanupTest, ResetRunsCleanupsOnceAndPoolStaysUsable) {
+    Pool* p = pool_create();
+    ASSERT_NE(p, nullptr);
+    CleanupLog log = {};
+    CleanupProbe probe = {&log, 1};
+    ASSERT_TRUE(pool_add_cleanup(p, record_cleanup, &probe));
+    pool_reset(p);
+    EXPECT_EQ(log.count, 1);
+    EXPECT_NE(pool_alloc(p, 32), nullptr);
+    pool_destroy(p);
+    EXPECT_EQ(log.count, 1);  // the reset consumed it
+}
+
+TEST(PoolCleanupTest, DrainRunsCleanups) {
+    Pool* p = pool_create();
+    ASSERT_NE(p, nullptr);
+    CleanupLog log = {};
+    CleanupProbe probe = {&log, 1};
+    ASSERT_TRUE(pool_add_cleanup(p, record_cleanup, &probe));
+    pool_drain(p);
+    EXPECT_EQ(log.count, 1);
+    EXPECT_FALSE(pool_add_cleanup(p, record_cleanup, &probe));  // drained pools are invalid
+    pool_destroy(p);
+    EXPECT_EQ(log.count, 1);
+}
+
+TEST(PoolCleanupTest, CleanupAddedDuringTeardownStillRuns) {
+    Pool* p = pool_create();
+    ASSERT_NE(p, nullptr);
+    CleanupLog log = {};
+    CleanupProbe inner = {&log, 2};
+    CleanupProbe outer = {&log, 1, nullptr, 0, p, &inner};
+    ASSERT_TRUE(pool_add_cleanup(p, record_cleanup, &outer));
+    pool_destroy(p);
+    ASSERT_EQ(log.count, 2);
+    EXPECT_EQ(log.order[0], 1);
+    EXPECT_EQ(log.order[1], 2);
+}
+
+TEST(PoolCleanupTest, AddCleanupRejectsMissingPoolOrCallback) {
+    CleanupLog log = {};
+    CleanupProbe probe = {&log, 1};
+    EXPECT_FALSE(pool_add_cleanup(nullptr, record_cleanup, &probe));
+    Pool* p = pool_create();
+    ASSERT_NE(p, nullptr);
+    EXPECT_FALSE(pool_add_cleanup(p, nullptr, &probe));
+    pool_destroy(p);
+    EXPECT_EQ(log.count, 0);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

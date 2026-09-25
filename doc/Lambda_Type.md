@@ -803,7 +803,7 @@ string that (len(~) > 0)           // Non-empty string
 ```
 
 When the value is a map or an element, a bare field name in the predicate
-reads that field of `~`, as in a `that` proviso (S10.1.7):
+reads that field of `~`, as in a `that` proviso (S10.1.7v2):
 
 ```lambda
 type Adult = {age: int} that (age >= 18);   // same as (~.age >= 18)
@@ -898,7 +898,7 @@ type Config {
 }
 ```
 
-In an object-level `that` clause, a field is read by its bare name, as in the type's methods (S10.1.7). A declared field shadows an outer binding of the same name; any other name that is not in scope resolves to `~.name`:
+In an object-level `that` clause, a field is read by its bare name, as in the type's methods (S10.1.7v2). A declared field shadows an outer binding of the same name; any other name that is not in scope resolves to `~.name`:
 
 ```lambda
 type User2 {

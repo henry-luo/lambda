@@ -263,7 +263,7 @@ one-arm form, `~` retains any enclosing match, pipe, constraint, or view
 meaning. In the optional two-arm form, `~` is rebound inside the second arm to
 the non-error operand result. As in a `that` body or a match arm, that `~` may
 be left implicit: `find(id) ^ { 0 } ~ { total + tax }` reads `~.total` and
-`~.tax` of the found record (S10.1.7). In the wrapper form `e ^ { ^ }`, the handler
+`~.tax` of the found record (S10.1.7v2). In the wrapper form `e ^ { ^ }`, the handler
 explicitly acknowledges a hard raised error and wraps that current error into
 a soft `error` value, changing the result from a raised channel into
 `T | error` data.

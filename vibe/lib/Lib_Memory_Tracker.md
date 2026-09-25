@@ -97,7 +97,6 @@ typedef enum MemCategory {
     MEM_CAT_STRING,        // String data (non-pooled)
     MEM_CAT_CONTAINER,     // List, Map, Element, Array
     MEM_CAT_NAMEPOOL,      // Name pool entries
-    MEM_CAT_SHAPEPOOL,     // Shape pool entries
 
     // Input parsers
     MEM_CAT_INPUT_JSON,
