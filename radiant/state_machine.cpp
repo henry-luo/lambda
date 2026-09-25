@@ -793,9 +793,8 @@ static void validate_selection_invariants(DocState* state,
         }
     } else {
         DomBoundaryOrder anchor_focus = dom_boundary_compare(&anchor, &focus);
-        if (selection->direction == DOM_SEL_DIR_NONE) {
-            report_fail(report, "non-collapsed DOM selection has no direction");
-        } else if (selection->direction == DOM_SEL_DIR_FORWARD && anchor_focus == DOM_BOUNDARY_AFTER) {
+        // Pointer multi-click can create a non-collapsed directionless range.
+        if (selection->direction == DOM_SEL_DIR_FORWARD && anchor_focus == DOM_BOUNDARY_AFTER) {
             report_fail(report, "forward DOM selection direction is inconsistent");
         } else if (selection->direction == DOM_SEL_DIR_BACKWARD && anchor_focus == DOM_BOUNDARY_BEFORE) {
             report_fail(report, "backward DOM selection direction is inconsistent");

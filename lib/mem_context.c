@@ -528,6 +528,11 @@ uint32_t mem_node_child_count(const MemNode* node) {
 
 void* mem_node_allocator(const MemNode* node) { return node ? node->allocator : NULL; }
 
+// `owner` is set at registration and never changes, so no lock is needed.
+MemContext* mem_node_owner(const MemNode* node) { return node ? node->owner : NULL; }
+
+bool mem_context_in_teardown(void) { return g_in_teardown != 0; }
+
 // ============================================================================
 // Document URL registry
 // ============================================================================

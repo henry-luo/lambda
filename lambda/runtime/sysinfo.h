@@ -20,19 +20,19 @@ extern "C" {
 typedef struct Path Path;
 
 /**
- * Initialize sysinfo module.
- * Must be called before any sysinfo_resolve_* functions.
+ * Lazily initialize sysinfo data for the current evaluation context.
+ * Path resolution also initializes it on first use.
  */
 void sysinfo_init(void);
 
 /**
- * Set command line arguments for sys.proc.self.args access.
+ * Set command line arguments for sys.proc.self.argv access.
  * Should be called early in main() before any sys path resolution.
  *
  * @param argc Argument count from main()
  * @param argv Argument vector from main()
  */
-void sysinfo_set_args(int argc, char** argv);
+void sysinfo_set_argv(int argc, char** argv);
 
 /**
  * Get the stored command line argument count.
@@ -45,7 +45,7 @@ int sysinfo_get_argc(void);
 char** sysinfo_get_argv(void);
 
 /**
- * Shutdown sysinfo module and free resources.
+ * Release the current EvalContext's sysinfo Input before its heap pool ends.
  */
 void sysinfo_shutdown(void);
 
@@ -61,12 +61,14 @@ void sysinfo_shutdown(void);
  *   sys.os.name      → String "Darwin", "Linux", "Windows"
  *   sys.cpu          → Map{cores, threads, arch, ...}
  *   sys.memory       → Map{total, free, used, ...}
- *   sys.proc.self    → Map{pid, cwd, args, env}
+ *   sys.proc.self    → Map{pid, cwd}
+ *   sys.proc.self.argv → Array of command line arguments
+ *   sys.proc.self.env → Map of environment variables
  *   sys.proc.self.env.PATH → String (environment variable)
  *   sys.time         → Map{now, uptime}
  *   sys.lambda       → Map{version}
- *   sys.home         → Path (user home directory)
- *   sys.temp         → Path (temp directory)
+ *   sys.home         → String (user home directory)
+ *   sys.temp         → String (temp directory)
  */
 Item sysinfo_resolve_path(Path* path);
 

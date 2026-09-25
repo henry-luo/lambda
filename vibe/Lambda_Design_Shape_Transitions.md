@@ -45,6 +45,15 @@ Every map built as `id` then `name`, with those value types, lands on the last n
 
 Only plain maps enter the tree, and only with ordinary string keys. Symbol and private keys, which need their own identity, and array-index keys on array property maps keep a private type.
 
+### Where the tree lives (2026-09-25)
+
+Nodes and edges come from the `Input`'s arena: the roots, each child with its copied chain, lookup table and slot array, and each `TypeMapTransition` (`input_tree_alloc`, `TypeAlloc`). None is ever freed on its own, which is the arena's side of D4.1.4v4 (sequential allocation, batch free), and the arena goes with the `Input`, which the pool it lives in now owns (D4.2.6). Before, they came from the `Input`'s pool, whose per-block free the tree never used.
+- **The element-root table is the exception.** Growing it replaces it and frees the old one, so it stays a pool block. A replaced table used to be left in the pool until the pool died.
+- **Private types stay in the pool:** clones, fresh types where the tree declined, and editor rebuilds that own their chain.
+- **JavaScript descriptor retags** (`js_property_attrs.cpp`) keep `js_input`'s pool for their edges and targets. A retag target can be an existing private clone promoted in place, so moving them would change which object is cloned, not only where it is stored.
+
+Measured before the move on a release build, over two 13 MiB corpora: creating types took 0.36 ms of a 1,260 ms parse (layout tests: 1,831 types, 9,892 allocations) and 0.89 ms of 69 ms (77 real sites: 5,179 types, 33,379 allocations). A zeroed 64-byte block costs 13.6 ns from the pool and 3.7 ns from the arena, so the arena saves about 0.1 and 0.33 ms, plus the pool's 32-byte header on each allocation (0.3 and 1.1 MB). The tree's time is in its edge lookups, which the allocator does not touch: 98.7% and 94.6% of attribute adds follow an existing edge.
+
 ## 4. A shared type is immutable
 
 Nothing edits a shared type in place:
@@ -102,13 +111,14 @@ Phases and gates: [Impl_Element_Type_Sharing](impl/Lambda_Impl_Element_Type_Shar
 
 ## Appendix A — Implementation pointers
 
-- `lambda/lambda-data.hpp`: `TypeMap`'s sharing fields (`transitions`, `is_transition_shared_shape`, `is_shared_constructor_shape`, `is_private_clone`), `TypeMapTransition`, `typemap_is_shared_shape`.
-- `lambda/input/input.cpp`: `map_transition_prefix_matches_parent`, `map_transition_target_for_add` (`MAX_SHAPE_TRANSITIONS`, `MAX_SHAPE_GRAPH`), `map_shape_transition_root`, `map_put_via_shape_transition`, `map_put_with_data_growth`, `map_clone_typemap_for_mutation`, `map_finalize_shape` (a no-op), `elmt_finalize_shape`.
+- `lambda/lambda-data.hpp`: `TypeMap`'s sharing fields (`transitions`, `is_transition_shared_shape`, `is_shared_constructor_shape`, `is_private_clone`), `TypeMapTransition`, `typemap_is_shared_shape`, `TypeTreeStep`; `TypeAlloc`, `type_alloc_zeroed`, `typemap_hash_build_in` (storage).
+- `lambda/input/input.cpp`: `transition_target_for_key` (`MAX_SHAPE_TRANSITIONS`, `MAX_SHAPE_GRAPH`, `MAX_ELEMENT_SHAPE_GRAPH`), `map_transition_prefix_matches_parent`, `map_transition_target_for_add`, `map_shape_transition_root`, `map_put_via_shape_transition`, `map_put_with_data_growth`, `map_clone_typemap_for_mutation`, `elmt_tree_root`, `elmt_put_tree`, `type_tree_root_like`, `type_tree_follow`, `input_tree_alloc`.
+- `lambda/core/lambda-data.cpp`: `alloc_type_in`.
 - `lambda/runtime/lambda-data-runtime.cpp`: `map`, `map_alloc_for_type` (literal types), `elmt_with_type`, `map_put_heap`.
 - `lambda/runtime/lambda-eval.cpp`: `map_extend_open_shape`, `map_rebuild_for_type_change`.
-- `lambda/io/mark_builder.cpp`: `ElementBuilder`, `ElementBuilder::final`.
-- `lambda/io/mark_editor.cpp`: `container_rebuild_with_new_shape`.
-- `lambda/core/shape_pool.cpp`, `lambda/core/shape_builder.cpp`.
+- `lambda/io/mark_builder.cpp`: `ElementBuilder` (starts on `elmt_tree_root`), `putToElement`.
+- `lambda/io/mark_editor.cpp`: `container_rebuild_with_new_shape`, `rebuild_steps`, `rebuild_private_chain`.
+- `lambda/core/shape_builder.cpp` (the editor's field list; the shape pool is deleted).
 
 ## Appendix S — Superseded rulings
 

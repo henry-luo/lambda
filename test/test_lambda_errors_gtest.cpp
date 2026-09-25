@@ -828,8 +828,7 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
     EXPECT_GT(tp.error_count, 0);
 
     arraylist_free(tp.const_list);
-    arraylist_free(input->type_list);
-    pool_destroy(pool);
+    pool_destroy(pool);  // releases the Input too (D4.2.6)
 }
 
 TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
@@ -870,8 +869,7 @@ TEST(AstBuildReductionTest, SyntaxPhaseDefersBindingUntilResolve) {
 
     lambda_rd_destroy_syntax(syntax);
     arraylist_free(tp.const_list);
-    arraylist_free(input->type_list);
-    pool_destroy(pool);
+    pool_destroy(pool);  // releases the Input too (D4.2.6)
 }
 
 TEST_F(ErrorCreationTest, CreateFormattedError) {

@@ -9,6 +9,8 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
+#include "../lib/mem_context.h"
+#include "../lib/mem_factory.h"
 #include "../lib/arraylist.h"
 #include "../lib/stringbuf.h"
 #include "../lib/log.h"
@@ -1636,4 +1638,149 @@ TEST_F(MarkBuilderTest, DeeplyNestedStructureSurvivesBuilderDestruction) {
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
+}
+
+// ============================================================================
+// Input lifetime (D4.2.6): the pool an Input lives in releases it at the
+// latest. Before, an Input without a URL had no owner for its arena, so each
+// one left an arena registered in the root context for the life of the process.
+// ============================================================================
+
+static uint32_t live_allocator_count() {
+    MemSnapshot* snap = mem_snapshot_capture(NULL);
+    uint32_t count = snap ? snap->count : 0;
+    mem_snapshot_free(snap);
+    return count;
+}
+
+// builds a map and an element, so the arena, the name pool and the transition
+// tree (maps and elements) all hold something
+static void build_sample_document(Input* input, int n) {
+    MarkBuilder builder(input);
+    Item map = builder.map().put("name", "value").put("n", (int64_t)n).final();
+    Item elmt = builder.element("p").attr("class", "x").text("hello").final();
+    ASSERT_EQ(get_type_id(map), LMD_TYPE_MAP);
+    ASSERT_EQ(get_type_id(elmt), LMD_TYPE_ELEMENT);
+}
+
+TEST(InputLifetimeTest, UrlLessInputIsReleasedWithItsPool) {
+    log_init(NULL);
+    // one warm-up round so lazily created process-wide owners are not counted
+    Pool* warm = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.input.warm");
+    ASSERT_NE(warm, nullptr);
+    build_sample_document(Input::create(warm, nullptr), 0);
+    mem_pool_destroy(warm);
+
+    uint32_t before = live_allocator_count();
+    for (int i = 0; i < 64; i++) {
+        Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.input");
+        ASSERT_NE(pool, nullptr);
+        Input* input = Input::create(pool, nullptr);
+        ASSERT_NE(input, nullptr);
+        ASSERT_NE(input->mem_ctx, nullptr);  // every Input has its own context
+        build_sample_document(input, i);
+        mem_pool_destroy(pool);
+    }
+    EXPECT_EQ(live_allocator_count(), before);
+}
+
+TEST(InputLifetimeTest, ExplicitReleaseLeavesNothingForThePool) {
+    log_init(NULL);
+    uint32_t before = live_allocator_count();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.input.release");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    build_sample_document(input, 1);
+    input_release_document_resources(input);
+    EXPECT_EQ(input->mem_ctx, nullptr);
+    EXPECT_EQ(input->arena, nullptr);
+    EXPECT_EQ(input->type_list, nullptr);
+    input_release_document_resources(input);  // idempotent
+    mem_pool_destroy(pool);                   // the cleanup finds it released
+    EXPECT_EQ(live_allocator_count(), before);
+}
+
+TEST(InputLifetimeTest, ContextCascadeReleasesInputOnItsPool) {
+    log_init(NULL);
+    uint32_t before = live_allocator_count();
+    MemContext* ctx = mem_context_create(NULL, MEM_ROLE_INPUT, "test.cascade");
+    ASSERT_NE(ctx, nullptr);
+    Pool* pool = mem_pool_create(ctx, MEM_ROLE_INPUT, "test.cascade.pool");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    build_sample_document(input, 2);
+    // The cascade destroys the Input's context (a child of `ctx`) before the
+    // pool, then runs the pool's cleanup with the registry lock held; the
+    // cleanup must not re-enter the registry.
+    mem_context_destroy(ctx);
+    EXPECT_EQ(live_allocator_count(), before);
+}
+
+// ============================================================================
+// Transition-tree storage (D3.4.3v2, D4.1.4v4): nodes and edges are never
+// freed one by one, so they come from the Input's arena; the element-root
+// table is replaced as it grows, so it is a pool block and the old one is freed.
+// ============================================================================
+
+TEST(TransitionTreeStorageTest, NodesAndEdgesComeFromTheArena) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.storage");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item map = builder.map().put("a", (int64_t)1).put("b", "x").final();
+    Item elmt = builder.element("p").attr("class", "x").final();
+
+    TypeMap* map_type = (TypeMap*)map.map->type;
+    ASSERT_TRUE(map_type->is_transition_shared_shape);
+    EXPECT_TRUE(arena_owns(input->arena, map_type));
+    EXPECT_TRUE(arena_owns(input->arena, map_type->shape));
+    if (map_type->field_index) EXPECT_TRUE(arena_owns(input->arena, map_type->field_index));
+    TypeMap* root = input->shape_transition_root;
+    ASSERT_NE(root, nullptr);
+    EXPECT_TRUE(arena_owns(input->arena, root));
+    ASSERT_NE(root->transitions, nullptr);
+    EXPECT_TRUE(arena_owns(input->arena, root->transitions));
+
+    TypeElmt* elmt_type = (TypeElmt*)elmt.element->type;
+    ASSERT_TRUE(elmt_type->is_transition_shared_shape);
+    EXPECT_TRUE(arena_owns(input->arena, elmt_type));
+    EXPECT_FALSE(arena_owns(input->arena, input->element_roots));
+    mem_pool_destroy(pool);
+}
+
+TEST(TransitionTreeStorageTest, RootTableGrowthFreesTheOldTable) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.roots");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    // intern the tags first, so only elmt_tree_root touches the pool below
+    enum { TAGS = 100 };
+    String* tags[TAGS];
+    for (int i = 0; i < TAGS; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "tag%d", i);
+        tags[i] = name_pool_create_name(input->name_pool, name);
+        ASSERT_NE(tags[i], nullptr);
+    }
+    PoolStats before = {};
+    pool_get_detailed_stats(pool, &before);
+    for (int i = 0; i < TAGS; i++) {
+        TypeElmt* root = elmt_tree_root(input, tags[i], NULL);
+        ASSERT_NE(root, nullptr);
+        EXPECT_TRUE(arena_owns(input->arena, root));
+    }
+    PoolStats after = {};
+    pool_get_detailed_stats(pool, &after);
+    // the table is kept at most half full: 64 -> 128 -> 256 slots, and each
+    // replaced table went back to the pool
+    EXPECT_EQ(input->element_root_cap, 256);
+    EXPECT_EQ(after.allocation_count - before.allocation_count, 3u);
+    EXPECT_EQ(after.free_count - before.free_count, 2u);
+    EXPECT_EQ(elmt_tree_root(input, tags[7], NULL), elmt_tree_root(input, tags[7], NULL));
+    mem_pool_destroy(pool);
 }

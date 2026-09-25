@@ -1169,9 +1169,11 @@ extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
 
 static Item js_create_event_init_with_class(const char* type, bool bubbles,
         bool cancelable, bool composed, JsClass class_id) {
-    RootFrame roots(1);
+    RootFrame roots(3);
     Rooted<Item> event_root(roots, radiant_dom_event_create(type, bubbles,
         cancelable, composed, (int)class_id));
+    Rooted<Item> init_key_root(roots, ItemNull);
+    Rooted<Item> init_function_root(roots, ItemNull);
     // Event construction performs many allocating property writes; keep the
     // partially initialized receiver precise until it is returned to JS.
     Item event = event_root.get();
@@ -1190,8 +1192,10 @@ static Item js_create_event_init_with_class(const char* type, bool bubbles,
     event_set_item(event, "srcElement", ItemNull);
     event_set_item(event, "currentTarget", ItemNull);
 
-    dom_realm_set(event, make_string_item("initEvent"),
-                       dom_realm_new_function(js_event_init_event));
+    // D5.3.3: function allocation can collect an unrooted property-name Item.
+    init_key_root.set(make_string_item("initEvent"));
+    init_function_root.set(dom_realm_new_function(js_event_init_event));
+    dom_realm_set(event_root.get(), init_key_root.get(), init_function_root.get());
 
     // F17 projects legacy aliases directly from the native record. Per-wrapper
     // accessors would recreate a second cancellation state.
@@ -1378,13 +1382,15 @@ extern "C" Item js_event_get_modifier_state(Item key_arg) {
 // Build a UIEvent base. `view` is constrained to be Window, null, or undefined
 // (per IDL); throws TypeError if a non-Window/non-null value is supplied.
 static Item build_ui_event(const char* type, Item init, const char* class_name) {
+    RootFrame roots(2);
+    Rooted<Item> init_root(roots, init);
     JsClass class_id = js_class_from_name(class_name,
         class_name ? (int)strlen(class_name) : 0);
-    Item ev = js_create_event_init_with_class(type ? type : "",
-        init_bool(init, "bubbles", false),
-        init_bool(init, "cancelable", false),
-        init_bool(init, "composed", false), class_id);
-    Item view = init_item(init, "view");
+    Rooted<Item> event_root(roots, js_create_event_init_with_class(type ? type : "",
+        init_bool(init_root.get(), "bubbles", false),
+        init_bool(init_root.get(), "cancelable", false),
+        init_bool(init_root.get(), "composed", false), class_id));
+    Item view = init_item(init_root.get(), "view");
     // Per IDL view is Window? — we accept null/undefined or a value that looks
     // like the global window object. Reject other types with TypeError.
     if (init_present(view)) {
@@ -1395,12 +1401,12 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
                 "Failed to construct event: view member is not of type Window.");
             return dom_raise(n, m);
         }
-        event_set_item(ev, "view", view);
+        event_set_item(event_root.get(), "view", view);
     } else {
-        event_set_item(ev, "view", ItemNull);
+        event_set_item(event_root.get(), "view", ItemNull);
     }
-    event_set_int(ev, "detail", init_int(init, "detail", 0));
-    return ev;
+    event_set_int(event_root.get(), "detail", init_int(init_root.get(), "detail", 0));
+    return event_root.get();
 }
 
 #define JS_DOM_UI_EVENT_CTOR(name, class_name) \
@@ -1417,25 +1423,30 @@ extern "C" Item js_ctor_focus_event_fn(Item type_arg, Item init_arg) {
 
 static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
         const char* class_name) {
-    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, class_name));
-    stamp_modifiers(ev, init_arg);
-    event_set_double(ev, "screenX", init_double(init_arg, "screenX", 0.0));
-    event_set_double(ev, "screenY", init_double(init_arg, "screenY", 0.0));
-    event_set_double(ev, "clientX", init_double(init_arg, "clientX", 0.0));
-    event_set_double(ev, "clientY", init_double(init_arg, "clientY", 0.0));
-    event_set_double(ev, "pageX",   init_double(init_arg, "pageX", 0.0));
-    event_set_double(ev, "pageY",   init_double(init_arg, "pageY", 0.0));
-    event_set_double(ev, "x",       init_double(init_arg, "clientX", 0.0));
-    event_set_double(ev, "y",       init_double(init_arg, "clientY", 0.0));
-    event_set_double(ev, "offsetX", 0.0);
-    event_set_double(ev, "offsetY", 0.0);
-    event_set_double(ev, "movementX", init_double(init_arg, "movementX", 0.0));
-    event_set_double(ev, "movementY", init_double(init_arg, "movementY", 0.0));
-    event_set_int(ev, "button",  init_int(init_arg, "button", 0));
-    event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
-    event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
-    dom_realm_set_name(ev, "getModifierState", dom_realm_new_function(js_event_get_modifier_state));
-    return ev;
+    // D5.3.3: each event property write may collect the init and event carriers.
+    RootFrame roots(3);
+    Rooted<Item> type_root(roots, type_arg);
+    Rooted<Item> init_root(roots, init_arg);
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_root.get()), init_root.get(), class_name));
+    Rooted<Item> event_root(roots, ev);
+    stamp_modifiers(event_root.get(), init_root.get());
+    event_set_double(event_root.get(), "screenX", init_double(init_root.get(), "screenX", 0.0));
+    event_set_double(event_root.get(), "screenY", init_double(init_root.get(), "screenY", 0.0));
+    event_set_double(event_root.get(), "clientX", init_double(init_root.get(), "clientX", 0.0));
+    event_set_double(event_root.get(), "clientY", init_double(init_root.get(), "clientY", 0.0));
+    event_set_double(event_root.get(), "pageX",   init_double(init_root.get(), "pageX", 0.0));
+    event_set_double(event_root.get(), "pageY",   init_double(init_root.get(), "pageY", 0.0));
+    event_set_double(event_root.get(), "x",       init_double(init_root.get(), "clientX", 0.0));
+    event_set_double(event_root.get(), "y",       init_double(init_root.get(), "clientY", 0.0));
+    event_set_double(event_root.get(), "offsetX", 0.0);
+    event_set_double(event_root.get(), "offsetY", 0.0);
+    event_set_double(event_root.get(), "movementX", init_double(init_root.get(), "movementX", 0.0));
+    event_set_double(event_root.get(), "movementY", init_double(init_root.get(), "movementY", 0.0));
+    event_set_int(event_root.get(), "button",  init_int(init_root.get(), "button", 0));
+    event_set_int(event_root.get(), "buttons", init_int(init_root.get(), "buttons", 0));
+    event_set_item(event_root.get(), "relatedTarget", init_item(init_root.get(), "relatedTarget"));
+    dom_realm_set_name(event_root.get(), "getModifierState", dom_realm_new_function(js_event_get_modifier_state));
+    return event_root.get();
 }
 
 #define JS_DOM_MOUSE_EVENT_CTOR(name, class_name) \
@@ -1682,9 +1693,11 @@ JS_DOM_TIMING_EVENT_CTOR(js_ctor_animation_event_fn,
 // for `HTMLElement.prototype.click()`. Per spec, all coordinate / button fields
 // default to 0; modifiers all false; detail = 1.
 extern "C" Item js_create_click_mouse_event(void) {
-    Item init = js_create_native_event_init(true, true, true);
-    event_set_int(init, "detail", 1);
-    return js_ctor_mouse_event_fn(js_name_item("click"), init);
+    RootFrame roots(2);
+    Rooted<Item> init_root(roots, js_create_native_event_init(true, true, true));
+    event_set_int(init_root.get(), "detail", 1);
+    Rooted<Item> type_root(roots, js_name_item("click"));
+    return js_ctor_mouse_event_fn(type_root.get(), init_root.get());
 }
 
 // ============================================================================
@@ -1695,11 +1708,12 @@ extern "C" Item js_create_click_mouse_event(void) {
 
 static Item js_create_native_event_init(bool bubbles, bool cancelable,
                                         bool composed) {
-    Item init = js_new_object();
-    event_set_bool(init, "bubbles", bubbles);
-    event_set_bool(init, "cancelable", cancelable);
-    event_set_bool(init, "composed", composed);
-    return init;
+    RootFrame roots(1);
+    Rooted<Item> init_root(roots, js_new_object());
+    event_set_bool(init_root.get(), "bubbles", bubbles);
+    event_set_bool(init_root.get(), "cancelable", cancelable);
+    event_set_bool(init_root.get(), "composed", composed);
+    return init_root.get();
 }
 
 static Item js_create_trusted_native_event(const char* type, Item init,

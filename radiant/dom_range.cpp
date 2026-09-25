@@ -264,6 +264,7 @@ DomRange* dom_range_create(DocState* state) {
     }
     memset(r, 0, sizeof(*r));
     r->state = state;
+    r->allocation_state = state;
     r->is_live = true;
     // Range identity is diagnostic-only but must not cross documents or race
     // concurrent document lifecycles.
@@ -293,7 +294,8 @@ void dom_range_release(DomRange* range) {
     if (range->ref_count == 0) {
         DocState* state = range->state;
         dom_range_unlink_from_state(state, range);
-        DomRange** freelist = dom_range_state_range_freelist_slot(state);
+        DomRange** freelist = dom_range_state_range_freelist_slot(
+            range->allocation_state);
         if (freelist) {
             range->is_live = false;
             range->prev = NULL;
@@ -913,6 +915,34 @@ void dom_range_unlink_from_state(DocState* state, DomRange* range) {
     else if (*head == range) *head = range->next;
     if (range->next) range->next->prev = range->prev;
     range->prev = range->next = NULL;
+}
+
+void dom_range_adopt_subtree(DocState* source, DocState* destination,
+                             DomNode* subtree) {
+    if (!source || !destination || source == destination || !subtree) return;
+    DomRange** head = dom_range_state_live_ranges_slot(source);
+    if (!head) return;
+    for (DomRange* range = *head; range;) {
+        DomRange* next = range->next;
+        // Removal has already collapsed boundaries that straddled the move.
+        // A range fully inside the adopted subtree must follow its nodes so
+        // later mutations in the destination document still adjust it.
+        if (range->start.node && range->end.node &&
+                view_geometry_dom_is_descendant(range->start.node, subtree, true) &&
+                view_geometry_dom_is_descendant(range->end.node, subtree, true)) {
+            DomSelection* selection = dom_range_state_selection(source);
+            if (selection) dom_selection_remove_range(selection, range);
+            if (!range->is_live) {
+                range = next;
+                continue;
+            }
+            dom_range_unlink_from_state(source, range);
+            range->state = destination;
+            dom_range_invalidate_layout(range);
+            dom_range_link_into_state(destination, range);
+        }
+        range = next;
+    }
 }
 
 void dom_range_refresh_lifecycle_pins(DomDocument* doc) {
@@ -1762,6 +1792,7 @@ static bool node_is_in_non_selectable_subtree(const DomNode* n) {
         if (!p->is_element()) continue;
         const char* tag = p->as_element()->tag_name;
         if (!tag) continue;
+        if (tag[0] == ':' && tag[1] == ':') return true;
         if (str_icmp_cstr(tag, "script") == 0 ||
             str_icmp_cstr(tag, "style") == 0 ||
             str_icmp_cstr(tag, "head") == 0 ||
@@ -3425,6 +3456,11 @@ static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host
     if (!codepoint_is_collapsible_space(next)) {
         return boundary_after_codepoint(next);
     }
+    // A collapsed whitespace run occupies one visible caret step, whose DOM
+    // position is immediately after its first space.
+    if (!codepoint_is_collapsible_space(prev_modify_codepoint(b, host))) {
+        return boundary_after_codepoint(next);
+    }
 
     DomBoundary scan = b;
     DomBoundary last = b;
@@ -3432,7 +3468,9 @@ static DomBoundary move_one_visible_char_forward(DomBoundary b, DomElement* host
         next = next_modify_codepoint(scan, host);
         if (!next.found) return last;
         DomBoundary after = boundary_after_codepoint(next);
-        if (!codepoint_is_collapsible_space(next)) return last;
+        if (!codepoint_is_collapsible_space(next)) {
+            return boundary_after_codepoint(next);
+        }
         if (after.node == scan.node && after.offset == scan.offset) return last;
         last = after;
         scan = after;
@@ -3724,6 +3762,7 @@ static DomBoundary editing_host_line_boundary(DomBoundary focus,
 static DomBoundary move_one_word(DomBoundary b, int dir) {
     DomBoundary cur = b;
     DomElement* host = editing_host_of(b.node);
+    DomElement* start_block = nearest_block_ancestor_or_self(b.node);
     DomNode* atomic = dir > 0 ? atomic_caret_stop_after_boundary(b, host)
                               : atomic_caret_stop_before_boundary(b, host);
     if (atomic) {
@@ -3770,6 +3809,11 @@ static DomBoundary move_one_word(DomBoundary b, int dir) {
         ModifyCodepoint cp = dir > 0 ? next_modify_codepoint(cur, host)
                                      : prev_modify_codepoint(cur, host);
         if (!cp.found) return cur;
+        // Generated content is skipped above; a word run must still stop at
+        // the authored block edge before it reaches the adjacent line.
+        if (start_block &&
+                nearest_block_ancestor_or_self(static_cast<DomNode*>(cp.text)) !=
+                    start_block) return cur;
         if (!cp_is_wordlike(cp.cp)) return cur;
         if (cp_script_class(cp.cp) != run_class) return cur;
         DomBoundary next = dir > 0 ? boundary_after_codepoint(cp)
@@ -4371,7 +4415,19 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
         if (extend && dir > 0) {
             anchor = normalize_line_forward_anchor(anchor);
         }
-        if (line_stop_list_move(focus, host, dir, &structural_line)) {
+        if (host && tx) {
+            // Across explicit breaks or block boundaries, keep the caret's
+            // text offset on the adjacent line inside the editing host.
+            target = find_paragraph_text(tx, dir);
+            if (target && !node_is_descendant_of(static_cast<DomNode*>(target),
+                                                  host)) {
+                target = nullptr;
+            }
+        }
+        // Structural stops are scoped to an editing host. Scanning the whole
+        // document collapses every block under <body> into its last text node.
+        if (!target && host && line_stop_list_move(focus, host, dir,
+                                                   &structural_line)) {
             new_focus = structural_line;
         } else if (tx) {
             // Walk past whitespace-only text nodes (typical between block-level

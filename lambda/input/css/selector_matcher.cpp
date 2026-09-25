@@ -116,6 +116,13 @@ void selector_matcher_set_pseudo_state_resolver(SelectorMatcher* matcher,
     }
 }
 
+bool selector_element_is_open_disclosure(DomElement* element) {
+    return element && element->tag_name &&
+        (str_icmp_cstr(element->tag_name, "details") == 0 ||
+         str_icmp_cstr(element->tag_name, "dialog") == 0) &&
+        element->has_attribute("open");
+}
+
 static bool selector_matcher_get_pseudo_state(SelectorMatcher* matcher,
                                               DomElement* element,
                                               uint32_t pseudo_state) {
@@ -148,6 +155,8 @@ static bool selector_matcher_get_pseudo_state(SelectorMatcher* matcher,
             // anything yet. Reading the attribute directly here made `:selected`
             // match the page's *default* selection forever.
             return dom_option_is_selected(element);
+        case PSEUDO_STATE_OPEN:
+            return selector_element_is_open_disclosure(element);
         case PSEUDO_STATE_PLACEHOLDER_SHOWN:
             {
                 const char* placeholder = element->get_attribute("placeholder");
@@ -834,6 +843,8 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_VALID);
         case CSS_SELECTOR_PSEUDO_INVALID:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_INVALID);
+        case CSS_SELECTOR_PSEUDO_OPEN:
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_OPEN);
         case CSS_SELECTOR_PSEUDO_READ_ONLY:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_READ_ONLY);
         case CSS_SELECTOR_PSEUDO_READ_WRITE:
@@ -1491,6 +1502,7 @@ uint32_t selector_matcher_pseudo_class_to_flag(const char* pseudo_class) {
     if (str_ieq_const(pseudo_class, pc_len, "indeterminate")) return PSEUDO_STATE_INDETERMINATE;
     if (str_ieq_const(pseudo_class, pc_len, "valid")) return PSEUDO_STATE_VALID;
     if (str_ieq_const(pseudo_class, pc_len, "invalid")) return PSEUDO_STATE_INVALID;
+    if (str_ieq_const(pseudo_class, pc_len, "open")) return PSEUDO_STATE_OPEN;
     if (str_ieq_const(pseudo_class, pc_len, "required")) return PSEUDO_STATE_REQUIRED;
     if (str_ieq_const(pseudo_class, pc_len, "optional")) return PSEUDO_STATE_OPTIONAL;
     if (str_ieq_const(pseudo_class, pc_len, "read-only")) return PSEUDO_STATE_READ_ONLY;
@@ -1520,6 +1532,7 @@ const char* selector_matcher_flag_to_pseudo_class(uint32_t flag) {
         case PSEUDO_STATE_INDETERMINATE: return "indeterminate";
         case PSEUDO_STATE_VALID: return "valid";
         case PSEUDO_STATE_INVALID: return "invalid";
+        case PSEUDO_STATE_OPEN: return "open";
         case PSEUDO_STATE_REQUIRED: return "required";
         case PSEUDO_STATE_OPTIONAL: return "optional";
         case PSEUDO_STATE_READ_ONLY: return "read-only";

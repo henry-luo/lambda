@@ -12,7 +12,7 @@ This documents the end-to-end path for calling a normal Lambda function: how the
 
 Every call expression is lowered by `transpile_call` (`transpile-mir.cpp:10136`), which wraps `transpile_call_raw` (`:8701`) (the wrapper only adds async suspend/resume splitting for procs that may await). `transpile_call_raw` resolves the callee in this order:
 
-1. **Special forms** — type-coercion calls (`int64(x)`, sized-num casts), then system functions (`print`, `select`, vmap ops, …). These compile to dedicated runtime-helper calls and never touch the user-function machinery.
+1. **Special forms** — sized-type conversions and system functions (`i64(x)`, `print`, `select`, vmap ops, …). These compile to dedicated runtime-helper calls and never touch the user-function machinery. [S17.5.1]
 2. **Imported module functions** — the import-call arm (mangled name, import ref, same marshaling as direct calls).
 3. **Direct call** — the callee identifier resolves to a known `AST_NODE_FUNC` / `FUNC_EXPR` / `PROC` definition **and** is not shadowed by a local variable. The shadow guard checks `find_var()`: if the name is a variable or parameter, it holds a *function value* at runtime and must go dynamic, even when AST type inference propagated the function type to it (prevents mis-treating `render_fn(args)` as a direct call).
 4. **Dynamic call** (`:10039`) — everything else: closures in variables, function-typed params, member functions used as values. Goes through the `fn_call*_into` runtime family.

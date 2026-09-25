@@ -31,6 +31,7 @@ typedef struct MatchResult MatchResult;
 typedef struct SelectorCache SelectorCache;
 typedef struct SelectorEntry SelectorEntry;
 typedef bool (*SelectorPseudoStateResolver)(void* context, DomElement* element, uint32_t pseudo_state);
+bool selector_element_is_open_disclosure(DomElement* element);
 
 // ============================================================================
 // Selector Entry (for caching)

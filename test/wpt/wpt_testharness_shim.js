@@ -834,6 +834,7 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
     var aeTag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : "";
     var isTC = (aeTag === "INPUT" || aeTag === "TEXTAREA");
     if (isTC) {
+        if (!_wpt_control_accepts_keyboard_edit(ae)) return;
         if (code === 0xE013 && _wpt_spin_number_control(ae, +1)) return; // ArrowUp
         if (code === 0xE015 && _wpt_spin_number_control(ae, -1)) return; // ArrowDown
         var v = ae.value || "";
@@ -2953,6 +2954,7 @@ function _wpt_spin_number_control(el, delta) {
     try { tag = String(el.tagName || "").toUpperCase(); } catch (_) {}
     try { type = String(el.type || el.getAttribute("type") || "").toLowerCase(); } catch (_) {}
     if (tag !== "INPUT" || type !== "number") return false;
+    if (!_wpt_control_accepts_keyboard_edit(el)) return true;
     if (!_wpt_dispatch_input_event(el, "beforeinput", "insertReplacementText", null)) {
         return true;
     }
@@ -2970,8 +2972,13 @@ function _wpt_spin_number_control(el, delta) {
     return true;
 }
 
+function _wpt_control_accepts_keyboard_edit(el) {
+    // The synthetic driver must honor the control's native editing gate.
+    return !!el && !el.disabled && !el.readOnly;
+}
+
 function _wpt_insert_text_in_control(el, text) {
-    if (!el) return false;
+    if (!_wpt_control_accepts_keyboard_edit(el)) return false;
     var v = el.value || "";
     var ss = el.selectionStart;
     var se = el.selectionEnd;
@@ -4906,11 +4913,8 @@ if (typeof document !== "undefined" && document &&
     };
 }
 
-// Fail-fast fetch shim: WPT clipboard tests load resources/*.png via fetch().
-// Lambda's runtime fetch attempts a real network request which produces a
-// terminal "Could not resolve host" error and aborts the script. We override
-// with a synchronous-rejecting stub so individual promise_tests fail cleanly
-// without poisoning sibling tests in the same file.
+// The headless runner serves WPT fixture URLs from its local ref/wpt tree.
+// Read binary assets through readSync: readFileSync currently decodes bytes as UTF-8.
 (function() {
     var orig = (typeof fetch === "function") ? fetch : null;
     var stub = function(url) {
@@ -4925,6 +4929,34 @@ if (typeof document !== "undefined" && document &&
                 });
             } catch (_) {
                 return Promise.resolve({ ok: false, text: function() { return Promise.resolve(""); } });
+            }
+        }
+        var local = path;
+        if (local.indexOf("/clipboard-apis/") === 0) local = local.substring(16);
+        if (/^resources\/[A-Za-z0-9_.-]+$/.test(local)) {
+            try {
+                var fs = require("fs");
+                var file = "ref/wpt/clipboard-apis/" + local;
+                var size = fs.statSync(file).size;
+                var bytes = Buffer.alloc(size);
+                var fd = fs.openSync(file, "r");
+                var count = 0;
+                try {
+                    while (count < size) {
+                        var read = fs.readSync(fd, bytes, count, size - count, count);
+                        if (read === 0) break;
+                        count += read;
+                    }
+                } finally { fs.closeSync(fd); }
+                var mime = /\.png$/i.test(local) ? "image/png" : "application/octet-stream";
+                var blob = new Blob([bytes.subarray(0, count)], { type: mime });
+                return Promise.resolve({
+                    ok: true,
+                    blob: function() { return Promise.resolve(blob); },
+                    text: function() { return blob.text(); }
+                });
+            } catch (e) {
+                return Promise.reject(e);
             }
         }
         return Promise.reject(new TypeError("NetworkError: fetch is not supported in headless WPT shim (" + url + ")"));

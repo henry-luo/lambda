@@ -16910,9 +16910,12 @@ static MirValue transpile_for(MirTranspiler* mt, AstForNode* for_node,
     mir_binder_raw_guard_cse_clear(mt);
 
     bool saved_item_position = mt->for_finish_item_position;
+    bool saved_block_returned = mt->block_returned;
     mt->for_finish_item_position = mir_take_list_item_position(mt, (AstNode*)for_node);
     MIR_reg_t result = emit_for_result(mt, for_node, result_demanded);
     mt->for_finish_item_position = saved_item_position;
+    // a loop body may return, but the loop exit remains reachable when no item runs.
+    mt->block_returned = saved_block_returned;
     return mir_value_from_reg(mt, (AstNode*)for_node, result, VALUE_REP_ITEM,
         ((AstNode*)for_node)->type);
 }
@@ -42113,9 +42116,9 @@ static void transpile_mir_ast_lower(MirModuleBuild* build) {
         child = child->next;
     }
 
-    // Emit invocation of user-defined main() procedure if present
-    // Equivalent to C transpiler's: if (rt->run_main) result = _main0();
-    child = script->child;
+    // An imported module's entry initializes it; only the entry script may
+    // conditionally invoke its user-defined main procedure.
+    child = mt.owner_script && !mt.owner_script->is_main ? nullptr : script->child;
     while (child) {
         if (child->node_type == AST_NODE_CONTENT) {
             child = ((AstListNode*)child)->item;
@@ -43701,7 +43704,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
         runner_setup_context(&runner);
         if (!runner.context) return nullptr;
         RuntimeExecutionScope execution_scope(runner.context);
-        runner.context->run_main = run_main;
+        // Imported entries share this Context but must run only module init.
+        runner.context->run_main = false;
 
         // Instantiate every module's fixed context-owned slabs before any
         // initialization code reads or writes a module binding.

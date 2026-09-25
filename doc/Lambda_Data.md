@@ -693,7 +693,7 @@ sys.proc.self.pid        // Current process ID
 sys.proc.self.ppid       // Parent process ID
 sys.proc.self.uid        // User ID (Unix)
 sys.proc.self.gid        // Group ID (Unix)
-sys.proc.self.argv       // Command-line arguments as list
+sys.proc.self.argv       // Argument array, including executable at index 0 (S17.3.1)
 sys.proc.self.cwd        // Current working directory (as Path)
 sys.process              // Alias for sys.proc.self
 

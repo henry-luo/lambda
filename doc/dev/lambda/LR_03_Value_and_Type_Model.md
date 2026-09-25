@@ -101,6 +101,8 @@ A shared type (`typemap_is_shared_shape`) is never edited in place. An add with 
 
 Parsed elements share the same way (P1 of the element plan). `ElementBuilder` starts each element on its tag's root — `elmt_tree_root`, a pool-owned table keyed by the pooled tag name and namespace — and `putToElement` adds attributes through the tree (`elmt_put_tree`), so elements with one tag, namespace and attribute sequence share one `TypeElmt`; their types carry no per-instance content count (the child count lives only in `List::length`). Element nodes count against their own budget, 16,384 per `Input` (`MAX_ELEMENT_SHAPE_GRAPH`). Runtime-built elements (`elmt_put` without an `Input`) and elements past the budget keep types of their own. There is no shape pool: it was retired once maps, elements and editor rebuilds all shared through the tree.
 
+**Storage.** Tree nodes and edges — the roots, each child with its copied chain, lookup table and slot array, and every `TypeMapTransition` — come from the `Input`'s arena (`input_tree_alloc`, `TypeAlloc`), because none is ever freed on its own (D4.1.4v4); they go with the `Input` (D4.2.6). The element-root table is the exception: growing it replaces it and frees the old one, so it is a pool block. Private types stay in the pool. JavaScript descriptor retags (`js_property_attrs.cpp`) keep `js_input`'s pool for their edges and targets, because a retag target can be an existing private clone promoted in place.
+
 ---
 
 ## 5. Static `Type*` vs runtime `TypeId`

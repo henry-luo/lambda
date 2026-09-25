@@ -94,6 +94,11 @@ Process-related information is grouped under `sys.proc`, modeled after Linux's `
 | `sys.home` | User's home directory | `/Users/alice` |
 | `sys.temp` | System temp directory | `/tmp` or `/var/folders/...` |
 
+**Argument vector (S17.3.1, IL2-I25).** `sys.proc.self.argv` is the only
+argument-vector field. It includes the executable at index 0 and retains the
+CLI subcommand and script path when supplied; Lambda's consumed startup flags
+are absent. The former `args` field has no compatibility alias.
+
 ### 2.1 Process Identification
 
 Current process info is accessed via `sys.proc.self` (like `/proc/self` in Linux):
