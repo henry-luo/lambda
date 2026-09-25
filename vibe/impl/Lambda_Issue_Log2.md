@@ -355,11 +355,20 @@ All issues below were first recorded on 2026-09-25.
 - **Observed / expected:** a path value should retain its type when assigned
   to a map field. The static-module inventory stores path values in a flat
   array and sorts them natively; its complete JSON output matches Python.
-- **Status:** open runtime value-storage defect; the exact map/GC cause has
-  not been isolated.
-- **Resolution / ruling:** D2 defines the tagged value representation and D4
-  governs runtime container ownership; neither permits a path value to
-  silently turn into an error on map insertion.
+- **Root cause:** a loop value inferred as `any` is stored in a packed
+  `TypedItem` field. `typeditem_store_item` retained its `Path*`, but
+  `typeditem_to_item` lacked `LMD_TYPE_PATH` and returned `ItemError`.
+  Statically path-typed fields already worked; both execution tiers shared
+  the faulty reader.
+- **Status:** fixed in the shared `TypedItem` reader. The regression
+  `test/lambda/path_map_fields.ls` and its `.txt` golden pass in interpreter,
+  forced JIT, and auto modes, covering direct/dynamic map reads, element
+  attributes, and recursive filesystem iteration. Isolated map storage also
+  passes forced GC; the separate wildcard-cache lifetime defect is IL2-I26.
+  `make test-lambda-baseline` passed 5,918/5,918 combined Lambda/Input cases.
+- **Resolution / ruling:** D2.6.1v3 requires descriptor-selected packed field
+  storage; D2.1.5 requires canonical value reconstruction. The reader now
+  restores the stored direct path pointer through the existing pointer arm.
 
 ## IL2-I21 — no documented procedural regular-expression API
 
@@ -446,3 +455,23 @@ All issues below were first recorded on 2026-09-25.
 - **Resolution / ruling:** S17.3.1 names `sys.proc.self.argv`, defines its
   filtered command-line vector, and excludes the old alias. The resolver and
   system-information examples now use that spelling.
+
+## IL2-I26 — cached path iteration results are not retained across GC
+
+- **Area:** path resolution / GC ownership.
+- **Reproduction:** with `LAMBDA_GC_FORCE_EVERY=1` and
+  `LAMBDA_GC_POISON_FREED=1`, collect
+  `[for (entry in \.test.input.dir.**) entry]` or map records containing
+  each entry. Both interpreter and JIT lose later entries after the first
+  loop-body allocation; the runtime reports `item_at` type 221 (freed-memory
+  poison), and later paths read as null.
+- **Root cause:** `path_resolve_for_iteration` caches a GC-allocated result
+  array in the pool-owned `Path::result`. The pool allocation is outside
+  collector traversal, and the cache has no precise root owner. Keeping the
+  path alive therefore does not keep the cached array alive.
+- **Status:** open; discovered under forced GC while validating IL2-I20.
+  The failure also occurs with a plain array of paths and is independent of
+  the packed map-field reader fixed there.
+- **Resolution / ruling:** D4.1.3 distinguishes pool ownership from GC
+  ownership; D5.3.3 requires precise native-helper roots. The cache needs an
+  explicit lifetime owner; native-stack scanning must not be restored.

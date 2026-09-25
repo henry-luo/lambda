@@ -1,0 +1,7 @@
+{
+  direct: [path, true],
+  dynamic: [path, true, true],
+  lookup: [path, true],
+  attribute: [path, true],
+  iterated: [true, true, true, true]
+}
