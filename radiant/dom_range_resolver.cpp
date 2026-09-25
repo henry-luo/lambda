@@ -72,7 +72,8 @@ extern "C" float dom_range_glyph_x_for_byte_offset(UiContext* uicon,
     return view_geometry_interpolate_text_x(text, rect, byte_offset, false);
 }
 
-static DomNode* child_at_boundary_offset(DomElement* elem, uint32_t offset) {
+extern "C" DomNode* dom_range_child_at_boundary_offset(DomElement* elem,
+                                                        uint32_t offset) {
     if (!elem) return NULL;
     uint32_t i = 0;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
@@ -379,7 +380,7 @@ static bool resolve_boundary(const DomBoundary* b,
         // contenteditable=false islands, inline controls) tied to real
         // layout boxes instead of the parent element's origin.
         DomElement* el = lam::dom_require_element(n);
-        DomNode* next = child_at_boundary_offset(el, b->offset);
+        DomNode* next = dom_range_child_at_boundary_offset(el, b->offset);
         DomNode* previous = child_before_boundary_offset(el, b->offset);
         bool is_inline_boundary = is_inline_element_boundary(n);
         uint32_t child_count = is_inline_boundary ? element_child_count(el) : 0;

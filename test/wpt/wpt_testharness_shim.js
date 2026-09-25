@@ -5226,5 +5226,8 @@ function _wpt_print_summary() {
             setTimeout(function() { tick(remaining - 1); }, 10);
         }
     }
-    tick(256);
+    // Tests can register their assertions from an already-settled Promise
+    // (for example, document.fonts.ready). Let those callbacks run before
+    // deciding that the file contains no tests.
+    Promise.resolve().then(function() { tick(256); });
 }

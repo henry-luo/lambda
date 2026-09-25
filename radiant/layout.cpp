@@ -370,11 +370,20 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
 
     DomElement* target = doc->pending_scroll_into_view_target;
     bool center = doc->pending_scroll_into_view_center;
+    bool if_needed = doc->pending_scroll_into_view_if_needed;
     DomNodeRef target_ref = {(DomNode*)target,
                              doc->pending_scroll_into_view_target_id};
     doc->pending_scroll_into_view_target = nullptr;
     doc->pending_scroll_into_view_target_id = 0;
     doc->pending_scroll_into_view_center = false;
+    doc->pending_scroll_into_view_if_needed = false;
+
+    // A zero-area inline has no scrollable target rectangle. In particular,
+    // focusable empty spans must not reset their ancestor's current scroll.
+    if (if_needed && (target->width <= 0.0f || target->height <= 0.0f)) {
+        dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
+        return;
+    }
 
     float target_x = layout_scroll_document_coord(target, true);
     float target_y = layout_scroll_document_coord(target, false);
@@ -386,7 +395,27 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
         float local_y = target_y - layout_scrollport_start(scroll_container, false);
         float scroll_x = local_x;
         float scroll_y = local_y;
-        if (center) {
+        if (if_needed) {
+            ViewBlock* scroll_block = lam::view_require_block(
+                static_cast<View*>(scroll_container));
+            float scrollport_width = layout_content_size_from_border_box(
+                scroll_block, scroll_container->width, true);
+            float scrollport_height = layout_content_size_from_border_box(
+                scroll_block, scroll_container->height, false);
+            float current_x = 0.0f;
+            float current_y = 0.0f;
+            scroll_state_get_position_for_view(doc->state,
+                static_cast<View*>(scroll_container), scroll_container->scroll()->pane,
+                &current_x, &current_y, nullptr, nullptr);
+            float nearest_x = layout_scroll_nearest_position(
+                local_x, target->width, current_x, scrollport_width);
+            float nearest_y = layout_scroll_nearest_position(
+                local_y, target->height, current_y, scrollport_height);
+            scroll_x = center && nearest_x != current_x
+                ? local_x + (target->width - scrollport_width) * 0.5f : nearest_x;
+            scroll_y = center && nearest_y != current_y
+                ? local_y + (target->height - scrollport_height) * 0.5f : nearest_y;
+        } else if (center) {
             ViewBlock* scroll_block = lam::view_require_block(
                 static_cast<View*>(scroll_container));
             float scrollport_width = layout_content_size_from_border_box(
@@ -412,17 +441,27 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
                  scroll_container->tag_name ? scroll_container->tag_name : "?");
     } else {
         float current_scroll_x = 0.0f;
+        float current_scroll_y = 0.0f;
         if (root_block->scroller && root_block->scroll()->pane) {
             DocState* state = doc->state;
             scroll_state_get_position_for_view(
                 state, static_cast<View*>(root_block), root_block->scroll()->pane,
-                &current_scroll_x, nullptr, nullptr, nullptr);
+                &current_scroll_x, &current_scroll_y, nullptr, nullptr);
         }
         float viewport_width = lycon->width;
         float viewport_height = lycon->height;
         target_x -= layout_scrollport_start(root_elem, true);
         target_y -= layout_scrollport_start(root_elem, false);
-        if (center) {
+        if (if_needed) {
+            float nearest_x = layout_scroll_nearest_position(
+                target_x, target->width, current_scroll_x, viewport_width);
+            float nearest_y = layout_scroll_nearest_position(
+                target_y, target->height, current_scroll_y, viewport_height);
+            target_x = center && nearest_x != current_scroll_x
+                ? target_x + (target->width - viewport_width) * 0.5f : nearest_x;
+            target_y = center && nearest_y != current_scroll_y
+                ? target_y + (target->height - viewport_height) * 0.5f : nearest_y;
+        } else if (center) {
             // HTML focus() uses center alignment on both viewport axes.
             target_x += (target->width - viewport_width) * 0.5f;
             target_y += (target->height - viewport_height) * 0.5f;
