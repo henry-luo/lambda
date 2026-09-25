@@ -96,6 +96,7 @@ static char** g_argv = nullptr;
 // ============================================================================
 
 static bool cache_valid(time_t cached_at, int ttl);
+static Input* sysinfo_create_input(Pool* pool);
 static int collect_path_segments(Path* path, const char** segments, int max_segments);
 static Item resolve_root(void);
 static Item resolve_os(void);
@@ -130,7 +131,7 @@ extern "C" void sysinfo_init(void) {
         if (context) {
             Pool* pool = eval_context_get_pool();
             if (pool) {
-                g_cache->input = Input::create(pool, nullptr, nullptr);
+                g_cache->input = sysinfo_create_input(pool);
                 log_info("sysinfo_init: created input %p", g_cache->input);
             }
         }
@@ -165,6 +166,24 @@ extern "C" void sysinfo_invalidate_cache(void) {
         g_cache->time_time = 0;
         g_cache->lambda_time = 0;
     }
+}
+
+// D4.2.6: the cache is per thread, but its Input and every Item cached from it
+// live in the eval context's pool. When that pool is released, forget both;
+// otherwise a later runtime on this thread builds into and reads freed memory.
+static void sysinfo_pool_released(void* arg) {
+    (void)arg;
+    sysinfo_invalidate_cache();
+    if (g_cache) g_cache->input = nullptr;
+}
+
+static Input* sysinfo_create_input(Pool* pool) {
+    Input* input = Input::create(pool, nullptr, nullptr);
+    if (input && !pool_add_cleanup(pool, sysinfo_pool_released, nullptr)) {
+        log_error("sysinfo: failed to tie the cache to its pool");
+        return nullptr;
+    }
+    return input;
 }
 
 // ============================================================================
@@ -224,7 +243,7 @@ static Input* get_input(void) {
     if (!g_cache->input && context) {
         Pool* pool = eval_context_get_pool();
         if (pool) {
-            g_cache->input = Input::create(pool, nullptr, nullptr);
+            g_cache->input = sysinfo_create_input(pool);
         }
     }
 

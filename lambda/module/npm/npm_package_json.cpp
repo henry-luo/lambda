@@ -6,8 +6,8 @@
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/mem_factory.h"
-#include "../../../lambda-data.hpp"
-#include "../../../core/mark_reader.hpp"
+#include "../../lambda-data.hpp"
+#include "../../core/mark_reader.hpp"
 // forward-declare JSON parser to avoid transitive input.hpp linkage issues
 class Input;
 Item parse_json_to_item(Input* input, const char* json_string);
@@ -130,13 +130,10 @@ NpmPackageJson* npm_package_json_parse_string(const char* json_content) {
 
     pkg->valid = true;
 
-    // NOTE: we intentionally do NOT destroy the pool here, because extracted
-    // string pointers (via cstring()) may point into pool memory. The pool
-    // is kept alive. For the npm use case, package.json is parsed once and
-    // the pool lifetime matches the process. For short-lived usage, the
-    // mem_strdup'd fields are the safe copies.
-    // Actually, since extract_string uses mem_strdup, the pool can be freed:
-    mem_pool_destroy(pool);
+    // exports_item, imports_item and raw_item point into the parsed JSON, so
+    // the package owns the parse pool; destroying it here left them dangling
+    // (the strings only survived while an Input arena outlived its pool).
+    pkg->parse_pool = pool;
 
     return pkg;
 }
@@ -178,6 +175,9 @@ void npm_package_json_free(NpmPackageJson* pkg) {
     free_deps(pkg->peer_dependencies, pkg->peer_dep_count);
     free_deps(pkg->scripts, pkg->script_count);
     free_deps(pkg->bin, pkg->bin_count);
+
+    // releases the parsed JSON and its Input (D4.2.6)
+    if (pkg->parse_pool) mem_pool_destroy(pkg->parse_pool);
 
     mem_free(pkg);
 }

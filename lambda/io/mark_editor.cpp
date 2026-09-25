@@ -683,7 +683,7 @@ static ShapeEntry* rebuild_private_chain(Pool* pool, const TypeTreeStep* steps,
     for (int i = 0; i < count; i++) {
         const TypeTreeStep* step = &steps[i];
         ShapeEntry* entry = step->like
-            ? shape_entry_copy_as(pool, step->like, step->type_id, prev)
+            ? shape_entry_copy_as(type_alloc_of_pool(pool), step->like, step->type_id, prev)
             : alloc_shape_entry(pool, step->key, step->type_id, prev);
         if (!entry) return NULL;
         if (step->like) {

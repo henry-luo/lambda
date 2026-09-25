@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <stdlib.h>
+#include <stdbool.h>
 
 /**
  * Pool-owned variable-size allocator. The Pool owns growth extents, block
@@ -51,6 +52,16 @@ void pool_drain(Pool* pool);
  * @param pool Pool to reset
  */
 void pool_reset(Pool* pool);
+
+/**
+ * Register a cleanup (D4.2.6): `fn(arg)` runs once when the pool releases its
+ * blocks — pool_destroy, pool_drain or pool_reset — newest first, while the
+ * pool is still valid. It lets the pool own a resource that is not one of its
+ * blocks, which then dies with the pool at the latest. Lifecycle only: the
+ * pool does not keep the resource's bytes.
+ * @return false if the pool is invalid or the record cannot be allocated
+ */
+bool pool_add_cleanup(Pool* pool, void (*fn)(void* arg), void* arg);
 
 /**
  * Allocate memory from a specific pool
