@@ -15,13 +15,14 @@
 
 ## Archive index
 
-This archive contains **115 historical records**: 114 RESOLVED entries and one
-CLOSED design decision. LR03-11, LR07-16, LR07-17 and LR10-7, from the
+This archive contains **135 historical records**: 130 fixed or resolved entries,
+one CLOSED design decision, and four records CLOSED by consolidation into
+[LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The six newest are the list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
-2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — moved
+2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
 provenance is not lost. The first sections contain records formerly
 interleaved with live entries; §15 preserves the 44 records from the former
@@ -50,6 +51,90 @@ layout records. Removing the dead `uint8_t*` field walk removes its unguarded
 `Mod` layout contract outright, consistent with the single MIR Direct pipeline
 in **D8.2.5**. Existing paired-loop and module fixtures still pass after the
 removal.
+
+<a id="lr01-14"></a>**LR01-14 · A rebuilt `lang-python` module bound `_map_read_field` by its C name · FIXED 2026-09-22**
+`py_runtime.h` included `lambda-data.hpp` inside its own `extern "C"` block,
+so that header's C++ declarations took C linkage in the Python module alone.
+Once 22911fb88 (2026-09-18) declared `_map_read_field` there, a freshly built
+`lang-python.dylib` imported `__map_read_field`, which `lambda.exe` does not
+export (`-undefined dynamic_lookup` bound it to null), and the first class
+definition crashed (`test_py_gtest` 13 of 43 at SIGSEGV; the dylib in use had
+been built before that commit, which hid it). The header now includes
+`lambda-data.hpp` first, outside the block, and the rebuilt module imports
+the C++ name: `test_py_gtest` 39 of 43. The remaining four fail identically
+on a clean build of upstream HEAD `bb3909e36` with the same header fix:
+`test_py_advanced_oop` prints `[]` for its plugin registry
+("py-call-into: unsupported MIR public function dispatch"), and
+`test_py_import`, `test_py_packages`, `test_py_pkg_simple` crash on import.
+
+<a id="lr01-15"></a>**LR01-15 · `test-batch` reset the heap under an in-flight satellite compile · FIXED 2026-09-22**
+After each script, `test-batch` calls `runtime_reset_heap` and only then
+`runtime_teardown_batch_scripts`, which is where a script's satellite queue
+was retired and awaited. A worker still lowering the finished script
+(`interp_satellite_compile_job`) read types the reset had freed and crashed in
+`find_shape_field_by_name` (SIGSEGV at 0x7), killing every later script in
+that batch. `run mutation_limits.ls` followed by `nesting_limits.ls` crashed
+3 of 10 runs on the pre-rebase HEAD, 0 of 10 on `bb3909e36`, and 7 of 10 with
+P1 of the list fixes (timing), taking out 41 of 105 `test_lambda_std_gtest`
+cases. `runtime_reset_heap` now quiesces satellite workers first, as
+`runtime_cleanup` already did (see [LR01-13](Lambda_Issue_Ledger.md#lr01-13)): 0 of 10, and the std
+suite passes 105 of 105 in three runs.
+
+<a id="lr01-16"></a>**LR01-16 · The `auto` tier's output changed from run to run · FIXED 2026-09-22**
+Seventeen `test-lambda-baseline` scripts passed with `LAMBDA_TIER=jit` and with
+`LAMBDA_TIER=interp`, three runs each, but failed nondeterministically under the
+default `auto` tier. `editor/commands_basic` differed from its golden by 58, 15
+and 51 lines in three runs, and `graphviz/parser` sometimes passed. The
+affected scripts:
+- `dom_edit_protocol`;
+- eight `editor/*` scripts (`commands_basic`, `dom_adapter`,
+  `drawing_block_integration`, `editor_api_basic`, `input_intent_basic`,
+  `list_autoformat`, `multi_node_delete`, `paste_basic`);
+- six `graph/*` scripts (`graphviz/formatter`, `ordering_groups`, `parser`,
+  `route_classes`, `suite`, `structurizr/reference_semantics`);
+- two `pdf/*` scripts (`phase1_multipage`, `phase8_invoice_fixtures`).
+
+Other symptoms had the same cause:
+- The MathLive markup gate passed 279–485 of 921 cases under `auto`.
+- `graph/mermaid/scene_render` lost an edge in some runs.
+- `gc_shape_any_lane.ls` reported `nodes: 2` under forced GC, where forced GC
+  only shifted the timing.
+
+The pre-P1 binary already failed this way.
+
+**Root cause.** A satellite image reads member names through its own suffix of
+the module slab's property-key table: `lambda_module_name_id_at(state, base +
+i)`. The base was an immediate taken while compiling,
+`lambda_module_state_property_key_count()` on the pool worker. That
+thread-local read saw no runtime and returned 0. Publication
+(`lambda_module_state_prepare_layout`) then treated any count other than the
+base as "suffix already linked" and appended nothing. So the first image to
+publish owned the table, and every later image resolved its names through the
+first one's keys. In the reduced repro, `ensure` read `st.nodes` as `st.id`
+(`null`) and rebuilt the list. An image that did not use any other image's
+keys stayed correct, which is why publication timing picked the failures.
+Each tier alone was correct because only `auto` publishes worker images.
+
+**Fix** (D8.1.1v12, D8.5.1v7):
+- The base is placed at publication and recorded in the layout's new
+  `property_key_base` cell.
+- Generated satellite code loads it from its own `_sat_N_layout`, so the
+  worker reads no receiving-runtime state.
+- Publication links by content: a slab that already holds the image's key IDs
+  at the recorded base keeps them; otherwise the suffix is appended and its
+  base recorded.
+
+**Results.** All 17 scripts and mermaid pass 3 of 3 under `auto`. MathLive
+passes 921/921 on `auto` in three runs, and its `baseline.txt` is raised from
+206 to 921 cases. A new test hook, `LAMBDA_SATELLITE_SYNC=1`, publishes at the
+promoting call. With it, `test/lambda/satellite_property_keys.ls` and
+`gc_shape_any_lane.ls` fail deterministically on the old code and pass on the
+fix, at `LAMBDA_JIT_THRESHOLD` 1 and 5
+(`LambdaTierParityTests.SatellitePublicationKeepsPropertyKeys`). After the fix, `test-lambda-baseline` keeps
+only failures that predate it, the UI baseline suite passes 119/119, and the
+UI DOM suite passes 127/127. That includes `codemirror_type`,
+`pkg_context_menu`, `pkg_focus_policy` and `pkg_keyboard_activation`, which
+failed in the earlier colour-work run and had been filed as pre-existing.
 
 
 ## 2. Parsing & AST construction (LR_02)
@@ -215,6 +300,39 @@ the complete namespace migration:
    `test_js_gtest` case `dom_3d_transform_inline_rect` now passes; additionally,
    `make test262-baseline` passes 40261/40261 with zero regressions.
 
+<a id="lr02-18"></a>**LR02-18 · The Tree-sitter reference grammar has no list literal (S2.5.1v2, S2.5.5v2) · FIXED 2026-09-24**
+`grammar.js` `_parenthesized_expr` admits one expression, optionally after
+`let` bindings, so `(1, 2)` parses as `ERROR` in the `lambda-cst` verifier's
+grammar (checked with `tree-sitter parse`, 2026-09-22); `()` is rejected with
+it. The C parser accepts both (`()` since P1 of
+[List Fixes](<impl/Lambda_List_Fixes (done).md>)). Neither conformance script
+(`test/ts_s16_conformance.sh`, `test/c_s16_conformance.sh`) has a list case,
+so the divergence is unguarded. Fix belongs with the grammar work of P5
+(`make generate-grammar`), with accept cases for `()`, `(a, b)` and
+`(let x = 1, x, 2)` in both scripts.
+*Fixed 2026-09-24 (grammar side; C unchanged):* a `list` node takes `()` and
+two or more items, each a `let` or an expression in any order; `(x)` stays
+the item. An arrow head is now a parameter list only (a GLR fork against the
+group, as C's `arrow_head_candidate`), and the scanner no longer starts a
+statement at a return type closed by `=>`, since `()` and `(a, b)` share the
+arrow's state. That also fixed `(x) int => x` and `(x, y: int) int => x`
+(rejected before) and `(1, 2) => 3` (accepted before). Pinned in both scripts'
+"list literals (LR02-18)" and "arrow heads are parameter lists" sections.
+
+<a id="lr02-19"></a>**LR02-19 · A let-group kept only its last item; a lone declaration was a value (S2.5.4, S2.5.5v2) · FIXED 2026-09-22**
+`direct_let_group` (`build_ast.cpp`) kept one non-declaration item — the
+last — so `(let x = 1, x, 2)` was `2` and `(1, let x = 2, x)` was `2`, on
+both tiers and on HEAD; both evaluators already build a list from
+declarations plus several items, so only the builder was wrong. A group
+with a single declaration skipped the let-group path and evaluated the
+declarator itself (`(let x = 5)` was `5`), and a block holding a single
+declaration took that declaration's type, so `[{ let x = 5 }, 9]` took the
+compact int lane and was `[0, 9]` on the interpreter. All three now follow
+the ruling: every non-declaration item stays, a declaration-only group or
+block is `null` and splices nothing in an item position. No script or
+package in the corpus used a multi-item let-group or a lone-declaration
+group (instrumented scan, 2026-09-22). Fixture:
+`test/lambda/list_declarations.ls`.
 
 <a id="lr03-12"></a>**LR03-12 · Occurrence/array type families not implemented (S11.1.1v3, S11.1.6v2, S16.8.6v3) · FIXED 2026-09-23**
 The parser reads `T[n]`, `T[n+]`, `T[n, m]` as occurrence counts
@@ -384,16 +502,16 @@ arithmetic, masks, and unary functions, `zip`, the set operators, `fill`, the
 mapping pipe and `that` (`pipe_end`, both tiers), and for-expression windows
 (`for_window`, in place ahead of the one collapse); `split`/`find` build
 arrays; typed admission keeps the bit. What remains of the umbrella is the
-slot-store image ([LR12-28](<Lambda_Issue_Ledger.md#lr12-28>), P3) and text ([LR05-11](<Lambda_Issue_Ledger.md#lr05-11>), P4).
+slot-store image ([LR12-28](#lr12-28), P3) and text ([LR05-11](#lr05-11), P4).
 Record: [plan §11](<impl/Lambda_List_Fixes (done).md>).
 *P3 landed 2026-09-23:* slot stores take the array image
-([LR12-28](<Lambda_Issue_Ledger.md#lr12-28>) fixed) and insertions splice a list (`a[i] = list`,
+([LR12-28](#lr12-28) fixed) and insertions splice a list (`a[i] = list`,
 `push`, typed arrays included).
 *P4 landed 2026-09-23:* text walks as a sequence and rebuilds its own kind,
 `++` follows S10.6.1's table, and `*` no longer marks its operand
-([LR05-11](<Lambda_Issue_Ledger.md#lr05-11>), [LR05-12](<Lambda_Issue_Ledger.md#lr05-12>), [LR05-9](<Lambda_Issue_Ledger.md#lr05-9>) fixed). The
+([LR05-11](#lr05-11), [LR05-12](#lr05-12), [LR05-9](#lr05-9) fixed). The
 umbrella's remaining part is the type families of P5
-([LR03-12](<Lambda_Issue_Ledger.md#lr03-12>)).
+([LR03-12](#lr03-12)).
 
 <a id="lr05-11"></a>**LR05-11 · Text sequence operations, `that`/pipe on scalars, and `++` do not follow S2.5.8, S10.1.2v2, S10.1.5v2, S10.6.1 · FIXED 2026-09-23**
 `reverse`/`sort`/`unique` return a string unchanged (`lambda-vector.cpp:2396`,
@@ -993,6 +1111,228 @@ keeps the ownership chain precise under **D4.4.3**. Regression:
 source pool before reading the copied path.
 
 
+## 12. Procedural runtime (LR_12)
+
+<a id="lr12-11"></a>**LR12-11 · A callee that returns its parameter aliased the argument · FIXED 2026-09-17**
+S9.1.2 / S9.1.3. `pn keep(p: Box) Box { return p }` then
+`var r = keep(b); b.size = 9` printed `r.size == 9` on both tiers (found while
+fixing LR12-10; present on the Result46 binary). The same held for a write
+through `r`, for `fn` callees, for a returned child (`return h.items[0]`), a
+conditional or `let`-aliased return, a forwarding wrapper, and a returned `var`
+parameter. Every call result was treated as a fresh owner
+(`ast_expr_produces_owned_container`), and `return` was the one retention site
+inside a callee that set no share bit.
+
+**Fix.** The AST pass decides, per parameter, whether the function result may
+be the parameter or a part of it (`ast_function_result_may_alias_entry`). The
+result may be:
+- the parameter itself, or a member or index path from it (an element of a
+  scalar array excepted);
+- either arm of an `if` or `match`, or a block's last value;
+- a local whose initializer or rebinding may alias the parameter (a loop or
+  pattern variable counts conservatively);
+- a call argument in a position the callee itself may return.
+
+FUNCTION_END seeds `NameEntry::cow_param_returned`, and script finalize
+completes it as a fixpoint (`lambda_ast_note_returned_params`), so forward and
+recursive callees resolve. Both tiers then share-mark the result after a direct
+call to such a callee (`ast_call_may_return_argument`; T0 in `eval_call`, MIR at
+the end of `transpile_call`), for plain and `var` parameters alike. MIR also:
+- keeps the share test on the argument roots and their children;
+- keeps it on a binding of such a call result;
+- skips the mark for a scalar result, and for a call in tail position, whose
+  caller marks instead (the mark would also split RV6 pair forwarding).
+
+An entry mark on the parameter (the CW29 placement) was tried first and
+rejected: it shared whole containers whose getters return one element
+(havlak2: +36k array copies, +38% time).
+
+**Cost.** Code that re-binds a getter result and writes it back now copies the
+element, because the element carries its sticky insertion mark. Before, MIR
+wrote through the shared object in place, which is the defect itself.
+havlak2 pays +34k small map copies. The outputs of all 157 benchmark scripts
+are unchanged. Release timing against the post-T29-1 build, which also
+predates LR12-10: havlak2 61.0 to 63.3 ms (+4%), splay2 +3%, cd2 +1%;
+deltablue2, richards2 and prettier_ast2 are flat.
+
+Regression `test/lambda/proc/call_result_alias.ls` (18 shapes; identical on
+interp, jit, auto and default; forced-GC clean).
+
+**Residue (OPEN):** a dynamic callee (a function value) is not analysed, so
+`var r = f(b)` with `f = keep` still aliases.
+
+<a id="lr12-12"></a>**LR12-12 · `push` did not capture the pushed value · FIXED 2026-09-17**
+S9.3.1 names `push`/`splice` as insertion points that capture by value. On both
+tiers (and the Result46 binary) `var x: Box = ...; push(bag, x); x.size = 5`
+left `bag[0].size == 5`, for a local root and for a `var` parameter alike
+(found while fixing LR12-10).
+
+**Fix.** `push` now captures a value that already has an observer, by the same
+rule as a literal element (`ast_expr_insertion_needs_capture`): MIR
+`mir_emit_insertion_capture` in the bound-owner and place arms, T0 in the push
+binding and place arms. A `var` parameter source is noted as marked so a later
+re-borrow detaches it (`interp_note_var_param_marked`). A fresh local whose
+only use in the function is one later push or compound store in its own
+statement list is moved instead (`NameEntry::insertion_moves_value`,
+`lambda_ast_note_insertion_moves`). Without that, deltablue2's constructors
+(`var c = {...}; push(w.cons, c)`) left a sticky mark that copied every element
+on its next write (+12k map copies, about +11% time). Regression
+`test/lambda/proc/push_insertion_capture.ls` (identical on interp, jit, auto and
+default; forced-GC clean).
+
+**Residue (OPEN):** `push(f(), x)` into a temporary owner does not capture.
+That only matters when `f` returns an argument through a dynamic callee (see
+LR12-11).
+
+<a id="lr12-13"></a>**LR12-13 · Index-then-field stores under a declared record array · FIXED 2026-09-17**
+D3.2.4v3. Found while testing LR12-12, present on the Result46 binary.
+`var bag: Box[] = [...]; bag[0].size = 6` failed on T0 with "typed nested
+array assignment index is out of bounds": `lambda_array_path_set_checked`
+walked only index keys. The JIT took the raw COW path store and admitted
+nothing, so `bag[0].size = v` with `v = "x"` stored the string into the int
+lane and read back a garbage integer.
+
+**Fix.** The checked map path setters' contract-generic body is shared
+(`runtime_container_path_set_checked[_inplace]`). The array setter delegates
+any path with a non-index key to it, and its leaf-only admission accepts a
+certified array root as well as a record (`runtime_value_rep_proves_contract`).
+An `any` step is an open leaf, like `array`. MIR routes array-rooted member
+paths through the same checked setter (`mir_emit_typed_array_path_store`, also
+used by the index-only arm). Covered by the LR12-12 regression (including a
+rejected dynamic value).
+
+<a id="lr12-15"></a>**LR12-15 · An out-of-range nested store is logged, not raised · CLOSED 2026-09-18 — consolidated into [LR12-24](Lambda_Issue_Ledger.md#lr12-24)**
+S7.1.3v2. `var m = [fill(2, 0), fill(2, 0)]; m[2][0] = 1; return 5` returns 5
+on both tiers. The store logs its failure: on JIT, a `fn_array_set` null-pointer
+message; on T0, "cow path mutation encountered a non-container child". The
+procedure continues as if nothing happened. Same for a packed matrix. Repro:
+`temp/t29/packed_probe.ls` (`oob_loop`, `oob_packed`).
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](Lambda_Issue_Ledger.md#lr12-24).
+
+<a id="lr12-16"></a>**LR12-16 · JIT drops a store error in a plain-parameter callee · CLOSED 2026-09-18 — consolidated into [LR12-24](Lambda_Issue_Ledger.md#lr12-24)**
+S7.1.3v2, SI3v2. `pn store(a: int[], i: int, v: int) int { a[i] = v; return a[0] }`
+called with an out-of-range `i` returns an error value on T0. On the JIT it
+returns `a[0]`, after logging the same `fn_array_set` bounds error. The same
+store in a callee with a local root raises on both tiers. Present on the
+post-T29-3 binary. Repro: `temp/t29/oob_int.ls` (JIT prints `param_oob=false`,
+T0 `true`).
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](Lambda_Issue_Ledger.md#lr12-24).
+
+<a id="lr12-17"></a>**LR12-17 · JIT COW facts ignored control flow; writes leaked into shared values · FIXED 2026-09-17**
+S9.1.2 / D4.4.1. Found in Tune29 §20.3, present on the Result46 binary. MIR
+Direct chooses a raw or a share-checked store from per-binding "may be
+shared" facts, and updated them in emission order only. A detach or rebind in
+one `if`/`match` arm cleared the fact for the path that skipped the arm. A
+share made late in a loop body (`var d = c; push(snaps, d)`) did not reach
+the store emitted earlier in the body. Eight shapes wrote into a value that
+another binding still held; T0 was correct. One of them is havlak2's
+`arr_set`.
+
+**Fix.** `MirCowJoin` joins the facts at `if`/`match` merges, starting each
+arm from the entry facts. A generalized loop pre-scan marks every outer
+binding the body may share at loop entry, and `MirCowLoopJoin` joins the
+facts at loop exits. Regressions: `test/lambda/proc/cow_flow_join.ls` and
+`test/mir/lambda/tune29_handle_alias.ls` (identical on interp, jit and auto;
+forced-GC clean).
+
+<a id="lr12-18"></a>**LR12-18 · A native float return drops a raised boundary error · CLOSED 2026-09-18 — consolidated into [LR12-24](Lambda_Issue_Ledger.md#lr12-24)**
+S7.1.3v2, SI3v2. `pn f(a: float[], i: int) float { var s: float = 1.0; s = s + a[i]; return s }`
+with an out-of-range `i` returns an error on T0 (the program aborts with E201).
+The JIT logs the same E201 and returns `nan`: the native float return lane has
+no transport for the error the assignment boundary raised. Present on v46.
+Same family as LR12-16. Repro: `temp/t30/h/err_prop.ls`. A boxed (`any`)
+return propagates correctly.
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](Lambda_Issue_Ledger.md#lr12-24).
+
+<a id="lr12-19"></a>**LR12-19 · Literal-bounded dense loops read past a short array · FIXED 2026-09-18**
+S7.1.3v2, D4.3.1. Found in Tune30 T30-1; present on v46. For
+`while (i < 5) { … a[i] … }`, `mir_dense_loop_scan` never copied the literal
+bound into its result, so the dense guard compared each array's length with
+`-1`, which is always true. Every proven read then loaded past the end of a
+shorter array instead of yielding null: `count_lit([1, 2])` counted 0 nulls
+where T0 counts 2. Fixed by copying the literal. Once fixed, a second defect
+made the guard always false: for a literal bound it emitted
+`mulo 5, 5; bo`, MIR folds the product into a move, and the `bo` read a
+stale flag. The square is now computed at compile time. Regression
+`test/lambda/proc/dense_loop_short_array.ls`.
+
+<a id="lr12-20"></a>**LR12-20 · A dense-guard proof leaked into its fallback arm · FIXED 2026-09-18**
+S7.1.3v2. `mir_expr_may_be_null` treated a read that is provable under the
+dense guard as never null, even outside the guard-true arm. A versioned
+tree's merged result (or a guarded load) can still be the null a short array
+yields, so `s = s + a[i]` in a loop skipped the declared binding's rejection
+and produced `nan` where T0 raises E201. The proof is now used only while the
+arm assumes the guard. Regression: same fixture.
+
+<a id="lr12-21"></a>**LR12-21 · Index arithmetic over lane sentinels wrapped into a valid index · FIXED 2026-09-18**
+S7.1.3v2, S4.1.2. `mir_emit_native_index_expr` gave a leaf no validity check,
+so a sentinel lane value (`INT_LANE_INF` = `INT64_MAX`, `INT_LANE_NEG_INF` =
+`INT64_MIN+1`, `INT_LANE_NAN`, the null lane) entered the index sum as a plain
+integer: `a[x + y]` with `x = inf, y = -inf` wrapped to `a[0]` and
+`-inf + -inf` to `a[2]`, where T0 yields null. The band test sat only on the
+result, which a wrap satisfies. Each leaf that `mir_int_lane_operand_proven_in_band`
+does not prove now carries the exact three-instruction test
+`(v >> 53) + 1 <=u 1`; a sum of in-band leaves cannot wrap, so the result's
+band test is gone and the poison is `(value | mask) >>u shift` (`INT64_MAX`,
+which every bounds check rejects, including one holding a nonnegative index
+proof that skips its `< 0` test). Present since v46. Regression:
+`test/lambda/proc/index_sentinel_sum.ls`.
+
+<a id="lr12-22"></a>**LR12-22 · A raised E201 inside a JIT function yields a value instead of propagating · CLOSED 2026-09-18 — consolidated into [LR12-24](Lambda_Issue_Ledger.md#lr12-24)**
+S4.1.2, S7.1.3v2. `pn f(data: int[], n: int, stride: int) int` whose body does
+`acc = acc + data[i] + j` with `i` out of range raises E201 on both tiers, but
+T0 abandons the caller's statement while the JIT returns `inf` and the caller
+prints it. Same family as [LR12-18](#lr12-18) (a native return lane has no
+error channel), seen here on a declared int lane. Probe:
+`temp/t30/h/tier_divergence_probe.ls` (`wide=` and `sentinel=` lines print on
+the JIT only). Pre-existing: reproduces on the Tune29 binary.
+
+Closed as a symptom: the four entries are one missing feature — TE-15's
+containment and the defect system channel — recorded as [LR12-24](Lambda_Issue_Ledger.md#lr12-24).
+
+<a id="lr12-23"></a>**LR12-23 · The interpreter's compact-int loop re-ran a partially applied iteration · FIXED 2026-09-18**
+S4.1.2. Reported as a saturation disagreement — `steps = steps + m` with `m`
+doubling gave `9007199254740991` on the JIT (the exact sum `2^53 - 1`, a legal
+int) and `inf` on T0 — but the cause was worse than saturation.
+`interp_fast_int_exec` commits each assignment as it executes it, and a value
+that leaves the compact band abandons the fast path *mid-body*; the ordinary
+evaluator then re-ran the whole iteration, so every statement that had already
+committed ran a second time. `while (i < n) { c = c + 1; m = m * K; i = i + 1 }`
+returned **4** for `n = 3`: a wrong answer with no saturation in sight. One
+iteration is now atomic — `interp_fast_int_collect_targets` records the
+register slots the body can write and a bail restores them, so the ordinary
+evaluator resumes from the state the iteration started with. Regression:
+`test/lambda/proc/loop_fast_path_bail.ls` (pre-fix T0: `bail=4`, `double=inf`,
+`guarded=25`).
+
+The second instance noted against this entry — `int(r * (r + 1) div 2)` with a
+saturating `r`, where T0 abandons the statement and the JIT prints `inf` — is
+*not* this bug. It is the error-propagation family of
+[LR12-22](#lr12-22)/[LR12-18](#lr12-18) and stays open there.
+
+<a id="lr12-26"></a>**LR12-26 · An `fn` may call a statically-known `pn` · RESOLVED 2026-09-18 (S12.1.1v2, C20.7)**
+Resolved by the designer's ruling that a script's top level is functional: the check now
+runs in every `fn` context, and the three reliance sites below were migrated.
+Original entry:
+S12.1.1 says `fn` cannot call `pn`, and the ruling is unmarked, but no check
+exists for a direct call: `fn bad(x) => logsq(x)` with `pn logsq` compiles and
+runs on both tiers. Only `call()` (`validate_effect_polymorphic_call`) and pn
+object methods were checked. The dynamic half (a `pn` reached through a value)
+was closed 2026-09-18 with S12.1.4v3(6), and the static rule now holds inside
+`function` bodies (C20-3) via the colour walk in `lambda_ast_finalize_script`
+(`colour_walk_call`, `build_ast.cpp`). Extending that one check to every `fn`
+context breaks three reliance sites: `lambda/package/dom/edit_history.ls`
+(`fn clear_history`/`fn replay_retained` call `pn session.set_history*`),
+`test/lambda/proc/type_binder_proc_raw.ls` (module-level calls to `pn`s), and
+`test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the
+module top level's colour, which no S#/D# point states (see C20.6).
+
 <a id="lr12-28"></a>**LR12-28 · A list stored in a field or `fill` keeps its list-ness (S2.5.6, S2.5.7) · FIXED 2026-09-23**
 `<e a: (1, 2)>` stores the attribute as a list, so reading `e.a` into an array
 literal spreads it (`[…, e.a]` gains two items); S2.5.6 rules that a
@@ -1006,6 +1346,43 @@ element, and object literals, member writes (`fn_map_set`, the checked and
 COW setters, `vmap_set`), and the MIR's direct field stores, which convert
 through `slot_image` whenever the value's static type may hold a list — and
 the source list keeps its kind. Record: [plan §12](<impl/Lambda_List_Fixes (done).md>).
+
+<a id="lr12-29"></a>**LR12-29 · The interpreter ran `on` handler bodies as functional blocks (S12.1.3, S2.5.3) · FIXED 2026-09-22**
+An `on` handler is a `pn` (S12.1.3), so its body yields its last value
+(S2.5.3). MIR compiles every handler with `in_proc` set, but the interpreter
+ran handler bodies in a frame with no `fn` node, so `eval_content` built the
+body as a list. That was invisible while blocks normalized like content. Once
+P1 of the list fixes made blocks keep `null`, the `<input>` keydown handler
+in `dom/form.ls` returned `(null, verdict)` — its `if (…) { return … }`
+without an `else` contributed the `null` — and the truthy list read as
+"handled", so the document-level paste shortcut never ran (paste into a text
+field was a no-op; `rsc_scale_context_menu_matrix`, `dom_pkg_paste_ime`).
+Handler frames now carry `proc_handler`, which `eval_content` treats like a
+`pn` frame.
+
+<a id="lr12-30"></a>**LR12-30 · An `fn` can call a built-in procedure (S12.1.1v2) · FIXED 2026-09-22**
+`fn f() => print("x")`, `output(…)`, `cmd(…)` and `today()` all compiled and
+ran from `fn` context, including the module top level. The colour walk
+(`colour_walk_call`, `build_ast.cpp`) skipped every system function, although
+these rows are `is_proc` in `sys_func_defs`. The walk now reads `is_proc` for
+every system-function callee, built-in rows and host-module `pn(...)` Jube
+rows (D7.4.6, ES48) alike, and reports E224. A name with both colours
+(`call`) has already resolved to its `fn` row by then. Reliance sites migrated
+with the fix:
+
+| Reliance on built-in procedures in `fn` context | Sites | Migration |
+|---|---|---|
+| Documentation examples (`check_doc_blocks.py`), mostly top-level `print` | 21 | effects moved into a `pn` (`pn main()`, or a named `pn`); three functional showcase scripts in `Lambda_Reference.md` now end with their value instead of printing it |
+| Test scripts (`input_md_simple`, `input_rst`, `datetime_funcs`), none gated | 19 | rewritten as `pn main()` |
+
+A compile-only scan of every tracked `.ls` outside `negative/` (1,708 files,
+the 168 package modules through import drivers) finds no remaining site.
+Still open around the fix: `now` and `today` are unimplemented (`func_ptr`
+NULL; any call fails with "import of undefined item pn_today"), while the
+0-argument `datetime()` and `justnow()` read the same clock but are registered
+`fn`, and the `log_*` family is `fn` although it writes the log. Which of these
+are effects is unruled.
+
 
 ## 13. Schema validator (LR_13)
 
