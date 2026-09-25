@@ -539,7 +539,6 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
         if (content_item .item != ITEM_ERROR && content_item .item != ITEM_NULL) {
             // Add content to element
             list_push((List*)element, content_item);
-            ((TypeElmt*)element->type)->content_length++;
         }
         skip_comments(mark);
 

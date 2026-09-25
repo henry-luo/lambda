@@ -1,6 +1,7 @@
 #include "mark_editor.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
+#include "../input/input.hpp"
 #include "../../lib/log.h"
 #include "../../lib/arena.h"
 #include "../../lib/hashmap.h"
@@ -184,7 +185,6 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , pool_(input->pool)
     , arena_(input->arena)
     , name_pool_(input->name_pool)
-    , shape_pool_(input->shape_pool)
     , type_list_(input->type_list)
     , mode_(mode)
     , ui_mode_(input->ui_mode)
@@ -637,10 +637,10 @@ static size_t container_header_size(const Map* container) {
 // so the builder has to be seeded from the right side of the shape pool.
 ShapeBuilder MarkEditor::container_shape_builder(const Map* container) {
     if (container->type_id == LMD_TYPE_ELEMENT) {
-        return shape_builder_init_element(shape_pool_,
+        return shape_builder_init_element(arena_,
             ((TypeElmt*)container->type)->name.str);
     }
-    return shape_builder_init_map(shape_pool_);
+    return shape_builder_init_map(arena_);
 }
 
 Map* MarkEditor::container_clone_header(const Map* container) {
@@ -654,6 +654,50 @@ Map* MarkEditor::container_clone_header(const Map* container) {
     return copy;
 }
 
+// The field list a rebuild lays out, as tree steps: a field the old type has
+// keeps that field's identity (D3.4.4v2); a new one joins under a pooled key,
+// as ElementBuilder::attr pools its keys.
+static TypeTreeStep* rebuild_steps(Pool* pool, MarkBuilder* builder_,
+        TypeMap* old_type, ShapeBuilder* builder) {
+    int count = (int)builder->field_count;
+    if (count == 0) return NULL;
+    TypeTreeStep* steps = (TypeTreeStep*)pool_calloc(pool, sizeof(TypeTreeStep) * (size_t)count);
+    if (!steps) return NULL;
+    for (int i = 0; i < count; i++) {
+        const char* name = builder->fields[i].name;
+        steps[i].type_id = builder->fields[i].type_id;
+        steps[i].like = typemap_hash_lookup(old_type, name, (int)strlen(name));
+        if (!steps[i].like) steps[i].key = builder_->createName(name);
+        if (!steps[i].like && !steps[i].key) return NULL;
+    }
+    return steps;
+}
+
+// A chain this container alone will own: the same steps, laid out by storage
+// size as alloc_shape_entry lays a chain, keeping a replayed field's flags and
+// default. Never pooled, so an in-place edit can never reach another type.
+static ShapeEntry* rebuild_private_chain(Pool* pool, const TypeTreeStep* steps,
+        int count, ShapeEntry** out_last) {
+    ShapeEntry* first = NULL;
+    ShapeEntry* prev = NULL;
+    for (int i = 0; i < count; i++) {
+        const TypeTreeStep* step = &steps[i];
+        ShapeEntry* entry = step->like
+            ? shape_entry_copy_as(pool, step->like, step->type_id, prev)
+            : alloc_shape_entry(pool, step->key, step->type_id, prev);
+        if (!entry) return NULL;
+        if (step->like) {
+            entry->flags = step->like->flags;
+            entry->default_value = step->like->default_value;
+        }
+        entry->byte_offset = prev ? prev->byte_offset + shape_entry_storage_size(prev) : 0;
+        if (!first) first = entry;
+        prev = entry;
+    }
+    *out_last = prev;
+    return first;
+}
+
 // Rebuild a container's attribute buffer against a new shape. The changed
 // field is NOT written here: it is left zeroed and the caller stores it once
 // the new offsets are known, which is what lets one rebuild serve add, retype
@@ -664,20 +708,39 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
     log_debug("container_rebuild_with_new_shape: field_count=%zu, element=%d",
         builder->field_count, (int)is_element);
 
-    // A NULL shape is the legitimate result of deleting the last field; only a
-    // NULL with fields still pending is a real failure.
-    ShapeEntry* new_shape = shape_builder_finalize(builder);
-    if (!new_shape && builder->field_count > 0) {
-        log_error("container_rebuild_with_new_shape: failed to finalize shape");
+    TypeMap* old_type = (TypeMap*)old_container->type;
+    int count = (int)builder->field_count;
+    TypeTreeStep* steps = rebuild_steps(pool_, builder_, old_type, builder);
+    if (count > 0 && !steps) {
+        log_error("container_rebuild_with_new_shape: failed to describe the new fields");
         return ItemError;
     }
 
-    int64_t new_byte_size = 0;
-    ShapeEntry* entry = new_shape;
-    while (entry) {
-        new_byte_size = entry->byte_offset + shape_entry_storage_size(entry);
-        entry = entry->next;
+    // D3.4.3v2: the rebuilt type comes from the Input's transition tree when
+    // the container may use it, so an edited container joins the type its new
+    // field sequence already has, allocating nothing on a hit. A declined tree
+    // leaves a private type with a chain of its own.
+    TypeMap* tree_type = NULL;
+    if (TypeMap* root = type_tree_root_like(input_, old_container)) {
+        tree_type = type_tree_follow(input_, root, steps, count);
     }
+    ShapeEntry* new_shape;
+    ShapeEntry* new_last = NULL;
+    if (tree_type) {
+        new_shape = tree_type->shape;
+        new_last = tree_type->last;
+    } else {
+        // A NULL shape is the legitimate result of deleting the last field;
+        // only a NULL with fields still pending is a real failure.
+        new_shape = rebuild_private_chain(pool_, steps, count, &new_last);
+        if (!new_shape && count > 0) {
+            log_error("container_rebuild_with_new_shape: failed to build the new shape");
+            return ItemError;
+        }
+    }
+
+    int64_t new_byte_size = new_last
+        ? new_last->byte_offset + shape_entry_storage_size(new_last) : 0;
 
     // pool_calloc(0) returns NULL, so an emptied container legitimately ends
     // with a null buffer.
@@ -689,8 +752,7 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
 
     // Carry across every field the new shape shares with the old one at the
     // same type; anything added or retyped stays zero for the caller to fill.
-    TypeMap* old_type = (TypeMap*)old_container->type;
-    entry = new_shape;
+    ShapeEntry* entry = new_shape;
     while (entry) {
         TypeId old_type_id;
         int64_t old_offset;
@@ -710,51 +772,45 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
         if (!result) return ItemError;
     }
 
-    // An inline edit on a MAP mutates the descriptor in place: allocating and
-    // interning a fresh shape on every edit is a measurable cost on this path.
-    // Three cases opt out. `type_index == -1` is a shape that was never
-    // registered and `EmptyMap` is the shared empty singleton, so neither may
-    // be written. And an ELEMENT always takes a fresh TypeElmt, as it always
-    // has: its descriptor is shared across the DOM by tag name, so mutating it
-    // leaves sibling elements reading their buffers through a layout they were
-    // never packed to. Letting elements share the map's in-place path was
-    // measured and breaks 8 DOM editing fixtures (todo_toggle, todo_delete,
-    // todo_text_input, todo_two_delete_clear, todo_perf_timing).
-    if (old_type->type_index == -1 || old_type == &EmptyMap || !is_inline || is_element) {
+    if (tree_type) {
+        result->type = tree_type;
+    } else if (is_inline && old_type->is_private_clone &&
+            !typemap_is_shared_shape(old_type) && old_type != &EmptyMap) {
+        // In place, and only here: this container owns its type. Every other
+        // type may be read by another container -- a transition-tree node, a
+        // literal's compile-time type, a pooled chain -- and rewriting one
+        // re-laid the fields under every sibling built the same way. An
+        // element's name, id and content pattern are untouched by a shape change.
+        old_type->shape = new_shape;
+        old_type->last = new_last;
+        old_type->length = count;
+        old_type->byte_size = new_byte_size;
+        typemap_hash_build(old_type, pool_);
+    } else {
+        // A fresh type this container owns, so its later inline edits can
+        // take the in-place path above.
         TypeMap* new_type;
         if (is_element) {
+            TypeElmt* old_elmt_type = (TypeElmt*)old_type;
             TypeElmt* elmt_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-            elmt_type->name = ((TypeElmt*)old_type)->name;
-            elmt_type->content_length = ((TypeElmt*)old_type)->content_length;
+            elmt_type->name = old_elmt_type->name;
+            elmt_type->name_id = old_elmt_type->name_id;  // the HTML5 parser compares tags by it
+            elmt_type->ns = old_elmt_type->ns;
+            elmt_type->content_list = old_elmt_type->content_list;
             new_type = (TypeMap*)elmt_type;
         } else {
             new_type = (TypeMap*)alloc_type(pool_, LMD_TYPE_MAP, sizeof(TypeMap));
         }
+        new_type->js_meta = old_type->js_meta;  // D3.4.7: the class stays with the value
         new_type->shape = new_shape;
-        new_type->length = builder->field_count;
+        new_type->last = new_last;
+        new_type->length = count;
         new_type->byte_size = new_byte_size;
+        new_type->is_private_clone = true;
         new_type->type_index = type_list_->length;
-
-        new_type->last = new_shape;
-        while (new_type->last && new_type->last->next) {
-            new_type->last = new_type->last->next;
-        }
         typemap_hash_build(new_type, pool_);
-
         arraylist_append(type_list_, new_type);
         result->type = new_type;
-    } else {
-        // In-place: an element's `name` and `content_length` are not touched by
-        // a shape change, so its descriptor carries them across unchanged.
-        old_type->shape = new_shape;
-        old_type->length = builder->field_count;
-        old_type->byte_size = new_byte_size;
-
-        old_type->last = new_shape;
-        while (old_type->last && old_type->last->next) {
-            old_type->last = old_type->last->next;
-        }
-        typemap_hash_build(old_type, pool_);
     }
 
     // Free old data (inline mode only), replace with new
@@ -1195,10 +1251,6 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child,
         elmt->items[index] = child;
         elmt->length = new_length;
 
-        // Update TypeElmt content_length
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = new_length;
-
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
 
@@ -1298,9 +1350,6 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
 
         elmt->length = new_length;
 
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = new_length;
-
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
 
@@ -1350,9 +1399,6 @@ Item MarkEditor::elmt_delete_child(Item element, int index) {
         }
 
         elmt->length--;
-
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = elmt->length;
 
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
@@ -1405,9 +1451,6 @@ Item MarkEditor::elmt_delete_children(Item element, int start, int end) {
         }
 
         elmt->length = new_length;
-
-        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-        elmt_type->content_length = new_length;
 
         // Sync DOM linked list if ui_mode
         if (ui_mode_) dom_relink_children(elmt);
@@ -1477,16 +1520,10 @@ Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_childr
     new_elmt->length = new_length;
     new_elmt->capacity = new_length;
 
-    // Need new TypeElmt with updated content_length
+    // Only the content changed, so the copy keeps the old element's type (the
+    // memcpy above): an element type carries no content count (D3.4.3v2), and
+    // attribute edits always take a fresh TypeElmt, so nothing writes it.
     TypeElmt* old_type = (TypeElmt*)old_elmt->type;
-    TypeElmt* new_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!new_type) return ItemError;
-
-    memcpy(new_type, old_type, sizeof(TypeElmt));
-    new_type->content_length = new_length;
-    new_type->type_index = type_list_->length;
-    typemap_hash_build((TypeMap*)new_type, pool_);
-    arraylist_append(type_list_, new_type);
 
     // Copy attribute data (if any)
     if (old_type->byte_size > 0) {
@@ -1495,8 +1532,6 @@ Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_childr
         memcpy(new_elmt->data, old_elmt->data, old_type->byte_size);
         new_elmt->data_cap = old_type->byte_size;
     }
-
-    new_elmt->type = new_type;
 
     return {.element = new_elmt};
 }
@@ -1512,7 +1547,7 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
 
     // Build new shape with new element name. Note the rebuilt TypeElmt keeps
     // the OLD name — as it always has; only the shape's pool bucket moves.
-    ShapeBuilder builder = shape_builder_init_element(shape_pool_, new_tag_name);
+    ShapeBuilder builder = shape_builder_init_element(arena_, new_tag_name);
     shape_builder_import_shape(&builder, old_type->shape);
 
     bool is_inline = mode_ == EDIT_MODE_INLINE;

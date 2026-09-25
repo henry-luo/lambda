@@ -1,0 +1,17 @@
+'=runs='
+[true, true, false]
+[true, false]
+[true, true, false]
+'=positional='
+[true, false, false]
+'=open='
+[true, true, false]
+[true, true]
+'=literal='
+[true, false]
+'=normalized='
+[false, true]
+'=slots='
+[false, true, false, false, true]
+'=nominal='
+[true, true, 3]

@@ -167,7 +167,6 @@ Item parse_strikethrough(MarkupParser* parser, const char** text) {
         Item inner = parse_inline_spans(parser, content);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
             list_push((List*)del_elem, inner);
-            increment_element_content_length(del_elem);
         }
         mem_free(content);
     }
@@ -218,7 +217,6 @@ Item parse_superscript(MarkupParser* parser, const char** text) {
         if (content_str) {
             Item text_item = {.item = s2it(content_str)};
             list_push((List*)sup_elem, text_item);
-            increment_element_content_length(sup_elem);
         }
         mem_free(content);
     }
@@ -267,7 +265,6 @@ Item parse_subscript(MarkupParser* parser, const char** text) {
         if (content_str) {
             Item text_item = {.item = s2it(content_str)};
             list_push((List*)sub_elem, text_item);
-            increment_element_content_length(sub_elem);
         }
         mem_free(content);
     }

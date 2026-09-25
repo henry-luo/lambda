@@ -81,6 +81,12 @@ void input_manager_destroy(InputManager* mgr);
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id,
                               ShapeEntry* prev_entry);
 
+// A new entry with `like`'s identity (name, id, key kind, namespace) at a new
+// value type, linked after `prev_entry`; the name is shared, not copied, so
+// both must live in the same Input. Its byte_offset is the caller's to set.
+ShapeEntry* shape_entry_copy_as(Pool* pool, const ShapeEntry* like, TypeId type_id,
+                                ShapeEntry* prev_entry);
+
 #include "../io/mark_builder.hpp"
 
 #ifdef __cplusplus

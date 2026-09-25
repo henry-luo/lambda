@@ -1166,7 +1166,7 @@ TEST_F(MarkEditorTest, NestedExternalStructureDeepCopy) {
 }
 
 //==============================================================================
-// EXTERNAL INPUT TESTS - Deep copy with NamePool/ShapePool lifecycle
+// EXTERNAL INPUT TESTS - Deep copy with NamePool lifecycle
 //==============================================================================
 
 // Test deep copying an element from external Input that gets destroyed
@@ -1205,7 +1205,7 @@ TEST(ExternalInputTest, DeepCopyExternalElement) {
     ASSERT_EQ(copied_elem.type_id(), LMD_TYPE_ELEMENT);
     ASSERT_NE(copied_elem.element, nullptr);
 
-    // CRITICAL: Destroy the external pool (frees its NamePool and shape_pool)
+    // CRITICAL: Destroy the external pool (frees its NamePool)
     pool_destroy(external_pool);
 
     // Now try to access the copied element's attributes
@@ -1452,32 +1452,99 @@ TEST(LaneStorageResolverTests, TableAndProjectionsAgree) {
 }
 
 TEST(LaneStorageResolverTests, ShapeBuilderHasNoFieldLimit) {
-    Pool* pool = pool_create();
     Arena* arena = arena_create_default();
-    ShapePool* shapes = shape_pool_create(pool, arena, nullptr);
-    ASSERT_NE(shapes, nullptr);
 
-    // 200 fields: past the retired 64-slot cap, laid out by the resolver
-    ShapeBuilder builder = shape_builder_init_map(shapes);
+    // 200 fields: past the retired 64-slot cap
+    ShapeBuilder builder = shape_builder_init_map(arena);
     char* names = (char*)arena_alloc(arena, 200 * 8);
     for (int i = 0; i < 200; i++) {
         snprintf(names + i * 8, 8, "f%d", i);
         ASSERT_TRUE(shape_builder_add_field(&builder, names + i * 8, (i % 2) ? LMD_TYPE_INT : LMD_TYPE_BOOL));
     }
     EXPECT_EQ(shape_builder_field_count(&builder), 200u);
-    ShapeEntry* shape = shape_builder_finalize(&builder);
-    ASSERT_NE(shape, nullptr);
+    EXPECT_TRUE(shape_builder_has_field(&builder, "f199"));
+    EXPECT_LE(sizeof(ShapeBuilder), 64u);
+
+    arena_destroy(arena);
+}
+
+//==============================================================================
+// SHARED TYPES (D3.4.3v2): an edit never rewrites a type another value uses
+//==============================================================================
+
+// Two maps built by the same adds share one transition-tree TypeMap. An inline
+// edit that changes the layout of one must leave the other's type untouched.
+TEST_F(MarkEditorTest, MapUpdateInlineKeepsSharedTypeIntact) {
+    MarkBuilder builder(input);
+    Item m1 = builder.map().put("name", "a").final();
+    Item m2 = builder.map().put("name", "b").final();
+    ASSERT_EQ(m1.map->type, m2.map->type) << "same adds should share a type";
+    TypeMap* shared = (TypeMap*)m2.map->type;
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item added = editor.map_update(m1, "age", editor.builder()->createInt(25));
+    ASSERT_EQ(get_type_id(added), LMD_TYPE_MAP);
+    Item retyped = editor.map_update(added, "name", editor.builder()->createInt(7));
+    ASSERT_EQ(get_type_id(retyped), LMD_TYPE_MAP);
+    EXPECT_EQ(retyped.map->get("age").type_id(), LMD_TYPE_INT);
+    EXPECT_EQ(retyped.map->get("name").type_id(), LMD_TYPE_INT);
+
+    EXPECT_EQ(m2.map->type, shared) << "the sibling keeps its type";
+    EXPECT_EQ(shared->length, 1);
+    EXPECT_EQ(m2.map->get("name").type_id(), LMD_TYPE_STRING);
+    EXPECT_EQ(m2.map->get("age").type_id(), LMD_TYPE_NULL);
+}
+
+// Element attribute edits take a new type; that type must keep the tag's
+// identity, which the HTML5 parser compares by name_id.
+TEST_F(MarkEditorTest, ElementUpdateAttrKeepsSharedTypeAndTagId) {
+    MarkBuilder builder(input);
+    Item e1 = builder.element("div").attr("id", "a").final();
+    Item e2 = builder.element("div").attr("id", "b").final();
+    ASSERT_EQ(e1.element->type, e2.element->type) << "same tag and attributes should share a type";
+    TypeElmt* shared = (TypeElmt*)e2.element->type;
+    NameId div_id = shared->name_id;
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item updated = editor.elmt_update_attr(e1, "class", editor.builder()->createStringItem("x"));
+    ASSERT_EQ(get_type_id(updated), LMD_TYPE_ELEMENT);
+    TypeElmt* updated_type = (TypeElmt*)updated.element->type;
+    EXPECT_EQ(updated_type->name_id, div_id);
+    EXPECT_EQ(updated_type->length, 2);
+
+    EXPECT_EQ(e2.element->type, shared) << "the sibling keeps its type";
+    EXPECT_EQ(shared->length, 1);
+}
+
+// A rebuild lays its fields out by storage size and carries every value across,
+// however many fields there are: past the retired 64-slot builder cap.
+TEST_F(MarkEditorTest, RebuildLaysOutManyFields) {
+    MarkBuilder builder(input);
+    MapBuilder mb = builder.map();
+    char names[200][8];
+    for (int i = 0; i < 200; i++) {
+        snprintf(names[i], sizeof(names[i]), "f%d", i);
+        if (i % 2) mb.put(names[i], (int64_t)i);
+        else mb.put(names[i], (bool)(i % 4 == 0));
+    }
+    Item map = mb.final();
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item updated = editor.map_update(map, "extra", editor.builder()->createStringItem("x"));
+    ASSERT_EQ(get_type_id(updated), LMD_TYPE_MAP);
+    TypeMap* type = (TypeMap*)updated.map->type;
+    EXPECT_EQ(type->length, 201);
     int count = 0;
     int64_t offset = 0;
-    for (ShapeEntry* e = shape; e; e = e->next) {
+    for (ShapeEntry* e = type->shape; e; e = e->next) {
         EXPECT_EQ(e->byte_offset, offset) << "field " << count;
         EXPECT_NE((int)e->storage.kind, (int)LANE_STORAGE_INVALID);
         offset += shape_entry_storage_size(e);
         count++;
     }
-    EXPECT_EQ(count, 200);
-    EXPECT_LE(sizeof(ShapeBuilder), 64u);
-
-    shape_pool_release(shapes);
-    pool_destroy(pool);
+    EXPECT_EQ(count, 201);
+    EXPECT_EQ(type->byte_size, offset);
+    EXPECT_EQ(updated.map->get("f199").type_id(), LMD_TYPE_INT64);
+    EXPECT_EQ(updated.map->get("f4").type_id(), LMD_TYPE_BOOL);
+    EXPECT_EQ(updated.map->get("extra").type_id(), LMD_TYPE_STRING);
 }

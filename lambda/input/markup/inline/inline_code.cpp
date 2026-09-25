@@ -140,7 +140,6 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
         if (code_text) {
             Item code_item = {.item = s2it(code_text)};
             list_push((List*)code, code_item);
-            increment_element_content_length(code);
         }
 
         mem_free(content);

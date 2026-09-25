@@ -566,12 +566,10 @@ static Item build_nested_list_from_content(MarkupParser* parser, const char* con
         Item nested = build_nested_list_from_content(parser, item_content);
         if (nested.item != ITEM_ERROR && nested.item != ITEM_UNDEFINED) {
             list_push((List*)item, nested);
-            increment_element_content_length(item);
         }
     }
 
     list_push((List*)list, Item{.item = (uint64_t)item});
-    increment_element_content_length(list);
 
     return Item{.item = (uint64_t)list};
 }
@@ -720,7 +718,6 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
 
         if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
             list_push((List*)content_container, block_item);
-            increment_element_content_length(content_container);
         } else if (parser->current_line < parser->line_count) {
             parser->current_line++;  // Prevent infinite loop
         }
@@ -922,7 +919,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 Element* hr = create_element(parser, "hr");
                 if (hr) {
                     list_push((List*)item, Item{.item = (uint64_t)hr});
-                    increment_element_content_length(item);
                 }
                 mem_free(first_line_stripped);
                 parser->current_line++;
@@ -933,7 +929,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 Item nested_list = build_nested_list_from_content(parser, item_content);
                 if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
                     list_push((List*)item, nested_list);
-                    increment_element_content_length(item);
                 }
                 mem_free(first_line_stripped);
                 parser->current_line++;
@@ -963,7 +958,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     if (is_empty_line(next_line)) {
                         // Empty list item - add to list and continue to next line processing
                         list_push((List*)list, Item{.item = (uint64_t)item});
-                        increment_element_content_length(list);
                         had_blank_before_item = true;
                         arraylist_free(content_lines);
                         continue;  // Don't collect any content, process next line
@@ -1121,7 +1115,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             }
 
                             list_push((List*)item, Item{.item = (uint64_t)checkbox});
-                            increment_element_content_length(item);
                         }
                     }
 
@@ -1165,7 +1158,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             had_blank_before_block = false;
 
                             list_push((List*)item, block_item);
-                            increment_element_content_length(item);
                         } else if (parser->current_line < parser->line_count) {
                             parser->current_line++;
                         }
@@ -1203,7 +1195,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
             // Add completed list item to list
             list_push((List*)list, Item{.item = (uint64_t)item});
-            increment_element_content_length(list);
 
         } else if (line_indent >= current_item_content_column && is_list_item(line)) {
             // This is a properly nested list - parse it recursively
@@ -1215,7 +1206,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 if (current_list->length > 0) {
                     Element* last_item = (Element*)current_list->items[current_list->length - 1].item;
                     list_push((List*)last_item, nested_list);
-                    increment_element_content_length(last_item);
                 }
             }
         } else if (line_indent > base_indent && line_indent < current_item_content_column &&
@@ -1259,14 +1249,12 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 Item inline_content = parse_inline_spans(parser, first_line_stripped);
                 if (inline_content.item != ITEM_ERROR && inline_content.item != ITEM_UNDEFINED) {
                     list_push((List*)item, inline_content);
-                    increment_element_content_length(item);
                 }
             }
             mem_free(first_line_stripped);
 
             parser->current_line++;
             list_push((List*)list, Item{.item = (uint64_t)item});
-            increment_element_content_length(list);
         } else if (!had_blank_before_item && is_list_item(line) && line_indent - base_indent >= 4 && ((List*)list)->length > 0) {
             // Line looks like a list item marker, but has 4+ spaces of indent relative to base
             // AND there was no blank line before it (so it can be lazy continuation)
@@ -1282,7 +1270,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             Element* softbreak = create_element(parser, "softbreak");
             if (softbreak) {
                 list_push((List*)last_item, Item{.item = (uint64_t)softbreak});
-                increment_element_content_length(last_item);
             }
 
             // Add the literal text
@@ -1290,7 +1277,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 Item text_item = parse_inline_spans(parser, literal_text);
                 if (text_item.item != ITEM_ERROR && text_item.item != ITEM_UNDEFINED) {
                     list_push((List*)last_item, text_item);
-                    increment_element_content_length(last_item);
                 }
             }
             mem_free(literal_text);
@@ -1350,7 +1336,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             item_children->length = 0;
             for (int ni = 0; ni < new_children->length; ni++) {
                 list_push((List*)item, Item{.item = (uint64_t)new_children->data[ni]});
-                increment_element_content_length(item);
             }
             arraylist_free(new_children);
         }
@@ -1376,7 +1361,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 Element* p = create_element(parser, "p");
                 if (p) {
                     list_push((List*)p, first_child);
-                    increment_element_content_length(p);
                     item_children->items[0] = Item{.item = (uint64_t)p};
                 }
             } else if (first_type == LMD_TYPE_ELEMENT) {
@@ -1390,7 +1374,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         Element* p = create_element(parser, "p");
                         if (p) {
                             list_push((List*)p, first_child);
-                            increment_element_content_length(p);
                             item_children->items[0] = Item{.item = (uint64_t)p};
                         }
                     }

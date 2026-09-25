@@ -97,7 +97,6 @@ Item parse_wiki_link(MarkupParser* parser, const char** text) {
         String* text_str = create_string(parser, display_text);
         if (text_str) {
             list_push((List*)link_elem, Item{.item = s2it(text_str)});
-            increment_element_content_length(link_elem);
         }
     }
 
@@ -198,7 +197,6 @@ Item parse_wiki_external_link(MarkupParser* parser, const char** text) {
         String* text_str = create_string(parser, display_text);
         if (text_str) {
             list_push((List*)link_elem, Item{.item = s2it(text_str)});
-            increment_element_content_length(link_elem);
         }
     }
 
@@ -290,16 +288,13 @@ Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
                 String* text_str = create_string(parser, content);
                 if (text_str) {
                     list_push((List*)inner_em, Item{.item = s2it(text_str)});
-                    increment_element_content_length(inner_em);
                 }
                 list_push((List*)format_elem, Item{.item = (uint64_t)inner_em});
-                increment_element_content_length(format_elem);
             }
         } else if (strlen(content) > 0) {
             String* text_str = create_string(parser, content);
             if (text_str) {
                 list_push((List*)format_elem, Item{.item = s2it(text_str)});
-                increment_element_content_length(format_elem);
             }
         }
 

@@ -551,7 +551,6 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
         Item inner = parse_inline_spans(parser, content);
         if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
             list_push((List*)elem, inner);
-            increment_element_content_length(elem);
         }
         mem_free(content);
     }

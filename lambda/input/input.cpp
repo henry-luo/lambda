@@ -365,7 +365,8 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->js_meta = tm->js_meta;
     clone->has_array_index_shape = tm->has_array_index_shape;
     clone->name = tm->name;
-    clone->content_length = tm->content_length;
+    clone->name_id = tm->name_id;  // the HTML5 parser compares tags by this id
+    clone->content_list = tm->content_list;
     clone->ns = tm->ns;
 
     ShapeEntry* last_clone = NULL;
@@ -416,17 +417,92 @@ static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* targe
     return true;
 }
 
-static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
-        TypeId type_id, Input* input, ShapeEntry** out_entry) {
-    if (out_entry) *out_entry = NULL;
-    if (!parent || !key || !input || !input->pool || !input->type_list) return NULL;
+// The graph budgets (D3.4.3v2). The per-node edge caps bound one shape's
+// fan-out, not the graph. A long-lived process that runs thousands of unrelated
+// scripts through one Input (the test262 batch runner is the extreme case)
+// would otherwise keep minting map shapes for the rest of its life: with only
+// the edge cap it grew to 5.4 GB. Parsed elements count against their own
+// budget: one document's attribute variety runs to thousands of distinct
+// sequences (a 13 MiB corpus of 77 real sites needs about 5.7K element nodes),
+// which would exhaust the map budget and leave most elements on private types.
+// Past a budget every add keeps a private type, as before the graph existed.
+static const int MAX_SHAPE_GRAPH = 1024;
+static const int MAX_ELEMENT_SHAPE_GRAPH = 16384;
+
+static bool transition_graph_has_room(Input* input, bool element) {
+    return element ? input->element_transition_shapes < MAX_ELEMENT_SHAPE_GRAPH
+                   : input->shape_transition_shapes < MAX_SHAPE_GRAPH;
+}
+
+static void transition_graph_count(Input* input, bool element) {
+    if (element) input->element_transition_shapes++;
+    else input->shape_transition_shapes++;
+    // a document past the budget silently loses sharing, so say so once
+    if (element && input->element_transition_shapes == MAX_ELEMENT_SHAPE_GRAPH) {
+        log_info("element_tree_budget: an Input reached %d element types; later elements keep private types",
+            MAX_ELEMENT_SHAPE_GRAPH);
+    }
+}
+
+// A field's identity on a transition edge (D3.4.4v2): its NameId, or for an
+// id-less Input name its bytes, plus its key kind. A new edge's entry is made
+// from `key`, or copied from `like` when an editor rebuild replays a field.
+typedef struct TransitionKey {
+    NameId name_id;
+    uint8_t key_kind;
+    const char* name;
+    uint32_t name_len;
+    String* key;
+    const ShapeEntry* like;
+} TransitionKey;
+
+static TransitionKey transition_key_of_string(String* key) {
     // D4.6.1v2: a pooled name's identity is its NameId. The record side below
     // stores name_id for every entry but keeps `name` only for the id-less
     // Input seam, so matching on `name` alone could never hit for a
     // runtime-created property — which is why two objects that added the same
     // fields in the same order never shared a shape.
-    NameId key_name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
-    uint8_t key_kind = property_key_kind(key);
+    TransitionKey k = {};
+    k.name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
+    k.key_kind = property_key_kind(key);
+    k.name = key->chars;
+    k.name_len = (uint32_t)key->len;
+    k.key = key;
+    return k;
+}
+
+static TransitionKey transition_key_of_entry(const ShapeEntry* like) {
+    TransitionKey k = {};
+    k.name_id = like->name_id;
+    k.key_kind = like->key_kind;
+    k.name = like->name->str;
+    k.name_len = (uint32_t)like->name->length;
+    k.like = like;
+    return k;
+}
+
+// The entry a replayed field adds: `like`'s identity at a new type. The name
+// is shared, as clone_shape_entries shares it, since both live in the Input.
+ShapeEntry* shape_entry_copy_as(Pool* pool, const ShapeEntry* like,
+        TypeId type_id, ShapeEntry* prev_entry) {
+    ShapeEntry* entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+    if (!entry) return NULL;
+    entry->name = like->name;
+    entry->name_hash = like->name_hash;
+    entry->name_id = like->name_id;
+    entry->key_kind = like->key_kind;
+    entry->ns = like->ns;
+    shape_entry_set_type(entry, type_info[type_id].type);
+    if (prev_entry) prev_entry->next = entry;
+    return entry;
+}
+
+static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* k,
+        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!parent || !k || !input || !input->pool || !input->type_list) return NULL;
+    NameId key_name_id = k->name_id;
+    uint8_t key_kind = k->key_kind;
     // The list is scanned per add, so it is bounded: a shape with more outgoing
     // edges than this is a dictionary-shaped site (parsed data, per-record
     // keys) where sharing cannot pay for a linear walk on every property.
@@ -449,8 +525,8 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
             // select a runtime-created property that merely spells the same.
             same_name = key_name_id == NAME_ID_NONE &&
                 tr->key_kind == NAME_KEY_STRING && tr->name &&
-                tr->name_len == (uint32_t)key->len &&
-                memcmp(tr->name, key->chars, key->len) == 0;
+                tr->name_len == k->name_len &&
+                memcmp(tr->name, k->name, k->name_len) == 0;
         }
         if (!same_name) continue;
         if (map_transition_prefix_matches_parent(parent, tr->target)) {
@@ -460,22 +536,26 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     }
 
     if (transition_count >= MAX_SHAPE_TRANSITIONS) return NULL;
-    // The per-node edge cap bounds one shape's fan-out, not the graph. A
-    // long-lived process that runs thousands of unrelated scripts through one
-    // Input (the test262 batch runner is the extreme case) would otherwise keep
-    // minting shapes for the rest of its life: with only the edge cap it grew
-    // to 5.4 GB. Past this budget every map keeps its private shape, which is
-    // exactly the behaviour before the graph existed.
-    const int MAX_SHAPE_GRAPH = 1024;
-    if (input->shape_transition_shapes >= MAX_SHAPE_GRAPH) return NULL;
+    bool is_element = parent->type_id == LMD_TYPE_ELEMENT;
+    if (!transition_graph_has_room(input, is_element)) return NULL;
 
-    TypeMap* child = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    // an element's node is a TypeElmt: its tag, id and namespace ride along
+    TypeMap* child = (TypeMap*)alloc_type(input->pool, parent->type_id,
+        is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
     if (!child) return NULL;
+    if (is_element) {
+        TypeElmt* element_child = (TypeElmt*)child;
+        element_child->name = ((TypeElmt*)parent)->name;
+        element_child->name_id = ((TypeElmt*)parent)->name_id;
+        element_child->ns = ((TypeElmt*)parent)->ns;
+    }
 
     ShapeEntry* last_clone = NULL;
     ShapeEntry* first = clone_shape_chain_for_transition(input->pool, parent, &last_clone);
     if (parent->shape && !first) return NULL;
-    ShapeEntry* added = alloc_shape_entry(input->pool, key, type_id, last_clone);
+    ShapeEntry* added = k->key
+        ? alloc_shape_entry(input->pool, k->key, type_id, last_clone)
+        : shape_entry_copy_as(input->pool, k->like, type_id, last_clone);
     if (!added) return NULL;
     added->byte_offset = parent->byte_size;
     if (!first) first = added;
@@ -517,7 +597,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 
     arraylist_append(input->type_list, child);
     child->type_index = input->type_list->length - 1;
-    input->shape_transition_shapes++;
+    transition_graph_count(input, is_element);
 
     TypeMapTransition* tr = (TypeMapTransition*)pool_calloc(input->pool,
         sizeof(TypeMapTransition));
@@ -535,6 +615,14 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
 
     if (out_entry) *out_entry = added;
     return child;
+}
+
+static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
+        TypeId type_id, Input* input, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!key) return NULL;
+    TransitionKey k = transition_key_of_string(key);
+    return transition_target_for_key(parent, &k, type_id, input, out_entry);
 }
 
 // The transition graph needs a shared root, otherwise the first add on a fresh
@@ -779,22 +867,50 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
     }
 }
 
+// An attribute already present with this name and value type: ElementReader
+// walks shape order while dynamic lookup is hashed, so a same-typed duplicate
+// key overwrites instead of appending, or the two APIs would disagree.
+static ShapeEntry* elmt_same_typed_attr(TypeElmt* elmt_type, String* key, TypeId type_id) {
+    for (ShapeEntry* field = elmt_type->shape; field; field = field->next) {
+        if (field->name && field->type->type_id == type_id &&
+            strview_equal(field->name, key->chars)) {
+            return field;
+        }
+    }
+    return NULL;
+}
+
+// Grow an element's attribute buffer to hold `byte_end` bytes, keeping the
+// first `used_bytes`.
+static bool elmt_ensure_data_capacity(Element* elmt, int64_t byte_end,
+        int64_t used_bytes, Pool* pool) {
+    if (byte_end <= elmt->data_cap) return true;
+    if (byte_end > INT_MAX / 2) return false;
+    // elmt->data_cap could be 0
+    int byte_cap = (int)MAX((int64_t)elmt->data_cap, byte_end) * 2;
+    void* new_data = pool_calloc(pool, byte_cap);
+    if (!new_data) return false;
+    if (elmt->data) {
+        memcpy(new_data, elmt->data, (size_t)used_bytes);
+        pool_free(pool, elmt->data);
+    }
+    elmt->data = new_data;  elmt->data_cap = byte_cap;
+    return true;
+}
+
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);
     TypeId type_id = get_type_id(value);
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-    for (ShapeEntry* field = elmt_type->shape; field; field = field->next) {
-        if (field->name && field->type->type_id == type_id &&
-            strview_equal(field->name, key->chars)) {
-            // ElementReader walks shape order while dynamic lookup is hashed;
-            // same-typed duplicate keys made the APIs observe different values.
-            elmt_store_value((char*)elmt->data + field->byte_offset, type_id, value);
-            return;
-        }
+    if (ShapeEntry* field = elmt_same_typed_attr(elmt_type, key, type_id)) {
+        elmt_store_value((char*)elmt->data + field->byte_offset, type_id, value);
+        return;
     }
-    if (elmt_type->shape && !elmt_type->is_private_clone) {
-        // ElementBuilder::final() pools shape chains; appending attrs after that
-        // must not mutate the shared pooled ShapeEntry list.
+    if (typemap_is_shared_shape((TypeMap*)elmt_type) ||
+            (elmt_type->shape && !elmt_type->is_private_clone)) {
+        // A transition-tree type is shared by every element built the same
+        // way (D3.4.3v2), and a pooled chain by every element with the same
+        // attributes: an append here must not reach either, so detach first.
         TypeElmt* clone = elmt_clone_type_for_mutation(elmt, pool);
         if (!clone) return;
         elmt_type = clone;
@@ -807,17 +923,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     // ensure data capacity
     int bsize = type_info[type_id].byte_size;
     int byte_offset = shape_entry->byte_offset + bsize;
-    if (byte_offset > elmt->data_cap) { // resize map data
-        // elmt->data_cap could be 0
-        int byte_cap = MAX(elmt->data_cap, byte_offset) * 2;
-        void* new_data = pool_calloc(pool, byte_cap);
-        if (!new_data) return;
-        if (elmt->data) {
-            memcpy(new_data, elmt->data, byte_offset - bsize);
-            pool_free(pool, elmt->data);
-        }
-        elmt->data = new_data;  elmt->data_cap = byte_cap;
-    }
+    if (!elmt_ensure_data_capacity(elmt, byte_offset, byte_offset - bsize, pool)) return;
     elmt_type->byte_size = byte_offset;
 
     // store the value
@@ -825,67 +931,130 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     elmt_store_value(field_ptr, type_id, value);
 }
 
-// ========== Shape Finalization ==========
-// Map ShapeEntry records stay map-owned because JavaScript descriptor flags are
-// mutable; sharing them from the shape pool would let one map alter another.
-
-void map_finalize_shape(TypeMap* type_map, Input* input) {
-    (void)type_map;
-    (void)input;
-    // map_put already built the authoritative per-map chain and hash index;
-    // retaining it avoids mutable JS descriptor state escaping into the shared
-    // shape pool and avoids allocating a second chain for every parsed map.
+// D3.4.3v2: an element's type starts at its tag's root in the Input's
+// transition tree. Pooled tag names are unique pointers, so a root is found by
+// the (name, namespace) pointer pair in a small pool-owned table. Returns NULL
+// when the name is not pooled or the element budget is spent; the caller then
+// keeps a private type.
+static uint64_t elmt_root_slot_hash(const char* name, const Target* ns) {
+    uint64_t h = (uint64_t)(uintptr_t)name * 0x9E3779B97F4A7C15ull;
+    return h ^ ((uint64_t)(uintptr_t)ns * 0xC2B2AE3D27D4EB4Full);
 }
 
-void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
-    if (!type_elmt) {
-        log_debug("missing element type");
-        return;  // safety check
+static void elmt_root_table_insert(TypeElmt** table, int cap, TypeElmt* root) {
+    uint64_t mask = (uint64_t)cap - 1;
+    for (uint64_t i = elmt_root_slot_hash(root->name.str, root->ns) & mask;;
+            i = (i + 1) & mask) {
+        if (!table[i]) { table[i] = root; return; }
     }
-
-    if (!type_elmt->shape || type_elmt->length == 0) {
-        return;  // empty element, nothing to finalize
-    }
-
-    // collect attribute names and types from existing shape chain
-    size_t attr_count = type_elmt->length;
-    log_debug("elmt_finalize_shape: attr_count=%zu", attr_count);
-    const char** attr_names = (const char**)pool_alloc(input->pool, attr_count * sizeof(char*));
-    TypeId* attr_types = (TypeId*)pool_alloc(input->pool, attr_count * sizeof(TypeId));
-
-    if (!attr_names || !attr_types) {
-        return;  // allocation failed
-    }
-
-    // traverse existing shape chain to collect info
-    ShapeEntry* entry = type_elmt->shape;
-    for (size_t i = 0; i < attr_count && entry; i++) {
-        attr_names[i] = entry->name ? entry->name->str : nullptr;
-        attr_types[i] = entry->type->type_id;
-        entry = entry->next;
-    }
-
-    // get or create pooled shape (includes element name)
-    const char* element_name = type_elmt->name.str ? type_elmt->name.str : "";
-    struct ShapeEntry* pooled_shape = shape_pool_get_element_shape(
-        input->shape_pool, element_name, attr_names, attr_types, attr_count);
-
-    if (pooled_shape) {
-        // replace the shape chain with pooled version
-        type_elmt->shape = pooled_shape;
-
-        // find last entry in pooled chain
-        struct ShapeEntry* last = pooled_shape;
-        while (last->next) { last = last->next; }
-        type_elmt->last = last;
-        type_elmt->is_private_clone = false;
-    }
-
-    // free temporary arrays
-    pool_free(input->pool, attr_names);
-    pool_free(input->pool, attr_types);
 }
 
+static TypeElmt* elmt_tree_root_find(Input* input, const char* name, const Target* ns) {
+    if (!input || !input->element_root_cap || !name) return NULL;
+    uint64_t mask = (uint64_t)input->element_root_cap - 1;
+    for (uint64_t i = elmt_root_slot_hash(name, ns) & mask;; i = (i + 1) & mask) {
+        TypeElmt* root = input->element_roots[i];
+        if (!root) return NULL;
+        if (root->name.str == name && root->ns == ns) return root;
+    }
+}
+
+TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns) {
+    if (!input || !input->pool || !input->type_list || !tag_name ||
+            !string_is_pooled(tag_name)) return NULL;
+    const char* name = tag_name->chars;
+    if (TypeElmt* root = elmt_tree_root_find(input, name, ns)) return root;
+    if (!transition_graph_has_room(input, true)) return NULL;
+    // keep the table at most half full; a replaced table is left to the pool
+    if ((input->element_root_count + 1) * 2 > input->element_root_cap) {
+        int cap = input->element_root_cap ? input->element_root_cap * 2 : 64;
+        TypeElmt** table = (TypeElmt**)pool_calloc(input->pool, sizeof(TypeElmt*) * (size_t)cap);
+        if (!table) return NULL;
+        for (int i = 0; i < input->element_root_cap; i++) {
+            if (input->element_roots[i]) elmt_root_table_insert(table, cap, input->element_roots[i]);
+        }
+        input->element_roots = table;
+        input->element_root_cap = cap;
+    }
+    TypeElmt* root = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!root) return NULL;
+    root->name.str = name;
+    root->name.length = tag_name->len;
+    root->name_id = name_ref_id(tag_name);
+    root->ns = ns;
+    root->is_transition_shared_shape = true;
+    arraylist_append(input->type_list, root);
+    root->type_index = input->type_list->length - 1;
+    transition_graph_count(input, true);
+    elmt_root_table_insert(input->element_roots, input->element_root_cap, root);
+    input->element_root_count++;
+    return root;
+}
+
+// D3.4.3v2: add an attribute through the Input's transition tree, exactly as
+// map_put adds a field. A tree-typed element follows or mints the edge and only
+// its own data buffer changes; without a usable edge, elmt_put detaches it onto
+// a private type and appends there.
+void elmt_put_tree(Element* elmt, String* key, Item value, Input* input) {
+    TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+    if (input && key && elmt_type && elmt_type->is_transition_shared_shape &&
+            !property_key_requires_identity(key)) {
+        TypeId type_id = get_type_id(value);
+        if (ShapeEntry* field = elmt_same_typed_attr(elmt_type, key, type_id)) {
+            elmt_store_value((char*)elmt->data + field->byte_offset, type_id, value);
+            return;
+        }
+        ShapeEntry* entry = NULL;
+        TypeMap* target = map_transition_target_for_add((TypeMap*)elmt_type, key,
+            type_id, input, &entry);
+        if (target && entry) {
+            int64_t byte_end = entry->byte_offset + type_info[type_id].byte_size;
+            if (!elmt_ensure_data_capacity(elmt, byte_end, elmt_type->byte_size,
+                    input->pool)) return;
+            elmt->type = target;
+            elmt_store_value((char*)elmt->data + entry->byte_offset, type_id, value);
+            return;
+        }
+    }
+    elmt_put(elmt, key, value, input ? input->pool : NULL);
+}
+
+// D3.4.3v2: the tree root a container's rebuilt type starts from — the plain
+// map root, or the element's tag root. An element root exists only for a
+// pooled tag, so it is found, never made; NULL keeps the container private.
+TypeMap* type_tree_root_like(Input* input, Map* container) {
+    if (!input || !container || !container->type) return NULL;
+    TypeMap* type = (TypeMap*)container->type;
+    if (container->type_id == LMD_TYPE_ELEMENT) {
+        return (TypeMap*)elmt_tree_root_find(input, ((TypeElmt*)type)->name.str,
+            ((TypeElmt*)type)->ns);
+    }
+    if (container->type_id == LMD_TYPE_MAP && container->map_kind == MAP_KIND_PLAIN) {
+        return map_shape_transition_root(input, type->js_meta);
+    }
+    return NULL;
+}
+
+// The tree node reached from `start` by adding `steps` in order, minting the
+// edges that are missing. Only ordinary named data fields take edges, as in
+// map_put; NULL when the tree declines any step.
+TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* steps, int count) {
+    TypeMap* node = start;
+    for (int i = 0; node && i < count; i++) {
+        const TypeTreeStep* step = &steps[i];
+        TransitionKey k;
+        if (step->like) {
+            if (!step->like->name || step->like->flags != 0 ||
+                    step->like->key_kind != NAME_KEY_STRING) return NULL;
+            k = transition_key_of_entry(step->like);
+        } else {
+            if (!step->key || property_key_requires_identity(step->key)) return NULL;
+            k = transition_key_of_string(step->key);
+        }
+        node = transition_target_for_key(node, &k, step->type_id, input, NULL);
+    }
+    return node;
+}
 
 typedef void (*InputParserFn)(Input* input, const char* source);
 
@@ -1577,12 +1746,15 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     // document-tree parentage is intentionally unrelated to name identity.
     input->name_pool = mem_name_pool_create(dctx, pool, name_parent,
         MEM_ROLE_INPUT, "input.name_pool");
-    input->shape_pool = mem_shape_pool_create(dctx, pool, input->arena, NULL, "input.shape_pool");  // Initialize shape pool
     input->type_list = arraylist_new(16);
     // Input is pool_alloc'd, not pool_calloc'd: every field must be set here.
     // Leaving this one uninitialized made map_put dereference pool garbage.
     input->shape_transition_root = nullptr;
     input->shape_transition_shapes = 0;
+    input->element_roots = nullptr;
+    input->element_root_cap = 0;
+    input->element_root_count = 0;
+    input->element_transition_shapes = 0;
     input->url = abs_url;
     input->path = nullptr;
     input->parent = parent;     // Set parent Input for hierarchical ownership
@@ -1601,10 +1773,6 @@ void input_release_auxiliary_resources(Input* input) {
         name_pool_release(input->name_pool);
         input->name_pool = nullptr;
     }
-    if (input->shape_pool) {
-        shape_pool_release(input->shape_pool);
-        input->shape_pool = nullptr;
-    }
     if (input->type_list) {
         arraylist_free(input->type_list);
         input->type_list = nullptr;
@@ -1620,7 +1788,6 @@ void input_release_document_resources(Input* input) {
         mem_context_destroy((MemContext*)input->mem_ctx);
         input->mem_ctx = nullptr;
         input->arena = nullptr;
-        input->shape_pool = nullptr;
     }
 }
 

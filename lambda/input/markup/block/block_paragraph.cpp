@@ -110,11 +110,9 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     String* text = parser->builder.createString(sb->str->chars, sb->length);
     Item text_item = {.item = s2it(text)};
     list_push((List*)code, text_item);
-    increment_element_content_length(code);
 
     // Add code to pre
     list_push((List*)pre, Item{.item = (uint64_t)code});
-    increment_element_content_length(pre);
 
     return Item{.item = (uint64_t)pre};
 }
@@ -202,11 +200,9 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                     Item inner = parse_inline_spans(parser, content);
                     if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
                         list_push((List*)strong, inner);
-                        increment_element_content_length(strong);
                     }
                 }
                 list_push((List*)para, Item{.item = (uint64_t)strong});
-                increment_element_content_length(para);
             }
             parser->current_line++;
             return Item{.item = (uint64_t)para};
@@ -229,11 +225,9 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                     Item inner = parse_inline_spans(parser, content);
                     if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
                         list_push((List*)em, inner);
-                        increment_element_content_length(em);
                     }
                 }
                 list_push((List*)para, Item{.item = (uint64_t)em});
-                increment_element_content_length(para);
             }
             parser->current_line++;
             return Item{.item = (uint64_t)para};
@@ -427,7 +421,6 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
 
         if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
             list_push((List*)heading, content);
-            increment_element_content_length(heading);
         }
 
         return Item{.item = (uint64_t)heading};
@@ -477,7 +470,6 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
 
             if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
                 list_push((List*)para, content);
-                increment_element_content_length(para);
             }
 
             if (literal.item != ITEM_UNDEFINED && literal.item != ITEM_ERROR) {
@@ -485,9 +477,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                 Element* wrapper = create_element(parser, "div");
                 if (wrapper) {
                     list_push((List*)wrapper, Item{.item = (uint64_t)para});
-                    increment_element_content_length(wrapper);
                     list_push((List*)wrapper, literal);
-                    increment_element_content_length(wrapper);
                     return Item{.item = (uint64_t)wrapper};
                 }
             }
@@ -502,7 +492,6 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
 
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
         list_push((List*)para, content);
-        increment_element_content_length(para);
     }
 
     return Item{.item = (uint64_t)para};
@@ -557,11 +546,9 @@ Item parse_rst_line_block(MarkupParser* parser, const char* line) {
             Item inline_content = parse_inline_spans(parser, p);
             if (inline_content.item != ITEM_ERROR && inline_content.item != ITEM_UNDEFINED) {
                 list_push((List*)line_elem, inline_content);
-                increment_element_content_length(line_elem);
             }
 
             list_push((List*)div, Item{.item = (uint64_t)line_elem});
-            increment_element_content_length(div);
         }
 
         parser->current_line++;
@@ -765,10 +752,8 @@ Item parse_rst_definition_list(MarkupParser* parser, const char* line) {
             Item term_inline = parse_inline_spans(parser, term_start);
             if (term_inline.item != ITEM_ERROR && term_inline.item != ITEM_UNDEFINED) {
                 list_push((List*)dt, term_inline);
-                increment_element_content_length(dt);
             }
             list_push((List*)dl, Item{.item = (uint64_t)dt});
-            increment_element_content_length(dl);
         }
 
         parser->current_line++;
@@ -825,10 +810,8 @@ Item parse_rst_definition_list(MarkupParser* parser, const char* line) {
                     Item def_inline = parse_inline_spans(parser, sb->str->chars);
                     if (def_inline.item != ITEM_ERROR && def_inline.item != ITEM_UNDEFINED) {
                         list_push((List*)dd, def_inline);
-                        increment_element_content_length(dd);
                     }
                     list_push((List*)dl, Item{.item = (uint64_t)dd});
-                    increment_element_content_length(dl);
                 }
             }
         }

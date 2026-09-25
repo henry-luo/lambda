@@ -5,7 +5,7 @@
 This document outlines a comprehensive plan to implement shape pooling for Lambda's type system. Shape pooling will deduplicate map and element type metadata (ShapeEntry chains) by caching and reusing shape structures that have identical field sequences, significantly reducing memory overhead for documents with repeated structural patterns.
 
 **Date**: November 20, 2025  
-**Status**: 📋 Planning Phase  
+**Status**: RETIRED 2026-09-25. Shipped for `Input`; maps stopped interning here on 2026-08-08 and share whole `TypeMap`s through the per-`Input` transition tree, and on 2026-09-25 parsed elements and `MarkEditor` rebuilds moved onto the same tree and the pool was deleted (D3.4.3v2, [Lambda_Design_Shape_Transitions.md](Lambda_Design_Shape_Transitions.md)). This document is kept as the history of the design.  
 **Priority**: Medium-High (Memory Optimization & Type System Enhancement)  
 **Dependencies**: Name Pool (✅ Completed), Arena Allocator (✅ Available)
 

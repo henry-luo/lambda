@@ -192,16 +192,6 @@ inline String* create_string(MarkupParser* parser, const char* text) {
     return parser->builder.createString(text);
 }
 
-/**
- * Increment an element's content length counter
- */
-inline void increment_element_content_length(Element* elem) {
-    if (elem && elem->type) {
-        TypeElmt* elmt_type = (TypeElmt*)elem->type;
-        elmt_type->content_length++;
-    }
-}
-
 // ============================================================================
 // Text Processing Utilities
 // ============================================================================

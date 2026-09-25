@@ -93,8 +93,7 @@ protected:
             }
 
             List* elem_list = (List*)elem;
-            int64_t attr_count = elem_list->length - type->content_length;
-            for (int64_t i = attr_count; i < elem_list->length; i++) {
+            for (int64_t i = 0; i < elem_list->length; i++) {
                 Element* found = findElementByTag(elem_list->items[i], tag_name);
                 if (found) return found;
             }
@@ -123,11 +122,9 @@ protected:
             }
         } else if (get_type_id(item) == LMD_TYPE_ELEMENT) {
             Element* elem = item.element;
-            TypeElmt* type = (TypeElmt*)elem->type;
             List* elem_list = (List*)elem;
 
-            int64_t attr_count = elem_list->length - type->content_length;
-            for (int64_t i = attr_count; i < elem_list->length; i++) {
+            for (int64_t i = 0; i < elem_list->length; i++) {
                 result += getTextContent(elem_list->items[i]);
             }
         } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
@@ -206,8 +203,7 @@ protected:
             }
 
             List* elem_list = (List*)elem;
-            int64_t attr_count = elem_list->length - type->content_length;
-            for (int64_t i = attr_count; i < elem_list->length; i++) {
+            for (int64_t i = 0; i < elem_list->length; i++) {
                 count += countElementsByTag(elem_list->items[i], tag_name);
             }
         } else if (get_type_id(item) == LMD_TYPE_ARRAY) {
@@ -226,10 +222,8 @@ protected:
         }
 
         int count = 0;
-        TypeElmt* type = (TypeElmt*)elem->type;
         List* elem_list = (List*)elem;
-        int64_t attr_count = elem_list->length - type->content_length;
-        for (int64_t i = attr_count; i < elem_list->length; i++) {
+        for (int64_t i = 0; i < elem_list->length; i++) {
             Item child = elem_list->items[i];
             if (get_type_id(child) != LMD_TYPE_ELEMENT) {
                 continue;

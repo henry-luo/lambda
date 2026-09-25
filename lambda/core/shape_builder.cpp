@@ -8,36 +8,34 @@
 
 // ========== Initialization ==========
 
-ShapeBuilder shape_builder_init_map(ShapePool* pool) {
+ShapeBuilder shape_builder_init_map(Arena* arena) {
     ShapeBuilder builder;
     memset(&builder, 0, sizeof(ShapeBuilder));
-    builder.pool = pool;
+    builder.arena = arena;
     builder.is_element = false;
     builder.element_name = nullptr;
-    log_debug("shape_builder_init_map: pool=%p", pool);
     return builder;
 }
 
-ShapeBuilder shape_builder_init_element(ShapePool* pool, const char* element_name) {
-    ShapeBuilder builder = shape_builder_init_map(pool);
+ShapeBuilder shape_builder_init_element(Arena* arena, const char* element_name) {
+    ShapeBuilder builder = shape_builder_init_map(arena);
     builder.is_element = true;
     builder.element_name = element_name;
-    log_debug("shape_builder_init_element: pool=%p, element=%s", pool, element_name);
     return builder;
 }
 
 // ========== Field Management ==========
 
-// SCU10: grow the draft array from the pool's arena. The arena owns the
-// abandoned smaller block for the Input's lifetime, which is what the shape
-// pool's own chains already rely on; there is no per-builder free.
+// SCU10: grow the draft array from the caller's arena, which owns the
+// abandoned smaller block for the Input's lifetime; there is no per-builder
+// free.
 static bool shape_builder_reserve(ShapeBuilder* builder, size_t needed) {
     if (needed <= builder->capacity) return true;
-    if (!builder->pool || !builder->pool->arena) {
-        log_error("shape_builder_reserve: builder has no pool arena");
+    if (!builder->arena) {
+        log_error("shape_builder_reserve: builder has no arena");
         return false;
     }
-    if (!lam::arena_grow_array(builder->pool->arena, &builder->fields,
+    if (!lam::arena_grow_array(builder->arena, &builder->fields,
                                 &builder->capacity, builder->field_count,
                                 needed, 8)) {
         log_error("shape_builder_reserve: draft allocation failed at %zu fields", needed);
@@ -134,68 +132,6 @@ void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape) {
     }
 
     log_debug("shape_builder_import_shape: imported %zu fields", builder->field_count);
-}
-
-// ========== Finalization ==========
-
-ShapeEntry* shape_builder_finalize(ShapeBuilder* builder) {
-    if (!builder || !builder->pool) {
-        log_error("shape_builder_finalize: invalid builder or pool");
-        return nullptr;
-    }
-
-    log_debug("shape_builder_finalize: finalizing %zu fields, is_element=%d",
-        builder->field_count, builder->is_element);
-
-    // An empty field list is the canonical shape after the final attribute or
-    // map field is deleted; NULL represents that valid shape.
-    if (builder->field_count == 0) return nullptr;
-
-    // The pool API takes parallel name/TypeId arrays (D3.4.2 identity); project
-    // the drafts onto short-lived arena arrays.
-    const char** names = nullptr;
-    TypeId* types = nullptr;
-    if (builder->field_count > 0) {
-        names = (const char**)arena_alloc(builder->pool->arena,
-            builder->field_count * sizeof(const char*));
-        types = (TypeId*)arena_alloc(builder->pool->arena,
-            builder->field_count * sizeof(TypeId));
-        if (!names || !types) {
-            log_error("shape_builder_finalize: projection allocation failed");
-            return nullptr;
-        }
-        for (size_t i = 0; i < builder->field_count; i++) {
-            names[i] = builder->fields[i].name;
-            types[i] = builder->fields[i].type_id;
-        }
-    }
-
-    ShapeEntry* result = nullptr;
-
-    if (builder->is_element) {
-        result = shape_pool_get_element_shape(
-            builder->pool,
-            builder->element_name,
-            names,
-            types,
-            builder->field_count
-        );
-    } else {
-        result = shape_pool_get_map_shape(
-            builder->pool,
-            names,
-            types,
-            builder->field_count
-        );
-    }
-
-    if (result) {
-        log_debug("shape_builder_finalize: success, shape=%p", result);
-    } else {
-        log_error("shape_builder_finalize: failed to get shape from pool");
-    }
-
-    return result;
 }
 
 // ========== Utilities ==========

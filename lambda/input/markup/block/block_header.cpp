@@ -123,7 +123,6 @@ Item parse_header(MarkupParser* parser, const char* line) {
             Item content = parse_inline_spans(parser, header_text);
             if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
                 list_push((List*)header, content);
-                increment_element_content_length(header);
             }
 
             mem_free(header_text);

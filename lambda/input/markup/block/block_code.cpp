@@ -261,7 +261,6 @@ static Item parse_indented_code_block(MarkupParser* parser, const char* line) {
     String* code_content = parser->builder.createString(sb->str->chars, sb->length);
     Item text_item = {.item = s2it(code_content)};
     list_push((List*)code, text_item);
-    increment_element_content_length(code);
 
     return Item{.item = (uint64_t)code};
 }
@@ -411,7 +410,6 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
             String* math_str = parser->builder.createString(sb->str->chars, sb->length);
             Item math_item = {.item = s2it(math_str)};
             list_push((List*)math, math_item);
-            increment_element_content_length(math);
 
             return Item{.item = (uint64_t)math};
         }
@@ -508,7 +506,6 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         String* code_content = parser->builder.createString(sb->str->chars, sb->length);
         Item text_item = {.item = s2it(code_content)};
         list_push((List*)code, text_item);
-        increment_element_content_length(code);
     }
     // If no content (has_content == false), leave the code element empty
 

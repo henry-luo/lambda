@@ -49,9 +49,6 @@ protected:
             if (input->name_pool) {
                 name_pool_release(input->name_pool);
             }
-            if (input->shape_pool) {
-                shape_pool_release(input->shape_pool);
-            }
             if (input->type_list) {
                 arraylist_free(input->type_list);
             }

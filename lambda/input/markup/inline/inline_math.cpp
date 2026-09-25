@@ -81,7 +81,6 @@ Item parse_inline_math(MarkupParser* parser, const char** text) {
     if (math_str) {
         Item math_item = {.item = s2it(math_str)};
         list_push((List*)math_elem, math_item);
-        increment_element_content_length(math_elem);
     }
 
     mem_free(content);
