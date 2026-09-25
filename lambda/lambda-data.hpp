@@ -1370,6 +1370,26 @@ static inline Type* type_field_unwrap_simple_decl(Type* type) {
     return type;
 }
 
+// A refinement alias nests one constrained base in another (`type Small = Pos
+// that ~ < 10`), and a chain this deep can only be a cycle.
+#define LAMBDA_CONSTRAINT_CHAIN_MAX 32
+
+static inline bool lambda_type_is_constrained(const Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE &&
+        type->kind == TYPE_KIND_CONSTRAINED;
+}
+
+// The base a constrained type finally admits, past every `that` layer and
+// SIMPLE wrapper; NULL for a cyclic chain.
+static inline Type* lambda_constrained_type_base(Type* type) {
+    for (int depth = 0; depth <= LAMBDA_CONSTRAINT_CHAIN_MAX; depth++) {
+        type = type_field_unwrap_simple_decl(type);
+        if (!lambda_type_is_constrained(type)) return type;
+        type = ((TypeConstrained*)type)->base;
+    }
+    return NULL;
+}
+
 static inline bool shape_entry_uses_raw_item_storage(const ShapeEntry* field) {
     return field && field->type && field->type->type_id != LMD_TYPE_NULL &&
         shape_entry_storage_type_id(field) == LMD_TYPE_NULL;

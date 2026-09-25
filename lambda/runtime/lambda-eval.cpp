@@ -2221,6 +2221,26 @@ Bool lambda_value_type_is_exact(Item value, Type* expected) {
     return actual_id == expected->type_id ? BOOL_TRUE : BOOL_FALSE;
 }
 
+// The operand `x is T` receives for a type the graph keeps unwrapped, such as a
+// constrained base: an extended kind is its own value; a base-type word is its
+// published singleton (`list`, `date` and the sized numerics are not their
+// TypeId's type); a structural type the builder made rides in `scratch`.
+static Type* is_operand_type_value(Type* type, TypeType* scratch) {
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type)) {
+        return type;
+    }
+    *(Type*)scratch = LIT_TYPE;
+    scratch->type = type;
+    TypeId tid = LMD_TYPE_ANY;
+    TypeType* singleton = lambda_type_node_singleton((Type*)scratch, &tid);
+    if (singleton) return (Type*)singleton;
+    if (tid > 0 && tid < LMD_TYPE_COUNT && type_info[tid].type == type) {
+        return base_type(tid);
+    }
+    return (Type*)scratch;
+}
+
 Bool fn_is(Item a, Item b) {
     TypeId b_type_id = get_type_id(b);
     if (b_type_id == LMD_TYPE_RANGE) {
@@ -2261,21 +2281,17 @@ Bool fn_is(Item a, Item b) {
         return pattern_full_match_chars(pattern, a.get_chars(), a.get_len()) ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    // Constraints are intentionally base-type-only until validator predicate
-    // evaluation ships. `is` retains that interim rule independently from
-    // assignment-boundary matching, where runtime validation owns diagnostics.
+    // S11.4.6: a first-class constrained type value carries no predicate in
+    // reach, so this generic path admits the base only; `is` and a match arm
+    // that name the type run its predicates too (ast_constrained_type). The
+    // base must admit exactly as `x is <base>` would: the tag test this
+    // replaced skipped every union, occurrence and array base outright.
     if (b_type->kind == TYPE_KIND_CONSTRAINED) {
-        TypeConstrained* constrained = (TypeConstrained*)b_type;
-        TypeId a_type_id = get_type_id(a);
-        Type* base = constrained->base;
-        if (base->type_id != LMD_TYPE_TYPE) {
-            if (a_type_id != base->type_id) {
-                Type actual_scratch = {};
-                Type* actual_type = item_static_type_for_is(a, &actual_scratch);
-                if (!numeric_type_subsumes(actual_type, base)) return BOOL_FALSE;
-            }
-        }
-        return BOOL_TRUE;
+        TypeType scratch;
+        Type* base = is_operand_type_value(lambda_constrained_type_base(b_type),
+            &scratch);
+        return base ? fn_is(a, (Item){.item = (uint64_t)(uintptr_t)base})
+            : BOOL_FALSE;
     }
 
     if (b_type->kind == TYPE_KIND_UNARY || b_type->kind == TYPE_KIND_BINARY) {

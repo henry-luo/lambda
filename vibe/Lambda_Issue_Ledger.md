@@ -240,6 +240,18 @@ Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inf
 
 [LR03-16](#lr03-16) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
 
+### Constrained type and `~key` fix pass — 2026-09-25
+
+A review of the `that` proviso (S10.1.5v3) and of `T that cond` (S11.4.6) found four defects. Each was reproduced on both tiers and fixed on both, with fixtures pinned in `kTune27TierParity`:
+- [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>): a constrained type's base was tested by its TypeId, or not at all on the generic `fn_is` path.
+- [LR03-23](<Lambda_Issue_Ledger (fixed).md#lr03-23>): a match arm naming a constrained type admitted its base alone, and an alias chain lost its inner predicates.
+- [LR13-11](<Lambda_Issue_Ledger (fixed).md#lr13-11>): the validator refused every element of a constrained element type, so `[1, 2] is Pos[]` was `false`.
+- [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>): `~key` in a single-subject body read a stale register on the JIT, and T0 segfaulted on it in a handler's value arm. The JIT's value arm also hid a nested pipe's `~`.
+
+Found on the way, still open: [LR03-24](#lr03-24) (T0 answers a predicate outside its allow-list with `false`, so `auto` flips a hot function's answer on promotion), [LR03-25](#lr03-25) (T0 reads an imported predicate's constants from the importing module), [LR03-26](#lr03-26) (an inline pattern island never compiles as a constrained base) and [LR10-12](#lr10-12) (a proviso answers null for an error operand, unruled).
+
+The proviso itself matches S10.1.5v3 on both tiers. By S11.4.6 the generic path is still base-only: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). `doc/Lambda_Type.md` shows field and object constraints failing `is` (`<User name: ""> is User; // false`); both answer `true`.
+
 ---
 
 
@@ -543,6 +555,15 @@ The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledge
 
 <a id="lr03-21"></a>**LR03-21 · `<:` does not split a range across union arms (S11.1.4v2) · OPEN (found 2026-09-25, residue of LR03-18)**
 With `type R = 1 to 2` and `type OneTwo = 1 | 2`, `R <: OneTwo` is `false`. Every member of `1 to 2` is admitted by `1 | 2`, so S11.1.4v2 ("`A <: B` holds exactly when every value admitted by `A` is admitted by `B`") makes it `true`. The same holds for `1 to 5` against `(1 to 3) | (4 to 5)`. `contract_type_is_subtype` (`type_contract.cpp`) tries each arm of an expected union whole, and since the LR03-18 fix a range is below an arm only if that arm alone admits all its members. Deciding the split case means covering the range with the arms' members. The reverse direction is right: `OneTwo <: R` is `true`. Before the fix, `<:` compared a range type's tag, so every range was below every other (`(1 to 9) <: (1 to 5)` was `true`); the second example gave `true` then only by that accident.
+
+<a id="lr03-24"></a>**LR03-24 · T0 answers a constraint predicate outside its allow-list with `false`, where the JIT evaluates it (S1.6) · OPEN (found 2026-09-25, waiting on a ruling)**
+T0 runs a `that` body only when `interp_predicate_supported` (`interp_plan.cpp`) admits every node in it: literals, `~` and `~key`, a set of operators, and an allow-list of pure system functions. A predicate that reads a `let` binding, calls a user function, builds a container or uses a pipe fails without an error. The JIT compiles the same body in full. With `let lim = 3; type Big = int that ~ > lim`, `5 is Big` is `false` on T0 and `true` on the JIT. Under `auto`, `fn check(x) => x is Big` called twelve times answers `false` four times, then `true` once promoted; with `LAMBDA_SATELLITE_SYNC=1` the switch point is fixed, otherwise it depends on timing. The allow-list keeps predicates free of effects (AI17), so the fix needs a ruling: both tiers reject such a predicate at compile time, or both evaluate it.
+
+<a id="lr03-25"></a>**LR03-25 · T0 reads an imported constrained type's predicate constants from the importing module (S1.6) · OPEN (found 2026-09-25)**
+A predicate's AST belongs to the module that declares the type, but `eval_literal` resolves a literal's `const_index` against the running frame's module (`interp_const_at(f->module, …)`). With `pub type Named = string that ~ != "admin"` imported, `"admin" is Named` is `true` on T0 and `false` on the JIT. An inline float such as `0.5` is unaffected. `is` has taken this path since a named constrained type was resolved through its declaration; since [LR03-23](<Lambda_Issue_Ledger (fixed).md#lr03-23>) a `case Named:` arm does too.
+
+<a id="lr03-26"></a>**LR03-26 · An inline pattern island never compiles as a constrained base · OPEN (found 2026-09-25)**
+An island compiles at its first evaluation (`compile_runtime_pattern`), and a constrained type's base is never evaluated, so the base of `type Digits = \(d+) that len(~) > 2` has no regex and admits nothing: `"1234" is Digits` is `false` on both tiers. A named pattern base works (`type D = \(d+); type Digits = D that len(~) > 2`). Before [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>) the base's TypeId was compared, with the same answer.
 
 ---
 
@@ -875,6 +896,9 @@ pn main() {
 }
 ```
 T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack overflow` and exits 1. A stack overflow is a fault, never a call result (S7.11.1v2), and faults pass through `fn` frames to their boundary (S7.11.2). T0 instead turns it into an ordinary error value, so an unused binding hides it: `negative/runtime/stack_overflow.ls` (`let x = f(0)` at top level) exits 0 on T0. `RuntimeError_StackOverflow` checks only that the script does not crash; `RuntimeError_StackOverflowJit` pins the JIT.
+
+<a id="lr10-12"></a>**LR10-12 · A proviso answers null for an error operand when its predicate touches `~` (S10.1.5v3, S7.9) · OPEN (found 2026-09-25, waiting on a ruling)**
+`x that p` binds `~` to `x` whatever it is. With `let e = error("boom")`, `e that true` is the error, but `e that ~ > 3` is `null`: the comparison propagates the error (S7.9.3), an error is falsy, so the proviso fails. S10.1.5v3 rules a failed proviso absence and says nothing of an error operand. S7.9 asks whether a result can be mistaken for a successful computation, and a null proviso can. Both tiers agree.
 
 ## 11. Mark data API (LR_11)
 

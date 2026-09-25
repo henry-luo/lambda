@@ -156,7 +156,10 @@ inline Type* unwrap_type(Type* type) {
             type->kind == TYPE_KIND_SIMPLE && !type_is_global_meta_type(type)) {
         type = ((TypeType*)type)->type;
     }
-    return type;
+    // S11.4.6: the validator enforces a constrained type's base only. Kept as
+    // the constrained type, a wrapped one (an element of `Pos[]`) reached a
+    // TypeId compare and refused every value.
+    return lambda_type_is_constrained(type) ? lambda_constrained_type_base(type) : type;
 }
 
 static inline bool validator_sized_kind_is_integer(NumSizedType kind) {

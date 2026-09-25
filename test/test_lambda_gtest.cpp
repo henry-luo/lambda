@@ -400,6 +400,12 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.10 (LR03-20): an object literal admits each field against its
     // declared contract; construction stored any value unchecked.
     {"test/lambda/object_field_admission.ls", "test/lambda/object_field_admission.txt"},
+    // S11.2.1: a constrained type admits its base as `x is <base>` does and a
+    // named arm runs its predicates; both tiers had compared the base's TypeId.
+    {"test/lambda/constrained_type_base.ls", "test/lambda/constrained_type_base.txt"},
+    // S10.1.3: `~key` is null in a single-subject body. The JIT read an
+    // enclosing pipe's index or failed to compile; T0 segfaulted in a value arm.
+    {"test/lambda/current_key_subject.ls", "test/lambda/current_key_subject.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
