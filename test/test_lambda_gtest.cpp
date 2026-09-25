@@ -44,34 +44,6 @@ static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
 static const size_t NUM_PROCEDURAL_TEST_DIRECTORIES = sizeof(PROCEDURAL_TEST_DIRECTORIES) / sizeof(PROCEDURAL_TEST_DIRECTORIES[0]);
 
 //==============================================================================
-// MIR Skip List - features not yet implemented in MIR Direct transpiler
-//==============================================================================
-
-static const char* MIR_SKIP_TESTS[] = {
-    // object, object_inherit, object_default, object_update, object_pattern,
-    // object_constraint, typed_param_direct_access and map_object_robustness
-    // re-enabled 2026-09-25: each matches its golden on interp, jit and auto
-    // now that a method's `_b` wrapper no longer re-boxes its result (LR07-23).
-    "object_direct_access", // object direct struct access is not implemented in MIR Direct
-    // benchmark tests not yet passing in MIR Direct
-    // awfy_list2 re-enabled 2026-07-29: it now prints "List: PASS" under MIR Direct,
-    // matching golden awfy/list2.txt
-    // awfy_deltablue / awfy_deltablue2 re-enabled: converted to the growable []/push/len/splice
-    // vector (no chunked + .sz wrapper), which fixed both the timeout and the null-output issue.
-    "beng_fasta",       // fasta benchmark uses features not yet in MIR
-    "beng_pidigits",    // pidigits benchmark uses features not yet in MIR
-    "beng_revcomp",     // revcomp benchmark uses features not yet in MIR
-};
-static const size_t NUM_MIR_SKIP_TESTS = sizeof(MIR_SKIP_TESTS) / sizeof(MIR_SKIP_TESTS[0]);
-
-static bool should_skip_mir_test(const std::string& test_name) {
-    for (size_t i = 0; i < NUM_MIR_SKIP_TESTS; i++) {
-        if (test_name == MIR_SKIP_TESTS[i]) return true;
-    }
-    return false;
-}
-
-//==============================================================================
 // Test Discovery
 //==============================================================================
 
@@ -91,11 +63,13 @@ std::vector<LambdaTestInfo> discover_all_tests() {
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
 
-    // Filter out unsupported tests and slow benchmark tests
+    // Filter out slow benchmark tests. The MIR skip list was retired on
+    // 2026-09-25, once every entry matched its golden on interp, jit and auto:
+    // the object tests after LR07-23, object_direct_access after its `open`
+    // field was renamed, and beng_fasta once its seed became a `var` parameter.
     std::vector<LambdaTestInfo> filtered;
     for (const auto& test : all_tests) {
         if (is_slow_benchmark(test.test_name)) continue;
-        if (should_skip_mir_test(test.test_name)) continue;
         filtered.push_back(test);
     }
     return filtered;
