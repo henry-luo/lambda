@@ -122,7 +122,7 @@ void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import) {
 static ShapeEntry* find_shape_field_named(TypeMap* map_type, const char* name,
         int name_len, bool last) {
     ShapeEntry* found = NULL;
-    for (ShapeEntry* field = map_type->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (field->name && (int)field->name->length == name_len &&
             strncmp(field->name->str, name, name_len) == 0) {
             found = field;
@@ -166,11 +166,9 @@ AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
 bool has_fixed_shape(TypeMap* map_type) {
     if (!map_type->struct_name) return false;
     if (!map_type->shape || map_type->length == 0) return false;
-    ShapeEntry* field = map_type->shape;
-    while (field) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) return false;
         if (field->byte_offset % sizeof(void*) != 0) return false;
-        field = field->next;
     }
     return true;
 }

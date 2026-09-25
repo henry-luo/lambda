@@ -186,7 +186,7 @@ void serialize_attributes_wpt(const ElementReader& elem, std::string& output, in
                 // LMD_TYPE_NULL: attr_value stays empty (""), outputting name=""
                 attrs.push_back({attr_name, attr_value});
             }
-            shape = shape->next;
+            shape = typemap_next_field(type, shape);
         }
     }
 

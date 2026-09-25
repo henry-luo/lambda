@@ -624,7 +624,7 @@ static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char*
             void* field_ptr = (char*)root_map->data + entry->byte_offset;
             return *(Map**)field_ptr;
         }
-        entry = entry->next;
+        entry = typemap_next_field((TypeMap*)root_map->type, entry);
     }
 
     // Create new section
@@ -659,12 +659,6 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
 
     // Handle nested parts
     TypeMap* current_map_type = (TypeMap*)current_map->type;
-    ShapeEntry* current_shape_entry = current_map_type->shape;
-    if (current_shape_entry) {
-        while (current_shape_entry->next) {
-            current_shape_entry = current_shape_entry->next;
-        }
-    }
 
     while (strview_split_next(&iter, &part)) {
         if (part.length == 0) return NULL;
@@ -682,7 +676,7 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
                 nested_map = *(Map**)field_ptr;
                 break;
             }
-            entry = entry->next;
+            entry = typemap_next_field(current_map_type, entry);
         }
 
         if (!nested_map) {
@@ -695,13 +689,6 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
 
         current_map = nested_map;
         current_map_type = (TypeMap*)nested_map->type;
-        // Find the last shape entry in the current table
-        current_shape_entry = current_map_type->shape;
-        if (current_shape_entry) {
-            while (current_shape_entry->next) {
-                current_shape_entry = current_shape_entry->next;
-            }
-        }
     }
 
     return current_map;

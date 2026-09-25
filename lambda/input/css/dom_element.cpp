@@ -1152,7 +1152,7 @@ const char** DomElement::attribute_names(int* count) {
         if (field->name && field->name->str) {
             names[index++] = field->name->str;
         }
-        field = field->next;
+        field = typemap_next_field(type, field);
     }
 
     *count = index;

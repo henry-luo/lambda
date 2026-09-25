@@ -192,7 +192,7 @@ protected:
                 }
                 return "";
             }
-            shape = shape->next;
+            shape = typemap_next_field(type, shape);
         }
 
         return "";

@@ -233,7 +233,7 @@ TEST_F(ValidatorFeaturesTest, ValidateMapWithFields) {
     entry->name->length = strlen(field_name);
     entry->type = create_primitive_type(LMD_TYPE_STRING);
     entry->byte_offset = 0;
-    entry->next = nullptr;
+    entry->chain_next = nullptr;
     map_type->shape = entry;
 
     // Create actual map
@@ -1272,7 +1272,7 @@ TEST_F(ValidatorFeaturesTest, MapField_MultipleFields) {
     name_entry->name->length = strlen(name_field);
     name_entry->type = create_primitive_type(LMD_TYPE_STRING);
     name_entry->byte_offset = 0;
-    name_entry->next = nullptr;
+    name_entry->chain_next = nullptr;
 
     // Add field: age: int
     ShapeEntry* age_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
@@ -1282,9 +1282,9 @@ TEST_F(ValidatorFeaturesTest, MapField_MultipleFields) {
     age_entry->name->length = strlen(age_field);
     age_entry->type = create_primitive_type(LMD_TYPE_INT);
     age_entry->byte_offset = sizeof(String*);
-    age_entry->next = nullptr;
+    age_entry->chain_next = nullptr;
 
-    name_entry->next = age_entry;
+    name_entry->chain_next = age_entry;
     map_type->shape = name_entry;
 
     // Create map with both fields
@@ -1333,7 +1333,7 @@ TEST_F(ValidatorFeaturesTest, MapField_NestedMapType) {
     city_entry->name->length = strlen(city_field);
     city_entry->type = create_primitive_type(LMD_TYPE_STRING);
     city_entry->byte_offset = 0;
-    city_entry->next = nullptr;
+    city_entry->chain_next = nullptr;
     address_type->shape = city_entry;
 
     register_type(validator, pool, "Address", 7, (Type*)address_type);
@@ -1351,7 +1351,7 @@ TEST_F(ValidatorFeaturesTest, MapField_NestedMapType) {
     ASSERT_NE(address_resolved, nullptr);
     address_field_entry->type = address_resolved;
     address_field_entry->byte_offset = 0;
-    address_field_entry->next = nullptr;
+    address_field_entry->chain_next = nullptr;
     person_type->shape = address_field_entry;
 
     // Verify structure
@@ -1374,7 +1374,7 @@ TEST_F(ValidatorFeaturesTest, MapField_WithUnionField) {
     // For this test, just verify the structure can be set up
     value_entry->type = create_primitive_type(LMD_TYPE_STRING);  // Simplified
     value_entry->byte_offset = 0;
-    value_entry->next = nullptr;
+    value_entry->chain_next = nullptr;
     data_type->shape = value_entry;
 
     // Verify setup
@@ -1464,7 +1464,7 @@ TEST_F(ValidatorFeaturesTest, Element_WithAttributes) {
     href_entry->name->length = strlen(href_field);
     href_entry->type = create_primitive_type(LMD_TYPE_STRING);
     href_entry->byte_offset = 0;
-    href_entry->next = nullptr;
+    href_entry->chain_next = nullptr;
     link_type->shape = href_entry;
 
     // Create element with attribute using MarkBuilder
@@ -1496,7 +1496,7 @@ TEST_F(ValidatorFeaturesTest, Element_AttributeTypeMismatch) {
     maxlength_entry->name->length = strlen(maxlen_field);
     maxlength_entry->type = create_primitive_type(LMD_TYPE_INT);
     maxlength_entry->byte_offset = 0;
-    maxlength_entry->next = nullptr;
+    maxlength_entry->chain_next = nullptr;
     input_type->shape = maxlength_entry;
 
     // Create element with string attribute instead of int

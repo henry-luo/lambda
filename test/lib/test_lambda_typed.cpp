@@ -280,17 +280,25 @@ TEST(LambdaTypedItem, VisitDispatchesCanonicalScalarAndContainerTags) {
 TEST(LambdaTypedItem, ShapeRefBorrowsAndAdvancesShapeEntries) {
     ShapeEntry first = {};
     ShapeEntry second = {};
-    first.next = &second;
+    first.chain_next = &second;
+    TypeMap owner = {};
+    owner.shape = &first;
+    owner.last = &second;
 
     lam::ShapeRef shape = lam::shape_borrow(&first);
     ASSERT_TRUE((bool)shape);
     EXPECT_EQ(shape.get(), &first);
 
-    shape = lam::shape_next(shape);
+    shape = lam::shape_next(&owner, shape);
     ASSERT_TRUE((bool)shape);
     EXPECT_EQ(shape.get(), &second);
 
-    shape = lam::shape_next(shape);
+    shape = lam::shape_next(&owner, shape);
+    EXPECT_FALSE((bool)shape);
+
+    // D3.4.3v3: a type whose chain continues past its last field stops there
+    owner.last = &first;
+    shape = lam::shape_next(&owner, lam::shape_borrow(&first));
     EXPECT_FALSE((bool)shape);
 }
 
@@ -314,7 +322,7 @@ TEST(LambdaTypedItem, TypeMapHashLookupFindsOverflowShapeEntries) {
         names[i].length = 3;
         entries[i].name = &names[i];
         entries[i].byte_offset = i;
-        if (i > 0) entries[i - 1].next = &entries[i];
+        if (i > 0) entries[i - 1].chain_next = &entries[i];
         typemap_hash_insert(&tm, &entries[i]);
     }
     tm.shape = &entries[0];
@@ -343,7 +351,7 @@ TEST(LambdaTypedItem, TypeMapHashLookupByNameIdUsesCachedHash) {
         entries[i].name = &names[i];
         entries[i].name_id = (NameId)(0x100 + i);
         entries[i].name_hash = typemap_name_hash(key_storage[i], 3);
-        if (i > 0) entries[i - 1].next = &entries[i];
+        if (i > 0) entries[i - 1].chain_next = &entries[i];
         if (i == 0) tm.shape = &entries[i];
         tm.last = &entries[i];
         tm.length++;
@@ -372,7 +380,7 @@ TEST(LambdaTypedItem, TypeMapHashLookupByNameIdFallsBackWhenTableIsFull) {
         entries[i].name = &names[i];
         entries[i].name_id = (NameId)(0x200 + i);
         entries[i].name_hash = typemap_name_hash(key_storage[i], 3);
-        if (i > 0) entries[i - 1].next = &entries[i];
+        if (i > 0) entries[i - 1].chain_next = &entries[i];
         if (i == 0) tm.shape = &entries[i];
         tm.last = &entries[i];
         typemap_hash_insert(&tm, &entries[i]);
@@ -419,7 +427,7 @@ TEST(LambdaTypedItem, TypeMapHashOwnedInsertGrowsWithTheShape) {
         names[i].length = 3;
         entries[i].name = &names[i];
         entries[i].byte_offset = i;
-        if (i > 0) entries[i - 1].next = &entries[i];
+        if (i > 0) entries[i - 1].chain_next = &entries[i];
         if (!tm.shape) tm.shape = &entries[i];
         tm.last = &entries[i];
         tm.length++;
@@ -451,7 +459,7 @@ TEST(LambdaTypedItem, TypeMapHashLookupFallsBackToLastShapeMatch) {
 
     first.name = &first_name;
     first.byte_offset = 8;
-    first.next = &second;
+    first.chain_next = &second;
     second.name = &second_name;
     second.byte_offset = 16;
     tm.shape = &first;

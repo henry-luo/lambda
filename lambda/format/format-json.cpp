@@ -192,8 +192,8 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
             TypeId nom_tid = get_type_id(item.item());
             TypeMap* attr_shape = lambda_attr_shape(nom_tid, obj);
             void* attr_data = lambda_attr_data(nom_tid, obj);
-            for (ShapeEntry* fld = attr_shape ? attr_shape->shape : nullptr;
-                    fld; fld = fld->next) {
+            for (ShapeEntry* fld = typemap_first_field(attr_shape);
+                    fld; fld = typemap_next_field(attr_shape, fld)) {
                 if (!fld->name || !attr_data) continue;
                 const char* key = fld->name->str;
                 ItemReader value(map_shape_field_to_item(attr_data, fld).to_const());

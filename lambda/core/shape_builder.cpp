@@ -111,7 +111,7 @@ bool shape_builder_has_field(ShapeBuilder* builder, const char* name) {
 
 // ========== Import/Export ==========
 
-void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape) {
+void shape_builder_import_shape(ShapeBuilder* builder, const TypeMap* shape) {
     if (!builder) {
         log_error("shape_builder_import_shape: null builder");
         return;
@@ -124,7 +124,7 @@ void shape_builder_import_shape(ShapeBuilder* builder, ShapeEntry* shape) {
         return;
     }
 
-    for (ShapeEntry* entry = shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(shape, entry) {
         if (!shape_builder_reserve(builder, builder->field_count + 1)) return;
         ShapeFieldDraft* draft = &builder->fields[builder->field_count++];
         draft->name = entry->name->str;

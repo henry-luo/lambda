@@ -1787,14 +1787,13 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
     if (!actual) return;
 
     bool has_spread = false;
-    for (ShapeEntry* entry = actual->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(actual, entry) {
         if (!entry->name) {
             has_spread = true;
             break;
         }
     }
-    for (ShapeEntry* expected_entry = expected->shape; expected_entry;
-            expected_entry = expected_entry->next) {
+    FOR_EACH_MAP_FIELD(expected, expected_entry) {
         if (!expected_entry->name || !expected_entry->name->str) continue;
         ShapeEntry* actual_entry = typemap_shape_lookup_last(actual,
             expected_entry->name->str, (int)expected_entry->name->length);
@@ -4824,21 +4823,24 @@ static void merge_ns_attr_maps(Transpiler* tp, AstNode* dst_item, AstNode* src_i
     else dst->item = src->item;
 
     // append src shape entries to dst shape linked list
-    ShapeEntry* last_entry = dst_type->shape;
-    while (last_entry && last_entry->next) last_entry = last_entry->next;
+    ShapeEntry* last_entry = NULL;
+    FOR_EACH_MAP_FIELD(dst_type, entry) last_entry = entry;
+    ShapeEntry* src_last = NULL;
+    FOR_EACH_MAP_FIELD(src_type, entry) src_last = entry;
     if (last_entry) {
         // update byte_offset for merged entries
         int byte_offset = last_entry->byte_offset + shape_entry_storage_size(last_entry);
-        ShapeEntry* src_entry = src_type->shape;
-        while (src_entry) {
+        FOR_EACH_MAP_FIELD(src_type, src_entry) {
             src_entry->byte_offset = byte_offset;
             byte_offset += shape_entry_storage_size(src_entry);
-            src_entry = src_entry->next;
         }
-        last_entry->next = src_type->shape;
+        last_entry->chain_next = src_type->shape;
     } else {
         dst_type->shape = src_type->shape;
     }
+    // a type that tracks its last field keeps it at the joined tail: walks
+    // stop there (D3.4.3v3)
+    if (dst_type->last && src_last) dst_type->last = src_last;
 
     dst_type->length += src_type->length;
     dst_type->byte_size += src_type->byte_size;
@@ -4925,7 +4927,7 @@ ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* 
     shape_entry_set_type(shape_entry, field_type);
     shape_entry->byte_offset = byte_offset;
     if (!*shape) *shape = shape_entry;
-    else (*prev_entry)->next = shape_entry;
+    else (*prev_entry)->chain_next = shape_entry;
     *prev_entry = shape_entry;
     return shape_entry;
 }
@@ -5112,7 +5114,7 @@ static void resolve_map(Transpiler* tp, AstMapNode* ast_node) {
         Type* field_type = shape_entry->type;
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { type->shape = shape_entry; }
-        else { prev_entry->next = shape_entry; }
+        else { prev_entry->chain_next = shape_entry; }
         prev_entry = shape_entry;
 
         type->length++;
@@ -5147,7 +5149,7 @@ static void check_object_literal_fields(Transpiler* tp, AstObjectLiteralNode* ob
     bool has_spread = ast_object_literal_spread_value(object) != NULL;
     int index = 0;
     for (ShapeEntry* field = object_type->shape; field && index < object_type->length;
-            field = field->next, index++) {
+            field = typemap_next_field(object_type, field), index++) {
         if (!field->name || !field->type) continue;
         AstNode* value = ast_object_literal_value_for_shape(object, field);
         AstNode* source = value ? value : has_spread ? NULL : field->default_value;
@@ -6794,7 +6796,7 @@ static void direct_bind_rewrite_object_shape(DirectBindContext* bind,
     if (!value || (value->type_id != LMD_TYPE_MAP &&
             value->type_id != LMD_TYPE_ELEMENT)) return;
     TypeObject* object_type = (TypeObject*)value;
-    for (ShapeEntry* field = object_type->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(object_type, field) {
         field->binding = direct_bind_entry(bind, field->binding);
     }
 }
@@ -8092,7 +8094,7 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         // recursive admission (D3.2.4v3, D8.3.2-D8.3.3).
         map->is_trusted_contract = true;
         bool changed_width = false;
-        for (ShapeEntry* field = map->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(map, field) {
             direct_refresh_recursive_type_layout(field->type, visited);
             int old_width = shape_entry_storage_size(field);
             shape_entry_set_type(field, field->type);
@@ -8100,7 +8102,7 @@ static void direct_refresh_recursive_type_layout(Type* type, ArrayList* visited)
         }
         if (changed_width) {
             int64_t offset = 0;
-            for (ShapeEntry* field = map->shape; field; field = field->next) {
+            FOR_EACH_MAP_FIELD(map, field) {
                 field->byte_offset = offset;
                 offset += shape_entry_storage_size(field);
             }
@@ -9003,7 +9005,7 @@ static TypeMethod* direct_lookup_object_method(Transpiler* tp,
     }
     TypeObject* object_type = (TypeObject*)receiver_type;
     for (TypeObject* owner = object_type; owner; owner = owner->base) {
-        for (ShapeEntry* field = owner->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(owner, field) {
             if (field->name && field->name->length == name.length &&
                     strncmp(field->name->str, name.str, name.length) == 0) {
                 // fields shadow methods.
@@ -9469,7 +9471,7 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
         raw->next = NULL;
         if (raw->node_type == AST_NODE_CONTENT) {
             // the literal's type records no content: the transpiler sizes the
-            // content array from this node (D3.4.3v2)
+            // content array from this node (D3.4.3v3)
             node->content = raw;
         } else {
             AstNode* candidate = raw;
@@ -9527,7 +9529,7 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
                 ShapeEntry* shape = build_map_shape_entry(tp, type, item, spread, false);
                 shape->byte_offset = byte_offset;
                 if (!prev_shape) type->shape = shape;
-                else prev_shape->next = shape;
+                else prev_shape->chain_next = shape;
                 prev_shape = shape;
                 type->length++;
                 byte_offset += spread ? (int)sizeof(void*) : shape->storage.byte_size;
@@ -12381,7 +12383,7 @@ static void direct_collect_binder_contracts(Type* type, TypeBinder** binders,
             binder_count, depth + 1);
     } else if ((type->type_id == LMD_TYPE_MAP && type != &TYPE_MAP) ||
             (type->type_id == LMD_TYPE_ELEMENT && type != &TYPE_ELMT)) {
-        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(type, field) {
             direct_collect_binder_contracts(field->type, binders, binder_count, depth + 1);
         }
     }
@@ -14887,7 +14889,7 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
     // OB7: the base's content pattern is inherited unless the derived type
     // declares its own, which replaces it (resolver_object_end)
     r->object_type->content_list = base->content_list;
-    for (ShapeEntry* parent = base->shape; parent; parent = parent->next) {
+    FOR_EACH_MAP_FIELD(base, parent) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
         shape_entry_set_type(entry, parent->type);
@@ -14896,7 +14898,7 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         entry->default_value = parent->default_value;
         entry->byte_offset = r->object_byte_offset;
         if (!r->object_type->shape) r->object_type->shape = entry;
-        else r->object_shape_tail->next = entry;
+        else r->object_shape_tail->chain_next = entry;
         r->object_shape_tail = entry;
         r->object_type->length++;
         r->object_byte_offset += sizeof(void*);
@@ -15030,7 +15032,7 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     shape->default_value = default_value;
     shape->byte_offset = r->object_byte_offset;
     if (!r->object_type->shape) r->object_type->shape = shape;
-    else r->object_shape_tail->next = shape;
+    else r->object_shape_tail->chain_next = shape;
     r->object_shape_tail = shape;
     r->object_type->length++;
     r->object_byte_offset += sizeof(void*);

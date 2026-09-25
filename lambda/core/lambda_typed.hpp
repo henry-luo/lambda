@@ -284,12 +284,15 @@ inline ConstShapeRef shape_borrow(const ShapeEntry* p) {
     return ConstShapeRef(p);
 }
 
-inline ShapeRef shape_next(ShapeRef shape) {
-    return shape ? shape_borrow(shape->next) : ShapeRef();
+// D3.4.3v3: the owner type bounds the walk; a tree node's chain may run on
+// past its last field into a descendant's.
+inline ShapeRef shape_next(const TypeMap* owner, ShapeRef shape) {
+    return shape ? shape_borrow(typemap_next_field(owner, shape.get())) : ShapeRef();
 }
 
-inline ConstShapeRef shape_next(ConstShapeRef shape) {
-    return shape ? shape_borrow((const ShapeEntry*)shape->next) : ConstShapeRef();
+inline ConstShapeRef shape_next(const TypeMap* owner, ConstShapeRef shape) {
+    return shape ? shape_borrow((const ShapeEntry*)typemap_next_field(owner, shape.get()))
+                 : ConstShapeRef();
 }
 
 template<class T>

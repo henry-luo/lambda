@@ -1719,7 +1719,7 @@ TEST(InputLifetimeTest, ContextCascadeReleasesInputOnItsPool) {
 }
 
 // ============================================================================
-// Transition-tree storage (D3.4.3v2, D4.1.4v4): nodes and edges are never
+// Transition-tree storage (D3.4.3v3, D4.1.4v4): nodes and edges are never
 // freed one by one, so they come from the Input's arena; the element-root
 // table is replaced as it grows, so it is a pool block and the old one is freed.
 // ============================================================================
@@ -1782,5 +1782,201 @@ TEST(TransitionTreeStorageTest, RootTableGrowthFreesTheOldTable) {
     EXPECT_EQ(after.allocation_count - before.allocation_count, 3u);
     EXPECT_EQ(after.free_count - before.free_count, 2u);
     EXPECT_EQ(elmt_tree_root(input, tags[7], NULL), elmt_tree_root(input, tags[7], NULL));
+    mem_pool_destroy(pool);
+}
+
+// ============================================================================
+// Prefix sharing (D3.4.3v3): a child extends its parent's chain in place while
+// the parent still owns the tail, so a linear path keeps one chain and one
+// growing hash table; a branch copies its prefix once. Walks stop at `last`,
+// and a type rejects the table entries of the types that extended it.
+// ============================================================================
+
+static int count_fields(const TypeMap* type) {
+    int count = 0;
+    FOR_EACH_MAP_FIELD(type, field) count++;
+    return count;
+}
+
+// the single edge of a node on a path these tests grow
+static TypeMap* only_child(const TypeMap* node) {
+    return node && node->transitions && !node->transitions->next
+        ? node->transitions->target : nullptr;
+}
+
+TEST(TransitionTreePrefixSharingTest, LinearPathSharesOneChain) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.prefix");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item a = builder.map().put("a", (int64_t)1).final();
+    Item abc = builder.map().put("a", (int64_t)1).put("b", (int64_t)2)
+        .put("c", (int64_t)3).final();
+    TypeMap* t_a = (TypeMap*)a.map->type;
+    TypeMap* t_ab = only_child(t_a);
+    TypeMap* t_abc = (TypeMap*)abc.map->type;
+    ASSERT_NE(t_ab, nullptr);
+    ASSERT_EQ(only_child(t_ab), t_abc);
+
+    // one chain, of which {a} and {a,b} see a prefix
+    EXPECT_EQ(t_ab->shape, t_a->shape);
+    EXPECT_EQ(t_abc->shape, t_a->shape);
+    EXPECT_NE(t_a->last->chain_next, nullptr);
+    EXPECT_EQ(count_fields(t_a), 1);
+    EXPECT_EQ(count_fields(t_ab), 2);
+    EXPECT_EQ(count_fields(t_abc), 3);
+
+    // one table, whose later entries the shorter types reject
+    EXPECT_EQ(t_ab->field_index, t_a->field_index);
+    EXPECT_EQ(t_abc->field_index, t_a->field_index);
+    EXPECT_EQ(typemap_hash_lookup(t_a, "b", 1), nullptr);
+    EXPECT_EQ(typemap_hash_lookup(t_ab, "c", 1), nullptr);
+    EXPECT_NE(typemap_hash_lookup(t_abc, "c", 1), nullptr);
+
+    // readers see each map's own fields only
+    MapReader reader(a.map);
+    EXPECT_EQ(reader.size(), 1);
+    EXPECT_FALSE(reader.has("b"));
+    int keys = 0;
+    const char* key = nullptr;
+    MapReader::KeyIterator it = reader.keys();
+    while (it.next(&key)) keys++;
+    EXPECT_EQ(keys, 1);
+    EXPECT_EQ(MapReader(abc.map).get("c").asInt(), 3);
+    mem_pool_destroy(pool);
+}
+
+TEST(TransitionTreePrefixSharingTest, BranchCopiesItsPrefixOnce) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.branch");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item ab = builder.map().put("a", (int64_t)1).put("b", (int64_t)2).final();
+    Item ac = builder.map().put("a", (int64_t)1).put("c", "x").final();
+    TypeMap* t_ab = (TypeMap*)ab.map->type;
+    TypeMap* t_ac = (TypeMap*)ac.map->type;
+    TypeMap* t_a = only_child(input->shape_transition_root);
+    ASSERT_NE(t_a, nullptr);
+
+    EXPECT_EQ(t_ab->shape, t_a->shape);  // the first child took the tail
+    EXPECT_NE(t_ac->shape, t_a->shape);  // the branch copied {a}
+    EXPECT_EQ(count_fields(t_ac), 2);
+    EXPECT_NE(t_ac->field_index, t_a->field_index);
+    EXPECT_EQ(typemap_hash_lookup(t_ac, "b", 1), nullptr);
+    EXPECT_EQ(typemap_hash_lookup(t_ab, "c", 1), nullptr);
+    EXPECT_STREQ(MapReader(ac.map).get("c").cstring(), "x");
+    EXPECT_FALSE(MapReader(ac.map).has("b"));
+    mem_pool_destroy(pool);
+}
+
+TEST(TransitionTreePrefixSharingTest, TableIsReplacedWhenItFillsUp) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.table");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    builder.map().put("f1", (int64_t)1).put("f2", (int64_t)2).put("f3", (int64_t)3)
+        .put("f4", (int64_t)4).put("f5", (int64_t)5).final();
+    TypeMap* nodes[6] = {input->shape_transition_root};
+    for (int i = 1; i <= 5; i++) {
+        nodes[i] = only_child(nodes[i - 1]);
+        ASSERT_NE(nodes[i], nullptr);
+    }
+    // a table stays at most half full: four fields share 8 slots, the fifth
+    // needs 16, and the types before it keep the old table
+    EXPECT_EQ(nodes[4]->field_index, nodes[1]->field_index);
+    EXPECT_EQ(nodes[1]->field_capacity, 8);
+    EXPECT_NE(nodes[5]->field_index, nodes[4]->field_index);
+    EXPECT_EQ(nodes[5]->field_capacity, 16);
+    EXPECT_EQ(nodes[5]->shape, nodes[1]->shape);  // the chain is still one
+    EXPECT_EQ(typemap_hash_lookup(nodes[4], "f5", 2), nullptr);
+    EXPECT_NE(typemap_hash_lookup(nodes[5], "f5", 2), nullptr);
+    EXPECT_NE(typemap_hash_lookup(nodes[5], "f1", 2), nullptr);
+    mem_pool_destroy(pool);
+}
+
+TEST(TransitionTreePrefixSharingTest, RepeatedNameGetsItsOwnTable) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.repeat");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item repeated = builder.map().put("a", (int64_t)1).put("a", "x").final();
+    TypeMap* t_a = only_child(input->shape_transition_root);
+    TypeMap* t_aa = (TypeMap*)repeated.map->type;
+    ASSERT_NE(t_a, nullptr);
+    ASSERT_EQ(only_child(t_a), t_aa);
+    EXPECT_EQ(t_aa->shape, t_a->shape);  // still one chain
+    // sharing the table would let the second `a` overwrite the first one's
+    // slot, which {a} still reads through the table
+    EXPECT_NE(t_aa->field_index, t_a->field_index);
+    ShapeEntry* first = typemap_hash_lookup(t_a, "a", 1);
+    ShapeEntry* second = typemap_hash_lookup(t_aa, "a", 1);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(first, t_a->shape);
+    EXPECT_EQ(second, t_aa->last);  // last writer wins
+    mem_pool_destroy(pool);
+}
+
+TEST(TransitionTreePrefixSharingTest, ElementAttributesShareAChain) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.attrs");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Item one = builder.element("p").attr("class", "x").final();
+    Item two = builder.element("p").attr("class", "x").attr("id", "y").final();
+    TypeMap* t_one = (TypeMap*)one.element->type;
+    TypeMap* t_two = (TypeMap*)two.element->type;
+    ASSERT_TRUE(t_one->is_transition_shared_shape);
+    EXPECT_EQ(t_two->shape, t_one->shape);
+    ElementReader reader(one);
+    EXPECT_TRUE(reader.has_attr("class"));
+    EXPECT_FALSE(reader.has_attr("id"));
+    EXPECT_EQ(reader.get_attr_string("id"), nullptr);
+    EXPECT_STREQ(ElementReader(two).get_attr_string("id"), "y");
+    mem_pool_destroy(pool);
+}
+
+// The case the quadratic copy made expensive: one object with a thousand
+// keys. Each of its thousand types used to carry its own copy of every field
+// before it -- half a million entries -- and now they share one chain.
+TEST(TransitionTreePrefixSharingTest, WideObjectKeepsOneChain) {
+    log_init(NULL);
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.wide");
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    enum { KEYS = 1000 };
+    size_t used_before = arena_total_used(input->arena);
+    MapBuilder wide = builder.map();
+    for (int i = 0; i < KEYS; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "key_%04d", i);
+        wide.put(key, (int64_t)i);
+    }
+    Item map = wide.final();
+    TypeMap* leaf = (TypeMap*)map.map->type;
+    ASSERT_TRUE(leaf->is_transition_shared_shape);
+    EXPECT_EQ(count_fields(leaf), KEYS);
+    int nodes = 0;
+    for (TypeMap* node = only_child(input->shape_transition_root); node;
+            node = only_child(node)) {
+        EXPECT_EQ(node->shape, leaf->shape);
+        nodes++;
+    }
+    EXPECT_EQ(nodes, KEYS);
+    // about 0.4 MB of types, entries, edges and tables; the copies took ~60 MB
+    EXPECT_LT(arena_total_used(input->arena) - used_before, (size_t)4 * 1024 * 1024);
+    EXPECT_EQ(MapReader(map.map).get("key_0999").asInt(), 999);
     mem_pool_destroy(pool);
 }

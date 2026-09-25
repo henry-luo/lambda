@@ -774,7 +774,7 @@ static void replace_string_field(Map* m, const char* field, String* new_val) {
     if (!m || !m->type || !m->data || !field || !new_val) return;
     TypeMap* mt = (TypeMap*)m->type;
     size_t flen = strlen(field);
-    for (ShapeEntry* se = mt->shape; se; se = se->next) {
+    FOR_EACH_MAP_FIELD(mt, se) {
         if (se->name && (size_t)se->name->length == flen
             && memcmp(se->name->str, field, flen) == 0) {
             *(String**)((char*)m->data + se->byte_offset) = new_val;

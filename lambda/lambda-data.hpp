@@ -348,13 +348,22 @@ typedef struct ShapeEntry {
     StrView* name;
     Type* type;  // type of the field
     int64_t byte_offset;  // byte offset of the map field
-    struct ShapeEntry* next;
+    // D3.4.3v3: the chain link. A transition-tree node shares its chain with
+    // the descendant that extended it in place, so the link may run past a
+    // type's `last` into fields that type does not have. Walk a type's fields
+    // with FOR_EACH_MAP_FIELD / typemap_next_field, never by this link alone.
+    struct ShapeEntry* chain_next;
     Target* ns;  // namespace target (NULL for unqualified fields)
     struct AstNode* default_value;  // default value expression (NULL if none)
     uint32_t name_hash;  // FNV lookup hash; never an identity.
     NameId name_id;  // generated or identity-scope identity; NONE for id-less Input.
     uint8_t key_kind;  // NAME_KEY_STRING, NAME_KEY_SYMBOL, or NAME_KEY_PRIVATE.
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
+    // D3.4.3v3: the entry's position in a transition-tree chain, set when the
+    // tree appends it; 0 for every other entry. A hash table shared along a
+    // chain holds descendants' entries too, and a type rejects any entry at or
+    // past its own length. Sits in padding: ShapeEntry does not grow.
+    uint32_t chain_index;
     // Object-method field lowering uses the builder-resolved binding directly.
     // Runtime/Input-created shapes leave this compiler-only edge null.
     struct NameEntry* binding;
@@ -465,18 +474,46 @@ typedef struct TypeMap : Type {
     struct TypeNominal* nominal;
 } TypeMap;
 
+// D3.4.3v3: a type's fields run from `shape` through `last`. A transition-tree
+// node shares its chain with the descendant that extended it in place, so the
+// chain may continue past `last`; every walk stops there. A type whose `last`
+// is unset owns an unshared chain and walks it to its end.
+static inline ShapeEntry* typemap_first_field(const TypeMap* tm) {
+    return tm ? tm->shape : NULL;
+}
+
+// the step of a walk over a chain segment that ends at `last` -- for a chain
+// being assembled before any type holds it
+static inline ShapeEntry* shape_chain_next_until(const ShapeEntry* entry,
+        const ShapeEntry* last) {
+    if (!entry || entry == last) return NULL;
+    return entry->chain_next;  // SHAPE_CHAIN_OK: the bounded step itself
+}
+
+static inline ShapeEntry* typemap_next_field(const TypeMap* tm, const ShapeEntry* entry) {
+    return shape_chain_next_until(entry, tm ? tm->last : NULL);
+}
+
+#define FOR_EACH_MAP_FIELD(map_type, field_var) \
+    for (ShapeEntry* field_var = typemap_first_field((const TypeMap*)(map_type)); \
+         field_var; field_var = typemap_next_field((const TypeMap*)(map_type), field_var))
+
 // callers detach shared shapes before changing observable field order. Physical
 // offsets and slot_entries stay valid because only the enumeration chain moves.
+// A detached type owns its chain, so relinking it cannot reach another type.
 static inline void typemap_move_field_to_end(TypeMap* shape, ShapeEntry* field) {
     if (!shape || !field || shape->last == field) return;
     ShapeEntry* previous = NULL;
     ShapeEntry* current = shape->shape;
-    while (current && current != field) { previous = current; current = current->next; }
+    while (current && current != field) {
+        previous = current;
+        current = typemap_next_field(shape, current);
+    }
     if (!current) return;
-    if (previous) previous->next = field->next;
-    else shape->shape = field->next;
-    field->next = NULL;
-    if (shape->last) shape->last->next = field;
+    if (previous) previous->chain_next = field->chain_next;  // SHAPE_CHAIN_OK: unlinks from an owned chain
+    else shape->shape = field->chain_next;  // SHAPE_CHAIN_OK: unlinks from an owned chain
+    field->chain_next = NULL;
+    if (shape->last) shape->last->chain_next = field;
     else shape->shape = field;
     shape->last = field;
 }
@@ -488,10 +525,11 @@ static inline void typemap_move_field_to_end(TypeMap* shape, ShapeEntry* field) 
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
 static_assert(offsetof(ShapeEntry, type) == LAMBDA_GC_OFF_SHAPE_ENTRY_TYPE &&
               offsetof(ShapeEntry, byte_offset) == LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET &&
-              offsetof(ShapeEntry, next) == LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT,
+              offsetof(ShapeEntry, chain_next) == LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT,
               "ShapeEntry must match the GC ABI");
 static_assert(offsetof(TypeMap, byte_size) == LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE &&
-              offsetof(TypeMap, shape) == LAMBDA_GC_OFF_TYPE_MAP_SHAPE,
+              offsetof(TypeMap, shape) == LAMBDA_GC_OFF_TYPE_MAP_SHAPE &&
+              offsetof(TypeMap, last) == LAMBDA_GC_OFF_TYPE_MAP_LAST,
               "TypeMap must match the GC ABI");
 #pragma clang diagnostic pop
 
@@ -526,7 +564,7 @@ static inline int typemap_fixed_slot_prefix_count(const TypeMap* tm) {
                 entry->byte_offset != (int64_t)i * (int64_t)sizeof(void*)) {
             return 0;
         }
-        entry = entry->next;
+        entry = typemap_next_field(tm, entry);
     }
     return tm->slot_count;
 }
@@ -700,7 +738,7 @@ static inline int typemap_hash_recommended_capacity(int64_t expected_fields) {
 
 // Where a type's records come from (D4.1.4v4). A transition-tree node is never
 // freed on its own, so it takes the Input's arena and goes with the Input
-// (D3.4.3v2, D4.2.6); a type a container owns takes a pool.
+// (D3.4.3v3, D4.2.6); a type a container owns takes a pool.
 typedef struct TypeAlloc {
     Pool* pool;
     Arena* arena;   // when set, records come from here rather than `pool`
@@ -771,7 +809,7 @@ static inline ShapeEntry* typemap_shape_lookup_last_by_hash(TypeMap* tm,
         const char* key, int key_len, uint32_t key_hash) {
     if (!tm) return NULL;
     ShapeEntry* found = NULL;
-    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+    FOR_EACH_MAP_FIELD(tm, e) {
         if (typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             found = e;
         }
@@ -787,7 +825,7 @@ static inline ShapeEntry* typemap_shape_lookup_last_idless_by_hash(TypeMap* tm,
         const char* key, int key_len, uint32_t key_hash) {
     if (!tm) return NULL;
     ShapeEntry* found = NULL;
-    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+    FOR_EACH_MAP_FIELD(tm, e) {
         if (e->name_id == NAME_ID_NONE &&
                 typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             found = e;
@@ -811,10 +849,21 @@ static inline ShapeEntry* typemap_shape_lookup_last_by_name_id(TypeMap* tm,
         NameId name_id) {
     if (!tm || name_id == NAME_ID_NONE) return NULL;
     ShapeEntry* found = NULL;
-    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(tm, entry) {
         if (typemap_shape_entry_has_name_id(entry, name_id)) found = entry;
     }
     return found;
+}
+
+// D3.4.3v3: a table shared along a transition-tree chain also holds the
+// entries of descendants that extended the chain in place; theirs sit at or
+// past this type's length. A shared table never takes a second entry for an
+// identity it holds, so hitting one of theirs means the name is not a field of
+// this type -- a miss, answered without walking the chain.
+static inline bool typemap_hash_entry_is_own(const TypeMap* tm, const ShapeEntry* entry) {
+    // position 0 is on every type of its chain, and an entry the tree did not
+    // append carries 0, so only a tree node's length is ever consulted
+    return entry->chain_index == 0 || (int64_t)entry->chain_index < tm->length;
 }
 
 // nameid is the definitive property identity. Probe the existing hash table
@@ -835,42 +884,57 @@ static inline ShapeEntry* typemap_hash_lookup_by_name_id(TypeMap* tm,
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
         ShapeEntry* entry = slots[slot];
         if (!entry) return NULL;
-        if (entry->name_id == name_id) return entry;
+        if (entry->name_id == name_id) {
+            return typemap_hash_entry_is_own(tm, entry) ? entry : NULL;
+        }
     }
     return typemap_shape_lookup_last_by_name_id(tm, name_id);
+}
+
+// A1: the slot on `entry`'s probe path that holds an entry with its identity,
+// else the first empty one; -1 when there is no table or it is full.
+static inline int typemap_hash_probe_slot(TypeMap* tm, ShapeEntry* entry) {
+    ShapeEntry** slots = typemap_hash_slots(tm);
+    int capacity = typemap_hash_capacity(tm);
+    if (!slots || capacity <= 0) return -1;
+    uint32_t idx = typemap_shape_entry_key_hash(entry) & ((uint32_t)capacity - 1);
+    for (int probe = 0; probe < capacity; probe++) {
+        uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
+        // last-writer-wins applies to the definitive property identity, not
+        // to diagnostics bytes shared by two Symbols or private names.
+        if (!slots[slot] || typemap_shape_entries_equal(slots[slot], entry)) return (int)slot;
+    }
+    return -1;
 }
 
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     if (!tm || !entry || !entry->name) return;
-    ShapeEntry** slots = typemap_hash_slots(tm);
-    int capacity = typemap_hash_capacity(tm);
-    if (!slots || capacity <= 0) return;
-    uint32_t h = typemap_shape_entry_key_hash(entry);
-    uint32_t idx = h & ((uint32_t)capacity - 1);
-    for (int probe = 0; probe < capacity; probe++) {
-        uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
-        if (!slots[slot]) {
-            if (tm->field_count >= (uint16_t)capacity) return;
-            slots[slot] = entry;
-            tm->field_count++;
-            return;
-        }
-        // last-writer-wins applies to the definitive property identity, not
-        // to diagnostics bytes shared by two Symbols or private names.
-        if (typemap_shape_entries_equal(slots[slot], entry)) {
-            slots[slot] = entry;
-            return;
-        }
-    }
+    int slot = typemap_hash_probe_slot(tm, entry);
     // table full — callers fall back to the authoritative shape chain.
+    if (slot < 0) return;
+    ShapeEntry** slots = typemap_hash_slots(tm);
+    if (!slots[slot]) {
+        if (tm->field_count >= (uint16_t)typemap_hash_capacity(tm)) return;
+        tm->field_count++;
+    }
+    slots[slot] = entry;
+}
+
+// D3.4.3v3: whether the table already holds an entry with `entry`'s identity.
+// A chain's shared table must not take such an entry: overwriting the slot
+// would hide a field from the types that still read it through the table.
+static inline bool typemap_hash_holds_equal(TypeMap* tm, ShapeEntry* entry) {
+    if (!tm || !entry || !entry->name) return false;
+    int slot = typemap_hash_probe_slot(tm, entry);
+    return slot >= 0 && typemap_hash_slots(tm)[slot] != NULL;
 }
 
 static inline void typemap_hash_build_in(TypeMap* tm, TypeAlloc alloc) {
     if (!tm) return;
     typemap_hash_prepare_in(tm, alloc, tm->length);
-    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+    FOR_EACH_MAP_FIELD(tm, e) {
         typemap_hash_insert(tm, e);
     }
 }
@@ -878,18 +942,6 @@ static inline void typemap_hash_build_in(TypeMap* tm, TypeAlloc alloc) {
 static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {
     typemap_hash_build_in(tm, type_alloc_of_pool(pool));
 }
-
-static inline ShapeEntry* typemap_first_field(TypeMap* tm) {
-    return tm ? tm->shape : NULL;
-}
-
-static inline ShapeEntry* typemap_next_field(ShapeEntry* entry) {
-    return entry ? entry->next : NULL;
-}
-
-#define FOR_EACH_MAP_FIELD(map_type, field_var) \
-    for (ShapeEntry* field_var = typemap_first_field((TypeMap*)(map_type)); \
-         field_var; field_var = typemap_next_field(field_var))
 
 static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Pool* pool) {
     if (!tm || !entry) return;
@@ -921,7 +973,7 @@ static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* k
         ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
         if (typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
-            return e;
+            return typemap_hash_entry_is_own(tm, e) ? e : NULL;
         }
     }
     return NULL;
@@ -943,7 +995,7 @@ typedef struct TypeElmt : TypeMap {
     // D2.6.6v3: a DECLARED element type's content pattern, matched against the
     // children as a sequence pattern (S11.1.6v3); NULL leaves content
     // unconstrained. Instance and literal types never carry one, so it plays
-    // no part in type sharing (D3.4.3v2).
+    // no part in type sharing (D3.4.3v3).
     TypeList* content_list;
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
@@ -1439,7 +1491,7 @@ typedef struct Input {
     NamePool* name_pool;        // centralized name management
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
-    // D3.4.3v2: one empty root per element tag and namespace, a pool-owned
+    // D3.4.3v3: one empty root per element tag and namespace, a pool-owned
     // open-addressing table keyed by the pooled tag-name pointer; element
     // nodes (roots included) count against their own budget
     struct TypeElmt** element_roots;
@@ -1510,7 +1562,7 @@ bool map_put_undefined_unique_absent_bulk_heap(Map* mp, String** keys, int count
     Input* input, uint8_t shape_flags);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
-// D3.4.3v2: element types share through the Input's transition tree. The root
+// D3.4.3v3: element types share through the Input's transition tree. The root
 // for a tag and namespace (NULL: keep a private type), and the attribute add
 // that follows or mints an edge from an element's tree type.
 TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns);
@@ -1524,7 +1576,7 @@ typedef struct TypeTreeStep {
     TypeId type_id;
 } TypeTreeStep;
 
-// D3.4.3v2: a rebuilt type comes from the tree too. The root a container's
+// D3.4.3v3: a rebuilt type comes from the tree too. The root a container's
 // rebuild starts from (NULL: the container stays private), and the node
 // reached by adding `steps` from `start` (NULL: the tree declined).
 TypeMap* type_tree_root_like(Input* input, Map* container);

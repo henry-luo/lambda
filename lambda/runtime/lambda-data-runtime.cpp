@@ -3078,8 +3078,8 @@ Item object_literal_admit_fields(const TypeObject* type, Item* values, int count
         uint64_t deferred) {
     char boundary[192];
     int index = 0;
-    for (ShapeEntry* field = type->shape; field && index < count;
-            field = field->next, index++) {
+    for (ShapeEntry* field = typemap_first_field(type); field && index < count;
+            field = typemap_next_field(type, field), index++) {
         if (!field->type || !object_field_deferred(deferred, index)) continue;
         if (get_type_id(values[index]) == LMD_TYPE_ERROR) {
             if (lambda_type_accepts_error(field->type)) continue;

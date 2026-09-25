@@ -306,7 +306,7 @@ struct TsDirectTypeParser {
             } else {
                 shape_entry_set_type(entry, member_type);
             }
-            if (previous) previous->next = entry;
+            if (previous) previous->chain_next = entry;
             else object->shape = entry;
             previous = entry;
             object->length++;

@@ -276,6 +276,13 @@ rules:
     enforces: claude-md/rule-3
     tags: [containers]
 
+  no-raw-shape-chain-walk:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-raw-shape-chain-walk.yml
+    category: correctness
+    tags: [lambda, shape, transition-tree, mandatory]
+    note: "D3.4.3v3: a tree node's chain runs on past `last`; walks go through FOR_EACH_MAP_FIELD / typemap_next_field."
+
   todo-inventory:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/todo-inventory.yml

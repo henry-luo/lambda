@@ -649,7 +649,7 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
                         elem_builder.attr(shape->name->str, *(Item*)&attr_value);
                     }
                 }
-                shape = shape->next;
+                shape = typemap_next_field(old_type, shape);
             }
         }
 

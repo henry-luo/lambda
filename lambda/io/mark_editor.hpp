@@ -357,7 +357,7 @@ private:
     
     // Utility
     String* ensure_string_key(const char* key);
-    bool find_field_in_shape(ShapeEntry* shape, const char* key, TypeId* out_type, int64_t* out_offset);
+    bool find_field_in_shape(const TypeMap* shape, const char* key, TypeId* out_type, int64_t* out_offset);
     void store_value_at_offset(void* field_ptr, Item value, TypeId type_id);
 };
 

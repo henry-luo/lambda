@@ -1124,8 +1124,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                 lambda_type_is_concrete_attr_shape(object_type) && member->property &&
                 member->property->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* property = (JsIdentifierNode*)member->property;
-            for (ShapeEntry* field = ((TypeMap*)object_type)->shape; field;
-                    field = field->next) {
+            FOR_EACH_MAP_FIELD(object_type, field) {
                 if (field->name && field->name->str &&
                         field->name->length == property->name->len &&
                         memcmp(field->name->str, property->name->chars,

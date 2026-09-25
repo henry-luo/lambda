@@ -1604,9 +1604,8 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
     }
     if (strcmp(method->chars, "popitem") == 0) {
         // return last key-value pair
-        ShapeEntry* field = tm->shape;
         ShapeEntry* last = NULL;
-        while (field) { last = field; field = field->next; }
+        FOR_EACH_MAP_FIELD(tm, field) last = field;
         if (!last || !last->name) return ItemNull;
         Item tuple = py_tuple_new(2);
         py_tuple_set(tuple, 0, (Item){.item = s2it(heap_create_name(last->name->str))});

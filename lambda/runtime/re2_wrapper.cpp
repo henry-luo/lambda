@@ -847,7 +847,6 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     e_value->name = nv1;
     shape_entry_set_type(e_value, type_info[LMD_TYPE_STRING].type);
     e_value->byte_offset = 0;
-    e_value->next = nullptr;
 
     int64_t offset2 = e_value->storage.byte_size;
 
@@ -859,9 +858,8 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
     e_index->name = nv2;
     shape_entry_set_type(e_index, type_info[LMD_TYPE_INT].type);
     e_index->byte_offset = offset2;
-    e_index->next = nullptr;
 
-    e_value->next = e_index;
+    e_value->chain_next = e_index;
 
     int64_t byte_size = offset2 + e_index->storage.byte_size;
 

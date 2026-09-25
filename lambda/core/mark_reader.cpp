@@ -288,7 +288,7 @@ ItemReader MapReader::get(const char* key) const {
         if (field->name && field->name->str && strcmp(field->name->str, key) == 0) {
             return ItemReader(map_shape_field_to_item(data_, field.get()).to_const());
         }
-        field = lam::shape_next(field);
+        field = lam::shape_next(map_type_, field);
     }
     return ItemReader();
 }
@@ -301,7 +301,7 @@ bool MapReader::has(const char* key) const {
         if (field->name && field->name->str && strcmp(field->name->str, key) == 0) {
             return true;
         }
-        field = lam::shape_next(field);
+        field = lam::shape_next(map_type_, field);
     }
 
     return false;
@@ -338,7 +338,7 @@ bool MapReader::KeyIterator::next(const char** key) {
     }
 
     *key = current_field_->name->str;
-    current_field_ = lam::shape_next(current_field_);
+    current_field_ = lam::shape_next(reader_->map_type_, current_field_);
     return true;
 }
 
@@ -365,7 +365,7 @@ bool MapReader::ValueIterator::next(ItemReader* value) {
     const char* key = current_field_->name->str;
     *value = reader_->get(key);
 
-    current_field_ = lam::shape_next(current_field_);
+    current_field_ = lam::shape_next(reader_->map_type_, current_field_);
     return true;
 }
 
@@ -388,7 +388,7 @@ bool MapReader::EntryIterator::next(const char** key, ItemReader* value) {
     *key = current_field_->name ? current_field_->name->str : nullptr;
     Item result = map_shape_field_to_item(reader_->data_, current_field_.get());
     *value = ItemReader(result.to_const());
-    current_field_ = lam::shape_next(current_field_);
+    current_field_ = lam::shape_next(reader_->map_type_, current_field_);
     return true;
 }
 
@@ -708,7 +708,7 @@ bool ElementReader::has_attr(const char* key) const {
             strncmp(field->name->str, key, key_len) == 0) {
             return true;
         }
-        field = lam::shape_next(field);
+        field = lam::shape_next(map_type, field);
     }
 
     return false;
@@ -739,7 +739,7 @@ const char* ElementReader::get_attr_string(const char* key) const {
             }
             break;
         }
-        field = lam::shape_next(field);
+        field = lam::shape_next(map_type, field);
     }
 
     return nullptr;
@@ -763,7 +763,7 @@ bool ElementReader::AttributeIterator::next(const char** key, ItemReader* value)
     *key = current_field_->name ? current_field_->name->str : nullptr;
     Item result = map_shape_field_to_item(reader_->element_->data, current_field_.get());
     *value = ItemReader(result.to_const());
-    current_field_ = lam::shape_next(current_field_);
+    current_field_ = lam::shape_next((const TypeMap*)reader_->element_type_, current_field_);
     return true;
 }
 

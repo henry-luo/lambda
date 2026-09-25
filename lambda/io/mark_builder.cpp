@@ -394,7 +394,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
         element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
     }
 
-    // D3.4.3v2: start on the tag's root in the Input's transition tree, so
+    // D3.4.3v3: start on the tag's root in the Input's transition tree, so
     // elements with one tag and attribute sequence share one TypeElmt
     TypeElmt* root = element ? elmt_tree_root(input, tag_name_, NULL) : NULL;
     if (root) {
@@ -536,7 +536,7 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 //------------------------------------------------------------------------------
 Item ElementBuilder::final() {
     // nothing to finalize: an element's type came from the transition tree, or
-    // is its own private type (D3.4.3v2)
+    // is its own private type (D3.4.3v3)
     return (Item){.element = elmt_};
 }
 
@@ -641,7 +641,7 @@ MapBuilder& MapBuilder::put(String* key, bool value) {
 }
 
 Item MapBuilder::final() {
-    // map_put already shared the type through the transition tree (D3.4.3v2)
+    // map_put already shared the type through the transition tree (D3.4.3v3)
     return (Item){.map = map_};
 }
 
@@ -805,7 +805,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
                 Item field_item = field_reader.item();
                 if (!is_in_arena(field_item)) return false;  // External value found
             }
-            field = lam::shape_next(field);
+            field = lam::shape_next(map_type, field);
         }
 
         // All fields are in arena - now check if Map struct itself is in arena
@@ -827,7 +827,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
                     Item attr_item = map_shape_field_to_item(elem->data, attr.get());
                     if (!is_in_arena(attr_item)) return false;  // External attribute found
                 }
-                attr = lam::shape_next(attr);
+                attr = lam::shape_next(elem_type, attr);
             }
         }
 
@@ -982,7 +982,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
                     // attr->name is null for nested map
                     elem_builder.attr((String*)nullptr, copied_item);
                 }
-                attr = lam::shape_next(attr);
+                attr = lam::shape_next(elem_type, attr);
             }
         }
 

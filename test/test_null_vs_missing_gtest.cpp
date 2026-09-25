@@ -136,8 +136,8 @@ TEST_F(NullVsMissingTest, MapHasFieldMethod) {
     entry2->type = (Type*)pool_calloc(pool, sizeof(Type));
     entry2->type->type_id = LMD_TYPE_INT;
 
-    entry1->next = entry2;
-    entry2->next = nullptr;
+    entry1->chain_next = entry2;
+    entry2->chain_next = nullptr;
 
     map_type->shape = entry1;
 

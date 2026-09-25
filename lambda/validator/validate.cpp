@@ -681,9 +681,9 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
 
 template <typename HasValueFn, typename GetValueFn>
 static void validate_shape_entries(SchemaValidator* validator, ValidationResult* result,
-                                   ShapeEntry* shape, HasValueFn has_value, GetValueFn get_value,
+                                   const TypeMap* shape, HasValueFn has_value, GetValueFn get_value,
                                    bool report_missing, bool check_null, bool push_name_scope) {
-    for (ShapeEntry* shape_entry = shape; shape_entry; shape_entry = shape_entry->next) {
+    FOR_EACH_MAP_FIELD(shape, shape_entry) {
         if (!shape_entry->name) {
             log_error("[VALIDATOR] ShapeEntry has NULL name pointer");
             continue;
@@ -751,10 +751,10 @@ static void validate_shape_entries(SchemaValidator* validator, ValidationResult*
 // merge, and it stops at the first bad field — full mode may never do that,
 // because it owes an error for every field.
 template <typename HasValueFn, typename GetValueFn>
-static bool shape_entries_match_fast(SchemaValidator* validator, ShapeEntry* shape,
+static bool shape_entries_match_fast(SchemaValidator* validator, const TypeMap* shape,
                                      HasValueFn has_value, GetValueFn get_value,
                                      bool report_missing, bool check_null) {
-    for (ShapeEntry* shape_entry = shape; shape_entry; shape_entry = shape_entry->next) {
+    FOR_EACH_MAP_FIELD(shape, shape_entry) {
         if (!shape_entry->name) continue;   // full mode logs; the verdict is unaffected
         const char* field_name = shape_entry->name->str;
 
@@ -804,7 +804,7 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
         if (!map_type->shape) return validation_verdict(true);
         if (map_carries_exact_shape(item, map_type)) return validation_verdict(true);
         MapReader fast_map = fast_reader.asMap();
-        return validation_verdict(shape_entries_match_fast(validator, map_type->shape,
+        return validation_verdict(shape_entries_match_fast(validator, map_type,
             [&fast_map](const char* name) { return fast_map.has(name); },
             [&fast_map](const char* name) { return fast_map.get(name); },
             true, true));
@@ -830,7 +830,7 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
     // Use MapReader for type-safe access
     MapReader map = item_reader.asMap();
 
-    validate_shape_entries(validator, result, map_type->shape,
+    validate_shape_entries(validator, result, map_type,
         [&map](const char* name) { return map.has(name); },
         [&map](const char* name) { return map.get(name); },
         true, true, true);
@@ -848,7 +848,7 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
         }
         TypeMap* fast_map_part = (TypeMap*)element_type;
         if (fast_map_part->shape &&
-                !shape_entries_match_fast(validator, fast_map_part->shape,
+                !shape_entries_match_fast(validator, fast_map_part,
                     [&fast_elem](const char* name) { return fast_elem.has_attr(name); },
                     [&fast_elem](const char* name) { return fast_elem.get_attr(name); },
                     false, false)) {
@@ -897,7 +897,7 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
     if (map_part->shape) {
         PathScope attr_scope(validator, PATH_ATTRIBUTE, (StrView){"attrs", 5});
 
-        validate_shape_entries(validator, result, map_part->shape,
+        validate_shape_entries(validator, result, map_part,
             [&element](const char* name) { return element.has_attr(name); },
             [&element](const char* name) { return element.get_attr(name); },
             false, false, false);

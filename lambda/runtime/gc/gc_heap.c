@@ -1729,6 +1729,9 @@ static void gc_trace_shape_field(gc_heap_t* gc, const void* shape_entry,
 static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                                   int64_t byte_size) {
     uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_SHAPE);
+    // D3.4.3v3: a tree node's chain continues past its last field into a
+    // descendant's, whose offsets lie outside this map's data.
+    uint8_t* last = (uint8_t*)*(void**)((uint8_t*)type_ptr + LAMBDA_GC_OFF_TYPE_MAP_LAST);
     while (shape) {
         // A JS accessor is a virtual ShapeEntry field (byte_offset == -1), so
         // trace its exact cell edge even when this Map has no packed data.
@@ -1739,6 +1742,7 @@ static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
                 *(int64_t*)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET),
                 data_ptr, byte_size);
         }
+        if (shape == last) break;
         shape = (uint8_t*)*(void**)(shape + LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT);
     }
 }

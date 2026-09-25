@@ -758,7 +758,7 @@ String* format_cmd_args(String* cmd, Item args) {
         ShapeEntry* field = type_map->shape;
         for (int i = 0; i < type_map->length && field; i++) {
             if (!field->name || !field->name->str) {
-                field = field->next;
+                field = typemap_next_field(type_map, field);
                 continue;
             }
 
@@ -783,7 +783,7 @@ String* format_cmd_args(String* cmd, Item args) {
                 // else skip boolean true values (just add the flag)
             }
 
-            field = field->next;
+            field = typemap_next_field(type_map, field);
         }
     }
     else {

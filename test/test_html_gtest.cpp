@@ -164,7 +164,7 @@ protected:
                 }
                 return "";
             }
-            shape = shape->next;
+            shape = typemap_next_field(type, shape);
         }
 
         return "";
@@ -182,7 +182,7 @@ protected:
             if (shape->name && strview_equal(shape->name, attr_name)) {
                 return true;
             }
-            shape = shape->next;
+            shape = typemap_next_field(type, shape);
         }
 
         return false;

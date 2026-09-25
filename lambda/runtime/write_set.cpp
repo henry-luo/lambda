@@ -134,7 +134,7 @@ static bool copy_attributes(Item target, Item source, const char* name,
     Rooted<Item> rooted_value(roots, value);
     TypeMap* shape = lambda_attr_shape(tid, (const void*)(uintptr_t)rooted_source.get().item);
     if (shape) {
-        for (ShapeEntry* field = shape->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(shape, field) {
             if (field->byte_offset < 0 || !field->name) continue;
             bool hit = name && field->name->length == name_length &&
                 memcmp(field->name->str, name, name_length) == 0;
@@ -311,7 +311,7 @@ static Item container_add_member(Item target, Item value) {
         TypeMap* shape = lambda_attr_shape(LMD_TYPE_MAP, (const void*)(uintptr_t)value.item);
         void* data = lambda_attr_data(LMD_TYPE_MAP, (const void*)(uintptr_t)value.item);
         if (!shape || !data) return result;
-        for (ShapeEntry* field = shape->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(shape, field) {
             if (field->byte_offset < 0 || !field->name) continue;
             result = container_with_name(result, field->name->str,
                 field->name->length, _map_read_field(field, data), false);

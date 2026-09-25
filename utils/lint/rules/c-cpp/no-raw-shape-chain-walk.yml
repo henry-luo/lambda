@@ -1,0 +1,29 @@
+id: no-raw-shape-chain-walk
+language: cpp
+severity: error
+message: >-
+  Raw read of ShapeEntry::chain_next. A type's fields run from `shape` through
+  `last` (D3.4.3v3): a transition-tree node shares its chain with the
+  descendant that extended it in place, so the link runs on past `last` into
+  fields the type does not have, at offsets outside its maps' data. Walk with
+  FOR_EACH_MAP_FIELD or typemap_next_field, or shape_chain_next_until for a
+  chain still being assembled. Linking entries (assigning TO chain_next) is
+  fine. Mark audited reads with a trailing "// SHAPE_CHAIN_OK: <reason>".
+metadata:
+  suppress: SHAPE_CHAIN_OK
+rule:
+  kind: field_expression
+  has:
+    field: field
+    regex: ^chain_next$
+  not:
+    inside:
+      kind: assignment_expression
+      field: left
+files:
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "lib/**/*.{c,cpp,h,hpp}"
+ignores:
+  - "**/tree-sitter*/**"
+  - "lambda/mir/**"

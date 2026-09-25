@@ -736,6 +736,7 @@ typedef struct LambdaGcTypeMapLayout {
     uint8_t has_named_shape;
     uint8_t is_trusted_contract;
     void* shape;
+    void* last;  // D3.4.3v3: a tree node's chain may continue past it
 } LambdaGcTypeMapLayout;
 
 typedef struct LambdaGcShapeEntryLayout {
@@ -825,6 +826,7 @@ enum LambdaGcLayoutOffset {
     LAMBDA_GC_OFF_LIST_CAPACITY = offsetof(LambdaGcListLayout, capacity),
     LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE = offsetof(LambdaGcTypeMapLayout, byte_size),
     LAMBDA_GC_OFF_TYPE_MAP_SHAPE = offsetof(LambdaGcTypeMapLayout, shape),
+    LAMBDA_GC_OFF_TYPE_MAP_LAST = offsetof(LambdaGcTypeMapLayout, last),
     LAMBDA_GC_OFF_SHAPE_ENTRY_TYPE = offsetof(LambdaGcShapeEntryLayout, type),
     LAMBDA_GC_OFF_SHAPE_ENTRY_BYTE_OFFSET = offsetof(LambdaGcShapeEntryLayout, byte_offset),
     LAMBDA_GC_OFF_SHAPE_ENTRY_NEXT = offsetof(LambdaGcShapeEntryLayout, next),

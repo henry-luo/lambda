@@ -670,7 +670,7 @@ TEST_F(MarkReaderTest, AttributeReaderIteration) {
         ItemReader value = elem.get_attr(key);
         EXPECT_NE(key, nullptr);
         count++;
-        field = field->next;
+        field = typemap_next_field(map_type, field);
     }
 
     EXPECT_EQ(count, 3);

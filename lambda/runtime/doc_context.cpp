@@ -122,7 +122,7 @@ static void doc_register_members(Document* doc, Item item, const void* self,
         TypeMap* shape = lambda_attr_shape(tid, (const void*)(uintptr_t)item.item);
         void* data = lambda_attr_data(tid, (const void*)(uintptr_t)item.item);
         if (shape && data) {
-            for (ShapeEntry* field = shape->shape; field; field = field->next) {
+            FOR_EACH_MAP_FIELD(shape, field) {
                 if (field->byte_offset < 0 || !field->name) continue;
                 Item value = _map_read_field(field, data);
                 doc_register_child(doc, value, self, field->name->str,

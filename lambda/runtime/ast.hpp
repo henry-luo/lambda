@@ -230,7 +230,7 @@ static inline TypeMethod* ast_lookup_object_method(TypeObject* object,
         const String* name) {
     if (!object || !name) return NULL;
     for (TypeObject* owner = object; owner; owner = owner->base) {
-        for (ShapeEntry* field = owner->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(owner, field) {
             if (field->name && field->name->length == name->len &&
                     memcmp(field->name->str, name->chars, name->len) == 0) {
                 return NULL;

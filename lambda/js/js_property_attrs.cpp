@@ -151,14 +151,13 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
     ShapeEntry* prev_clone = nullptr;
     ShapeEntry* first_clone = nullptr;
     ShapeEntry* last_clone = nullptr;
-    for (ShapeEntry* src = tm->shape; src; src = src->next) {
+    FOR_EACH_MAP_FIELD(tm, src) {
         ShapeEntry* dst = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
         if (!dst) return nullptr;
         dst->name = src->name;
         dst->type = src->type;
         dst->storage = *shape_entry_storage(src);
         dst->byte_offset = src->byte_offset;
-        dst->next = nullptr;
         dst->ns = src->ns;
         dst->default_value = src->default_value;
         dst->name_hash = src->name_hash;
@@ -167,7 +166,7 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
         dst->flags = src->flags;
         dst->accessor = src->accessor;
         if (!first_clone) first_clone = dst;
-        if (prev_clone) prev_clone->next = dst;
+        if (prev_clone) prev_clone->chain_next = dst;
         prev_clone = dst;
         last_clone = dst;
     }
@@ -184,7 +183,7 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
         ShapeEntry** entries = (ShapeEntry**)pool_calloc(pool, tm->slot_count * sizeof(ShapeEntry*));
         if (entries) {
             ShapeEntry* e = first_clone;
-            for (int i = 0; i < tm->slot_count && e; i++, e = e->next) {
+            for (int i = 0; i < tm->slot_count && e; i++, e = typemap_next_field(clone, e)) {
                 entries[i] = e;
             }
             clone->slot_entries = entries;

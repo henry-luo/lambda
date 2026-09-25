@@ -121,7 +121,7 @@ static ShapeEntry* shape_transition_find_field_in_type(TypeMap* type, String* na
     if (field) return field;
     // freshly assembled Element shapes do not publish a hash table until a
     // runtime shape rebuild; the linked chain is still the authoritative data.
-    for (field = type->shape; field; field = field->next) {
+    for (field = typemap_first_field(type); field; field = typemap_next_field(type, field)) {
         if (field->name && field->name->length == name->len &&
                 memcmp(field->name->str, name->chars, name->len) == 0) {
             return field;
@@ -207,14 +207,14 @@ protected:
         map_put(map, fixed_right, {.item = i2it(7)}, &input);
         TypeMap* constructor_shape = (TypeMap*)map->type;
         if (!constructor_shape || !constructor_shape->shape ||
-                !constructor_shape->shape->next) {
+                !typemap_next_field(constructor_shape, constructor_shape->shape)) {
             return nullptr;
         }
 
         ShapeEntry** slots = (ShapeEntry**)pool_calloc(pool, 2 * sizeof(ShapeEntry*));
         if (!slots) return nullptr;
         slots[0] = constructor_shape->shape;
-        slots[1] = constructor_shape->shape->next;
+        slots[1] = typemap_next_field(constructor_shape, constructor_shape->shape);
         constructor_shape->slot_entries = slots;
         constructor_shape->slot_count = 2;
         constructor_shape->is_shared_constructor_shape = true;

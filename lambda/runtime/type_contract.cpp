@@ -433,8 +433,7 @@ static int contract_array_fixed_length(const Type* type) {
 static bool contract_map_is_subtype(const TypeMap* candidate,
         const TypeMap* expected, int depth) {
     if (!candidate || !expected) return false;
-    for (ShapeEntry* expected_field = expected->shape; expected_field;
-            expected_field = expected_field->next) {
+    FOR_EACH_MAP_FIELD(expected, expected_field) {
         if (!expected_field->name || !expected_field->type) continue;
         ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
             expected_field->name->str, (int)expected_field->name->length);
@@ -999,8 +998,7 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
     if (candidate->length != expected->length) return MAP_CONTRACT_INCOMPATIBLE;
 
     bool storage_compatible = true;
-    for (ShapeEntry* expected_field = expected->shape; expected_field;
-            expected_field = expected_field->next) {
+    FOR_EACH_MAP_FIELD(expected, expected_field) {
         if (!expected_field->name || !expected_field->type) continue;
         ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
             expected_field->name->str, (int)expected_field->name->length);

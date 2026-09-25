@@ -4009,7 +4009,7 @@ extern "C" Item js_new_literal_object_with_typemap(TypeMap* tm) {
     }
     int64_t offset = 0;
     int count = 0;
-    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(tm, entry) {
         if (entry->byte_offset != offset || entry->flags != 0 || entry->accessor ||
                 shape_entry_storage_size(entry) != (int)sizeof(void*) || count == 16) {
             return object;
@@ -4030,7 +4030,7 @@ static bool js_constructor_instance_shape_is_admissible(TypeMap* shape) {
     }
     int64_t offset = 0;
     int count = 0;
-    for (ShapeEntry* entry = shape->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(shape, entry) {
         if (entry->byte_offset != offset || entry->flags != 0 ||
                 entry->accessor || shape_entry_storage_size(entry) !=
                     (int)sizeof(void*) || count == 16) {
@@ -4117,7 +4117,7 @@ Item js_map_shape_lookup(Map* m, const char* key_str, int key_len, bool* out_fou
                 }
             }
         }
-        field = field->next;
+        field = typemap_next_field(map_type, field);
     }
     if (out_found) *out_found = found;
     return result;
@@ -4670,7 +4670,7 @@ static Item js_private_brand_owner(Item object, String* private_key, bool* out_f
     Item lookup_object = js_private_storage_object(object);
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return ItemNull;
     TypeMap* type = (TypeMap*)lookup_object.map->type;
-    for (ShapeEntry* entry = type ? type->shape : NULL; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(type, entry) {
         String* candidate_brand_key = (String*)name_pool_resolve_id(
             context ? context->name_pool : NULL, entry->name_id);
         if (!candidate_brand_key || entry->key_kind != NAME_KEY_PRIVATE) continue;
@@ -6551,7 +6551,7 @@ static void js_array_delete_sparse_indices_range(lam::GcPtr<Array> arr,
     if (!pm || !pm->type) return;
     TypeMap* tm = (TypeMap*)pm->type;
     Item map_item = (Item){.map = pm};
-    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(tm, entry) {
         if (!entry->name) continue;
         int name_len = (int)entry->name->length;
         const char* name = entry->name->str;
@@ -8690,7 +8690,9 @@ static bool js_named_fast_reserved_constructor_slot_is_next(Map* map,
     // A prior source assignment can publish a later reserved field through an
     // RHS or initializer. fn_map_set then detaches and repairs enumeration
     // order; retain that path whenever such an out-of-order publication exists.
-    for (ShapeEntry* next = entry->next; next; next = next->next) {
+    const TypeMap* tm = (const TypeMap*)map->type;
+    for (ShapeEntry* next = typemap_next_field(tm, entry); next;
+            next = typemap_next_field(tm, next)) {
         if (!map_ctor_offset_is_reserved(map, next->byte_offset)) return false;
     }
     return true;
@@ -24422,7 +24424,7 @@ static bool js_array_proto_scan_indexed_properties(Item proto) {
                             return true;
                         }
                     }
-                    se = se->next;
+                    se = typemap_next_field(tm, se);
                 }
             }
         }
@@ -24561,7 +24563,7 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
     int64_t sparse_version = sm ? sm->sparse_version : 0;
 
     int count = 0;
-    for (ShapeEntry* se = shape; se; se = se->next) {
+    for (ShapeEntry* se = shape; se; se = typemap_next_field(tm, se)) {
         if (!se->name) continue;
         int64_t idx = -1;
         if (js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) count++;
@@ -24578,7 +24580,7 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
     }
 
     int pos = 0;
-    for (ShapeEntry* se = shape; se; se = se->next) {
+    for (ShapeEntry* se = shape; se; se = typemap_next_field(tm, se)) {
         if (!se->name) continue;
         int64_t idx = -1;
         if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
@@ -24720,7 +24722,7 @@ static bool js_array_find_own_element(Item arr, lam::GcPtr<Array> a,
         if (!cursor) {
             if (props && props->type) {
                 TypeMap* tm = (TypeMap*)props->type;
-                for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                FOR_EACH_MAP_FIELD(tm, se) {
                     if (!se->name) continue;
                     int64_t idx = -1;
                     if (!js_array_parse_index_name(se->name->str,
@@ -24772,7 +24774,7 @@ static bool js_array_has_numeric_own_accessors(lam::GcPtr<Array> a) {
     Map* props = js_array_props(a.get());
     if (!props || !props->type) return false;
     TypeMap* tm = (TypeMap*)props->type;
-    for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+    FOR_EACH_MAP_FIELD(tm, se) {
         if (!se->name) continue;
         int64_t idx = -1;
         if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
@@ -24953,7 +24955,7 @@ static bool js_concat_ta_own_name_blocks_fast(const char* name, int len) {
 static bool js_concat_ta_has_observable_own_index_or_length(Item element) {
     if (get_type_id(element) != LMD_TYPE_MAP || !element.map || element.map->data_cap <= 0) return false;
     TypeMap* tm = element.map->type ? (TypeMap*)element.map->type : NULL;
-    for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+    FOR_EACH_MAP_FIELD(tm, se) {
         if (!se->name) continue;
         const char* name = se->name->str;
         int len = (int)se->name->length;
@@ -28178,22 +28180,22 @@ extern "C" void js_mark_all_non_enumerable(Item object) {
     TypeMap* tm = (TypeMap*)m->type;
     ShapeEntry* entry = tm->shape;
     while (entry) {
-        if (!entry->name) { entry = entry->next; continue; }
+        if (!entry->name) { entry = typemap_next_field(tm, entry); continue; }
         const char* name = entry->name->str;
         int name_len = (int)entry->name->length;
         if (entry->key_kind != NAME_KEY_STRING) {
             js_shape_entry_update_flags_name_id(object, entry->name_id,
                 JSPD_NON_ENUMERABLE, 0);
-            entry = entry->next;
+            entry = typemap_next_field(tm, entry);
             continue;
         }
         // skip internal properties
         if (name_len >= 2 && name[0] == '_' && name[1] == '_') {
-            entry = entry->next;
+            entry = typemap_next_field(tm, entry);
             continue;
         }
         js_attr_set_enumerable(object, name, name_len, /*enumerable=*/false);
-        entry = entry->next;
+        entry = typemap_next_field(tm, entry);
     }
 }
 

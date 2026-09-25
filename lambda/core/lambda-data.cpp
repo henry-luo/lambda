@@ -1062,7 +1062,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
         // always read an Item (uint64_t) from varargs - transpiler passes Items via box functions like i2it()
         Item item = {.item = va_arg(args, uint64_t)};
         set_field_value(field, field_ptr, item);
-        field = field->next;
+        field = typemap_next_field(map_type, field);
     }
 }
 
@@ -1074,7 +1074,7 @@ void set_fields_items(TypeMap *map_type, void* map_data, const Item* values,
         void* field_ptr = map_field_ptr(map_data, field);
         Item item = (i < value_count && values) ? values[i] : ItemNull;
         set_field_value(field, field_ptr, item);
-        field = field->next;
+        field = typemap_next_field(map_type, field);
     }
 }
 
@@ -1390,7 +1390,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
                 *is_found = true;
                 return result;
             }
-            field = field->next;
+            field = typemap_next_field(map_type, field);
             continue;
         }
         // compare both name AND namespace
@@ -1410,7 +1410,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             Item result = map_shape_field_to_item(map_data, field);
             return *(ConstItem*)&result;
         }
-        field = field->next;
+        field = typemap_next_field(map_type, field);
     }
     *is_found = false;
     return null_result;
@@ -1445,20 +1445,19 @@ ConstItem Map::get(const char* key_str) const {
     return _map_get_const((TypeMap*)this->type, this->data, (char*)key_str, &is_found, NULL);
 }
 
-static bool shape_has_name(ShapeEntry* shape, const char* name) {
+static bool shape_has_name(const TypeMap* type, const char* name) {
     if (!name) return false;
-    while (shape) {
+    FOR_EACH_MAP_FIELD(type, shape) {
         if (shape->name && strview_equal(shape->name, name)) {
             return true;
         }
-        shape = shape->next;
     }
     return false;
 }
 
 bool Map::has_field(const char* field_name) const {
     if (!this || !this->type) return false;
-    return shape_has_name(((TypeMap*)this->type)->shape, field_name);
+    return shape_has_name((TypeMap*)this->type, field_name);
 }
 
 Element* elmt_pooled(Pool *pool) {
@@ -1509,7 +1508,7 @@ ConstItem Element::get_attr(const char* attr_name) const {
 
 bool Element::has_attr(const char* attr_name) {
     if (!this || !this->type) return false;
-    return shape_has_name(((TypeElmt*)this->type)->shape, attr_name);
+    return shape_has_name((TypeElmt*)this->type, attr_name);
 }
 
 // ---------------------------------------------------------------------------

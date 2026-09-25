@@ -214,7 +214,7 @@ void template_registry_set_element_pattern(TemplateEntry* entry, const void* elm
     // derive both counts here so a caller cannot desynchronize them from the
     // predicate list they describe.
     int total = 0, literal = 0;
-    for (ShapeEntry* field = pattern->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(pattern, field) {
         if (!field->name || !field->name->str) continue;
         total++;
         if (template_is_value_predicate(field->type)) literal++;
@@ -256,7 +256,7 @@ static bool template_attrs_match(const TypeElmt* pattern, Item target) {
     if (!pattern) return true;
     ElementReader elem(target);
     if (!elem.isValid()) return false;
-    for (ShapeEntry* field = pattern->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(pattern, field) {
         if (!field->name || !field->name->str) continue;
         // shape names are not null-terminated; copy the short attribute name out
         char key[128];

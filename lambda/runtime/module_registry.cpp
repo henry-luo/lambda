@@ -519,7 +519,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
     ShapeEntry* shape = type_map->shape;
     while (shape) {
         if (!shape->name || !shape->name->str) {
-            shape = shape->next;
+            shape = typemap_next_field(type_map, shape);
             continue;
         }
 
@@ -617,7 +617,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
                 (int)shape->name->length, shape->name->str, val_type);
         }
 
-        shape = shape->next;
+        shape = typemap_next_field(type_map, shape);
     }
 
     return script;

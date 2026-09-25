@@ -395,7 +395,7 @@ static bool js_array_has_nonconfigurable_index_from(Item obj, int64_t new_len) {
     if (!pm || !pm->type) return false;
     TypeMap* tm = (TypeMap*)pm->type;
     Item pm_item = (Item){.map = pm};
-    for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(tm, entry) {
         if (!entry->name) continue;
         int name_len = (int)entry->name->length;
         const char* name = entry->name->str;
@@ -433,7 +433,7 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
         if (pm && pm->type) {
             TypeMap* tm = (TypeMap*)pm->type;
             Item pm_item = (Item){.map = pm};
-            for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
+            FOR_EACH_MAP_FIELD(tm, entry) {
                 if (!entry->name) continue;
                 int name_len = (int)entry->name->length;
                 const char* name = entry->name->str;
@@ -1145,23 +1145,23 @@ bool js_property_ops_own_property_names(Item object, Item* out_result) {
             // getOwnPropertyNames excludes Symbols; byte reconstruction would
             // otherwise turn an identity key into an unrelated string key.
             if (e->key_kind != NAME_KEY_STRING) {
-                e = e->next;
+                e = typemap_next_field(tm, e);
                 continue;
             }
             const char* s = e->name->str;
             int slen = (int)e->name->length;
-            if (js_is_engine_internal_enumeration_key(s, slen)) { e = e->next; continue; }
+            if (js_is_engine_internal_enumeration_key(s, slen)) { e = typemap_next_field(tm, e); continue; }
             JsShapeSlotStatus status = js_own_shape_slot_status(object, s, slen, NULL, NULL);
-            if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR) { e = e->next; continue; }
+            if (status != JS_SHAPE_SLOT_DATA && status != JS_SHAPE_SLOT_ACCESSOR) { e = typemap_next_field(tm, e); continue; }
             Item key_item = js_name_item(s, slen);
             double numeric_index = 0;
             bool is_negative_zero = false;
             if (js_ta_key_canonical_numeric(key_item, &numeric_index, &is_negative_zero)) {
-                e = e->next;
+                e = typemap_next_field(tm, e);
                 continue;
             }
             js_array_push(result, key_item);
-            e = e->next;
+            e = typemap_next_field(tm, e);
         }
         *out_result = result;
         return true;
@@ -7348,7 +7348,7 @@ static void js_array_append_companion_keys(Item object, Item result,
             js_array_push(result_root.get(), (Item){.item = s2it(
                 heap_create_name("length", 6))});
         }
-        for (ShapeEntry* entry = type_map->shape; entry; entry = entry->next) {
+        FOR_EACH_MAP_FIELD(type_map, entry) {
             if (entry->key_kind != NAME_KEY_STRING || !entry->name) continue;
             const char* name = entry->name->str;
             int name_len = (int)entry->name->length;
@@ -7992,7 +7992,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                                     }
                                 }
                             }
-                            se = se->next;
+                            se = typemap_next_field(_tm, se);
                         }
                     }
                     // simple insertion sort (small N)
@@ -8030,7 +8030,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                             if (!skip) {
                                 js_array_push(result, js_name_item(s, len));
                             }
-                            se = se->next;
+                            se = typemap_next_field(_tm, se);
                         }
                     }
                     return result;
@@ -8077,8 +8077,9 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
     return false;
 }
 
-static bool js_shape_name_seen_before(ShapeEntry* first, ShapeEntry* current, const char* name, int name_len) {
-    for (ShapeEntry* entry = first; entry && entry != current; entry = entry->next)
+static bool js_shape_name_seen_before(const TypeMap* type, ShapeEntry* current, const char* name, int name_len) {
+    for (ShapeEntry* entry = typemap_first_field(type); entry && entry != current;
+            entry = typemap_next_field(type, entry))
         if (entry->name && (int)entry->name->length == name_len && memcmp(entry->name->str, name, (size_t)name_len) == 0) return true;
     return false;
 }
@@ -8092,7 +8093,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
     bool skip_error_stack = enumerable_only &&
         js_class_id(object_root.get()) == JS_CLASS_ERROR;
     int entry_count = 0;
-    for (ShapeEntry* entry = type_map->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(type_map, entry) {
         entry_count++;
     }
     int64_t* index_pairs = entry_count > 0
@@ -8102,7 +8103,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
     ShapeEntry* entry = type_map->shape;
     while (entry) {
         if (entry->key_kind != NAME_KEY_STRING || !entry->name) {
-            entry = entry->next;
+            entry = typemap_next_field(type_map, entry);
             continue;
         }
         const char* name = entry->name->str;
@@ -8113,7 +8114,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
         // repeated JSON names share one logical string slot; numeric shape
         // transitions remain distinct because integer-key order is observable.
         if (!skip && js_parse_array_index(name, name_len) < 0 &&
-                js_shape_name_seen_before(type_map->shape, entry, name, name_len)) {
+                js_shape_name_seen_before(type_map, entry, name, name_len)) {
             skip = true;
         }
         if (!skip) {
@@ -8133,7 +8134,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
                 index_count++;
             }
         }
-        entry = entry->next;
+        entry = typemap_next_field(type_map, entry);
     }
     if (index_count > 1) {
         qsort(index_pairs, index_count, sizeof(int64_t) * 2, js_idx_pair_cmp);
@@ -8147,7 +8148,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
     entry = type_map->shape;
     while (entry) {
         if (entry->key_kind != NAME_KEY_STRING || !entry->name) {
-            entry = entry->next;
+            entry = typemap_next_field(type_map, entry);
             continue;
         }
         const char* name = entry->name->str;
@@ -8156,7 +8157,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
             (is_regexp && js_regexp_virtual_prop_name(name, name_len)) ||
             js_parse_array_index(name, name_len) >= 0 ||
             (skip_error_stack && name_len == 5 && strncmp(name, "stack", 5) == 0);
-        if (!skip && js_shape_name_seen_before(type_map->shape, entry, name, name_len)) {
+        if (!skip && js_shape_name_seen_before(type_map, entry, name, name_len)) {
             skip = true;
         }
         if (!skip) {
@@ -8171,7 +8172,7 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
         if (!skip) {
             js_array_push(result_root.get(), js_name_item(name, name_len));
         }
-        entry = entry->next;
+        entry = typemap_next_field(type_map, entry);
     }
     if (index_pairs) mem_free(index_pairs);
     return result_root.get();
@@ -8208,7 +8209,7 @@ static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
                 }
             }
         }
-        e = e->next;
+        e = typemap_next_field(tm, e);
     }
 }
 
@@ -8374,7 +8375,7 @@ extern "C" Item js_object_keys(Item object) {
                                 }
                             }
                         }
-                        se = se->next;
+                        se = typemap_next_field(stm, se);
                     }
                     return result;
                 }
@@ -8408,7 +8409,7 @@ extern "C" Item js_typed_array_enumerable_custom_keys(Item object) {
                 }
             }
         }
-        e = e->next;
+        e = typemap_next_field(tm, e);
     }
     return result;
 }
@@ -8619,7 +8620,7 @@ extern "C" Item js_for_in_keys(Item object) {
                         }
                     }
                 }
-                e = e->next;
+                e = typemap_next_field(tm, e);
             }
         }
         // Phase-5D: legacy __get_<name>/__set_<name> pass-2 scan removed.
@@ -10633,7 +10634,7 @@ static Item js_object_test_integrity(Item obj, bool frozen) {
         if (e->name) {
             const char* n = e->name->str;
             int nlen = (int)e->name->length;
-            if (nlen >= 2 && n[0] == '_' && n[1] == '_') { e = e->next; continue; }
+            if (nlen >= 2 && n[0] == '_' && n[1] == '_') { e = typemap_next_field(tm, e); continue; }
             // Stage A3.4: shape-flag-first via helper (falls back to legacy markers).
             // check non-configurable
             if (js_props_query_configurable(m, e, n, nlen)) return (Item){.item = b2it(false)};
@@ -10647,7 +10648,7 @@ static Item js_object_test_integrity(Item obj, bool frozen) {
                 }
             }
         }
-        e = e->next;
+        e = typemap_next_field(tm, e);
     }
     return (Item){.item = b2it(true)};
 }
@@ -16271,7 +16272,7 @@ static void js_proto_snapshot_collect_intrinsic_functions(MapSnapshot* snap,
     JsPrototypeSnapshotState* state = (JsPrototypeSnapshotState*)data;
     if (!state || !snap || !snap->m || !snap->m->type) return;
     TypeMap* type = (TypeMap*)snap->m->type;
-    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(type, entry) {
         if (jspd_is_deleted(entry)) continue;
         if (jspd_is_accessor(entry)) {
             JsAccessorPair* pair = js_shape_entry_accessor_pair(entry);

@@ -1469,7 +1469,7 @@ TEST(LaneStorageResolverTests, ShapeBuilderHasNoFieldLimit) {
 }
 
 //==============================================================================
-// SHARED TYPES (D3.4.3v2): an edit never rewrites a type another value uses
+// SHARED TYPES (D3.4.3v3): an edit never rewrites a type another value uses
 //==============================================================================
 
 // Two maps built by the same adds share one transition-tree TypeMap. An inline
@@ -1536,7 +1536,7 @@ TEST_F(MarkEditorTest, RebuildLaysOutManyFields) {
     EXPECT_EQ(type->length, 201);
     int count = 0;
     int64_t offset = 0;
-    for (ShapeEntry* e = type->shape; e; e = e->next) {
+    FOR_EACH_MAP_FIELD(type, e) {
         EXPECT_EQ(e->byte_offset, offset) << "field " << count;
         EXPECT_NE((int)e->storage.kind, (int)LANE_STORAGE_INVALID);
         offset += shape_entry_storage_size(e);

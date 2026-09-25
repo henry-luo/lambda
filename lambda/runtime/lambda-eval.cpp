@@ -1889,7 +1889,7 @@ static bool runtime_contract_uses_binder(Type* type, int depth = 0) {
         return runtime_contract_uses_binder(((TypeArray*)type)->nested, depth + 1);
     }
     if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
-        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(type, field) {
             if (runtime_contract_uses_binder(field->type, depth + 1)) return true;
         }
     }
@@ -4663,7 +4663,7 @@ static bool input_schema_collect_type(Type* type, NamePool* name_pool,
                 return false;
             }
         }
-        for (ShapeEntry* field = map_type->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name && !name_pool_create_len(name_pool,
                     field->name->str, field->name->length)) return false;
             if (!input_schema_collect_type(field->type, name_pool, visited)) return false;
@@ -8935,7 +8935,7 @@ static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src
     ShapeEntry* entry = map_type->shape;
     while (entry) {
         if (entry->byte_offset < 0) {
-            entry = entry->next;
+            entry = typemap_next_field(map_type, entry);
             continue;
         }
         void* src_data = mutable_clone_owner_data(src_owner);
@@ -8967,7 +8967,7 @@ static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src
                 map_field_store(dst_field, field_clone, shape_entry_storage_type_id(entry));
             }
         }
-        entry = entry->next;
+        entry = typemap_next_field(map_type, entry);
     }
 }
 
@@ -9522,7 +9522,7 @@ Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item k
 // carries COW_STATE_SHARED, the marks stay, and COW keeps its guarantee (S9.1.2).
 static void cow_unmark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
-    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(type, entry) {
         if (entry->byte_offset < 0) continue;
         Item child = entry->name ? _map_read_field(entry, data)
                                  : (Item){.map = map_shape_field_to_map(data, entry)};
@@ -9538,7 +9538,7 @@ static void cow_unmark_shape_children(TypeMap* type, void* data) {
 // walk over the finished shape captures the whole literal.
 void cow_mark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
-    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(type, entry) {
         if (entry->byte_offset < 0) continue;
         if (!entry->name) {
             Map* spread = map_shape_field_to_map(data, entry);
@@ -9913,7 +9913,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     if (!map->data && old_type->byte_size > 0) return false;
     int old_count = 0;
     int64_t new_size = 0;
-    for (ShapeEntry* entry = old_type->shape; entry; entry = entry->next) {
+    FOR_EACH_MAP_FIELD(old_type, entry) {
         old_count++;
         if (entry->byte_offset >= 0) new_size += shape_entry_storage_size(entry);
     }
@@ -9944,11 +9944,12 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     ShapeEntry* first = NULL;
     ShapeEntry* last = NULL;
     int64_t offset = 0;
-    for (ShapeEntry* old = old_type->shape; old; old = old->next) {
+    FOR_EACH_MAP_FIELD(old_type, old) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
         if (!entry) return false;
         *entry = *old;
-        entry->next = NULL;
+        entry->chain_next = NULL;
+        entry->chain_index = 0;  // a private chain holds no tree positions (D3.4.3v3)
         if (old->byte_offset >= 0) {
             entry->byte_offset = offset;
             int size = shape_entry_storage_size(old);
@@ -9958,7 +9959,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         } else {
             entry->byte_offset = -1;
         }
-        if (last) last->next = entry;
+        if (last) last->chain_next = entry;
         else first = entry;
         last = entry;
     }
@@ -9979,7 +9980,7 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     added->type = type_info[value_type].type;
     added->byte_offset = offset;
     map_field_store((char*)new_data + offset, rooted_value.get(), value_type);
-    if (last) last->next = added;
+    if (last) last->chain_next = added;
     else first = added;
 
     new_type->shape = first;
@@ -11296,7 +11297,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // count existing fields
     int field_count = 0;
     ShapeEntry* e = old_map_type->shape;
-    while (e) { field_count++; e = e->next; }
+    while (e) { field_count++; e = typemap_next_field(old_map_type, e); }
     // No artificial upper bound: rebuild only uses heap/pool allocation per field,
     // no stack arrays or fixed-size buffers. globalThis legitimately has 100+ fields.
     if (field_count <= 0) {
@@ -11340,7 +11341,6 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         bool virtual_field = e->byte_offset < 0;
         bool fixed_slot = !virtual_field && field_index < fixed_slot_count;
         ne->byte_offset = virtual_field ? -1 : (fixed_slot ? e->byte_offset : byte_offset);
-        ne->next = NULL;
         ne->ns = e->ns;
         // Preserve property attribute flags (JSPD_IS_ACCESSOR, NW, NE, NC, etc.)
         // and default_value across shape rebuild. Without this, accessors lose
@@ -11351,14 +11351,14 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         ne->accessor = e->accessor;
 
         if (!first) first = ne;
-        if (prev) prev->next = ne;
+        if (prev) prev->chain_next = ne;
         last = ne;
         prev = ne;
         if (!fixed_slot && !virtual_field) {
             byte_offset += ne->storage.byte_size;
         }
         field_index++;
-        e = e->next;
+        e = typemap_next_field(old_map_type, e);
     }
     int64_t new_byte_size = byte_offset;
 
@@ -11389,8 +11389,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     field_index = 0;
     while (old_e && new_e) {
         if (old_e->byte_offset < 0 || new_e->byte_offset < 0) {
-            old_e = old_e->next;
-            new_e = new_e->next;
+            old_e = typemap_next_field(old_map_type, old_e);
+            new_e = shape_chain_next_until(new_e, last);
             field_index++;
             continue;
         }
@@ -11417,8 +11417,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             memcpy(new_field, old_field, sz);
         }
         field_index++;
-        old_e = old_e->next;
-        new_e = new_e->next;
+        old_e = typemap_next_field(old_map_type, old_e);
+        new_e = shape_chain_next_until(new_e, last);
     }
 
     // rebuilt shapes belong to this execution pool, not the retained module's
@@ -11476,7 +11476,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
                 fixed_slot_count * sizeof(ShapeEntry*));
             if (entries) {
                 ShapeEntry* se = first;
-                for (int i = 0; i < fixed_slot_count && se; i++, se = se->next) {
+                for (int i = 0; i < fixed_slot_count && se; i++, se = typemap_next_field(new_mt, se)) {
                     entries[i] = se;
                 }
                 new_mt->slot_entries = entries;
@@ -11528,7 +11528,7 @@ static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr, size_
                 memcmp(entry->name->str, key_cstr, key_len) == 0) {
             return entry;
         }
-        entry = entry->next;
+        entry = typemap_next_field(tm, entry);
     }
     return NULL;
 }
@@ -11547,7 +11547,7 @@ static bool map_relayout_to_contract(Map* map, TypeMap* contract) {
     // the allocation may have collected, moving the map's old buffer
     map = (Map*)rooted_map.get();
     TypeMap* current = (TypeMap*)map->type;
-    for (ShapeEntry* field = contract->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(contract, field) {
         if (!field->name || field->byte_offset < 0) continue;
         ShapeEntry* source = map_find_shape_entry(current, field->name->str,
             field->name->length);
@@ -11592,8 +11592,7 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     }
 
     TypeMap* expected_map = (TypeMap*)expected;
-    for (ShapeEntry* expected_field = expected_map->shape; expected_field;
-            expected_field = expected_field->next) {
+    FOR_EACH_MAP_FIELD(expected_map, expected_field) {
         if (!expected_field->name || !expected_field->name->str || !expected_field->type) {
             continue;
         }
@@ -12499,7 +12498,8 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                 // An RHS, parameter initializer or inherited setter can publish
                 // another key first. Reserve storage without preordering creation.
                 bool published_after = false;
-                for (ShapeEntry* next = entry->next; next; next = next->next) {
+                for (ShapeEntry* next = typemap_next_field(map_type, entry); next;
+                        next = typemap_next_field(map_type, next)) {
                     if (!map_ctor_offset_is_reserved(map_item.map, next->byte_offset)) {
                         published_after = true;
                         break;
@@ -12655,7 +12655,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                                         type_info[value_type].type, value);
             return ItemNull;
         }
-        entry = entry->next;
+        entry = typemap_next_field(map_type, entry);
     }
     // S2.1.4 part 3 / S9.1.6: a name is in a map's key domain, so an unknown
     // member write GROWS the shape rather than failing. Growth was previously

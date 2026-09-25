@@ -4309,7 +4309,7 @@ static TypeMap* mir_scalar_record_shape(Type* contract) {
     TypeMap* shape = (TypeMap*)result;
     if (!shape->is_trusted_contract || !has_fixed_shape(shape) ||
             shape->length < 1 || shape->length > 4) return NULL;
-    for (ShapeEntry* field = shape->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(shape, field) {
         Type* type = mir_unwrap_decl_contract(field->type);
         if (!field->name || !type || type->kind != TYPE_KIND_SIMPLE || type->is_literal ||
                 (type->type_id != LMD_TYPE_INT &&
@@ -4372,7 +4372,7 @@ static bool mir_record_result_body(AstNode* node, TypeMap* shape,
     if (map->has_computed_key || ast_linked_node_count(map->item) != shape->length) return false;
     ShapeEntry* field = shape->shape;
     // Exact fields preserve open-record extra-field behavior at materialization.
-    for (AstNode* item = map->item; item; item = item->next, field = field->next) {
+    for (AstNode* item = map->item; item; item = item->next, field = typemap_next_field(shape, field)) {
         if (item->node_type != AST_NODE_KEY_EXPR || ((AstNamedNode*)item)->is_spread) return false;
         String* name = ((AstNamedNode*)item)->name;
         if (!name || find_shape_field_by_name(shape, name->chars, name->len) != field) return false;
@@ -4388,7 +4388,8 @@ static TypeMap* mir_record_result_plan(AstFuncNode* function) {
 
 static int mir_record_string_field(TypeMap* shape) {
     int selected = -1, index = 0;
-    for (ShapeEntry* field = shape->shape; field; field = field->next, index++) {
+    for (ShapeEntry* field = typemap_first_field(shape); field;
+            field = typemap_next_field(shape, field), index++) {
         if (mir_decl_type_id(field->type) != LMD_TYPE_STRING) continue;
         if (selected >= 0) return -1;
         selected = index;
@@ -6304,7 +6305,7 @@ static bool mir_contract_has_binder(Type* type, bool include_refs, int depth = 0
             include_refs, depth + 1);
     }
     if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
-        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(type, field) {
             if (mir_contract_has_binder(field->type, include_refs, depth + 1)) return true;
         }
     }
@@ -6770,7 +6771,7 @@ static void mir_record_value_init(MirTranspiler* mt, MirRecordValue* value, Type
     value->count = (int)shape->length;
     value->streamed_field = -1;
     ShapeEntry* field = shape->shape;
-    for (int i = 0; i < value->count; i++, field = field->next) {
+    for (int i = 0; i < value->count; i++, field = typemap_next_field(shape, field)) {
         MIR_reg_t initial = mir_decl_type_id(field->type) == LMD_TYPE_STRING
             ? emit_box_string(mt, mir_empty_string_pointer(mt)) : emit_null_item_reg(mt);
         value->roots[i] = create_gc_root_slot(mt, initial);
@@ -8596,7 +8597,7 @@ static bool static_const_map_from_node(const ConstMaterializeCtx* cx, AstMapNode
             return false;
         }
         item = item->next;
-        field = field->next;
+        field = typemap_next_field(map_type, field);
     }
     if (item || field) return false;
     out->item = (uint64_t)(uintptr_t)map;
@@ -22123,7 +22124,7 @@ static bool mir_union_map_field_matches(Type* parent, String* name,
     if (parent->type_id == LMD_TYPE_NULL) return true;
     if (parent->type_id != LMD_TYPE_MAP || parent == &TYPE_MAP ||
             ((TypeMap*)parent)->has_spread) return false;
-    for (ShapeEntry* field = ((TypeMap*)parent)->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(parent, field) {
         if (!field->name) return false;
     }
     ShapeEntry* field = find_shape_field_by_name((TypeMap*)parent, name->chars, name->len);
@@ -22263,7 +22264,7 @@ static bool mir_map_literal_keys_follow_contract(AstMapNode* map_node,
                     key->name->len) != 0) {
             return false;
         }
-        expected_field = expected_field->next;
+        expected_field = typemap_next_field(expected, expected_field);
         item = item->next;
     }
     return !expected_field && !item;
@@ -22284,12 +22285,10 @@ static bool mir_map_literal_matches_contract(AstMapNode* map_node,
     // so its ShapeEntry can conservatively say `any` even though the call's
     // declared result is the exact field contract. Prove only direct named
     // entries here; spreads and arbitrary producers remain runtime-bound.
-    for (ShapeEntry* candidate_field = candidate->shape; candidate_field;
-            candidate_field = candidate_field->next) {
+    FOR_EACH_MAP_FIELD(candidate, candidate_field) {
         if (!candidate_field->name) return false;
     }
-    for (ShapeEntry* expected_field = expected->shape; expected_field;
-            expected_field = expected_field->next) {
+    FOR_EACH_MAP_FIELD(expected, expected_field) {
         if (!expected_field->name || !expected_field->type) continue;
         ShapeEntry* candidate_field = typemap_hash_lookup((TypeMap*)candidate,
             expected_field->name->str, (int)expected_field->name->length);
@@ -22336,7 +22335,7 @@ static bool mir_map_literal_matches_contract(AstMapNode* map_node,
 // contracts pass this gate automatically and no code here changes.
 static bool mir_map_contract_storage_valid(TypeMap* expected) {
     if (!expected || !expected->shape) return false;
-    for (ShapeEntry* field = expected->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(expected, field) {
         if (!field->name || !field->type) return false;
         TypeId storage = shape_entry_storage_type_id(field);
         if (storage == LMD_TYPE_ANY) return false;
@@ -22681,7 +22680,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
                 all_direct = false;
                 break;
             }
-            check = check->next;
+            check = typemap_next_field(map_type, check);
         }
 
         if (all_direct) {
@@ -22838,7 +22837,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
                 }
 
                 item = item->next;
-                field = field->next;
+                field = typemap_next_field(map_type, field);
             }
 
             return load_gc_root_slot(mt, map_root_slot, "map_live");
@@ -22863,7 +22862,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
     int vi = 0;
     while (item) {
         Type* field_contract = contract_field ? contract_field->type : NULL;
-        if (contract_field) contract_field = contract_field->next;
+        if (contract_field) contract_field = typemap_next_field(map_contract, contract_field);
         if (item->node_type == AST_NODE_KEY_EXPR) {
             AstNamedNode* key_expr = (AstNamedNode*)item;
             if (key_expr->as) {
@@ -23017,7 +23016,7 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
     }
 
     // Fill content if present. The count comes from the literal's own content
-    // node: an element type carries no per-literal count (D3.4.3v2).
+    // node: an element type carries no per-literal count (D3.4.3v3).
     AstListNode* content_node = (AstListNode*)elmt_node->content;
     int64_t literal_content_count = content_node && content_node->list_type
         ? content_node->list_type->length : 0;
@@ -23729,7 +23728,7 @@ static MIR_reg_t mir_record_materialize(MirTranspiler* mt, const MirRecordValue*
     int map_root = create_pointer_gc_root_slot(mt, map);
     MIR_op_t fields[4];
     ShapeEntry* field = record->shape->shape;
-    for (int i = 0; i < record->count; i++, field = field->next) fields[i] = MIR_new_reg_op(mt->ctx,
+    for (int i = 0; i < record->count; i++, field = typemap_next_field(record->shape, field)) fields[i] = MIR_new_reg_op(mt->ctx,
         mir_record_publish_field(mt, record, i, field));
     return emit_vararg_call(mt, "map_fill", MIR_T_P, 1,
         MIR_T_P, MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, map_root, "record_map")),
@@ -23758,7 +23757,7 @@ static void mir_emit_record_call(MirTranspiler* mt, AstCallNode* call, MirRecord
     // has already crossed the same exact record boundary; extract it once.
     int root = create_gc_root_slot(mt, item);
     ShapeEntry* field = output->shape->shape;
-    for (int i = 0; i < output->count; i++, field = field->next) {
+    for (int i = 0; i < output->count; i++, field = typemap_next_field(output->shape, field)) {
         // the result crossed the exact record boundary, so required fields are present
         MIR_reg_t raw = emit_mir_direct_field_read(mt,
             load_gc_root_slot(mt, root, "record_fallback"), field, true, LMD_TYPE_MAP,
@@ -23830,7 +23829,7 @@ static int mir_record_streamed_field(MirTranspiler* mt, AstDeclaratorNode* decla
     int selected = mir_record_string_field(shape);
     if (selected < 0) return -1;
     ShapeEntry* string_field = shape->shape;
-    for (int i = 0; i < selected; i++) string_field = string_field->next;
+    for (int i = 0; i < selected; i++) string_field = typemap_next_field(shape, string_field);
     AstNode* use = NULL;
     for (uint32_t id = 0; id < mt->ast_index->count; id++) {
         AstNode* node = mt->ast_index->nodes[id];
@@ -23949,7 +23948,7 @@ static void mir_emit_record_body(MirTranspiler* mt, AstNode* node,
     }
     ShapeEntry* field = shape->shape;
     item = map->item;
-    for (int i = 0; field; i++, field = field->next, item = item->next) {
+    for (int i = 0; field; i++, field = typemap_next_field(shape, field), item = item->next) {
         MIR_reg_t value = load_gc_root_slot(mt, fields[i], "record_return_field");
         if (!mir_boundary_is_redundant(mt, ((AstNamedNode*)item)->as, field->type)) {
             value = emit_parameter_boundary(mt, value, LMD_TYPE_ANY, field->type, "function return");
@@ -23957,7 +23956,7 @@ static void mir_emit_record_body(MirTranspiler* mt, AstNode* node,
         }
     }
     field = shape->shape;
-    for (int i = 0; i < shape->length; i++, field = field->next) {
+    for (int i = 0; i < shape->length; i++, field = typemap_next_field(shape, field)) {
         MIR_reg_t value = load_gc_root_slot(mt, fields[i], "record_result");
         mir_record_store_field(mt, addresses[i], value, field->type);
     }
@@ -23974,7 +23973,7 @@ static bool mir_record_argument_proven(MirTranspiler* mt, AstNode* node, TypeMap
     if (unwrapped && unwrapped->node_type == AST_NODE_MAP &&
             mir_record_result_body(unwrapped, shape, visiting, 0)) {
         ShapeEntry* field = shape->shape;
-        for (AstNode* item = ((AstMapNode*)unwrapped)->item; item; item = item->next, field = field->next)
+        for (AstNode* item = ((AstMapNode*)unwrapped)->item; item; item = item->next, field = typemap_next_field(shape, field))
             if (!mir_boundary_is_redundant(mt, ((AstNamedNode*)item)->as, field->type)) return false;
         return true;
     }
@@ -24010,7 +24009,7 @@ static MIR_reg_t mir_record_argument_pointer(MirTranspiler* mt, AstNode* node,
         emit_return_if_item_error(mt, item);
         int root = create_gc_root_slot(mt, item);
         ShapeEntry* field = shape->shape;
-        for (int i = 0; i < fields.count; i++, field = field->next) {
+        for (int i = 0; i < fields.count; i++, field = typemap_next_field(shape, field)) {
             // Open record admission preserves extra fields. Resolve the actual
             // layout at the boxed edge; only scalar cells cross the raw edge.
             String* name = name_pool_create_len(mt->name_pool, field->name->str, field->name->length);
@@ -24056,7 +24055,7 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
         String* name = ((AstIdentNode*)member)->name;
         ShapeEntry* selected = find_shape_field_by_name(scalar->shape, name->chars, name->len);
         ShapeEntry* field = scalar->shape->shape;
-        for (int i = 0; field; i++, field = field->next) {
+        for (int i = 0; field; i++, field = typemap_next_field(scalar->shape, field)) {
             if (field != selected) continue;
             MIR_reg_t value = i == scalar->streamed_field
                 ? emit_box_string(mt, mir_empty_string_pointer(mt))
@@ -33896,7 +33895,7 @@ static MirValue transpile_object_literal_value(MirTranspiler* mt,
     MIR_op_t* values = LAMBDA_ALLOCA(value_count, MIR_op_t);
     ShapeEntry* field = object_type->shape;
     int value_index = 0;
-    for (; field; field = field->next) {
+    for (; field; field = typemap_next_field(object_type, field)) {
         AstNode* value_node = ast_object_literal_value_for_shape(literal, field);
         MIR_reg_t value = 0;
         if (value_node) {
@@ -38867,7 +38866,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 log_debug("mir: method '%s' - loaded field '%s' (type=%d) from self",
                     name_buf->str, field_name, ftid);
             }
-            se = se->next;
+            se = typemap_next_field(obj_type, se);
         }
     }
 
@@ -39490,7 +39489,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     emit_return_if_item_error(mt, write_result);
                 }
             }
-            field = field->next;
+            field = typemap_next_field(owner, field);
         }
     }
     // Conservative exit-edge analysis may reserve states for branches whose

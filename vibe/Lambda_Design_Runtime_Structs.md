@@ -363,7 +363,7 @@ immutable `const JsClassMeta* js_meta` (§9.5), `has_array_index_shape`, a lazil
 allocated `JsProtoEntryCache*`, and `TypeNominal* nominal` — the authoritative
 nominal record that the container header bit only caches.
 
-How the sharing flags and the `transitions` chain let maps share one `TypeMap` — the per-`Input` transition tree, and the rule that a shared type is never edited in place — is ruled by D3.4.3v2 and designed in [Lambda_Design_Shape_Transitions.md](Lambda_Design_Shape_Transitions.md).
+How the sharing flags and the `transitions` chain let maps share one `TypeMap` — the per-`Input` transition tree, and the rule that a shared type is never edited in place — is ruled by D3.4.3v3 and designed in [Lambda_Design_Shape_Transitions.md](Lambda_Design_Shape_Transitions.md).
 
 The C++ definitions are in
 [`lambda-data.hpp`](../lambda/lambda-data.hpp#L309) and

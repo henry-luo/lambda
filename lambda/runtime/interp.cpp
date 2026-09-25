@@ -1089,7 +1089,7 @@ static bool interp_contract_has_binder(Type* type, bool include_refs, int depth 
         // The generic container descriptors are compact Type prefixes. Casting
         // one to TypeMap reads unrelated globals through `shape` (D3.3.3).
         if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return false;
-        for (ShapeEntry* field = ((TypeMap*)type)->shape; field; field = field->next) {
+        FOR_EACH_MAP_FIELD(type, field) {
             if (interp_contract_has_binder(field->type, include_refs, depth + 1)) return true;
         }
     }
@@ -2773,7 +2773,8 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     Scratch spread(f);
     if (spread_node) spread.set(eval_expr(f, spread_node));
     ShapeEntry* field = object_type->shape;
-    for (int index = 0; index < field_count && field; index++, field = field->next) {
+    for (int index = 0; index < field_count && field;
+            index++, field = typemap_next_field(object_type, field)) {
         AstNode* value_node = ast_object_literal_value_for_shape(node, field);
         if (value_node) {
             Item value = eval_expr(f, value_node);

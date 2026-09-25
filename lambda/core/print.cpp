@@ -230,8 +230,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
         }
 
         advance_field:
-        ShapeEntry *next_field = field->next;
-        field = next_field;
+        field = typemap_next_field(map_type, field);
     }
 }
 

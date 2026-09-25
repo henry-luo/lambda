@@ -73,7 +73,7 @@ ShapeEntry* alloc_shape_entry_in(TypeAlloc alloc, String* key, TypeId type_id,
         shape_entry_set_type(shape_entry, type_info[type_id].type);
     }
     if (prev_entry) {
-        prev_entry->next = shape_entry;
+        prev_entry->chain_next = shape_entry;
         int prev_size = prev_entry->type ? shape_entry_storage_size(prev_entry) : (int)sizeof(Item);
         shape_entry->byte_offset = prev_entry->byte_offset + prev_size;
     }
@@ -261,21 +261,24 @@ static bool map_ensure_data_capacity_for_end(Map** map_slot, Pool* pool,
     return true;
 }
 
-static ShapeEntry* clone_shape_entries(TypeAlloc alloc, ShapeEntry* source,
+// Copies `source`'s fields into fresh entries. It walks the type, not the
+// chain: a tree node's chain may run on into a descendant's fields (D3.4.3v3).
+// The copies keep chain_index 0 -- a copied prefix is on every type of the
+// chain it starts.
+static ShapeEntry* clone_shape_entries(TypeAlloc alloc, const TypeMap* source,
         ShapeEntry** out_last) {
     if (out_last) *out_last = NULL;
-    if (!source) return NULL;
+    if (!source || !source->shape) return NULL;
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;
     ShapeEntry* last = NULL;
-    for (ShapeEntry* src = source; src; src = src->next) {
+    FOR_EACH_MAP_FIELD(source, src) {
         ShapeEntry* dst = (ShapeEntry*)type_alloc_zeroed(alloc, sizeof(ShapeEntry));
         if (!dst) return NULL;
         dst->name = src->name;
         dst->type = src->type;
         dst->storage = *shape_entry_storage(src);
         dst->byte_offset = src->byte_offset;
-        dst->next = NULL;
         dst->ns = src->ns;
         dst->default_value = src->default_value;
         dst->name_hash = src->name_hash;
@@ -283,7 +286,7 @@ static ShapeEntry* clone_shape_entries(TypeAlloc alloc, ShapeEntry* source,
         dst->key_kind = src->key_kind;
         dst->flags = src->flags;
         if (!first) first = dst;
-        if (prev) prev->next = dst;
+        if (prev) prev->chain_next = dst;
         prev = dst;
         last = dst;
     }
@@ -293,7 +296,7 @@ static ShapeEntry* clone_shape_entries(TypeAlloc alloc, ShapeEntry* source,
 
 static ShapeEntry* clone_shape_chain_for_transition(TypeAlloc alloc, TypeMap* parent,
         ShapeEntry** out_last) {
-    return clone_shape_entries(alloc, parent ? parent->shape : NULL, out_last);
+    return clone_shape_entries(alloc, parent, out_last);
 }
 
 // js constructor/pre-shape caches share TypeMap instances across many Maps.
@@ -337,7 +340,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
             (size_t)tm->slot_count * sizeof(ShapeEntry*));
         if (entries) {
             ShapeEntry* e = clone->shape;
-            for (int i = 0; i < tm->slot_count && e; i++, e = e->next) {
+            for (int i = 0; i < tm->slot_count && e; i++, e = typemap_next_field(clone, e)) {
                 entries[i] = e;
             }
             clone->slot_entries = entries;
@@ -399,6 +402,9 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
 // is not worth weakening this one for (JS_Tune_History rule 5).
 static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* target) {
     if (!parent || !target) return false;
+    // D3.4.3v3: a child that extended the parent's chain in place holds the
+    // parent's own entries as its prefix, so there is nothing to compare.
+    if (parent->shape && target->shape == parent->shape) return true;
     ShapeEntry* parent_entry = parent->shape;
     ShapeEntry* target_entry = target->shape;
     while (parent_entry) {
@@ -420,13 +426,13 @@ static bool map_transition_prefix_matches_parent(TypeMap* parent, TypeMap* targe
                 target_entry->flags != parent_entry->flags) {
             return false;
         }
-        parent_entry = parent_entry->next;
-        target_entry = target_entry->next;
+        parent_entry = typemap_next_field(parent, parent_entry);
+        target_entry = typemap_next_field(target, target_entry);
     }
     return true;
 }
 
-// The graph budgets (D3.4.3v2). The per-node edge caps bound one shape's
+// The graph budgets (D3.4.3v3). The per-node edge caps bound one shape's
 // fan-out, not the graph. A long-lived process that runs thousands of unrelated
 // scripts through one Input (the test262 batch runner is the extreme case)
 // would otherwise keep minting map shapes for the rest of its life: with only
@@ -509,7 +515,7 @@ ShapeEntry* shape_entry_copy_as(TypeAlloc alloc, const ShapeEntry* like,
     entry->key_kind = like->key_kind;
     entry->ns = like->ns;
     shape_entry_set_type(entry, type_info[type_id].type);
-    if (prev_entry) prev_entry->next = entry;
+    if (prev_entry) prev_entry->chain_next = entry;
     return entry;
 }
 
@@ -567,14 +573,22 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
         element_child->ns = ((TypeElmt*)parent)->ns;
     }
 
-    ShapeEntry* last_clone = NULL;
-    ShapeEntry* first = clone_shape_chain_for_transition(tree, parent, &last_clone);
-    if (parent->shape && !first) return NULL;
+    // D3.4.3v3: while the parent still owns its chain's tail -- no other child
+    // has extended it -- the child extends it in place, so a linear path keeps
+    // one chain. Once the tail is taken, this branch copies the prefix.
+    bool in_place = parent->last && !parent->last->chain_next;  // SHAPE_CHAIN_OK: tail ownership
+    ShapeEntry* first = parent->shape;
+    ShapeEntry* prefix_last = parent->last;
+    if (!in_place) {
+        first = clone_shape_chain_for_transition(tree, parent, &prefix_last);
+        if (parent->shape && !first) return NULL;
+    }
     ShapeEntry* added = k->key
-        ? alloc_shape_entry_in(tree, k->key, type_id, last_clone)
-        : shape_entry_copy_as(tree, k->like, type_id, last_clone);
+        ? alloc_shape_entry_in(tree, k->key, type_id, prefix_last)
+        : shape_entry_copy_as(tree, k->like, type_id, prefix_last);
     if (!added) return NULL;
     added->byte_offset = parent->byte_size;
+    added->chain_index = (uint32_t)parent->length;
     if (!first) first = added;
 
     child->shape = first;
@@ -592,15 +606,32 @@ static TypeMap* transition_target_for_key(TypeMap* parent, const TransitionKey* 
     child->js_meta = parent->js_meta;
     child->has_array_index_shape = parent->has_array_index_shape;
 
-    typemap_hash_build_in(child, tree);
+    // D3.4.3v3: an in-place child shares the parent's hash table while the
+    // table has room for it and holds no entry with the added field's
+    // identity; otherwise it builds its own, which its own in-place children
+    // then share.
+    if (in_place && parent->field_index &&
+            (int)parent->field_capacity >= typemap_hash_recommended_capacity(child->length) &&
+            !typemap_hash_holds_equal(parent, added)) {
+        child->field_index = parent->field_index;
+        child->field_capacity = parent->field_capacity;
+        child->field_count = parent->field_count;
+        typemap_hash_insert(child, added);
+    } else {
+        typemap_hash_build_in(child, tree);
+    }
 
     int fixed_slot_count = typemap_fixed_slot_prefix_count(parent);
-    if (fixed_slot_count > 0) {
+    if (fixed_slot_count > 0 && in_place) {
+        // the fixed prefix is the parent's own entries, so is its slot index
+        child->slot_entries = parent->slot_entries;
+        child->slot_count = fixed_slot_count;
+    } else if (fixed_slot_count > 0) {
         ShapeEntry** entries = (ShapeEntry**)type_alloc_zeroed(tree,
             (size_t)fixed_slot_count * sizeof(ShapeEntry*));
         if (entries) {
             ShapeEntry* e = first;
-            for (int i = 0; i < fixed_slot_count && e; i++, e = e->next) {
+            for (int i = 0; i < fixed_slot_count && e; i++, e = typemap_next_field(child, e)) {
                 entries[i] = e;
             }
             child->slot_entries = entries;
@@ -889,7 +920,7 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
 // walks shape order while dynamic lookup is hashed, so a same-typed duplicate
 // key overwrites instead of appending, or the two APIs would disagree.
 static ShapeEntry* elmt_same_typed_attr(TypeElmt* elmt_type, String* key, TypeId type_id) {
-    for (ShapeEntry* field = elmt_type->shape; field; field = field->next) {
+    FOR_EACH_MAP_FIELD(elmt_type, field) {
         if (field->name && field->type->type_id == type_id &&
             strview_equal(field->name, key->chars)) {
             return field;
@@ -927,7 +958,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     if (typemap_is_shared_shape((TypeMap*)elmt_type) ||
             (elmt_type->shape && !elmt_type->is_private_clone)) {
         // A transition-tree type is shared by every element built the same
-        // way (D3.4.3v2), and a pooled chain by every element with the same
+        // way (D3.4.3v3), and a pooled chain by every element with the same
         // attributes: an append here must not reach either, so detach first.
         TypeElmt* clone = elmt_clone_type_for_mutation(elmt, pool);
         if (!clone) return;
@@ -949,7 +980,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     elmt_store_value(field_ptr, type_id, value);
 }
 
-// D3.4.3v2: an element's type starts at its tag's root in the Input's
+// D3.4.3v3: an element's type starts at its tag's root in the Input's
 // transition tree. Pooled tag names are unique pointers, so a root is found by
 // the (name, namespace) pointer pair in a small pool-owned table. Returns NULL
 // when the name is not pooled or the element budget is spent; the caller then
@@ -1013,7 +1044,7 @@ TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns) {
     return root;
 }
 
-// D3.4.3v2: add an attribute through the Input's transition tree, exactly as
+// D3.4.3v3: add an attribute through the Input's transition tree, exactly as
 // map_put adds a field. A tree-typed element follows or mints the edge and only
 // its own data buffer changes; without a usable edge, elmt_put detaches it onto
 // a private type and appends there.
@@ -1041,7 +1072,7 @@ void elmt_put_tree(Element* elmt, String* key, Item value, Input* input) {
     elmt_put(elmt, key, value, input ? input->pool : NULL);
 }
 
-// D3.4.3v2: the tree root a container's rebuilt type starts from — the plain
+// D3.4.3v3: the tree root a container's rebuilt type starts from — the plain
 // map root, or the element's tag root. An element root exists only for a
 // pooled tag, so it is found, never made; NULL keeps the container private.
 TypeMap* type_tree_root_like(Input* input, Map* container) {
@@ -1820,7 +1851,7 @@ void input_release_document_resources(Input* input) {
         input->mem_ctx = nullptr;
         input->arena = nullptr;
     }
-    // The transition tree lived in that arena (D3.4.3v2); drop its entry points.
+    // The transition tree lived in that arena (D3.4.3v3); drop its entry points.
     if (input->element_roots) {
         pool_free(input->pool, input->element_roots);
         input->element_roots = nullptr;

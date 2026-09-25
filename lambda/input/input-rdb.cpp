@@ -437,7 +437,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
                     new_row.putNull(se->name->str);
                 }
             }
-            se = se->next;
+            se = typemap_next_field(tm, se);
         }
 
         // add reverse FK array
