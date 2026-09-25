@@ -91,7 +91,7 @@ Each phase lands on its own, green on the gates below, before the next starts.
 
 **DONE 2026-09-25.**
 
-**What landed.** `lambda/core/shape_pool.cpp`/`.hpp` are deleted, with `Input::shape_pool`, `mem_shape_pool_create` and its registry node, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`, the editor's `shape_pool_` and the transpiler's unread copy of the pool pointer. `ShapeBuilder` stays as the editor's field list; its drafts now come from the editor's arena. `ElementBuilder::final` and `MapBuilder::final` have nothing left to do. `MEM_KIND_SHAPEPOOL` and `MEM_ROLE_TYPE_SHAPE` remain in `lib/mem_context.h`, unused, since report label tables index those enums.
+**What landed.** `lambda/core/shape_pool.cpp`/`.hpp` are deleted, with `Input::shape_pool`, `mem_shape_pool_create` and its registry node, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`, the editor's `shape_pool_` and the transpiler's unread copy of the pool pointer. `ShapeBuilder` stays as the editor's field list; its drafts now come from the editor's arena. `ElementBuilder::final` and `MapBuilder::final` have nothing left to do. `MEM_KIND_SHAPEPOOL` and `MEM_ROLE_TYPE_SHAPE` were left in `lib/mem_context.h`, unused, out of caution about the report label tables. A later sweep the same day removed them with `MEM_CAT_SHAPEPOOL` (`lib/memtrack.h`): the label tables are switches or keyed by the enum names, the memory snapshot's JSON writes names, and no tool reads the numbers.
 
 **Tests.** The pool-only `ShapePoolCollisionDoesNotAliasDifferentFieldNames` is gone; `ShapeBuilderHasNoFieldLimit` now checks the builder alone, and the new `RebuildLaysOutManyFields` checks that a 201-field rebuild lays out by storage size and carries every value.
 

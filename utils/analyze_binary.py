@@ -266,7 +266,7 @@ LAMBDA_CLI_FILES = {"main", "main-repl", "runner"}
 
 # Files from lambda/ that should be Data builders
 LAMBDA_DATA_BUILDER_FILES = {"mark_builder", "mark_editor", "mark_reader",
-                             "name_pool", "shape_pool", "shape_builder"}
+                             "name_pool", "shape_builder"}
 
 
 # ── Helper: run an external tool ──────────────────────────────────────
