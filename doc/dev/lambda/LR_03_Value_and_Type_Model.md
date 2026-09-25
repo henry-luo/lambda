@@ -88,6 +88,19 @@ A map's fields are described by its `TypeMap`, not stored inline as key/value pa
 
 `TypeMap` (`lambda-data.hpp:246`) holds `length`, `byte_size` (the packed-struct size), the shape chain, and — for fast lookup — an open-addressing hash table `field_index` that lives out of line: pool-owned, allocated when first populated, and sized to the shape (a power of two, at least twice the fields; `typemap_hash_prepare`, `typemap_hash_lookup*`). Runtime JavaScript shapes additionally carry one immutable `const JsClassMeta*` selected before publication and preserved by transitions, as ruled by **D3.4.7**; the metadata has no `Item`, realm, GC, mutable-cache, or context-owned fields. The **shape chain remains authoritative** (last-writer-wins) whenever the hash table is unpopulated or saturated. `TypeElmt : TypeMap` (`:482`) adds the element's local `name`, `content_length`, and namespace; `TypeObject : TypeMap` (`:501`) adds a `type_name`, a `base` for inheritance, a method list, and constraint hooks.
 
+### Type sharing: literals, the transition tree, private types
+
+Maps built the same way share one `TypeMap` (**D3.4.3v2**; the design and its history are in [`vibe/Lambda_Design_Shape_Transitions.md`](../../../vibe/Lambda_Design_Shape_Transitions.md)). Only the type is shared: each map keeps its values in its own data buffer. A map gets its type in one of four ways:
+
+- **Literal.** The transpiler builds one `TypeMap` per literal, and `map`/`map_alloc_for_type` (`lambda-data-runtime.cpp`) attach it to every map that literal creates. Element literals share their `TypeElmt` the same way (`elmt_with_type`).
+- **Transition tree.** A map built one field at a time — by a parser through `MarkBuilder`, or a JS object through `map_put_heap` — starts on the global `EmptyMap` and, at its first add, enters its `Input`'s tree at the empty root (`map_shape_transition_root`, `input.cpp`). Each add follows the edge keyed by the field's `name_id` (or, for an id-less `Input` name, its bytes), its key kind and the value's `TypeId` (`map_transition_target_for_add`, `TypeMapTransition`). A hit only repoints `Map::type`; a miss mints the child — the parent's chain plus one entry — once, and records the edge on the parent. Identity is the path, so `{a, b}` and `{b, a}` get different types; equality (S5.4.1) and `is` cannot tell.
+- **Published family shape.** A JS runtime family may publish one sealed shape for its instances (`is_shared_constructor_shape`, e.g. RegExp instances).
+- **Private.** A type owned by one map: a fresh type where the tree declined, or a detached clone (`is_private_clone`). Only a private type grows in place.
+
+A shared type (`typemap_is_shared_shape`) is never edited in place. An add with no usable edge clones first (`map_clone_typemap_for_mutation`), and runtime growth and type-changing writes build new types (`map_extend_open_shape`, `map_rebuild_for_type_change`; D3.4.5). The tree is bounded — 256 edges from the root, 16 from any other shape, 1,024 shapes per `Input` (`MAX_SHAPE_TRANSITIONS`, `MAX_SHAPE_GRAPH`) — and past a bound a map keeps a private type. Maps do not use the shape pool: `map_finalize_shape` is a no-op.
+
+Parsed elements do not share yet. Each gets a private `TypeElmt` from `ElementBuilder` (168 bytes plus a pool header), and `elmt_finalize_shape` pools only its attribute chain ([LR_08](LR_08_Memory_and_GC.md) §7). D3.4.3v2 rules that element types adopt the tree, rooted per tag and namespace, once `content_length` stops carrying a per-instance child count.
+
 ---
 
 ## 5. Static `Type*` vs runtime `TypeId`

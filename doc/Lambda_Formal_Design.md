@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 12.3.0 (2026-09-24)
+**Spec version:** 13.0.0 (2026-09-25)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -363,7 +363,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   interval and leaks on any early return that forgets to restore it. Such a
   flag existed on `EvalContext`/`InputAllocationContext` and was retired once
   the append-site split made it dead.* [LR09-R3]
-- **D2.6.6v2*** **One container hierarchy — map → array → element — and
+- **D2.6.6v3*** **One container hierarchy — map → array → element — and
   nominal is a descriptor property, not a kind.** Physically, containers form
   a single-inheritance chain: `Map` is the base (header plus the attribute
   face `type`/`data`/`data_cap`); `Array`, with `ArrayNum` beside it, extends
@@ -389,9 +389,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   cost:* every array header grows by the map face; array-heavy benchmarks
   gate the change. *Sequencing:* the layout change lands first as its own
   verified change, then the nominal-descriptor change and the TypeId
-  retirement (DO26). `TypeObject`'s `content_length` stays the DECLARED
-  content arity; per-literal counts stay on `AstObjectLiteralNode`. `entity`
-  never had a TypeId. [OB1, OB2, OB4, OB13–OB16, OB20]
+  retirement (DO26). `TypeObject` carries the DECLARED content pattern in `TypeElmt::content_list` (D3.4.3v2) — NULL when the declaration has no content section, in which case the type is map-kinded; per-literal counts stay on `AstObjectLiteralNode`. A nominal type's name is the type's name only: it is never matched against an element's tag (S11.3.1v2 compares the record), and a tag is enforced by a structural element pattern alone (`type e = <tag …>`); a declaration that also names a tag is DO31. `entity` never had a TypeId. [OB1, OB2, OB4, OB13–OB16, OB20, OB23]
 - **D2.6.7*** A bound method is an ordinary D6.2.1 function value whose
   closure environment is the receiver, captured by value; the method's
   compiled entry takes the receiver first and `TypeMethod.arity` excludes
@@ -691,13 +689,7 @@ that carries them.
   (field-name, TypeId) sequence, keyed by a signature of hash + length +
   byte size. Field order is significant; `byte_offset` is derivable from
   the type sequence and deliberately excluded from identity. [Shape_Pool §3]
-- **D3.4.3*** Shapes intern in a **per-Input shape pool** — hierarchical
-  lookup with parent inheritance (a parent hit is returned, not copied
-  down), interning **at finalization, not incrementally** (builders
-  construct a throwaway chain; `final()` swaps in the pooled one), and
-  null-safe opt-in (no pool ⇒ per-map chains, no semantic change).
-  Runtime-constructed maps do not intern today — they rebuild per
-  transition. [Shape_Pool §3–§8]
+- **D3.4.3v2*** **Maps share types through a per-`Input` transition tree, grown one field at a time.** Every `Input` owns an empty root shape. Adding a field to a map on a tree shape follows the edge keyed by the field's identity (D3.4.4v2), its key kind and the value's `TypeId` to the child shape that extends the parent by that one field; a miss mints the child once and records the edge on the parent. Maps built by the same sequence of adds therefore share one `TypeMap`: identity is the path, so field order is significant (D3.4.2), and JavaScript class metadata is part of that identity (D3.4.7). The edge list is shape metadata keyed on immutable inputs, never per-site cache state (D8.4.1v2). **A shared type is immutable**: an add with no usable edge detaches the map onto a private clone, a layout-changing write rebuilds (D3.4.5), and only a private type grows in place. The tree is bounded — per-node fan-out and a per-`Input` shape budget — and past a bound a map keeps a private type. A literal's type is built at compile time and shared by construction. **Element types shall share the same way** — a root per tag and namespace, attributes as edges, and a built element's attribute changes rebuild through the tree exactly as a map's do. For that, `TypeElmt` carries no per-instance content count: its `content_list` (a typed `TypeList*`, NULL when content is unconstrained) holds a DECLARED type's content pattern for validation (S11.1.6v3) and plays no part in sharing, while the child count an element literal needs to pre-size its content array comes from the literal's syntax tree. Until elements are on the tree the per-`Input` shape pool interns their attribute chains at `final()`; once elements and the editor's rebuilds are on it, the pool retires. No map shape comes from the pool, the editor's shape rebuilds included. *Sharing is memory policy, never semantics: one layout per shape instead of one per object.* [Shape_Transitions §2–§7; JS Tune10 §9.3, §9.9]
 - **D3.4.4v2** ShapeEntry name identity is one integer field, `name_id`.
   `name_hash` is routing metadata only and never identity; a non-zero
   `name_id` is compared exactly. `NAME_ID_NONE` is reserved for an ordinary
@@ -2217,7 +2209,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.8.2–D2.8.3 | TE-17 lane gating is designed, not built: the admission predicates exist (`lambda_type_accepts_error`, `lambda_type_lane_storage_desc`) but no lane-entry decision consults them, and the `may_defect` fixed point they need does not exist (D6.1.3) — so the current polarity is "trusted clean", the wrong direction. Known violation V1: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true (the lane is lost, not poisoned) but makes the S7.7.2 dominance guarantee false today. **Partial routing landed 2026-09-18 (LR12-24).** A native-returning body that originates a defect at a declaration (TE-18 case 1) or reassignment (case 7) boundary now returns its error on lane 2 — the existing `RETURN_SHAPE_NATIVE_ERROR` shape, previously reachable only from a source-level `^E` — and its callers branch on the callee's descriptor rather than on `TypeFunc::can_raise`. Before this, `emit_function_error_return` fell through to the value lane and published the error Item's bits as a number (`inf` from int, `nan` from float), so D2.8.1 held only because the lane held a NUMBER: the error was destroyed, not stored. This is lane ROUTING without the `may_defect` fixed point D2.8.3 names as its prerequisite, and the cost of going first is measured: `lambda_corpus_deltablue` +2.6% module insns, attributed by toggling the predicate off; runtime is within noise across nine benchmark rows (−0.6% to +0.3%, A/B from one release binary). The remaining origination classes — parameter admission, element/field stores (TE-18 S1), literal construction — still publish through the value lane; an assertion at that return fired on 75 of 156 emission fixtures, and each such emission now logs `mir-defect-residue`. The blocker for the rest is TE-17's I3: a defect-capable call's result is `T | error` and must stop being lane-eligible, or its consumer demands an int lane from a boxed join and the emitter fails closed. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
-| D3.4.3 | Shape pool shipped for `Input` (contrary to its doc's stale "planning" header); the runtime/EvalContext shape pool (Shape_Pool Phase 5) is not implemented — runtime maps rebuild per transition instead of interning. |
+| D3.4.3v2 | **Maps implemented; elements not.** Maps built through `map_put` — every `MarkBuilder` parser and every JS object — share through the per-`Input` tree (`map_put_with_data_growth`, `input.cpp`). The edge table dates from 2026-06-25; the shared root and the bounds (256 edges from the root, 16 from any other shape, 1,024 shapes per `Input`) from 2026-09-09. Maps stopped interning through the shape pool on 2026-08-08 (`map_finalize_shape` is a no-op). Verification: removing 256 B from every `TypeMap` (A1v2, 2026-09-25) left the JSON parse peak at 191 MB while HTML fell from 315 to 233 MB; the shape budget took the test262 batch peak from 5,662 to 891 MB. **Residue:** each parsed element still takes a private `TypeElmt` (168 B plus pool header) carrying a per-instance `content_length`, with only its attribute chain pooled; element literals already share. `MarkEditor` rebuilds still intern map and element chains in the pool, and its inline map edits rewrite a registered `TypeMap` in place without a shared-type check (suspected, not reproduced). The element design was settled and the pool's retirement decided on 2026-09-25; both are planned, not built ([Impl_Element_Type_Sharing](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md)). The runtime/EvalContext shape pool (Shape_Pool Phase 5) is superseded rather than pending. Pointer: [Shape_Transitions §7–§8](../vibe/Lambda_Design_Shape_Transitions.md). |
 | D4.1.4v4 | Semantics remain live; the separate arena-level `arena_mark`/`arena_rewind` promotion is still pending (ScratchArena currently provides `scratch_mark`/`scratch_restore`). Pool v2 core landed in Mem_Heap R7 on 2026-08-11: `pool_alloc` carves user bytes from Pool-owned growth extents, uses boundary-tagged blocks and segregated free lists, and no longer calls `mem_alloc_loc`/`mem_free_loc` per user allocation or uses a pointer index. Growth starts at an optional reservation clamped to 1 KiB and rounded up to `1 KiB * 2^n`, doubles subsequent reservations, uses the context/memtrack path below 4 KiB and page-backed VM at/above 4 KiB, and commits at least `max(4 KiB, required block bytes)` page-rounded. |
 | D4.2.1v3 | MemContext owns allocator identity/lifecycle; hardened memtrack and the VM region provider are the normative system-allocation substrate. Pool is a context-owned VM-extent allocator; its user blocks are not `memtrack_pool_*` allocations. The Pool v2 core migration is landed and verified; the broader every-allocator context-binding audit remains pending. |
 | D4.2.2v2 | Stage 2 page allocation and the single MemContext failure coordinator are implemented as the allocator-retirement foundation. Full cost-based reclaimers remain follow-up work. |
@@ -2491,6 +2483,7 @@ Numbered `DO#` (design-open); each links to its record.
   binarytrees 1.24x and gcbench 1.26x. The defect is D4.3.4's rule; with it
   every tier traces the whole tree and the auto tier runs splay at the
   eager tier's time by right.
+- **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
 
 ## Appendix C — Decision-Record Index
 
@@ -2505,7 +2498,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13/TE-19; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
-| D3.4 | Shape_Pool §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33 | `Lambda_Shape_Pool.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md` |
+| D3.4 | Shape_Pool §1–§8; Shape_Transitions §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33; JS Tune10 §9.3–§9.9 | `Lambda_Shape_Pool.md`, `Lambda_Design_Shape_Transitions.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md`, `jube/JS_Tune10_Fast_Paths (done).md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |
