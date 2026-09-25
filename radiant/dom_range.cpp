@@ -264,6 +264,7 @@ DomRange* dom_range_create(DocState* state) {
     }
     memset(r, 0, sizeof(*r));
     r->state = state;
+    r->allocation_state = state;
     r->is_live = true;
     // Range identity is diagnostic-only but must not cross documents or race
     // concurrent document lifecycles.
@@ -293,7 +294,8 @@ void dom_range_release(DomRange* range) {
     if (range->ref_count == 0) {
         DocState* state = range->state;
         dom_range_unlink_from_state(state, range);
-        DomRange** freelist = dom_range_state_range_freelist_slot(state);
+        DomRange** freelist = dom_range_state_range_freelist_slot(
+            range->allocation_state);
         if (freelist) {
             range->is_live = false;
             range->prev = NULL;
@@ -913,6 +915,34 @@ void dom_range_unlink_from_state(DocState* state, DomRange* range) {
     else if (*head == range) *head = range->next;
     if (range->next) range->next->prev = range->prev;
     range->prev = range->next = NULL;
+}
+
+void dom_range_adopt_subtree(DocState* source, DocState* destination,
+                             DomNode* subtree) {
+    if (!source || !destination || source == destination || !subtree) return;
+    DomRange** head = dom_range_state_live_ranges_slot(source);
+    if (!head) return;
+    for (DomRange* range = *head; range;) {
+        DomRange* next = range->next;
+        // Removal has already collapsed boundaries that straddled the move.
+        // A range fully inside the adopted subtree must follow its nodes so
+        // later mutations in the destination document still adjust it.
+        if (range->start.node && range->end.node &&
+                view_geometry_dom_is_descendant(range->start.node, subtree, true) &&
+                view_geometry_dom_is_descendant(range->end.node, subtree, true)) {
+            DomSelection* selection = dom_range_state_selection(source);
+            if (selection) dom_selection_remove_range(selection, range);
+            if (!range->is_live) {
+                range = next;
+                continue;
+            }
+            dom_range_unlink_from_state(source, range);
+            range->state = destination;
+            dom_range_invalidate_layout(range);
+            dom_range_link_into_state(destination, range);
+        }
+        range = next;
+    }
 }
 
 void dom_range_refresh_lifecycle_pins(DomDocument* doc) {

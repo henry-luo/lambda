@@ -2615,6 +2615,8 @@ static Item dom_table_first_section(DomElement* table, const char* tag) {
     return ItemNull;
 }
 
+static Item dom_table_row_insert_cell(Item index_arg);
+
 static Item dom_text_replace_data_method(DomText* text_node, Item offset_arg,
                                             Item count_arg, Item data_arg);
 static Item dom_text_insert_data_method(DomText* text_node, Item offset_arg,
@@ -3116,8 +3118,19 @@ static bool dom_prepare_cross_document_insertion(DomNode* node,
     if (cross_document && node->parent && !dom_detach_dom_node(node)) {
         return false;
     }
+    if (cross_document && source->state) {
+        DocState* destination_state = destination->state
+            ? destination->state
+            : dom_engine_document_ensure_state(destination, "dom_adopt_range");
+        if (!destination_state) return false;
+        dom_range_adopt_subtree(source->state, destination_state, node);
+        dom_range_refresh_lifecycle_pins(source);
+    }
     if (cross_document &&
         !dom_rebind_subtree_document(node, source, destination)) return false;
+    if (cross_document && source->state) {
+        dom_range_refresh_lifecycle_pins(destination);
+    }
     return true;
 }
 
@@ -9787,6 +9800,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "tr") && prop_id == JS_DOM_PROP_CELLS) {
         return dom_live_table_collection(elem, DOM_VARRAY_TABLE_ROW_CELLS);
     }
+    if (_is_tag(elem, "tr") && strcmp(prop, "insertCell") == 0) {
+        return dom_realm_new_function(dom_table_row_insert_cell);
+    }
 
     // parentElement
     if (prop_id == JS_DOM_PROP_PARENT_ELEMENT) return dom_fp_parent_element(elem_item);
@@ -10685,6 +10701,36 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // would read as a Document but not accept one's writes.
     if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
         return dom_document_proxy_set_property(prop_name, value);
+    }
+
+    if (_is_tag(elem, "table") && prop_id == JS_DOM_PROP_T_HEAD) {
+        // Insertion can collect wrappers still needed to replace the old section.
+        RootFrame roots(3);
+        Rooted<Item> replacement_arg(roots, value);
+        Rooted<Item> previous(roots, dom_table_first_section(elem, "thead"));
+        if (get_type_id(value) == LMD_TYPE_NULL) {
+            if (get_type_id(previous.get()) != LMD_TYPE_NULL) {
+                JS_ASSIGN_OR_RETURN(removed,
+                    dom_remove_child_bridge(elem, previous.get()));
+            }
+            return value;
+        }
+        DomNode* replacement = (DomNode*)dom_unwrap_element(replacement_arg.get());
+        if (!replacement || !replacement->is_element() ||
+                !_is_tag(replacement->as_element(), "thead")) {
+            return dom_raise_type_error("tHead must be a thead element or null");
+        }
+        if (replacement_arg.get().item == previous.get().item) return value;
+        DomNode* first = dom_first_script_visible_child(elem);
+        Rooted<Item> reference(roots,
+            first ? dom_wrap_element(first) : ItemNull);
+        JS_ASSIGN_OR_RETURN(inserted,
+            dom_insert_before_bridge(elem, replacement_arg.get(), reference.get()));
+        if (get_type_id(previous.get()) != LMD_TYPE_NULL) {
+            JS_ASSIGN_OR_RETURN(removed,
+                dom_remove_child_bridge(elem, previous.get()));
+        }
+        return value;
     }
 
     if (prop_id == JS_DOM_PROP_DISABLED &&
@@ -14422,6 +14468,37 @@ extern "C" Item dom_insert_before_bridge(void* parent_ptr, Item new_child_arg,
                   ? elem->first_child->as_element()->tag_name
                   : elem->first_child && elem->first_child->is_text() ? "#text" : "null");
     return new_child_arg;
+}
+
+static Item dom_table_row_insert_cell(Item index_arg) {
+    DomNode* receiver = (DomNode*)dom_unwrap_element(dom_realm_receiver());
+    if (!receiver || !receiver->is_element() ||
+            !_is_tag(receiver->as_element(), "tr")) {
+        return dom_raise_type_error("insertCell requires a table row");
+    }
+    DomElement* row = receiver->as_element();
+    int64_t index = get_type_id(index_arg) == LMD_TYPE_UNDEFINED
+        ? -1 : dom_to_integer_or_zero(index_arg);
+    int64_t count = 0;
+    DomNode* reference = nullptr;
+    for (DomNode* child = dom_first_script_visible_child(row); child;
+         child = dom_next_script_visible_sibling(child)) {
+        if (!child->is_element() ||
+                (!_is_tag(child->as_element(), "td") &&
+                 !_is_tag(child->as_element(), "th"))) continue;
+        if (count == index) reference = child;
+        count++;
+    }
+    if (index < -1 || index > count) {
+        return dom_throw_index_size_error("insertCell index is out of range");
+    }
+    RootFrame roots(4);
+    Rooted<Item> document(roots, dom_owner_document_from_node(receiver));
+    Rooted<Item> tag(roots, js_name_item("td"));
+    Rooted<Item> cell(roots, dom_fp_create_element(document.get(), tag.get()));
+    if (get_type_id(cell.get()) == LMD_TYPE_NULL) return ItemNull;
+    Rooted<Item> before(roots, reference ? dom_wrap_element(reference) : ItemNull);
+    return dom_insert_before_bridge(row, cell.get(), before.get());
 }
 
 extern "C" Item dom_remove_bridge(void* node_ptr) {
