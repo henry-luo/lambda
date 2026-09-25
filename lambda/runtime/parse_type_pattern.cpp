@@ -1184,28 +1184,9 @@ void resolve_array_type(Transpiler* tp, AstArrayNode* ast_node) {
         resolve_type_pattern(tp, item);
         count++;
     }
-    if (count > 0) {
-        type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * (size_t)count);
-        type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * (size_t)count);
-        Type* nested = ast_node->item->type;
-        int i = 0;
-        for (AstNode* item = ast_node->item; item; item = item->next, i++) {
-            if (item->type && item->type->type_id == LMD_TYPE_TYPE) {
-                type->item_patterns[i].type = item->type;
-                type->item_is_type_pattern[i] = 1;
-            } else {
-                Item literal = ItemNull;
-                if (ast_static_literal_item(tp, item, &literal)) {
-                    type->item_patterns[i] = literal;
-                }
-            }
-            if (nested && item->type && item->type->type_id != nested->type_id) { nested = NULL; }
-        }
-        type->length = count;
-        type->nested = nested;
-        if (count == 1 && type->item_is_type_pattern[0]) {
-            log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
-        }
+    fill_sequence_pattern_slots(tp, type, ast_node->item, count);
+    if (type->length == 1 && type->item_is_type_pattern[0]) {
+        log_warn("lambda_array_pattern_hint: bare [T] is an exact one-item pattern; use T[] for homogeneous arrays");
     }
     ast_node->type = register_wrapped(tp, (Type*)type, &type->type_index);
 }
@@ -1307,6 +1288,29 @@ void resolve_occurrence(Transpiler* tp, AstUnaryNode* ast_node) {
 }
 
 }  // namespace
+
+void fill_sequence_pattern_slots(Transpiler* tp, TypeList* type,
+        AstNode* first_item, int count) {
+    type->length = count;
+    if (count <= 0 || !first_item) return;
+    type->item_patterns = (Item*)pool_calloc(tp->pool, sizeof(Item) * (size_t)count);
+    type->item_is_type_pattern = (uint8_t*)pool_calloc(tp->pool, sizeof(uint8_t) * (size_t)count);
+    Type* nested = first_item->type;
+    int i = 0;
+    for (AstNode* item = first_item; item && i < count; item = item->next, i++) {
+        if (item->type && item->type->type_id == LMD_TYPE_TYPE) {
+            type->item_patterns[i].type = item->type;
+            type->item_is_type_pattern[i] = 1;
+        } else {
+            Item literal = ItemNull;
+            if (ast_static_literal_item(tp, item, &literal)) {
+                type->item_patterns[i] = literal;
+            }
+        }
+        if (nested && item->type && item->type->type_id != nested->type_id) { nested = NULL; }
+    }
+    type->nested = nested;
+}
 
 void resolve_type_pattern(Transpiler* tp, AstNode* node) {
     if (!node) return;
@@ -1416,8 +1420,10 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstBinaryNode* ast_node = (AstBinaryNode*)node;
         resolve_type_pattern(tp, ast_node->left);
         resolve_type_pattern(tp, ast_node->right);
-        TypeRange* range_type = (TypeRange*)alloc_type(tp->pool, LMD_TYPE_RANGE, sizeof(TypeRange));
-        range_type->kind = TYPE_KIND_RANGE;
+        // D3.1.1v4: a range type shares the LMD_TYPE_TYPE tag and is told apart
+        // by its kind; the range VALUE tag made it read as a range (LR03-18)
+        TypeRange* range_type = (TypeRange*)alloc_type_kind(tp->pool, TYPE_KIND_RANGE,
+            sizeof(TypeRange));
         range_type->start = ItemNull;
         range_type->end = ItemNull;
         range_type->is_char = false;
@@ -1494,10 +1500,14 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         TypeList* content_type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_ARRAY, sizeof(TypeList));
         content->type = (Type*)content_type;
         content->list_type = content_type;
+        int count = 0;
         for (AstNode* item = content->item; item; item = item->next) {
             resolve_type_pattern(tp, item);
-            content_type->length++;
+            count++;
         }
+        // S11.1.6v3: element content is a sequence-pattern slot, so its
+        // items fill the same typed/literal slots a bracket pattern does
+        fill_sequence_pattern_slots(tp, content_type, content->item, count);
         break;
     }
     case LSF_TP_ELEMENT: {
@@ -1507,7 +1517,10 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
             &type->byte_size);
         if (ast_node->content) {
             resolve_type_pattern(tp, ast_node->content);
-            type->content_length = ((AstListNode*)ast_node->content)->list_type->length;
+            // an empty section (`<div;>`) stays unconstrained until SO46 rules
+            // how "must be empty" is spelled
+            TypeList* content_type = ((AstListNode*)ast_node->content)->list_type;
+            type->content_list = content_type && content_type->length > 0 ? content_type : NULL;
         }
         ast_node->type = register_wrapped(tp, (Type*)type, &type->type_index);
         break;

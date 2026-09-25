@@ -366,6 +366,7 @@ struct DomDocument {
     // Foreign documents can borrow their creator's Input. Only the document
     // assigned a fresh Input may release that Input's document context.
     bool owns_input_resources;
+    bool pending_scroll_into_view_if_needed;
 
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
@@ -393,7 +394,8 @@ struct DomDocument {
                     js_realm_released_after_load(false), dom_package_loaded(false),
                     owns_script_runtime(false), behavior_init_pending(false),
                     design_mode(false), document_domain(nullptr), owned_loader_pool(nullptr),
-                    behavior_init_controls(nullptr), owns_input_resources(false) {}
+                    behavior_init_controls(nullptr), owns_input_resources(false),
+                    pending_scroll_into_view_if_needed(false) {}
 
     bool init(Input* input);
     void destroy();

@@ -47,7 +47,6 @@ Item parse_math_block(MarkupParser* parser, const char* line) {
         if (content_str) {
             Item text_item = {.item = s2it(content_str)};
             list_push((List*)math, text_item);
-            increment_element_content_length(math);
         }
         parser->current_line++;
         return Item{.item = (uint64_t)math};
@@ -113,7 +112,6 @@ Item parse_math_block(MarkupParser* parser, const char* line) {
         if (content_str) {
             Item text_item = {.item = s2it(content_str)};
             list_push((List*)math, text_item);
-            increment_element_content_length(math);
         }
     }
 

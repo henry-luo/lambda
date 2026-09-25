@@ -60,7 +60,6 @@ static Item create_link_from_definition(MarkupParser* parser,
             Item inner_content = parse_inline_spans(parser, text_copy);
             if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
                 list_push((List*)link, inner_content);
-                increment_element_content_length(link);
             }
             mem_free(text_copy);
         }
@@ -599,7 +598,6 @@ Item parse_link(MarkupParser* parser, const char** text) {
                     Item inner_content = parse_inline_spans(parser, link_text);
                     if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
                         list_push((List*)link, inner_content);
-                        increment_element_content_length(link);
                     }
 
                     mem_free(link_text);

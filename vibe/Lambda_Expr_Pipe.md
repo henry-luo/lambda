@@ -545,9 +545,9 @@ data | slice(0, 10)    // slice(data, 0, 10)
 > pipes and every sequence function return an array for a list source, while
 > the broadcast operators keep the operand kind. Points the rulings left open
 > were settled in the implementation and are flagged: a `|:` body gets no
-> implicit field access (SO46); a called bare name is never an implicit field
+> implicit field access (SO47); a called bare name is never an implicit field
 > in a `that` body, which S10.1.5v3's `xs that len(~) > 2` needs; and the set
-> operators `| & !` keep P2's operand-kind rule until SO47 is ruled.
+> operators `| & !` keep P2's operand-kind rule until SO48 is ruled.
 
 ### §F.1 What was wrong with `that`
 

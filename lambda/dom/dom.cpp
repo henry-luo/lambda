@@ -245,7 +245,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis);
 static Item dom_svg_create_matrix(void);
 static Item dom_svg_create_point(void);
 extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem);
-static bool dom_ensure_geometry_snapshot(DomDocument* doc);
+extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc);
 
 // ============================================================================
 // Thread-local DOM document context
@@ -700,7 +700,7 @@ extern "C" bool dom_has_committed_geometry_snapshot(void* dom_doc) {
 
 static thread_local bool dom_geometry_flush_in_progress = false;
 
-static bool dom_ensure_geometry_snapshot(DomDocument* doc) {
+extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     if (!doc) return false;
     // Host event turns expose their last committed tree. Re-entering layout
     // from a callback advances geometry before that turn has settled and
@@ -5500,10 +5500,18 @@ static float dom_scrollable_extent(DomElement* elem, bool width_axis) {
     float extent = max(width_axis ? elem->content_width : elem->content_height,
                        width_axis ? elem->width : elem->height);
     float origin = width_axis ? elem->x : elem->y;
+    float descendant_extent = 0.0f;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        extent = max(extent,
-                     dom_scrollable_descendant_extent(child, width_axis, origin));
+        descendant_extent = max(descendant_extent,
+            dom_scrollable_descendant_extent(child, width_axis, origin));
     }
+    // Scrollable overflow includes the padding after overflowing descendants.
+    // Flex boxes with overflow: clip otherwise lose that padding because their
+    // cached content size stops at the child edge.
+    float padding_end = elem->bound
+        ? (width_axis ? elem->boundary()->padding.right
+                      : elem->boundary()->padding.bottom) : 0.0f;
+    extent = max(extent, descendant_extent + padding_end);
     return extent;
 }
 
@@ -7167,7 +7175,8 @@ static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
 }
 JS_FORWARD_ITEM(dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
 
-static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
+static void dom_queue_scroll_into_view(DomElement* elem, bool center,
+                                       bool if_needed = false) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
     if (doc->pending_scroll_into_view_target) {
@@ -7179,6 +7188,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
     doc->pending_scroll_into_view_target = nullptr;
     doc->pending_scroll_into_view_target_id = 0;
     doc->pending_scroll_into_view_center = false;
+    doc->pending_scroll_into_view_if_needed = false;
     DomNodeRef ref = dom_node_ref((DomNode*)elem);
     if (!dom_node_ref_validate(doc, ref) ||
         !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
@@ -7187,6 +7197,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center) {
     doc->pending_scroll_into_view_target = elem;
     doc->pending_scroll_into_view_target_id = ref.expected_id;
     doc->pending_scroll_into_view_center = center;
+    doc->pending_scroll_into_view_if_needed = if_needed;
     if (doc->state) doc_state_request_reflow(doc->state);
 }
 
@@ -9838,14 +9849,18 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it(dom_geometry_dimension(elem, false))};
     }
 
-    // clientWidth / clientHeight — border box minus borders
+    // clientWidth / clientHeight — padding box in the element's CSS pixels.
+    // Layout stores zoomed coordinates, so remove the effective zoom after
+    // subtracting the zoomed border widths.
     if (prop_id == JS_DOM_PROP_CLIENT_WIDTH) {
         dom_ensure_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
         }
-        return (Item){.item = i2it((int64_t)llroundf(elem->width - bw))};
+        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        return (Item){.item = i2it((int64_t)llroundf(
+            (elem->width - bw) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
     if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
         dom_ensure_geometry_snapshot(elem->doc);
@@ -9853,7 +9868,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
-        return (Item){.item = i2it((int64_t)llroundf(elem->height - bh))};
+        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        return (Item){.item = i2it((int64_t)llroundf(
+            (elem->height - bh) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
     // CSSOM View §6: clientTop/clientLeft expose the border's start width.
     if (prop_id == JS_DOM_PROP_CLIENT_TOP) {
@@ -15033,6 +15050,14 @@ extern "C" Item dom_core_has_child_nodes(Item n) {
 extern "C" Item dom_core_scroll_into_view_op(Item n) {
     DomElement* elem = dom_op_element(n);
     return elem ? dom_scroll_into_view_bridge((void*)elem) : ItemNull;
+}
+
+extern "C" Item dom_core_scroll_into_view_if_needed_op(Item n,
+                                                         Item center_if_needed) {
+    DomElement* elem = dom_op_element(n);
+    if (!elem) return ItemNull;
+    dom_queue_scroll_into_view(elem, center_if_needed.item != ITEM_FALSE, true);
+    return make_js_undefined();
 }
 
 // Node-level: valid on text and comment receivers too, so no element check.

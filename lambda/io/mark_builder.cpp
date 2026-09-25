@@ -364,7 +364,7 @@ Item MarkBuilder::createMetaType(TypeId type_id) {
 //------------------------------------------------------------------------------
 
 void MarkBuilder::putToElement(lam::GcPtr<Element> elmt, String* key, Item value) {
-    elmt_put(elmt.get(), key, value, pool_);
+    elmt_put_tree(elmt.get(), key, value, input_);
 }
 
 void MarkBuilder::putToMap(lam::GcPtr<Map> map, String* key, Item value) {
@@ -394,7 +394,13 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
         element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
     }
 
-    if (element) {
+    // D3.4.3v2: start on the tag's root in the Input's transition tree, so
+    // elements with one tag and attribute sequence share one TypeElmt
+    TypeElmt* root = element ? elmt_tree_root(input, tag_name_, NULL) : NULL;
+    if (root) {
+        element->type = root;
+        elmt_ = element;
+    } else if (element) {
         TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
         if (element_type) {
             element->type = element_type;
@@ -529,18 +535,8 @@ ElementBuilder& ElementBuilder::children(std::initializer_list<Item> items) {
 
 //------------------------------------------------------------------------------
 Item ElementBuilder::final() {
-    // Set content_length to match the number of children in the element
-    // This is required for the formatter to properly access children
-    if (elmt_ && elmt_->type) {
-        TypeElmt* elmt_type = (TypeElmt*)elmt_->type;
-        List* list = (List*)elmt_;
-        elmt_type->content_length = list->length;
-
-        // finalize shape before returning - deduplicate via shape pool
-        if (builder_->input()) {
-            elmt_finalize_shape(elmt_type, builder_->input());
-        }
-    }
+    // nothing to finalize: an element's type came from the transition tree, or
+    // is its own private type (D3.4.3v2)
     return (Item){.element = elmt_};
 }
 
@@ -645,10 +641,7 @@ MapBuilder& MapBuilder::put(String* key, bool value) {
 }
 
 Item MapBuilder::final() {
-    // finalize shape before returning - deduplicate via shape pool
-    if (map_type_ && builder_->input()) {
-        map_finalize_shape(map_type_, builder_->input());
-    }
+    // map_put already shared the type through the transition tree (D3.4.3v2)
     return (Item){.map = map_};
 }
 

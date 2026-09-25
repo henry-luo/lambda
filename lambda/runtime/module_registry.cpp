@@ -3,7 +3,6 @@
 #include "module_registry.h"
 #include "ast.hpp"
 #include "transpiler.hpp"
-#include "../core/shape_pool.hpp"
 #include "concurrency_js.h"
 #include "lambda-root-frame.hpp"
 #include "../../lib/hashmap.h"

@@ -1692,6 +1692,35 @@ TEST_F(NegativeScriptTest, StringLiteralParameterKeepsItsCheckOnEveryTier) {
         false, "failed: expected \"a\", got string 'c'");
 }
 
+// S11.1.3 (LR03-14, LR03-18): a range type admits its members only. It wore
+// the range VALUE tag (D3.1.1v4), so a range-typed parameter rejected every
+// int statically while the JIT admitted a range value, and a range-typed map
+// field read its int as a pointer.
+TEST_F(NegativeScriptTest, RangeParameterRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_param.ls",
+        false, "failed: expected 1 to 5, got int 9");
+}
+
+TEST_F(NegativeScriptTest, RangeParameterRejectsRangeValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_range_value.ls",
+        false, "failed: expected 1 to 5, got range");
+}
+
+TEST_F(NegativeScriptTest, RangeMapFieldRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_field.ls",
+        false, "validator at .a: Expected type '1 to 5', but got 'int'");
+}
+
+TEST_F(NegativeScriptTest, CharacterRangeRejectsNonMemberOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/range_admission_char.ls",
+        false, "failed: expected \"a\" to \"e\", got string 'z'");
+}
+
+TEST_F(NegativeScriptTest, RangeValueArgumentIsStaticError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/range_argument_static.ls",
+        "argument 1 expected 1 to 5, got range");
+}
+
 TEST_F(NegativeScriptTest, CountedArrayContractRejectsWrongLengthOnEveryTier) {
     ExpectRejectedOnEveryTier("test/lambda/negative/runtime/array_count_flat_contract.ls",
         false, "error[E201]: type check at declaration 'a' failed: expected int[3]");

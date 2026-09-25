@@ -2839,6 +2839,11 @@ extern "C" {
     // returns its input on success and a diagnostic-carrying Error Item on a
     // mismatch; no native lane may be entered before this succeeds.
     bool lambda_type_matches(Item value, Type* expected);
+    // S11.1.3: membership in a range type, and its bounds as one inclusive
+    // interval (codepoints for a character range). A bound outside the
+    // range's domain makes both answer false: that range admits nothing.
+    bool lambda_range_type_contains(const Type* range_type, Item value);
+    bool lambda_range_type_bounds(const Type* range_type, int64_t* start, int64_t* end);
     Item lambda_type_error(Item actual, Type* expected, const char* boundary);
     Item lambda_type_check(Item value, Type* expected, const char* boundary);
     // S12.1.4v2(3): the run-time half of an `fn`-context call's colour check.

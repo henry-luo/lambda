@@ -52,3 +52,10 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
 // register constants/types in the order the productions completed. A node
 // that is not an unresolved type-pattern node is left untouched.
 void resolve_type_pattern(Transpiler* tp, AstNode* node);
+
+// Fill a sequence pattern's `count` slots from its already-resolved item nodes:
+// a type item becomes a type slot, a static literal an exact-value slot
+// (S11.1.1v3). Bracket patterns, element content sections and object content
+// patterns (S11.1.6v3) share it.
+void fill_sequence_pattern_slots(Transpiler* tp, TypeList* type,
+        AstNode* first_item, int count);

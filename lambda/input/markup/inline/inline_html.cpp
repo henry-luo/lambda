@@ -397,7 +397,6 @@ Item parse_autolink(MarkupParser* parser, const char** text) {
     // Add link text (same as URL/email, no mailto)
     String* link_text = parser->builder.createString(url_buf);
     list_push((List*)link, Item{.item = s2it(link_text)});
-    increment_element_content_length(link);
 
     *text = end;
     return Item{.item = (uint64_t)link};
@@ -460,7 +459,6 @@ Item parse_raw_html(MarkupParser* parser, const char** text) {
     String* content = parser->builder.createString(start, len);
     Item content_item = {.item = s2it(content)};
     list_push((List*)html_elem, content_item);
-    increment_element_content_length(html_elem);
 
     // Advance position
     *text = end;

@@ -15,12 +15,12 @@
 
 ## Archive index
 
-This archive contains **135 historical records**: 130 fixed or resolved entries,
+This archive contains **141 historical records**: 136 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
 "Wrong-value fix pass — 2026-09-25"), and LR07-21, which that pass found, later the same day.
-LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
+LR07-23 to LR07-27 were found and fixed together by the JIT golden sweep of the same day. Also on 2026-09-25, twenty records closed between 2026-09-17 and 2026-09-24 that had stayed in the central ledger were moved here: LR01-14 to LR01-16, LR02-18, LR02-19, LR12-11 to LR12-13, LR12-15 to LR12-23, LR12-26, LR12-29 and LR12-30. §12 was added for them, and LR12-28 moved into it from the end of §11. LR02-20, LR02-24 and LR02-26, C parser gaps, were fixed and moved here the same day. LR03-14 and LR03-18, two symptoms of one range-type defect, followed later that day. LR13-10, the element-content check, was fixed by P0 of [the element type plan](<impl/Lambda_Impl_Element_Type_Sharing.md>) the same day. LR05-14 and LR05-15, filed by the string function tuning survey, were fixed by P0 of [its implementation](<impl/Lambda_Impl_String_Func_Tuning.md>) on 2026-09-24. The list/array kind records closed
 by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) on
 2026-09-23 — LR03-12, LR05-9, LR05-10, LR05-11, LR05-12, LR05-13 and LR12-28 — were moved
 here with their original IDs, as every central-ledger move is. Duplicate and split records remain separate so their
@@ -334,6 +334,71 @@ package in the corpus used a multi-item let-group or a lone-declaration
 group (instrumented scan, 2026-09-22). Fixture:
 `test/lambda/list_declarations.ls`.
 
+<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.2v3) · FIXED 2026-09-25 (found 2026-09-24)**
+`lambda_parser.c` gathers the children of a flat reduction in fixed
+proof-of-concept stack buffers, so it rejects valid source the reference
+grammar accepts. `parse_group_or_arrow` (`children[64]`, :1127) fails a
+65-item list literal `(0, 1, …, 64)` with E100 "too many grouped expressions
+in parser POC"; `parse_element` (`children[64]`, :943) caps attributes plus
+the content child (:970, :1010); `parser_parse_postfix_delimited`
+(`children[65]`, :1625) caps call arguments and index dimensions (:1631); and
+`parse_assignment_clause` (`LambdaToken names[64]`, :1467) caps decomposition
+names (:1484). A 65-item array parses, because `parse_array` builds its items
+as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.2v3
+the C side is wrong; `lambda-cst` reports such a list as `missing` (grammar
+accepts, RD rejects). It surfaced once LR02-18 gave the grammar list
+literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
+`parse_crud_statement` caps comma-joined `put`/`del` edits at
+`LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
+confirm it is unintended before lifting it.
+*Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
+`children` by pointer and count to a synchronous sink, `syntax_sink_reduce`
+(`build_ast.cpp`), whose GROUP/ELEMENT/POSTFIX/LET handlers walk
+`child_count` (the reduction tape that copied them is retired, LC3.9).
+A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
+(rest parameters exempt), whose `binder_env`/`resolved` arrays are
+bounds-checked. A growable buffer with inline storage keeps every reduction
+byte-identical; switching to `parser_list_append` chains would change the
+GROUP/ELEMENT/CALL shapes that `build_ast` and the `child_count` assertions in
+`test/test_lambda_parser_poc_gtest.cpp` rely on. The parser links only libc
+(`lambda-cst` and the parser POC gtest build the parser sources alone), and a
+heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
+`children[65]` (:1674) only ever uses slot 0. Pin the fix with mirrored accept
+cases (a 65-item list literal, 65 call arguments) in both S16 conformance
+scripts.
+
+*Fixed 2026-09-25:* the four fixed buffers are now `ParserGrowBuffer`s (`lambda_parser.c`). Each has 64 (or 65) inline slots and spills to the heap past them, so every reduction keeps the same children in the same order and the sink sees any count. A buffer is a local of one parse call, released by a thin wrapper around the old body (`parse_element_into`, `parse_group_or_arrow_into`, `parse_assignment_clause_into`, `parser_parse_postfix_delimited_into`), so no early return leaks it and no `parser_probe` copy shares it. The parser links only libc, so the spill uses `malloc`/`realloc`/`free` under `RAWALLOC_OK`. The "in parser POC" limit diagnostics and "too many decomposition names" are gone; a failed spill reports "out of memory while parsing". `parse_postfix` keeps its own buffer, sized to the three children its member, query and handler forms use rather than 65. A call over 16 arguments still meets the source-argument limit after parsing (E230, D6.2.2v2). The `put`/`del` cap of 32 (`LAMBDA_CRUD_MAX_CLAUSES`) is unchanged, since no PTH60v3 text rules on it. Fixtures: `test/lambda/parser_item_limits.ls` (70 list items, attributes and decomposition names, all tiers), `LambdaRdParserPoc.ReducesMoreThanSixtyFourChildren`, and mirrored accept cases in both S16 scripts (a 65-item list, 65 call arguments, 70 attributes, 70 names; 350/350 C, 337/337 Tree-sitter).
+
+<a id="lr02-24"></a>**LR02-24 · The C parser reads `x is 1 to 5` as `(x is 1) to 5` (S11.1.3, S11.1.6v2) · FIXED 2026-09-25 (found 2026-09-24)**
+Both front ends accept `let r = x is 1 to 5`, but they read it differently.
+- **Reference grammar:** `is` takes a `_type_pattern` on its right (`grammar.js:144`), which reads `1 to 5` as a `range_type` (`:1351`). So `r` is a membership test.
+- **C:** builds `(x is 1) to 5`, a range whose start is a bool. The script compiles with no diagnostic and fails at run time ("Script execution failed"; in an array literal the item is `[error]`).
+
+The cause is the `is` arm of the Pratt loop, which reads its right side with the bare `parse_type_slot` (`lambda_parser.c:1848`). `parse_type_slot_mode` has no `to` case, so the slot ends after `1`. `to` binds tighter than `is` (`LAMBDA_BP_SET` 50 against `LAMBDA_BP_MEMBERSHIP` 40), so the loop then folds it over the finished `is` node.
+
+Annotations already handle the range. `parse_annotation_type_slot_value_mode` reads a trailing `to` into `LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE` (:796). So `type R = 1 to 5`, `let y: 1 to 5 = 3` and `case 1 to 5:` all work. `x is (1 to 5)` is `true`, and `x in 1 to 5` is unaffected.
+
+The rulings put C in the wrong. S11.1.6v2 makes `is` a boundary-type position, and S11.1.3 applies the range type's membership rule there. The user precedence table (`doc/Lambda_Expr_Stam.md`, "Operator Precedence") also binds `to` (10) tighter than `is` (11). An S16 accept case cannot pin the fix, since C already accepts the text. It needs a `test/lambda` golden instead: `3 is 1 to 5` is `true`, and `9 is 1 to 5` is `false`.
+
+*Fixed 2026-09-25:* `parse_type_slot_mode` now reads two literals joined by `to` as one atom, as the grammar makes `range_type` a `primary_type`. A literal here is a non-null one (`LAMBDA_TOK_INTEGER` through `LAMBDA_TOK_NAMED_VALUE`, the grammar's `_non_null_literal`). So `x is 1 to 5` tests membership, `x is 1 to 5 and y` stops at `and`, and a union of ranges stays one type. `to` continues across a line break (S16.2.2v2). A bound that is not a literal (`x is 1 to n`) makes no range type in either parser, so that form still reads `(x is 1) to n`. Literal ranges in annotations and match arms now take the same atom instead of the annotation path's `to` arm; an AST dump of all 1,952 tracked `.ls` files changed only one census line (`match_expr.ls`). Fixture `test/lambda/is_range_type.ls` (all tiers). Found on the way: [LR03-18](#lr03-18), where `is` never matches a range inside a union.
+
+<a id="lr02-26"></a>**LR02-26 · The C parser ends a type at a line-start `?` (S16.2.2v2, S16.2.1) · FIXED 2026-09-25 (found 2026-09-24)**
+S16.2.2v2 puts `?` in the continue-only set, so after a complete expression a line-start `?` continues it. The reference grammar applies this in types: its scanner never opens a statement at `?` (`classify_start`, `scanner.c:296`). So `type T = int` ⏎ `?` is `type T = int?`.
+
+C rejects every such form:
+
+| Source | C diagnostic |
+|---|---|
+| `type T = int` ⏎ `?` | E100 "expected an expression" at the `?` |
+| `let x: int` ⏎ `? = null` | "expected '=' after let binding" |
+| `fn f(a: int` ⏎ `?) { a }` | "expected ')' after parameters" |
+
+The last rejection also breaks S16.2.1, which binds the next line inside an unclosed bracket.
+
+The cause is in `parse_type_slot_mode` (`lambda_parser.c:683`), which continues across a line break only for `| & !`. Its `nesting` counter counts only brackets opened inside the slot, not an enclosing parameter list. Inside a type's own brackets, C does continue (both accept `type T = [int` ⏎ `?]`). The ruling puts C in the wrong. Neither S16 script has a line-start `?` in a type; add mirrored accept cases for the three forms.
+
+*Fixed 2026-09-25:* the type slot's line-break rule now continues at `?` as well as at `| & !`, the continue-only tokens a type can take (S16.2.2v2), so all three forms parse. The parameter-list form no longer depends on the slot's own bracket count. A line-start `+`, `*` or `[` still ends the type, since each can begin a statement (S16.2.3v3); the reference grammar likewise rejects a line-start dual-role token inside a bracket, as in `(1` ⏎ `+ 2)`. Fixture `test/lambda/type_line_start_optional.ls` (all tiers), and mirrored accept cases for the three forms in both S16 scripts.
+
 <a id="lr03-12"></a>**LR03-12 · Occurrence/array type families not implemented (S11.1.1v3, S11.1.6v2, S16.8.6v3) · FIXED 2026-09-23**
 The parser reads `T[n]`, `T[n+]`, `T[n, m]` as occurrence counts
 (`parse_type_pattern.cpp` `apply_occurrence`, `grammar.js` `occurrence_count`)
@@ -371,6 +436,49 @@ literal-union contract is not checked at all (a string literal union such as
 - **Diagnostics.** `type_numeric_contract_name` names sized types (`expected u8`, not `num_sized`) in contract and validator messages, and `lambda_type_format_contract_name` prints a literal contract's value on the expected side (`expected 1 | 2`, `expected "a"`).
 
 Fixtures: `negative/runtime/sized_admission_{param,declaration,u32_lane,u64}.ls` and `literal_admission_{union,string_param}.ls` (`ExpectRejectedOnEveryTier`); `sized_admission_values.ls` and `type_literal_admission.ls` in `kTune27TierParity`. `tune21_u32_decl_lane.mir-check` now counts the one cold-arm call instead of forbidding it. Found on the way: [LR03-15](Lambda_Issue_Ledger.md#lr03-15), [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
+
+<a id="lr03-14"></a>**LR03-14 · A range-typed parameter rejects every integer, and the tiers split on a range argument (S11.1.3, S1.6) · FIXED 2026-09-25**
+A parameter declared with a range type, such as `fn f(x: 1 to 5) { x }`, is wrong on both tiers. An alias (`type R = 1 to 5`, `fn f(x: R)`) behaves the same:
+
+| Call | Interpreter (and the default `auto` tier) | JIT |
+|---|---|---|
+| `f(3)` | rejected at compile time: `error[E207]: argument 1 expected range, got int` | same |
+| `f(1 to 5)` | passes the static check, then fails at run time: "type check at argument 1 of _f_0 failed: expected range, got range" | admitted: `f` returns the range, and `[type(r), r is error]` is `[range, false]` |
+
+S11.1.3 applies the range type's membership rule "in annotations, match arms, and value expressions". Under it, `f(3)` must be admitted and `f(1 to 5)` rejected, since a range is not an integer member. Every other boundary follows the rule: `let y: 1 to 5 = 3` is admitted and `= 9` is rejected, on both tiers; `3 is R` is `true`; and `case 1 to 5:` matches. The parameter boundary is the only one that doesn't. The static check treats the parameter as the `range` container kind, and so does the JIT's argument check. The interpreter's run-time check does reject the range argument, but it never sees an integer, because the static check has already refused it. So no call succeeds on the interpreter, and on the JIT only the wrong one does.
+
+The static rejection comes from `lambda_ast_validate_call_arguments` (`build_ast.cpp`), whose `lambda_static_boundary_relation` (`build_ast.cpp:1708`) rejects `int` against the parameter's range type. The root cause of that, and of the JIT's admission of a range, is not yet located.
+
+The diagnostics add confusion. Each one names the membership type `range`, the same word as the container kind, so even the correct `let` failure reads "expected range, got int 9". No test or package declares a range-typed parameter.
+
+*Fixed 2026-09-25, with [LR03-18](#lr03-18), which has the cause:* a range type wore the range value's tag. On every tier, `f(3)` and `f(3.0)` are now admitted, `f(9)` fails at run time with "expected 1 to 5, got int 9", and `f(1 to 5)` is a compile error ("argument 1 expected 1 to 5, got range"). The static relation now treats a range contract as it treats a literal one (S11.2.1): an argument whose carrier fits the range's domain is left to the run-time check, and any other is rejected. Diagnostics name a range by its bounds: `expected 1 to 5`, `expected "a" to "e"`.
+
+<a id="lr03-18"></a>**LR03-18 · `is` never matches a range inside a union type (S11.1.3) · FIXED 2026-09-25**
+```
+type R = 1 to 5 | 10
+let a = [3 is R, 10 is R, 7 is R]    // [false, true, false]
+let b = 3 is 1 to 5 | 10 to 20       // false
+```
+`3 is R` should be `true`: S11.1.3 applies a range type's membership rule in annotations, match arms and value expressions alike. The other two positions agree with it. `let v: R = 3` is admitted, and `match 3 { case 1 to 5 | 10: … }` takes the arm, because a match arm splits a union and tests each member. A range alone is right too: `3 is 1 to 5` is `true`. So the fault is in `is` against the union type, where the range member never matches. Both tiers give the same result, and so did the binary from before LR02-24's fix, through a type alias.
+
+*Fixed 2026-09-25.* The fault was not in `is` or in unions. `parse_type_pattern.cpp` built a range type with `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag, told apart by its kind. Six sites special-cased the pair (`fn_is`, `lambda_type_matches`, the `let` static exemption, alias wrapping, a declared `let`'s AST type, the JIT's `let` carrier). Everything that dispatched on the tag read "an int between the bounds" as "a range", on both tiers:
+- **Schema validator.** It had no range case ("Unsupported type for validation: 16"), so `is` failed whenever the range sat inside a union, map or array type (`{a: 3} is {a: 1 to 5}` and `[3, 4] is (1 to 5)[]` were `false`), and `lambda.exe validate` rejected range-typed fields.
+- **Map layout.** A range-typed field was laid out as a pointer to a range. Passing `{a: 3}` to `fn f(p: {a: 1 to 5})` segfaulted: admission rebuilt the map in the contract's layout, and the validator read the int 3 as a `Container*` (`map_field_to_item`). `let p: {a: 1 to 5} = {a: 3}` was a static E201, and a nominal `type Gauge { level: 1 to 5 }` read `null`.
+- **Static checks and the JIT's argument lane.** Both read a range-typed parameter as a range ([LR03-14](#lr03-14)); a `(1 to 5)[]` parameter rejected `[3, 3]`.
+- **Subtyping.** `<:` compared tags, so `R <: int` was `false` and every range was below every other (`(1 to 9) <: (1 to 5)` was `true`).
+
+The fix builds the range type with `alloc_type_kind(…, TYPE_KIND_RANGE, …)`. Two helpers in `lambda-data.hpp` (`lambda_type_is_range`, `lambda_range_type_domain`) and one membership test in `lambda-eval.cpp` (`lambda_range_type_contains`, over `lambda_range_type_bounds`) serve every consumer:
+- `fn_is` and `lambda_type_matches` test the kind.
+- The validator has a range case (`validate_against_range_type`). The retag makes it mandatory, since the TypeType fallback would read the lower bound as a nested `Type*`.
+- `static_boundary_relation` treats a range contract as it treats a literal one (S11.2.1). A range source is never PROVEN, since its members keep their own carriers.
+- `<:` relates ranges by their members (S11.1.4v2), and `contract_semantics_equal` compares bounds; the tag alone equated `1 to 9` with `1 to 5` and would have let a map shape skip admission.
+- The contract formatter names a range by its bounds.
+
+A member keeps its own carrier: `3.0 is 1 to 5` is `true`. So a range contract has no native lane. Fields and parameters hold the boxed Item, as unions do; `lambda_canonical_rep` returns the Item rep, where the new tag would have claimed a Type pointer; a `let` keeps its initializer's carrier, as before. The `let`-only static exemption is gone, and the other special cases test the kind.
+
+Fixtures: `range_type_membership.ls`, pinned in `kTune27TierParity`; `negative/runtime/range_admission_{param,range_value,field,char}.ls` (`ExpectRejectedOnEveryTier`) and `negative/semantic/range_argument_static.ls`. All 971 goldens pass with `LAMBDA_TIER=jit` and with `interp`, and compiling all 1,955 tracked `.ls` files reports the same errors before and after.
+
+*Residue:* `<:` tries each arm of a union whole, so `1 to 5 <: (1 to 3 | 4 to 5)` is `false` ([LR03-21](Lambda_Issue_Ledger.md#lr03-21)). Found on the way, all older than this fix: [LR03-19](Lambda_Issue_Ledger.md#lr03-19), [LR03-20](Lambda_Issue_Ledger.md#lr03-20), [LR07-30](Lambda_Issue_Ledger.md#lr07-30), and two more symptoms of [LR03-16](Lambda_Issue_Ledger.md#lr03-16).
 
 ## 4. Numbers, decimal & datetime (LR_04)
 
@@ -1395,6 +1503,18 @@ containing map type is available. The option explicitly suppresses both
 population and reporting. Regression:
 `LambdaValidator.TypeMismatchSuggestionsAreAttachedAndReported` verifies the
 hint appears and that disabling the option omits it.
+
+
+<a id="lr13-10"></a>**LR13-10 · Element content is checked by pattern-item count, never matched against the pattern · FIXED 2026-09-25 (found 2026-09-25)**
+`validate_against_element_type` checks an element's content only by comparing its child count with the type's `TypeElmt::content_length` (`validate.cpp:826` in the fast verdict, `:871` on the reporting path). For a type pattern that field counts the items of the content pattern (`parse_type_pattern.cpp:1510`), so an occurrence stands for exactly one child. The children themselves are never validated: neither their types nor their own content patterns are checked. `is` reaches the same check through `fn_is` → `schema_validator_validate_type` (`lambda-eval.cpp:2248`). Reproduced on both tiers with a build of `293b7a175`; none of the code involved has changed since.
+- With `a = <ul <li "a"> <li "b"> <li "c">>`, `a is <ul; <li>*>` is `false`, but `a is <ul; <p>, <p>, <p>>` is `true`.
+- `<ul> is <ul; <li>?>` is `false`: an empty run still needs one child.
+- `validate` of an XML file holding three `<li>` fails against `<document; <li>*>` and `<document; <li>+>` ("Element content length mismatch: expected 1, got 3"), while a file holding three `<p>` passes `<document; <li>, <li>, <li>>`. XML input wraps its top-level elements in `document`.
+- The [Validator Guide](../doc/Lambda_Validator_Guide.md)'s own `Page` schema relies on runs (`<meta …>*`, `<h1>+`, `<p>*`). Under this check a run counts as one child, and the nested patterns are never reached.
+
+**Why it went unnoticed:** the validator GTests build `TypeElmt`s by hand with `content_length` set to the exact child count they want (`test_validator_features_gtest.cpp`, `test_ast_validator_gtest.cpp`); no Lambda test puts an occurrence inside element content; and the validator targets run outside the baseline (the validator's [LR13-9](Lambda_Issue_Ledger.md#lr13-9), filed as LR12-1). The S2.1.3 and D2.6.6 implementation footnotes (Appendix A of each formal spec) and that LR13-9 entry all record the count check as implemented, without this caveat.
+
+*Fixed 2026-09-25 ([Impl_Element_Type_Sharing P0](<impl/Lambda_Impl_Element_Type_Sharing.md>)):* S11.1.6v3 ruled element content a sequence-pattern slot. The content section now resolves to `TypeElmt::content_list`, a typed `TypeList` filled as a bracket pattern is, and `validate_against_element_type` matches the children with `array_pattern_runs_match` in the fast verdict and with the shared `validate_sequence_pattern` on the reporting path. A second defect under the same symptom: the per-slot shortcut `array_pattern_simple_type_matches` reduced a structural slot (`<p>`, `{y: int}`, `[int, int]`) to a TypeId test, so `[<li>]` matched `[<p>]` as well; only bare kinds take it now. Every reproducer above now answers correctly on both tiers. Tests: `test/lambda/element_content_pattern.ls`; the validator GTests use content patterns instead of counts.
 
 
 ## 13.1 Verification-pass records (LR_03 and ledger hygiene)

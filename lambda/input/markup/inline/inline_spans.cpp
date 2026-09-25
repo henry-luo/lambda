@@ -25,13 +25,11 @@ static bool try_parse_inline_item(MarkupParser* parser, Element* span, StringBuf
         String* text_content = parser->builder.createString(sb->str->chars, sb->length);
         Item text_item = {.item = s2it(text_content)};
         list_push((List*)span, text_item);
-        increment_element_content_length(span);
         stringbuf_reset(sb);
     }
     Item item = parse(parser, pos);
     if (item.item == ITEM_ERROR || item.item == ITEM_UNDEFINED) return false;
     list_push((List*)span, item);
-    increment_element_content_length(span);
     return true;
 }
 
@@ -41,7 +39,6 @@ static void parse_code_span_item(MarkupParser* parser, Element* span,
         String* text_content = parser->builder.createString(sb->str->chars, sb->length);
         Item text_item = {.item = s2it(text_content)};
         list_push((List*)span, text_item);
-        increment_element_content_length(span);
         stringbuf_reset(sb);
     }
     const char* backtick_start = *pos;
@@ -54,7 +51,6 @@ static void parse_code_span_item(MarkupParser* parser, Element* span,
     Item code_item = parse_code_span(parser, pos);
     if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
         list_push((List*)span, code_item);
-        increment_element_content_length(span);
         return;
     }
     stringbuf_append_char_n(sb, '`', (size_t)opening_count);
@@ -77,10 +73,8 @@ static void parse_emphasis_item(MarkupParser* parser, Element* span, StringBuf* 
             String* text_content = parser->builder.createString(saved_buffer, saved_length);
             Item text_item = {.item = s2it(text_content)};
             list_push((List*)span, text_item);
-            increment_element_content_length(span);
         }
         list_push((List*)span, inline_item);
-        increment_element_content_length(span);
         *pos = try_pos;
         stringbuf_reset(sb);
     } else {
@@ -208,7 +202,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                         Item text_item = {.item = s2it(text_content)};
                         list_push((List*)span, text_item);
-                        increment_element_content_length(span);
                         stringbuf_reset(sb);
                     }
 
@@ -246,10 +239,8 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         String* content = parser->builder.createString(content_start, content_len);
                         Item content_item = {.item = s2it(content)};
                         list_push((List*)role_elem, content_item);
-                        increment_element_content_length(role_elem);
 
                         list_push((List*)span, Item{.item = (uint64_t)role_elem});
-                        increment_element_content_length(span);
                     }
 
                     pos = content_end + 1; // skip closing `
@@ -306,7 +297,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                                 String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                                 Item text_item = {.item = s2it(text_content)};
                                 list_push((List*)span, text_item);
-                                increment_element_content_length(span);
                             }
                             stringbuf_reset(sb);
 
@@ -331,11 +321,9 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                                 String* text_str = create_string(parser, ref_name);
                                 if (text_str) {
                                     list_push((List*)link_elem, Item{.item = s2it(text_str)});
-                                    increment_element_content_length(link_elem);
                                 }
 
                                 list_push((List*)span, Item{.item = (uint64_t)link_elem});
-                                increment_element_content_length(span);
                             }
 
                             pos++; // skip _
@@ -376,7 +364,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
-                increment_element_content_length(span);
                 stringbuf_reset(sb);
             }
 
@@ -384,7 +371,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             Item link_item = parse_rst_inline_link(parser, &pos);
             if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, link_item);
-                increment_element_content_length(span);
                 continue;
             }
 
@@ -392,7 +378,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             Item ref_item = parse_rst_reference_link(parser, &pos);
             if (ref_item.item != ITEM_ERROR && ref_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, ref_item);
-                increment_element_content_length(span);
                 continue;
             }
 
@@ -517,7 +502,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                     Item text_item = {.item = s2it(text_content)};
                     list_push((List*)span, text_item);
-                    increment_element_content_length(span);
                     stringbuf_reset(sb);
                 }
                 // Add all tildes as literal text
@@ -597,7 +581,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                     Item text_item = {.item = s2it(text_content)};
                     list_push((List*)span, text_item);
-                    increment_element_content_length(span);
                     stringbuf_reset(sb);
                 }
 
@@ -605,7 +588,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 Element* br = create_element(parser, "br");
                 if (br) {
                     list_push((List*)span, Item{.item = (uint64_t)br});
-                    increment_element_content_length(span);
                 }
 
                 pos += 2;
@@ -664,7 +646,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                         String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                         Item text_item = {.item = s2it(text_content)};
                         list_push((List*)span, text_item);
-                        increment_element_content_length(span);
                         stringbuf_reset(sb);
                     }
 
@@ -672,7 +653,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     Element* br = create_element(parser, "br");
                     if (br) {
                         list_push((List*)span, Item{.item = (uint64_t)br});
-                        increment_element_content_length(span);
                     }
 
                     // Skip the newline
@@ -712,7 +692,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             String* text_content = parser->builder.createString(sb->str->chars, sb->length);
             Item text_item = {.item = s2it(text_content)};
             list_push((List*)span, text_item);
-            increment_element_content_length(span);
         }
         stringbuf_reset(sb);  // Reset for any subsequent/parent calls
     }

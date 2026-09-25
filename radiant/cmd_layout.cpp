@@ -456,7 +456,7 @@ Element* get_html_root_element(Input* input) {
             List* doc_list = (List*)root_elem;
 
 
-            // Iterate through all items (HTML5 parser doesn't use content_length correctly)
+            // Iterate through all items: an element's List items are its children
             for (int64_t i = 0; i < doc_list->length; i++) {
                 Item child = doc_list->items[i];
                 TypeId child_type = get_type_id(child);

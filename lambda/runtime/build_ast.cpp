@@ -1667,6 +1667,19 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             return STATIC_BOUNDARY_DEFERRED;
         }
     }
+    // S11.1.3: a range contract, like a literal one (S11.2.1), proves only its
+    // members' domain. A source whose carrier fits the domain leaves
+    // membership to the runtime check; one that cannot fit rejects. A range
+    // source is never PROVEN either: its members keep their own carriers
+    // (`3.0` is in `1 to 5`), so no native lane may skip admission.
+    if (Type* domain = lambda_range_type_domain(target)) {
+        return static_boundary_relation(source, domain) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
+    if (Type* domain = lambda_range_type_domain(source)) {
+        return static_boundary_relation(domain, target) == STATIC_BOUNDARY_REJECTED
+            ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
+    }
     // A parameter/member can carry an occurrence or optional wrapper as its
     // effective AST type. Its structural relation is not represented by the
     // compact Type prefix, so defer to the runtime matcher instead of
@@ -1818,10 +1831,6 @@ static void check_declared_map_literal(Transpiler* tp, AstDeclaratorNode* declar
 static bool check_declaration_static_boundary(Transpiler* tp, AstDeclaratorNode* declaration,
         Type* expected, int line) {
     if (!declaration || !declaration->init || !expected) return false;
-    if (expected->type_id == LMD_TYPE_RANGE && expected->kind == TYPE_KIND_RANGE) {
-        // Range annotations are checked by value membership at the MIR boundary, not by TypeId equality.
-        return false;
-    }
     Type* actual = declaration->init->type;
     StaticBoundaryResult result = static_boundary_relation(actual, expected);
     if (result == STATIC_BOUNDARY_REJECTED) {
@@ -8099,8 +8108,7 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
     }
     bool literal_alias = (definition->type_id == LMD_TYPE_STRING ||
         definition->type_id == LMD_TYPE_SYMBOL) && definition->is_literal;
-    bool range_alias = definition->type_id == LMD_TYPE_RANGE &&
-        definition->kind == TYPE_KIND_RANGE;
+    bool range_alias = lambda_type_is_range(definition);
     if (!literal_alias && !range_alias) return;
 
     // Named literal/range aliases are first-class type values. Keep the
@@ -9411,8 +9419,9 @@ static void resolve_element(Transpiler* tp, AstElementNode* node) {
         AstNode* next = raw->next;
         raw->next = NULL;
         if (raw->node_type == AST_NODE_CONTENT) {
+            // the literal's type records no content: the transpiler sizes the
+            // content array from this node (D3.4.3v2)
             node->content = raw;
-            type->content_length = ((AstListNode*)raw)->list_type->length;
         } else {
             AstNode* candidate = raw;
             // Direct reductions carry the source spelling `ns.local` as one
@@ -9627,10 +9636,10 @@ static void resolve_declarator(Transpiler* tp, AstDeclaratorNode* assignment) {
     bool invalid_annotation = declared && declared->type_id == LMD_TYPE_ERROR;
     if (declared && !invalid_annotation) {
         assignment->declared_type = declared;
-        // Range annotations are membership contracts, not a storage lane.
-        // Preserve the initializer's concrete type so a string range value is
-        // not emitted as a raw Range pointer.
-        assignment->type = declared->type_id == LMD_TYPE_RANGE && value &&
+        // Range annotations are membership contracts, not a storage lane: a
+        // member keeps its own carrier, so the binding keeps the initializer's
+        // concrete type rather than the contract's LMD_TYPE_TYPE tag.
+        assignment->type = lambda_type_is_range(declared) && value &&
                 value->type ? value->type : declared;
         int line = (int)lambda_source_span_start_point(tp->source, span).row + 1;
         check_declaration_static_boundary(tp, assignment, declared, line);
@@ -14826,6 +14835,9 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         r->object_type->nominal->base = base->nominal;
         r->object_type->nominal->struct_kind = base->nominal->struct_kind;
     }
+    // OB7: the base's content pattern is inherited unless the derived type
+    // declares its own, which replaces it (resolver_object_end)
+    r->object_type->content_list = base->content_list;
     for (ShapeEntry* parent = base->shape; parent; parent = parent->next) {
         ShapeEntry* entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
         entry->name = parent->name;
@@ -14894,23 +14906,42 @@ static void resolver_object_end(LambdaResolver* r) {
     // A type declared inside a method body closes the one open declaration
     // state, so the enclosing type publishes no further members.
     if (!r->object_node) return;
-    // S2.1.3: the DECLARED content arity, mirroring TypeElmt::content_length.
-    // It describes the type's content pattern, not any one literal's children —
-    // every literal of this type shares this TypeObject, so per-literal counts
-    // live on AstObjectLiteralNode instead.
+    // D2.6.6v3: the DECLARED content pattern. It describes the type, not any
+    // one literal's children — every literal of this type shares this
+    // TypeObject, so per-literal counts live on AstObjectLiteralNode instead.
+    // A declared pattern replaces an inherited one (OB7).
+    bool declares_content = false;
     if (r->object_node->content) {
         AstListNode* content = (AstListNode*)r->object_node->content;
-        r->object_type->content_length = content->list_type
-            ? content->list_type->length : 0;
+        if (content->list_type && content->list_type->length > 0) {
+            r->object_type->content_list = content->list_type;
+            declares_content = true;
+        }
     }
-    // S2.1.3v2: the declared structure fixes ONE structural kind. A content
-    // pattern makes it an element; otherwise it is a map.
     if (r->object_type->nominal) {
-        r->object_type->nominal->content_length = r->object_type->content_length;
-        r->object_type->nominal->struct_kind = r->object_type->content_length > 0
-            ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP;
+        TypeNominal* nominal = r->object_type->nominal;
+        if (r->object_type->base) {
+            // S2.1.3v2: inheritance never changes the base kind, which
+            // resolver_object_copy_base already adopted. Content is legal
+            // only where that kind admits it (OB17). Deciding the kind from
+            // the derived type's own content, as before, turned `U : B` with
+            // no content section into a map and `V : P { string* }` into an
+            // element.
+            if (declares_content && nominal->struct_kind != LMD_TYPE_ELEMENT) {
+                StrView base_name = r->object_type->base->type_name;
+                record_semantic_error_span(r->tp, r->object_node->source_span,
+                    ERR_SEMANTIC_ERROR,
+                    "a content pattern needs an element-kinded type, but base type '%.*s' is a map (S2.1.3v2)",
+                    (int)base_name.length, base_name.str);
+            }
+        } else {
+            // S2.1.3v2: the declared structure fixes ONE structural kind. A
+            // content pattern makes it an element; otherwise it is a map.
+            nominal->struct_kind = r->object_type->content_list
+                ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP;
+        }
         // the descriptor and every value built from it wear that same kind
-        r->object_type->type_id = r->object_type->nominal->struct_kind;
+        r->object_type->type_id = nominal->struct_kind;
     }
     r->object_type->byte_size = r->object_byte_offset;
     r->object_type->last = r->object_shape_tail;
@@ -14967,7 +14998,11 @@ static void resolve_object_content(LambdaResolver* r, AstListNode* content) {
     if (!r->object_node) return;
     content->list_type = (TypeList*)alloc_type(r->tp->pool, LMD_TYPE_ARRAY,
         sizeof(TypeList));
-    content->list_type->length = content->item ? 1 : 0;
+    // S11.1.6v3: the content pattern is a one-slot sequence pattern. The
+    // count is explicit: the type node is also the member's reduction result,
+    // so its `next` link is not part of the pattern.
+    fill_sequence_pattern_slots(r->tp, content->list_type, content->item,
+        content->item ? 1 : 0);
     content->type = (Type*)content->list_type;
     r->object_node->content = (AstNode*)content;
 }
@@ -15969,7 +16004,6 @@ static bool lambda_rd_prepare_transpiler(Transpiler* tp, const char* source) {
         tp->pool = input->pool;
         tp->arena = input->arena;
         tp->name_pool = input->name_pool;
-        tp->shape_pool = input->shape_pool;
         tp->type_list = input->type_list;
         tp->url = input->url;
         tp->path = input->path;

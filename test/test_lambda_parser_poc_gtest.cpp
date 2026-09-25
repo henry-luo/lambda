@@ -4,6 +4,7 @@ extern "C" {
 #include "../lambda/runtime/parser/lambda_rd_parser.h"
 }
 
+#include <stdio.h>
 #include <string.h>
 
 static int lex_all(const char* source, LambdaToken* tokens, int capacity) {
@@ -523,6 +524,74 @@ TEST(LambdaRdParserPoc, ParsesContextualNamesPathsAndMatchPatterns) {
 
 // S2.5.5v2: `()` is the empty list, which is `null`. A comment between the
 // parentheses is insignificant, so `(// comment\n)` is that literal too.
+// LR02-20: S2.5 sets no item limit. Fixed 64-slot buffers rejected a 65th
+// list item, call argument, element child or decomposition name; the sink now
+// sees every one, in source order, past the parser's inline slots.
+struct ChildCountRecorder {
+    uint32_t group_children;
+    uint32_t call_children;
+    uint32_t element_children;
+    uint32_t decompose_names;
+};
+
+static LambdaParseValue record_child_counts(void* context,
+        const LambdaParseReduction* reduction) {
+    ChildCountRecorder* recorder = (ChildCountRecorder*)context;
+    if (reduction->kind == LAMBDA_REDUCE_GROUP &&
+            reduction->child_count > recorder->group_children) {
+        recorder->group_children = reduction->child_count;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_POSTFIX &&
+            reduction->form == LAMBDA_REDUCTION_FORM_CALL) {
+        recorder->call_children = reduction->child_count;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_ELEMENT) {
+        recorder->element_children = reduction->child_count;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_LET &&
+            reduction->form == LAMBDA_REDUCTION_FORM_DECOMPOSE) {
+        recorder->decompose_names = reduction->name_count;
+    }
+    return 0;
+}
+
+static void write_items(char* out, size_t capacity, const char* prefix,
+        const char* item_format, int count, const char* suffix) {
+    size_t used = (size_t)snprintf(out, capacity, "%s", prefix);
+    for (int i = 0; i < count && used < capacity; i++) {
+        used += (size_t)snprintf(out + used, capacity - used, "%s", i ? ", " : "");
+        used += (size_t)snprintf(out + used, capacity - used, item_format, i, i);
+    }
+    if (used < capacity) snprintf(out + used, capacity - used, "%s", suffix);
+}
+
+TEST(LambdaRdParserPoc, ReducesMoreThanSixtyFourChildren) {
+    char source[4096];
+    ChildCountRecorder recorder = {};
+    LambdaParseSink sink = {record_child_counts};
+    LambdaParseError error = {};
+
+    write_items(source, sizeof(source), "(", "%d", 70, ")");
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+    EXPECT_EQ(recorder.group_children, 70u);
+
+    write_items(source, sizeof(source), "f(", "%d", 70, ")");
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+    EXPECT_EQ(recorder.call_children, 71u);  // the callee, then 70 arguments
+
+    write_items(source, sizeof(source), "<e ", "a%d: %d", 70, ", \"body\">");
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+    EXPECT_EQ(recorder.element_children, 71u);  // 70 attributes and the content
+
+    write_items(source, sizeof(source), "let ", "n%d", 70, " = x");
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+    EXPECT_EQ(recorder.decompose_names, 70u);
+}
+
 TEST(LambdaRdParserPoc, ParsesEmptyListLiteral) {
     const char* sources[] = {"()", "( )", "(// comment\n)", "let e = (); [e, 1]"};
     for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {

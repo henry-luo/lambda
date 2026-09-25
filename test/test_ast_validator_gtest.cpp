@@ -17,6 +17,7 @@ extern "C" {
 #include "../lib/log.h"
 }
 #include "../lib/test_utils.h"
+#include "test_validator_patterns.hpp"
 
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator/validator.hpp"
@@ -152,7 +153,7 @@ protected:
             element_type->name.str = name;
             element_type->name.length = strlen(name);
         }
-        element_type->content_length = 0; // No content length constraint by default
+        // content_list stays NULL: content unconstrained by default
 
         return element_type;
     }
@@ -385,8 +386,8 @@ TEST_F(AstValidatorTest, ElementContentLengthViolation) {
         .final();
 
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
-    // Set a content_length constraint that expects 5 children, but we only have 1
-    element_type->content_length = 5;
+    // A content pattern that expects 5 children, but we only have 1
+    element_type->content_list = test_any_content_pattern(test_pool, 5);
 
     Item item_mut;
     item_mut.element = element.element;

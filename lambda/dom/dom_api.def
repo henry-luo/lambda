@@ -672,6 +672,10 @@ DOM_OP(CORE, stylesheet_get_length, style, 1, "fn(sheet: any) -> int", dom_cssom
 DOM_OP(CORE, stylesheet_get_title, style, 1, "fn(sheet: any) -> string|null", dom_cssom_stylesheet_get_title, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, stylesheet_get_type, style, 1, "fn(sheet: any) -> string", dom_cssom_stylesheet_get_type, DOM_F_NEUTRAL, "", none, "", "")
 
+// Appended to preserve existing catalog slots. The optional JS argument is
+// undefined when omitted and defaults to centering only when scrolling is needed.
+DOM_OP(CORE, scroll_into_view_if_needed, geometry, 2, "pn(n: any, center: bool) -> null", dom_core_scroll_into_view_if_needed_op, DOM_F_NEUTRAL | DOM_F_MUTATES, "", html_element, "", "scrollIntoViewIfNeeded")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

@@ -197,9 +197,9 @@ The survey's other correctness claims are not yet reproduced; they stay in the p
 ### Grammar/C disagreement pass — 2026-09-25
 
 The 2026-09-24 grammar work noted five disagreements between the two front ends without filing them. Each was re-run at `293b7a175` on `lambda.exe` and on the reference grammar, regenerated with the pinned tree-sitter CLI 0.25.10 (S16 harnesses: 343/343 C, 330/330 Tree-sitter). Under D8.1.2v3, each is judged against the rulings.
-- **Four reproduce** and are filed as [LR02-24](#lr02-24)–[LR02-27](#lr02-27).
+- **Four reproduce** and are filed as [LR02-24](<Lambda_Issue_Ledger (fixed).md#lr02-24>)–[LR02-27](#lr02-27). LR02-24 and LR02-26 were fixed on 2026-09-25, with LR02-20.
 - **The fifth no longer reproduces.** The grammar had lexed keywords as type names (`let x: if = 1`, `fn f() pn { 1 }`). Since 538dca7b0 reserved them, both front ends reject every probe.
-- **Checking LR02-24 found [LR03-14](#lr03-14).**
+- **Checking LR02-24 found [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>), and fixing it found [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>).** Both had one cause and were fixed later on 2026-09-25 (see "Range type fix" below).
 
 Setup note: the checkout first needed `npm install`. `node_modules` still held CLI 0.24.7, although `package.json` pins 0.25.10. The untracked ABI 14 `src/parser.c` then failed to compile against the committed ABI 15 `parser.h`. `test/ts_s16_conformance.sh` classifies a case by grepping for `ERROR|MISSING|Unexpected`, so it reads that compile failure as an accept.
 
@@ -229,6 +229,16 @@ The first, per-file sweep also flagged 109 fixtures that are not JIT defects:
 - **11 fixtures outside the baseline directories** (`ext/`, `sem/`, `wip/`, `jube/`, `proc-ext/`) fail identically on every tier.
 
 Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inferred element lane after a store widens it, and [LR03-17](#lr03-17), a repeated literal key whose write and read reach different entries.
+
+### Range type fix — 2026-09-25
+
+[LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) (`is` against a union holding a range) and [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>) (range-typed parameters) had one cause: a range type wore `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag. The same cause made a range-typed map field segfault at a call boundary. All three are fixed on every tier; the two records are archived, and LR03-18's describes the segfault. Checking the fix found three older defects, each reproduced on the binary from before it, and left one residue:
+- [LR03-19](#lr03-19): in a nominal object type, a union- or range-typed field that is not last reads back a wrong value.
+- [LR03-20](#lr03-20): object construction does not check its field contracts.
+- [LR07-30](#lr07-30): a range-typed `var` changes its member's representation on the JIT.
+- [LR03-21](#lr03-21), the residue: `<:` does not split a range across union arms.
+
+[LR03-16](#lr03-16) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
 
 ---
 
@@ -364,39 +374,6 @@ change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
 
-<a id="lr02-20"></a>**LR02-20 · The C parser caps list literals, elements, calls and decompositions at 64 items (S2.5.1v2, S2.5.5v2, D8.1.2v3) · OPEN (found 2026-09-24)**
-`lambda_parser.c` gathers the children of a flat reduction in fixed
-proof-of-concept stack buffers, so it rejects valid source the reference
-grammar accepts. `parse_group_or_arrow` (`children[64]`, :1127) fails a
-65-item list literal `(0, 1, …, 64)` with E100 "too many grouped expressions
-in parser POC"; `parse_element` (`children[64]`, :943) caps attributes plus
-the content child (:970, :1010); `parser_parse_postfix_delimited`
-(`children[65]`, :1625) caps call arguments and index dimensions (:1631); and
-`parse_assignment_clause` (`LambdaToken names[64]`, :1467) caps decomposition
-names (:1484). A 65-item array parses, because `parse_array` builds its items
-as a `parser_list_append` chain. S2.5 sets no item limit, so under D8.1.2v3
-the C side is wrong; `lambda-cst` reports such a list as `missing` (grammar
-accepts, RD rejects). It surfaced once LR02-18 gave the grammar list
-literals. Recorded rather than fixed (USER, 2026-09-24). Sibling, unruled:
-`parse_crud_statement` caps comma-joined `put`/`del` edits at
-`LAMBDA_CRUD_MAX_CLAUSES = 32` (:2207), and no PTH60v3 text sets a limit —
-confirm it is unintended before lifting it.
-*Fix notes (2026-09-24 survey).* Consumers are unbounded: a reduction passes
-`children` by pointer and count to a synchronous sink, `syntax_sink_reduce`
-(`build_ast.cpp`), whose GROUP/ELEMENT/POSTFIX/LET handlers walk
-`child_count` (the reduction tape that copied them is retired, LC3.9).
-A call over 16 arguments still meets the semantic `ERR_FUNCTION_ARGUMENT_LIMIT`
-(rest parameters exempt), whose `binder_env`/`resolved` arrays are
-bounds-checked. A growable buffer with inline storage keeps every reduction
-byte-identical; switching to `parser_list_append` chains would change the
-GROUP/ELEMENT/CALL shapes that `build_ast` and the `child_count` assertions in
-`test/test_lambda_parser_poc_gtest.cpp` rely on. The parser links only libc
-(`lambda-cst` and the parser POC gtest build the parser sources alone), and a
-heap buffer must not be shared with a `parser_probe` copy. `parse_postfix`'s
-`children[65]` (:1674) only ever uses slot 0. Pin the fix with mirrored accept
-cases (a 65-item list literal, 65 call arguments) in both S16 conformance
-scripts.
-
 <a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · OPEN (found 2026-09-24)**
 `token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
 `apply`, `view` and `edit` as identifiers since the parser's first version
@@ -448,17 +425,6 @@ neither behaviour is ruled.
   `NAMED_VALUE`, and the grammar reserves the five words without admitting
   them as data names. Rule whether S16.10.2's "keywords" covers them.
 
-<a id="lr02-24"></a>**LR02-24 · The C parser reads `x is 1 to 5` as `(x is 1) to 5` (S11.1.3, S11.1.6v2) · OPEN (found 2026-09-24)**
-Both front ends accept `let r = x is 1 to 5`, but they read it differently.
-- **Reference grammar:** `is` takes a `_type_pattern` on its right (`grammar.js:144`), which reads `1 to 5` as a `range_type` (`:1351`). So `r` is a membership test.
-- **C:** builds `(x is 1) to 5`, a range whose start is a bool. The script compiles with no diagnostic and fails at run time ("Script execution failed"; in an array literal the item is `[error]`).
-
-The cause is the `is` arm of the Pratt loop, which reads its right side with the bare `parse_type_slot` (`lambda_parser.c:1848`). `parse_type_slot_mode` has no `to` case, so the slot ends after `1`. `to` binds tighter than `is` (`LAMBDA_BP_SET` 50 against `LAMBDA_BP_MEMBERSHIP` 40), so the loop then folds it over the finished `is` node.
-
-Annotations already handle the range. `parse_annotation_type_slot_value_mode` reads a trailing `to` into `LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE` (:796). So `type R = 1 to 5`, `let y: 1 to 5 = 3` and `case 1 to 5:` all work. `x is (1 to 5)` is `true`, and `x in 1 to 5` is unaffected.
-
-The rulings put C in the wrong. S11.1.6v2 makes `is` a boundary-type position, and S11.1.3 applies the range type's membership rule there. The user precedence table (`doc/Lambda_Expr_Stam.md`, "Operator Precedence") also binds `to` (10) tighter than `is` (11). An S16 accept case cannot pin the fix, since C already accepts the text. It needs a `test/lambda` golden instead: `3 is 1 to 5` is `true`, and `9 is 1 to 5` is `false`.
-
 <a id="lr02-25"></a>**LR02-25 · The reference grammar reads a tight count after a suffix as a new block (S11.1.6v2, SO45) · OPEN (found 2026-09-24)**
 The two front ends split on `type T = int?{2}`:
 - **C** reads it as a count chained onto `?` and rejects it with E103 "invalid type pattern", per the no-chaining rule (Type_Pattern §1.3).
@@ -471,21 +437,6 @@ A 2026-09-25 sweep of `type T = int<suffix>{2}` over eleven suffixes (`? + * [] 
 The cause is in the scanner. It emits the zero-width `OCCURRENCE_LBRACE` only when the grammar can take a count (`valid_symbols[OCCURRENCE_LBRACE]`, `scanner.c:539`). No chain in `suffix_chain` (`grammar.js:195`) takes a count after a suffix, so the tight brace falls through to a statement start.
 
 The rulings put the grammar in the wrong. S11.1.6v2's spelling note says a `{` count binds tight, and that "a spaced brace opens a body or a block". C's `parser_at_counted_run` (`lambda_parser.c:641`) accordingly reads a tight integer brace after any type as a count. The fix must make a tight integer brace after a suffixed type a syntax error, not a statement boundary. Neither S16 script has a chained-count case; pin the fix with mirrored reject cases (`int?{2}`, `int[]{2}`, `fn (){2}`) in both.
-
-<a id="lr02-26"></a>**LR02-26 · The C parser ends a type at a line-start `?` (S16.2.2v2, S16.2.1) · OPEN (found 2026-09-24)**
-S16.2.2v2 puts `?` in the continue-only set, so after a complete expression a line-start `?` continues it. The reference grammar applies this in types: its scanner never opens a statement at `?` (`classify_start`, `scanner.c:296`). So `type T = int` ⏎ `?` is `type T = int?`.
-
-C rejects every such form:
-
-| Source | C diagnostic |
-|---|---|
-| `type T = int` ⏎ `?` | E100 "expected an expression" at the `?` |
-| `let x: int` ⏎ `? = null` | "expected '=' after let binding" |
-| `fn f(a: int` ⏎ `?) { a }` | "expected ')' after parameters" |
-
-The last rejection also breaks S16.2.1, which binds the next line inside an unclosed bracket.
-
-The cause is in `parse_type_slot_mode` (`lambda_parser.c:683`), which continues across a line break only for `| & !`. Its `nesting` counter counts only brackets opened inside the slot, not an enclosing parameter list. Inside a type's own brackets, C does continue (both accept `type T = [int` ⏎ `?]`). The ruling puts C in the wrong. Neither S16 script has a line-start `?` in a type; add mirrored accept cases for the three forms.
 
 <a id="lr02-27"></a>**LR02-27 · Function-type parameters without `: T`: C admits them untyped, the grammar rejects them (S11.1.5v2, S16.10.1v2) · OPEN, needs a ruling (found 2026-09-24)**
 The two front ends read a function-type parameter differently.
@@ -556,25 +507,12 @@ a declaration's is (`test/lambda/fn_type_curried_call.ls`), so curried
 contracts now behave the same way; before, a curried call typed as a
 function and crashed a map literal instead.
 
-<a id="lr03-14"></a>**LR03-14 · A range-typed parameter rejects every integer, and the tiers split on a range argument (S11.1.3, S1.6) · OPEN (found 2026-09-25, while verifying LR02-24)**
-A parameter declared with a range type, such as `fn f(x: 1 to 5) { x }`, is wrong on both tiers. An alias (`type R = 1 to 5`, `fn f(x: R)`) behaves the same:
-
-| Call | Interpreter (and the default `auto` tier) | JIT |
-|---|---|---|
-| `f(3)` | rejected at compile time: `error[E207]: argument 1 expected range, got int` | same |
-| `f(1 to 5)` | passes the static check, then fails at run time: "type check at argument 1 of _f_0 failed: expected range, got range" | admitted: `f` returns the range, and `[type(r), r is error]` is `[range, false]` |
-
-S11.1.3 applies the range type's membership rule "in annotations, match arms, and value expressions". Under it, `f(3)` must be admitted and `f(1 to 5)` rejected, since a range is not an integer member. Every other boundary follows the rule: `let y: 1 to 5 = 3` is admitted and `= 9` is rejected, on both tiers; `3 is R` is `true`; and `case 1 to 5:` matches. The parameter boundary is the only one that doesn't. The static check treats the parameter as the `range` container kind, and so does the JIT's argument check. The interpreter's run-time check does reject the range argument, but it never sees an integer, because the static check has already refused it. So no call succeeds on the interpreter, and on the JIT only the wrong one does.
-
-The static rejection comes from `lambda_ast_validate_call_arguments` (`build_ast.cpp`), whose `lambda_static_boundary_relation` (`build_ast.cpp:1708`) rejects `int` against the parameter's range type. The root cause of that, and of the JIT's admission of a range, is not yet located.
-
-The diagnostics add confusion. Each one names the membership type `range`, the same word as the container kind, so even the correct `let` failure reads "expected range, got int 9". No test or package declares a range-typed parameter.
-
 <a id="lr03-15"></a>**LR03-15 · `5u8 is (u8 | string)` is false (S11.1) · OPEN (found 2026-09-25)**
 `validate_against_base_type` (`lambda/validator/validate.cpp`) reads a type's `kind` without checking that its TypeId is `LMD_TYPE_TYPE`. A sized type keeps its `NumSizedType` in `kind`, and `NUM_INT16`, `NUM_INT32` and `NUM_UINT8` share values with the unary, binary and pattern kinds, so a sized arm of a union is read as a larger struct than the 2-byte global it is. `5u8 is (u8 | string)` and `5i16 is (i16 | string)` are `false` on both tiers, while `5u8 is u8` is `true`. Reported by the LR03-11 investigation, reproduced 2026-09-25.
 
 <a id="lr03-16"></a>**LR03-16 · A literal type alias used as a value prints a pointer · OPEN (found 2026-09-25)**
 `type One = 1` then `[One]` prints a large integer on both tiers (`[4403549872]` on T0): the alias's `Type` pointer read as an int. The investigation also saw `type F = 1.5` print `2.1e-314`. A type alias is a first-class type value (S11); printing or comparing it must not expose its address. Reported by the LR03-11 investigation, reproduced 2026-09-25.
+*Also found 2026-09-25, while fixing [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>):* the alias is not usable as a type either. With `type Three = 3`, `3 is Three` is `false`, `Three <: int` is an error and `type(Three)` is `int`, on both tiers. A string literal alias works (`type A = "a"`, `A <: string` is `true`): `direct_finalize_type_alias` (`build_ast.cpp`) wraps only string and symbol literal aliases as type values.
 
 <a id="lr03-17"></a>**LR03-17 · A repeated key in a map literal keeps both entries; a write updates the first, a read takes the last · OPEN (found 2026-09-25)**
 ```
@@ -586,6 +524,20 @@ pn main() {
 }
 ```
 Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's member oracle, fixture `map_duplicate_key_lookup.ls`), but `fn_map_set` updates the first matching entry, so a write is invisible to the next read. `len`, printing and iteration all count both entries. The runtime comment beside the spread walk assumes map keys are unique except through a spread. No S# ruling covers a repeated literal key: collapsing it at construction (one key, first position, last value) and rejecting it are both open. The tiers agree since [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>).
+
+<a id="lr03-19"></a>**LR03-19 · In a nominal object type, a union- or range-typed field that is not last reads back a wrong value (S1.6) · OPEN (found 2026-09-25, while fixing LR03-18)**
+```
+type Obj { a: int | string, b: string }
+let o = <Obj a: 3, b: "b">
+let r = [o.a, o]    // [inf, <Obj a: inf, b: "b">] on both tiers
+```
+The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix gave it the union's boxed slot: `{ a: 1 to 5, b: string }` reads `-inf`, and `{ a: 1 to 5, b: int }` reads `0` (before that fix, a range field read `null` in every position). The value is right when the boxed field is last (`{ b: string, a: int | string }`), and a map-type alias is right in every position, whether built with `{…}` or with `<P …>` (`type P = {a: int | string, b: string}`). So the object type's layout and its construction disagree about a boxed field followed by another field. The union case reproduces on the binary from before the LR03-18 fix. Not yet traced.
+
+<a id="lr03-20"></a>**LR03-20 · Object construction does not check its field contracts (S11.4.10) · OPEN (found 2026-09-25, while fixing LR03-18)**
+`type Obj { a: int }` then `<Obj a: "x">` is admitted on both tiers and prints `<Obj a: 4317266544>`, the string's pointer read from the int field. A literal or range field admits any value: `type Obj { a: 1 | 2 }` and `type Obj { a: 1 to 5 }` both accept `<Obj a: 9>`. S11.4.10 verifies a declared type when the value crosses it, and lists the nominal binding of an element among the crossings. A map-type alias checks its fields: with `type P = {a: 1 to 5}`, `let p: P = {a: 9}` fails with E201. Reproduces on the binary from before the LR03-18 fix.
+
+<a id="lr03-21"></a>**LR03-21 · `<:` does not split a range across union arms (S11.1.4v2) · OPEN (found 2026-09-25, residue of LR03-18)**
+With `type R = 1 to 2` and `type OneTwo = 1 | 2`, `R <: OneTwo` is `false`. Every member of `1 to 2` is admitted by `1 | 2`, so S11.1.4v2 ("`A <: B` holds exactly when every value admitted by `A` is admitted by `B`") makes it `true`. The same holds for `1 to 5` against `(1 to 3) | (4 to 5)`. `contract_type_is_subtype` (`type_contract.cpp`) tries each arm of an expected union whole, and since the LR03-18 fix a range is below an arm only if that arm alone admits all its members. Deciding the split case means covering the range with the arms' members. The reverse direction is right: `OneTwo <: R` is `true`. Before the fix, `<:` compared a range type's tag, so every range was below every other (`(1 to 9) <: (1 to 5)` was `true`); the second example gave `true` then only by that accident.
 
 ---
 
@@ -786,6 +738,16 @@ Of the 159 negative fixtures, 11 fail differently on the two tiers. All of them 
 - **An imported module's parse error is printed twice by T0** (`import_parse_error_driver`).
 
 Both tiers also leak internal names: `_takes3_317`, `fn_call2`, "representation fallback". The negative gtests check only an exit status and a substring, and no harness compares these fixtures' `.txt` files, which have drifted (`Error[E201]` against `error[E201]`).
+
+<a id="lr07-30"></a>**LR07-30 · A range-typed `var` changes its member's representation on the JIT (S1.6) · OPEN (found 2026-09-25, while fixing LR03-18)**
+```
+pn main() {
+    var v: 1 to 5 = 3
+    v = 4.0
+    print([v, type(v)])    // interpreter [4, float], JIT [4, int]
+}
+```
+A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
 
 ## 8. Memory management & GC (LR_08)
 
@@ -1604,7 +1566,7 @@ together, not individually.
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
 | **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
-| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-24–LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
+| **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-25, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 
 ---

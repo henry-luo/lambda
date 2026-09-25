@@ -18,10 +18,8 @@ flowchart TB
         ARR["Array slab"]
     end
 
-    subgraph Shapes["Shape finalize (dedup)"]
-        FS1["elmt_finalize_shape()"]
-        FS2["map_finalize_shape()"]
-        SP["ShapePool\nshared ShapeEntry / TypeMap"]
+    subgraph Shapes["Type sharing (D3.4.3v2)"]
+        TT["Input transition tree\nmaps: root + field edges\nelements: tag root + attribute edges\n(one type per add sequence)"]
     end
 
     MB --> EB & MapB & ArrB
@@ -36,6 +34,7 @@ flowchart TB
     CS --> Arena
     CY --> Arena
 
-    EB -- "final()" --> FS1 --> SP
-    MapB -- "final()" --> FS2 --> SP
-    SP -. "dedup chains" .-> ELMT & MAP
+    EB -- "element(tag), attr()" --> TT
+    MapB -- "each put" --> TT
+    TT -. "shared TypeMap" .-> MAP
+    TT -. "shared TypeElmt" .-> ELMT

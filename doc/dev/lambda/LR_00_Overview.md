@@ -77,7 +77,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 
 ### Part IV — Runtime services
 
-- **[LR_08 — Memory Management & Garbage Collection](LR_08_Memory_and_GC.md)** — the non-moving mark-sweep heap, the two distinct nurseries, three-tier string allocation, and the name/shape pools.
+- **[LR_08 — Memory Management & Garbage Collection](LR_08_Memory_and_GC.md)** — the non-moving mark-sweep heap, the two distinct nurseries, three-tier string allocation, and the name pool.
 - **[LR_09 — Runtime Builtins & System Functions](LR_09_Runtime_Builtins.md)** — the C-ABI support library and the `sys_func_defs[]` registry that feeds both AST build and JIT linking.
 - **[LR_10 — Error Handling](LR_10_Error_Handling.md)** — the two error representations, `GUARD_ERROR` propagation, error codes, and the manually-walked native stack traces.
 

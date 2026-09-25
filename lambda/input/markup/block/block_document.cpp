@@ -174,7 +174,6 @@ Item parse_document(MarkupParser* parser) {
 
         if (block.item != ITEM_UNDEFINED && block.item != ITEM_ERROR) {
             list_push((List*)body, block);
-            increment_element_content_length(body);
         }
 
         // Safety: ensure progress to prevent infinite loops
@@ -185,7 +184,6 @@ Item parse_document(MarkupParser* parser) {
 
     // Add body to document
     list_push((List*)doc, Item{.item = (uint64_t)body});
-    increment_element_content_length(doc);
 
     // If any HTML content was parsed, add the HTML DOM to the document
     // The HTML DOM contains all HTML fragments accumulated during parsing
@@ -198,13 +196,8 @@ Item parse_document(MarkupParser* parser) {
             for (size_t i = 0; i < (size_t)html_body->length; i++) {
                 list_push((List*)html_dom, html_body->items[i]);
             }
-            // Set content length
-            TypeElmt* html_dom_type = (TypeElmt*)html_dom->type;
-            html_dom_type->content_length = html_body->length;
-
             // Add html-dom to the document
             list_push((List*)doc, Item{.item = (uint64_t)html_dom});
-            increment_element_content_length(doc);
 
             log_debug("parse_document: added html-dom with %zu children", html_body->length);
         }

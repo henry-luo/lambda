@@ -6764,9 +6764,19 @@ void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                  (span_block && layout_block_inline_axis_is_vertical(span_block) &&
                   layout_vertical_inline_line_has_atomic(span_block))) &&
                 (mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL);
+            bool line_axis_already_trimmed = span_block && span_block->blk &&
+                span_block->block()->text_box_trim_applied;
+            // Empty inline font boxes share the line's half-leading with text.
+            // Without it, adjacent empty and text spans acquire different
+            // physical x origins after vertical writing-mode mapping.
+            float inline_leading = !line_axis_already_trimmed &&
+                layout_span_children_have_no_line_content(span) &&
+                line_height > logical_height
+                ? (line_height - logical_height) / 2.0f : 0.0f;
             float logical_y = vertical_central
                 ? (block_extent - logical_height) / 2.0f
-                : span->y - surrogate_block_origin + physical_block_origin;
+                : span->y - surrogate_block_origin + physical_block_origin +
+                    inline_leading;
             bool reverse_span_inline = false;
             if (reverse_inline_axis && span->is_element()) {
                 CssEnum span_writing_mode = layout_element_css_writing_mode(

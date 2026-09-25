@@ -108,10 +108,8 @@ Item parse_textile_definition_list(MarkupParser* parser, const char* line) {
             Item term_content = parse_inline_spans(parser, term_text);
             if (term_content.item != ITEM_NULL && term_content.item != ITEM_ERROR) {
                 list_push((List*)dt, term_content);
-                increment_element_content_length(dt);
             }
             list_push((List*)dl, Item{.item = (uint64_t)dt});
-            increment_element_content_length(dl);
         }
 
         // Create dd element
@@ -122,10 +120,8 @@ Item parse_textile_definition_list(MarkupParser* parser, const char* line) {
             Item def_content = parse_inline_spans(parser, def_start);
             if (def_content.item != ITEM_NULL && def_content.item != ITEM_ERROR) {
                 list_push((List*)dd, def_content);
-                increment_element_content_length(dd);
             }
             list_push((List*)dl, Item{.item = (uint64_t)dd});
-            increment_element_content_length(dl);
         }
 
         mem_free(term_text);
@@ -197,10 +193,8 @@ Item parse_textile_footnote_def(MarkupParser* parser, const char* line) {
         Item content = parse_inline_spans(parser, p);
         if (content.item != ITEM_NULL && content.item != ITEM_ERROR) {
             list_push((List*)para, content);
-            increment_element_content_length(para);
         }
         list_push((List*)footnote, Item{.item = (uint64_t)para});
-        increment_element_content_length(footnote);
     }
 
     parser->current_line++;

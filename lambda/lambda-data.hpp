@@ -45,7 +45,6 @@ class SchemaValidator;
 #undef min
 
 #include "core/name_pool.hpp"
-#include "core/shape_pool.hpp"
 #include "runtime/ast-core.hpp"
 
 // void *memcpy(void *dest, const void *src, size_t n);
@@ -914,7 +913,11 @@ static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,
 typedef struct TypeElmt : TypeMap {
     StrView name;  // local name of the element
     NameId name_id;  // generated element identity; NAME_ID_NONE for custom names.
-    int64_t content_length;  // no. of content items, needed for element type
+    // D2.6.6v3: a DECLARED element type's content pattern, matched against the
+    // children as a sequence pattern (S11.1.6v3); NULL leaves content
+    // unconstrained. Instance and literal types never carry one, so it plays
+    // no part in type sharing (D3.4.3v2).
+    TypeList* content_list;
     Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
 
@@ -951,16 +954,15 @@ typedef struct TypeNominal {
     int method_count;
     struct AstNode* constraint;   // object-level that(...) AST, NULL if none
     ConstraintFn constraint_fn;   // JIT-compiled constraint checker, NULL if none
-    int64_t content_length;       // declared content arity
     TypeId struct_kind;           // the one structural kind this type declares
 } TypeNominal;
 
 // D2.6.6v2 phase 2: an object's shape extends TypeElmt, not TypeMap. A nominal
 // type declares ONE structural kind (S2.1.3v2) — map or element — and this shape
 // serves both: a nominal map simply leaves the element fields unused, while a
-// nominal element needs `name`/`content_length`/`ns` at TypeElmt's own offsets
+// nominal element needs `name`/`content_list`/`ns` at TypeElmt's own offsets
 // so every element code path reads it correctly. Before this, an object's shape
-// was a TypeMap and element readers reached `content_length` at the wrong
+// was a TypeMap and element readers reached the element fields at the wrong
 // offset, working only by accident where `type_name` happened to alias `name`.
 typedef struct TypeObject : TypeElmt {
     StrView type_name;          // nominal type name ("Point", "Circle"); mirrors TypeElmt::name
@@ -1179,6 +1181,23 @@ extern Type TYPE_ANY_NO_ERROR;
 extern Type TYPE_ANY_NO_NULL;
 extern Type TYPE_ANY_NO_ERROR_OR_NULL;
 
+// D3.1.1v4: a range type `X to Y` is a type-kind node under the shared
+// LMD_TYPE_TYPE tag. It must never wear LMD_TYPE_RANGE, the tag of a range
+// VALUE, or every tag-driven consumer reads "an int from 1 to 5" as "a range"
+// (LR03-18, LR03-14).
+static inline bool lambda_type_is_range(const Type* type) {
+    return type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_RANGE;
+}
+
+// The domain a range type draws its members from (S11.1.3): `int` for an
+// integer range, `string` for a character range. It serves static carrier
+// checks only. A member keeps its own representation (`3.0` is a member of
+// `1 to 5`), so the domain never selects a native lane.
+static inline Type* lambda_range_type_domain(const Type* type) {
+    if (!lambda_type_is_range(type)) return NULL;
+    return ((const TypeRange*)type)->is_char ? &TYPE_STRING : &TYPE_INT;
+}
+
 // S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
 // union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
 // so a caller that needs a signature must ask here rather than cast on the id.
@@ -1391,9 +1410,15 @@ typedef struct Input {
     Pool* pool;                 // memory pool
     Arena* arena;               // arena allocator
     NamePool* name_pool;        // centralized name management
-    ShapePool* shape_pool;      // shape deduplication (NEW)
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
+    // D3.4.3v2: one empty root per element tag and namespace, a pool-owned
+    // open-addressing table keyed by the pooled tag-name pointer; element
+    // nodes (roots included) count against their own budget
+    struct TypeElmt** element_roots;
+    int element_root_cap;
+    int element_root_count;
+    int element_transition_shapes;    // bounded by MAX_ELEMENT_SHAPE_GRAPH
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)
@@ -1458,9 +1483,25 @@ bool map_put_undefined_unique_absent_bulk_heap(Map* mp, String** keys, int count
     Input* input, uint8_t shape_flags);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
-// Shape finalization - deduplicate map/element shapes using shape pool
-void map_finalize_shape(TypeMap* type_map, Input* input);
-void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
+// D3.4.3v2: element types share through the Input's transition tree. The root
+// for a tag and namespace (NULL: keep a private type), and the attribute add
+// that follows or mints an edge from an element's tree type.
+TypeElmt* elmt_tree_root(Input* input, String* tag_name, Target* ns);
+void elmt_put_tree(Element* elmt, String* key, Item value, Input* input);
+
+// A field an editor rebuild adds to a tree type: replay an existing field's
+// identity (`like`), or add one under `key`, at `type_id`.
+typedef struct TypeTreeStep {
+    const ShapeEntry* like;
+    String* key;
+    TypeId type_id;
+} TypeTreeStep;
+
+// D3.4.3v2: a rebuilt type comes from the tree too. The root a container's
+// rebuild starts from (NULL: the container stays private), and the node
+// reached by adding `steps` from `start` (NULL: the tree declined).
+TypeMap* type_tree_root_like(Input* input, Map* container);
+TypeMap* type_tree_follow(Input* input, TypeMap* start, const TypeTreeStep* steps, int count);
 
 // Borrowed scalar read: boxed int64/float/uint64 Items point into ArrayNum storage.
 // Use only while the source ArrayNum is alive and not being mutated.

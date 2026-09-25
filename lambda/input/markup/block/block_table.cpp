@@ -272,12 +272,10 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
             Item cell_content = parse_table_cell_content(parser, cell_text);
             if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
                 list_push((List*)cell, cell_content);
-                increment_element_content_length(cell);
             }
 
             // Add cell to row
             list_push((List*)row, Item{.item = (uint64_t)cell});
-            increment_element_content_length(row);
         }
 
         mem_free(cell_text);
@@ -311,7 +309,6 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
                 }
             }
             list_push((List*)row, Item{.item = (uint64_t)empty_cell});
-            increment_element_content_length(row);
         }
         col_index++;
     }
@@ -404,11 +401,9 @@ static Item parse_rst_simple_table_row(MarkupParser* parser, const char* line,
                 Item cell_content = parse_inline_spans(parser, cell_text);
                 if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
                     list_push((List*)cell, cell_content);
-                    increment_element_content_length(cell);
                 }
             }
             list_push((List*)row, Item{.item = (uint64_t)cell});
-            increment_element_content_length(row);
         }
     }
     arraylist_free(col_starts);
@@ -445,7 +440,6 @@ static Item parse_rst_simple_table(MarkupParser* parser, const char* line) {
         Item row_item = parse_rst_simple_table_row(parser, current, border);
         if (row_item.item != ITEM_ERROR && row_item.item != ITEM_UNDEFINED) {
             list_push((List*)table, row_item);
-            increment_element_content_length(table);
         }
         parser->current_line++;
     }
@@ -517,10 +511,8 @@ Item parse_table(MarkupParser* parser, const char* line) {
             Item header_row = parse_table_row_with_type(parser, line, "th", column_alignments);
             if (header_row.item != ITEM_ERROR && header_row.item != ITEM_UNDEFINED) {
                 list_push((List*)thead, header_row);
-                increment_element_content_length(thead);
             }
             list_push((List*)table, Item{.item = (uint64_t)thead});
-            increment_element_content_length(table);
         }
         
         // Skip separator row
@@ -552,14 +544,11 @@ Item parse_table(MarkupParser* parser, const char* line) {
                 }
                 
                 list_push((List*)tbody, row_item);
-                increment_element_content_length(tbody);
             }
             
             // Only add tbody if it has content
-            TypeElmt* tbody_type = (TypeElmt*)tbody->type;
-            if (tbody_type->content_length > 0) {
+            if (((List*)tbody)->length > 0) {
                 list_push((List*)table, Item{.item = (uint64_t)tbody});
-                increment_element_content_length(table);
             }
         }
     } else {
@@ -604,13 +593,11 @@ Item parse_table(MarkupParser* parser, const char* line) {
             }
 
             list_push((List*)table, row_item);
-            increment_element_content_length(table);
         }
     }
 
     // Warn if table has no rows
-    TypeElmt* table_type = (TypeElmt*)table->type;
-    if (table_type->content_length == 0) {
+    if (((List*)table)->length == 0) {
         parser->warnInvalidSyntax("table", "at least one row with | delimiters");
     }
     arraylist_free(column_alignments);
