@@ -853,6 +853,17 @@ TEST_F(MimeTest, DetectFromFilenameJs) {
     EXPECT_NE(strstr(mime, "javascript"), nullptr);
 }
 
+TEST_F(MimeTest, ServeProfileMappings) {
+    EXPECT_STREQ(mime_detect_from_filename(detector, "/work/v1.2/data.XML"), "application/xml");
+    EXPECT_STREQ(mime_detect_from_filename(detector, "data.yaml"), "text/yaml");
+    EXPECT_STREQ(mime_detect_from_filename(detector, "main.cpp"), "text/x-c++");
+    EXPECT_STREQ(mime_detect_from_filename(detector, "app.mjs"), "application/javascript");
+    EXPECT_STREQ(mime_detect_from_filename(detector, "app.wasm"), "application/wasm");
+    EXPECT_STREQ(mime_detect_from_filename(detector, "app.avif"), "image/avif");
+    EXPECT_STREQ(mime_detect_from_content(detector, "OggS", 4), "audio/ogg");
+    EXPECT_EQ(mime_detect_from_content(detector, "plain text", 10), nullptr);
+}
+
 TEST_F(MimeTest, DetectFromFilenameUnknown) {
     const char *mime = mime_detect_from_filename(detector, "file_without_ext");
     // may return NULL for unknown extension — just verify no crash
@@ -880,11 +891,28 @@ TEST_F(MimeTest, DetectCombined) {
     EXPECT_NE(strstr(mime, "json"), nullptr);
 }
 
+TEST_F(MimeTest, CombinedPriorityAndRiffSubtype) {
+    const char *pdf = "%PDF-1.4 fake content";
+    EXPECT_STREQ(mime_detect(detector, "file.json", pdf, strlen(pdf)), "application/pdf");
+
+    const char wav[] = "RIFF\0\0\0\0WAVE";
+    EXPECT_STREQ(mime_detect_from_content(detector, wav, sizeof(wav) - 1), "audio/wav");
+    EXPECT_STREQ(mime_detect(detector, "notes.txt", "plain text", 10), "text/plain");
+    EXPECT_STREQ(mime_detect(NULL, "file.json", NULL, 0), "application/octet-stream");
+}
+
 TEST_F(MimeTest, ExtensionForType) {
     EXPECT_STREQ(mime_extension_for_type("text/html"), ".html");
     EXPECT_STREQ(mime_extension_for_type("application/json"), ".json");
     EXPECT_STREQ(mime_extension_for_type("image/png"), ".png");
     EXPECT_STREQ(mime_extension_for_type("application/pdf"), ".pdf");
+    EXPECT_STREQ(mime_extension_for_type("application/zip"), ".zip");
+    EXPECT_STREQ(mime_extension_for_type("font/woff2"), ".woff2");
+    EXPECT_STREQ(mime_extension_for_type("application/wasm"), ".wasm");
+    EXPECT_STREQ(mime_extension_for_type("unknown/type"), ".bin");
+    EXPECT_STREQ(mime_extension_for_type("text/xml"), ".bin");
+    EXPECT_STREQ(mime_extension_for_type("text/html; charset=utf-8"), ".bin");
+    EXPECT_STREQ(mime_extension_for_type("TEXT/HTML"), ".html");
 }
 
 TEST_F(MimeTest, GlobMatch) {
@@ -895,6 +923,8 @@ TEST_F(MimeTest, GlobMatch) {
     EXPECT_EQ(mime_match_glob("test?", "test"), 0);
     EXPECT_EQ(mime_match_glob(NULL, "test"), 0);
     EXPECT_EQ(mime_match_glob("*.html", NULL), 0);
+    EXPECT_EQ(mime_match_glob("*.xml", "/work/v1.2/data.xml"), 1);
+    EXPECT_EQ(mime_match_glob("*ab", "aab"), 1);
 }
 
 TEST_F(MimeTest, MagicMatch) {

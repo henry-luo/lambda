@@ -68,6 +68,28 @@ TEST_F(MimeDetectTest, FilenameDetection) {
     EXPECT_NE(strstr(mime, "pdf"), nullptr) << "Expected MIME type to contain 'pdf', got: " << mime;
 }
 
+TEST_F(MimeDetectTest, FilenameDetectionThroughDottedDirectories) {
+    EXPECT_STREQ(detect_mime_from_filename(detector, "/work/v1.2/data.xml"), "application/xml");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "C:\\v1.2\\data.XML"), "application/xml");
+}
+
+TEST_F(MimeDetectTest, GlobBacktracking) {
+    EXPECT_EQ(match_glob("*.xml", "/work/v1.2/data.xml"), 1);
+    EXPECT_EQ(match_glob("*ab", "aab"), 1);
+    EXPECT_EQ(match_glob("a*b*c", "axbybc"), 1);
+    EXPECT_EQ(match_glob("a*b", "ac"), 0);
+    EXPECT_EQ(match_glob("file?", "file"), 0);
+}
+
+TEST_F(MimeDetectTest, InputProfileMappings) {
+    EXPECT_STREQ(detect_mime_from_filename(detector, "data.yaml"), "application/x-yaml");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "main.cpp"), "text/x-c++src");
+    EXPECT_EQ(detect_mime_from_filename(detector, "app.mjs"), nullptr);
+    EXPECT_STREQ(detect_mime_from_content(detector, "OggS", 4), "text/plain");
+    EXPECT_STREQ(mime_extension_from_content_type("text/xml; charset=utf-8"), ".xml");
+    EXPECT_STREQ(mime_extension_from_content_type("application/xhtml+xml"), ".html");
+}
+
 // Test content-based detection without filename
 TEST_F(MimeDetectTest, ContentDetection) {
     const char* mime = detect_mime_type(detector, "unknown", "<html>", 6);

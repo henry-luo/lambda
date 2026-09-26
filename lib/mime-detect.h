@@ -13,11 +13,14 @@ typedef struct MimePattern {
     int offset;
     int priority;
     const char* mime_type;
+    const char* serve_mime_type; // NULL when serve did not recognize this signature
+    int serve_priority;
 } MimePattern;
 
 typedef struct MimeGlob {
     const char* pattern;
     const char* mime_type;
+    const char* serve_mime_type; // NULL when serve did not recognize this extension
 } MimeGlob;
 
 typedef struct MimeDetector {
@@ -25,10 +28,12 @@ typedef struct MimeDetector {
     size_t magic_patterns_count;
     MimeGlob* glob_patterns;
     size_t glob_patterns_count;
+    int serve_profile; // select the legacy serve MIME spellings and fallback rules
 } MimeDetector;
 
 // MIME detection functions
 MimeDetector* mime_detector_init(void);
+MimeDetector* mime_detector_init_serve(void);
 void mime_detector_destroy(MimeDetector* detector);
 const char* detect_mime_type(MimeDetector* detector, const char* filename, const char* data, size_t data_len);
 const char* detect_mime_from_filename(MimeDetector* detector, const char* filename);
@@ -42,6 +47,7 @@ int match_magic(const char* pattern, size_t pattern_len, const char* data, size_
 // to a file extension including the dot (e.g. ".html").
 // Returns a static string — no allocation.  Returns NULL for unknown types.
 const char* mime_extension_from_content_type(const char* content_type);
+const char* mime_extension_from_content_type_serve(const char* content_type);
 
 // External declarations for MIME type data
 extern MimePattern magic_patterns[];
