@@ -1,0 +1,18 @@
+{
+  "name": "the toolbar stays at the top and the status line at the bottom while the document scrolls",
+  "command": "edit",
+  "html": "test/ui/edit/long.md",
+  "working_copy": "temp/edit-ui/edit_md_scroll_chrome.md",
+  "viewport": {"width": 1000, "height": 600},
+  "events": [
+    {"type": "assert_hit_test", "x": 990, "y": 5, "expected_selector": ".edit-toolbar"},
+    {"type": "assert_hit_test", "x": 990, "y": 594, "expected_selector": ".edit-status"},
+    {"type": "scroll", "x": 500, "y": 300, "dx": 0, "dy": -10},
+    {"type": "scroll", "x": 500, "y": 300, "dx": 0, "dy": -10},
+    {"type": "assert_scroll", "x": 0, "y": 0, "negate": true},
+    {"type": "assert_hit_test", "x": 990, "y": 5, "expected_selector": ".edit-toolbar"},
+    {"type": "assert_hit_test", "x": 990, "y": 594, "expected_selector": ".edit-status"},
+    {"type": "assert_pixel", "x": 990, "y": 594, "min_r": 243, "max_r": 249, "min_g": 245, "max_g": 251, "min_b": 247, "max_b": 253},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened edit_md_scroll_chrome.md"}
+  ]
+}

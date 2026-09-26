@@ -118,6 +118,8 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
         DomDocument* doc = block->embedp()->doc;
         // render html doc
         if (doc && doc->view_tree && doc->view_tree->root) {
+            // the frame's own scrolls move its sticky boxes (CSS Position 3)
+            layout_resolve_scrolled_sticky(doc->view_tree);
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
                 // Save parent context and reset for embedded document

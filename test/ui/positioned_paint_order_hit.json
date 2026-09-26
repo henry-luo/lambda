@@ -1,0 +1,26 @@
+{
+  "name": "In-flow positioned boxes paint above non-positioned siblings and take the hit where they paint",
+  "html": "test/ui/positioned_paint_order_hit.html",
+  "viewport": {"width": 400, "height": 400},
+  "events": [
+    {"type": "log", "message": "relative box pulled down over a later non-positioned sibling paints on top (overlap y 50-80)"},
+    {"type": "assert_pixel", "x": 300, "y": 65, "min_r": 250, "max_r": 255, "min_g": 0, "max_g": 5, "min_b": 0, "max_b": 5},
+    {"type": "assert_hit_test", "x": 300, "y": 65, "expected_selector": ".rel-down"},
+    {"type": "assert_hit_test", "x": 300, "y": 90, "expected_selector": ".later"},
+
+    {"type": "log", "message": "relative box pulled up over an earlier sibling (overlap y 130-150)"},
+    {"type": "assert_pixel", "x": 300, "y": 140, "min_r": 250, "max_r": 255, "min_g": 160, "max_g": 170, "min_b": 0, "max_b": 5},
+    {"type": "assert_hit_test", "x": 300, "y": 140, "expected_selector": ".rel-up"},
+    {"type": "assert_hit_test", "x": 300, "y": 110, "expected_selector": ".earlier"},
+
+    {"type": "log", "message": "positive z-index paints above a later z-auto positioned sibling (overlap y 250-280)"},
+    {"type": "assert_pixel", "x": 300, "y": 265, "min_r": 123, "max_r": 133, "min_g": 0, "max_g": 5, "min_b": 123, "max_b": 133},
+    {"type": "assert_hit_test", "x": 300, "y": 265, "expected_selector": ".z1"},
+    {"type": "assert_hit_test", "x": 300, "y": 290, "expected_selector": ".zauto"},
+
+    {"type": "log", "message": "two z-auto positioned siblings: the later one paints on top (overlap y 350-380)"},
+    {"type": "assert_pixel", "x": 300, "y": 365, "min_r": 95, "max_r": 105, "min_g": 95, "max_g": 105, "min_b": 250, "max_b": 255},
+    {"type": "assert_hit_test", "x": 300, "y": 365, "expected_selector": ".pb"},
+    {"type": "assert_hit_test", "x": 300, "y": 340, "expected_selector": ".pa"}
+  ]
+}

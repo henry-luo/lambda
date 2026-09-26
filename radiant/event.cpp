@@ -833,16 +833,29 @@ void target_children(EventContext* evcon, View* view) {
     if (!evcon || !view) return;
 
     bool has_float_child = false;
+    bool has_step8 = false;
+    View* last = view;
     for (View* child = view; child; child = child->next()) {
-        if (event_view_is_float(child)) {
-            has_float_child = true;
-            break;
+        if (event_view_is_float(child)) has_float_child = true;
+        if (!radiant_stack_is_deferred_from_normal_flow(child) &&
+            radiant_stack_is_in_flow_positioned_step8(child)) {
+            has_step8 = true;
         }
+        last = child;
     }
 
-    View* last = view;
-    if (has_float_child) {
-        while (last->next()) last = last->next();
+    // CSS 2.1 Appendix E step 8: in-flow positioned siblings (relative, sticky)
+    // paint after the others (render_walk_children), so they take the hit
+    // first — the later one first, as it paints on top.
+    if (has_step8) {
+        for (View* child = last; child && !evcon->target;
+             child = child == view ? nullptr : static_cast<View*>(child->prev_sibling)) {
+            if (!radiant_stack_is_deferred_from_normal_flow(child) &&
+                radiant_stack_is_in_flow_positioned_step8(child)) {
+                target_stacking_view(evcon, child);
+            }
+        }
+        if (evcon->target) return;
     }
 
     // floating siblings can overlap after shrink-to-fit; later floats paint on
@@ -852,6 +865,8 @@ void target_children(EventContext* evcon, View* view) {
          child = has_float_child
              ? (child == view ? nullptr : static_cast<View*>(child->prev_sibling))
              : child->next()) {
+        // step-8 boxes were tried above
+        if (has_step8 && radiant_stack_is_in_flow_positioned_step8(child)) continue;
         if (child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
             if (radiant_stack_is_deferred_from_normal_flow(child)) {
@@ -10750,6 +10765,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // they write lands in a quiescent pass rather than inside one. This is also
     // what covers a headless event run that never paints (ES19).
     radiant_run_behavior_init(doc);
+    // hit-testing must see sticky boxes where a scroll since the last paint put them
+    layout_resolve_scrolled_sticky(doc->view_tree);
     if (!doc->html_root && !doc->view_tree) {
         log_error("No document content to handle event");
         return;

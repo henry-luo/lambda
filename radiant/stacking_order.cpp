@@ -34,6 +34,21 @@ bool radiant_stack_is_deferred_from_normal_flow(View* view) {
         radiant_stack_is_out_of_flow_positioned(view);
 }
 
+// CSS 2.1 Appendix E step 8: in-flow positioned boxes (relative, sticky) with
+// z-index auto or 0 paint after their non-positioned siblings, in tree order,
+// so one pulled over a later sibling stays on top. Stacking is resolved among
+// siblings, as for positive z; negative z still paints in tree order.
+bool radiant_stack_is_in_flow_positioned_step8(View* view) {
+    ViewElement* element = lam::view_as_element(view);
+    if (!element || !element->position) return false;
+    const PositionProp* position = element->positionp();
+    // a custom layout sequences its own children (radiant_stack_collect_custom_layout_paint)
+    if (position->has_custom_layout_z_index) return false;
+    return (position->position == CSS_VALUE_RELATIVE ||
+            position->position == CSS_VALUE_STICKY) &&
+        position->z_index == 0;
+}
+
 static void radiant_stack_collect_positive_z_descendants_into(View* view, ArrayList* out_views,
                                                               const char* log_prefix) {
     while (view) {

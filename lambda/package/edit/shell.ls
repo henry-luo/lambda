@@ -23,8 +23,12 @@ import .model
 
 let shell_css = "
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  html { height: 100%; }
+  /* the body grows with the document: a sticky toolbar and status line stay
+     inside their containing block, so a body fixed to the viewport's height
+     would carry both away once the page scrolls past its first screen */
+  body { margin: 0; min-height: 100%;
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
          background: #ffffff; color: #1f2328; }
   .edit-app { display: flex; flex-direction: column; min-height: 100%; }
   .edit-main { flex: 1; max-width: 980px; width: 100%; margin: 0 auto; }

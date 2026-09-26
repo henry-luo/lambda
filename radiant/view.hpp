@@ -1605,6 +1605,12 @@ typedef struct PositionProp {
     bool has_static_parent_offset_y;    // static y captured parent-to-containing-block offset
     float static_parent_offset_x;       // parent-to-containing-block offset when static x was set
     float static_parent_offset_y;       // parent-to-containing-block offset when static y was set
+    // sticky (CSS Position 3): a scroll re-solves the offset from the box's
+    // normal-flow position, so keep what the last solve applied and where it
+    // left the box; a box found anywhere else was re-placed by layout
+    bool has_sticky_offset;
+    float sticky_offset_x, sticky_offset_y;
+    float sticky_placed_x, sticky_placed_y;
 } PositionProp;
 
 // Keep the three physical inset lanes coupled so logical-position resolution
@@ -2688,6 +2694,7 @@ struct ViewTree {
     int measurement_cache_capacity;
     uint32_t measurement_cache_generation;
     uint32_t layout_generation; // Advances at each retained full-layout boundary.
+    int sticky_box_count;       // sticky boxes the last layout pass solved; scrolls re-solve them
 #ifdef __cplusplus
     void init();
     void reset_retained();

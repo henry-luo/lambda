@@ -1,0 +1,29 @@
+{
+  "name": "Sticky boxes follow the scroll position: stick, unstick on the way back, settle at the end",
+  "html": "test/ui/sticky_scroll_follow.html",
+  "viewport": {"width": 600, "height": 400},
+  "events": [
+    {"type": "log", "message": "scroll 0: header in place, footer stuck to the viewport bottom over the rows"},
+    {"type": "assert_hit_test", "x": 300, "y": 5, "expected_selector": ".top"},
+    {"type": "assert_hit_test", "x": 300, "y": 40, "expected_selector": "#r1"},
+    {"type": "assert_hit_test", "x": 300, "y": 395, "expected_selector": ".bottom"},
+
+    {"type": "log", "message": "scrolled down: both boxes stay at the viewport edges, painted and hit over the rows"},
+    {"type": "scroll", "x": 300, "y": 200, "dx": 0, "dy": -5},
+    {"type": "assert_hit_test", "x": 300, "y": 5, "expected_selector": ".top"},
+    {"type": "assert_pixel", "x": 300, "y": 5, "min_r": 199, "max_r": 209, "min_g": 216, "max_g": 226, "min_b": 233, "max_b": 243},
+    {"type": "assert_hit_test", "x": 300, "y": 395, "expected_selector": ".bottom"},
+    {"type": "assert_pixel", "x": 300, "y": 395, "min_r": 233, "max_r": 243, "min_g": 216, "max_g": 226, "min_b": 199, "max_b": 209},
+
+    {"type": "log", "message": "back to the top: the header returns to its normal-flow place"},
+    {"type": "scroll", "x": 300, "y": 200, "dx": 0, "dy": 5},
+    {"type": "assert_hit_test", "x": 300, "y": 5, "expected_selector": ".top"},
+    {"type": "assert_hit_test", "x": 300, "y": 40, "expected_selector": "#r1"},
+
+    {"type": "log", "message": "at the end: the footer rests after the last row"},
+    {"type": "scroll", "x": 300, "y": 200, "dx": 0, "dy": -60},
+    {"type": "assert_hit_test", "x": 300, "y": 5, "expected_selector": ".top"},
+    {"type": "assert_hit_test", "x": 300, "y": 340, "expected_selector": "#r20"},
+    {"type": "assert_hit_test", "x": 300, "y": 395, "expected_selector": ".bottom"}
+  ]
+}
