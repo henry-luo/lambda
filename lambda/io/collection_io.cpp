@@ -32,10 +32,11 @@ static Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) 
     return {.item = s2it(merged)};
 }
 
-static bool expand_list_io(List* list, Pool* pool, Arena* arena) {
+bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena) {
     if (!list || (!pool && !arena)) return false;
     int64_t previous_capacity = list->capacity;
     int64_t new_capacity = previous_capacity ? previous_capacity * 2 : 8;
+    if (new_capacity < min_capacity) new_capacity = min_capacity;
     size_t new_size;
     if (!lam::checked_mul((size_t)new_capacity, sizeof(Item), &new_size)) return false;
 
@@ -57,7 +58,7 @@ static bool expand_list_io(List* list, Pool* pool, Arena* arena) {
 void array_append(Array* arr, Item item, Pool* pool, Arena* arena) {
     if (!arr || (!pool && !arena)) return;
     if (arr->length + arr->extra + 2 > arr->capacity &&
-            !expand_list_io((List*)arr, pool, arena)) return;
+            !list_grow_io((List*)arr, 0, pool, arena)) return;
     array_set(arr, arr->length, item);
     arr->length++;
 }
@@ -110,7 +111,7 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
     }
 
     if (list->length + list->extra + 2 > list->capacity &&
-            !expand_list_io(list, pool, arena)) return;
+            !list_grow_io(list, 0, pool, arena)) return;
     array_set((Array*)list, list->length, item);
     list->length++;
 }

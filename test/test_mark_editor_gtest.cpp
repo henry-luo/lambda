@@ -1548,3 +1548,105 @@ TEST_F(MarkEditorTest, RebuildLaysOutManyFields) {
     EXPECT_EQ(updated.map->get("f4").type_id(), LMD_TYPE_BOOL);
     EXPECT_EQ(updated.map->get("extra").type_id(), LMD_TYPE_STRING);
 }
+
+// LR11-4: drafts that cannot grow are reported, so an edit errors instead of
+// rebuilding the container from a partial field list.
+TEST_F(MarkEditorTest, ShapeBuilderImportReportsDraftFailure) {
+    MarkBuilder builder(input);
+    Item map = builder.map().put("a", (int64_t)1).put("b", (int64_t)2).final();
+    TypeMap* type = (TypeMap*)map.map->type;
+
+    ShapeBuilder no_arena = shape_builder_init_map(nullptr);
+    EXPECT_FALSE(shape_builder_import_shape(&no_arena, type));
+
+    ShapeBuilder drafts = shape_builder_init_map(input->arena);
+    EXPECT_TRUE(shape_builder_import_shape(&drafts, type));
+    EXPECT_EQ(shape_builder_field_count(&drafts), 2u);
+}
+
+//==============================================================================
+// BUFFER PROVENANCE (LR11-3): the editor frees or regrows only what it owns
+//==============================================================================
+
+// A child buffer the editor's arena did not allocate -- here another pool's --
+// stays with its owner. Growth used to raw_realloc it, which is heap
+// corruption for any buffer malloc did not hand out.
+TEST_F(MarkEditorTest, InlineGrowthLeavesForeignItemsBuffer) {
+    Pool* foreign = pool_create();
+    ASSERT_NE(foreign, nullptr);
+    MarkBuilder builder(input);
+    Array* arr = array_pooled(foreign);
+    arr->items = (Item*)pool_calloc(foreign, 2 * sizeof(Item));
+    arr->capacity = 2;
+    arr->items[0] = builder.createInt(1);
+    arr->items[1] = builder.createInt(2);
+    arr->length = 2;
+    Item* foreign_items = arr->items;
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item grown = editor.array_append({.array = arr}, builder.createInt(3));
+    ASSERT_EQ(get_type_id(grown), LMD_TYPE_ARRAY);
+    EXPECT_NE(arr->items, foreign_items);
+    EXPECT_TRUE(pool_owns(foreign, foreign_items)) << "the old buffer stays with its owner";
+    ASSERT_EQ(arr->length, 3);
+    for (int i = 0; i < 3; i++) EXPECT_EQ(arr->items[i].item, builder.createInt(i + 1).item);
+    pool_destroy(foreign);
+}
+
+// Wide scalars live in an owned tail at the end of the capacity. Growth moves
+// the tail with the dense items that point into it, and the capacity counts it,
+// so an insert never lands on a payload.
+TEST_F(MarkEditorTest, InlineInsertKeepsOwnedScalarTail) {
+    MarkBuilder builder(input);
+    Array* arr = array_pooled(input->pool);
+    const int64_t wide = INT64_C(1) << 40;
+    for (int64_t i = 0; i < 3; i++) {
+        array_append(arr, builder.createLong(wide + i), input->pool, input->arena);
+    }
+    ASSERT_EQ(arr->extra, 3);
+
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item arr_item = {.array = arr};
+    for (int i = 0; i < 20; i++) {
+        arr_item = editor.array_append(arr_item, builder.createInt(i));
+        ASSERT_EQ(get_type_id(arr_item), LMD_TYPE_ARRAY);
+    }
+    ASSERT_EQ(arr->length, 23);
+    for (int64_t i = 0; i < 3; i++) {
+        ASSERT_EQ(get_type_id(arr->items[i]), LMD_TYPE_INT64);
+        EXPECT_EQ(arr->items[i].get_int64(), wide + i);
+    }
+    for (int i = 0; i < 20; i++) EXPECT_EQ(arr->items[3 + i].item, builder.createInt(i).item);
+}
+
+// The old data buffer is freed exactly when the editor's pool owns it, whatever
+// ui_mode says: the flag used to keep a pool buffer alive in ui_mode, and a
+// wrong flag would have freed a foreign one.
+TEST_F(MarkEditorTest, InlineRebuildFreesOnlyPoolOwnedData) {
+    MarkBuilder builder(input);
+    Item owned = builder.map().put("a", (int64_t)1).final();
+    void* owned_data = owned.map->data;
+    ASSERT_TRUE(pool_owns(input->pool, owned_data));
+
+    Pool* foreign = pool_create();
+    ASSERT_NE(foreign, nullptr);
+    Item other = builder.map().put("a", (int64_t)2).final();
+    TypeMap* other_type = (TypeMap*)other.map->type;
+    void* foreign_data = pool_calloc(foreign, (size_t)other_type->byte_size);
+    memcpy(foreign_data, other.map->data, (size_t)other_type->byte_size);
+    other.map->data = foreign_data;
+
+    input->ui_mode = true;
+    {
+        MarkEditor editor(input, EDIT_MODE_INLINE);
+        Item grown = editor.map_update(owned, "b", builder.createInt(5));
+        ASSERT_EQ(get_type_id(grown), LMD_TYPE_MAP);
+        EXPECT_FALSE(pool_owns(input->pool, owned_data)) << "a pool buffer is freed in ui_mode too";
+        Item grown_other = editor.map_update(other, "b", builder.createInt(6));
+        ASSERT_EQ(get_type_id(grown_other), LMD_TYPE_MAP);
+        EXPECT_TRUE(pool_owns(foreign, foreign_data)) << "a foreign buffer is never freed";
+        EXPECT_EQ(grown_other.map->get("a").type_id(), LMD_TYPE_INT64);
+    }
+    input->ui_mode = false;
+    pool_destroy(foreign);
+}

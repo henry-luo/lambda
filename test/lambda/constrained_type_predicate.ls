@@ -75,4 +75,12 @@ let first = "bob";
 
 "9 a hot function keeps its answer when it is compiled";
 fn check(x) => x is Big;
-[for (i in 1 to 8) check(5)]
+[for (i in 1 to 8) check(5)];
+
+"10 an imported predicate reads its module's let and calls its private fn";
+[3 is AtLim, 4 is AtLim, 5 is Doubled, 3 is Doubled];
+
+"11 a body whose answer may be an error compiles: the error fails the check";
+type Pos = int that checked(~);
+type Deep = any that (~ is int or (~ is array and all(~ |> (~ is Deep))));
+[5 is Pos, -5 is Pos, [1, [2, [3]]] is Deep, [1, ["x"]] is Deep]

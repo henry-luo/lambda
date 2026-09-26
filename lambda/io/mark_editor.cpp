@@ -811,14 +811,12 @@ Item MarkEditor::container_rebuild_with_new_shape(Map* old_container,
         result->type = new_type;
     }
 
-    // Free old data (inline mode only), replace with new
-    if (is_inline && old_container->data) {
-        // In ui_mode, old data was arena-allocated during JIT execution
-        // (via context->arena = result_arena). The MarkEditor's pool_ is a
-        // different owner; calling pool_free here would release unrelated data.
-        if (!ui_mode_) {
-            pool_free(pool_, old_container->data);
-        }
+    // Free the old data (inline mode only) when this editor's pool owns it. A
+    // JIT result's buffer belongs to its result arena (ui_mode) or the GC heap,
+    // which reclaim it themselves. Keying this on ui_mode_ trusted every path
+    // to set that flag right, where a wrong one freed a foreign buffer (LR11-3).
+    if (is_inline && pool_owns(pool_, old_container->data)) {
+        pool_free(pool_, old_container->data);
     }
     result->data = new_data;
     result->data_cap = new_byte_size;
@@ -858,9 +856,11 @@ Item MarkEditor::container_update_attr_inline(Map* container, String* key, Item 
     }
 
     ShapeBuilder builder = container_shape_builder(container);
-    shape_builder_import_shape(&builder, type);
+    // a draft that failed to grow holds only some fields; rebuilding from it
+    // would silently drop the rest (LR11-4)
+    if (!shape_builder_import_shape(&builder, type)) return ItemError;
     if (exists) shape_builder_remove_field(&builder, key->chars);
-    shape_builder_add_field(&builder, key->chars, value_type);
+    if (!shape_builder_add_field(&builder, key->chars, value_type)) return ItemError;
 
     Item rebuilt = container_rebuild_with_new_shape(container, &builder, true);
     container_store_field(rebuilt, key->chars, value, value_type);
@@ -896,9 +896,9 @@ Item MarkEditor::container_update_attr_immutable(Map* old_container, String* key
     }
 
     ShapeBuilder builder = container_shape_builder(old_container);
-    shape_builder_import_shape(&builder, old_type);
+    if (!shape_builder_import_shape(&builder, old_type)) return ItemError;
     if (exists) shape_builder_remove_field(&builder, key->chars);
-    shape_builder_add_field(&builder, key->chars, value_type);
+    if (!shape_builder_add_field(&builder, key->chars, value_type)) return ItemError;
 
     Item rebuilt = container_rebuild_with_new_shape(new_container, &builder, false);
     container_store_field(rebuilt, key->chars, value, value_type);
@@ -935,7 +935,7 @@ Item MarkEditor::container_delete_attr(Item container_item_in, String* key) {
     }
 
     ShapeBuilder builder = container_shape_builder(container);
-    shape_builder_import_shape(&builder, type);
+    if (!shape_builder_import_shape(&builder, type)) return ItemError;
     shape_builder_remove_field(&builder, key->chars);
 
     return container_rebuild_with_new_shape(target, &builder, is_inline);
@@ -954,7 +954,7 @@ Item MarkEditor::container_update_attr_batch(Item container_item_in, int count, 
 
     Map* container = container_item_in.map;
     ShapeBuilder builder = container_shape_builder(container);
-    shape_builder_import_shape(&builder, (TypeMap*)container->type);
+    if (!shape_builder_import_shape(&builder, (TypeMap*)container->type)) return ItemError;
 
     for (int i = 0; i < count; i++) {
         AttrUpdate entry;
@@ -973,7 +973,9 @@ Item MarkEditor::container_update_attr_batch(Item container_item_in, int count, 
         if (shape_builder_has_field(&builder, entry.key)) {
             shape_builder_remove_field(&builder, entry.key);
         }
-        shape_builder_add_field(&builder, entry.key, entry.value_type);
+        if (!shape_builder_add_field(&builder, entry.key, entry.value_type)) {
+            return ItemError;
+        }
     }
 
     bool is_inline = mode_ == EDIT_MODE_INLINE;
@@ -1051,7 +1053,7 @@ Item MarkEditor::map_delete_batch(Item map, int count, const char** keys) {
 
     // Build new shape without deleted fields
     ShapeBuilder builder = container_shape_builder(target_map);
-    shape_builder_import_shape(&builder, map_type);
+    if (!shape_builder_import_shape(&builder, map_type)) return ItemError;
 
     for (int i = 0; i < count; i++) {
         shape_builder_remove_field(&builder, keys[i]);
@@ -1182,6 +1184,17 @@ Item MarkEditor::elmt_delete_attr(Item element, String* attr_name) {
     return container_delete_attr(element, attr_name);
 }
 
+// LR11-3: a child buffer may belong to this Input's arena, a JIT result arena or
+// the GC heap -- never to malloc -- so the old one stays with its owner and the
+// grown one comes from this editor. raw_realloc of a buffer the editor's arena
+// had not allocated corrupted the heap, and the copy loops it replaced left the
+// owned wide-scalar tail behind the dense items that point into it.
+bool MarkEditor::reserve_children(List* list, int64_t dense_length) {
+    int64_t needed = dense_length + list->extra;
+    if (needed <= list->capacity) return true;
+    return list_grow_io(list, needed, pool_, arena_);
+}
+
 Item MarkEditor::elmt_insert_child(Item element, int index, Item child,
                                    bool preserve_dom_child) {
     if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
@@ -1215,29 +1228,12 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child,
         // Inline mode - resize and insert in-place
         int64_t new_length = elmt->length + 1;
 
-        if (new_length > elmt->capacity) {
-            // Resize children array
-            int64_t new_capacity = elmt->capacity ? elmt->capacity * 2 : 8;
-            bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
-            if (use_arena) {
-                // Always fresh alloc — do NOT arena_realloc (frees old buffer
-                // to arena free-list, which can be recycled by new DomElement
-                // allocations, overwriting still-referenced items buffers).
-                Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                if (new_items && elmt->items) {
-                    memcpy(new_items, elmt->items, elmt->capacity * sizeof(Item));
-                }
-                elmt->items = new_items;
-            } else {
-                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items — heap-allocated, freed by free_container
-                if (!new_items) {
-                    log_error("elmt_insert_child: realloc failed");
-                    return ItemError;
-                }
-                elmt->items = new_items;
-            }
-            if (!elmt->items) return ItemError;
-            elmt->capacity = new_capacity;
+        // Always a fresh buffer -- never arena_realloc, which frees the old one
+        // to the arena free-list where a new DomElement could overwrite a
+        // still-referenced items buffer.
+        if (!reserve_children((List*)elmt, new_length)) {
+            log_error("elmt_insert_child: children growth failed");
+            return ItemError;
         }
 
         // Shift children to make space
@@ -1315,25 +1311,9 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
     if (mode_ == EDIT_MODE_INLINE) {
         int64_t new_length = elmt->length + count;
 
-        if (new_length > elmt->capacity) {
-            int64_t new_capacity = (elmt->capacity ? elmt->capacity : 8);
-            while (new_capacity < new_length) {
-                new_capacity *= 2;
-            }
-            bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
-            if (use_arena) {
-                Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                if (new_items && elmt->items) {
-                    memcpy(new_items, elmt->items, elmt->capacity * sizeof(Item));
-                }
-                elmt->items = new_items;
-            } else {
-                Item* new_items = (Item*)raw_realloc(elmt->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
-                if (!new_items) return ItemError;
-                elmt->items = new_items;
-            }
-            if (!elmt->items) return ItemError;
-            elmt->capacity = new_capacity;
+        if (!reserve_children((List*)elmt, new_length)) {
+            log_error("elmt_insert_children: children growth failed");
+            return ItemError;
         }
 
         // Shift existing children
@@ -1546,7 +1526,7 @@ Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
     // Build new shape with new element name. Note the rebuilt TypeElmt keeps
     // the OLD name — as it always has; only the shape's pool bucket moves.
     ShapeBuilder builder = shape_builder_init_element(arena_, new_tag_name);
-    shape_builder_import_shape(&builder, old_type);
+    if (!shape_builder_import_shape(&builder, old_type)) return ItemError;
 
     bool is_inline = mode_ == EDIT_MODE_INLINE;
     Map* target = (Map*)old_elmt;
@@ -1626,23 +1606,9 @@ Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
         if (mode_ == EDIT_MODE_INLINE) {
             int64_t new_length = arr->length + 1;
 
-            if (new_length > arr->capacity) {
-                int64_t new_capacity = arr->capacity ? arr->capacity * 2 : 8;
-                // Check if items are arena-allocated to avoid realloc on arena pointers
-                bool use_arena = (arena_ != nullptr && (arr->items == nullptr || arena_owns(arena_, arr->items)));
-                if (use_arena) {
-                    Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                    if (new_items && arr->items) {
-                        memcpy(new_items, arr->items, arr->capacity * sizeof(Item));
-                    }
-                    arr->items = new_items;
-                } else {
-                    Item* new_items = (Item*)raw_realloc(arr->items, new_capacity * sizeof(Item));  // RAWALLOC_OK: Container items
-                    if (!new_items) return ItemError;
-                    arr->items = new_items;
-                }
-                if (!arr->items) return ItemError;
-                arr->capacity = new_capacity;
+            if (!reserve_children((List*)arr, new_length)) {
+                log_error("array_insert: items growth failed");
+                return ItemError;
             }
 
             // Shift

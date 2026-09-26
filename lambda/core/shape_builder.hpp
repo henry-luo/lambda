@@ -89,8 +89,11 @@ bool shape_builder_has_field(ShapeBuilder* builder, const char* name);
 /**
  * Import existing shape into builder (for modification)
  * Clears current builder content and imports all fields of the type
+ *
+ * @return false when the drafts could not grow; the builder then holds only
+ *         some of the fields and must not be rebuilt from (LR11-4)
  */
-void shape_builder_import_shape(ShapeBuilder* builder, const TypeMap* shape);
+bool shape_builder_import_shape(ShapeBuilder* builder, const TypeMap* shape);
 
 // ========== Utilities ==========
 

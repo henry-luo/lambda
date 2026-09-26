@@ -1,0 +1,12 @@
+"1 a body naming its own type"
+[true, true, false, true]
+"2 through an alias chain and a match arm"
+[true, false, "small", "other"]
+"3 a local type reading an outer local, from a nested closure"
+[true, true, 2]
+"4 recursion over the value's structure"
+[true, false, true]
+"5 a level that answers an error fails the whole test"
+[true, false, false]
+"6 the candidate starts a fresh context: `~~` is null inside the body"
+[true, true]

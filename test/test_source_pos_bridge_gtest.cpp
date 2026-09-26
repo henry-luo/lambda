@@ -11,6 +11,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/render_map.h"
+#include "../lambda/runtime/template_registry.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
@@ -662,4 +663,61 @@ TEST(SourcePosBridgeR4, ApplyRejectsUnknownKind) {
     auto root_sentinel = (struct DomNode*)0xbeef;
     EXPECT_FALSE(dom_selection_apply_source_selection(ds_sentinel,
         root_sentinel, bogus_sel));
+}
+
+// ---------------------------------------------------------------------------
+// render_map retransform (LR11-2)
+// ---------------------------------------------------------------------------
+// A re-executed template body records its own apply() results, and those
+// inserts resize the render map and move Robin Hood buckets. Iterating the map
+// while re-executing skipped a dirty entry whenever one was displaced across
+// the iterator. The key hashes an interned pointer, so which layout does that
+// varies from run to run; the sweep over fresh maps made the old loop miss an
+// entry in about one case in ten, and every case must re-run each entry once.
+
+static const char* const retransform_ref = "lr11_2_template";
+static int retransform_invocations = 0;
+static int retransform_inserts = 0;
+static int64_t retransform_next_child = 0;
+
+static Item retransform_recording_body(Context*, Item) {
+    retransform_invocations++;
+    for (int i = 0; i < retransform_inserts; i++) {
+        int64_t child = retransform_next_child++;
+        render_map_record(synthetic_bridge_item(child), "lr11_2_child",
+            synthetic_bridge_item(-child), Item{0}, -1);
+    }
+    return Item{0};
+}
+
+TEST(RenderMapRetransform, EveryDirtyEntryRunsOnceDespiteInserts) {
+    TemplateEntry entry = {};
+    entry.template_ref = retransform_ref;
+    entry.body_func = (fn_ptr)retransform_recording_body;
+    TemplateRegistry registry = {};
+    registry.first = registry.last = &entry;
+    registry.count = 1;
+    test_template_registry = &registry;
+
+    const int inserts_per_run[] = {1, 16};
+    for (int inserts : inserts_per_run) {
+        for (int dirty = 2; dirty <= 120; dirty++) {
+            render_map_destroy();   // a fresh map for every case
+            for (int64_t i = 1; i <= dirty; i++) {
+                render_map_record(synthetic_bridge_item(i), retransform_ref,
+                    synthetic_bridge_item(-i), Item{0}, -1);
+                render_map_mark_dirty(synthetic_bridge_item(i), retransform_ref);
+            }
+            retransform_invocations = 0;
+            retransform_inserts = inserts;
+            retransform_next_child = 100000;
+            ASSERT_EQ(render_map_retransform(), dirty)
+                << dirty << " dirty entries, " << inserts << " inserts each";
+            ASSERT_EQ(retransform_invocations, dirty);
+            ASSERT_FALSE(render_map_has_dirty());
+        }
+    }
+
+    render_map_reset();
+    test_template_registry = nullptr;
 }

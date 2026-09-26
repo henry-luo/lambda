@@ -1364,6 +1364,9 @@ typedef struct AstFuncNode : AstNode {
     bool is_async;
     bool is_generator;
     bool has_use_strict_directive;
+    // S11.4.11: a `that` body's function; its one parameter is the candidate,
+    // which the body reads as `~` (resolver_predicate_begin)
+    bool is_that_predicate;
     // T29-1: number of synthesized place-handle slots in this body
     uint16_t place_handle_count;
     Type* declared_return_type;

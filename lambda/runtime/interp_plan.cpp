@@ -198,9 +198,9 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_ARRAY_TYPE:
     case AST_NODE_MAP_TYPE:
     case AST_NODE_ELMT_TYPE:
-    // P3: the walker resolves the type-list entry and evaluates its `that`
-    // clause in full, in the declaring module (AI17v2); raw Type* identity is
-    // never used as a substitute for the constraint.
+    // P3: the walker resolves the type-list entry and calls its `that`
+    // predicate function, a child the scan reaches as any function
+    // (S11.4.11); raw Type* identity never substitutes for the constraint.
     case AST_NODE_FUNC_TYPE:
     case AST_NODE_CONSTRAINED_TYPE:
     // --- P1 object literals and interpreted methods ---
@@ -1130,26 +1130,17 @@ static void plan_link_call_shape(AstCallNode* call) {
 static uint32_t plan_need(AstNode* node);
 
 // A constrained type that `is` or a match arm names -- inline, by name, or
-// through an alias chain -- holds three occurrence homes (index, parent,
-// root) while each of its predicates runs, one after another, over that
-// layer's window of its own names (interp_eval_constrained_predicate). Zero
-// when the node names none.
+// through an alias chain -- roots one predicate closure while each layer's
+// call runs (interp_eval_constrained_predicate). The bodies are planned as
+// those functions' own frames, so a body naming its own type costs its caller
+// nothing more (LR03-28). Zero when the node names none.
 static uint32_t plan_constrained_type_need(AstNode* node) {
-    TypeConstrained* constrained = ast_constrained_type(node);
-    if (!constrained) return 0;
-    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
-    int count = ast_constrained_type_layers(constrained, layers);
-    uint32_t best = 0;
-    for (int i = 0; i < count; i++) {
-        uint32_t need = layers[i]->predicate_slots + plan_need(layers[i]->constraint);
-        if (need > best) best = need;
-    }
-    return 3 + best;
+    return ast_constrained_type(node) ? 1 : 0;
 }
 
 // Pattern testing is not ordinary expression evaluation: a non-constrained
 // leaf materializes its value and keeps that value live while fn_is/fn_eq runs,
-// whereas a constrained leaf owns three occurrence homes for its predicate.
+// whereas a constrained leaf roots its predicate closure across the call.
 // Keep this shared with MATCH_ARM so a type-name pattern cannot borrow the
 // match frame's signal slot at a GC safepoint.
 static uint32_t plan_match_pattern_need(AstNode* pattern) {
@@ -1375,9 +1366,10 @@ static uint32_t plan_need(AstNode* node) {
         return pattern > body ? pattern : body;
     }
     case AST_NODE_CONSTRAINED_TYPE:
-        // A constrained pattern holds the current occurrence plus index,
-        // parent, and root while its predicate walks, all before any helper.
-        return 3 + plan_need(((AstConstrainedTypeNode*)node)->constraint);
+        // the node evaluates to its type-list entry; its body is planned as
+        // its predicate function's frame, and a test roots that closure
+        // (plan_constrained_type_need)
+        return 0;
     case AST_NODE_ARRAY:
     case AST_NODE_SEQ:
     case AST_NODE_CONTENT:
@@ -1758,11 +1750,6 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_EVENT_HANDLER:
         plan_handler(pc, (AstEventHandler*)node);
         return;
-    case AST_NODE_CONSTRAINED_TYPE:
-        // the predicate's own names were planned into its window up front
-        // (plan_predicate_windows); only the base belongs to this plan
-        plan_walk(((AstConstrainedTypeNode*)node)->base, pc);
-        return;
     case AST_NODE_VARIABLE_DECLARATOR:
         plan_assign_entry(pc, ((AstDeclaratorNode*)node)->entry);
         break;
@@ -1794,33 +1781,6 @@ static void plan_walk(AstNode* node, void* ctx) {
     interp_visit_children(node, plan_walk, ctx);
 }
 
-// A predicate runs in whatever frame names its type -- a nested closure's, an
-// importer's, its own again through a call -- so the names it binds itself (a
-// `for` variable, a group `let`) take window slots that each evaluation
-// reserves in the evaluating frame, never slots of the declaring frame. The
-// type list holds every constrained type the module resolved, so each layer is
-// planned before any use site sizes its scratch by the window; a layer an
-// import re-registered here was planned by its owner.
-static void plan_predicate_windows(PlanCtx* module) {
-    ArrayList* types = module->script->type_list;
-    for (int i = 0; types && i < types->length && !module->failed; i++) {
-        Type* type = (Type*)types->data[i];
-        if (!lambda_type_is_constrained(type)) continue;
-        TypeConstrained* layer = (TypeConstrained*)type;
-        if (layer->predicate_planned) continue;
-        PlanCtx pc = {0};
-        pc.script = module->script;
-        pc.storage = BINDING_STORAGE_PREDICATE;
-        plan_walk(layer->constraint, &pc);
-        if (pc.failed || pc.next_slot > UINT16_MAX) {
-            module->failed = true;
-            return;
-        }
-        layer->predicate_slots = (uint16_t)pc.next_slot;
-        layer->predicate_planned = true;
-    }
-}
-
 bool interp_plan_script(Script* script) {
     if (!script || !script->ast_root) return false;
     if (script->interp_planned) return true;
@@ -1838,7 +1798,6 @@ bool interp_plan_script(Script* script) {
     // Module-level bindings live in the per-context module slab, not in a
     // per-activation window: they outlive the top-level frame (D7.2.1/AI6).
     pc.storage = BINDING_STORAGE_MODULE;
-    plan_predicate_windows(&pc);
     plan_assign_scope(&pc, root->global_vars);
 
     for (AstNode* item = root->child; item; item = item->next) plan_walk(item, &pc);
@@ -1891,7 +1850,6 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
     // after them so appending a REPL cell cannot renumber a live binding.
     pc.next_slot = script->interp_slab_count;
     pc.max_scratch = script->interp_plan.scratch_depth;
-    plan_predicate_windows(&pc);
     plan_assign_scope(&pc, root->global_vars);
     for (AstNode* item = fragment; item; item = item->next) plan_walk(item, &pc);
     uint32_t need = plan_need(fragment);
@@ -2054,6 +2012,15 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
         // image, so those keep the whole match expression in T0 (D5.2). Type
         // and literal arms have no such state (T27-6).
         if (!interp_satellite_match_supported((AstMatchNode*)node)) {
+            sc->ok = false;
+            return;
+        }
+        break;
+    case AST_NODE_BINARY:
+        // `is` on a constrained type calls its predicate function (S11.4.11),
+        // which a satellite image does not carry, as a constrained arm above
+        if (((AstBinaryNode*)node)->op == OPERATOR_IS &&
+                ast_constrained_type(((AstBinaryNode*)node)->right)) {
             sc->ok = false;
             return;
         }

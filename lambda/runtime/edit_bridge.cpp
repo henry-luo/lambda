@@ -658,8 +658,9 @@ int edit_bridge_init(void* input_ptr) {
             log_error("edit_bridge_init: failed to create Input from runtime pool");
             return -1;
         }
-        // Propagate ui_mode so MarkEditor knows data buffers are arena-allocated
-        // and must NOT be freed via pool_free (they live on the result_arena).
+        // Propagate ui_mode so MarkEditor relinks the DOM children of the
+        // result tree it edits. Which buffers it frees is decided by their
+        // owner (pool_owns), not by this flag (LR11-3).
         if (active_runtime->ui_mode) {
             input->ui_mode = true;
         }

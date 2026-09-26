@@ -888,15 +888,6 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
         // reads it, so the Item is taken as-is (immortal) rather than re-homed.
         return owned_item_slot_read(f->env, f->env_count, cap, true);
     }
-    if (entry->binding_storage == BINDING_STORAGE_PREDICATE) {
-        if ((uint32_t)entry->slot >= f->predicate_window_count) {
-            log_error("interp: predicate binding '%.*s' read outside its window",
-                entry->name ? (int)entry->name->len : 0,
-                entry->name ? entry->name->chars : "");
-            return ItemError;
-        }
-        return (Item){.item = f->predicate_window[entry->slot]};
-    }
     if ((uint32_t)entry->slot >= f->scratch_base) {
         log_error("interp: binding slot %d out of window (%u) for '%.*s'",
             entry->slot, f->scratch_base,
@@ -959,12 +950,6 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
             : entry->import_owner;
         if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
         interp_write_module_slot(owner, entry->slot, value);
-        return;
-    }
-    if (entry->binding_storage == BINDING_STORAGE_PREDICATE) {
-        if ((uint32_t)entry->slot < f->predicate_window_count) {
-            f->predicate_window[entry->slot] = value.item;
-        }
         return;
     }
     if ((uint32_t)entry->slot < f->scratch_base) f->slots[entry->slot] = value.item;
@@ -2887,10 +2872,6 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
     EvalSignal saved_signal = f->signal;
     uint64_t saved_signal_payload = f->slots[f->signal_index];
     const AstNode* saved_cur = f->cur;
-    // a faulting `that` predicate leaves its module and window switched in
-    Script* saved_module = f->module;
-    uint64_t* saved_predicate_window = f->predicate_window;
-    uint32_t saved_predicate_window_count = f->predicate_window_count;
 
     if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery)) {
         Item fault = ItemError;
@@ -2912,9 +2893,6 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
         f->signal = saved_signal;
         f->slots[f->signal_index] = saved_signal_payload;
         f->cur = saved_cur;
-        f->module = saved_module;
-        f->predicate_window = saved_predicate_window;
-        f->predicate_window_count = saved_predicate_window_count;
         return fault;
     }
     if (!lambda_recovery_frame_arm(recovery)) {
@@ -2967,8 +2945,8 @@ static Item eval_handler(InterpFrame* f, AstHandlerNode* handler) {
 // Match
 // ---------------------------------------------------------------------------
 
-// Fills the context slots for `~` bound to one subject -- a match scrutinee, a
-// constraint candidate, or a `that` proviso operand (S10.1.3). The subject is
+// Fills the context slots for `~` bound to one subject -- a match scrutinee or
+// a `that` proviso operand (S10.1.3). The subject is
 // no member of a walk, so `~key` is null; `~~` is the enclosing item for a
 // match and the enclosing parent otherwise, and the enclosing traversal keeps
 // its root (a fresh one is rooted at the subject). The caller owns the slots
@@ -2993,22 +2971,17 @@ static Script* interp_constrained_module(InterpFrame* f,
     if (!owner || !current || current == owner || current->cache_template == owner) {
         return current;
     }
-    Runtime* runtime = f->st->runtime ? f->st->runtime
-        : (f->st->ctx ? f->st->ctx->runtime : NULL);
-    for (int i = 0; runtime && runtime->scripts && i < runtime->scripts->length; i++) {
-        Script* script = (Script*)runtime->scripts->data[i];
-        if (script && (script == owner || script->cache_template == owner)) return script;
-    }
-    return NULL;
+    return runtime_script_instance(f->st->runtime ? f->st->runtime
+        : (f->st->ctx ? f->st->ctx->runtime : NULL), owner);
 }
 
-// Runs one `that` layer with the candidate installed as `~`. The body is an
-// ordinary `fn` expression (S12.1.1v2), evaluated as the proviso's is
-// (S10.1.5v3) and with no step budget, since the JIT inlines it whole. The
-// names it binds itself live in a window reserved here, so the frame may be
-// any one that names the type, and a call that re-enters the predicate gets
-// its own. A falsy or error answer fails the check without signalling, as
-// the JIT's branch does. Object constraints remain on their S11.4.6 path.
+// Runs one `that` layer by calling its predicate function with the candidate
+// (S11.4.11), as emit_constrained_predicate_call does. The function belongs to
+// the declaring module, and the outer locals its body reads are captured here,
+// where the type is named. Each call is an activation of its own, so a body
+// that names its own type recurses as any `fn` does (LR03-28). A falsy or
+// error answer fails the check without signalling, as the JIT's branch does.
+// Object constraints remain on their S11.4.6 path.
 static bool interp_eval_constrained_predicate(InterpFrame* f,
         TypeConstrained* layer, Scratch& subject) {
     Script* module = interp_constrained_module(f, layer);
@@ -3016,25 +2989,16 @@ static bool interp_eval_constrained_predicate(InterpFrame* f,
         log_error("interp: constrained type's declaring module is not loaded");
         return false;
     }
-    Scratch index_slot(f);
-    Scratch parent_slot(f);
-    Scratch root_slot(f);
-    interp_subject_slots(f, subject, index_slot, parent_slot, root_slot, false);
-    InterpContextGuard bound(f->st, subject.home(), index_slot.home(),
-        parent_slot.home(), root_slot.home());
-    ScratchSpan window(f, layer->predicate_slots);
-    if (!window.valid()) return false;
-    uint64_t* outer_window = f->predicate_window;
-    uint32_t outer_window_count = f->predicate_window_count;
-    Script* caller_module = f->module;
-    f->predicate_window = window.words();
-    f->predicate_window_count = layer->predicate_slots;
-    f->module = module;
-    Item result = eval_expr(f, layer->constraint);
-    f->module = caller_module;
-    f->predicate_window = outer_window;
-    f->predicate_window_count = outer_window_count;
-    return !interp_frame_pending(f) && is_truthy(result) == BOOL_TRUE;
+    Function* predicate = interp_make_closure(module, layer->predicate_fn, f);
+    if (!predicate) return false;
+    Scratch callee(f);   // roots the closure across the call
+    callee.set(interp_ptr_item(predicate));
+    List args = {};
+    args.length = 1;
+    args.items = (Item*)(void*)subject.home();
+    uint64_t result_home = 0;
+    Item result = fn_call_into(predicate, &args, &result_home);
+    return is_truthy(result) == BOOL_TRUE;
 }
 
 // S11.2.1: a constrained type named by `is` or a match arm admits its base
@@ -6167,9 +6131,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         }
 
         if (!interp_frame_pending(frame)) {
+            // `~` is a method's receiver, and a `that` body's candidate
+            // (S11.4.11); either is no member of a walk, so `~key` is null
             uint64_t method_index = ITEM_NULL;
-            InterpContextGuard method_context(frame->st, frame->method_self,
-                &method_index, NULL, frame->method_self);
+            uint64_t* subject = fn_node->is_that_predicate && params > 0
+                ? &frame->slots[0] : frame->method_self;
+            InterpContextGuard method_context(frame->st, subject,
+                &method_index, NULL, subject);
             uint64_t iterations = 0;
             for (;;) {
                 result = eval_expr(frame, fn_node->body);

@@ -258,7 +258,7 @@ The user ruled [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>) the way S11.4
 - [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>): T0 answered `false` for a predicate outside its allow-list. The colour walk never entered a constraint body, so a `pn` call there compiled and the JIT ran it inside `is`.
 - [LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>): T0 read an imported predicate's constants from the importer.
 
-Found on the way and fixed with them: a closure that names a local constrained type did not capture what the predicate reads, so the JIT logged "undefined variable" and failed the test. T0, once it evaluated such predicates, also needed the names a predicate binds itself kept out of the declaring frame. Still open: [LR03-27](#lr03-27) (the JIT reads an imported predicate's names in the importer) and [LR03-28](#lr03-28) (a predicate that names its own type crashes compilation).
+Found on the way and fixed with them: a closure that names a local constrained type did not capture what the predicate reads, so the JIT logged "undefined variable" and failed the test. T0, once it evaluated such predicates, also needed the names a predicate binds itself kept out of the declaring frame. Left open, and fixed later the same day by the hazard pass below: [LR03-27](<Lambda_Issue_Ledger (fixed).md#lr03-27>) (the JIT read an imported predicate's names in the importer) and [LR03-28](<Lambda_Issue_Ledger (fixed).md#lr03-28>) (a predicate that names its own type crashed compilation).
 
 ### Subscript probe pass — 2026-09-25/26
 
@@ -278,6 +278,17 @@ Implementing `none`, the empty type (S11.1.7), fixed two older defects on the wa
 - [LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>), fixed the same day: a one-literal alias `type T = 1` was not a type value, and a symbol alias admitted nothing. Its fix also restored `type(int) == type`, which the S11.1.7 identity comparison had made `false`, and found [LR03-31](<Lambda_Issue_Ledger (fixed).md#lr03-31>), also fixed that day: a bool literal type carried no value, so it admitted both bools.
 
 The audit of the day's rulings (S8.2.4v3, S10.1.1v2, S11.1.7) that followed fixed two more defects and completed the rulings' residue: [LR07-38](<Lambda_Issue_Ledger (fixed).md#lr07-38>) (the JIT skipped a one-value numeric literal contract) and [LR13-12](<Lambda_Issue_Ledger (fixed).md#lr13-12>) (the validator refused bare datetime, binary and decimal arms and misread sized types). Container, bool, datetime and binary operands now read as literal types, `unique`/`intersect` take any number of operands, `!none` reduces, and a type query walks the virtual carriers (spec Appendix A rows S10.1.1v2, S8.2.4v3, S11.1.7).
+
+### Hazard and recursion pass — 2026-09-26
+
+A crash, two stale caps and three latent hazards were closed together, each with a regression that fails on the tree before the fix:
+- [LR03-28](<Lambda_Issue_Ledger (fixed).md#lr03-28>) and [LR03-27](<Lambda_Issue_Ledger (fixed).md#lr03-27>): a `that` body is now an `fn` of its own, as TE-20 named, which both tiers call where the type is named. A body that names its own type recurses as any `fn` does, and an imported type's body runs in its declaring module on the JIT too (S11.4.11 status row).
+- [LR08-6](<Lambda_Issue_Ledger (fixed).md#lr08-6>) and [LR11-4](<Lambda_Issue_Ledger (fixed).md#lr11-4>): the 64-field caps had gone with the shape pool and SCU10, but a shape draft that could not grow still truncated an edit silently, and the printer printed any map over 10,000 fields as `{[invalid map_type length]}`.
+- [LR11-2](<Lambda_Issue_Ledger (fixed).md#lr11-2>): the render map's retransform skipped a dirty entry that an insert displaced behind its iterator.
+- [LR11-3](<Lambda_Issue_Ledger (fixed).md#lr11-3>): MarkEditor chose which buffers to free or regrow from `ui_mode_` and from "not my arena, so malloc's"; it now asks the owner, and its child growth moves the owned scalar tail it had left behind.
+- §15.1's masked memory-safety bug: the event-loop SIGSEGV band-aid was already gone; timer-callback stress fixtures now run in the forced-GC lane.
+
+Verified: `make test-lambda-baseline` 5958/5958 once the worktree reaches the Test262 data (`Test262Prelim.RunnerContracts` fails without it, identically on the untouched worktree); every golden 1000/1000 with the tier pinned to `jit` and to `interp`; `make test-radiant-baseline` green but for fixtures a nested worktree cannot reach through the tracked relative link `test/jquery-ui` (the four jQuery UI clicks, 31/31 assertions with the data linked) and two runs killed under load (the page suite and `RadiantViewTest.WindowScrollOnlyEmitsForPositionChanges`), each of which passes when rerun. Found on the way, not a defect of these: a `that` body cannot name a type declared after it, since only a type's own name is bound before its body and S10.1.7v2 reads an unbound bare name as `~.Name`, so two types cannot name each other.
 
 ---
 
@@ -587,12 +598,6 @@ The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledge
 <a id="lr03-21"></a>**LR03-21 · `<:` does not split a range across union arms (S11.1.4v2) · OPEN (found 2026-09-25, residue of LR03-18)**
 With `type R = 1 to 2` and `type OneTwo = 1 | 2`, `R <: OneTwo` is `false`. Every member of `1 to 2` is admitted by `1 | 2`, so S11.1.4v2 ("`A <: B` holds exactly when every value admitted by `A` is admitted by `B`") makes it `true`. The same holds for `1 to 5` against `(1 to 3) | (4 to 5)`. `contract_type_is_subtype` (`type_contract.cpp`) tries each arm of an expected union whole, and since the LR03-18 fix a range is below an arm only if that arm alone admits all its members. Deciding the split case means covering the range with the arms' members. The reverse direction is right: `OneTwo <: R` is `true`. Before the fix, `<:` compared a range type's tag, so every range was below every other (`(1 to 9) <: (1 to 5)` was `true`); the second example gave `true` then only by that accident.
 
-<a id="lr03-27"></a>**LR03-27 · The JIT reads an imported constrained type's predicate names in the importer (S11.4.11, S1.6) · OPEN (found 2026-09-26, while fixing LR03-24)**
-Both tiers run a predicate inline where `is` names its type. T0 switches to the declaring module for the evaluation (`interp_constrained_module`); the JIT emits the body into the importer's MIR function, where the declaring module's names are not bound. With `let lim = 3` and `pub type Eq = int that ~ == lim` imported, `3 is Eq` is `true` on T0 and `false` on the JIT, which logs "mir: undefined variable 'lim'" and tests the error value. A predicate that calls one of the declaring module's private functions (`pub type Dbl = int that dbl(~) > 6`) fails to link on the JIT ("failed to resolve native fn/pn: _dbl_87"), so the importer does not load. Literal-only predicates and string constants are right on both tiers. Before the LR03-24 fix T0 answered `false` for both, from its allow-list. A fix evaluates the predicate as a function of its declaring module, exported beside the type, which would also answer [LR03-28](#lr03-28).
-
-<a id="lr03-28"></a>**LR03-28 · A constrained type whose predicate names the type itself crashes compilation (S11.4.11) · OPEN (found 2026-09-26, while fixing LR03-24)**
-`type Rec = int that (~ <= 0 or (~ - 1) is Rec)` segfaults on both tiers before anything runs, on the binary from before the LR03-24 fix as well. Both tiers expand a named constrained type's predicate where `is` names it: T0's frame plan sizes the scratch of `is Rec` by the predicate (`plan_constrained_type_need` into `plan_need`), and the JIT inlines it (`emit_constrained_type_test`), so a self-reference recurses without bound. Recursion through a function works: `Down`'s predicate calls `inner`, which tests `is Down` (fixture `constrained_type_predicate.ls` §5).
-
 <a id="lr03-29"></a>**LR03-29 · Type equality compares a compound type's payload tag only (S5.5.2) · OPEN (found 2026-09-26, while implementing S11.1.7)**
 `==` on two type values (`fn_eq_depth`, `lambda-eval.cpp`) compares the TypeId of each value's payload. Every union, intersection, exclusion, occurrence and literal type shares one tag, so all of them compare equal: `(1 | 2) == (3 | 4)`, `(int | string) == (int | bool)` and `(int & 5) == (string ! "a")` are `true` on both tiers. S5.5.2 makes type equality representational — normalized forms compare, so `int|string == string|int` holds and these do not. The S11.1.7 change made the compact meta types (`type`, `number`, `integer`, `none`) compare by identity, which fixed `number == integer`, and a reduced operation now is its result, so `(1 & 2) == none` holds for the right reason. A fix compares normalized forms structurally: literals by value, a union as the set of its arms; hashing must follow (S5.6.2).
 
@@ -817,11 +822,6 @@ Root and raw-number regions have fixed virtual limits. Checked prologues fail
 deterministically instead of corrupting adjacent memory, but workloads that
 genuinely exceed those reservations cannot grow them dynamically.
 
-<a id="lr08-6"></a>**LR08-6 · `SHAPE_POOL_MAX_CHAIN_LENGTH` = 64 silently returns NULL · OPEN**
-Maps/elements with more than 64 fields get no pooled shape
-(`lambda/core/shape_pool.cpp:182`–`183`, `:247`) — only a `log_warn`, with a
-possible NULL-deref downstream depending on caller handling.
-
 <a id="lr08-7"></a>**LR08-7 · Deep recursion consumes root and number watermarks as well as C stack · OPEN**
 Frames no longer allocate heap root blocks, but recursion accumulates each
 function's statically reserved slots until the epilogue restores them. The
@@ -942,36 +942,6 @@ T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack over
 `next()` only linear-scans *direct* children (`:57`, `// TODO: Implement proper
 tree traversal for nested elements`). There is no real descendant or CSS-like
 matching, so any caller expecting deep selection gets silently wrong results.
-
-<a id="lr11-2"></a>**LR11-2 · `render_map` iterates while it mutates · OPEN**
-The retransform loop calls `fn()` inside the iteration, and that can reach
-`render_map_record()` → `hashmap_set()`, resizing the very map being iterated.
-The current code defends by snapshotting the entry before re-execution
-(`lambda/runtime/render_map.cpp:323`–`326`) and by refreshing the root reverse
-mapping (`:135`–`142`), but the iterate-while-mutate pattern remains and is easy
-to break with any change to retransform ordering.
-
-<a id="lr11-3"></a>**LR11-3 · The `ui_mode` arena-provenance landmine · OPEN**
-Inline `map_rebuild_with_new_shape` must **not** `pool_free` the old data buffer
-in `ui_mode_`, because in ui_mode that buffer was arena-allocated by the JIT
-(`context->arena`), and freeing it through the editor's pool would corrupt
-rpmalloc. The guard is present and correct at both sites
-(`lambda/io/mark_editor.cpp:834`–`837`, `:1356`–`1359`), but any path that flips
-`ui_mode_` incorrectly corrupts the heap with no diagnostic.
-
-<a id="lr11-4"></a>**LR11-4 · Hard-coded caps with mixed failure modes · OPEN**
-All four caps survive, and so does the inconsistency in how they fail:
-
-| Cap | Where | Failure mode |
-|---|---|---|
-| `SHAPE_BUILDER_MAX_FIELDS` 64 | `lambda/core/shape_builder.hpp:6` | **silent truncation** in `shape_builder_import_shape` (`shape_builder.cpp:132`, `:141` — `log_warn` only), so maps/elements with >64 fields cannot be edited correctly |
-| `MAX_BATCH_UPDATES` 64 | `lambda/io/mark_editor.cpp:13` | **errors out** above 64 (`:941`–`945`) |
-| `MAX_DEPTH` 2000 / `MAX_FIELD_COUNT` 10000 | `lambda/core/print.cpp:12`–`13` | **clamps** deep/wide structures with a `[MAX_DEPTH_REACHED]` marker (`:139`, `:208`, `:650`) or a bail (`:142`) |
-| `EDIT_SOURCE_PATH_MAX` 32 | `lambda/runtime/edit_bridge.h:31` | **fails** source paths deeper than 32 (`edit_bridge.cpp:72`–`75`, `"source path too deep"`) |
-
-Truncate vs. error vs. clamp vs. fail, for four caps in one subsystem, is itself
-the hazard.
-
 
 <a id="lr11-7"></a>**LR11-7 · `createSymbol` pooling-comment divergence · OPEN**
 The header comment still claims symbols ≤32 chars are pooled
@@ -1588,17 +1558,11 @@ and points at the generator that actually conflicts.
 
 One policy each, not per-site fixes.
 
-- **Silent fixed caps with inconsistent failure modes** — closure captures 16,
-  generator states 63, promise reactions 8, TypeMap hash 32, union types 32,
-  module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine
-  retires the class. Ledger instances: [LR01-5](#lr01-5), [LR11-4](#lr11-4),
-  [LR13-5](#lr13-5).
+- **Silent fixed caps with inconsistent failure modes** — closure captures 16, generator states 63, promise reactions 8, TypeMap hash 32, union types 32, module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine retires the class. Ledger instances: [LR01-5](#lr01-5), [LR13-5](#lr13-5); [LR11-4](<Lambda_Issue_Ledger (fixed).md#lr11-4>), the Mark data API's four, was closed on 2026-09-26 with every one of its caps failing visibly.
 - **Layout-coupled raw offsets** — resolved for module binding by removing the
   unreachable `init_module_import` walk ([LR01-8](<Lambda_Issue_Ledger (fixed).md#lr01-8>)); GC
   trace/compaction is resolved by [LR08-5](<Lambda_Issue_Ledger (fixed).md#lr08-5>).
-- **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
-  the `sys://` map-walk segfault workaround was replaced by the shape-aware
-  traversal in [LR01-R3](<Lambda_Issue_Ledger (fixed).md#lr01-r3>).
+- **Masked memory-safety bugs** — none remain. The event-loop SIGSEGV band-aid was removed on 2026-07-31 (ER-S6 in `impl/Lambda_Impl_Type_Enforce (done).md`): a memory fault in a timer callback now terminates the process, as S7.11.4 requires, and a callback re-enters only its owning context (`timer_runtime_enter`, an owner check since 2026-07-29), which closes JO12's re-entry audit. Verified 2026-09-26: `test/js/timer_callback_gc_stress.js` and its document twin `dom_timer_callback_gc_stress.js` drive allocating callbacks, nested scheduling, clears and promise jobs through the drain, and run in the forced-GC lane (`make test-gc-rooting-core`) with freed memory poisoned. The `sys://` map-walk segfault workaround was replaced by the shape-aware traversal in [LR01-R3](<Lambda_Issue_Ledger (fixed).md#lr01-r3>).
 - **`SysFuncInfo` registry expressiveness** — data-driven argument/return
   conventions would delete inline special-casing ([LR09-1](#lr09-1),
   [LR09-2](<Lambda_Issue_Ledger (fixed).md#lr09-2>)).
@@ -1628,7 +1592,7 @@ together, not individually.
 |---|---|---|
 | **TCO safety proof residue** | LR07-13 | The former root-classification faces LR07-7/LR08-3 are resolved and archived. The surviving TCO face is the unused `is_tco_function_safe` proof, now tracked independently under LR07-13. |
 | **Representation ↔ semantics coupling** | LR07-14 | Remaining container and result-domain cases. Lambda expression lowering carries `MirValue`; see resolved [LR07-1](<Lambda_Issue_Ledger (fixed).md#lr07-1>). |
-| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
+| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-10, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency was stated most plainly by LR11-4, closed on 2026-09-26 with LR08-6 (archived). |
 | **Surface syntax (S16) residue** | S16.9.5, i8-genafterlet, SO36, O3, §7.17, LR02-25, LR02-27 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). LR02-24–LR02-27 (2026-09-25) are four such type-sublanguage splits between the front ends: a range after `is`, a chained count, a line-start `?`, and signature parameters without `: T`. The harnesses stand at 343/343 C and 330/330 Tree-sitter at `293b7a175`, and neither covers these forms. |
 | **Process globals** | LR12-6 | `g_template_registry` is now context-local; `g_dry_run` remains process-global and blocks per-run dry-run semantics. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 

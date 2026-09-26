@@ -2140,13 +2140,13 @@ static void capture_indexed_outer_binding(Transpiler* tp, AstFuncNode* fn_node,
     if (is_mutable) mark_capture_mutable(&fn_node->captures, name);
 }
 
-// Both tiers run a constrained type's predicates inline where `is` or a match
-// arm names the type, so a function naming a local constrained type from an
-// enclosing scope captures each outer binding those predicates read, as if the
-// predicate text were written in its body (S10.1.7v2: bare names are lexical).
-// Names a predicate binds itself stay put; a nested constrained type's own
-// predicates are followed, each type once per function, so types that name
-// each other cannot recurse without bound.
+// Both tiers call a constrained type's predicate functions where `is` or a
+// match arm names the type, reading each function's captures there, so a
+// function naming a local constrained type from an enclosing scope captures
+// each outer binding those predicates read (S10.1.7v2: bare names are
+// lexical). Names a predicate binds itself stay put; a nested constrained
+// type's own predicates are followed, each type once per function, so types
+// that name each other cannot recurse without bound.
 typedef struct PredicateCaptureScan {
     Transpiler* tp;
     AstFuncNode* fn_node;
@@ -15052,6 +15052,49 @@ static void resolver_function_end(LambdaResolver* r) {
     }
 }
 
+// S11.4.11: a `that` body is an `fn` body over the scope it is written in, so it
+// resolves inside a function of its own, `that(~)`: the names the body binds
+// are that function's locals and the outer locals it reads are its captures.
+// `is` and a match arm call it instead of expanding the body where the type is
+// named, which recursed without bound on a body naming its own type (LR03-28),
+// and it is compiled in the declaring module, whose names an importer's copy
+// of the body could not read (LR03-27).
+static AstFuncNode* resolver_predicate_begin(LambdaResolver* r,
+        AstConstrainedTypeNode* node) {
+    Transpiler* tp = r->tp;
+    SourceSpan span = node->constraint ? node->constraint->source_span
+        : node->source_span;
+    // `that` is a keyword, so the MIR symbol `_that_<offset>` names no user
+    // function; the kind is a function expression's, as nothing binds it
+    AstFuncNode* fn = build_function_syntax(tp, span, strview_from_cstr("that"), false);
+    fn->node_type = AST_NODE_FUNC_EXPR;
+    fn->syntax_form = LSF_NONE;
+    init_function_placeholder(tp, fn);
+    // an error answer fails the test (S11.4.11), so the body may produce one;
+    // the implicit `fn` contract would reject that as an escape (E208)
+    set_function_return_contract((TypeFunc*)fn->type, &TYPE_ANY, false);
+    fn->is_that_predicate = true;
+    fn->vars = lambda_ast_enter_scope(tp, false);
+    // the candidate, read in the body as `~`; `any` admits an error too, as
+    // `err is T` tests one
+    AstNamedNode* subject = build_param_syntax(tp, span, strview_from_cstr("~"),
+        NULL, NULL, false, false);
+    subject->syntax_form = LSF_NONE;
+    resolve_param(tp, subject);
+    set_param_contract((TypeParam*)subject->type, &TYPE_ANY, false);
+    fn->param = subject;
+    return fn;
+}
+
+static void resolver_predicate_end(LambdaResolver* r, AstFuncNode* fn,
+        AstNode* body) {
+    Transpiler* tp = r->tp;
+    NameScope* scope = fn->vars;
+    direct_complete_function(tp, fn->source_span, fn, scope, (AstNode*)fn->param,
+        NULL, NULL, body, false, false, false);
+    lambda_ast_leave_scope(tp, scope);
+}
+
 static void resolver_type_alias_begin(LambdaResolver* r, AstDeclaratorNode* alias) {
     Transpiler* tp = r->tp;
     alias->is_type_definition = true;
@@ -15352,9 +15395,13 @@ static void resolve_base_type(Transpiler* tp, AstNode* node) {
 static_assert(sizeof(AstTypeNode) <= sizeof(AstConstrainedTypeNode),
     "a rejected constrained type must be able to become the error type");
 
-static void resolve_constrained(Transpiler* tp, AstConstrainedTypeNode* node) {
+static void resolve_constrained(Transpiler* tp, AstConstrainedTypeNode* node,
+        AstFuncNode* predicate) {
     AstNode* base = node->base;
     AstNode* constraint = node->constraint;
+    // the tree holds the body once, inside its function, so every pass that
+    // plans, indexes or emits functions reaches it as one
+    node->constraint = (AstNode*)predicate;
     if (base && base->type && base->type->type_id == LMD_TYPE_TYPE &&
             base->type->kind == TYPE_KIND_BINDER) {
         record_semantic_error_span(tp, node->source_span, ERR_BINDER_TRAILING_THAT,
@@ -15369,6 +15416,7 @@ static void resolve_constrained(Transpiler* tp, AstConstrainedTypeNode* node) {
     base_type = unwrap_simple_type_type(base_type);
     type->base = base_type ? base_type : &TYPE_ANY;
     type->constraint = constraint;
+    type->predicate_fn = predicate;
     type->module = tp->script_owner;
     node->type = (Type*)type;
     arraylist_append(tp->type_list, node->type);
@@ -16038,16 +16086,20 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_call(tp, call);
         break;
     }
-    case LSF_CONSTRAINED:
-        resolve_walk(r, ((AstConstrainedTypeNode*)node)->base);
+    case LSF_CONSTRAINED: {
+        AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)node;
+        resolve_walk(r, constrained->base);
+        AstFuncNode* predicate = resolver_predicate_begin(r, constrained);
         // `T that cond` binds the candidate as the current item, in every
         // position: annotation, alias, field, match arm (S10.1.7v2)
         resolver_that_begin(r, true);
-        resolve_walk(r, ((AstConstrainedTypeNode*)node)->constraint);
+        resolve_walk(r, constrained->constraint);
         resolver_that_end(r);
+        resolver_predicate_end(r, predicate, constrained->constraint);
         resolve_diagnostics(r, node);
-        resolve_constrained(tp, (AstConstrainedTypeNode*)node);
+        resolve_constrained(tp, constrained, predicate);
         break;
+    }
     case LSF_IMPORT:
         resolve_diagnostics(r, node);
         resolve_import(tp, (AstImportNode*)node);

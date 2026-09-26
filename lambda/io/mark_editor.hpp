@@ -62,6 +62,10 @@ private:
     // DOM linked-list sync helper (ui_mode only)
     void dom_relink_children(Element* parent_elem);
 
+    // Room for `dense_length` children beside the list's owned scalar tail,
+    // grown into this editor's arena (inline mode; LR11-3)
+    bool reserve_children(List* list, int64_t dense_length);
+
 public:
     /**
      * Construct editor from Input

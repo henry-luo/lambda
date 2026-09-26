@@ -859,6 +859,14 @@ fn check(x) => x is Big;
 [5 is Big, 2 is Big, 4 is BigDouble, check(5)]   // [true, false, true, true]
 ```
 
+Because a predicate is a function, it may name its own type, and each level of the value is one more call:
+
+```lambda
+// an int, or an array whose items are all Nested
+type Nested = any that (~ is int or (~ is array and all(~ |> (~ is Nested))));
+[[1, [2, [3]]] is Nested, [1, ["x"]] is Nested, 7 is Nested]   // [true, false, true]
+```
+
 Because `is` may run it from any function, a predicate is always `fn`
 context, even when written inside a `pn`: calling a procedure in it is a
 compile error.

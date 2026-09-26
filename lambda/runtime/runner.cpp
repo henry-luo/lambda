@@ -2702,6 +2702,15 @@ void runtime_register_script(Runtime* runtime, Script* script) {
     runtime_loaded_script_put(runtime, script);
 }
 
+Script* runtime_script_instance(Runtime* runtime, const Script* owner) {
+    for (int i = 0; runtime && runtime->scripts && owner &&
+            i < runtime->scripts->length; i++) {
+        Script* script = (Script*)runtime->scripts->data[i];
+        if (script && (script == owner || script->cache_template == owner)) return script;
+    }
+    return NULL;
+}
+
 // runtime::type_list can alias a Script's Input-owned list while a nested
 // Lambda package is evaluated. The Script remains the owner of that alias.
 bool runtime_type_list_is_script_owned(Runtime* runtime) {

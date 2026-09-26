@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
 **Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. General loop OSR, JS P2 promotion, and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI22** remains the design record; the formal rulings named above win on disagreement.
-**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v10**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v2), S15.3.
+**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v10**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
 
@@ -485,19 +485,19 @@ enum class EvalMode : uint8_t {
 };
 ```
 
-A `that` predicate has no mode of its own (AI17v2, §6.2): it runs under `RUNTIME`.
+A `that` predicate has no mode of its own (AI17v3, §6.2): it runs under `RUNTIME`.
 
 `EvalMode::CONST` **is** the const-folder D8.1.1 sanctioned: same walker, restricted to the pure core subset with the `fn`/`pn` purity bit as the soundness gate — D6.1.2 names that bit *"the const-folder's soundness gate"* verbatim, and U26 §12.3's estimate (*"~95% of argument 4 at ~5% of an interpreter's cost"*) inverts once the interpreter exists anyway: the folder becomes a mode flag, not a second engine. Folding runs in the pass manager over literal-typed subtrees, with a fuel budget and a strict no-effect, no-fault discipline (a folding attempt that raises or exhausts fuel simply doesn't fold). The MIR-cache folding hazard (`Lambda_Design_MIR_Cache_L3.md` — folded data-item REFs kill value-based patching) is a constraint on what folded *pointers* may flow into lowering, inherited as-is.
 
-### 6.2 `that` predicates without the JIT (AI17v2, revised 2026-09-26)
+### 6.2 `that` predicates without the JIT (AI17v3, revised 2026-09-26)
 
-T0 evaluates a constrained type's `that` body (`TypeConstrained::constraint`, an `AstNode*`) directly, binding `~` per §4.7, so no `is` on a constrained type in T0 needs the JIT. It is an ordinary `fn` expression (S11.4.11): the walker runs it under `RUNTIME`, as it runs the proviso (S10.1.5v3), with no allow-list and no step budget, because the JIT inlines the same body whole and S1.6 leaves no room for either tier to answer for a body it declined. Purity is enforced statically instead: the colour walk checks every constraint body as `fn` context (E224; dynamic callees colour-guarded).
+A constrained type's `that` body is an ordinary `fn` body (S11.4.11), and it is compiled as one: the resolver opens a function of its own around the body, `that(~)` (`TypeConstrained::predicate_fn`), whose one parameter is the candidate and which binds it as `~` at entry. T0 runs `is` on a constrained type by calling that function once per layer, so no such `is` needs the JIT. The body runs under `RUNTIME` with no allow-list and no step budget, because the JIT runs the same body whole and S1.6 leaves no room for either tier to answer for a body it declined. Purity is enforced statically instead: the colour walk checks every constraint body as `fn` context (E224; dynamic callees colour-guarded).
 
-Three facts make the inline evaluation lexically right wherever `is` names the type:
+Three facts make the call lexically right wherever `is` names the type:
 
-- **Declaring module.** `TypeConstrained::module` records the module that resolved the layer, and the walker switches the frame's module to its execution instance for the layer's evaluation (`interp_constrained_module`), so an imported predicate reads its owner's slab, constants and functions.
-- **Captures.** Capture analysis treats a function's reference to a local constrained type as a read of what the type's predicates read (`capture_constraint_reads`, `build_ast.cpp`), so a nested closure has those values on both tiers.
-- **Predicate window.** The names a predicate binds itself are planned as `BINDING_STORAGE_PREDICATE` slots of a per-layer window (`plan_predicate_windows`). Each evaluation reserves the window in the evaluating frame's scratch, so the frame may be any one that names the type, and a call that re-enters the predicate gets a fresh window. The use-site scratch plan counts it (`plan_constrained_type_need`).
+- **Declaring module.** `TypeConstrained::module` records the module that resolved the layer, and the closure is made in its execution instance (`interp_constrained_module`), so an imported predicate reads its owner's slab, constants and functions.
+- **Captures.** The outer locals a body reads are its function's captures, read where the type is named (`interp_eval_constrained_predicate` makes the closure there). Capture analysis treats a function's reference to a local constrained type as a read of what the type's predicates read (`capture_constraint_reads`, `build_ast.cpp`), so a nested closure has those values to pass on, on both tiers.
+- **An activation per evaluation.** The names a body binds are its function's locals, and each evaluation is a call, so a body that names its own type recurses as an `fn` does. The use-site plan roots only the closure (`plan_constrained_type_need`).
 
 S11.4.6's base-only interim for the generic path is unchanged (SO9 stays open): a first-class type value, a declaration boundary and the validator still enforce only the base. The superseded AI17 wording is in Appendix S.
 
@@ -748,7 +748,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 | **AI14** | `return`/`break`/`continue` travel as `EvalSignal` through the walker; `longjmp` is fault-only | **confirmed** |
 | **AI15** | Implicit contexts (`~`, `~#`, `last`, `^`, pipe injection, handlers) are explicit slot-backed stacks in `InterpState` | **confirmed** |
 | **AI16** | The sanctioned const-folder is this engine under `EvalMode::CONST`, purity-gated (D6.1.2), fuel-budgeted — one engine, two modes | **confirmed** |
-| **AI17v2** | `that` predicates evaluate in T0 as ordinary `fn` expressions, in full and in their declaring scope (declaring module, captured locals, a per-evaluation window for the names they bind); purity is the static `fn`/`pn` check, not an evaluator mode (S11.4.11, TE-20). Revised 2026-09-26; v1 in Appendix S | **confirmed** |
+| **AI17v3** | `that` predicates evaluate in T0 as calls of their own `fn`, in full and in their declaring scope (declaring module, captures read where the type is named, the names they bind as that function's locals); purity is the static `fn`/`pn` check, not an evaluator mode (S11.4.11, TE-20). Revised 2026-09-26 (twice); v1 and v2 in Appendix S | **confirmed** |
 | **AI18** | The U26-KIV reference interpreter is subsumed: T0 is the executable-spec oracle, differentially gated on every baseline run | **confirmed** |
 | **AI19** | MIR-interp demotes to codegen diagnostic at P5; `mir_policy.hpp` size thresholds retire | **confirmed** |
 | **AI20** | REPL/shell route through T0 now; persistent top-level environment (P4) supersedes incremental-compilation caching as the REPL end state | **confirmed** |
@@ -772,4 +772,5 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 
 ## Appendix S — Superseded rulings
 
+- ~~**AI17v2** — `that` predicates evaluate in T0 as ordinary `fn` expressions, in full and in their declaring scope (declaring module, captured locals, a per-evaluation window for the names they bind).~~ Superseded 2026-09-26 by **AI17v3** (§6.2). Both tiers expanded the body where `is` named the type, T0 reserving a `BINDING_STORAGE_PREDICATE` window in the evaluating frame for the names it binds. A body naming its own type recursed without bound at compile time ([LR03-28](<Lambda_Issue_Ledger (fixed).md#lr03-28>)), and the JIT's copy of an imported body read the importer's names ([LR03-27](<Lambda_Issue_Ledger (fixed).md#lr03-27>)); each body is now a function, called per layer.
 - ~~**AI17** — `that` predicates evaluate under `EvalMode::PREDICATE` instead of JIT-compiled `constraint_fn`; S11.4.6 base-only shipped behavior unchanged.~~ Superseded 2026-09-26 by **AI17v2** (§6.2, §14). The mode admitted a predicate only when every node passed an allow-list (literals, `~`/`~key`, a set of operators, 22 pure system functions) within a 1,024-step `LAMBDA_PREDICATE_FUEL` budget, and answered `false` otherwise. The JIT evaluated the same body in full, so the tiers disagreed and `auto` flipped a hot function's answer on promotion ([LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>)). Purity is now the static `fn`/`pn` check (S11.4.11, TE-20).

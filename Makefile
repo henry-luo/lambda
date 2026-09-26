@@ -1674,6 +1674,14 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_property_accessor_gc.js > temp/gc_rooting_js_accessor.txt
 	@diff -u test/js/regression_property_accessor_gc.txt temp/gc_rooting_js_accessor.txt
+	@echo "Running LambdaJS timer-callback drain forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/timer_callback_gc_stress.js > temp/gc_rooting_js_timers.txt
+	@diff -u test/js/timer_callback_gc_stress.txt temp/gc_rooting_js_timers.txt
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/dom_timer_callback_gc_stress.js \
+		--document test/js/dom_timer_callback_gc_stress.html > temp/gc_rooting_js_dom_timers.txt
+	@diff -u test/js/dom_timer_callback_gc_stress.txt temp/gc_rooting_js_dom_timers.txt
 	@echo "Running LambdaJS eval state forced-GC gates..."
 	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/eval_basic.js > temp/gc_rooting_js_eval_basic.txt

@@ -16,3 +16,7 @@
 [false, true, true, false]
 "9 a hot function keeps its answer when it is compiled"
 [true, true, true, true, true, true, true, true]
+"10 an imported predicate reads its module's let and calls its private fn"
+[true, false, true, false]
+"11 a body whose answer may be an error compiles: the error fails the check"
+[true, false, true, false]

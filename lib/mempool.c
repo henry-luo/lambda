@@ -818,6 +818,11 @@ void pool_free(Pool* pool, void* ptr) {
     pool_coalesce_free(pool, block);
 }
 
+bool pool_owns(Pool* pool, const void* ptr) {
+    return pool && pool->valid == POOL_VALID_MARKER && ptr &&
+        pool_find_block(pool, (void*)ptr) != NULL;
+}
+
 static void pool_account_realloc(Pool* pool, size_t old_size, size_t new_size) {
     pool->alloc_bytes += new_size;
     pool->alloc_count++;

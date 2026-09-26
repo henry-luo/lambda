@@ -106,7 +106,7 @@ static inline int ast_constrained_type_layers(TypeConstrained* type,
     for (Type* link = (Type*)type; lambda_type_is_constrained(link);
             link = type_field_unwrap_simple_decl(((TypeConstrained*)link)->base)) {
         TypeConstrained* layer = (TypeConstrained*)link;
-        if (count == LAMBDA_CONSTRAINT_CHAIN_MAX || !layer->constraint) return -1;
+        if (count == LAMBDA_CONSTRAINT_CHAIN_MAX || !layer->predicate_fn) return -1;
         out[count++] = layer;
     }
     for (int i = 0, j = count - 1; i < j; i++, j--) {
@@ -117,7 +117,8 @@ static inline int ast_constrained_type_layers(TypeConstrained* type,
     return count;
 }
 
-// The predicates of those layers, in the same order.
+// The `that` bodies of those layers, in the same order: each is its predicate
+// function's body, read here for what it names, never evaluated in place.
 static inline int ast_constrained_type_predicates(TypeConstrained* type,
         AstNode** out) {
     TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];

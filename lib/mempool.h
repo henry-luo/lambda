@@ -87,6 +87,12 @@ void* pool_calloc(Pool* pool, size_t size);
 void pool_free(Pool* pool, void* ptr);
 
 /**
+ * True when ptr is a live allocation of this pool, so a caller holding a
+ * buffer of unknown provenance can ask its owner rather than guess one.
+ */
+bool pool_owns(Pool* pool, const void* ptr);
+
+/**
  * Reallocate memory from a specific pool
  * @param pool Pool to reallocate from
  * @param ptr Pointer to existing memory (can be NULL)

@@ -1099,16 +1099,15 @@ typedef struct TypeUnary : Type {
 // Note: ConstraintFn typedef is forward-declared above (near TypeObject)
 typedef struct TypeConstrained : Type {
     Type* base;                 // base type (e.g., int, string)
-    struct AstNode* constraint; // constraint expression AST (for error messages)
+    struct AstNode* constraint; // the `that` body, predicate_fn's (printing, scans)
     int type_index;             // index in the type list
     ConstraintFn constraint_fn; // compiled constraint check function
     // the declaring module: the predicate reads its names wherever `is` runs
     // it, an importer's included (S10.1.7v2)
     Script* module;
-    // T0 frame-plan facts: the window of names the predicate binds itself
-    // (BINDING_STORAGE_PREDICATE), reserved afresh by each evaluation
-    uint16_t predicate_slots;
-    bool predicate_planned;
+    // S11.4.11: the body as an `fn` of its written scope, `that(~)`; `is` and
+    // a match arm call it, so each evaluation is an activation of its own
+    struct AstFuncNode* predicate_fn;
 } TypeConstrained;
 
 // A binder appears only in a function parameter contract.  `bound` is the
@@ -1568,6 +1567,10 @@ void array_append(Array* arr, Item itm, Pool* pool, Arena* arena = nullptr);
 // append entry points keep parser-owned list growth in its Pool/Arena owner.
 void list_push_io(List* list, Item item);
 void list_push_pooled(List* list, Item item, Pool* pool);
+// Grow an Input-owned list to at least `min_capacity` slots (doubling) from the
+// arena when given, else the pool. The old buffer stays with whoever owns it,
+// and an owned wide-scalar tail moves with the dense items that point into it.
+bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena);
 #ifdef LAMBDA_IO_STATIC_VALUES
 // Static input sources select their explicit Pool/Arena provider at compile time.
 #define list_push list_push_io

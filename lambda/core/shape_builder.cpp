@@ -111,27 +111,28 @@ bool shape_builder_has_field(ShapeBuilder* builder, const char* name) {
 
 // ========== Import/Export ==========
 
-void shape_builder_import_shape(ShapeBuilder* builder, const TypeMap* shape) {
+bool shape_builder_import_shape(ShapeBuilder* builder, const TypeMap* shape) {
     if (!builder) {
         log_error("shape_builder_import_shape: null builder");
-        return;
+        return false;
     }
 
     builder->field_count = 0;
 
     if (!shape) {
         log_debug("shape_builder_import_shape: null shape, cleared builder");
-        return;
+        return true;
     }
 
     FOR_EACH_MAP_FIELD(shape, entry) {
-        if (!shape_builder_reserve(builder, builder->field_count + 1)) return;
+        if (!shape_builder_reserve(builder, builder->field_count + 1)) return false;
         ShapeFieldDraft* draft = &builder->fields[builder->field_count++];
         draft->name = entry->name->str;
         draft->type_id = entry->type->type_id;
     }
 
     log_debug("shape_builder_import_shape: imported %zu fields", builder->field_count);
+    return true;
 }
 
 // ========== Utilities ==========

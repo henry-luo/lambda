@@ -13,7 +13,6 @@
 #endif
 
 #define MAX_DEPTH 2000
-#define MAX_FIELD_COUNT 10000
 
 static char* binary_literal_text(Binary* bin, size_t* text_len) {
     size_t byte_len = binary_length(bin);
@@ -169,8 +168,9 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
     // Prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!map_type) { strbuf_append_str(strbuf, "[null map_type]");  return; }
-    // Safety check for map_type length
-    if (map_type->length < 0 || map_type->length > MAX_FIELD_COUNT) {
+    // A corrupt length is refused; a wide map is not. A 10000-field cap printed
+    // every larger input map as this marker, dropping its fields (LR11-4).
+    if (map_type->length < 0) {
         strbuf_append_str(strbuf, "[invalid map_type length]");
         return;
     }

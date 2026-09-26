@@ -115,7 +115,7 @@ The `Type*` family (all in `lambda-data.hpp`):
 
 - **Literal/const scalars** — `TypeConst` (+`const_index`) specialized as `TypeFloat`, `TypeInt64`, `TypeUint64`, `TypeNumSized` (`num_type` + `raw_bits`), `TypeDateTime`, `TypeDecimal`, `TypeString`/`TypeSymbol` (`:151`–`192`).
 - **Containers** — `TypeArray`/`TypeList` (`nested`, `length`, `type_index`, `:194`), and the `TypeMap`/`TypeElmt`/`TypeObject` shapes above.
-- **Type expressions** — `TypeBinary` (union / intersect / exclude via `left`/`right`/`op`, `:571`), `TypeUnary` (occurrence `?+*{n}` via `operand`/`op`/`min_count`/`max_count`, `:578`), `TypeConstrained` (`base where(...)` with a compiled `constraint_fn`, `:590`), `TypePattern` (a compiled RE2 regex, `:630`).
+- **Type expressions** — `TypeBinary` (union / intersect / exclude via `left`/`right`/`op`, `:571`), `TypeUnary` (occurrence `?+*{n}` via `operand`/`op`/`min_count`/`max_count`, `:578`), `TypeConstrained` (`base that …`, whose body is compiled as a function of its own, `predicate_fn`, which `is` and match arms call per layer — S11.4.11), `TypePattern` (a compiled RE2 regex, `:630`).
 - **Functions** — `TypeFunc` (`param`/`returned`/`error_type` plus the `can_raise`/`is_proc`/`is_variadic` flags, `:604`), `TypeParam` (`:597`), `TypeSysFunc`.
 - **Meta** — `TypeType` (`:622`) wraps a `Type*`: the type of a type value (`LMD_TYPE_TYPE`).
 

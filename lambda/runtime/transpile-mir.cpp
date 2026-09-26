@@ -2025,11 +2025,11 @@ static void mir_pipe_context_restore(MirTranspiler* mt, const MirPipeContext& sa
     mt->pipe_root_reg = saved.root;
 }
 
-// `~` bound to one subject as a constraint binds its candidate: `~~` stays the
-// enclosing parent and the enclosing traversal keeps its root, while outside
-// any context the subject roots a fresh one. The subject is no member of a
-// walk, so `~key` is null, as T0's interp_subject_slots has it; left unset it
-// read an enclosing pipe's index, or reg 0 outside any pipe.
+// `~` bound to the one subject of a `that` proviso: `~~` stays the enclosing
+// parent and the enclosing traversal keeps its root, while outside any context
+// the subject roots a fresh one. The subject is no member of a walk, so `~key`
+// is null, as T0's interp_subject_slots has it; left unset it read an
+// enclosing pipe's index, or reg 0 outside any pipe.
 static MirPipeContext mir_bind_subject(MirTranspiler* mt, MIR_reg_t subject) {
     MirPipeContext saved = mir_pipe_context_save(mt);
     mt->pipe_item_reg = subject;
@@ -13890,18 +13890,85 @@ static void mir_note_float_null_flag(MirTranspiler* mt, MIR_reg_t value, MIR_reg
 static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         bool native_int_out);
 
+// S11.4.11: one `that` layer is a call of its predicate function with the
+// candidate, through the function's boxed `_b` entry, answering an Item. A
+// function of this module is called directly, and its captures -- the outer
+// locals the body reads -- are read here, where the type is named, as a direct
+// call to a local closure builds its env. An imported type's function stays in
+// its declaring module, which exports it (register_module_pub_fns), so its body
+// reads that module's names and calls its private functions (LR03-27). Mirrors
+// T0's interp_eval_constrained_predicate.
+static MIR_reg_t emit_constrained_predicate_call(MirTranspiler* mt,
+        TypeConstrained* layer, MIR_reg_t value) {
+    AstFuncNode* predicate = layer->predicate_fn;
+    StrBuf* name = strbuf_new_cap(64);
+    write_fn_name_ex(name, predicate, NULL, "_b");
+    MIR_item_t local = find_local_func(mt, name->str);
+    MIR_reg_t answer = 0;
+    if (local) {
+        int capture_count = 0;
+        MIR_reg_t env = emit_capture_environment(mt, predicate, &capture_count);
+        MirCallOptions options = {};
+        options.has_hidden_context = true;
+        options.has_hidden_env = env != 0;
+        options.hidden_env = env;
+        MIR_type_t arg_types[1] = {MIR_T_I64};
+        MIR_op_t arg_ops[1] = {MIR_new_reg_op(mt->ctx, value)};
+        const FnVariantAnalysis* variant = local_func_variant_for_call(
+            find_local_func_entry(mt, name->str), name->str);
+        MirValue normal = em_call_direct(&mt->em, name->str, local, variant, 1,
+            arg_types, arg_ops, &options).normal;
+        if (normal.maybe_pending) {
+            normal = em_materialize_pending_value(&mt->em, normal,
+                MIR_PENDING_REASON_REP_CONVERSION);
+        }
+        answer = normal.reg;
+    } else {
+        Script* owner = runtime_script_instance(mt->runtime, layer->module);
+        if (!owner) {
+            log_error("mir: constrained type's declaring module is not loaded");
+            strbuf_free(name);
+            return emit_null_item_reg(mt);
+        }
+        strbuf_reset(name);
+        write_fn_name_for_script_ex(name, predicate, owner, "_b");
+        // a cross-module `_b` entry is reached through the trampoline that
+        // supplies its context, as an imported function call is
+        MIR_item_t target = MIR_new_import(mt->ctx, name->str);
+        MIR_reg_t target_reg = new_reg(mt, "that_fp", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, target_reg), MIR_new_ref_op(mt->ctx, target)));
+        MIR_var_t vars[3] = {{MIR_T_P, "fp", 0}, {MIR_T_I64, "p", 0},
+            {MIR_T_P, "home", 0}};
+        MirImportEntry* trampoline = ensure_import(mt, "fn_call_boxed_1_into",
+            MIR_T_I64, 3, vars, 1);
+        answer = new_reg(mt, "that_answer", MIR_T_I64);
+        MIR_op_t ops[6] = {
+            MIR_new_ref_op(mt->ctx, trampoline->proto),
+            MIR_new_ref_op(mt->ctx, trampoline->import),
+            MIR_new_reg_op(mt->ctx, answer),
+            MIR_new_reg_op(mt->ctx, target_reg),
+            MIR_new_reg_op(mt->ctx, value),
+            MIR_new_int_op(mt->ctx, 0)};
+        em_emit_borrowed_call(&mt->em, "fn_call_boxed_1_into",
+            MIR_new_insn_arr(mt->ctx, MIR_CALL, 6, ops));
+    }
+    strbuf_free(name);
+    return answer;
+}
+
 // S11.2.1: a constrained type named by `is` or a match arm admits its base
 // through fn_is on the type's own value -- the test `x is <base>` makes -- and
-// then owes every `that` predicate on its alias chain, innermost first, with
-// `~` bound to the value. Mirrors T0's interp_constrained_type_matches. Yields
-// a 0/1 register.
+// then owes every `that` predicate on its alias chain, innermost first, each
+// a call of its predicate function. Mirrors T0's
+// interp_constrained_type_matches. Yields a 0/1 register.
 static MIR_reg_t emit_constrained_type_test(MirTranspiler* mt,
         TypeConstrained* constrained, MIR_reg_t value) {
     MIR_reg_t result = new_reg(mt, "ct_res", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_int_op(mt->ctx, 0)));
-    AstNode* predicates[LAMBDA_CONSTRAINT_CHAIN_MAX];
-    int count = ast_constrained_type_predicates(constrained, predicates);
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(constrained, layers);
     if (count < 0) return result;
 
     MIR_label_t l_end = new_label(mt);
@@ -13916,15 +13983,13 @@ static MIR_reg_t emit_constrained_type_test(MirTranspiler* mt,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, admitted)));
 
-    MirPipeContext saved = mir_bind_subject(mt, value);
     for (int i = 0; i < count; i++) {
-        MIR_reg_t held = transpile_box_item(mt, predicates[i]);
+        MIR_reg_t held = emit_constrained_predicate_call(mt, layers[i], value);
         MIR_reg_t truthy = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, held)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
-    mir_pipe_context_restore(mt, saved);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_int_op(mt->ctx, 1)));
     emit_label(mt, l_end);
@@ -39304,6 +39369,21 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         param = (AstNamedNode*)param->next;
     }
 
+    // S11.4.11: a `that` body reads its one parameter, the candidate, as `~`;
+    // the candidate is no member of a walk, so `~key` and `~~` are null, as
+    // T0 binds it at entry (interp_call_internal)
+    if (fn_node->is_that_predicate && fn_node->param) {
+        MirVarEntry* subject = mir_var_for_binding(mt, fn_node->param->entry);
+        if (subject) {
+            MIR_reg_t item = emit_box(mt, subject->reg, subject->type_id);
+            mt->in_pipe = true;
+            mt->pipe_item_reg = item;
+            mt->pipe_index_reg = emit_null_item_reg(mt);
+            mt->pipe_parent_reg = emit_null_item_reg(mt);
+            mt->pipe_root_reg = item;
+        }
+    }
+
     // Set proc flag based on function type
     bool saved_in_proc = mt->in_proc;
     bool saved_current_func_can_raise = mt->current_func_can_raise;
@@ -42346,6 +42426,9 @@ static int lambda_mir_plan_compiler_pass(void* opaque) {
         pass->property_keys, NULL, pass->script,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
         NULL, NULL, 0, false, pass->tp->whole_script_poc, &pass->tp->ast_index);
+    // an imported constrained type's predicate is named by its declaring
+    // module's running instance (emit_constrained_predicate_call)
+    pass->build.mt.runtime = pass->tp->runtime;
     return 1;
 }
 
@@ -42713,6 +42796,7 @@ static bool compile_ast_function_satellite_image(Runtime* runtime, Script* scrip
         compile_type_list, compile_const_list, compile_pool, compile_name_pool,
         &names, &property_keys, &artifacts, script, script, lowering_target,
         lowering_members, member_count, snapshot, false, &script->ast_index);
+    build.mt.runtime = runtime;
     transpile_mir_ast_lower(&build);
     mem_free(copies);
     copies = NULL;
@@ -42987,6 +43071,29 @@ static void register_module_pub_fns(AstImportNode* imp, Script* dependency) {
             }
         }
         mod_child = mod_child->next;
+    }
+
+    // S11.4.11 (LR03-27): an importer calls an imported type's `that` predicate
+    // function here, in its declaring module, whatever the function's own
+    // visibility. The type list also holds layers other modules declared;
+    // their owners export those.
+    ArrayList* types = dependency->type_list;
+    for (int i = 0; types && i < types->length; i++) {
+        Type* type = (Type*)types->data[i];
+        if (!lambda_type_is_constrained(type)) continue;
+        TypeConstrained* layer = (TypeConstrained*)type;
+        if (!layer->predicate_fn || (layer->module != dependency &&
+                layer->module != dependency->cache_template)) continue;
+        StrBuf* local_name = strbuf_new_cap(64);
+        write_fn_name_ex(local_name, layer->predicate_fn, NULL, "_b");
+        void* fn_ptr = find_func(dependency->jit_context, local_name->str);
+        if (fn_ptr) {
+            StrBuf* reg_name = strbuf_new_cap(64);
+            write_fn_name_for_script_ex(reg_name, layer->predicate_fn, dependency, "_b");
+            register_dynamic_import(raw_strdup(reg_name->str), fn_ptr); // RAWALLOC_OK: MIR manages param name lifetime
+            strbuf_free(reg_name);
+        }
+        strbuf_free(local_name);
     }
 }
 

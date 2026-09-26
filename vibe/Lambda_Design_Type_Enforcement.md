@@ -2255,30 +2255,20 @@ constraint body at all: the colour walk never entered a type expression, so
 `type Bad = int that eff(~) > 3` compiled, the JIT ran the effect inside `5 is Bad`, and T0's
 allow-list answered `false`.
 
-**Why the scope is the written one.** Both tiers evaluate a predicate inline at the `is` site,
-so the site can be a nested closure, an importer, or the predicate itself re-entered through a
-call. Lexical scope decides each case:
+**Why the scope is the written one.** Both tiers evaluated a predicate inline at the `is` site when this was ruled (a function of its own since the residue fix below), so the site can be a nested closure, an importer, or the predicate itself re-entered through a call. Lexical scope decides each case:
 
 - a local type named in a nested closure makes the closure capture what the predicate reads;
 - an imported type's predicate reads its own module's slab, constants and functions
   ([LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>): T0 had read the importer's constants);
-- the names a predicate binds itself (a `for` variable, a group `let`) belong to the evaluation.
-  On T0 they take a window that each evaluation reserves in the evaluating frame, so a
-  re-entering call gets its own. Declaring-frame slots or module-slab slots were the two wrong
-  homes tried first: the first failed in a closure, the second on re-entry.
+- the names a predicate binds itself (a `for` variable, a group `let`) belong to the evaluation. On T0 they took a window that each evaluation reserved in the evaluating frame, so a re-entering call got its own; they are now the predicate function's locals. Declaring-frame slots or module-slab slots were the two wrong homes tried first: the first failed in a closure, the second on re-entry.
 
 **Why no step budget.** The JIT has none, so a budget turns an expensive predicate into an
 observable `false` on T0 alone. Non-termination is the program's own bug, as in any `fn`. Fault
 timing stays exempt from S1.6 (S7.11.4).
 
-**Residue.** The JIT inlines an imported predicate in the importer, where the declaring module's
-names are undefined and its private functions fail to link
-([LR03-27](Lambda_Issue_Ledger.md#lr03-27)). Doing it right needs the predicate evaluated as a
-function of its declaring module, which also answers a predicate that names its own type: today
-that crashes compilation on both tiers ([LR03-28](Lambda_Issue_Ledger.md#lr03-28)).
+**Residue, closed 2026-09-26.** Both tiers expanded a predicate where `is` named its type, so the JIT inlined an imported predicate in the importer, where the declaring module's names are undefined and its private functions fail to link ([LR03-27](<Lambda_Issue_Ledger (fixed).md#lr03-27>)), and a predicate naming its own type recursed without bound at compile time ([LR03-28](<Lambda_Issue_Ledger (fixed).md#lr03-28>)). Doing it right, as anticipated here, evaluates the predicate as a function of its declaring scope: each `that` body resolves inside a function of its own, `that(~)`, which both tiers call per layer with the captures read where the type is named, and a module exports its predicate functions to its importers. The names a predicate binds are that function's locals, which retires T0's per-evaluation windows. The candidate starts a fresh context (`~~` null, the root the candidate), where the inline body had read the enclosing context of the `is` site.
 
-**Spec linkage.** TE-20 → S11.4.11; the mechanism revises AI17 to AI17v2
-(`Lambda_Design_Ast_Interpreter.md` §6.2).
+**Spec linkage.** TE-20 → S11.4.11; the mechanism revised AI17 to AI17v2, and the predicate function revised AI17v2 to AI17v3 (`Lambda_Design_Ast_Interpreter.md` §6.2).
 
 ## 8. Phasing
 

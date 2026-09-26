@@ -408,6 +408,9 @@ static inline void runtime_set_scheduler(Runtime* runtime, LambdaScheduler* sche
     if (owner) owner->scheduler = scheduler;
 }
 void runtime_register_script(Runtime* runtime, Script* script);
+// The Script this Runtime runs for `owner`: `owner` itself, or the instance of
+// a cached AST template. NULL when the Runtime has not loaded it.
+Script* runtime_script_instance(Runtime* runtime, const Script* owner);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
 bool runtime_hold_js_module_mir_scope(Runtime* runtime,
                                       struct InputCacheScope* scope);

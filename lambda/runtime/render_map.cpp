@@ -8,6 +8,7 @@
 #include "template_registry.h"
 #include "transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
 #include <limits.h>
@@ -330,24 +331,49 @@ Item render_map_get_result(Item source_item, const char* template_ref) {
 }
 
 int render_map_retransform(void) {
+    return render_map_retransform_with_results(NULL, 0);
+}
+
+int render_map_retransform_with_results(RetransformResult* out_results, int max_results) {
     HashMap* map = ensure_map();
     if (!g_template_registry) {
         log_error("render_map_retransform: no template registry");
         return 0;
     }
 
-    // collect dirty entries (iterate + re-execute)
-    // we iterate the map, and for each dirty entry, re-execute the template
-    int count = 0;
+    // LR11-2: a re-executed body can reach apply() -> render_map_record(), and
+    // that insert may resize the map or shift a Robin Hood bucket behind the
+    // iterator, so iterating while re-executing skipped dirty entries. Take
+    // the dirty keys first, then look each entry up afresh.
+    size_t dirty_count = 0;
     size_t iter = 0;
     void* item;
     while (hashmap_iter(map, &iter, &item)) {
-        RenderMapEntry* entry = (RenderMapEntry*)item;
-        if (!entry->dirty) continue;
+        if (((const RenderMapEntry*)item)->dirty) dirty_count++;
+    }
+    if (dirty_count == 0) return 0;
+    RenderMapKey* dirty_keys = (RenderMapKey*)mem_alloc(
+        dirty_count * sizeof(RenderMapKey), MEM_CAT_TEMP);
+    if (!dirty_keys) {
+        log_error("render_map_retransform: dirty key snapshot allocation failed");
+        return 0;
+    }
+    size_t taken = 0;
+    iter = 0;
+    while (taken < dirty_count && hashmap_iter(map, &iter, &item)) {
+        const RenderMapEntry* entry = (const RenderMapEntry*)item;
+        if (entry->dirty) dirty_keys[taken++] = entry->key;
+    }
 
-        // Save entry data BEFORE re-execution. fn() may call apply() which
-        // calls render_map_record() → hashmap_set(), potentially resizing the
-        // hashmap and invalidating the 'entry' pointer.
+    int count = 0;
+    for (size_t k = 0; k < taken; k++) {
+        RenderMapEntry query;
+        memset(&query, 0, sizeof(query));
+        query.key = dirty_keys[k];
+        RenderMapEntry* entry = RenderMap::get(map, query);
+        // an earlier re-execution may have recorded this entry afresh
+        if (!entry || !entry->dirty) continue;
+        // re-execution below may move the entry; read only this copy after it
         RenderMapEntry saved = *entry;
 
         // find the template by template_ref
@@ -371,85 +397,8 @@ int render_map_retransform(void) {
         int tree_child_index = saved.child_index;
         Item tree_parent = render_map_find_tree_parent(saved, &tree_child_index);
 
-        // re-execute template body with the source item
-        // NOTE: invocation may call apply() which modifies this hashmap — after this
-        // call, 'entry' may be dangling. Use 'saved' for old values.
         if (!context) {
             log_error("render_map_retransform: no bound EvalContext");
-            entry->dirty = false;
-            continue;
-        }
-        Item new_result = render_map_invoke_template(tmpl, saved.key.source_item);
-
-        // update reverse map
-        if (s_reverse_map && new_result.item) {
-            render_map_record_reverse_result_tree(s_reverse_map, new_result, saved.key, 0);
-        }
-
-        render_map_replace_tree_result(saved, tree_parent, tree_child_index, new_result);
-
-        // write back the updated entry to the map (re-lookup since entry may be stale)
-        RenderMapEntry updated = saved;
-        updated.result_node = new_result;
-        updated.dirty = false;
-        RenderMap::set(map, updated);
-
-        count++;
-        log_debug("render_map_retransform: re-transformed tmpl=%s (entry %d)",
-                  saved.key.template_ref ? saved.key.template_ref : "(anon)", count);
-    }
-
-    if (count > 0) {
-        log_debug("render_map_retransform: re-transformed %d dirty entries", count);
-    }
-    return count;
-}
-
-int render_map_retransform_with_results(RetransformResult* out_results, int max_results) {
-    HashMap* map = ensure_map();
-    if (!g_template_registry) {
-        log_error("render_map_retransform_with_results: no template registry");
-        return 0;
-    }
-
-    int count = 0;
-    size_t iter = 0;
-    void* item;
-    while (hashmap_iter(map, &iter, &item)) {
-        RenderMapEntry* entry = (RenderMapEntry*)item;
-        if (!entry->dirty) continue;
-
-        // Save entry data BEFORE re-execution. fn() may call apply() which
-        // calls render_map_record() → hashmap_set(), potentially resizing the
-        // hashmap and invalidating the 'entry' pointer.
-        RenderMapEntry saved = *entry;
-
-        // find the template by template_ref
-        TemplateEntry* tmpl = NULL;
-        for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
-            if (e->template_ref == saved.key.template_ref) {
-                tmpl = e;
-                break;
-            }
-        }
-
-        if (!tmpl || (!tmpl->body_func &&
-                      !(tmpl->interp_view && tmpl->interp_body_func))) {
-            log_error("render_map_retransform_with_results: no template found for ref=%s",
-                      saved.key.template_ref ? saved.key.template_ref : "(null)");
-            entry->dirty = false;
-            continue;
-        }
-
-        Item old_result = saved.result_node;
-        int tree_child_index = saved.child_index;
-        Item tree_parent = render_map_find_tree_parent(saved, &tree_child_index);
-
-        // re-execute template body with the source item
-        // NOTE: invocation may call apply() which modifies this hashmap — after this
-        // call, 'entry' may be dangling. Use 'saved' for old values.
-        if (!context) {
-            log_error("render_map_retransform_with_results: no bound EvalContext");
             entry->dirty = false;
             continue;
         }
@@ -478,12 +427,13 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         RenderMap::set(map, updated);
 
         count++;
-        log_debug("render_map_retransform_with_results: re-transformed tmpl=%s (entry %d)",
+        log_debug("render_map_retransform: re-transformed tmpl=%s (entry %d)",
                   saved.key.template_ref ? saved.key.template_ref : "(anon)", count);
     }
+    mem_free(dirty_keys);
 
     if (count > 0) {
-        log_debug("render_map_retransform_with_results: re-transformed %d entries (%d reported)",
+        log_debug("render_map_retransform: re-transformed %d entries (%d reported)",
                   count, count < max_results ? count : max_results);
     }
     return count;

@@ -50,7 +50,7 @@ SF17's watermark-restore contract holds at the three recovery boundaries; these 
 
 **JO11 — MIR code pages leak ~55 MB per crash recovery.** Each SIGSEGV/timeout `longjmp` in the batch worker leaks the JIT'd code pages; bounded only by the 10-crash / 4 GB RSS worker exit (JS_16 KI-3). Needs a reclaim (or arena) story for MIR code memory at the recovery boundary — the code-image side of what SF17 did for the side stacks.
 
-**JO12 — Event-loop SIGSEGV band-aid + un-audited timer re-entry.** `js_event_loop_drain` installs a SIGSEGV handler + `setjmp` to survive "heap corruption in timer callbacks (pre-existing bug)" (`js_event_loop.cpp:1076`; JS_09 KI-7) — a masked memory-safety bug, not a fix. Related audit gap no plan stage covers: timer callbacks re-enter a **captured** runtime via a scratch `EvalContext` (`timer_runtime_enter`, JS_09 §5) after the originating context may have been swapped out — verify the re-entry binds/saves the current thread's side-stack watermarks correctly (the callback must run as a proper top-level frame, and a mid-drain recovery must restore the drain's watermarks, not the callback's). Plausibly JO12's corruption and this audit are the same bug.
+**JO12 — Event-loop SIGSEGV band-aid + un-audited timer re-entry · RESOLVED.** `js_event_loop_drain` installed a SIGSEGV handler + `setjmp` to survive "heap corruption in timer callbacks (pre-existing bug)" (JS_09 KI-7) — a masked memory-safety bug, not a fix — and timer callbacks re-entered a **captured** runtime through a scratch `EvalContext` after the originating context might have been swapped out, which left the side-stack watermark binding of that re-entry unaudited. Both halves are gone: on 2026-07-29 `timer_runtime_enter` became a routing check that refuses a callback not on its owning context and thread, so no evaluator is borrowed and no watermark swapped; on 2026-07-31 the guard was removed (ER-S6), so a fault in a callback fails the process as S7.11.4 requires. Verified 2026-09-26 by `test/js/timer_callback_gc_stress.js` and `dom_timer_callback_gc_stress.js` in the forced-GC lane (central ledger §15.1).
 
 ## Group E — Boxing-traffic codegen (the other half of JS_15 §5.1)
 
@@ -61,6 +61,6 @@ SF17's watermark-restore contract holds at the three recovery boundaries; these 
 ## Suggested tackle order
 
 1. **Group A (JO1–JO5)** — one design decision covers five issues: the "GC-owned records, roots for true globals only" doctrine, then per-subsystem migration mirroring J0a census → J2 de-rooting. JO6 rides the function-cache lifetime story.
-2. **JO12 audit first, then JO11** — the timer re-entry watermark audit is cheap and may root-cause the masked corruption; the code-page reclaim is bounded, standalone work.
+2. **JO11** — JO12, which was to go first, is resolved; the code-page reclaim is bounded, standalone work.
 3. **JO7 before JO8** — exact state counts are a contained fix; the principled spill model can then reuse K2-R liveness when the concurrency work lands. JO9 waits on that same work.
 4. **JO10 and JO13 last** — separate codegen projects (TCO generalization; scalar replacement) with their own cost/benefit profiles, no memory-architecture dependency.
