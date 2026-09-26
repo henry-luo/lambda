@@ -1580,6 +1580,9 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             !type_is_any_without_error(source) && !type_is_any_without_null(source))) {
         return STATIC_BOUNDARY_DEFERRED;
     }
+    // S11.1.7: a `none` source has no value: what arrives at run time is the
+    // error its own contract produced, which the runtime check handles
+    if (source == &TYPE_NONE) return STATIC_BOUNDARY_DEFERRED;
     if (target->type_id == LMD_TYPE_ANY) {
         if (target == &TYPE_ANY) return STATIC_BOUNDARY_PROVEN;
         if (type_is_any_without_error(target) && lambda_type_accepts_error(source)) {
@@ -1596,6 +1599,9 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     if (type_is_any_without_error(source) || type_is_any_without_null(source)) {
         return STATIC_BOUNDARY_DEFERRED;
     }
+    // S11.1.7: `none` admits no value, so a known source never crosses into it;
+    // an unknown one is left to the runtime check above
+    if (target == &TYPE_NONE) return STATIC_BOUNDARY_REJECTED;
     if (source == &TYPE_NUMBER || source == &TYPE_INTEGER) {
         // Abstract numeric success sets describe several concrete Item carriers.
         // They cannot reject a narrower destination statically; its established
@@ -4417,11 +4423,14 @@ static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
     // annotation received a LMD_TYPE_TYPE-tagged *value* rather than a type,
     // which surfaced as "cannot initialize 'a' of type type with int" (LR02-9).
     ast_node->node_type = AST_NODE_BINARY_TYPE;
+    Type* left = ((TypeType*)ast_node->left->type)->type;
+    Type* right = ((TypeType*)ast_node->right->type)->type;
+    if (reduce_binary_type_node(tp, ast_node, left, right)) return true;
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
     node_type->type = (Type*)type;
-    type->left = ((TypeType*)ast_node->left->type)->type;
-    type->right = ((TypeType*)ast_node->right->type)->type;
+    type->left = left;
+    type->right = right;
     type->op = ast_node->op;
     ast_node->type = (Type*)node_type;
     arraylist_append(tp->type_list, ast_node->type);
@@ -4970,6 +4979,8 @@ static const BaseTypeName BASE_TYPE_NAMES[] = {
     // f64 is accepted on input but canonicalizes to float.
     {"f64", (Type*)&LIT_TYPE_FLOAT},      {"decimal", (Type*)&LIT_TYPE_DECIMAL},
     {"integer", (Type*)&LIT_TYPE_INTEGER},{"number", (Type*)&LIT_TYPE_NUMBER},
+    // S11.1.7: the empty type, the canonical form of every type that admits nothing
+    {"none", (Type*)&LIT_TYPE_NONE},
     {"string", (Type*)&LIT_TYPE_STRING},  {"symbol", (Type*)&LIT_TYPE_SYMBOL},
     // PTH30: `path` is a scalar type disjoint from `symbol`, not a sub-symbol.
     // The runtime tag has always been separate (LMD_TYPE_PATH); this is the
@@ -5030,12 +5041,15 @@ ShapeEntry* append_shape_entry_typed(Transpiler* tp, String* pooled_name, Type* 
 }
 
 void register_binary_type(Transpiler* tp, AstBinaryNode* binary) {
+    Type* left = unwrap_simple_type_type(binary->left->type);
+    Type* right = unwrap_simple_type_type(binary->right->type);
+    if (reduce_binary_type_node(tp, binary, left, right)) return;
     binary->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY,
         sizeof(TypeBinary));
     ((TypeType*)binary->type)->type = (Type*)type;
-    type->left = unwrap_simple_type_type(binary->left->type);
-    type->right = unwrap_simple_type_type(binary->right->type);
+    type->left = left;
+    type->right = right;
     type->op = binary->op;
     arraylist_append(tp->type_list, binary->type);
     type->type_index = tp->type_list->length - 1;
@@ -8283,8 +8297,12 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
         map->struct_name = alias->name->chars;
         map->is_trusted_contract = true;
     }
-    bool literal_alias = (definition->type_id == LMD_TYPE_STRING ||
-        definition->type_id == LMD_TYPE_SYMBOL) && definition->is_literal;
+    // S11.2.1: every literal is a type -- its value's singleton -- so a numeric
+    // literal is wrapped like a string one. Only string and symbol literals
+    // were, and `type T = 1` published the literal Type's address as an int
+    // (LR03-30). A TypeType is already a type value (its singletons carry
+    // is_literal too), so only a bare literal payload is wrapped here.
+    bool literal_alias = definition->is_literal && definition->type_id != LMD_TYPE_TYPE;
     bool range_alias = lambda_type_is_range(definition);
     if (!literal_alias && !range_alias) return;
 

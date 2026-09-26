@@ -960,6 +960,23 @@ SysFuncInfo sys_func_defs[] = {
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
      /* result */ SYS_RESULT_COLLECTION_TRANSFORM_ARGUMENT},
 
+    // S10.1.1v2: the value set functions that took over container `| & !`;
+    // text keeps its kind, anything else yields an array (open result type)
+    {SYSFUNC_UNIQUE2, "unique", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_unique2", FPTR(fn_unique2), NULL, NULL, false, 0},
+    {SYSFUNC_UNIQUE3, "unique", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_unique3", FPTR(fn_unique3), NULL, NULL, false, 0},
+    {SYSFUNC_UNIQUE4, "unique", 4, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_unique4", FPTR(fn_unique4), NULL, NULL, false, 0},
+    {SYSFUNC_INTERSECT2, "intersect", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_intersect2", FPTR(fn_intersect2), NULL, NULL, false, 0},
+    {SYSFUNC_INTERSECT3, "intersect", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_intersect3", FPTR(fn_intersect3), NULL, NULL, false, 0},
+    {SYSFUNC_INTERSECT4, "intersect", 4, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_intersect4", FPTR(fn_intersect4), NULL, NULL, false, 0},
+    {SYSFUNC_EXCEPT, "except", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_except", FPTR(fn_except), NULL, NULL, false, 0},
+
     // LR07-18: a fractional or non-finite count returns an error, so a call types `T | error` and stays boxed (S7.8.1)
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_take", FPTR(fn_take), NULL, NULL, false, 0,

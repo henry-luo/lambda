@@ -9727,6 +9727,18 @@ static bool import_requires_context_abi(const AstImportNode* import) {
     return import_is_js(import);
 }
 
+// True when a binary type node's value is the TypeBinary it registered itself.
+// A reduced node (S11.1.7) holds `none` or a surviving operand instead, and a
+// survivor's own slot -- or the static `reference` union's, which has none --
+// is not this node's value.
+static bool mir_binary_type_node_owns_payload(MirTranspiler* mt, AstBinaryNode* bin) {
+    Type* payload = ((TypeType*)bin->type)->type;
+    if (type_is_global_meta_type(payload) || payload->kind != TYPE_KIND_BINARY) return false;
+    int64_t index = ((TypeBinary*)payload)->type_index;
+    return mt->type_list && index >= 0 && index < mt->type_list->length &&
+        (Type*)mt->type_list->data[index] == bin->type;
+}
+
 static MIR_reg_t mir_emit_declared_type_value(MirTranspiler* mt, Type* type) {
     if (!type) return 0;
     if (mt->type_list) {
@@ -33364,6 +33376,12 @@ static MirValue transpile_type_value(MirTranspiler* mt, AstNode* node) {
         AstBinaryNode* bin = (AstBinaryNode*)node;
         if (bin->type && bin->type->type_id == LMD_TYPE_TYPE) {
             TypeType* type = (TypeType*)bin->type;
+            if (type->type && !mir_binary_type_node_owns_payload(mt, bin)) {
+                // S11.1.7: a reduced operation is `none` or its surviving
+                // operand, not a TypeBinary this node registered
+                reg = mir_emit_declared_type_value(mt, bin->type);
+                break;
+            }
             if (type->type) {
                 TypeBinary* binary = (TypeBinary*)type->type;
                 reg = emit_call_2(mt, "const_type_with_tl", MIR_T_P,

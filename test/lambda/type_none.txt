@@ -1,0 +1,18 @@
+"-- the word: a type value that admits nothing --"
+[none, type, true, false, false, false, false]
+"-- literal-decided emptiness reduces to none --"
+[none, none, none, none, none]
+"-- none's identities --"
+[int, true, false, int, none, none, true]
+"-- equality: reduced forms compare as their result --"
+[true, true, true, false, false, false, false]
+"-- relations: below every type, above none only --"
+[true, true, true, true, false, false]
+"-- type context reduces alike --"
+[none, true, false, string, true, true, false, true, false]
+"-- names --"
+["none", "none", 'none']
+"-- a none return is a contract no value passes: each call is the error --"
+[true, "handled"]
+"-- a none arm never matches --"
+["int", "other", "other"]

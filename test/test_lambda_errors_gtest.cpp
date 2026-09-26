@@ -1796,6 +1796,24 @@ TEST_F(NegativeScriptTest, StaticDeclaredReturnsRejectKnownMismatches) {
         "function 'wrong_return' body returns type string, declared return type int");
 }
 
+// S11.1.7: `none` admits no value, so a known value never crosses into it.
+// An unknown one is left to the runtime check (test/lambda/type_none.ls).
+TEST_F(NegativeScriptTest, StaticNoneDeclarationRejectsKnownValue) {
+    ExpectErrorMessage("test/lambda/negative/semantic/none_type_rejections.ls",
+        "cannot initialize 'wrong_none' of type none with int");
+}
+
+TEST_F(NegativeScriptTest, StaticNoneReturnRejectsKnownBody) {
+    ExpectErrorMessage("test/lambda/negative/semantic/none_type_rejections.ls",
+        "function 'none_return' body returns type string, declared return type none");
+}
+
+// S11.1.7 + S16.10.1v2: `none` is a base-type word, barred as a binding name.
+TEST_F(NegativeScriptTest, NoneIsBarredAsBindingName) {
+    ExpectErrorMessage("test/lambda/negative/semantic/none_binding_barred.ls",
+        "'none' is a reserved keyword and cannot be used as a name");
+}
+
 TEST_F(NegativeScriptTest, StaticTypedMapWritesRejectKnownMismatches) {
     ExpectErrorMessage("test/lambda/negative/type_enforcement_declaration.ls",
         "cannot assign string to typed map member of type int");

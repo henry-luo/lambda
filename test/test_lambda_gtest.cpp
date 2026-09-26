@@ -418,10 +418,15 @@ static const TierParityFixture kTune27TierParity[] = {
     // JIT only, and `last` there resolved against an outer container.
     {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt"},
     {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt"},
-    // S10.1.1v2 (LR07-37): `|`, `&`, `!` with a type or two scalar operands are
-    // a type operation that collapses to a value only in expression context;
-    // `1 | 2` and `int | null` had been `[]` on both tiers.
+    // S10.1.1v2 (LR07-37): `|`, `&`, `!` are the type operators only and never
+    // collapse to a value; `1 | 2` and `int | null` had been `[]` on both tiers.
     {"test/lambda/type_set_operators_expr.ls", "test/lambda/type_set_operators_expr.txt"},
+    // S11.1.7: `none`, the empty type -- literal-decided operations reduce to
+    // it in value and type context alike, and it is below every type.
+    {"test/lambda/type_none.ls", "test/lambda/type_none.txt"},
+    // LR03-30: a one-literal alias is a type value (S11.2.1); `type T = 1` had
+    // published the literal Type's address as an int on both tiers.
+    {"test/lambda/type_literal_alias.ls", "test/lambda/type_literal_alias.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

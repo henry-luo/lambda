@@ -351,17 +351,70 @@ standard pipe symbol.
 - Typo safety of the new regime: writing `|` where `|>` was meant yields a union of
   non-types → compile error, caught, never a silent wrong answer.
 
-#### C6.4 Type operators over values: `1 | 2` is an enum, not a set (2026-09-26) — RESOLVED, ratified as S10.1.1v2
+#### C6.4 Type operators over values: `|`, `&`, `!` are type operators only (2026-09-26) — RESOLVED, ratified as S10.1.1v2
 
-**The question** ([LR07-37](<Lambda_Issue_Ledger (fixed).md#lr07-37>)): `e[(int | null)]` selected nothing, because `int | null` in expression position was the value set union — `fn_union` walked its operands' content, a scalar has none (S8.3.1v3), so `1 | 2`, `1 | 1` and `int | null` were all `[]`. The builder promoted `A | B` to a type only when both operands were explicit types. So the question was what `|` (and `&`, `!`) mean between a type and a value, and between two scalars — and `int?` has no expression spelling, since there `?` is the query operator.
+**The question** ([LR07-37](<Lambda_Issue_Ledger (fixed).md#lr07-37>)): `e[(int | null)]` selected nothing, because `int | null` in expression position was the value set union — `fn_union` walked its operands' content, a scalar has none (S8.3.1v3), so `1 | 2`, `1 | 1` and `int | null` were all `[]`, and `[1] | 2` was `[1]`. `int?` has no expression spelling, since there `?` is the query operator.
 
-**Two readings of `1 | 2`.** As a *set* `(: 1, 2 :)` (conceptual syntax) it is a value, which would introduce a set kind Lambda does not have: arrays already are the set carrier (`[1, 2] | [2, 3]` is the deduplicated `[1, 2, 3]`, with `&` and `!` beside it), and a set value would make one spelling a type in an annotation and a value in an expression, against C6's "one symbol, one concept". As an *enum* it is a type — the literal union the type language already writes (`"a" | "b"`, the literal islands of S11.1.2v2, `match` arms) — and it needs nothing new.
+**Two readings of `1 | 2`.** As a *set* `(: 1, 2 :)` (conceptual syntax) it is a value, which would need a set kind Lambda does not have and arrays already serve. As an *enum* it is a type — the literal union the type language already writes (`"a" | "b"`, the literal islands of S11.1.2v2, `match` arms). The enum reading won: union is the concept Lambda needs everywhere.
 
-**Ruling (USER, 2026-09-26).** `|`, `&` and `!` are the type operators. Value ⊕ value stays a value: two containers meet as sets. A type operand, or two scalars, make a type operation, a scalar reading as its literal type. A type operation collapses to a value only in expression context, and only when a literal set decides its admitted set — `1 | 1` is `1`, `(1 | 2) & 2` is `2`, `int & 5` is `5`, an empty result (`1 & 2`) is `null`; otherwise it stays a type. In type context nothing collapses: `type t = 1 & 2` and `let v: 1 & 2` declare a type, just as `type t = 1` is the literal type and not the value `1`.
+**Why the container set operators went too.** A first ruling (the same day) kept `|`, `&`, `!` as set operations between two containers and made everything else a type operation that collapsed to a value when a literal set decided one value (`1 | 1` → `1`) or none (`1 & 2` → `null`). It failed on `[1] | 2`: as sets it is `[1, 2]`, as alternatives it is "`[1]` or `2`", and no rule makes it both. That is the operand-kind overloading C6.1 had ruled out — one symbol meaning "either" for scalars and "both" for containers. So the symbols are type operators and only that; set algebra on containers became functions, named by SQL convention: `unique(a, b, ...)` (≡ `unique(a ++ b ++ ...)`), `intersect(a, b, ...)`, `except(a, b)` (`diff` was passed over: in a document language it will be wanted for comparing documents).
 
-**Why the context rule.** Every literal already means a type in type position and a value in expression position (`type t = 1` against `let v = 1`); a type operation follows its operands. The collapse mirrors S2.5.5v2: a union of one alternative is that alternative, as a list of one item is its item, and the empty union is absence, as the empty list is.
+**Why no collapse.** With collapse, the kind of `a | b` depended on the operands' values (`1 | 1` a value, `1 | 2` a type), and a type operation meant one thing in an expression and another in a declaration. Without it, a type operation is a type everywhere: `type t = 1 & 2`, `let v: 1 & 2` and `let x = 1 & 2` denote the same type. `1 & 2` is the empty type, which admits nothing — not the null type, which admits `null` (`int | null` must admit `null`; `int & string` must not).
 
-**Residue.** A literal set decides the collapse; nothing tries to decide an infinite type (`int ! 5` and `int & string` stay types). Runtime literal types exist for `null`, int, float, string and symbol; a bool, decimal, datetime, binary or container operand of a type operation is an error until a literal type is built for it. A scalar beside a container keeps the old set path, in which the scalar contributes no items — unruled. The list kind of a set operation is SO48.
+**Ruling (USER, 2026-09-26).** `|`, `&` and `!` are the type operators, and only that. A scalar operand reads as its literal type; the result is always a type. Container set algebra is `unique`, `intersect` and `except`.
+
+**Residue.** A container has no runtime literal type yet, so `[1] | 2` is an operand error rather than the type "`[1]` or `2`"; bool, decimal, datetime and binary scalars lack one too. The set functions take at most four operands and, like unary `unique`, do not walk an element (its children are `content(e)`). SO48, which asked what the value set operators return for lists, is dissolved.
+
+#### C6.5 The empty type is `none` (2026-09-26) — RESOLVED, ratified as S11.1.7
+
+**The question.** C6.4 made `1 & 2` a type that admits nothing — not the null type, which admits `null`. It had no name and no canonical form: it printed as `type`, `(1 & 2) <: int` answered `false` though S11.1.4v2 makes it `true`, and `(1 & 2) == (3 & 4)` held only because type equality compared a tag. How is the empty type represented, and what is it called?
+
+**Ruling (USER, 2026-09-26).** One global type, the bottom of the lattice, spelled `none`. It admits no value, `null` and errors included; `none <: T` for every `T`, and `T <: none` only for `none`. A type operation reduces to it when its literal operands decide that nothing is admitted (`1 & 2`, `(1 | 2) ! (1 | 2)`, `int & "a"`, `null & int`), and `none` is the identity of `|` and `!` and absorbs `&` (`T | none` and `T ! none` are `T`; `T & none` and `none ! T` are `none`), in value and type context alike. A reduced form is its result, so it prints and compares as it (S5.5.2). What the literals do not decide stays as written: `int & string` admits nothing but is not reduced, since only a literal operand makes emptiness a matter of listing values.
+
+**"Must raise" was a static-typing inference, not a law.** The first explanation offered for the name said a function returning the empty type cannot return, so it must raise. That holds in TypeScript, Rust and Swift, whose checkers accept a `never` body only if it provably produces no value, so only a throwing or non-terminating body type-checks. It does not hold in Lambda. A declared type is a contract (S11.4.1v3), and `none` is a contract no value passes, with no rule of its own: it fails the way its position fails for any type. Probed with `int` and with `none`, same on both tiers:
+
+| Position | Mismatch known at compile time | Mismatch known only at run time |
+|---|---|---|
+| Return: `fn f(x) none => x` | compile error E208 | soft: the call's value is the E201 error, the script goes on |
+| Declaration: `let x: none = v` | compile error E201 | hard: E201 stops the script (failure never establishes the binding) |
+| Argument: `fn g(x: none)` | compile error E207 | hard: E201 stops the script |
+
+So `fn f(x) none => x` is a legal function whose every call is an error value, and `none^E` is how a function that only raises says so. Making a failed declaration soft (the user's `let x: 1 & 2` question) would change S11.4.1v3 for every type, not just `none`, and was left alone.
+
+**Prior art.** How languages spell the type with no values:
+
+| Spelling | Languages | Form |
+|---|---|---|
+| `never` | TypeScript, Luau, Ballerina | type |
+| `never` | PHP 8.1 | return type only |
+| `Never` | Swift (SE-0102 replaced the `@noreturn` attribute with it), Dart, Elm, Python 3.11 (`typing.Never`) | type |
+| `Nothing` / `nothing` | Kotlin, Scala, Ceylon, Typed Racket; Hack (`nothing`) | type |
+| `Void` | Haskell (`Data.Void`), PureScript, Idris | type |
+| `Empty` / `Empty_set` | CDuce, Lean 4; Coq | type |
+| `⊥` | Agda (`Data.Empty`), type theory | type, notation |
+| `none` | XQuery 1.0 Formal Semantics, Erlang (`none()`), Elixir (`none()`) | type |
+| `noreturn` / `NoReturn` | Zig, D (a type); Crystal, Python (`typing.NoReturn`), Sorbet (`T.noreturn`), Hack (return types) | type, or return type only |
+| `_Noreturn` / `[[noreturn]]` | C11 and C23, C++11 | function attribute, not a type |
+| `!` | Rust (the stable form is the empty enum `Infallible`) | type, full use unstable |
+| `Union{}` | Julia | the empty union |
+| `nil` | Common Lisp (`t` is the top) | type specifier |
+| `bot` | RBS for Ruby (`top` is the top) | type |
+| `empty` | Flow | type |
+| `false` | JSON Schema | the schema no instance passes |
+
+The unit type is the other thing a reader may mean: `void` in C, Java and TypeScript, `()` in Rust and Haskell, `Void` in Swift, `None` in Python. It has exactly one value and a function returning it returns normally. Lambda's unit is `null` (S2.5.5v2: `()` ≡ `null`). C blurs the two — its standard calls `void` an empty set of values, yet `void` functions return — which is why it needed the separate `_Noreturn`.
+
+**Turned down: `never`.** It was the first spelling chosen: TypeScript's word, and the most common among languages with `|`, `&` and literal types. It lost because it is a strong word that reads as control flow — "this never returns" — and so as an exception. Its whole history is the return-type use above, and that reading is false in Lambda, where a failed contract is an error value and nothing is thrown. The name would promise an exception the language does not have (USER: "never is a very strong word and feels more like exception").
+
+**Turned down: `empty`.** It is the closest to how the type is explained — the empty type, the empty set — but in Lambda it names a container state. `()`, `[]` and `{}` are the empty list, array and map, and `()` *is* `null` (S2.5.5v2), the very type `none` must not be confused with. XQuery, where Lambda's query semantics come from, uses `empty-sequence()` for the type of exactly one value, the empty sequence — the opposite of an empty type. It is also the most used identifier among the candidates (30 binding sites in the tree).
+
+**Also considered.** `nothing` reads as absence, and several languages use it for the null-like value: Julia's `nothing` is its unit value, VB's `Nothing` is null, Haskell's `Nothing` is Maybe's empty case — the opposite of Kotlin's and Scala's `Nothing`. `void` is the unit type in C, Java and TypeScript. `bottom` and `bot` are jargon. A symbol has no free spelling: `!` is exclusion in Lambda, and there is no empty-union syntax like Julia's `Union{}`.
+
+**Why `none`.** It pairs with `any`: `any` admits every value and `none` admits none, top and bottom as one English pair — the pair Erlang's type language uses (`any()`, `none()`) and Elixir's set-theoretic types keep. It names what the type does and says nothing about control flow, which fits a language whose contract failures are values. It is lowercase like Lambda's other type words and reads naturally in every position: `type E = 1 & 2`, `{a: none}`, `none[]` (only `[]`), `none^E` (only raises). And it is the precedent in Lambda's own lineage: the XQuery Formal Semantics names its empty type `none` and keeps "empty" for the empty sequence, the same split this ruling makes. The one trap is Python's `None`, which is null; the docs pair the two explicitly — `null` has one value, `none` has none, `null is none` is `false`.
+
+**Cost.** `none` becomes a base-type word (S16.10.1v2), so it no longer names a binding; eight sites in six fixtures were renamed. `never` and `empty` stay free identifiers (the editor fixture's `fn never(_)` is untouched).
+
+**Implementation and residue** (spec Appendix A, S11.1.7 row). The reduction is one function over the scalar lattice, three-valued, so anything that needs a predicate, a pattern, an occurrence or a shape answers *unknown* and never reduces. Two older defects surfaced and were fixed with it: type equality compared a payload tag, so `number == integer` held; and `is` tested a bare numeric literal type by its tag. Structural type equality beyond the compact meta types is still open ([LR03-29](Lambda_Issue_Ledger.md#lr03-29)). A one-literal alias `type T = 1`, which was not a type value, was fixed the same day ([LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>)); a bool literal type still carries no value ([LR03-31](Lambda_Issue_Ledger.md#lr03-31)).
 
 #### C6a. Pending: file write/append syntax
 

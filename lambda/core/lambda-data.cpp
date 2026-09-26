@@ -38,6 +38,7 @@ Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_INTEGER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE};
+Type TYPE_NONE = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
@@ -95,11 +96,12 @@ Type LIT_NUM_SIZED = {.type_id = LMD_TYPE_NUM_SIZED, .is_literal = 1, .is_const 
 Type LIT_UINT64 = {.type_id = LMD_TYPE_UINT64, .is_literal = 1, .is_const = 1};
 Type LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_literal = 1, .is_const = 1};
 
-// Printing, string() and name() all name a type value; these three share
-// another kind's TypeId, so its name would say "int", "float" or "array".
+// Printing, string() and name() all name a type value; these share another
+// kind's TypeId, so its name would say "int", "float", "array" or "type".
 const char* type_alias_name(Type* type) {
     if (type == &TYPE_INTEGER) return "integer";
     if (type == &TYPE_NUMBER) return "number";
+    if (type == &TYPE_NONE) return "none";
     if (type == &TYPE_LIST) return "list";
     return NULL;
 }
@@ -167,6 +169,7 @@ TypeType LIT_TYPE_COMPLEX;
 TypeType LIT_TYPE_DECIMAL;
 TypeType LIT_TYPE_INTEGER;
 TypeType LIT_TYPE_NUMBER;
+TypeType LIT_TYPE_NONE;
 TypeType LIT_TYPE_STRING;
 TypeType LIT_TYPE_BINARY;
 TypeType LIT_TYPE_SYMBOL;
@@ -242,6 +245,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
     *(Type*)(&LIT_TYPE_INTEGER) = LIT_TYPE;  LIT_TYPE_INTEGER.type = &TYPE_INTEGER;
     *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
+    *(Type*)(&LIT_TYPE_NONE) = LIT_TYPE;  LIT_TYPE_NONE.type = &TYPE_NONE;
     *(Type*)(&LIT_TYPE_STRING) = LIT_TYPE;  LIT_TYPE_STRING.type = &TYPE_STRING;
     *(Type*)(&LIT_TYPE_BINARY) = LIT_TYPE;  LIT_TYPE_BINARY.type = &TYPE_BINARY;
     *(Type*)(&LIT_TYPE_SYMBOL) = LIT_TYPE;  LIT_TYPE_SYMBOL.type = &TYPE_SYMBOL;
@@ -1567,7 +1571,8 @@ static TypeId classify_storage_domain(const Type* type) {
     // Abstract numeric contracts describe numeric Items; they are not
     // Type* payloads. Keep them in the self-describing TypedItem lane so a
     // map field such as `score: min(values)` cannot be read as a Type pointer.
-    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_ANY;
+    // `none` admits no value at all, so it has no lane of its own either.
+    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER || type == &TYPE_NONE) return LMD_TYPE_ANY;
     if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
         // TB1: an occurrence contract (`T[]`) is a POINTER lane, not ANY. Array
         // and ArrayNum are both Container*, and the pointee's own type_id is the
@@ -1608,7 +1613,8 @@ static TypeId classify_storage_domain(const Type* type) {
                             ((const TypeUnary*)base)->op == OPERATOR_ARRAY) {
                         return LMD_TYPE_ARRAY;
                     }
-                    if (base == &TYPE_INTEGER || base == &TYPE_NUMBER) return LMD_TYPE_ANY;
+                    if (base == &TYPE_INTEGER || base == &TYPE_NUMBER ||
+                            base == &TYPE_NONE) return LMD_TYPE_ANY;
                     if (base->type_id == LMD_TYPE_TYPE &&
                             base->kind != TYPE_KIND_SIMPLE) return LMD_TYPE_ANY;
                     return base->type_id;

@@ -36,9 +36,9 @@ pn write_a(var h: H, v: int) {
 
 pn main() {
     // no field write before the aliased element write
-    var none: H = mk()
-    write_a(none, 1)
-    print(none.a[0]) print(" ") print(none.n)
+    var fresh: H = mk()
+    write_a(fresh, 1)
+    print(fresh.a[0]) print(" ") print(fresh.n)
     print("\n")
 
     // one, two and three field replacements: each clones the root again

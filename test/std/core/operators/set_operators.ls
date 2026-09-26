@@ -1,28 +1,30 @@
-// Test: Set Operators
-// Layer: 2 | Category: operator | Covers: & intersection, | union, ! exclusion
+// Test: Set Functions
+// Layer: 2 | Category: operator | Covers: intersect, unique, except
+// S10.1.1v2: `|`, `&` and `!` are type operators only; set algebra on
+// containers is intersect(a, b, ...), unique(a, b, ...) and except(a, b).
 
 // ===== Array intersection =====
-[1, 2, 3, 4] & [3, 4, 5, 6];
-[1, 2, 3] & [4, 5, 6];
-[1, 2, 3] & [1, 2, 3];
-[] & [1, 2, 3];
+intersect([1, 2, 3, 4], [3, 4, 5, 6]);
+intersect([1, 2, 3], [4, 5, 6]);
+intersect([1, 2, 3], [1, 2, 3]);
+intersect([], [1, 2, 3]);
 
 // ===== Array union =====
-[1, 2, 3] | [3, 4, 5];
-[1, 2] | [3, 4];
-[1, 2, 3] | [];
-[] | [1, 2, 3];
+unique([1, 2, 3], [3, 4, 5]);
+unique([1, 2], [3, 4]);
+unique([1, 2, 3], []);
+unique([], [1, 2, 3]);
 
 // ===== Array exclusion =====
-[1, 2, 3, 4, 5] ! [2, 4];
-[1, 2, 3] ! [1, 2, 3];
-[1, 2, 3] ! [];
-[] ! [1, 2, 3];
+except([1, 2, 3, 4, 5], [2, 4]);
+except([1, 2, 3], [1, 2, 3]);
+except([1, 2, 3], []);
+except([], [1, 2, 3]);
 
 // ===== String set operations =====
-["a", "b", "c"] & ["b", "c", "d"];
-["a", "b"] | ["b", "c"];
-["a", "b", "c"] ! ["b"];
+intersect(["a", "b", "c"], ["b", "c", "d"]);
+unique(["a", "b"], ["b", "c"]);
+except(["a", "b", "c"], ["b"]);
 
 // ===== Chained set operations =====
-([1, 2, 3, 4, 5] & [2, 3, 4, 5, 6]) ! [4]
+except(intersect([1, 2, 3, 4, 5], [2, 3, 4, 5, 6]), [4])

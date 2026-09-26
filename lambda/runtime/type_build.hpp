@@ -38,6 +38,12 @@ void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit)
 // general pattern binary constructor.
 void register_binary_type(Transpiler* tp, AstBinaryNode* binary);
 
+// S11.1.7: when `left node->op right` reduces (lambda_type_operation_reduced),
+// the node takes the result as its type value -- the `none` singleton, or the
+// surviving operand in a fresh type_list slot -- and no TypeBinary is built.
+// False when the node stays an ordinary binary type.
+bool reduce_binary_type_node(Transpiler* tp, AstBinaryNode* node, Type* left, Type* right);
+
 // Allocate an AST node. Defined in build_ast.cpp; promoted because pattern
 // islands are the one type form whose AST must survive to MIR transpilation,
 // so the hand parser has to build real nodes for them.

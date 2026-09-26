@@ -21,7 +21,7 @@
     "x">, <q
     "y">]
 2
-"-- set operators traverse content too --"
+"-- the set functions over content (S10.1.1v2 retired `| & !` on containers) --"
 [<p
     "x">, <q
     "y">]

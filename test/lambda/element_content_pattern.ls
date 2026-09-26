@@ -13,7 +13,7 @@ type Note { label: string, string* }
 type Memo : Note { extra: int }
 
 let three = <ul <li "a"> <li "b"> <li "c">>;
-let none = <ul>;
+let empty_ul = <ul>;
 let one = <ul <li "a">>;
 let ps = <ul <p "a"> <p "b">>;
 let l = <li "a">;
@@ -21,9 +21,9 @@ let m = <Memo label: "a", extra: 1, "x">;
 
 // a: a run consumes any number of matching children, and nothing else
 '=runs=';
-[three is UL, none is UL, ps is UL];
-[three is NonEmpty, none is NonEmpty];
-[none is Opt, one is Opt, three is Opt];
+[three is UL, empty_ul is UL, ps is UL];
+[three is NonEmpty, empty_ul is NonEmpty];
+[empty_ul is Opt, one is Opt, three is Opt];
 
 // b: run-free slots are positional and exact
 '=positional=';

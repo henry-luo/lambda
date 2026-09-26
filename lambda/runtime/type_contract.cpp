@@ -106,8 +106,10 @@ ValueRep lambda_canonical_rep(Type* contract) {
     }
 
     Type* base = canonical_contract_base(contract, 0);
+    // `none` carries no value; the error a failed `none` boundary produces is
+    // an Item, so it must not be given the type-value pointer lane
     if (!base || base == &TYPE_ANY || base == &TYPE_INTEGER ||
-            base == &TYPE_NUMBER) {
+            base == &TYPE_NUMBER || base == &TYPE_NONE) {
         return VALUE_REP_ITEM;
     }
     switch (base->type_id) {
@@ -195,7 +197,7 @@ static LambdaWideResultProof wide_result_proof_inner(const Type* type,
     // not name a closed value domain. Their physical carrier is not proof of
     // an inline result (D2.4.1).
     if (type->type_id == LMD_TYPE_ANY || type == &TYPE_INTEGER ||
-            type == &TYPE_NUMBER || type == &TYPE_TYPE) {
+            type == &TYPE_NUMBER || type == &TYPE_TYPE || type == &TYPE_NONE) {
         return LAMBDA_WIDE_RESULT_UNKNOWN;
     }
 
@@ -475,6 +477,10 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
     expected = contract_subtype_unwrap(expected);
     if (!candidate || !expected) return false;
     if (candidate == expected) return true;
+    // S11.1.7: the empty type admits no value, so every type holds all of it --
+    // and it holds nothing, so only itself is below it
+    if (candidate == &TYPE_NONE) return true;
+    if (expected == &TYPE_NONE) return false;
     if (expected == &TYPE_ANY) return true;
     if (candidate == &TYPE_ANY) return false;
 
@@ -589,6 +595,127 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
 
 bool lambda_type_contract_is_subtype(Type* candidate, Type* expected) {
     return contract_type_is_subtype(candidate, expected, 0);
+}
+
+// ---------------------------------------------------------------------------
+// S11.1.7: `none` is the canonical empty type. A type operation reduces to it
+// when its literal operands decide that nothing is admitted -- `1 & 2`,
+// `(1 | 2) ! (1 | 2)`, `int & "a"` -- and `none` is the identity of `|` and
+// `!` and absorbs `&`. What the literals cannot decide stays a binary type,
+// so a reduction is exact wherever it applies and never a guess.
+
+enum ScalarAdmission { SCALAR_ADMIT_NO, SCALAR_ADMIT_YES, SCALAR_ADMIT_UNKNOWN };
+
+// the type-pattern parser historically spells `&` OPERATOR_OR (validate_pattern.cpp)
+static inline bool contract_op_is_intersect(Operator op) {
+    return op == OPERATOR_INTERSECT || op == OPERATOR_OR;
+}
+
+// Whether `type` admits the scalar `value`, over the scalar lattice alone:
+// literals, base scalars, `number`/`integer`, ranges, `any`, `none` and the
+// three type operators. Admission that needs more -- a predicate, a string
+// pattern, an occurrence, a container shape -- is UNKNOWN. The leaves go to
+// lambda_type_matches, the membership `is` uses, which is exact and needs no
+// runtime state for these kinds.
+static ScalarAdmission contract_scalar_admission(Item value, Type* type, int depth) {
+    type = contract_unwrap_type(type);
+    if (!type || depth > 32) return SCALAR_ADMIT_UNKNOWN;
+    if (type == &TYPE_NONE) return SCALAR_ADMIT_NO;
+    if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
+            !lambda_type_is_range(type)) {
+        if (type->kind != TYPE_KIND_BINARY) return SCALAR_ADMIT_UNKNOWN;
+        const TypeBinary* binary = (const TypeBinary*)type;
+        ScalarAdmission left = contract_scalar_admission(value, binary->left, depth + 1);
+        ScalarAdmission right = contract_scalar_admission(value, binary->right, depth + 1);
+        if (binary->op == OPERATOR_UNION) {
+            if (left == SCALAR_ADMIT_YES || right == SCALAR_ADMIT_YES) return SCALAR_ADMIT_YES;
+            return left == SCALAR_ADMIT_NO && right == SCALAR_ADMIT_NO
+                ? SCALAR_ADMIT_NO : SCALAR_ADMIT_UNKNOWN;
+        }
+        if (contract_op_is_intersect(binary->op)) {
+            if (left == SCALAR_ADMIT_NO || right == SCALAR_ADMIT_NO) return SCALAR_ADMIT_NO;
+            return left == SCALAR_ADMIT_YES && right == SCALAR_ADMIT_YES
+                ? SCALAR_ADMIT_YES : SCALAR_ADMIT_UNKNOWN;
+        }
+        if (binary->op == OPERATOR_EXCLUDE) {
+            if (left == SCALAR_ADMIT_NO || right == SCALAR_ADMIT_YES) return SCALAR_ADMIT_NO;
+            return left == SCALAR_ADMIT_YES && right == SCALAR_ADMIT_NO
+                ? SCALAR_ADMIT_YES : SCALAR_ADMIT_UNKNOWN;
+        }
+        return SCALAR_ADMIT_UNKNOWN;
+    }
+    switch (type->type_id) {
+    case LMD_TYPE_ANY: case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_INT:
+    case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT:
+    case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_COMPLEX:
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_PATH:
+    case LMD_TYPE_BINARY: case LMD_TYPE_DTIME: case LMD_TYPE_ERROR:
+    case LMD_TYPE_TYPE:
+        return lambda_type_matches(value, type) ? SCALAR_ADMIT_YES : SCALAR_ADMIT_NO;
+    default:
+        // shapes, nominal records and signatures are outside the scalar lattice
+        return SCALAR_ADMIT_UNKNOWN;
+    }
+}
+
+// A literal set is a literal type, the null type, or a union of literal sets.
+// Collects its values; false for any other type, or one too large to list.
+static bool contract_literal_set(Type* type, Item* values, int capacity, int* count,
+        int depth) {
+    type = contract_unwrap_type(type);
+    if (!type || depth > 32) return false;
+    Item literal;
+    if (type->type_id == LMD_TYPE_NULL) {
+        literal = ItemNull;
+    } else if (!lambda_literal_contract_value(type, &literal)) {
+        if (!lambda_type_is_union(type)) return false;
+        const TypeBinary* binary = (const TypeBinary*)type;
+        return contract_literal_set(binary->left, values, capacity, count, depth + 1) &&
+            contract_literal_set(binary->right, values, capacity, count, depth + 1);
+    }
+    if (*count >= capacity) return false;
+    values[(*count)++] = literal;
+    return true;
+}
+
+// true when `set` is a literal set whose every value gets `wanted` from `other`
+static bool contract_literals_all(Type* set, Type* other, ScalarAdmission wanted) {
+    const int capacity = 64;
+    Item values[capacity];
+    int count = 0;
+    if (!contract_literal_set(set, values, capacity, &count, 0)) return false;
+    for (int i = 0; i < count; i++) {
+        if (contract_scalar_admission(values[i], other, 0) != wanted) return false;
+    }
+    return true;
+}
+
+Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
+    Type* left_type = contract_unwrap_type(left);
+    Type* right_type = contract_unwrap_type(right);
+    if (!left_type || !right_type) return NULL;
+    if (op == OPERATOR_UNION) {
+        if (left_type == &TYPE_NONE) return right;
+        if (right_type == &TYPE_NONE) return left;
+        return NULL;
+    }
+    if (contract_op_is_intersect(op)) {
+        if (left_type == &TYPE_NONE || right_type == &TYPE_NONE) return &TYPE_NONE;
+        // no literal of one side is admitted by the other: nothing is in both
+        if (contract_literals_all(left_type, right_type, SCALAR_ADMIT_NO) ||
+                contract_literals_all(right_type, left_type, SCALAR_ADMIT_NO)) {
+            return &TYPE_NONE;
+        }
+        return NULL;
+    }
+    if (op == OPERATOR_EXCLUDE) {
+        if (right_type == &TYPE_NONE) return left;
+        if (left_type == &TYPE_NONE) return &TYPE_NONE;
+        // every literal of the left side is one the right side excludes
+        if (contract_literals_all(left_type, right_type, SCALAR_ADMIT_YES)) return &TYPE_NONE;
+        return NULL;
+    }
+    return NULL;
 }
 
 static Type* array_contract_unwrap(Type* type, int depth) {
@@ -1292,6 +1419,9 @@ Type* lambda_type_union_normalized(Pool* pool, Type* left, Type* right) {
     right = contract_unwrap_type(right);
     if (!left) return right;
     if (!right) return left;
+    // S11.1.7: `T | none` is `T`
+    if (left == &TYPE_NONE) return right;
+    if (right == &TYPE_NONE) return left;
 
     uint8_t left_top = contract_top_exclusions(left);
     uint8_t right_top = contract_top_exclusions(right);

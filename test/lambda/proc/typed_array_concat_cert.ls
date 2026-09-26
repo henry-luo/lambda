@@ -3,8 +3,8 @@
 // admits in O(1); a mismatched element keeps the result uncertified, so it is
 // no N[].
 type N = {kind: int, kids: N[]}
-let none: N[] = []
-fn mk(k: int) N => {kind: k, kids: none}
+let no_kids: N[] = []
+fn mk(k: int) N => {kind: k, kids: no_kids}
 fn build(acc: N[], k: int) N[] {
     if (k == 0) acc
     else build(acc ++ [mk(k)], k - 1)
@@ -20,7 +20,7 @@ fn ints(acc: int[], k: int) int[] {
 pn main() {
     let r = build([], 50)
     print(len(r)) print(" ") print(total(r, 0, 0)) print(" ")
-    let loose = r ++ [{kind: 9, kids: none}]
+    let loose = r ++ [{kind: 9, kids: no_kids}]
     print(total(loose, 0, 0)) print(" ")
     let xs = ints([], 20)
     print(len(xs)) print(" ") print(xs[0] + xs[19]) print("\n")

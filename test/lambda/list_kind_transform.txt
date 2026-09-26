@@ -14,9 +14,9 @@
 [array, list, list]
 [6, 2, 4, 9]
 [[6, 2, 4], 9]
-"-- masks and set operators --"
+"-- masks and set functions --"
 [list, array]
-[list, array, array]
+[array, array, array]
 "-- zip --"
 [array, array, array]
 [3, array, 2]

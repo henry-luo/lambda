@@ -251,6 +251,20 @@ static inline bool validator_numeric_item_embeds(ConstItem item, Type* target) {
     return validator_numeric_type_embeds(actual, kind, target);
 }
 
+// The compact meta types `number`, `integer` and `none` all wear LMD_TYPE_TYPE,
+// so a tag test cannot admit by them; their pointer identity decides. Answers
+// whether `meta` is one of them and, when it is, whether it admits `item`.
+static inline bool validator_meta_type_admits(ConstItem item, const Type* meta, bool* admits) {
+    if (meta == &TYPE_NUMBER) { *admits = IS_NUMERIC_ID(item.type_id()); return true; }
+    if (meta == &TYPE_INTEGER) {
+        *admits = validator_numeric_item_embeds(item, (Type*)meta);
+        return true;
+    }
+    // S11.1.7: the empty type admits nothing
+    if (meta == &TYPE_NONE) { *admits = false; return true; }
+    return false;
+}
+
 static inline bool validator_array_elem_embeds(ArrayNumElemType elem_type, Type* target) {
     target = unwrap_type(target);
     // Core `any` includes error, while validator `any` is intentionally the

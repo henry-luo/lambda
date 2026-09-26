@@ -2980,6 +2980,83 @@ Item fn_unique(Item item) {
     return seq_finish_array({ .array = rooted_result.get() });
 }
 
+// ---------------------------------------------------------------------------
+// S10.1.1v2: the value set functions, which took over the container reading of
+// `|`, `&` and `!` when those became type operators only. `unique(a, b, ...)`
+// is `unique(a ++ b ++ ...)`, so it inherits `++`'s operand table (S10.6.1) and
+// the unary form's rules. `intersect(a, b, ...)` keeps the items of its first
+// operand found in every other, `except(a, b)` those not found in the second,
+// in first-operand order and without duplicates; membership is `in` (S8.1.1).
+// Text walks by code point and keeps its kind (S2.5.8); any other source
+// yields an array (S2.5.7v4). Like unary `unique`, an element is not walked --
+// its children are `content(e)`.
+
+// the operands stay rooted while each `++` allocates
+static Item vector_unique_of(Item a, Item b, Item c, Item d, int count) {
+    RootFrame roots(4);
+    Rooted<Item> joined(roots, a);
+    Rooted<Item> second(roots, b);
+    Rooted<Item> third(roots, c);
+    Rooted<Item> fourth(roots, d);
+    Rooted<Item>* rest[3] = {&second, &third, &fourth};
+    for (int i = 0; i < count - 1; i++) {
+        joined.set(fn_join(joined.get(), rest[i]->get()));
+        if (item_is_error(joined.get())) return joined.get();
+    }
+    return fn_unique(joined.get());
+}
+
+Item fn_unique2(Item a, Item b) { return vector_unique_of(a, b, ItemNull, ItemNull, 2); }
+Item fn_unique3(Item a, Item b, Item c) { return vector_unique_of(a, b, c, ItemNull, 3); }
+Item fn_unique4(Item a, Item b, Item c, Item d) { return vector_unique_of(a, b, c, d, 4); }
+
+static Item vector_keep_by_membership(Item source, Item other, bool keep_members) {
+    GUARD_ERROR2(source, other);
+    VECTOR_NDIM_ROWS(source, vector_keep_by_membership(source, other, keep_members));
+    VECTOR_TEXT_ITEMS(source, vector_keep_by_membership(source, other, keep_members));
+    int64_t len = vector_length(source);
+    RootFrame roots(4);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<Item> rooted_other(roots, other);
+    Rooted<Array*> rooted_result(roots, array());
+    Rooted<Item> rooted_elem(roots, ItemNull);
+    for (int64_t i = 0; i < len; i++) {
+        rooted_elem.set(vector_get(rooted_source.get(), i));
+        Array* result = rooted_result.get();
+        bool seen = false;
+        for (int64_t j = 0; j < result->length && !seen; j++) {
+            seen = unique_items_equal(rooted_elem.get(), result->items[j]);
+        }
+        if (seen) continue;
+        Bool present = fn_in(rooted_elem.get(), rooted_other.get());
+        if (present >= BOOL_ERROR) return ItemError;
+        if ((present == BOOL_TRUE) == keep_members) {
+            array_push_verbatim(rooted_result.get(), rooted_elem.get());
+        }
+    }
+    return seq_finish_array({ .array = rooted_result.get() });
+}
+
+// intersect keeps what every other operand holds: narrow by each in turn
+static Item vector_intersect_of(Item a, Item b, Item c, Item d, int count) {
+    RootFrame roots(4);
+    Rooted<Item> kept(roots, a);
+    Rooted<Item> second(roots, b);
+    Rooted<Item> third(roots, c);
+    Rooted<Item> fourth(roots, d);
+    Rooted<Item>* rest[3] = {&second, &third, &fourth};
+    for (int i = 0; i < count - 1; i++) {
+        kept.set(vector_keep_by_membership(kept.get(), rest[i]->get(), true));
+        if (item_is_error(kept.get())) return kept.get();
+    }
+    return kept.get();
+}
+
+Item fn_intersect2(Item a, Item b) { return vector_intersect_of(a, b, ItemNull, ItemNull, 2); }
+Item fn_intersect3(Item a, Item b, Item c) { return vector_intersect_of(a, b, c, ItemNull, 3); }
+Item fn_intersect4(Item a, Item b, Item c, Item d) { return vector_intersect_of(a, b, c, d, 4); }
+Item fn_except(Item a, Item b) { return vector_keep_by_membership(a, b, false); }
+
 // Take/drop counts are explicit (C15): an integer-valued, non-negative number,
 // so tail-relative intent is spelled with `last`, never hidden in the sign.
 static bool vector_count_arg(Item n_item, const char* name, int64_t* n) {

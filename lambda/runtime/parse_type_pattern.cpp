@@ -2,6 +2,7 @@
 #include "ast_build.hpp"
 #include "type_build.hpp"
 #include "transpiler.hpp"
+#include "type_contract.hpp"
 #include "lambda-error.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -1289,6 +1290,22 @@ void resolve_occurrence(Transpiler* tp, AstUnaryNode* ast_node) {
 
 }  // namespace
 
+// Declared in type_build.hpp; outside the anonymous namespace so build_ast.cpp
+// reaches it, while register_wrapped stays file-local.
+bool reduce_binary_type_node(Transpiler* tp, AstBinaryNode* node, Type* left, Type* right) {
+    Type* reduced = lambda_type_operation_reduced(left, right, node->op);
+    if (!reduced) return false;
+    if (reduced == &TYPE_NONE) {
+        node->type = (Type*)&LIT_TYPE_NONE;
+        return true;
+    }
+    // the surviving operand gets a type_list slot of its own: a literal operand
+    // has no wrapper to reuse, and emission finds a value by its slot
+    int index = 0;
+    node->type = register_wrapped(tp, type_field_unwrap_simple_decl(reduced), &index);
+    return true;
+}
+
 void fill_sequence_pattern_slots(Transpiler* tp, TypeList* type,
         AstNode* first_item, int count) {
     type->length = count;
@@ -1402,6 +1419,7 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstBinaryNode* binary = (AstBinaryNode*)node;
         resolve_type_pattern(tp, binary->left);
         resolve_type_pattern(tp, binary->right);
+        if (reduce_binary_type_node(tp, binary, binary->left->type, binary->right->type)) break;
         TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
         type->op = binary->op;
         type->left = binary->left->type;

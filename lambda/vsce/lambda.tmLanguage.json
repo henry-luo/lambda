@@ -127,7 +127,7 @@
     },
     "types": {
       "name": "storage.type.lambda",
-      "match": "\\b(any|error|boolean|int|float|decimal|number|string|symbol|date|time|datetime|list|array|map|element|type|function)\\b"
+      "match": "\\b(any|none|error|boolean|int|float|decimal|number|string|symbol|date|time|datetime|list|array|map|element|type|function)\\b"
     },
     "function_definition": {
       "patterns": [

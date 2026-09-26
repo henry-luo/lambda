@@ -4,9 +4,12 @@
 let data = [1, "a", 2]
 let other = [9]
 
-// E1: query takes a single primary type; a following `|` is a VALUE union,
-// never part of the queried type.
-let e1 = data?int | other
+// E1: query takes a single primary type; a following `|` applies to the query's
+// result, never part of the queried type. `data?string` is the one match "a",
+// so `u1` is the type "a" | "b"; had `|` joined the queried type, the query
+// `data?(string | "b")` would be the value "a" and "b" would not be admitted.
+let u1 = data?string | "b"
+let e1 = "b" is u1
 
 // E2: annotation continues across a newline that follows a trailing operator
 let e2: int |

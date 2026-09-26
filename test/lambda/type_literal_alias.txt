@@ -1,0 +1,11 @@
+"-- a one-literal alias is a type value --"
+[type, type, type, type, type]
+"-- it admits exactly its value --"
+[true, false, true, true, false, false]
+[true, false, true, false, false, true, false, false]
+"-- as a contract --"
+[1, 'sym', 2.5]
+"-- in a match arm --"
+["T", "Y", "S", "other"]
+"-- the type of a type value is type --"
+[true, true, true, true, true]

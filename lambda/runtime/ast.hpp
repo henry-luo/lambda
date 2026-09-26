@@ -739,7 +739,7 @@ static inline bool parse_bool_literal_span(const char* source, SourceSpan span) 
 }
 
 // A type node's runtime identity is not always its TypeId: `date`/`time` share
-// LMD_TYPE_DTIME, `list`/`number`/`integer` have no runtime TypeId of their own,
+// LMD_TYPE_DTIME, `list`/`number`/`integer`/`none` have no runtime TypeId of their own,
 // and every sized numeric shares LMD_TYPE_NUM_SIZED. Those denote one specific
 // TypeType singleton; anything else is base_type(tid). Shared so both tiers give
 // `is`/`query` the same type identity.
@@ -763,6 +763,9 @@ static inline TypeType* lambda_type_node_singleton(Type* node_type, TypeId* out_
             if (tt->type == &TYPE_OBJECT)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_OBJECT; }
             if (tt->type == &TYPE_NUMBER)  { if (out_tid) *out_tid = tid; return &LIT_TYPE_NUMBER; }
             if (tt->type == &TYPE_INTEGER) { if (out_tid) *out_tid = tid; return &LIT_TYPE_INTEGER; }
+            // S11.1.7: `none` shares the compact TYPE tag too; the tag fallback
+            // would hand `is` the `type` singleton and admit every type value.
+            if (tt->type == &TYPE_NONE)    { if (out_tid) *out_tid = tid; return &LIT_TYPE_NONE; }
             // PTH30: `reference` is the union `symbol | path`, so like `number`
             // and `integer` its payload carries LMD_TYPE_TYPE and the tag
             // fallback below would hand `is` the `type` singleton instead —

@@ -27,9 +27,9 @@ let R = 1 to 3
 [type(L + A), type(L + (1, 1, 1)), type(L + 1)];
 [L * 2, 9];
 [L + A, 9]
-"-- masks and set operators --";
+"-- masks and set functions --";
 [type(L eq 1), type(A eq 1)];
-[type(L | (2, 5)), type(L | [2, 5]), type(A | A)]
+[type(unique(L, (2, 5))), type(unique(L, [2, 5])), type(intersect(A, A))]
 "-- zip --";
 [type(zip(L, L)), type(zip(L, A)), type(zip(A, A))];
 [len(zip(L, L)), type(zip(L, L)[0]), len(zip(L, L)[0])];

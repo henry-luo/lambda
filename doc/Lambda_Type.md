@@ -173,6 +173,7 @@ f16  f32  f64        // Sized floats
 ```lambda
 // Special type values
 any         // Top type (supertype of all values, including error)
+none        // Empty type: admits no value, not even null (below every type)
 error       // Error type
 number      // Union: all numeric value types and sized-storage types
 ```
@@ -208,6 +209,33 @@ their parameter and result variance is specified. [S11.1.4v2, D3.2.5v2]
 The schema validator historically spells its catch-all *valid data* pattern as
 `any`; in validation position that pattern intentionally means
 `any ! error`. Core language `any` itself remains the true top type.
+
+### The Empty Type (`none`)
+
+`none` is the type with no values — the bottom of the type lattice, as `any` is the top. It admits nothing, not even `null`: the null type has one value, `none` has none. Every type holds it (`none <: T` for any `T`), and only `none` is below it. [S11.1.7]
+
+A type operation whose literal operands leave nothing admitted *is* `none`, in an expression and in a declaration alike, and `none` drops out of `|` and `!`:
+
+```lambda
+1 & 2                 // none: no value is both 1 and 2
+(1 | 2) ! (1 | 2)     // none
+int & "a"             // none: "a" is not an int
+int | none            // int
+int ! none            // int
+int & none            // none
+(1 & 2) == none       // true
+null is none          // false
+none <: string        // true
+```
+
+Only literals decide it: `int & string` admits nothing as well, but stays as written.
+
+As an annotation, `none` is a contract no value passes. A value known at compile time is rejected (`let x: none = 5` is error E201), and an unknown one fails at run time like any other failed contract: a declaration or argument stops the script, and a function's return becomes the call's error value. A function that only raises is declared `none^`:
+
+```lambda
+fn fail(msg: string) none^ { raise error(msg) }
+fail("boom") or "handled"     // "handled"
+```
 
 ### Type Examples
 
@@ -697,32 +725,20 @@ fn process(value: int | string | null) => {
 
 ### Type Operators in Expressions
 
-`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v2). What they do depends on the operands. Two containers meet as value sets over their items: `|` is the deduplicated union, `&` the intersection, `!` the exclusion. Any other pairing — a type with a value, or two scalars — is a type operation, in which a scalar stands for its literal type: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type.
-
-In an expression a type operation collapses to a value when the literals decide that it admits exactly one value, and to `null` when it admits none. Otherwise it stays a type.
+`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v2). In an expression a type operand is itself and a scalar stands for its literal type, and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`.
 
 ```lambda
 let choice = 1 | 2;            // a type: the literal union of 1 and 2, an enum
-let same = 1 | 1;              // 1: one alternative collapses to its value
-let none = 1 & 2;              // null: no value is admitted
-let five = int & 5;            // 5: the literals a type admits
 let opt = int | null;          // a type: nullable int
-let both = [1, 2] | [2, 3];    // [1, 2, 3]: two containers meet as value sets
-(2 is choice, 3 is choice, same, none, five, null is opt, both)
+let nothing_fits = 1 & 2;      // none, the empty type: admits nothing
+(2 is choice, 3 is choice, null is opt, 1 is nothing_fits, nothing_fits == none)
 ```
 
-In type context — a `type` declaration, an annotation, a pattern — nothing collapses. `type t = 1 & 2` declares a type that admits no value, just as `type t = 1` declares the literal type and not the value `1`.
+The operators do not merge containers. For set algebra on arrays, lists, ranges and text use the functions `unique(a, b, ...)`, `intersect(a, b, ...)` and `except(a, b)` (see `Lambda_Sys_Func.md`).
 
 ### Exclusion Type Patterns
 
 The exclusion operator `!` subtracts one type from another — `T1 ! T2` matches values that match `T1` but **not** `T2`:
-
-> **Not yet supported:** the binary `!` (exclusion) and `&` (intersection)
-> type operators are unimplemented in the current runtime — `42 is (any !
-> null)` returns `false` rather than `true`. This is tracked as open issue
-> `SO9` in [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md). Prefix
-> negation (`!T`, see [Negation Types](#negation-types) below) does work and
-> is the supported spelling for "not `T`" today.
 
 ```lambda
 // any except null (non-nullable any)

@@ -24,6 +24,7 @@ Scalar Types:
 | `i8 i16 i32 i64` | Sized signed integers |
 | `u8 u16 u32 u64` | Sized unsigned integers |
 | `f16 f32 f64` | Sized floats |
+| `any none` | Top type (every value); empty type (no value, not even null) |
 
 Container Types:
 
@@ -41,8 +42,8 @@ Type Operators:
 | `int \| string` | Union type |
 | `int & number` | Intersection |
 | `int ! string` | Exclusion |
-| `1 \| 2` | Literal union (enum) type — in an expression too; `1 \| 1` is `1` |
-| `int & 5` | Type operation collapsing to `5` in an expression |
+| `1 \| 2` | Literal union (enum) type — in an expression too |
+| `1 & 2` | `none`, the empty type: admits nothing |
 | `int?` | Optional (int \| null) |
 | `int*` | Zero or more |
 | `int+` | One or more |

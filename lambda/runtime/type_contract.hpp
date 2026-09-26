@@ -119,6 +119,11 @@ bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expecte
 // Value-set inclusion for first-class type values. Unlike boundary
 // compatibility, this relation never relies on a value conversion.
 bool lambda_type_contract_is_subtype(Type* candidate, Type* expected);
+// S11.1.7: the result of `left op right` for the type operators when it
+// reduces -- `&TYPE_NONE` when the literals decide nothing is admitted or an
+// operand is `none` under `&`, the other operand when one side is `none`
+// under `|` (either side) or `!` (right side) -- else NULL: it stays binary.
+Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op);
 
 // Resolve a concrete record layout through aliases and nullable spellings.
 // A nullable receiver still needs its own value/null guard (D3.2.4v3).

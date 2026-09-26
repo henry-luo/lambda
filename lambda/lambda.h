@@ -677,6 +677,14 @@ typedef enum SysFunc {
     // appended, never inserted: existing SysFunc values stay stable for
     // anything that stores them
     SYSFUNC_COUNT,      // count(x) - the size of the run x is (S8.3.3v3)
+    // S10.1.1v2: the value set functions that replaced container `| & !`
+    SYSFUNC_UNIQUE2,
+    SYSFUNC_UNIQUE3,
+    SYSFUNC_UNIQUE4,
+    SYSFUNC_INTERSECT2,
+    SYSFUNC_INTERSECT3,
+    SYSFUNC_INTERSECT4,
+    SYSFUNC_EXCEPT,
 } SysFunc;
 
 typedef struct Type {
@@ -2812,9 +2820,16 @@ extern "C" {
     Item fn_sum(Item a);
     Item fn_avg(Item a);
     Item fn_avg_skip_null(Item a, bool skip_null);
-    Item fn_union(Item a, Item b);
-    Item fn_intersect(Item a, Item b);
+    Item fn_union(Item a, Item b);      // S10.1.1v2: `|`, `&`, `!` build a type; the value set
+    Item fn_intersect(Item a, Item b);  // functions are unique/intersect/except below
     Item fn_exclude(Item a, Item b);
+    Item fn_unique2(Item a, Item b);
+    Item fn_unique3(Item a, Item b, Item c);
+    Item fn_unique4(Item a, Item b, Item c, Item d);
+    Item fn_intersect2(Item a, Item b);
+    Item fn_intersect3(Item a, Item b, Item c);
+    Item fn_intersect4(Item a, Item b, Item c, Item d);
+    Item fn_except(Item a, Item b);
     Item fn_pos(Item a);
     Item fn_neg(Item a);
 

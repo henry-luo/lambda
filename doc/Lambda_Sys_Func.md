@@ -782,6 +782,9 @@ empty. Generic arrays and lists retain their ordinary collection behavior.
 | `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
 | `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc', by: ~.age})` | Sorted by age desc |
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
+| `unique(a, b, ...)`  | Union: `unique(a ++ b ++ ...)`      | `unique([1, 2], [2, 3])`               | `[1, 2, 3]`        |
+| `intersect(a, b, ...)` | Items of `a` held by every other  | `intersect([1, 2, 3], [2, 3, 4])`      | `[2, 3]`           |
+| `except(a, b)`       | Items of `a` not held by `b`        | `except([1, 2, 3], [2])`               | `[1, 3]`           |
 | `set(vec)`           | Remove duplicates                   | `set([1, 1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[[1, 3], [2, 4]]` |
 
@@ -1552,7 +1555,9 @@ pn main() {                  // print is a pn: only a pn may call it
 | `any` | 1 | Any truthy |
 | `reverse` | 1 | Reverse order |
 | `sort` | 1-2 | Sort (dir, key fn, or options map) |
-| `unique` | 1 | Unique elements |
+| `unique` | 1-4 | Unique elements; with several operands, their union |
+| `intersect` | 2-4 | Items of the first held by every other |
+| `except` | 2 | Items of the first not held by the second |
 | `take` | 2 | Take first n |
 | `drop` | 2 | Drop first n |
 | `zip` | 2 | Zip vectors |

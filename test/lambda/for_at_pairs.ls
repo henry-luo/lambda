@@ -9,6 +9,6 @@ let e = <d id: "m", cls: "c", "txt">
 let attrs = [for (k, v at e) k ++ "=" ++ v]
 let both = [for (k, v in e) "" ++ v]
 // an IntKey is not a name, so paired `at` over an array is empty
-let none = [for (k, v at [10, 20]) k]
-let out = [pairs, keys, filtered, attrs, both, none]
+let no_pairs = [for (k, v at [10, 20]) k]
+let out = [pairs, keys, filtered, attrs, both, no_pairs]
 out

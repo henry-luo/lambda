@@ -22,6 +22,6 @@ let xs = [3, 1, 2]
 [for (x in [1, 2]) (x, x)];
 [for (x in [1, 2]) [x, x]]
 "-- empty and one-item results collapse --"
-let none = for (x in xs where x > 5) x
+let no_match = for (x in xs where x > 5) x
 let just = for (x in xs where x > 2) x;
-[none == null, just, type(just)]
+[no_match == null, just, type(just)]

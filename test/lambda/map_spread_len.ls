@@ -32,8 +32,8 @@ let deep = {*:b, q: 1}
 len(deep)
 
 // spreading an empty map adds nothing
-let none = {*:{}, only: 1}
-len(none)
+let only_one = {*:{}, only: 1}
+len(only_one)
 
 // element attribute spread uses the same link slots; `at` iteration must
 // list the spread's attribute names

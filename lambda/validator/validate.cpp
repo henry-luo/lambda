@@ -63,7 +63,12 @@ static bool array_pattern_simple_type_matches(Item item, Type* type_pattern, boo
     if (!type_pattern || type_pattern->type_id != LMD_TYPE_TYPE) return false;
     Type* expected = ((TypeType*)type_pattern)->type;
     if (!expected) return false;
-    if (expected == &TYPE_NUMBER || expected == &TYPE_INTEGER || IS_NUMERIC_ID(expected->type_id)) {
+    bool admits = false;
+    if (validator_meta_type_admits(item.to_const(), expected, &admits)) {
+        *handled = true;
+        return admits;
+    }
+    if (IS_NUMERIC_ID(expected->type_id)) {
         *handled = true;
         // array tuple type patterns use the same exact-embedding rule as scalar `is`.
         return validator_numeric_item_embeds(item.to_const(), expected);
@@ -342,9 +347,8 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
     // because the deref that precedes it is already out of bounds.
     if (type_is_global_meta_type((const Type*)type)) {
         Type* meta = (Type*)type;
-        bool ok = meta == &TYPE_NUMBER ? IS_NUMERIC_ID(item.type_id())
-            : meta == &TYPE_INTEGER ? validator_numeric_item_embeds(item, meta)
-            : item.type_id() == LMD_TYPE_TYPE;
+        bool ok = false;
+        if (!validator_meta_type_admits(item, meta, &ok)) ok = item.type_id() == LMD_TYPE_TYPE;
         if (validator->is_fast_mode()) return validation_verdict(ok);
         ValidationResult* meta_result = create_validation_result(validator->get_pool());
         meta_result->valid = ok;
@@ -371,10 +375,11 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         if (lambda_type_is_range(fast_base)) {
             return validate_against_range_type(validator, item, fast_base);
         }
-        if (fast_base == &TYPE_NUMBER) {
-            return validation_verdict(IS_NUMERIC_ID(item.type_id()));
+        bool meta_admits = false;
+        if (validator_meta_type_admits(item, fast_base, &meta_admits)) {
+            return validation_verdict(meta_admits);
         }
-        if (fast_base == &TYPE_INTEGER || IS_NUMERIC_ID(fast_base->type_id)) {
+        if (IS_NUMERIC_ID(fast_base->type_id)) {
             return validation_verdict(validator_numeric_item_embeds(item, fast_base));
         }
         if (fast_base == &TYPE_MAP) {
@@ -447,15 +452,11 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         return validate_against_range_type(validator, item, base_type);
     }
 
-    if (base_type == &TYPE_NUMBER) {
-        // `number` has no runtime tag; validation expands it to all concrete numeric tags.
-        result->valid = IS_NUMERIC_ID(item.type_id());
-        if (!result->valid) add_type_mismatch_error_ex(result, validator, base_type, item);
-        return result;
-    }
-    if (base_type == &TYPE_INTEGER) {
-        result->valid = validator_numeric_item_embeds(item, base_type);
-        if (!result->valid) add_type_mismatch_error_ex(result, validator, base_type, item);
+    // `number`, `integer` and `none` have no runtime tag; each admits by identity
+    bool meta_admits = false;
+    if (validator_meta_type_admits(item, base_type, &meta_admits)) {
+        result->valid = meta_admits;
+        if (!meta_admits) add_type_mismatch_error_ex(result, validator, base_type, item);
         return result;
     }
 

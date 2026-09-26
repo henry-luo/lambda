@@ -8,7 +8,7 @@
 // child count, the two agreed by accident, and every consumer that pairs a
 // count with an index read was written against `len`. Correcting the law made
 // each of them walk one position past the last child and read `null` there
-// (LR09-8, LR09-9). `last`, the set operators and the mapping pipe are pinned
+// (LR09-8, LR09-9). `last`, the set functions and the mapping pipe are pinned
 // below because each was broken exactly that way with no test to catch it.
 
 let e = <div id: "a", cls: "b", <p "x"> <q "y">>
@@ -36,13 +36,13 @@ let piped = e |> ~
 piped
 len(piped)
 
-"-- set operators traverse content too --"
+"-- the set functions over content (S10.1.1v2 retired `| & !` on containers) --"
 let f = <div z: 9, <p "x">>
-let u = e | f
+let u = unique(content(e), content(f))
 u
-let both = e & f
+let both = intersect(content(e), content(f))
 both
-let only_e = e ! f
+let only_e = except(content(e), content(f))
 only_e
 
 "-- degenerate shapes --"

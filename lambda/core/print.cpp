@@ -797,6 +797,7 @@ void print_item(Item item, int depth) {
 const char* format_type(Type *type) {
     if (!type) { return "null*"; }
     if (type == &TYPE_NUMBER) { return "number"; }
+    if (type == &TYPE_NONE) { return "none"; }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:

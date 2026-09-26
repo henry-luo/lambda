@@ -1228,6 +1228,8 @@ extern Type TYPE_INTEGER;
 // so static promotion cannot erase integer into ordinary decimal.
 extern Type TYPE_INTEGER_VALUE;
 extern Type TYPE_NUMBER;
+// S11.1.7: `none`, the empty type -- admits no value, below every type.
+extern Type TYPE_NONE;
 extern Type TYPE_STRING;
 extern Type TYPE_BINARY;
 extern Type TYPE_SYMBOL;
@@ -1324,10 +1326,11 @@ static inline bool lambda_type_is_concrete_attr_shape(const Type* type) {
     return type != &TYPE_MAP && type != &TYPE_ELMT && type != &TYPE_OBJECT;
 }
 
-// These three values use LMD_TYPE_TYPE as a compact semantic category, not a
+// These values use LMD_TYPE_TYPE as a compact semantic category, not a
 // TypeType payload. Callers must test this before reading extended Type fields.
 static inline bool type_is_global_meta_type(const Type* type) {
-    return type == &TYPE_TYPE || type == &TYPE_INTEGER || type == &TYPE_NUMBER;
+    return type == &TYPE_TYPE || type == &TYPE_INTEGER || type == &TYPE_NUMBER ||
+        type == &TYPE_NONE;
 }
 
 static inline bool type_is_any_without_error(const Type* type) {
@@ -1355,6 +1358,7 @@ static inline const char* type_contract_display_name(const Type* type) {
     if (type == &TYPE_ANY_NO_ERROR) return "any \\ error";
     if (type == &TYPE_ANY_NO_NULL) return "any \\ null";
     if (type == &TYPE_ANY_NO_ERROR_OR_NULL) return "any \\ {error, null}";
+    if (type == &TYPE_NONE) return "none";
     if (const char* numeric = type_numeric_contract_name(type)) return numeric;
     // a function contract names its colour; bare `function` falls through
     if (TypeFunc* signature = lambda_type_func_signature((Type*)type)) {
@@ -1430,6 +1434,7 @@ extern TypeType LIT_TYPE_COMPLEX;
 extern TypeType LIT_TYPE_DECIMAL;
 extern TypeType LIT_TYPE_INTEGER;
 extern TypeType LIT_TYPE_NUMBER;
+extern TypeType LIT_TYPE_NONE;
 extern TypeType LIT_TYPE_STRING;
 extern TypeType LIT_TYPE_BINARY;
 extern TypeType LIT_TYPE_SYMBOL;
