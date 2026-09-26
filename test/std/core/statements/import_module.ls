@@ -16,9 +16,9 @@ math_mul(5, 6)
 
 // ===== Namespace-like grouping =====
 let math_ops = {
-    add: fn(a, b) => a + b,
-    sub: fn(a, b) => a - b,
-    mul: fn(a, b) => a * b
+    add: (a, b) => a + b,
+    sub: (a, b) => a - b,
+    mul: (a, b) => a * b
 }
 math_ops.add(10, 20)
 math_ops.sub(30, 5)
@@ -26,10 +26,10 @@ math_ops.mul(4, 7)
 
 // ===== Function re-export pattern =====
 fn create_api() {
-    let internal_helper = fn(x) => x * 2
+    let internal_helper = (x) => x * 2
     {
         double: internal_helper,
-        quadruple: fn(x) => internal_helper(internal_helper(x))
+        quadruple: (x) => internal_helper(internal_helper(x))
     }
 }
 let api = create_api()

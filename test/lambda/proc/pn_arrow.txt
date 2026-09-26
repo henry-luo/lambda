@@ -1,0 +1,14 @@
+[true, false, true, null]
+18
+[3, 0, 60]
+123
+42
+true
+hello, arrow
+101
+top 7
+42
+2
+caught negative
+40425
+

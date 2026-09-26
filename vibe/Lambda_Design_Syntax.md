@@ -3200,9 +3200,20 @@ reads `int` as a parameter *name*, and Tree-sitter rejects the form.
 
 ### 7.30 Anonymous functions: the arrow is the one form, and `pn` colours it (decided 2026-09-26 — ratified as S16.6.7v2, S16.4.2v2, S16.6.8v2)
 
-> **Not yet implemented** (2026-09-26): neither front end parses the
-> procedure arrow, and the C parser still misreads `fn (x) { … }`
-> ([LR02-21](<Lambda_Issue_Ledger.md#lr02-21>)).
+> **Implemented 2026-09-26** in both front ends: the C parser's
+> `parse_procedure_arrow` (an unnamed `AST_NODE_PROC`, no postfix, no `var`
+> parameter) and a line-start `fn (` that reaches the repair diagnostic; the
+> Tree-sitter `proc_expr`, a closed tail whose parameters come from a
+> `parameter_body` helper. S16 harness C 372/372, Tree-sitter 358/358.
+> Fixture `proc/pn_arrow.ls` pinned on every tier. The unnamed `fn` sites
+> were migrated; C's remaining barred words are
+> [LR02-21](<Lambda_Issue_Ledger.md#lr02-21>)'s residue.
+>
+> *Pitfall recorded:* sharing the parameter body through a hidden
+> `_parameter_tail` rule broke every arrow head in Tree-sitter (15 harness
+> cases), because the declared `[_named_parameter, primary_expr]` fork no
+> longer covered the name. The body is now spliced in by a JS helper, so both
+> parameter rules keep their name inline.
 
 **Question.** `doc/Lambda_Func.md` documented an unnamed
 `fn (x: int, y: int) { x + y }`, and parts of the corpus wrote
