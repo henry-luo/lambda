@@ -1027,13 +1027,16 @@ struct IntrinsicMulticolChild {
 static bool intrinsic_multicol_child_info(DomNode* child, IntrinsicMulticolChild* info) {
     if (!child || !child->is_element() || !info) return false;
     info->element = child->as_element();
-    info->block = lam::unsafe_view_block_element_storage(info->element);
+    ViewBlock* storage = lam::unsafe_view_block_element_storage(info->element);
+    // Shared element storage is enough for pre-layout style reads, but BFC
+    // checks require a real block view rather than an inline element alias.
+    info->block = lam::view_as_block(static_cast<View*>(info->element));
     // Intrinsic multicol passes need one pre-layout interpretation of hidden, out-of-flow,
     // and column-spanning children; keeping it here prevents the two tree walks diverging.
-    info->skipped = info->block && (layout_block_is_display_none(info->block) ||
-                                    layout_view_is_abs_or_fixed(info->block));
-    info->spans_all = info->block && info->block->multicol_prop() &&
-        info->block->multicol_prop()->span == COLUMN_SPAN_ALL;
+    info->skipped = storage && (layout_block_is_display_none(storage) ||
+                                layout_view_is_abs_or_fixed(storage));
+    info->spans_all = storage && storage->multicol_prop() &&
+        storage->multicol_prop()->span == COLUMN_SPAN_ALL;
     if (!info->spans_all && info->element->specified_style) {
         CssDeclaration* span_decl = style_tree_get_declaration(
             info->element->specified_style, CSS_PROPERTY_COLUMN_SPAN);

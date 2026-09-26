@@ -215,6 +215,40 @@ TEST_F(DomRetirementTest, GeneratedTextPayloadIsFreedWithItsNode) {
     EXPECT_GT(after.free_count, before.free_count);
 }
 
+TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
+    // the view tree owns the layout props a retirement sweep returns
+    ViewTree tree = {};
+    tree.prop_pool = pool_create();
+    ASSERT_NE(tree.prop_pool, nullptr);
+    view_tree_canonical_init(&tree);
+    doc.view_tree = &tree;
+
+    // layout_text points a text node at the FontProp of its nearest
+    // font-owning ancestor; an unstyled span owns none, so its text borrows
+    // the live parent's
+    DomElement* parent = root();
+    DomElement* span = element("span");
+    ASSERT_TRUE(attach(parent, span));
+    DomText* text = DomText::create_copy("world", 5, span);
+    ASSERT_NE(text, nullptr);
+    ASSERT_TRUE(span->append_child(text));
+    FontProp* owned = (FontProp*)tree.alloc_prop(sizeof(FontProp));
+    parent->font = owned;
+    text->font = owned;
+
+    ASSERT_TRUE(parent->remove_child(span));
+    EXPECT_EQ(dom_retire_sweep(&doc), 2u);
+    // the retired borrower only drops its pointer; freeing the prop left the
+    // live parent's font dangling
+    EXPECT_TRUE(pool_owns(tree.prop_pool, owned));
+    EXPECT_EQ(parent->font, owned);
+
+    parent->font = nullptr;
+    doc.view_tree = nullptr;
+    view_tree_canonical_destroy(&tree);
+    pool_destroy(tree.prop_pool);
+}
+
 TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
     DomElement* parent = root();
     for (int i = 0; i < 128; i++) {

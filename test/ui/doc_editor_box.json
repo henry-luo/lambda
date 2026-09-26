@@ -1,0 +1,17 @@
+{
+  "name": "Doc editor opens box.html",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 2000},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html .tree-label"}},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html_box_html"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html_box_html"}},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "box.html"}
+  ]
+}

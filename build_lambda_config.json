@@ -2964,15 +2964,34 @@
             "source": "test/test_view_reuse_gtest.cpp",
             "name": "View Reuse Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-rt",
+              "node-core",
+              "radiant"
             ],
             "libraries": [
               "gtest",
               "gtest_main"
             ],
-            "additional_sources": [
-              "radiant/view_reuse.cpp"
-            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
             "binary": "test_view_reuse_gtest.exe",
             "icon": "\u267b\ufe0f"
           },

@@ -694,15 +694,6 @@ static void view_teardown_reset_text(ViewTree* tree, DomText* text) {
     text->view_type = RDT_VIEW_NONE;
 }
 
-static void view_teardown_free_text_font(ViewTree* tree, DomText* text) {
-    if (!text || !text->font) return;
-    if (text->font->family) {
-        view_pool_free_ptr(tree, text->font->family);
-    }
-    view_pool_free_ptr(tree, text->font);
-    text->font = nullptr;
-}
-
 static bool release_should_walk_dom_children(DomElement* elem) {
     if (!elem) {
         return false;
@@ -767,12 +758,11 @@ static void view_teardown_visit_node(ViewTree* tree,
             }
         } else if (node->is_text()) {
             DomText* text = node->as_text();
-            if ((flags & VIEW_TEARDOWN_RELEASE_EXTERNAL) && text->font) {
-                font_prop_release_handle(text->font);
-            }
-            if (flags & VIEW_TEARDOWN_FREE_POOL) {
-                view_teardown_free_text_font(tree, text);
-            }
+            // text->font is borrowed from the nearest font-owning ancestor
+            // (layout_text takes lycon->font.style), which may lie outside this
+            // subtree; only that element releases and frees it, exactly once.
+            // Freeing it here double-freed the owner's prop, freed families the
+            // view pool never allocated, and could free a live ancestor's font.
             if (flags & VIEW_TEARDOWN_RESET_IN_PLACE) {
                 view_teardown_reset_text(tree, text);
             }
