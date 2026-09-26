@@ -63,7 +63,7 @@
       .rdt-editor img { cursor: pointer; }
 
       .rdt-toolbar {
-        flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+        position: relative; flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
         padding: 8px 10px; background: var(--bar); border-bottom: 1px solid var(--border); z-index: 5;
       }
       .rdt-btn {
@@ -94,7 +94,7 @@
       .rdt-emoji:hover { background: #e2e8f0; }
       .rdt-color .rdt-a { font-weight: 700; line-height: 11px; border-bottom: 3px solid currentColor; padding-bottom: 1px; }
       .rdt-palette {
-        position: absolute; top: 34px; left: 0; z-index: 20; background: #fff;
+        position: absolute; top: 34px; right: 0; z-index: 20; background: #fff;
         border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
         padding: 8px; display: grid; grid-template-columns: repeat(8, 18px); gap: 6px; width: max-content;
       }

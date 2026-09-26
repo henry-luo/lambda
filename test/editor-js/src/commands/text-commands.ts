@@ -11,7 +11,7 @@
 // block, all/node selections) get expanded as the corresponding Slate
 // fixtures are ported.
 
-import { isNode, isText, lastIndex, node, nodeAt, nodeAttrs, parentPath, withContent } from '../model/doc.js'
+import { isNode, isText, lastIndex, nodeAt, nodeAttrs, parentPath, withContent } from '../model/doc.js'
 import { pos, posEqual, textSelection } from '../model/source-pos.js'
 import { charLen, caretPosInContent, mergeInlines } from '../model/inline.js'
 import { cmdInsertTextAtGap, cmdDeleteAtGap } from './gap-cursor.js'
@@ -290,6 +290,11 @@ export function cmdInsertText(state: EditorState, txt: string): Transaction | nu
 // cmdSetBlockType after the fact.
 // ---------------------------------------------------------------------------
 
+function splitRightAttrs(block: Node, rightTag: string): Node['attrs'] {
+  // A repeated list item keeps its indent, while the original alone keeps its id.
+  return rightTag === block.tag ? block.attrs.filter(attr => attr.name !== 'id') : []
+}
+
 export function cmdInsertParagraph(state: EditorState): Transaction | null {
   const sel = state.selection
   if (sel === null) return null
@@ -333,7 +338,7 @@ export function cmdInsertParagraph(state: EditorState): Transaction | null {
     const first: Node = {
       kind: 'node', tag: target0.tag, attrs: target0.attrs, content: target0.content.slice(0, off)
     }
-    const second = node(splitTag, target0.content.slice(off))
+    const second = nodeAttrs(splitTag, splitRightAttrs(target0, splitTag), target0.content.slice(off))
     let tx = txBegin(state.doc, sel)
     tx = txStep(tx, stepReplace(blockParentPath, blockIdx, blockIdx + 1, [first, second]))
     const secondPath = [...blockParentPath, blockIdx + 1]
@@ -375,7 +380,7 @@ export function cmdInsertParagraph(state: EditorState): Transaction | null {
   const second = {
     kind: 'node' as const,
     tag: splitTag,
-    attrs: [],
+    attrs: splitRightAttrs(blockNode, splitTag),
     content: [...leafSuffix, ...trailingChildren]
   }
 

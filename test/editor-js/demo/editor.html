@@ -105,6 +105,7 @@
 
       /* Toolbar */
       .rdt-toolbar {
+        position: relative;
         flex: 0 0 auto;       /* pinned at the top; never scrolls */
         display: flex;
         align-items: center;
@@ -173,7 +174,7 @@
         border-bottom: 3px solid currentColor; padding-bottom: 1px;
       }
       .rdt-palette {
-        position: absolute; top: 34px; left: 0; z-index: 20;
+        position: absolute; top: 34px; right: 0; z-index: 20;
         background: #fff; border: 1px solid var(--border); border-radius: 8px;
         box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
         padding: 8px;

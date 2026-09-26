@@ -121,44 +121,8 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
 }
 
-static int selection_paint_push_overflow_clips(SelectionPaintCtx* ctx,
-                                                View* selection_view) {
-    if (!ctx || !ctx->rdcon || !selection_view) return 0;
-
-    int pushed = 0;
-    for (View* view = selection_view; view; view = view->parent) {
-        if (!view->is_block()) continue;
-        ViewBlock* block = lam::view_require_block(view);
-        Bound clip;
-        if (!layout_block_overflow_clip(block, &clip)) continue;
-
-        RdtLogicalPoint origin = view_geometry_node_viewport_origin(
-            view, scroll_state_resolve_view_geometry);
-        RdtLogicalPoint top_left = selection_paint_to_canvas(ctx, {
-            origin.x + clip.left,
-            origin.y + clip.top
-        });
-        RdtLogicalPoint bottom_right = selection_paint_to_canvas(ctx, {
-            origin.x + clip.right,
-            origin.y + clip.bottom
-        });
-        float width = (bottom_right.x - top_left.x) * ctx->scale;
-        float height = (bottom_right.y - top_left.y) * ctx->scale;
-        if (width <= 0.0f || height <= 0.0f) continue;
-
-        RdtPath* path = rdt_path_new();
-        rdt_path_add_rect(path, top_left.x * ctx->scale, top_left.y * ctx->scale,
-                          width, height, 0, 0);
-        rc_push_clip(ctx->rdcon, path, nullptr);
-        rdt_path_free(path);
-        pushed++;
-    }
-    return pushed;
-}
-
-static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
-                                          SelectionPaintCtx* paint) {
-    if (!rdcon || !range || !paint) return false;
+static bool render_text_control_selection(RenderContext* rdcon, DomRange* range) {
+    if (!rdcon || !range) return false;
     if (!range->start.node || range->start.node != range->end.node) return false;
     if (!range->start.node->is_element()) return false;
 
@@ -167,8 +131,8 @@ static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
     if (range->start.offset == range->end.offset) return true;
 
     // Form controls paint their own selection inside render_form_control().
-    // Painting it again as a document overlay offsets the highlight a second
-    // time in embedded/scrolled documents.
+    // Painting it again in the text pass offsets the highlight a second time
+    // in embedded/scrolled documents.
     return true;
 }
 
@@ -222,7 +186,12 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
     return scratch;
 }
 
-static void render_selection(RenderContext* rdcon, DocState* state) {
+void render_text_selection_rect(RenderContext* rdcon, ViewText* text_view,
+                                TextRect* text_rect) {
+    if (!rdcon || !text_view || !text_rect || !rdcon->ui_context ||
+        !rdcon->ui_context->document) return;
+
+    DocState* state = rdcon->ui_context->document->state;
     if (!state) return;
 
     DomSelection* ds = state->dom_selection;
@@ -250,7 +219,7 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
 
     DomRange paint_range;
     r = selection_paint_range_for_current_tree(rdcon, r, &paint_range);
-    if (render_text_control_selection(rdcon, r, &ctx)) {
+    if (render_text_control_selection(rdcon, r)) {
         return;
     }
 
@@ -258,24 +227,16 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
         return;
     }
 
-    // The content pass has already popped its overflow scopes. Recreate the
-    // selected text's ancestor clips so off-screen editor lines cannot paint
-    // over neighbouring controls.
-    int overflow_clip_depth = selection_paint_push_overflow_clips(
-        &ctx, static_cast<View*>(r->start_view));
-    dom_range_for_each_rect(r, rdcon->ui_context, selection_paint_rect_cb, &ctx);
-    while (overflow_clip_depth-- > 0) {
-        rc_pop_clip(rdcon);
-    }
+    // Paint with this text fragment so later stacking contexts cover its
+    // highlight, and the fragment inherits its normal overflow clips.
+    dom_range_for_each_rect_in_text_rect(r, lam::dom_require_text(text_view),
+        text_rect, rdcon->ui_context, selection_paint_rect_cb, &ctx);
 }
 
 void render_ui_overlays(RenderContext* rdcon, DocState* state) {
     if (!state) {
         return;
     }
-
-
-    render_selection(rdcon, state);
 
     if (state->open_dropdown) {
         ViewBlock* select = lam::view_require_block(state->open_dropdown);

@@ -1,0 +1,12 @@
+{
+  "name": "editor4c-phase-c: clicks within collapsed newline text place the caret at the click",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "x": 180, "y": 160},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"anchor\":{\"path\":[1,14],\"offset\":16"},
+    {"type": "click", "x": 320, "y": 160},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface"}, "attribute": "data-rdt-selection", "contains": "\"anchor\":{\"path\":[1,14],\"offset\":36"}
+  ]
+}

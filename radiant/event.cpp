@@ -10657,7 +10657,8 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
     float word_spacing = font->style->word_spacing;
     bool has_space = false;
     while (current < run.end) {
-        if (*current == '\n' || *current == '\r') break;
+        // A normal-flow newline collapses to a space within the same text rect;
+        // preserved line breaks are already split into separate rects by layout.
         float advance = 0.0f;
         int bytes = 1;
         if (is_space(*current)) {
@@ -10686,7 +10687,7 @@ static int event_text_offset_for_x(UiContext* uicon, FontBox* font,
             }
         }
         unsigned char* next = current + bytes;
-        if (next < run.end && *next != '\n' && *next != '\r') {
+        if (next < run.end) {
             advance += letter_spacing;
         }
         if (target_x < x + advance / 2.0f) return byte_offset;

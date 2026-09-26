@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { node, nodeAt, text } from '../../src/model/doc.js'
+import { node, nodeAt, nodeAttrs, text } from '../../src/model/doc.js'
 import { pos, textSelection } from '../../src/model/source-pos.js'
 import { html5SubsetSchema } from '../../src/schemas/index.js'
 import {
@@ -111,6 +111,23 @@ describe('commands/cmdInsertParagraph — empty block (bug 2)', () => {
 })
 
 describe('commands/cmdInsertParagraph (split_block)', () => {
+  it('carries list indentation to a new item without duplicating its id', () => {
+    const item = nodeAttrs('li', [{ name: 'indent', value: 2 }, { name: 'id', value: 'original' }], [text('hello')])
+    const s = state('doc', [node('ul', [item])], caret([0, 0, 0], 3))
+    const tx = cmdInsertParagraph(s)!
+    expect((nodeAt(tx.doc_after, [0, 0]) as any).attrs).toEqual(item.attrs)
+    expect((nodeAt(tx.doc_after, [0, 1]) as any).attrs).toEqual([{ name: 'indent', value: 2 }])
+    expect(tx.sel_after).toEqual(caret([0, 1, 0], 0))
+  })
+
+  it('carries list indentation when splitting at a child boundary', () => {
+    const item = nodeAttrs('li', [{ name: 'indent', value: 1 }], [text('hello'), node('br', []), text('world')])
+    const s = state('doc', [node('ul', [item])], caret([0, 0], 2))
+    const tx = cmdInsertParagraph(s)!
+    expect((nodeAt(tx.doc_after, [0, 1]) as any).attrs).toEqual(item.attrs)
+    expect(textAt(tx.doc_after, [0, 1, 0])).toBe('world')
+  })
+
   it('splits a paragraph at the caret', () => {
     const s = state('doc', [node('p', [text('hello world')])], caret([0, 0], 6))
     const tx = cmdInsertParagraph(s)!
@@ -140,6 +157,16 @@ describe('commands/cmdInsertParagraph (split_block)', () => {
 })
 
 describe('commands/cmdInsertLineBreak', () => {
+  it('keeps the line break inside the indented list item', () => {
+    const item = nodeAttrs('li', [{ name: 'indent', value: 2 }], [text('hello')])
+    const s = state('doc', [node('ul', [item])], caret([0, 0, 0], 3))
+    const tx = cmdInsertLineBreak(s)!
+    const list = nodeAt(tx.doc_after, [0]) as any
+    expect(list.content).toHaveLength(1)
+    expect(list.content[0].attrs).toEqual(item.attrs)
+    expect(list.content[0].content[1].tag).toBe('br')
+  })
+
   it('at the end of a leaf inserts a <br> with no trailing empty leaf', () => {
     const s = state('doc', [node('p', [text('hello')])], caret([0, 0], 5))
     const tx = cmdInsertLineBreak(s)!
