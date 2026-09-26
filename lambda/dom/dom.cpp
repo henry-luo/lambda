@@ -7305,8 +7305,11 @@ extern "C" Item name(Item target_item, Item type, Item callback, Item opts) { \
     operation(target_item, type, callback, opts); \
     return make_js_undefined(); \
 }
-JS_DOM_EVENT_LISTENER_BRIDGE(dom_add_event_listener_bridge,
-    dom_add_event_listener)
+extern "C" Item dom_add_event_listener_bridge(Item target_item, Item type,
+        Item callback, Item opts) {
+    Item result = dom_add_event_listener(target_item, type, callback, opts);
+    return item_is_error(result) ? result : make_js_undefined();
+}
 JS_DOM_EVENT_LISTENER_BRIDGE(dom_remove_event_listener_bridge,
     dom_remove_event_listener)
 #undef JS_DOM_EVENT_LISTENER_BRIDGE

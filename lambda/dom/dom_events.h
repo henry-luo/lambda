@@ -25,8 +25,9 @@ extern "C" {
  * @param type_item   String: event type (e.g., "click", "load")
  * @param cb_item     Function: listener callback
  * @param opts_item   Boolean (useCapture) or options object {capture, once, passive}
+ * @return ItemNull on success, or a thrown error from options conversion.
  */
-void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
+Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
 
 /**
  * removeEventListener(elem, type, callback, capture)

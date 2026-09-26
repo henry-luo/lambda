@@ -124,6 +124,12 @@ function assert_true(val, desc) {
     }
 }
 
+function assert_implements(val, desc) {
+    if (!val) {
+        throw new Error("assert_implements: " + (desc || "required feature is unavailable"));
+    }
+}
+
 function assert_false(val, desc) {
     if (val !== false) {
         var msg = "assert_false: got " + JSON.stringify(val);
