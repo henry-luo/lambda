@@ -1,5 +1,5 @@
 // S7.2.2: `last` is the length minus one of the innermost enclosing
-// subscript's container, in a write as in a read (LR07-35). A write had no
+// subscript's container, in a write as in a read (LR07-36). A write had no
 // scope of its own and read whatever container the last lowered read left
 // behind, so `a[last] = v` failed to compile unless a read of `a` came first.
 // The container is evaluated once: `src()[last]` calls `src` once, as the

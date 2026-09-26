@@ -1,0 +1,20 @@
+"1 match arm"
+[null]
+[null, null]
+"2 constraint"
+[true]
+[true, true]
+["no key", "no key"]
+"3 proviso"
+[5]
+[5, 6]
+"4 handler value arm"
+[null]
+[null, null]
+[[10, 20]]
+"5 method"
+[null]
+"6 the pipe's own key returns after each body"
+[[0, null, 0], [1, null, 1]]
+"7 no walk binds a key"
+[null]

@@ -1,0 +1,4 @@
+predicate_calls_pn.ls:7:21: error[E224]: 'eff' is a procedure (pn) and cannot be called from a function (fn)
+predicate_calls_pn.ls:8:24: error[E224]: 'eff' is a procedure (pn) and cannot be called from a function (fn)
+predicate_calls_pn.ls:8:42: error[E224]: 'eff' is a procedure (pn) and cannot be called from a function (fn)
+predicate_calls_pn.ls:11:19: error[E224]: 'eff' is a procedure (pn) and cannot be called from a function (fn)

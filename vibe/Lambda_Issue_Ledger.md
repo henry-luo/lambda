@@ -240,16 +240,36 @@ Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inf
 
 [LR03-16](#lr03-16) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
 
+### Constrained type and `~key` fix pass — 2026-09-25
+
+A review of the `that` proviso (S10.1.5v3) and of `T that cond` (S11.4.6) found four defects. Each was reproduced on both tiers and fixed on both, with fixtures pinned in `kTune27TierParity`:
+- [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>): a constrained type's base was tested by its TypeId, or not at all on the generic `fn_is` path.
+- [LR03-23](<Lambda_Issue_Ledger (fixed).md#lr03-23>): a match arm naming a constrained type admitted its base alone, and an alias chain lost its inner predicates.
+- [LR13-11](<Lambda_Issue_Ledger (fixed).md#lr13-11>): the validator refused every element of a constrained element type, so `[1, 2] is Pos[]` was `false`.
+- [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>): `~key` in a single-subject body read a stale register on the JIT, and T0 segfaulted on it in a handler's value arm. The JIT's value arm also hid a nested pipe's `~`.
+
+Found on the way: [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>) (T0 answers a predicate outside its allow-list with `false`, so `auto` flips a hot function's answer on promotion) and [LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>) (T0 reads an imported predicate's constants from the importing module), both fixed 2026-09-26 (next section); still open, [LR03-26](#lr03-26) (an inline pattern island never compiles as a constrained base) and [LR10-12](#lr10-12) (a proviso answers null for an error operand, unruled).
+
+The proviso itself matches S10.1.5v3 on both tiers. By S11.4.6 the generic path is still base-only: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). `doc/Lambda_Type.md` shows field and object constraints failing `is` (`<User name: ""> is User; // false`); both answer `true`.
+
+### Predicate evaluation pass — 2026-09-26
+
+The user ruled [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>) the way S11.4.11 now reads (TE-20): a `that` predicate is an `fn` body over the scope it is written in, evaluated in full on every tier. Fixed with it, each on both tiers, with fixtures pinned in `kTune27TierParity`:
+- [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>): T0 answered `false` for a predicate outside its allow-list. The colour walk never entered a constraint body, so a `pn` call there compiled and the JIT ran it inside `is`.
+- [LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>): T0 read an imported predicate's constants from the importer.
+
+Found on the way and fixed with them: a closure that names a local constrained type did not capture what the predicate reads, so the JIT logged "undefined variable" and failed the test. T0, once it evaluated such predicates, also needed the names a predicate binds itself kept out of the declaring frame. Still open: [LR03-27](#lr03-27) (the JIT reads an imported predicate's names in the importer) and [LR03-28](#lr03-28) (a predicate that names its own type crashes compilation).
+
 ### Subscript probe pass — 2026-09-25/26
 
 Probing slices, index arrays, multi-key subscripts and `last` while the query result shape was re-ruled (S8.2.4v2, then S8.2.4v3) found six defects, none covered by a golden — the goldens subscript with literal keys only. Five were fixed on 2026-09-26 with the S8.2.4v3 implementation (both tiers; `make test-lambda-baseline` see the spec's Appendix A row):
-- [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>): an `any`-typed key took the typed-array int fast path on the JIT.
-- [LR07-32](<Lambda_Issue_Ledger (fixed).md#lr07-32>): the checker typed `a[r]` as the element and `m[i, j]` as the row, so a map field stored `0` or `null`.
-- [LR07-33](<Lambda_Issue_Ledger (fixed).md#lr07-33>): `fn_int64_index` was emitted but not registered; with it, the interpreter's N-D key decoding and the JIT's unchecked N-D target.
-- [LR07-34](<Lambda_Issue_Ledger (fixed).md#lr07-34>): a partial N-D subscript was `null`; it is now the leading-axis view `Lambda_Typed_Array2.md` records.
-- [LR07-35](<Lambda_Issue_Ledger (fixed).md#lr07-35>): `last` resolved against an outer container on the JIT, a computed container was evaluated twice, and `a[last] = v` needed a preceding read.
+- [LR07-32](<Lambda_Issue_Ledger (fixed).md#lr07-32>): an `any`-typed key took the typed-array int fast path on the JIT.
+- [LR07-33](<Lambda_Issue_Ledger (fixed).md#lr07-33>): the checker typed `a[r]` as the element and `m[i, j]` as the row, so a map field stored `0` or `null`.
+- [LR07-34](<Lambda_Issue_Ledger (fixed).md#lr07-34>): `fn_int64_index` was emitted but not registered; with it, the interpreter's N-D key decoding and the JIT's unchecked N-D target.
+- [LR07-35](<Lambda_Issue_Ledger (fixed).md#lr07-35>): a partial N-D subscript was `null`; it is now the leading-axis view `Lambda_Typed_Array2.md` records.
+- [LR07-36](<Lambda_Issue_Ledger (fixed).md#lr07-36>): `last` resolved against an outer container on the JIT, a computed container was evaluated twice, and `a[last] = v` needed a preceding read.
 
-Still open: [LR07-36](#lr07-36), an inline `T | null` subscript key, which waits on a ruling.
+Still open: [LR07-37](#lr07-37), an inline `T | null` subscript key, which waits on a ruling.
 
 ---
 
@@ -555,6 +575,15 @@ The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledge
 <a id="lr03-21"></a>**LR03-21 · `<:` does not split a range across union arms (S11.1.4v2) · OPEN (found 2026-09-25, residue of LR03-18)**
 With `type R = 1 to 2` and `type OneTwo = 1 | 2`, `R <: OneTwo` is `false`. Every member of `1 to 2` is admitted by `1 | 2`, so S11.1.4v2 ("`A <: B` holds exactly when every value admitted by `A` is admitted by `B`") makes it `true`. The same holds for `1 to 5` against `(1 to 3) | (4 to 5)`. `contract_type_is_subtype` (`type_contract.cpp`) tries each arm of an expected union whole, and since the LR03-18 fix a range is below an arm only if that arm alone admits all its members. Deciding the split case means covering the range with the arms' members. The reverse direction is right: `OneTwo <: R` is `true`. Before the fix, `<:` compared a range type's tag, so every range was below every other (`(1 to 9) <: (1 to 5)` was `true`); the second example gave `true` then only by that accident.
 
+<a id="lr03-27"></a>**LR03-27 · The JIT reads an imported constrained type's predicate names in the importer (S11.4.11, S1.6) · OPEN (found 2026-09-26, while fixing LR03-24)**
+Both tiers run a predicate inline where `is` names its type. T0 switches to the declaring module for the evaluation (`interp_constrained_module`); the JIT emits the body into the importer's MIR function, where the declaring module's names are not bound. With `let lim = 3` and `pub type Eq = int that ~ == lim` imported, `3 is Eq` is `true` on T0 and `false` on the JIT, which logs "mir: undefined variable 'lim'" and tests the error value. A predicate that calls one of the declaring module's private functions (`pub type Dbl = int that dbl(~) > 6`) fails to link on the JIT ("failed to resolve native fn/pn: _dbl_87"), so the importer does not load. Literal-only predicates and string constants are right on both tiers. Before the LR03-24 fix T0 answered `false` for both, from its allow-list. A fix evaluates the predicate as a function of its declaring module, exported beside the type, which would also answer [LR03-28](#lr03-28).
+
+<a id="lr03-28"></a>**LR03-28 · A constrained type whose predicate names the type itself crashes compilation (S11.4.11) · OPEN (found 2026-09-26, while fixing LR03-24)**
+`type Rec = int that (~ <= 0 or (~ - 1) is Rec)` segfaults on both tiers before anything runs, on the binary from before the LR03-24 fix as well. Both tiers expand a named constrained type's predicate where `is` names it: T0's frame plan sizes the scratch of `is Rec` by the predicate (`plan_constrained_type_need` into `plan_need`), and the JIT inlines it (`emit_constrained_type_test`), so a self-reference recurses without bound. Recursion through a function works: `Down`'s predicate calls `inner`, which tests `is Down` (fixture `constrained_type_predicate.ls` §5).
+
+<a id="lr03-26"></a>**LR03-26 · An inline pattern island never compiles as a constrained base · OPEN (found 2026-09-25)**
+An island compiles at its first evaluation (`compile_runtime_pattern`), and a constrained type's base is never evaluated, so the base of `type Digits = \(d+) that len(~) > 2` has no regex and admits nothing: `"1234" is Digits` is `false` on both tiers. A named pattern base works (`type D = \(d+); type Digits = D that len(~) > 2`). Before [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>) the base's TypeId was compared, with the same answer.
+
 ---
 
 
@@ -765,7 +794,7 @@ pn main() {
 ```
 A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
 
-<a id="lr07-36"></a>**LR07-36 · An inline `T | null` in expression position is a set union, not a type, so `e[(int | null)]` is no type query (S10.1.1) · OPEN — needs a ruling (found 2026-09-26)**
+<a id="lr07-37"></a>**LR07-37 · An inline `T | null` in expression position is a set union, not a type, so `e[(int | null)]` is no type query (S10.1.1) · OPEN — needs a ruling (found 2026-09-26)**
 ```
 let u = (int | null)
 [type(u), u]                     // [array, []] on both tiers; (int | string) is a type
@@ -774,7 +803,7 @@ type N = int | null
 [1, null, 2][N]                  // (1, 2) — the alias is a type, and a null value never matches (S8.2.4v3)
 [1, null, 2]?(int | null)        // (1, 2) — the query operand is a type position
 ```
-*Root cause, located 2026-09-26:* `promote_type_union_expr` (`build_ast.cpp`) makes `A | B` a type union only when both operands are explicit type values; a `null` literal is a value, so `int | null` stays the value-level `|` — `fn_union`, a set union of a type with `null`, which is `[]`. The earlier reading (different answers per tier) came from the JIT's `any`-key fast path, [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>). S10.1.1 says `|` is union everywhere with types first-class, but nothing rules whether a `null` literal beside a type means the null type in expression position — and `T?` cannot be spelled there at all (`e[(int?)]` parses `?` as the query operator), so an inline nullable type has no spelling. Needs a USER ruling; the fix, if `null` is ruled the null type beside a type operand, is a one-arm extension of `promote_type_union_expr`.
+*Root cause, located 2026-09-26:* `promote_type_union_expr` (`build_ast.cpp`) makes `A | B` a type union only when both operands are explicit type values; a `null` literal is a value, so `int | null` stays the value-level `|` — `fn_union`, a set union of a type with `null`, which is `[]`. The earlier reading (different answers per tier) came from the JIT's `any`-key fast path, [LR07-32](<Lambda_Issue_Ledger (fixed).md#lr07-32>). S10.1.1 says `|` is union everywhere with types first-class, but nothing rules whether a `null` literal beside a type means the null type in expression position — and `T?` cannot be spelled there at all (`e[(int?)]` parses `?` as the query operator), so an inline nullable type has no spelling. Needs a USER ruling; the fix, if `null` is ruled the null type beside a type operand, is a one-arm extension of `promote_type_union_expr`.
 
 ## 8. Memory management & GC (LR_08)
 
@@ -897,6 +926,9 @@ pn main() {
 }
 ```
 T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack overflow` and exits 1. A stack overflow is a fault, never a call result (S7.11.1v2), and faults pass through `fn` frames to their boundary (S7.11.2). T0 instead turns it into an ordinary error value, so an unused binding hides it: `negative/runtime/stack_overflow.ls` (`let x = f(0)` at top level) exits 0 on T0. `RuntimeError_StackOverflow` checks only that the script does not crash; `RuntimeError_StackOverflowJit` pins the JIT.
+
+<a id="lr10-12"></a>**LR10-12 · A proviso answers null for an error operand when its predicate touches `~` (S10.1.5v3, S7.9) · OPEN (found 2026-09-25, waiting on a ruling)**
+`x that p` binds `~` to `x` whatever it is. With `let e = error("boom")`, `e that true` is the error, but `e that ~ > 3` is `null`: the comparison propagates the error (S7.9.3), an error is falsy, so the proviso fails. S10.1.5v3 rules a failed proviso absence and says nothing of an error operand. S7.9 asks whether a result can be mistaken for a successful computation, and a null proviso can. Both tiers agree.
 
 ## 11. Mark data API (LR_11)
 

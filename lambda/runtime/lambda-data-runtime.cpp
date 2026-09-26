@@ -629,7 +629,7 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     // N-D access via stride dot product
     ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
     if (shape && ndim < shape->ndim) {
-        // LR07-34: a partial index steps one leading axis per index, each step
+        // LR07-35: a partial index steps one leading axis per index, each step
         // a view of the last; the full-rank read below stays allocation-free.
         // Copy the keys first: the JIT passes them in a GC heap buffer, which
         // a view allocation may collect before the next key is read.

@@ -1446,7 +1446,7 @@ JitImport jit_runtime_imports[] = {
     {"array_num_new", FPTR(array_num_new)},
     {"array_num_new_ndim", FPTR(array_num_new_ndim)},
     {"array_num_at_nd", FPTR(array_num_at_nd)},
-    // the N-D subscript lowering reads a non-native key through this (LR07-33)
+    // the N-D subscript lowering reads a non-native key through this (LR07-34)
     {"fn_int64_index", FPTR(fn_int64_index)},
     {"fn_index_nd", FPTR(fn_index_nd)},
     {"array_num_set_nd", FPTR(array_num_set_nd)},

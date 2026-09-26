@@ -400,7 +400,19 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.10 (LR03-20): an object literal admits each field against its
     // declared contract; construction stored any value unchecked.
     {"test/lambda/object_field_admission.ls", "test/lambda/object_field_admission.txt"},
-    // S8.2.4v3 (LR07-31..35): type keys step lists and drop null matches,
+    // S11.2.1: a constrained type admits its base as `x is <base>` does and a
+    // named arm runs its predicates; both tiers had compared the base's TypeId.
+    {"test/lambda/constrained_type_base.ls", "test/lambda/constrained_type_base.txt"},
+    // S10.1.3: `~key` is null in a single-subject body. The JIT read an
+    // enclosing pipe's index or failed to compile; T0 segfaulted in a value arm.
+    {"test/lambda/current_key_subject.ls", "test/lambda/current_key_subject.txt"},
+    // S11.4.6/S10.1.7v2 (LR03-24, LR03-25): a predicate is an ordinary `fn`
+    // expression over its declaring scope. T0 answered `false` outside an
+    // allow-list and read an imported predicate's constants in the importer,
+    // so `auto` flipped a hot function's answer when the JIT took over.
+    {"test/lambda/constrained_type_predicate.ls",
+     "test/lambda/constrained_type_predicate.txt"},
+    // S8.2.4v3 (LR07-32..36): type keys step lists and drop null matches,
     // positional selections gather; a run-time-typed key read element 0 on the
     // JIT only, and `last` there resolved against an outer container.
     {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt"},

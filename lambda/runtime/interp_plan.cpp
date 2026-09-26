@@ -199,8 +199,8 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_MAP_TYPE:
     case AST_NODE_ELMT_TYPE:
     // P3: the walker resolves the type-list entry and evaluates its `that`
-    // clause only through EvalMode::PREDICATE; raw Type* identity is never
-    // used as a substitute for the constraint.
+    // clause in full, in the declaring module (AI17v2); raw Type* identity is
+    // never used as a substitute for the constraint.
     case AST_NODE_FUNC_TYPE:
     case AST_NODE_CONSTRAINED_TYPE:
     // --- P1 object literals and interpreted methods ---
@@ -959,12 +959,13 @@ bool interp_named_sys_args_supported(const AstNode* callee) {
 }
 
 // ---------------------------------------------------------------------------
-// Restricted evaluator modes (P3)
+// Restricted evaluator mode (P3)
 // ---------------------------------------------------------------------------
 
-// A predicate has no user-code call edge.  This explicit list is deliberately
-// smaller than the ordinary sysfunc surface: every row here is a value reader
-// or scalar/text transform with no I/O, mutation, async, or callback path.
+// A constant fold has no user-code call edge.  This explicit list is
+// deliberately smaller than the ordinary sysfunc surface: every row here is a
+// value reader or scalar/text transform with no I/O, mutation, async, or
+// callback path.
 bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info) {
     if (mode == EvalMode::RUNTIME) return true;
     if (!info || info->is_proc || !info->func_ptr || info->is_async) return false;
@@ -995,89 +996,6 @@ bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info) {
     default:
         return false;
     }
-}
-
-typedef struct InterpPredicateScan {
-    bool ok;
-} InterpPredicateScan;
-
-static bool interp_predicate_node_supported(AstNode* node);
-
-static void interp_predicate_scan_visit(AstNode* child, void* opaque) {
-    InterpPredicateScan* scan = (InterpPredicateScan*)opaque;
-    if (scan->ok && !interp_predicate_node_supported(child)) scan->ok = false;
-}
-
-static bool interp_predicate_children_supported(AstNode* node) {
-    InterpPredicateScan scan = {true};
-    interp_visit_children(node, interp_predicate_scan_visit, &scan);
-    return scan.ok;
-}
-
-static bool interp_predicate_node_supported(AstNode* node) {
-    if (!node) return false;
-    switch (node->node_type) {
-    case AST_NODE_PRIMARY: {
-        AstNode* expr = ((AstPrimaryNode*)node)->expr;
-        return !expr || interp_predicate_node_supported(expr);
-    }
-    case AST_NODE_LITERAL:
-    case AST_NODE_CURRENT_ITEM:
-    case AST_NODE_CURRENT_INDEX:
-    case AST_NODE_TYPE:
-        return true;
-    case AST_NODE_UNARY: {
-        Operator op = ((AstUnaryNode*)node)->op;
-        return (op == OPERATOR_NOT || op == OPERATOR_NEG || op == OPERATOR_POS) &&
-            interp_predicate_children_supported(node);
-    }
-    case AST_NODE_BINARY: {
-        Operator op = ((AstBinaryNode*)node)->op;
-        switch (op) {
-        case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL:
-        case OPERATOR_DIV: case OPERATOR_IDIV: case OPERATOR_MOD: case OPERATOR_POW:
-        case OPERATOR_JOIN: case OPERATOR_AND: case OPERATOR_OR:
-        case OPERATOR_EQ: case OPERATOR_NE: case OPERATOR_LT: case OPERATOR_LE:
-        case OPERATOR_GT: case OPERATOR_GE: case OPERATOR_TO:
-        case OPERATOR_IS: case OPERATOR_SUBTYPE: case OPERATOR_IS_NAN:
-        case OPERATOR_IN: case OPERATOR_AT:
-            return interp_predicate_children_supported(node);
-        default:
-            return false;
-        }
-    }
-    case AST_NODE_IF_EXPR:
-    case AST_NODE_INDEX_EXPR:
-        return interp_predicate_children_supported(node);
-    case AST_NODE_MEMBER_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
-        // A dotted name is a compile-time key, not a binding read. Dynamic
-        // member keys remain admissible only when their expression is pure.
-        return interp_predicate_node_supported(field->object) &&
-            (!field->field || field->field->node_type == AST_NODE_IDENT ||
-                interp_predicate_node_supported(field->field));
-    }
-    case AST_NODE_CALL_EXPR: {
-        AstCallNode* call = (AstCallNode*)node;
-        AstNode* callee = ast_unwrap_primary(call->function);
-        if (!callee || callee->node_type != AST_NODE_SYS_FUNC ||
-                !interp_eval_mode_allows_sys_func(EvalMode::PREDICATE,
-                    ((AstSysFuncNode*)callee)->fn_info)) return false;
-        for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            if (!interp_predicate_node_supported(arg)) return false;
-        }
-        return true;
-    }
-    default:
-        // No identifiers, containers, assignments, lambdas/procedures,
-        // handlers, pipes, loops, or arbitrary calls cross the predicate
-        // boundary.  This keeps `that` independent of runtime effects (AI17).
-        return false;
-    }
-}
-
-bool interp_predicate_supported(AstNode* predicate) {
-    return interp_predicate_node_supported(predicate);
 }
 
 // ---------------------------------------------------------------------------
@@ -1211,6 +1129,24 @@ static void plan_link_call_shape(AstCallNode* call) {
 // builder, so they cost 1 regardless of element count.
 static uint32_t plan_need(AstNode* node);
 
+// A constrained type that `is` or a match arm names -- inline, by name, or
+// through an alias chain -- holds three occurrence homes (index, parent,
+// root) while each of its predicates runs, one after another, over that
+// layer's window of its own names (interp_eval_constrained_predicate). Zero
+// when the node names none.
+static uint32_t plan_constrained_type_need(AstNode* node) {
+    TypeConstrained* constrained = ast_constrained_type(node);
+    if (!constrained) return 0;
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(constrained, layers);
+    uint32_t best = 0;
+    for (int i = 0; i < count; i++) {
+        uint32_t need = layers[i]->predicate_slots + plan_need(layers[i]->constraint);
+        if (need > best) best = need;
+    }
+    return 3 + best;
+}
+
 // Pattern testing is not ordinary expression evaluation: a non-constrained
 // leaf materializes its value and keeps that value live while fn_is/fn_eq runs,
 // whereas a constrained leaf owns three occurrence homes for its predicate.
@@ -1226,10 +1162,10 @@ static uint32_t plan_match_pattern_need(AstNode* pattern) {
             return left > right ? left : right;
         }
     }
-    if (pattern->node_type == AST_NODE_CONSTRAINED_TYPE) {
-        AstConstrainedTypeNode* constrained = (AstConstrainedTypeNode*)pattern;
-        return 3 + plan_need(constrained->constraint);
-    }
+    // a named arm (`case Pos:`) runs its predicates too, so it is costed as
+    // the inline form; one slot overflowed the frame
+    uint32_t constrained = plan_constrained_type_need(pattern);
+    if (constrained) return constrained;
     uint32_t value = plan_need(pattern);
     return value > 1 ? value : 1;
 }
@@ -1283,6 +1219,11 @@ static uint32_t plan_need(AstNode* node) {
         // The mapping context owns five additional homes beside the source
         // while its right side runs; nested pipes retain the enclosing homes.
         uint32_t r = 6 + plan_need(b->right);
+        // `x is T` for a named constrained T keeps x while T's predicates run
+        if (node->node_type == AST_NODE_BINARY && b->op == OPERATOR_IS) {
+            uint32_t constrained = plan_constrained_type_need(b->right);
+            if (constrained && 1 + constrained > r) r = 1 + constrained;
+        }
         // Mapping pipes retain the source, result, item, index, parent, and
         // root occurrence homes while evaluating each right-hand expression.
         uint32_t at_call = 6;
@@ -1817,6 +1758,11 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_EVENT_HANDLER:
         plan_handler(pc, (AstEventHandler*)node);
         return;
+    case AST_NODE_CONSTRAINED_TYPE:
+        // the predicate's own names were planned into its window up front
+        // (plan_predicate_windows); only the base belongs to this plan
+        plan_walk(((AstConstrainedTypeNode*)node)->base, pc);
+        return;
     case AST_NODE_VARIABLE_DECLARATOR:
         plan_assign_entry(pc, ((AstDeclaratorNode*)node)->entry);
         break;
@@ -1848,6 +1794,33 @@ static void plan_walk(AstNode* node, void* ctx) {
     interp_visit_children(node, plan_walk, ctx);
 }
 
+// A predicate runs in whatever frame names its type -- a nested closure's, an
+// importer's, its own again through a call -- so the names it binds itself (a
+// `for` variable, a group `let`) take window slots that each evaluation
+// reserves in the evaluating frame, never slots of the declaring frame. The
+// type list holds every constrained type the module resolved, so each layer is
+// planned before any use site sizes its scratch by the window; a layer an
+// import re-registered here was planned by its owner.
+static void plan_predicate_windows(PlanCtx* module) {
+    ArrayList* types = module->script->type_list;
+    for (int i = 0; types && i < types->length && !module->failed; i++) {
+        Type* type = (Type*)types->data[i];
+        if (!lambda_type_is_constrained(type)) continue;
+        TypeConstrained* layer = (TypeConstrained*)type;
+        if (layer->predicate_planned) continue;
+        PlanCtx pc = {0};
+        pc.script = module->script;
+        pc.storage = BINDING_STORAGE_PREDICATE;
+        plan_walk(layer->constraint, &pc);
+        if (pc.failed || pc.next_slot > UINT16_MAX) {
+            module->failed = true;
+            return;
+        }
+        layer->predicate_slots = (uint16_t)pc.next_slot;
+        layer->predicate_planned = true;
+    }
+}
+
 bool interp_plan_script(Script* script) {
     if (!script || !script->ast_root) return false;
     if (script->interp_planned) return true;
@@ -1865,6 +1838,7 @@ bool interp_plan_script(Script* script) {
     // Module-level bindings live in the per-context module slab, not in a
     // per-activation window: they outlive the top-level frame (D7.2.1/AI6).
     pc.storage = BINDING_STORAGE_MODULE;
+    plan_predicate_windows(&pc);
     plan_assign_scope(&pc, root->global_vars);
 
     for (AstNode* item = root->child; item; item = item->next) plan_walk(item, &pc);
@@ -1917,6 +1891,7 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
     // after them so appending a REPL cell cannot renumber a live binding.
     pc.next_slot = script->interp_slab_count;
     pc.max_scratch = script->interp_plan.scratch_depth;
+    plan_predicate_windows(&pc);
     plan_assign_scope(&pc, root->global_vars);
     for (AstNode* item = fragment; item; item = item->next) plan_walk(item, &pc);
     uint32_t need = plan_need(fragment);

@@ -77,24 +77,53 @@ typedef struct AstConstrainedTypeNode : AstNode {
     AstNode *constraint;    // constraint expression (uses ~ to refer to value)
 } AstConstrainedTypeNode;
 
-// Resolve the AST form that carries a constrained type predicate.  A named
-// type is represented by its declaration binding, not by an evaluator-local
-// copy, so both direct `int that …` and `x is Positive` retain the same
-// predicate node (S11.4.6).
-static inline AstConstrainedTypeNode* ast_constrained_type_node(AstNode* node) {
+// The constrained type a type position names statically: an inline `T that p`,
+// or a type definition bound to one, aliases included (`type P2 = Pos` binds
+// Pos's own TypeConstrained). `is` and a match arm run its predicates from
+// here, where a first-class type value carries none (S11.2.1, S11.4.6).
+static inline TypeConstrained* ast_constrained_type(AstNode* node) {
     node = ast_unwrap_primary(node);
     if (!node) return NULL;
+    Type* type = NULL;
     if (node->node_type == AST_NODE_CONSTRAINED_TYPE) {
-        return (AstConstrainedTypeNode*)node;
+        type = node->type;
+    } else if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        AstNode* declaration = ident->entry ? ident->entry->node : NULL;
+        if (!declaration || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+                !((AstDeclaratorNode*)declaration)->is_type_definition) return NULL;
+        type = type_field_unwrap_simple_decl(declaration->type);
     }
-    if (node->node_type != AST_NODE_IDENT) return NULL;
-    AstIdentNode* ident = (AstIdentNode*)node;
-    AstNode* declaration = ident->entry ? ident->entry->node : NULL;
-    if (!declaration || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR ||
-            !((AstDeclaratorNode*)declaration)->is_type_definition) return NULL;
-    AstNode* value = ast_unwrap_primary(((AstDeclaratorNode*)declaration)->init);
-    return value && value->node_type == AST_NODE_CONSTRAINED_TYPE
-        ? (AstConstrainedTypeNode*)value : NULL;
+    return lambda_type_is_constrained(type) ? (TypeConstrained*)type : NULL;
+}
+
+// The `that` layers a constrained type owes, innermost base first: `type
+// Small = Pos that ~ < 10` owes Pos's before its own. Returns the count, or -1
+// for a cyclic chain or a layer with no predicate, which no check may pass.
+static inline int ast_constrained_type_layers(TypeConstrained* type,
+        TypeConstrained** out) {
+    int count = 0;
+    for (Type* link = (Type*)type; lambda_type_is_constrained(link);
+            link = type_field_unwrap_simple_decl(((TypeConstrained*)link)->base)) {
+        TypeConstrained* layer = (TypeConstrained*)link;
+        if (count == LAMBDA_CONSTRAINT_CHAIN_MAX || !layer->constraint) return -1;
+        out[count++] = layer;
+    }
+    for (int i = 0, j = count - 1; i < j; i++, j--) {
+        TypeConstrained* outer = out[i];
+        out[i] = out[j];
+        out[j] = outer;
+    }
+    return count;
+}
+
+// The predicates of those layers, in the same order.
+static inline int ast_constrained_type_predicates(TypeConstrained* type,
+        AstNode** out) {
+    TypeConstrained* layers[LAMBDA_CONSTRAINT_CHAIN_MAX];
+    int count = ast_constrained_type_layers(type, layers);
+    for (int i = 0; i < count; i++) out[i] = layers[i]->constraint;
+    return count;
 }
 
 // direct Lambda calls share their target and argument layout between MIR and

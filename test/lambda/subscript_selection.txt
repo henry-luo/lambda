@@ -21,17 +21,17 @@
 [[[10, 20], [30, 40]], [[4, 5, 6], [1, 2, 3]], [10, 50]]
 "-- a bool array is a mask, on a generic array too --"
 [[20, 40], ["p", "r"]]
-"-- LR07-31: a key typed only at run time is dispatched on its value --"
+"-- LR07-32: a key typed only at run time is dispatched on its value --"
 [[20, 30, 40], [20, 30, 40], [20, 40], null, null, null, 30]
-"-- LR07-32: a selection is not typed as the element --"
+"-- LR07-33: a selection is not typed as the element --"
 [{
     k: [20, 30, 40]
   }, {
     v: 6
   }, [8, 9]]
-"-- LR07-33: an N-D key that is not a native int --"
+"-- LR07-34: an N-D key that is not a native int --"
 [5, null, null, 6, null]
-"-- LR07-34: fewer keys than axes select a leading-axis view --"
+"-- LR07-35: fewer keys than axes select a leading-axis view --"
 [[42, 43, 44, 45, 46, 47], true, 47, null]
-"-- LR07-35: last belongs to the innermost subscript's container --"
+"-- LR07-36: last belongs to the innermost subscript's container --"
 [40, 40, 40, [4, 5, 6]]

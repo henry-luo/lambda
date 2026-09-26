@@ -1,0 +1,18 @@
+"1 bindings, calls, containers, pipes and comprehensions"
+[true, false, true, false, true, false, true, false, true, false]
+"2 let groups, lambdas, match and nested constrained tests"
+[true, false, true, false, true, false, true, false]
+"3 alias chains and match arms"
+[true, false, "small", "huge", "other"]
+"4 local types, read in place and from a nested closure"
+[true, false, [true, true, true, 11, 22], [false, false, false, 11, 22]]
+"5 a predicate re-entered through a call keeps its own names"
+[true, true, true, false]
+"6 a predicate that answers an error value fails the check"
+[true, false]
+"7 a procedure reaching a predicate as a value fails its colour check"
+[true, false]
+"8 an imported predicate reads its own module's constants"
+[false, true, true, false]
+"9 a hot function keeps its answer when it is compiled"
+[true, true, true, true, true, true, true, true]

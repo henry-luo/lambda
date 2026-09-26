@@ -35,10 +35,11 @@ bool lambda_tier_parse(const char* text, LambdaTier* out);
 // Evaluation modes and statement signals
 // ---------------------------------------------------------------------------
 
+// A `that` predicate needs no mode of its own: it is `fn` context, checked
+// statically, and runs in full like any expression (AI17v2).
 enum class EvalMode : uint8_t {
     RUNTIME,    // full language; effects are admitted by the ordinary walker
     CONST,      // pass-manager const folder: pure, fuel-bounded, no effects (AI16)
-    PREDICATE,  // pure, fuel-bounded `that` evaluation (AI17)
 };
 
 // The only non-local mechanism for language control flow (AI14); longjmp stays
@@ -114,6 +115,10 @@ struct InterpFrame {
     // compile-time `cow_marked`; a re-borrow of that slot prepares first
     uint32_t            var_marked_mask;
     InterpFrame*        caller;
+    // the window the running `that` predicate reserved for the names it binds
+    // itself (BINDING_STORAGE_PREDICATE); NULL outside a predicate
+    uint64_t*           predicate_window;
+    uint32_t            predicate_window_count;
     const AstNode*      cur;         // currently evaluating node (backtrace/step)
     // An `on` handler activation: it has no `fn` node, yet its body is
     // procedural (S12.1.3), so its blocks yield their last value (S2.5.3)
@@ -133,7 +138,7 @@ static inline bool interp_frame_pending(const InterpFrame* f) {
 // pointers to those slots, never Items of its own.
 struct InterpContext {
     uint64_t* item;            // `~`  — current item
-    uint64_t* index;           // `~#` — current index/key
+    uint64_t* index;           // `~key` — current index/key, when present
     uint64_t* parent;          // parent occurrence of `~`, when present
     uint64_t* root;            // root occurrence of `~`, when present
     InterpContext* prev;
@@ -184,9 +189,9 @@ struct InterpState {
     uint32_t     depth_limit;
     uint64_t     node_count;     // evaluated nodes, for the measurement report
     bool         depth_exhausted;
-    // Restricted modes consume this per-node budget.  A rejected call or an
-    // exhausted budget is local to the attempt: its caller receives false,
-    // never a partial predicate result (AI16/AI17).
+    // CONST mode consumes this per-node budget.  A rejected call or an
+    // exhausted budget is local to the attempt: the fold is declined, never
+    // published from a partial result (AI16).
     uint32_t     mode_fuel;
     bool         mode_exhausted;
     bool         mode_rejected;
@@ -273,10 +278,8 @@ Script* lambda_ast_overlay_import_script(const Script* importer,
                                          const AstImportNode* import_node);
 const char* lambda_ast_overlay_string(Script* script, const char* text);
 
-// Conservative, effect-free `that` subset.  The caller must reject rather
-// than execute a predicate outside this shape; runtime repeats the call gate
+// The pure system functions CONST mode may call; the runtime repeats this gate
 // as defense in depth when a future AST form reaches eval_call directly.
-bool interp_predicate_supported(AstNode* predicate);
 bool interp_eval_mode_allows_sys_func(EvalMode mode, const SysFuncInfo* info);
 // System-call names are syntactic labels only: MIR lowers their values in
 // source order. Pure rows therefore share T0's positional Item ABI; procedural
