@@ -276,7 +276,7 @@ export class FullEditorDom {
   private buildToolbar(): HTMLElement {
     const mkBtn = (key: string, title: string, label: string | Node, onClick: () => void): HTMLButtonElement => {
       const b = h('button', {
-        type: 'button', class: 'rdt-btn', title,
+        type: 'button', class: 'rdt-btn', title, 'aria-label': title,
         onmousedown: (e: Event) => e.preventDefault(),
         onclick: onClick
       }, [typeof label === 'string' ? document.createTextNode(label) : label]) as HTMLButtonElement
@@ -319,6 +319,9 @@ export class FullEditorDom {
         if (name) this.runCmd(s => cmdInsertInlineAtom(s, 'mention', [{ name: 'label', value: name }]))
       }),
       this.buildEmojiPicker(),
+      sep(),
+      mkBtn('indent-list', 'Indent list item (Tab)', '≡→', () => this.runCmd(cmdIndentListItem)),
+      mkBtn('outdent-list', 'Outdent list item (Shift+Tab)', '←≡', () => this.runCmd(cmdOutdentListItem)),
       sep(),
       mkBtn('merge', 'Merge selected cells (shift-click cells)', '⊞', () => this.runCmd(cmdMergeCells)),
       mkBtn('split', 'Split a merged cell', '⊟', () => this.runCmd(cmdSplitCell)),

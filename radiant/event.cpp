@@ -3562,6 +3562,7 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
 
 static void select_open_dropdown(UiContext* uicon, DocState* state,
                                  View* select_view);
+static void select_refresh_dropdown_geometry(UiContext* uicon, DocState* state);
 
 // Dropdown open/close for the dom package's `<select>` behavior template. The
 // policy of *when* to open belongs to the template; the overlay geometry,
@@ -7048,10 +7049,7 @@ static bool post_html_handler_incremental_rebuild(
     uint64_t t1 = time_now_ns();
 
     DocState* state = (DocState*)doc->state;
-    if (state) {
-        doc_state_close_dropdown(state, NULL);
-        doc_state_close_context_menu(state);
-    }
+    if (state) doc_state_close_context_menu(state);
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
     if (evcon->ui_context) evcon->ui_context->document = doc;
@@ -7078,6 +7076,9 @@ static bool post_html_handler_incremental_rebuild(
         // Incremental reflow also needs the StateStore ownership and focus
         // repair performed by the retained full-layout fallback.
         state_pruned = (int)state_store_prune_after_reflow(state); // INT_CAST_OK: reconcile telemetry count.
+        // A DOM mutation beneath an open popup can reflow its anchor without
+        // ending the select interaction; detached owners were pruned above.
+        select_refresh_dropdown_geometry(evcon->ui_context, state);
         dirty_clear(&state->dirty_tracker);
         if (repaint_root_overflow) {
             repaint_reason = "repaint-root-overflow";
@@ -7173,12 +7174,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
     DocState* state = (DocState*)doc->state;
 
     // The fallback drops the layout epoch, not the DOM identity epoch. Keep
-    // StateStore owners for connected DOM nodes; after relayout we prune only
-    // state whose node was actually removed by the mutation.
-    if (state) {
-        doc_state_close_dropdown(state, NULL);
-        doc_state_close_context_menu(state);
-    }
+    // the dropdown owner until the post-layout prune checks its DOM identity.
+    if (state) doc_state_close_context_menu(state);
 
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
@@ -7204,6 +7201,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     int state_pruned = 0;
     if (state) {
         state_pruned = (int)state_store_prune_after_reflow(state); // INT_CAST_OK: log/test telemetry count
+        select_refresh_dropdown_geometry(evcon->ui_context, state);
         selection_refresh_presentation(state);
     }
 
@@ -8343,37 +8341,14 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
     EventContext evcon;
     event_context_init(&evcon, uicon, &event);
     evcon.target = target;
-    // F2c: the template commits, here as on the pointer and keyboard paths. The
-    // sim used to write selectedness itself, which left a second copy of the
-    // commit policy — including radio-style exclusivity concerns — that no test
-    // could observe diverging from the template's, because the only tests that
-    // exercised it were the ones bypassing the template. Commit before the JS
-    // mirror below, which needs the new value already in place.
-    {
-        InputIntent commit_intent;
-        commit_intent.option_index = selected_index;
-        radiant_dispatch_behavior_option_commit(&evcon, target, &commit_intent);
-    }
-    JsDispatchScope dispatch_scope(&evcon);
-    if (event_document_has_js_runtime(&evcon)) {
-        if (!dispatch_scope.active) {
-            event_context_cleanup(&evcon);
-            return false;
-        }
-        DomElement* dom_target = view_geometry_nearest_dom_element(target);
-        if (!dom_target) {
-            event_context_cleanup(&evcon);
-            return false;
-        }
-        // the template has committed selectedness; mirror it into the JS DOM
-        // before firing change so handlers reading target.value see it.
-        dom_select_set_selected_index_bridge((void*)dom_target,
-                                                (Item){.item = i2it(selected_index)});
-    }
-    radiant_dispatch_simple_event(&evcon, target, "input", true, false);
-    bool prevented = radiant_dispatch_simple_event(&evcon, target, "change", true, false);
+    // The template owns the selectedness change and its input/change events
+    // for pointer, keyboard, and simulated choices alike.
+    InputIntent commit_intent;
+    commit_intent.option_index = selected_index;
+    bool committed = radiant_dispatch_behavior_option_commit(
+        &evcon, target, &commit_intent);
     event_context_cleanup(&evcon);
-    return prevented;
+    return committed;
 }
 
 // Stage 4C Phase B: dispatch a JS clipboard event (paste/copy/cut) with a
@@ -9615,6 +9590,24 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
         logical_width, visible_count * option_height);
 }
 
+static void select_refresh_dropdown_geometry(UiContext* uicon, DocState* state) {
+    if (!uicon || !state || !state->open_dropdown) return;
+    View* select_view = state->open_dropdown;
+    ViewBlock* select = lam::view_require_block(select_view);
+    if (!select || !select->form) return;
+
+    float visual_x = 0.0f, visual_y = 0.0f;
+    float visual_width = 0.0f, visual_height = 0.0f;
+    view_get_visual_bounds(select_view, &visual_x, &visual_y,
+                           &visual_width, &visual_height);
+    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
+        uicon->document, select->doc, scroll_state_resolve_view_geometry);
+    doc_state_set_dropdown_geometry(state, document_offset.x + visual_x,
+        document_offset.y + visual_y + visual_height, state->dropdown_width,
+        state->dropdown_height);
+    calculate_dropdown_dimensions(select, state, visual_width);
+}
+
 /**
  * Handle click on select to toggle dropdown
  */
@@ -9628,21 +9621,9 @@ static void select_open_dropdown(UiContext* uicon, DocState* state,
     if (!select || !select->form) return;
     log_debug("select_open_dropdown: opening with %d options", select->form->option_count);
     doc_state_open_dropdown(state, select_view);
-
-    float visual_x = 0.0f, visual_y = 0.0f;
-    float visual_width = 0.0f, visual_height = 0.0f;
-    view_get_visual_bounds(select_view, &visual_x, &visual_y,
-                           &visual_width, &visual_height);
-    RdtLogicalPoint document_offset = view_geometry_document_viewport_offset(
-        uicon->document, select->doc, scroll_state_resolve_view_geometry);
-
-    // Popup state stays in the top-level logical viewport. Rendering performs
-    // the sole logical-to-surface conversion, so event hit-testing never needs
-    // to know the monitor scale.
-    doc_state_set_dropdown_geometry(state, document_offset.x + visual_x,
-        document_offset.y + visual_y + visual_height, state->dropdown_width,
-        state->dropdown_height);
-    calculate_dropdown_dimensions(select, state, visual_width);
+    // Popup state stays in the top-level logical viewport; rendering performs
+    // the sole logical-to-surface conversion.
+    select_refresh_dropdown_geometry(uicon, state);
 }
 
 
@@ -9653,6 +9634,14 @@ static ViewBlock* event_open_dropdown_select(EventContext* evcon,
     if (!state || !state->open_dropdown) return nullptr;
     ViewBlock* select = lam::view_require_block(state->open_dropdown);
     return select->form ? select : nullptr;
+}
+
+static bool dropdown_point_inside(DocState* state, float mouse_x, float mouse_y) {
+    return state && state->open_dropdown &&
+        mouse_x >= state->dropdown_x &&
+        mouse_x <= state->dropdown_x + state->dropdown_width &&
+        mouse_y >= state->dropdown_y &&
+        mouse_y <= state->dropdown_y + state->dropdown_height;
 }
 
 /**
@@ -9670,12 +9659,8 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
              state->dropdown_width, state->dropdown_height);
 
     // Check if click is within dropdown popup
-    if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width) {
-        log_debug("handle_dropdown_option_click: click outside X bounds");
-        return false;
-    }
-    if (mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
-        log_debug("handle_dropdown_option_click: click outside Y bounds");
+    if (!dropdown_point_inside(state, mouse_x, mouse_y)) {
+        log_debug("handle_dropdown_option_click: click outside popup bounds");
         return false;
     }
 
@@ -9710,8 +9695,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     if (!select) return;
 
     // Check if mouse is within dropdown popup
-    if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
-        mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
+    if (!dropdown_point_inside(state, mouse_x, mouse_y)) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != -1) {
             form_control_set_hover_index(state, static_cast<View*>(select), -1);
         }
@@ -9782,8 +9766,7 @@ static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float 
     }
 
     // Check if click is on dropdown popup
-    if (mouse_x >= state->dropdown_x && mouse_x <= state->dropdown_x + state->dropdown_width &&
-        mouse_y >= state->dropdown_y && mouse_y <= state->dropdown_y + state->dropdown_height) {
+    if (dropdown_point_inside(state, mouse_x, mouse_y)) {
         return false;  // optioncommit handles a popup-row hit.
     }
 
@@ -11047,6 +11030,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         MousePositionEvent* motion = &event->mouse_position;
         log_debug("Mouse event at (%.1f, %.1f)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
+        // The select popup is a native overlay, so a row hover must not send
+        // mousemove to the editor or controls underneath it.
+        if (dropdown_point_inside(event_context_target_state(&evcon), mouse_x, mouse_y)) {
+            update_dropdown_hover(&evcon, mouse_x, mouse_y);
+            break;
+        }
         target_html_doc(&evcon, doc->view_tree);
         document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
@@ -11533,6 +11522,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
             uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
+        }
+
+        // Popup rows receive the press and release before the underlying DOM.
+        // The select behavior template still owns the option commit.
+        if (dropdown_point_inside(state, mouse_x, mouse_y)) {
+            if (event->type == RDT_EVENT_MOUSE_UP &&
+                btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+                handle_dropdown_option_click(&evcon, mouse_x, mouse_y);
+            }
+            break;
         }
 
         // ES34: native context-menu hit-testing runs before focus/drag work so

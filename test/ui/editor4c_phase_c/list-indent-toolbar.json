@@ -1,0 +1,19 @@
+{
+  "name": "editor4c-phase-c: list toolbar buttons indent and outdent the selected item",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "assert_count", "target": {"selector": "button.rdt-btn[title=\"Indent list item (Tab)\"]"}, "equals": 1},
+    {"type": "assert_count", "target": {"selector": "button.rdt-btn[title=\"Outdent list item (Shift+Tab)\"]"}, "equals": 1},
+    {"type": "click", "target": {"selector": ".rdt-surface li", "index": 1}},
+    {"type": "wait", "ms": 80},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Indent list item (Tab)\"]"}},
+    {"type": "render_pending"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface li", "index": 1}, "attribute": "style", "contains": "margin-inline-start:1.75em"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface li", "index": 0}, "attribute": "style", "not_contains": "margin-inline-start:1.75em"},
+    {"type": "click", "target": {"selector": "button.rdt-btn[title=\"Outdent list item (Shift+Tab)\"]"}},
+    {"type": "render_pending"},
+    {"type": "assert_attribute", "target": {"selector": ".rdt-surface li", "index": 1}, "attribute": "style", "not_contains": "margin-inline-start:1.75em"}
+  ]
+}
