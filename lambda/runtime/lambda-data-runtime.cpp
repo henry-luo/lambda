@@ -1,5 +1,6 @@
 
 #include "transpiler.hpp"
+#include "type_contract.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "heap_api.h"
@@ -2068,6 +2069,9 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
     }
     case LMD_TYPE_PATH:
         return path_hash(key.path, seed0, seed1);
+    case LMD_TYPE_TYPE:
+        // S5.6.2: equal type values hash alike, by their normalized form
+        return lambda_type_repr_hash(key.type, seed0, seed1);
     default:
         return hashmap_hash_bytes(&key.item, sizeof(uint64_t), seed0, seed1);
     }
@@ -2116,6 +2120,9 @@ int lambda_item_compare(Item a, Item b) {
         DateTime db = b.get_datetime();
         return datetime_compare(&da, &db);
     }
+    case LMD_TYPE_TYPE:
+        // S5.6.1: keys group by `==`, which compares a type's normalized form
+        return lambda_type_repr_equal(a.type, b.type) ? 0 : 1;
     default:
         return (a.item == b.item) ? 0 : 1;  // RAW_ITEM_EQ_OK: non-numeric scalar/container fallback matches existing VMap key identity.
     }

@@ -9790,6 +9790,9 @@ static bool mir_is_type_value_node(AstNode* node) {
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_FUNC_TYPE:
     case AST_NODE_CONSTRAINED_TYPE:
+    // an inline pattern is a type as a named one is: without it `case \(d+):`
+    // was tested with `==` and never matched
+    case AST_NODE_PATTERN_ISLAND:
         return true;
     case AST_NODE_IDENT: {
         // a pattern name is a type too: `case digits:` must test with `is`
@@ -27512,6 +27515,19 @@ static MIR_reg_t emit_native_math_lanes_call(MirTranspiler* mt,
     return out;
 }
 
+// One dynamic-call argument, boxed. A parameter a named-argument method call
+// skips is passed as the absent-argument marker, which the callee's wrapper
+// reads as its default or null (LR07-19).
+static MIR_reg_t mir_box_call_argument(MirTranspiler* mt, AstNode* arg) {
+    if (ast_is_omitted_argument(arg)) {
+        MIR_reg_t missing = new_reg(mt, "arg_missing", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, missing),
+            MIR_new_uint_op(mt->ctx, ITEM_MISSING_ARGUMENT)));
+        return missing;
+    }
+    return transpile_box_item(mt, arg);
+}
+
 static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // Only this call can occupy the tail; its callee and arguments must finish
     // before it runs, even when an argument recursively calls the same function.
@@ -30416,7 +30432,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         arg = call_node->argument;
         for (int i = 0; i < arg_count; i++) {
             // Use transpile_box_item to correctly handle BINARY/UNARY with native returns
-            args[i] = transpile_box_item(mt, arg);
+            args[i] = mir_box_call_argument(mt, arg);
             arg_roots[i] = create_gc_root_slot(mt, args[i]);
             arg = arg->next;
         }
@@ -30486,7 +30502,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         int dyn_boxed_count = 0;
         arg = call_node->argument;
         while (arg) {
-            MIR_reg_t boxed_arg = transpile_box_item(mt, arg);
+            MIR_reg_t boxed_arg = mir_box_call_argument(mt, arg);
             int boxed_arg_root = create_gc_root_slot(mt, boxed_arg);
             args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
             boxed_arg = load_gc_root_slot(mt, boxed_arg_root, "dynamic_arg");

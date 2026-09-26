@@ -2868,6 +2868,9 @@ extern "C" {
     // range's domain makes both answer false: that range admits nothing.
     bool lambda_range_type_contains(const Type* range_type, Item value);
     bool lambda_range_type_bounds(const Type* range_type, int64_t* start, int64_t* end);
+    // where `value` sits in the range's domain, on the scale of its bounds:
+    // an exact integer, or a one-codepoint string's codepoint
+    bool lambda_range_type_position(const Type* range_type, Item value, int64_t* position);
     Item lambda_type_error(Item actual, Type* expected, const char* boundary);
     Item lambda_type_check(Item value, Type* expected, const char* boundary);
     // S12.1.4v2(3): the run-time half of an `fn`-context call's colour check.

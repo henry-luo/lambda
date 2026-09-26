@@ -3,6 +3,7 @@
 #include "type_build.hpp"
 #include "transpiler.hpp"
 #include "type_contract.hpp"
+#include "re2_wrapper.hpp"
 #include "lambda-error.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -1417,6 +1418,13 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         pattern_type->source = nullptr;
         pattern_type->regex_source = nullptr;
         island->type = (Type*)pattern_type;
+        // LR03-26: an island compiled only when evaluated as a value, and
+        // nothing evaluates one inside a type -- a constrained base, a union
+        // arm, a field -- so there it had no regex and admitted nothing.
+        // Every pattern it may name has resolved by now; a failure is left to
+        // the evaluation that reports it.
+        compile_runtime_pattern(tp->pool, tp->type_list, pattern_type,
+            island->pattern, island->is_symbol);
         break;
     }
     case LSF_TP_BINARY: {

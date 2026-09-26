@@ -179,6 +179,8 @@ create_user("Bob", 25)               // active defaults to true
 - Named arguments need a statically known callee. A call through a function
   value — a `let`-bound function, a function parameter, a map field — takes
   positional arguments only, and naming one is a compile error (`E212`)
+- An object method's named arguments bind by name, as a function's do: `t.m(b: 1, a: 5)` binds `a` to 5
+- A parameter the named arguments skip takes its default, or `null` when it has none; an explicit `null` stays `null`. Only an optional parameter can be skipped: leaving out a required one is a compile error (`E206`)
 
 ### Variadic Parameters
 

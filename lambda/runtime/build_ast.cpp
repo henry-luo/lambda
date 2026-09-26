@@ -2947,6 +2947,18 @@ bool lambda_ast_collect_static_binder_env(AstCallNode* call,
     return true;
 }
 
+// A call whose named arguments leave out a required parameter (LR07-19).
+// False when compilation stops here.
+static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
+        SourceSpan span, AstNamedNode* param) {
+    record_semantic_error_span(tp, span, ERR_ARGUMENT_COUNT_MISMATCH,
+        "the named arguments leave out required parameter '%.*s'",
+        param->name ? (int)param->name->len : 0, param->name ? param->name->chars : "");
+    if (should_continue_transpiling(tp)) return true;
+    call->type = &TYPE_ERROR;
+    return false;
+}
+
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         SourceSpan diagnostic_span, int arg_count) {
     // a `function`-typed callee has no signature to validate against
@@ -2954,8 +2966,6 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         ? lambda_type_func_signature(call->function->type) : NULL;
     if (!func_type) return true;
     TypeParam* expected_param = func_type->param;
-    AstNode* arg = call->argument;
-    int arg_index = 0;
     // Calls normally succeed. Source points scan from the input head, so only
     // recover this diagnostic value on a failing path (D8.2.4).
     int line = 0;
@@ -2965,14 +2975,32 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
     bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
 
+    // Each parameter's argument, in parameter order. Named arguments bind by
+    // name: walked by position, a direct call naming typed parameters out of
+    // order was rejected with E207 (found with LR07-19). A parameter with no
+    // argument, or a skipped one (ast_is_omitted_argument), has none to check.
+    AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    int slot_count = 0;
+    AstFuncNode* named_callee = ast_call_has_named_args(call)
+        ? ast_direct_call_function(call) : NULL;
+    if (named_callee) {
+        ast_resolve_call_args(call->argument, named_callee,
+            ast_linked_node_count(call->argument), by_param);
+        slot_count = LAMBDA_MAX_FUNCTION_ARGS;
+    } else {
+        for (AstNode* a = call->argument; a && slot_count < LAMBDA_MAX_FUNCTION_ARGS;
+                a = a->next) {
+            by_param[slot_count++] = a;
+        }
+    }
+
     // Resolve every binder site before checking references. This makes a
     // same-name multi-site join independent of parameter order (TG13v2).
     TypeParam* binder_param = func_type->param;
-    AstNode* binder_arg = call->argument;
-    int binder_index = 0;
-    for (; binder_param && binder_arg;
-            binder_param = binder_param->next, binder_arg = binder_arg->next,
-            binder_index++) {
+    for (int binder_index = 0; binder_param && binder_index < slot_count;
+            binder_param = binder_param->next, binder_index++) {
+        AstNode* binder_arg = by_param[binder_index];
+        if (!binder_arg || ast_is_omitted_argument(binder_arg)) continue;
         TypeBinder* binder = binder_param->binder ? binder_param->binder :
             static_contract_binder_site(parameter_boundary_type(binder_param));
         if (!binder) continue;
@@ -3024,8 +3052,23 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             return false;
         }
     }
+    // ...nor can named arguments leave a required parameter out: the count
+    // above holds when a named optional stands in for it, and the tiers then
+    // split, T0 failing the parameter's null and the JIT binding a lane's zero
+    AstNamedNode* named_param = named_callee ? named_callee->param : NULL;
+    for (int index = 0; named_param && index < LAMBDA_MAX_FUNCTION_ARGS;
+            named_param = (AstNamedNode*)((AstNode*)named_param)->next, index++) {
+        TypeParam* parameter = (TypeParam*)named_param->type;
+        if (by_param[index] || !parameter || parameter->is_optional) continue;
+        if (!report_missing_named_parameter(tp, call, diagnostic_span, named_param)) {
+            return false;
+        }
+    }
 
-    while (arg && expected_param) {
+    for (int arg_index = 0; expected_param && arg_index < slot_count;
+            expected_param = expected_param->next, arg_index++) {
+        AstNode* arg = by_param[arg_index];
+        if (!arg || ast_is_omitted_argument(arg)) continue;
         TypeBinder* binder_site = expected_param->binder ? expected_param->binder :
             static_contract_binder_site(parameter_boundary_type(expected_param));
         if (expected_param->binder && !ast_is_explicit_type_value(arg)) {
@@ -3130,9 +3173,6 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                 return false;
             }
         }
-        arg = arg->next;
-        expected_param = expected_param->next;
-        arg_index++;
     }
     if (func_type->binder_count) {
         Type* result_contract = function_success_result_type(func_type);
@@ -9240,6 +9280,55 @@ static int fold_set_function_operands(Transpiler* tp, AstCallNode* call,
     return arg_count;
 }
 
+// LR07-19: a statically resolved object method binds named arguments by name,
+// as a direct call does; S12.3.2 rejects names only on a dynamic callee. The
+// method is called through its bound member with a positional list, so the
+// arguments are put in parameter order here, before either tier sees them. An
+// optional parameter the names skip takes its default, or null, as on a direct
+// call: its position holds a placeholder (ast_is_omitted_argument) that both
+// tiers pass as the absent-argument marker. A skipped required parameter is a
+// compile error, as on a direct call; an unknown or repeated name leaves the
+// call as written.
+static int order_method_named_arguments(Transpiler* tp, AstCallNode* call,
+        TypeMethod* method, int arg_count) {
+    AstFuncNode* definition = method ? (AstFuncNode*)method->ast_def : NULL;
+    if (!definition || !ast_call_has_named_args(call) ||
+            arg_count > LAMBDA_MAX_FUNCTION_ARGS ||
+            ast_linked_node_count(call->argument) != arg_count) return arg_count;
+    AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    ast_resolve_call_args(call->argument, definition, arg_count, resolved);
+    int bound = 0;
+    int last = -1;
+    for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+        if (resolved[i]) { bound++; last = i; }
+    }
+    if (bound != arg_count) return arg_count;
+    AstNamedNode* param = definition->param;
+    for (int i = 0; i <= last; i++, param = param ? (AstNamedNode*)param->next : NULL) {
+        if (resolved[i]) continue;
+        TypeParam* parameter = param ? (TypeParam*)param->type : NULL;
+        if (!parameter) return arg_count;
+        if (!parameter->is_optional) {
+            report_missing_named_parameter(tp, call, call->source_span, param);
+            return arg_count;
+        }
+    }
+    for (int i = 0; i <= last; i++) {
+        if (resolved[i]) continue;
+        AstPrimaryNode* placeholder = (AstPrimaryNode*)alloc_ast_node_from_span(
+            tp, AST_NODE_PRIMARY, call->source_span, sizeof(AstPrimaryNode));
+        placeholder->type = &LIT_NULL;
+        placeholder->literal_value_kind = AST_PRIMARY_OMITTED_ARGUMENT;
+        resolved[i] = (AstNode*)placeholder;
+    }
+    for (int i = 0; i <= last; i++) {
+        resolved[i]->next = i < last ? resolved[i + 1] : NULL;
+    }
+    call->argument = resolved[0];
+    call->syntax_aux = (uint16_t)(last + 1);
+    return last + 1;
+}
+
 static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     SourceSpan span = call->source_span;
     AstNode* function = call->function;
@@ -9254,6 +9343,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     bool method_call = false;
     bool user_method_found = false;
     bool user_method_is_proc = false;
+    TypeMethod* resolved_user_method = NULL;
     AstNode* user_method_receiver = NULL;
     StrView user_method_name = {0};
     int lookup_arg_count = arg_count + tp->pipe_inject_args;
@@ -9322,6 +9412,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 field_name, &receiver_has_member);
             if (user_method) {
                 user_method_found = true;
+                resolved_user_method = user_method;
                 user_method_is_proc = user_method->is_proc;
                 user_method_receiver = receiver;
                 user_method_name = field_name;
@@ -9465,6 +9556,10 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             }
         }
     }
+    int ordered_count = order_method_named_arguments(tp, call,
+        resolved_user_method, arg_count);
+    lookup_arg_count += ordered_count - arg_count;
+    arg_count = ordered_count;
     if (user_method_found && user_method_is_proc) {
         if (!tp->current_scope || !tp->current_scope->is_proc) {
             AstIdentNode* field = effective && effective->node_type == AST_NODE_MEMBER_EXPR
@@ -15116,7 +15211,8 @@ static void resolver_object_copy_base(LambdaResolver* r, StrView base_name) {
         else r->object_shape_tail->chain_next = entry;
         r->object_shape_tail = entry;
         r->object_type->length++;
-        r->object_byte_offset += sizeof(void*);
+        // stride by the field's storage class, as the base laid it out
+        r->object_byte_offset += shape_entry_storage_size(entry);
 
         AstNamedNode* field = (AstNamedNode*)pool_calloc(tp->pool,
             sizeof(AstNamedNode));
@@ -15250,7 +15346,10 @@ static void resolve_object_field(LambdaResolver* r, AstNamedNode* field) {
     else r->object_shape_tail->chain_next = shape;
     r->object_shape_tail = shape;
     r->object_type->length++;
-    r->object_byte_offset += sizeof(void*);
+    // LR03-19: stride by the field's storage class, as map shapes do
+    // (resolve_field_shape). A union- or range-typed field is a 9-byte
+    // TypedItem, so a flat 8 laid the next field one byte inside it.
+    r->object_byte_offset += shape_entry_storage_size(shape);
 
     // Methods and constraints resolve bare field names in the object scope;
     // keep that scope entry separate from the annotation AST node.

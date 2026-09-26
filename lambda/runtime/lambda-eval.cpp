@@ -1153,21 +1153,26 @@ bool lambda_range_type_bounds(const Type* range_type, int64_t* start, int64_t* e
         lambda_item_to_int64_exact(range->end, end);
 }
 
+bool lambda_range_type_position(const Type* range_type, Item item, int64_t* position) {
+    if (!lambda_type_is_range(range_type) || !position) return false;
+    if (((const TypeRange*)range_type)->is_char) {
+        uint32_t codepoint = 0;
+        if (!item_single_string_codepoint(item, &codepoint)) return false;
+        *position = codepoint;
+        return true;
+    }
+    return lambda_item_to_int64_exact(item, position);
+}
+
 // The one membership test for a range type: `is`, boundary admission and the
 // schema validator all answer through it (S11.1.3).
 bool lambda_range_type_contains(const Type* range_type, Item item) {
     int64_t start = 0;
     int64_t end = 0;
-    if (!lambda_range_type_bounds(range_type, &start, &end)) return false;
     int64_t value = 0;
-    if (((const TypeRange*)range_type)->is_char) {
-        uint32_t codepoint = 0;
-        if (!item_single_string_codepoint(item, &codepoint)) return false;
-        value = codepoint;
-    } else if (!lambda_item_to_int64_exact(item, &value)) {
-        return false;
-    }
-    return start <= value && value <= end;
+    return lambda_range_type_bounds(range_type, &start, &end) &&
+        lambda_range_type_position(range_type, item, &value) &&
+        start <= value && value <= end;
 }
 
 // One owner for the bad-range-bound diagnosis. The JIT's counted-range lowering
@@ -2539,13 +2544,10 @@ Bool fn_is(Item a, Item b) {
     Type* b_type = b.type;
     if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
-        if (!is_text_type_id(a_type_id)) {
-            log_error("pattern matching requires string or symbol, got type: %s", get_type_name(a_type_id));
-            return BOOL_ERROR;
-        }
         TypePattern* pattern = (TypePattern*)b_type;
-        // pattern tags carry the value domain; content alone is not enough to
-        // make a string and symbol type interchangeable under `is`.
+        // S11.1.2v2: matching checks the value domain before content, so a
+        // value outside it -- another text kind, or no text at all -- is no
+        // member. A non-text value had raised an error from `is`.
         if ((pattern->is_symbol && a_type_id != LMD_TYPE_SYMBOL) ||
                 (!pattern->is_symbol && a_type_id != LMD_TYPE_STRING)) {
             return BOOL_FALSE;
@@ -2634,13 +2636,16 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
-        if (type_b == &LIT_TYPE_ARRAY) {
+        // the kinds are known by their payload, which `type(x)` wraps afresh:
+        // by the static wrapper alone, `[1] is type((1, 2))` sent the bare
+        // `list` Type to the validator, which read it as a TypeArray
+        if (type_b->type == (Type*)&TYPE_ARRAY) {
             return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY ||
                 a_type_id == LMD_TYPE_ARRAY_NUM || a_type_id == LMD_TYPE_VARRAY
                 ? BOOL_TRUE : BOOL_FALSE;
         }
         // S2.5.1v2: `is list` tests the kind bit; `is array` holds for lists too
-        if (type_b == &LIT_TYPE_LIST) {
+        if (type_b->type == &TYPE_LIST) {
             return item_is_list(a) ? BOOL_TRUE : BOOL_FALSE;
         }
         if (type_nominal_record(type_b->type)) {
@@ -3370,16 +3375,10 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth, EqualityMode mode) 
 
         // type values
         if (a_tid == LMD_TYPE_TYPE && b_tid == LMD_TYPE_TYPE) {
-            // compare type values by their inner type
-            TypeType* a_tt = (TypeType*)a_item.type;
-            TypeType* b_tt = (TypeType*)b_item.type;
-            // S5.5.2: `type`, `number`, `integer` and `none` share one compact
-            // TypeId, so the tag cannot tell them apart -- their identity is
-            // the pointer. Without this `none == number` answered true.
-            if (type_is_global_meta_type(a_tt->type) || type_is_global_meta_type(b_tt->type)) {
-                return a_tt->type == b_tt->type ? BOOL_TRUE : BOOL_FALSE;
-            }
-            return (a_tt->type->type_id == b_tt->type->type_id) ? BOOL_TRUE : BOOL_FALSE;
+            // S5.5.2: normalized forms compare. The payload's tag alone made
+            // every union, intersection, exclusion, occurrence and literal
+            // type equal to every other (LR03-29).
+            return lambda_type_repr_equal(a_item.type, b_item.type) ? BOOL_TRUE : BOOL_FALSE;
         }
 
         // structural equality for container types requires same resolved type
@@ -4869,6 +4868,16 @@ Type* fn_type(Item item) {
         // preserve the sub-type in the kind field for sized numerics
         item_type->kind = item.get_num_type();
     }
+    // a container or function kind is its singleton: every reader of an
+    // array, map, element or function type may take a bare prefix with that
+    // tag for the extended struct and read past its end
+    switch (item_type->type_id) {
+    case LMD_TYPE_ARRAY: type->type = (Type*)&TYPE_ARRAY; break;
+    case LMD_TYPE_MAP: type->type = &TYPE_MAP; break;
+    case LMD_TYPE_ELEMENT: type->type = &TYPE_ELMT; break;
+    case LMD_TYPE_FUNC: type->type = &TYPE_FUNC; break;
+    default: break;
+    }
     return (Type*)type;
 }
 
@@ -4902,7 +4911,9 @@ static Symbol* fn_name_from_type(Type* type) {
         Symbol* nominal_name = fn_name_symbol_from_strview(record->type_name);
         if (nominal_name) return nominal_name;
     }
-    switch (type->type_id) {
+    // the generic `map`, `element` and `object` are bare Types with no shape
+    // fields to read: `name(map)` read a TypeMap's name past their end
+    switch (lambda_type_is_concrete_attr_shape(type) ? type->type_id : LMD_TYPE_NULL) {
     case LMD_TYPE_ELEMENT: {
         TypeElmt* elmt_type = (TypeElmt*)type;
         Symbol* elmt_name = fn_name_symbol_from_strview(elmt_type->name);

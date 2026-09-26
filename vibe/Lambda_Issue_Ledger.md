@@ -209,7 +209,7 @@ The "wrong value, no error" group was triaged against the rulings; each defect a
 - **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
 - **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
 - **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](#lr10-8), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
-- **Found on the way, all reproduced:** [LR03-15](#lr03-15), [LR03-16](#lr03-16), [LR07-19](#lr07-19)–[LR07-22](#lr07-22), [LR10-10](#lr10-10), [LR12-31](#lr12-31)–[LR12-34](#lr12-34). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
+- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](#lr07-22), [LR10-10](#lr10-10), [LR12-31](#lr12-31)–[LR12-34](#lr12-34). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
 
 Three goldens had pinned wrong values and were corrected (`conc/cancel_*`), and several fixtures that are wrong only on the JIT had been hidden because goldens run on `auto`, which starts in T0. The new fixtures are pinned on every tier.
 
@@ -233,12 +233,12 @@ Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inf
 ### Range type fix — 2026-09-25
 
 [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) (`is` against a union holding a range) and [LR03-14](<Lambda_Issue_Ledger (fixed).md#lr03-14>) (range-typed parameters) had one cause: a range type wore `LMD_TYPE_RANGE`, the tag of a range value, where D3.1.1v4 puts it under the shared `LMD_TYPE_TYPE` tag. The same cause made a range-typed map field segfault at a call boundary. All three are fixed on every tier; the two records are archived, and LR03-18's describes the segfault. Checking the fix found three older defects, each reproduced on the binary from before it, and left one residue:
-- [LR03-19](#lr03-19): in a nominal object type, a union- or range-typed field that is not last reads back a wrong value.
+- [LR03-19](<Lambda_Issue_Ledger (fixed).md#lr03-19>): in a nominal object type, a union- or range-typed field that is not last reads back a wrong value.
 - [LR03-20](<Lambda_Issue_Ledger (fixed).md#lr03-20>): object construction does not check its field contracts. Fixed the same day.
 - [LR07-30](#lr07-30): a range-typed `var` changes its member's representation on the JIT.
-- [LR03-21](#lr03-21), the residue: `<:` does not split a range across union arms.
+- [LR03-21](<Lambda_Issue_Ledger (fixed).md#lr03-21>), the residue: `<:` does not split a range across union arms.
 
-[LR03-16](#lr03-16) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
+[LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
 
 ### Constrained type and `~key` fix pass — 2026-09-25
 
@@ -248,7 +248,7 @@ A review of the `that` proviso (S10.1.5v3) and of `T that cond` (S11.4.6) found 
 - [LR13-11](<Lambda_Issue_Ledger (fixed).md#lr13-11>): the validator refused every element of a constrained element type, so `[1, 2] is Pos[]` was `false`.
 - [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>): `~key` in a single-subject body read a stale register on the JIT, and T0 segfaulted on it in a handler's value arm. The JIT's value arm also hid a nested pipe's `~`.
 
-Found on the way: [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>) (T0 answers a predicate outside its allow-list with `false`, so `auto` flips a hot function's answer on promotion) and [LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>) (T0 reads an imported predicate's constants from the importing module), both fixed 2026-09-26 (next section); still open, [LR03-26](#lr03-26) (an inline pattern island never compiles as a constrained base) and [LR10-12](#lr10-12) (a proviso answers null for an error operand, unruled).
+Found on the way: [LR03-24](<Lambda_Issue_Ledger (fixed).md#lr03-24>) (T0 answers a predicate outside its allow-list with `false`, so `auto` flips a hot function's answer on promotion) and [LR03-25](<Lambda_Issue_Ledger (fixed).md#lr03-25>) (T0 reads an imported predicate's constants from the importing module), both fixed 2026-09-26 (next section); [LR03-26](<Lambda_Issue_Ledger (fixed).md#lr03-26>) (an inline pattern island never compiles as a constrained base), fixed 2026-09-26 by the type-value fix pass; and, still open, [LR10-12](#lr10-12) (a proviso answers null for an error operand, unruled).
 
 The proviso itself matches S10.1.5v3 on both tiers. By S11.4.6 the generic path is still base-only: a first-class type value, a constrained type nested in a union, container or field, a declaration boundary, and an object type's field and object-level constraints (SO9). `doc/Lambda_Type.md` shows field and object constraints failing `is` (`<User name: ""> is User; // false`); both answer `true`.
 
@@ -274,12 +274,34 @@ Probing slices, index arrays, multi-key subscripts and `last` while the query re
 ### Empty type pass — 2026-09-26
 
 Implementing `none`, the empty type (S11.1.7), fixed two older defects on the way (spec Appendix A, S11.1.7 row): `==` on type values compared a payload tag, so `number == integer` was `true`, and `is` tested a bare numeric literal type by its tag. It found two more:
-- [LR03-29](#lr03-29), still open: type equality compares a compound type's payload tag only, so `(1 | 2) == (3 | 4)` is `true`.
+- [LR03-29](<Lambda_Issue_Ledger (fixed).md#lr03-29>), fixed later the same day by the type-value fix pass: type equality compared a compound type's payload tag only, so `(1 | 2) == (3 | 4)` was `true`.
 - [LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>), fixed the same day: a one-literal alias `type T = 1` was not a type value, and a symbol alias admitted nothing. Its fix also restored `type(int) == type`, which the S11.1.7 identity comparison had made `false`, and found [LR03-31](<Lambda_Issue_Ledger (fixed).md#lr03-31>), also fixed that day: a bool literal type carried no value, so it admitted both bools.
 
 The audit of the day's rulings (S8.2.4v3, S10.1.1v2, S11.1.7) that followed fixed two more defects and completed the rulings' residue: [LR07-38](<Lambda_Issue_Ledger (fixed).md#lr07-38>) (the JIT skipped a one-value numeric literal contract) and [LR13-12](<Lambda_Issue_Ledger (fixed).md#lr13-12>) (the validator refused bare datetime, binary and decimal arms and misread sized types). Container, bool, datetime and binary operands now read as literal types, `unique`/`intersect` take any number of operands, `!none` reduces, and a type query walks the virtual carriers (spec Appendix A rows S10.1.1v2, S8.2.4v3, S11.1.7).
 
 The user then clarified S11.1.7 (spec 47.2.0): literal operands include containers, and its `int & string` sentence is implementation status, not a ruling. Container literals now decide (`[1] & [2]` is `none`). The pass fixed [LR03-32](<Lambda_Issue_Ledger (fixed).md#lr03-32>) (the reduction asked only a literal's own value, so `1 ! int` was `none` though `1.0 is 1`) and [LR13-13](<Lambda_Issue_Ledger (fixed).md#lr13-13>) (`1.0 is (1 | 2)` was `false`). It found two validator defects, still open: [LR13-14](#lr13-14) (`[]` admits every array) and [LR13-15](#lr13-15) (`{a: null} is {a: null}` is `false`).
+
+### Type-value fix pass — 2026-09-26
+
+Seven records were closed on both tiers and archived, each with a fixture pinned in `kTune27TierParity`:
+- [LR03-19](<Lambda_Issue_Ledger (fixed).md#lr03-19>): an object type's fields stride by storage size, so a union- or range-typed field no longer overlaps the next.
+- [LR03-29](<Lambda_Issue_Ledger (fixed).md#lr03-29>): type equality compares normalized forms (S5.5.2), and the hash agrees with it (S5.6.2).
+- [LR03-21](<Lambda_Issue_Ledger (fixed).md#lr03-21>): a union's arms may split a range under `<:`, and the S11.1.7 reduction splits one the same way.
+- [LR03-26](<Lambda_Issue_Ledger (fixed).md#lr03-26>): an inline pattern island compiles where its type resolves, so it admits as a constrained base, a union arm or a field.
+- [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>): a method's named arguments bind by name, and a skipped optional parameter takes its default, as on a direct call.
+- [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>) and [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>) no longer reproduced: LR13-12 and LR03-30, fixed earlier the same day, had their causes. They are now pinned by a fixture.
+
+Found on the way and fixed with them, each covered by those fixtures:
+- The JIT tested a `case \(d+):` arm with `==`, so an inline pattern arm never matched.
+- `x is P` raised an error for a non-text value against a pattern, where the domain check makes it `false` (S11.1.2v2).
+- `[1, 2] is type((3, 4))` crashed. `type(x)` wrapped a bare prefix that readers took for an array, map or function struct, and `fn_is` knew `list` and `array` only by their static wrappers.
+- A direct call that named typed parameters out of order was rejected with E207.
+- A named call that skipped a required parameter split the tiers; it is now E206.
+- `name(map)`, `name(element)` and `name(object)` crashed, and so did `{a: int} <: map` and `<p> <: element`. Both read a shape past the end of the bare generic kinds. `object <: map` is now `false`, since `object` holds nominal values of every kind (S2.1.1v4), and `object`, `date` and `time` print and name as themselves rather than as `map` and `datetime` (`type_alias_name`).
+
+Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](#lr03-34) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](#lr07-39) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
+
+Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_TIER=interp` (1005/1005) and `LAMBDA_TIER=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
 
 ---
 
@@ -559,13 +581,6 @@ a declaration's is (`test/lambda/fn_type_curried_call.ls`), so curried
 contracts now behave the same way; before, a curried call typed as a
 function and crashed a map literal instead.
 
-<a id="lr03-15"></a>**LR03-15 · `5u8 is (u8 | string)` is false (S11.1) · OPEN (found 2026-09-25)**
-`validate_against_base_type` (`lambda/validator/validate.cpp`) reads a type's `kind` without checking that its TypeId is `LMD_TYPE_TYPE`. A sized type keeps its `NumSizedType` in `kind`, and `NUM_INT16`, `NUM_INT32` and `NUM_UINT8` share values with the unary, binary and pattern kinds, so a sized arm of a union is read as a larger struct than the 2-byte global it is. `5u8 is (u8 | string)` and `5i16 is (i16 | string)` are `false` on both tiers, while `5u8 is u8` is `true`. Reported by the LR03-11 investigation, reproduced 2026-09-25.
-
-<a id="lr03-16"></a>**LR03-16 · A literal type alias used as a value prints a pointer · OPEN (found 2026-09-25)**
-`type One = 1` then `[One]` prints a large integer on both tiers (`[4403549872]` on T0): the alias's `Type` pointer read as an int. The investigation also saw `type F = 1.5` print `2.1e-314`. A type alias is a first-class type value (S11); printing or comparing it must not expose its address. Reported by the LR03-11 investigation, reproduced 2026-09-25.
-*Also found 2026-09-25, while fixing [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>):* the alias is not usable as a type either. With `type Three = 3`, `3 is Three` is `false`, `Three <: int` is an error and `type(Three)` is `int`, on both tiers. A string literal alias works (`type A = "a"`, `A <: string` is `true`): `direct_finalize_type_alias` (`build_ast.cpp`) wraps only string and symbol literal aliases as type values.
-
 <a id="lr03-17"></a>**LR03-17 · A repeated key in a map literal keeps both entries; a write updates the first, a read takes the last · OPEN (found 2026-09-25)**
 ```
 pn main() {
@@ -577,29 +592,20 @@ pn main() {
 ```
 Reads resolve a repeated key to its last entry (`_map_get_keyed`, the checker's member oracle, fixture `map_duplicate_key_lookup.ls`), but `fn_map_set` updates the first matching entry, so a write is invisible to the next read. `len`, printing and iteration all count both entries. The runtime comment beside the spread walk assumes map keys are unique except through a spread. No S# ruling covers a repeated literal key: collapsing it at construction (one key, first position, last value) and rejecting it are both open. The tiers agree since [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>).
 
-<a id="lr03-19"></a>**LR03-19 · In a nominal object type, a union- or range-typed field that is not last reads back a wrong value (S1.6) · OPEN (found 2026-09-25, while fixing LR03-18)**
-```
-type Obj { a: int | string, b: string }
-let o = <Obj a: 3, b: "b">
-let r = [o.a, o]    // [inf, <Obj a: inf, b: "b">] on both tiers
-```
-The same happens to a range-typed field, since the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix gave it the union's boxed slot: `{ a: 1 to 5, b: string }` reads `-inf`, and `{ a: 1 to 5, b: int }` reads `0` (before that fix, a range field read `null` in every position). The value is right when the boxed field is last (`{ b: string, a: int | string }`), and a map-type alias is right in every position, whether built with `{…}` or with `<P …>` (`type P = {a: int | string, b: string}`). So the object type's layout and its construction disagree about a boxed field followed by another field. The union case reproduces on the binary from before the LR03-18 fix.
-*Traced 2026-09-25, while fixing [LR03-20](<Lambda_Issue_Ledger (fixed).md#lr03-20>):* an object type lays its fields out on a flat 8-byte stride (`r->object_byte_offset += sizeof(void*)` in `resolve_object_field` and `resolver_object_copy_base`, `build_ast.cpp`), but a boxed field's slot is a 9-byte TypedItem, so the next field starts one byte inside it. Map types had the same fault and stride by `lambda_lane_storage_size` since G3 (`resolve_field_shape`, `parse_type_pattern.cpp`).
-
-<a id="lr03-21"></a>**LR03-21 · `<:` does not split a range across union arms (S11.1.4v2) · OPEN (found 2026-09-25, residue of LR03-18)**
-With `type R = 1 to 2` and `type OneTwo = 1 | 2`, `R <: OneTwo` is `false`. Every member of `1 to 2` is admitted by `1 | 2`, so S11.1.4v2 ("`A <: B` holds exactly when every value admitted by `A` is admitted by `B`") makes it `true`. The same holds for `1 to 5` against `(1 to 3) | (4 to 5)`. `contract_type_is_subtype` (`type_contract.cpp`) tries each arm of an expected union whole, and since the LR03-18 fix a range is below an arm only if that arm alone admits all its members. Deciding the split case means covering the range with the arms' members. The reverse direction is right: `OneTwo <: R` is `true`. Before the fix, `<:` compared a range type's tag, so every range was below every other (`(1 to 9) <: (1 to 5)` was `true`); the second example gave `true` then only by that accident.
-
 <a id="lr03-27"></a>**LR03-27 · The JIT reads an imported constrained type's predicate names in the importer (S11.4.11, S1.6) · OPEN (found 2026-09-26, while fixing LR03-24)**
 Both tiers run a predicate inline where `is` names its type. T0 switches to the declaring module for the evaluation (`interp_constrained_module`); the JIT emits the body into the importer's MIR function, where the declaring module's names are not bound. With `let lim = 3` and `pub type Eq = int that ~ == lim` imported, `3 is Eq` is `true` on T0 and `false` on the JIT, which logs "mir: undefined variable 'lim'" and tests the error value. A predicate that calls one of the declaring module's private functions (`pub type Dbl = int that dbl(~) > 6`) fails to link on the JIT ("failed to resolve native fn/pn: _dbl_87"), so the importer does not load. Literal-only predicates and string constants are right on both tiers. Before the LR03-24 fix T0 answered `false` for both, from its allow-list. A fix evaluates the predicate as a function of its declaring module, exported beside the type, which would also answer [LR03-28](#lr03-28).
 
 <a id="lr03-28"></a>**LR03-28 · A constrained type whose predicate names the type itself crashes compilation (S11.4.11) · OPEN (found 2026-09-26, while fixing LR03-24)**
 `type Rec = int that (~ <= 0 or (~ - 1) is Rec)` segfaults on both tiers before anything runs, on the binary from before the LR03-24 fix as well. Both tiers expand a named constrained type's predicate where `is` names it: T0's frame plan sizes the scratch of `is Rec` by the predicate (`plan_constrained_type_need` into `plan_need`), and the JIT inlines it (`emit_constrained_type_test`), so a self-reference recurses without bound. Recursion through a function works: `Down`'s predicate calls `inner`, which tests `is Down` (fixture `constrained_type_predicate.ls` §5).
 
-<a id="lr03-29"></a>**LR03-29 · Type equality compares a compound type's payload tag only (S5.5.2) · OPEN (found 2026-09-26, while implementing S11.1.7)**
-`==` on two type values (`fn_eq_depth`, `lambda-eval.cpp`) compares the TypeId of each value's payload. Every union, intersection, exclusion, occurrence and literal type shares one tag, so all of them compare equal: `(1 | 2) == (3 | 4)`, `(int | string) == (int | bool)` and `(int & 5) == (string ! "a")` are `true` on both tiers. S5.5.2 makes type equality representational — normalized forms compare, so `int|string == string|int` holds and these do not. The S11.1.7 change made the compact meta types (`type`, `number`, `integer`, `none`) compare by identity, which fixed `number == integer`, and a reduced operation now is its result, so `(1 & 2) == none` holds for the right reason. A fix compares normalized forms structurally: literals by value, a union as the set of its arms; hashing must follow (S5.6.2).
+<a id="lr03-33"></a>**LR03-33 · Container patterns and function types compare by kind under `==` (S5.5.2, S2.1.1v4) · OPEN (found 2026-09-26, while fixing LR03-29)**
+`lambda_type_repr_equal` compares a map, element, bracket-pattern or function type by kind alone. So `{a: int} == {b: string}`, `<p> == <div>`, `[int] == [string]` and `fn (x: int) int == fn (x: string) int` are all `true`. The cause is `type(x)`: S2.1.1v4 has it name the kind, but for an element it returns the element's own tagged shape, kept for `name(type(e))` (074321c54a), and for a named map alias its TypeMap. Nothing tells that shape from a declared pattern of the same kind, and structural comparison would make `type(<p>) == element` `false`, which about 70 library and fixture lines rely on (`type(c) == element`). The same split shows under `is`: `<div> is type(<p>)` is `false`, because the shape is tested as the pattern `<p>`, while `type(<p>) == element` is `true`. A fix has `type(x)` of a structural element or map return the kind, keeps the tag elsewhere for `name()`, and then compares patterns structurally. Function types also wait on S11.1.4v2's pending variance. Related, and unruled: `type()` names `datetime` for a date value, so `type(t'2025-01-01') == date` is `false`; S2.1.1v4 does not say whether `type()` names the `date`/`time` sub-kind, as it names `list` and `range`.
 
-<a id="lr03-26"></a>**LR03-26 · An inline pattern island never compiles as a constrained base · OPEN (found 2026-09-25)**
-An island compiles at its first evaluation (`compile_runtime_pattern`), and a constrained type's base is never evaluated, so the base of `type Digits = \(d+) that len(~) > 2` has no regex and admits nothing: `"1234" is Digits` is `false` on both tiers. A named pattern base works (`type D = \(d+); type Digits = D that len(~) > 2`). Before [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>) the base's TypeId was compared, with the same answer.
+<a id="lr03-34"></a>**LR03-34 · A pattern type as a parameter or declaration annotation is rejected statically (S11.1.2v2, S11.4.1v3) · OPEN (found 2026-09-26, while fixing LR03-26)**
+With `type D = \(d+)`, `fn f(x: D) => x` then `f("12")` is E207 ("argument 1 expected type, got string"), and `let y: D = "12"` is E201 ("cannot initialize 'y' of type type with string"), on both tiers. An inline `x: \(d+)` fails the same way. The static relation reads the pattern's `LMD_TYPE_TYPE` tag as the `type` kind. `is`, match arms and fields test the same pattern correctly.
+
+<a id="lr03-35"></a>**LR03-35 · An object literal drops a field its type does not declare (S2.1.4) · OPEN (found 2026-09-26, while fixing LR03-19)**
+With `type P { a: int, b: string }`, `<P a: 1, b: "x", extra: 5>` prints `<P a: 1, b: "x">` and `.extra` is `null`, on both tiers and with no diagnostic. S2.1.4(3) makes an instance open: it may hold fields the type does not declare. A member addition does keep one (`p.z = 9`, fixture `proc/object_open_instance.ls`). No ruling says whether the literal keeps the field, as a shape transition, or rejects it; dropping it silently fits neither.
 
 ---
 
@@ -760,9 +766,6 @@ same pattern at `lambda-eval.cpp:4020`). Contradicts **S7.4** / **S7.10**
 - **Unproven `int` offsets.** `fn f(s: string, i: int) => slice(s, i, i + 1)` is now E208, because `int` admits `nan` and `inf` and a non-finite offset errors. Whether such an offset should clamp or read as absent (S7.10.2 admission) is unruled; a ruling would let an `int`-typed offset prove the call clean.
 - **`format`.** A function returning `format(x, 'json')` is E208 too: formatting a value that holds a complex number fails.
 
-<a id="lr07-19"></a>**LR07-19 · Named arguments to an object method bind by position · OPEN (found 2026-09-25)**
-`type T { k: int, fn m(a, b) => a - b + k }` with `let t = <T k: 100>`: `t.m(b: 1, a: 5)` is `96`, not `104`, on both tiers. T0 refuses a method call with named arguments at plan time (`interp_plan.cpp`), so the script runs on the JIT, which lowers the call through a bound closure (`fn_member`) with a positional argument list. The method is statically resolved (`TypeMethod::ast_def`), so S12.3.2's rejection of dynamic calls does not apply; it should bind by name, as a direct call does (`doc/Lambda_Func.md`). A build-time reorder against `ast_def` works when the named arguments leave no gap; skipping an optional parameter by name needs a ruling on whether an absent optional equals an explicit `null`. Found while fixing LR07-16.
-
 <a id="lr07-20"></a>**LR07-20 · JIT: an imported function's default arguments are not applied · OPEN (found 2026-09-25)**
 A module with `pub fn h(a, b = 42) => [a, b]`, imported with `import .mod.dm`: `h(1)` is `[1, 42]` on T0 and `[1, null]` on the JIT (S1.6). Reported by the LR07-17 investigation, reproduced 2026-09-25.
 
@@ -810,6 +813,15 @@ pn main() {
 }
 ```
 A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
+
+<a id="lr07-39"></a>**LR07-39 · JIT: a default that names an earlier parameter is evaluated in the caller (S1.6) · OPEN (found 2026-09-26, while fixing LR07-19)**
+Take `fn h(a, b = a, c = 0) => [a, b, c]`. `h(2)` is `[2, 2, 0]` on T0 and an error on the JIT, which logs "mir: undefined variable 'a'". `h(1, c: 5)` is `[1, 1, 5]` on T0 and `[1, error, 5]` on the JIT. The JIT's direct-call lowering fills a missing argument by transpiling the parameter's default in the calling function, where the callee's parameters are not bound. `doc/Lambda_Func.md` documents the form (`fn make_rect(width: int, height = width)`). The dynamic path is right, since the callee's wrapper evaluates the default (`emit_optional_argument_value`): a method with `fn r(a, b = a)` gives `t.r(2)` as `[2, 2, ...]` on both tiers.
+
+<a id="lr07-40"></a>**LR07-40 · An unknown or repeated argument name is dropped silently (S12.3.2) · OPEN (found 2026-09-26, while fixing LR07-19)**
+Take `fn f(a, b = 2) => [a, b]`. `f(1, zz: 5)` is `[1, 2]`, and so is `f(5, a: 1)`, on both tiers. `ast_resolve_call_args` skips a name no parameter has, and lets a name overwrite a positional argument. `doc/Lambda_Func.md` says the same argument cannot be given both positionally and by name, but nothing reports it. On a method call, either case leaves the arguments as written, so they bind by position. A fix reports both at build time, where the names are resolved.
+
+<a id="lr07-41"></a>**LR07-41 · JIT: a self-referencing union's value crashes (S1.6) · OPEN (found 2026-09-26, while fixing LR03-29)**
+`type U = U | int` then `[U]` segfaults on the JIT; T0 prints it, and `5 is U` is `true` on both tiers. The binary from before the type-value fix pass crashes the same way, so type equality is not involved: emitting the alias's value recurses through its own arm.
 
 ## 8. Memory management & GC (LR_08)
 

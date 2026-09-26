@@ -1,0 +1,9 @@
+"-- by name, in any order --"
+[104, 104, 104, [1, 2, 3, 100]]
+"-- a skipped optional parameter takes its default, or null --"
+[[1, 42, 3, 100], [1, 42, 3, 100], [1, 2, 7, 100], [1, 42, 7, 100]]
+[[1, null, 3], [1, 42, "y"], [0, 42, "w"]]
+"-- an explicit null is not an absent argument --"
+[[1, null, 3, 100], [1, null, 3]]
+"-- as on a direct call --"
+[[1, 42, 3], [1, 42, 3], [1, "x"], [1, "y"]]

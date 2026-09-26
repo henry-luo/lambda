@@ -1,0 +1,9 @@
+"-- an inline island as a constrained base --"
+[true, false, false, true, false]
+[true, false, false]
+"-- in a union arm, a map field and an array element --"
+[true, true, false, true, false, true, false]
+"-- as a match arm, inline and named --"
+["digits", "int", "other", "D", "other", "digits or int", "digits or int", "other"]
+"-- a value outside the pattern's domain is no member --"
+[false, false, false, true, false]
