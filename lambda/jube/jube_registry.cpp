@@ -4816,7 +4816,7 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
     }
     int existing = jube_find_static_module_index(module->name);
     if (existing >= 0) {
-        log_debug("JUBE_REG: %s module '%s' already registered",
+        log_trace("JUBE_REG: %s module '%s' already registered",
                   source_label ? source_label : "Jube", module->name);
         jube_close_dynamic_handle(dynamic_handle);
         return 0;

@@ -7,6 +7,9 @@
 #include <string.h>
 #include <assert.h>
 
+// Tree construction traces once per parsed node; keep them opt-in for normal debug views.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // ============================================================================
 // TAG CLASSES
 // The tag lists of the tree-construction rules, one class bit each

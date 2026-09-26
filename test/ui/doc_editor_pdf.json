@@ -11,9 +11,11 @@
     {"type": "click", "target": {"selector": ".tree-hit-__test_input_advanced_test_pdf"}},
     {"type": "wait", "ms": 100},
     {"type": "assert_count", "target": {"selector": "#pdf-preview"}, "count": 1},
-    {"type": "assert_count", "target": {"selector": "#pdf-preview .pdf-page"}, "min": 1},
-    {"type": "assert_count", "target": {"selector": "#pdf-preview svg"}, "min": 1},
-    {"type": "assert_count", "target": {"selector": "#pdf-preview text"}, "min": 1},
+    {"type": "switch_frame", "selector": "#pdf-preview"},
+    {"type": "assert_count", "target": {"selector": ".pdf-page"}, "min": 1},
+    {"type": "assert_count", "target": {"selector": "svg"}, "min": 1},
+    {"type": "assert_count", "target": {"selector": "text"}, "min": 1},
+    {"type": "switch_frame"},
     {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "advanced_test.pdf"}
   ]
 }

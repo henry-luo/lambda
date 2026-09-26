@@ -9,11 +9,7 @@
 // Headless smoke:
 //   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log
 
-import latex: lambda.latex.latex
-import pdf: lambda.pdf.pdf
-
 let PROJECT_ROOT = "."
-let PDF_MAX_PAGES = 48
 
 // --------------------------------------------------------------------------
 // Filesystem and selection helpers
@@ -104,6 +100,12 @@ fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or is_pdf_document(extension)
 
+fn preview_frame_id(extension) {
+  if (document_format(extension) == "html") { "html-preview" }
+  else if (is_pdf_document(extension)) { "pdf-preview" }
+  else { "latex-preview" }
+}
+
 fn selected_source(file) {
   if (file == null) { "" }
   else {
@@ -112,44 +114,13 @@ fn selected_source(file) {
   }
 }
 
-// Render parsed pages as native SVG while keeping large documents bounded.
-fn render_pdf_document(pdf_document) {
-  let total_pages = pdf.pdf_page_count(pdf_document)
-  let rendered_pages = if (total_pages < PDF_MAX_PAGES) total_pages else PDF_MAX_PAGES
-  if (rendered_pages == 0) {
-    <p class:"preview-error", "The selected PDF has no renderable pages.">
-  } else {
-    <div id:"pdf-preview", class:"pdf-document"
-    , for (page_index in 0 to (rendered_pages - 1))
-        <div class:"pdf-page", 'data-page':(page_index + 1),
-          pdf.pdf_to_svg(pdf_document, page_index, {show_label:false})>
-      if (rendered_pages < total_pages) {
-        <p class:"pdf-page-limit", "Showing the first " ++ rendered_pages ++ " of " ++ total_pages ++ " pages.">
-      }
-    >
-  }
-}
-
 fn selected_preview(file) {
   if (file == null) { null }
   else {
     let selected_path = file["file_path"]
-    if (is_pdf_document(file["extension"])) {
-      let pdf_document = input(selected_path, 'pdf') ^ { null }
-      if (pdf_document == null) {
-        <p class:"preview-error", "Unable to render selected PDF">
-      } else {
-        render_pdf_document(pdf_document)
-      }
-    }
-    else if (is_latex_document(file["extension"])) {
-      latex.render_file(selected_path) ^ { <p class:"preview-error", "Unable to render selected file"> }
-    }
-    else {
-      let format = document_format(file["extension"])
-      if (format == null) { null }
-      else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
-    }
+    let format = document_format(file["extension"])
+    if (format == null) { null }
+    else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
   }
 }
 
@@ -301,13 +272,15 @@ view <document_pane> {
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
       if (~.preview_mode == "view") {
-        if (document_format(~.file["extension"]) == "html") {
-          <iframe id:"html-preview", class:"html-preview",
+        if (document_format(~.file["extension"]) == "html" or
+            is_latex_document(~.file["extension"]) or
+            is_pdf_document(~.file["extension"])) {
+          // defer optional document transforms until their file is selected.
+          <iframe id:preview_frame_id(~.file["extension"]), class:"document-preview",
             src:absolute_file_path(~.file["file_path"])>
         } else {
           let preview = selected_preview(~.file);
-          <section id:"rendered-preview",
-            class:(if (is_pdf_document(~.file["extension"])) "rendered-preview pdf-preview" else "rendered-preview"),
+          <section id:"rendered-preview", class:"rendered-preview",
             apply(preview)>
         }
       } else {
@@ -451,7 +424,7 @@ on preview_tab(tab) {
       .tree-entry, .tree-children { min-width: 0; }
       .tree-row { min-height: 28px; display: flex; align-items: center; padding-right: 8px;
                   border-radius: 5px; cursor: pointer; color: #c6cedb; user-select: none; }
-      .tree-row:hover { background: #2c3444; color: #fff; }
+      .tree-row:hover { background-color: #2c3444; color: #fff; }
       .tree-row.selected { background: #365383; color: #fff; }
       .project-root { padding-left: 2px; color: #f5f7fb; font-weight: 650; }
       .tree-toggle, .root-toggle { width: 22px; height: 24px; padding: 0; border: 0; background: transparent;
@@ -483,19 +456,12 @@ on preview_tab(tab) {
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
-      .html-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
-      .pdf-preview { padding: 16px; background: #f1f3f5; }
-      .pdf-document { min-height: 100%; }
-      .pdf-page { display: block; box-sizing: border-box; position: relative; overflow: hidden; max-width: 100%;
-                  margin: 0 auto 16px; padding: 0; background: #fff; border: 1px solid #d9dee3;
-                  box-shadow: 0 2px 10px rgba(15,23,42,.08); }
-      .pdf-page svg { display: block; width: 100%; height: auto; background: #fff; }
-      .pdf-page-limit { margin: 8px auto 20px; color: #607087; font-size: 12px; text-align: center; }
+      .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
       .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
                        padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-tab { padding: 5px 11px; border: 0; border-radius: 5px; background: transparent;
                       color: #68778a; cursor: pointer; font-size: 12px; font-weight: 650; }
-      .document-tab:hover { background: #e8edf5; color: #31425a; }
+      .document-tab:hover { background-color: #e8edf5; color: #31425a; }
       .document-tab.active { background: #dce9fd; color: #1c5da6; }
       .document-body, .latex-output { max-width: 900px; margin: 0 auto; color: #232a35; font-size: 16px; line-height: 1.65; }
       .document-body h1, .document-body h2, .document-body h3, .document-body h4,

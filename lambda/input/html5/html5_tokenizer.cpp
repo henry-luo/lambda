@@ -10,6 +10,9 @@
 #include "../line_counter.hpp"
 #include <string.h>
 
+// Attribute token traces scale with the input document; keep them opt-in.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // ============================================================================
 // SOURCE LINE TRACKING
 // Incrementally counts newlines from line_scan_pos to current parser->pos.

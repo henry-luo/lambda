@@ -1773,9 +1773,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
         if (dom_elem && dom_elem->specified_style) {
+            bool styles_current = dom_elem->styles_resolved() &&
+                                  !dom_elem->needs_style_recompute();
             // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
-            if (dom_elem->styles_resolved() && !dom_elem->needs_style_recompute() &&
-                !layout_context_is_measuring(lycon)) {
+            if (styles_current && !layout_context_is_measuring(lycon)) {
                 // calling us. When we skip resolution, these must be restored from
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
@@ -1795,7 +1796,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 return;  // early return - reuse existing styles
             }
 
-            if (dom_elem->layout_cache) {
+            // Measurement refreshes used values in the current context, but
+            // must not discard a clean subtree's keyed intrinsic cache.
+            if (dom_elem->layout_cache && !styles_current) {
                 radiant::layout_cache_clear(dom_elem->layout_cache);
             }
 

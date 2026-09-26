@@ -24,6 +24,9 @@
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 
+// DOM bridge diagnostics are emitted per node during document construction.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 void element_dom_map_remove(HashMap* map, Element* elem);
 static void dom_element_clear_synthetic_attributes(DomElement* element);
 
@@ -1890,50 +1893,34 @@ static int check_quote_content(CssValue* value) {
 }
 
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element) {
-    log_info("[PSEUDO CONTENT GET ENTRY] element=%p, pseudo=%d, tag=%s",
-        (void*)element, pseudo_element,
-        element ? (element->tag_name ? element->tag_name : "?") : "NULL");
-
     if (!element) {
-        log_info("[PSEUDO CONTENT GET] element is NULL, returning NULL");
         return NULL;
     }
-
-    log_info("[PSEUDO CONTENT GET] Called for element <%s>, pseudo=%d",
-        element->tag_name ? element->tag_name : "?", pseudo_element);
 
     StyleTree* style = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
         style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
-        log_info("[PSEUDO CONTENT GET] before_styles=%p", (void*)style);
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         style = element->pseudo_style(PSEUDO_STYLE_AFTER);
-        log_info("[PSEUDO CONTENT GET] after_styles=%p", (void*)style);
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
         style = element->pseudo_style(PSEUDO_STYLE_MARKER);
-        log_info("[PSEUDO CONTENT GET] marker_styles=%p", (void*)style);
-    }    if (!style) {
-        log_info("[PSEUDO CONTENT GET] No style tree found");
+    }
+    if (!style) {
         return NULL;
     }
 
     CssDeclaration* content_decl = style_tree_get_declaration(style, CSS_PROPERTY_CONTENT);
 
     if (!content_decl || !content_decl->value) {
-        log_info("[PSEUDO CONTENT GET] No content declaration found");
         return NULL;
     }
 
     CssValue* value = content_decl->value;
-    log_info("[PSEUDO CONTENT GET] Found content value, type=%d", value->type);
 
     // Return the string content
     if (value->type == CSS_VALUE_TYPE_STRING) {
         const char* str = value->data.string;
-        size_t len = str ? strlen(str) : 0;
-        log_info("[PSEUDO CONTENT] Extracted STRING content, len=%zu, bytes=[%02x %02x %02x]",
-            len, len > 0 ? (unsigned char)str[0] : 0, len > 1 ? (unsigned char)str[1] : 0, len > 2 ? (unsigned char)str[2] : 0);
         return str;
     }
 
@@ -1958,7 +1945,6 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
             }
             if (attr_name) {
                 const char* attr_value = element->get_attribute(attr_name);
-                log_info("[PSEUDO CONTENT] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
                 return attr_value ? attr_value : "";
             }
         }
@@ -1969,7 +1955,6 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
         CSSAttrRef* attr_ref = value->data.attr_ref;
         if (attr_ref && attr_ref->name) {
             const char* attr_value = element->get_attribute(attr_ref->name);
-            log_info("[PSEUDO CONTENT] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
             return attr_value ? attr_value : "";
         }
     }
@@ -1989,14 +1974,10 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
         CssValue* first = value->data.list.values[0];
         if (first && first->type == CSS_VALUE_TYPE_STRING) {
             const char* str = first->data.string;
-            size_t len = str ? strlen(str) : 0;
-            log_info("[PSEUDO CONTENT] Extracted LIST content, len=%zu, bytes=[%02x %02x %02x]",
-                len, len > 0 ? (unsigned char)str[0] : 0, len > 1 ? (unsigned char)str[1] : 0, len > 2 ? (unsigned char)str[2] : 0);
             return str;
         }
     }
 
-    log_info("[PSEUDO CONTENT] No string content found (type=%d)", value->type);
     return NULL;
 }
 
@@ -2006,12 +1987,7 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
  */
 const char* dom_element_get_pseudo_element_content_with_counters(
     DomElement* element, int pseudo_element, void* counter_context, Arena* arena) {
-
-    log_info("[PSEUDO CONTENT WITH COUNTERS] Called: element=%p <%s>, pseudo=%d",
-        (void*)element, element ? (element->tag_name ? element->tag_name : "?") : "NULL", pseudo_element);
-
     if (!element || !arena) {
-        log_info("[PSEUDO CONTENT WITH COUNTERS] element or arena is NULL");
         return NULL;
     }
 
@@ -2019,36 +1995,27 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
         style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
-        log_info("[PSEUDO CONTENT WITH COUNTERS] before_styles=%p", (void*)style);
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         style = element->pseudo_style(PSEUDO_STYLE_AFTER);
-        log_info("[PSEUDO CONTENT WITH COUNTERS] after_styles=%p", (void*)style);
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
         style = element->pseudo_style(PSEUDO_STYLE_MARKER);
-        log_info("[PSEUDO CONTENT WITH COUNTERS] marker_styles=%p", (void*)style);
     }
 
     if (!style) {
-        log_info("[PSEUDO CONTENT WITH COUNTERS] No style tree");
         return NULL;
     }
 
     CssDeclaration* content_decl = style_tree_get_declaration(style, CSS_PROPERTY_CONTENT);
 
     if (!content_decl || !content_decl->value) {
-        log_info("[PSEUDO CONTENT WITH COUNTERS] No content declaration");
         return NULL;
     }
 
     CssValue* value = content_decl->value;
-    log_info("[PSEUDO CONTENT WITH COUNTERS] Found content value, type=%d", value->type);
 
     // Return string content directly
     if (value->type == CSS_VALUE_TYPE_STRING) {
         const char* str = value->data.string;
-        size_t len = str ? strlen(str) : 0;
-        log_info("[PSEUDO CONTENT WITH COUNTERS] STRING content, len=%zu, bytes=[%02x %02x %02x]",
-            len, len > 0 ? (unsigned char)str[0] : 0, len > 1 ? (unsigned char)str[1] : 0, len > 2 ? (unsigned char)str[2] : 0);
         return str;
     }
 
@@ -2057,7 +2024,6 @@ const char* dom_element_get_pseudo_element_content_with_counters(
         CSSAttrRef* attr_ref = value->data.attr_ref;
         if (attr_ref && attr_ref->name) {
             const char* attr_value = element->get_attribute(attr_ref->name);
-            log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
             return attr_value ? attr_value : "";
         }
     }
@@ -2132,7 +2098,6 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 const char* attr_name = css_value_extract_name(func->args[0]);
                 if (attr_name) {
                     const char* attr_value = element->get_attribute(attr_name);
-                    log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
                     return attr_value ? attr_value : "";
                 }
             }

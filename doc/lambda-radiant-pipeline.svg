@@ -1,0 +1,305 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="880" viewBox="0 0 1320 880" role="img" aria-labelledby="title desc">
+  <title id="title">Lambda and Radiant document pipeline</title>
+  <desc id="desc">A diagram showing Lambda and Radiant accepting many document and data formats, processing them through convert, validate, view, edit, and render commands, and producing structured, document, and rendered output formats through a shared Mark tree.</desc>
+
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8fbff"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#132b49"/>
+      <stop offset="1" stop-color="#1b4662"/>
+    </linearGradient>
+    <linearGradient id="radiant" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e5f7f2"/>
+      <stop offset="1" stop-color="#edf2ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#19324a" flood-opacity="0.10"/>
+    </filter>
+    <filter id="small-shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#19324a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b9b9b"/>
+    </marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6679c9"/>
+    </marker>
+    <style>
+      .sans { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 2.2px; }
+      .section { font-size: 12px; font-weight: 700; letter-spacing: 1.7px; }
+      .node { font-size: 14px; font-weight: 600; }
+      .node-note { font-size: 11px; font-weight: 500; }
+      .connector { fill: none; stroke-linecap: round; }
+    </style>
+  </defs>
+
+  <rect width="1320" height="880" fill="url(#page)"/>
+
+  <g transform="translate(0 -104)">
+
+  <!-- quiet connector field, kept behind the cards -->
+  <g class="connector" stroke-width="1.25" opacity="0.42">
+    <!-- input families converge on the Lambda / Mark model -->
+    <path d="M360 231 C401 231 423 316 480 316" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 264 C403 264 425 328 480 328" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 297 C405 297 427 340 480 340" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 330 C405 330 429 352 480 352" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 363 C407 363 431 364 480 364" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 396 C407 396 431 376 480 376" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 429 C405 429 429 388 480 388" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 462 C403 462 425 400 480 400" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 534 C403 534 425 412 480 412" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 567 C405 567 427 424 480 424" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 600 C407 600 429 436 480 436" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 633 C409 633 431 448 480 448" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 666 C409 666 433 460 480 460" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 699 C409 699 435 472 480 472" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 732 C410 732 438 484 480 484" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 765 C410 765 440 496 480 496" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 836 C409 836 435 508 480 508" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 869 C407 869 433 520 480 520" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M360 902 C405 902 429 532 480 532" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+
+    <!-- the shared model fans back out to every output family -->
+    <path d="M1120 316 C1170 316 1190 231 1240 231" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 328 C1170 328 1190 264 1240 264" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 340 C1170 340 1190 297 1240 297" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 352 C1170 352 1190 330 1240 330" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 364 C1170 364 1190 363 1240 363" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 376 C1170 376 1190 396 1240 396" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 388 C1170 388 1190 429 1240 429" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 400 C1170 400 1190 462 1240 462" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 412 C1170 412 1190 534 1240 534" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 424 C1170 424 1190 567 1240 567" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 436 C1170 436 1190 600 1240 600" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 448 C1170 448 1190 633 1240 633" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 460 C1170 460 1190 666 1240 666" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 472 C1170 472 1190 699 1240 699" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 484 C1170 484 1190 732 1240 732" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 496 C1170 496 1190 765 1240 765" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 508 C1170 508 1190 836 1240 836" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 520 C1170 520 1190 869 1240 869" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M1120 532 C1170 532 1190 902 1240 902" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+  </g>
+
+  <!-- left input panel -->
+  <g class="sans" transform="translate(-10 0)">
+    <rect x="40" y="136" width="240" height="800" rx="22" fill="#ffffff" stroke="#dce7ef" filter="url(#small-shadow)"/>
+    <circle cx="70" cy="172" r="9" fill="#3b9b9b"/>
+    <text x="90" y="177" fill="#173752" class="eyebrow">INPUT FORMATS</text>
+
+    <text x="60" y="207" fill="#8aa0b2" class="section">DOCUMENTS &amp; MARKUP</text>
+    <g fill="#f4fbfb" stroke="#b9e3df">
+      <rect x="60" y="216" width="200" height="30" rx="15"/>
+      <rect x="60" y="249" width="200" height="30" rx="15"/>
+      <rect x="60" y="282" width="200" height="30" rx="15"/>
+      <rect x="60" y="315" width="200" height="30" rx="15"/>
+      <rect x="60" y="348" width="200" height="30" rx="15"/>
+      <rect x="60" y="381" width="200" height="30" rx="15"/>
+      <rect x="60" y="414" width="200" height="30" rx="15"/>
+      <rect x="60" y="447" width="200" height="30" rx="15"/>
+    </g>
+    <g fill="#24445d" class="node">
+      <text x="80" y="236">Markdown</text>
+      <text x="80" y="269">HTML</text>
+      <text x="80" y="302">XML</text>
+      <text x="80" y="335">LaTeX</text>
+      <text x="80" y="368">reStructuredText</text>
+      <text x="80" y="401">Wiki</text>
+      <text x="80" y="434">AsciiDoc</text>
+      <text x="80" y="467">Org mode</text>
+    </g>
+
+    <text x="60" y="515" fill="#8aa0b2" class="section">DATA &amp; CONFIGURATION</text>
+    <g fill="#f4fbfb" stroke="#b9e3df">
+      <rect x="60" y="519" width="200" height="30" rx="15"/>
+      <rect x="60" y="552" width="200" height="30" rx="15"/>
+      <rect x="60" y="585" width="200" height="30" rx="15"/>
+      <rect x="60" y="618" width="200" height="30" rx="15"/>
+      <rect x="60" y="651" width="200" height="30" rx="15"/>
+      <rect x="60" y="684" width="200" height="30" rx="15"/>
+      <rect x="60" y="717" width="200" height="30" rx="15"/>
+      <rect x="60" y="750" width="200" height="30" rx="15"/>
+    </g>
+    <g fill="#24445d" class="node">
+      <text x="80" y="539">JSON</text>
+      <text x="80" y="572">YAML</text>
+      <text x="80" y="605">TOML</text>
+      <text x="80" y="638">CSV</text>
+      <text x="80" y="671">INI</text>
+      <text x="80" y="704">Properties</text>
+      <text x="80" y="737">Key–value</text>
+      <text x="80" y="770">Plain text</text>
+    </g>
+
+    <text x="60" y="810" fill="#8aa0b2" class="section">OTHER SOURCES</text>
+    <g fill="#f4fbfb" stroke="#b9e3df">
+      <rect x="60" y="822" width="200" height="30" rx="15"/>
+      <rect x="60" y="855" width="200" height="30" rx="15"/>
+      <rect x="60" y="888" width="200" height="30" rx="15"/>
+    </g>
+    <g fill="#24445d" class="node">
+      <text x="80" y="842">PDF · SVG</text>
+      <text x="80" y="875">Lambda Script (.ls)</text>
+      <text x="80" y="908">Mermaid · D2 · GraphViz</text>
+    </g>
+  </g>
+
+  <!-- central command panel -->
+  <g class="sans" transform="translate(-140 0)">
+    <rect x="480" y="136" width="640" height="800" rx="24" fill="#ffffff" stroke="#d7e2eb" filter="url(#shadow)"/>
+    <text x="800" y="174" text-anchor="middle" fill="#3b9b9b" class="eyebrow">THE LAMBDA WORKBENCH</text>
+    <text x="800" y="210" text-anchor="middle" fill="#173752" font-size="24" font-weight="750">One data model. Many doc workflows.</text>
+    <text x="800" y="235" text-anchor="middle" fill="#667d90" font-size="14">All sources become one structured value before commands act on them.</text>
+
+    <rect x="520" y="261" width="560" height="105" rx="18" fill="url(#core)" filter="url(#small-shadow)"/>
+    <circle cx="560" cy="313" r="23" fill="#49b5a9"/>
+    <path d="M548 313 C548 303 555 297 564 297 C572 297 578 303 578 311 C578 320 571 327 562 327 C554 327 548 322 548 313 Z" fill="none" stroke="#ffffff" stroke-width="2"/>
+    <path d="M554 313 H570 M562 305 V321" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+    <text x="598" y="304" fill="#ffffff" font-size="20" font-weight="750">Mark tree</text>
+    <text x="598" y="329" fill="#c5e4e4" font-size="13">maps · arrays · elements · documents · DOM</text>
+    <text x="1050" y="305" text-anchor="end" fill="#9eddd5" class="eyebrow">UNIFIED</text>
+    <text x="1050" y="329" text-anchor="end" fill="#9eddd5" font-size="12">parse → transform → emit</text>
+
+    <text x="520" y="405" fill="#8aa0b2" class="section">COMMAND SURFACE</text>
+    <path d="M520 417 H1080" stroke="#e5edf2"/>
+
+    <!-- command cards -->
+    <g filter="url(#small-shadow)">
+      <rect x="520" y="425" width="560" height="56" rx="14" fill="#ffffff" stroke="#dce7ef"/>
+      <rect x="520" y="489" width="560" height="56" rx="14" fill="#ffffff" stroke="#dce7ef"/>
+      <rect x="520" y="553" width="560" height="56" rx="14" fill="#ffffff" stroke="#dce7ef"/>
+      <rect x="520" y="617" width="560" height="56" rx="14" fill="#ffffff" stroke="#dce7ef"/>
+      <rect x="520" y="681" width="560" height="56" rx="14" fill="#ffffff" stroke="#dce7ef"/>
+    </g>
+    <g>
+      <circle cx="557" cy="453" r="17" fill="#e3f6f1"/>
+      <path d="M549 453 H565 M561 449 L565 453 L561 457" stroke="#2b8f88" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="590" y="447" fill="#173752" font-size="16" font-weight="750">convert</text>
+      <text x="590" y="468" fill="#718698" font-size="12">transform between supported formats</text>
+      <text x="1050" y="457" text-anchor="end" fill="#3c556d" class="mono" font-size="12">lambda convert …</text>
+
+      <circle cx="557" cy="517" r="17" fill="#fff1df"/>
+      <path d="M548 517 L554 523 L566 510" stroke="#c07b2e" stroke-width="2.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="590" y="511" fill="#173752" font-size="16" font-weight="750">validate</text>
+      <text x="590" y="532" fill="#718698" font-size="12">check data and document trees with schemas</text>
+      <text x="1050" y="521" text-anchor="end" fill="#3c556d" class="mono" font-size="12">lambda validate …</text>
+
+      <circle cx="557" cy="581" r="17" fill="#e9edff"/>
+      <path d="M551 573 L566 581 L551 589 Z" fill="#6679c9"/>
+      <text x="590" y="575" fill="#173752" font-size="16" font-weight="750">view</text>
+      <text x="590" y="596" fill="#718698" font-size="12">open, lay out, and inspect in Radiant</text>
+      <text x="1050" y="585" text-anchor="end" fill="#3c556d" class="mono" font-size="12">lambda view …</text>
+
+      <circle cx="557" cy="645" r="17" fill="#f3e9ff"/>
+      <path d="M549 638 H565 V652 H549 Z M552 635 H562" fill="none" stroke="#8a63bd" stroke-width="2" stroke-linejoin="round"/>
+      <text x="590" y="639" fill="#173752" font-size="16" font-weight="750">edit</text>
+      <text x="590" y="660" fill="#718698" font-size="12">author Markdown, HTML, and SVG documents</text>
+      <text x="1050" y="649" text-anchor="end" fill="#3c556d" class="mono" font-size="12">lambda edit …</text>
+
+      <circle cx="557" cy="709" r="17" fill="#eaf0ff"/>
+      <path d="M548 700 H566 V718 H548 Z M552 696 H562 V700" fill="none" stroke="#5368b3" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M552 710 L556 714 L563 706" fill="none" stroke="#5368b3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="590" y="703" fill="#173752" font-size="16" font-weight="750">render</text>
+      <text x="590" y="724" fill="#718698" font-size="12">render to SVG, PDF, PNG, or JPEG</text>
+      <text x="1050" y="713" text-anchor="end" fill="#3c556d" class="mono" font-size="12">lambda render …</text>
+    </g>
+
+    <!-- Radiant output engine -->
+    <rect x="520" y="760" width="560" height="122" rx="18" fill="url(#radiant)" stroke="#c9dce9"/>
+    <circle cx="559" cy="805" r="20" fill="#ffffff" stroke="#79b8b4" stroke-width="2"/>
+    <path d="M550 805 C554 797 557 797 561 805 C565 813 568 813 572 805" fill="none" stroke="#3b9b9b" stroke-width="2.2" stroke-linecap="round"/>
+    <text x="595" y="797" fill="#173752" font-size="16" font-weight="750">Radiant layout &amp; rendering</text>
+    <text x="595" y="820" fill="#637b8d" font-size="12">CSS · HTML · SVG · JavaScript · interactive UI</text>
+    <text x="595" y="850" fill="#387d80" class="mono" font-size="12">layout → paint → view / render</text>
+    <g class="sans" font-size="11" font-weight="700">
+      <rect x="910" y="789" width="47" height="24" rx="12" fill="#ffffff" stroke="#c4deda"/>
+      <rect x="964" y="789" width="47" height="24" rx="12" fill="#ffffff" stroke="#c4deda"/>
+      <rect x="1018" y="789" width="47" height="24" rx="12" fill="#ffffff" stroke="#c4deda"/>
+      <text x="933" y="805" text-anchor="middle" fill="#387d80">CSS</text>
+      <text x="987" y="805" text-anchor="middle" fill="#387d80">DOM</text>
+      <text x="1041" y="805" text-anchor="middle" fill="#387d80">JS</text>
+    </g>
+  </g>
+
+  <!-- right output panel -->
+  <g class="sans" transform="translate(-190 0)">
+    <rect x="1240" y="136" width="240" height="800" rx="22" fill="#ffffff" stroke="#dce7ef" filter="url(#small-shadow)"/>
+    <circle cx="1264" cy="172" r="9" fill="#6679c9"/>
+    <text x="1284" y="177" fill="#173752" class="eyebrow">OUTPUT FORMATS</text>
+
+    <text x="1260" y="207" fill="#8aa0b2" class="section">STRUCTURED DATA</text>
+    <g fill="#f6f7ff" stroke="#cbd3f1">
+      <rect x="1260" y="216" width="200" height="30" rx="15"/>
+      <rect x="1260" y="249" width="200" height="30" rx="15"/>
+      <rect x="1260" y="282" width="200" height="30" rx="15"/>
+      <rect x="1260" y="315" width="200" height="30" rx="15"/>
+      <rect x="1260" y="348" width="200" height="30" rx="15"/>
+      <rect x="1260" y="381" width="200" height="30" rx="15"/>
+      <rect x="1260" y="414" width="200" height="30" rx="15"/>
+      <rect x="1260" y="447" width="200" height="30" rx="15"/>
+    </g>
+    <g fill="#31466f" class="node">
+      <text x="1280" y="236">Mark</text>
+      <text x="1280" y="269">HTML</text>
+      <text x="1280" y="302">XML</text>
+      <text x="1280" y="335">JSON</text>
+      <text x="1280" y="368">YAML</text>
+      <text x="1280" y="401">TOML</text>
+      <text x="1280" y="434">INI</text>
+      <text x="1280" y="467">CSS</text>
+    </g>
+
+    <text x="1260" y="515" fill="#8aa0b2" class="section">DOCUMENTS &amp; TEXT</text>
+    <g fill="#f6f7ff" stroke="#cbd3f1">
+      <rect x="1260" y="519" width="200" height="30" rx="15"/>
+      <rect x="1260" y="552" width="200" height="30" rx="15"/>
+      <rect x="1260" y="585" width="200" height="30" rx="15"/>
+      <rect x="1260" y="618" width="200" height="30" rx="15"/>
+      <rect x="1260" y="651" width="200" height="30" rx="15"/>
+      <rect x="1260" y="684" width="200" height="30" rx="15"/>
+      <rect x="1260" y="717" width="200" height="30" rx="15"/>
+      <rect x="1260" y="750" width="200" height="30" rx="15"/>
+    </g>
+    <g fill="#31466f" class="node">
+      <text x="1280" y="539">Markdown</text>
+      <text x="1280" y="572">RST</text>
+      <text x="1280" y="605">Org mode</text>
+      <text x="1280" y="638">Wiki</text>
+      <text x="1280" y="671">Textile</text>
+      <text x="1280" y="704">JSX / MDX</text>
+      <text x="1280" y="737">LaTeX</text>
+      <text x="1280" y="770">Plain text</text>
+    </g>
+
+    <text x="1260" y="810" fill="#8aa0b2" class="section">RADIANT RENDER TARGETS</text>
+    <g fill="#f6f7ff" stroke="#cbd3f1">
+      <rect x="1260" y="822" width="200" height="30" rx="15"/>
+      <rect x="1260" y="855" width="200" height="30" rx="15"/>
+      <rect x="1260" y="888" width="95" height="30" rx="15"/>
+      <rect x="1365" y="888" width="95" height="30" rx="15"/>
+    </g>
+    <g fill="#31466f" class="node">
+      <text x="1280" y="842">SVG</text>
+      <text x="1280" y="875">PDF</text>
+      <text x="1327" y="908" text-anchor="middle">PNG</text>
+      <text x="1472" y="908" text-anchor="middle">JPEG</text>
+    </g>
+  </g>
+
+  <!-- small legend -->
+  <g class="sans" transform="translate(50 952)">
+    <circle cx="6" cy="-4" r="5" fill="#3b9b9b"/>
+    <text x="18" y="0" fill="#718698" font-size="12">many sources</text>
+    <path d="M115 -4 H151" stroke="#96a9bb" stroke-width="1.5" marker-end="url(#arrow-teal)"/>
+    <text x="163" y="0" fill="#718698" font-size="12">shared model</text>
+    <path d="M270 -4 H306" stroke="#96a9bb" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
+    <text x="318" y="0" fill="#718698" font-size="12">many outputs</text>
+    <text x="1550" y="0" text-anchor="end" fill="#91a2b2" font-size="12">lambda • radiant • document processing</text>
+  </g>
+</svg>

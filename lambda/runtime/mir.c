@@ -16,6 +16,9 @@
 #include "runtime-state.h"
 #include "sys_func_registry.h"
 
+// MIR linker diagnostics can emit once per module item and lookup.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
 // Set via JS_MIR_INTERP=1 environment variable
 int g_mir_interp_mode = 0;

@@ -14,6 +14,9 @@
 #include <string.h>
 #include <stdarg.h>
 
+// View allocation diagnostics are emitted per layout node and must remain opt-in.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // Flag to control whether consecutive text nodes are combined during JSON output
 // When true (default), consecutive ViewText nodes are merged for HTML output compatibility
 // When false, each ViewText is output separately (useful for PDF comparison testing)

@@ -75,6 +75,8 @@ static int log_disabled = 0;
 static int timestamps_enabled = 1;
 static int colors_enabled = 0;
 static int env_min_level = 0;
+static int env_min_level_set = 0;
+static int env_trace_requested = 0;
 
 void log_mem_stage(const char *stage) {
 #ifdef __APPLE__
@@ -155,6 +157,7 @@ static const char* get_level_color(int level) {
 /* Convert log level to string */
 const char* log_level_to_string(int level) {
     switch (level) {
+        case LOG_LEVEL_TRACE: return "TRCE";
         // set all categories to 4-letter codes, so that log lines align better
         case LOG_LEVEL_FATAL: return "FATL";
         case LOG_LEVEL_ERROR: return "ERR!";
@@ -364,7 +367,8 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
 static void write_log_message_to_stream(FILE *stream, log_category_t *category,
                                        const char *timestamp, const char *level_str,
                                        const char *color, const char *reset_color,
-                                       const char *message, bool use_colors) {
+                                       const char *message, bool use_colors,
+                                       bool flush_immediately) {
     // Buffer size for formatted output (header + message)
     #define LOG_BUFFER_SIZE 1024
     // Maximum message size that fits in buffer (leaving room for header)
@@ -391,7 +395,7 @@ static void write_log_message_to_stream(FILE *stream, log_category_t *category,
         }
 
         fprintf(stream, "%s\n", formatted_message);
-        fflush(stream);
+        if (flush_immediately) fflush(stream);
     } else {
         // Message is too long - output header once, then print message continuously
         const char *msg_ptr = message;
@@ -432,7 +436,7 @@ static void write_log_message_to_stream(FILE *stream, log_category_t *category,
 
         // End with newline
         fprintf(stream, "\n");
-        fflush(stream);
+        if (flush_immediately) fflush(stream);
     }
 
     #undef LOG_BUFFER_SIZE
@@ -712,8 +716,11 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
 /* Core logging implementation */
 static int log_output(log_category_t *category, int level, const char *format, va_list args) {
     if (!category || !category->enabled) { return LOG_OK; }
-    if (env_min_level > 0 && level < env_min_level) { return LOG_OK; }
-    if (level < category->level) { return LOG_OK; }
+    if (env_min_level_set && level < env_min_level) { return LOG_OK; }
+    if (level < category->level &&
+        !(level == LOG_LEVEL_TRACE && env_trace_requested)) {
+        return LOG_OK;
+    }
 
     // Format the user message first
     char user_message[4096];
@@ -726,12 +733,16 @@ static int log_output(log_category_t *category, int level, const char *format, v
     const char *level_str = log_level_to_string(level);
     const char *color = get_level_color(level);
     const char *reset_color = COLOR_RESET;
+    // Debug parser/layout traces can contain thousands of lines per document.
+    // Buffer routine diagnostics, but make failures durable before returning.
+    bool flush_immediately = level >= LOG_LEVEL_WARN;
 
     // 1. Always log to file if category has file output configured
     if (category->output && category->output != stdout && category->output != stderr) {
         bool use_colors_for_file = should_use_colors_for_file(category);
         write_log_message_to_stream(category->output, category, timestamp, level_str,
-                                  color, reset_color, user_message, use_colors_for_file);
+                                  color, reset_color, user_message, use_colors_for_file,
+                                  flush_immediately);
     }
 
     // 2. Additionally send to console streams based on log level
@@ -747,7 +758,8 @@ static int log_output(log_category_t *category, int level, const char *format, v
 
     if (console_output) {
         write_log_message_to_stream(console_output, category, timestamp, level_str,
-                                  color, reset_color, user_message, colors_enabled);  // Use colors_enabled for console output
+                                  color, reset_color, user_message, colors_enabled,
+                                  flush_immediately);  // Use colors_enabled for console output
     }
 
     return LOG_OK;
@@ -812,6 +824,8 @@ int log_init(const char *config) {
         // Online/browser smoke runs need warnings and errors, but debug traces
         // from parser/layout hot loops can dominate large-page execution.
         env_min_level = level;
+        env_min_level_set = 1;
+        env_trace_requested = level == LOG_LEVEL_TRACE;
         log_set_level(&default_category, level);
         for (int i = 0; i < categories_count; i++) {
             log_set_level(&categories[i], level);
@@ -840,6 +854,9 @@ void log_finish(void) {
     categories_count = 0;
     formats_count = 0;
     rules_count = 0;
+    env_min_level = 0;
+    env_min_level_set = 0;
+    env_trace_requested = 0;
     log_initialized = 0;
     log_disabled = 0;
 }
@@ -868,7 +885,7 @@ log_category_t* log_get_category(const char *cname) {
         log_category_t *cat = &categories[categories_count++];
         strncpy(cat->name, cname, sizeof(cat->name) - 1);
         cat->name[sizeof(cat->name) - 1] = '\0';
-        cat->level = LOG_LEVEL_DEBUG;
+        cat->level = env_min_level_set ? env_min_level : LOG_LEVEL_DEBUG;
         cat->output = stdout;
         cat->enabled = 1;
         cat->format = &default_format;
@@ -973,6 +990,14 @@ int clog_debug(log_category_t *category, const char *format, ...) {
     return ret;
 }
 
+int clog_trace(log_category_t *category, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int ret = clog_vtrace(category, format, args);
+    va_end(args);
+    return ret;
+}
+
 /* Default category logging functions (convenient API) */
 int log_fatal(const char *format, ...) {
     va_list args;
@@ -1022,6 +1047,14 @@ int log_debug(const char *format, ...) {
     return ret;
 }
 
+int log_trace(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int ret = log_vtrace(format, args);
+    va_end(args);
+    return ret;
+}
+
 /* Variadic versions with category parameter */
 int clog_vfatal(log_category_t *category, const char *format, va_list args) {
     return log_output(category, LOG_LEVEL_FATAL, format, args);
@@ -1045,6 +1078,10 @@ int clog_vinfo(log_category_t *category, const char *format, va_list args) {
 
 int clog_vdebug(log_category_t *category, const char *format, va_list args) {
     return log_output(category, LOG_LEVEL_DEBUG, format, args);
+}
+
+int clog_vtrace(log_category_t *category, const char *format, va_list args) {
+    return log_output(category, LOG_LEVEL_TRACE, format, args);
 }
 
 /* Default category variadic versions */
@@ -1072,6 +1109,10 @@ int log_vdebug(const char *format, va_list args) {
     return log_output(log_default_category, LOG_LEVEL_DEBUG, format, args);
 }
 
+int log_vtrace(const char *format, va_list args) {
+    return log_output(log_default_category, LOG_LEVEL_TRACE, format, args);
+}
+
 /* Default category functions */
 int log_default_init(const char *config, const char *default_category_name) {
     int ret = log_init(config);
@@ -1091,6 +1132,7 @@ void log_default_finish(void) {
 static int parse_log_level(const char *level_str) {
     if (!level_str) return LOG_LEVEL_DEBUG;
 
+    if (str_ieq_const(level_str, strlen(level_str), "TRACE")) return LOG_LEVEL_TRACE;
     if (str_ieq_const(level_str, strlen(level_str), "FATAL")) return LOG_LEVEL_FATAL;
     if (str_ieq_const(level_str, strlen(level_str), "ERROR")) return LOG_LEVEL_ERROR;
     if (str_ieq_const(level_str, strlen(level_str), "WARN")) return LOG_LEVEL_WARN;

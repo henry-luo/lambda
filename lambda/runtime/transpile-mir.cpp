@@ -49,6 +49,9 @@ extern "C" int lambda_mir_lazy_enabled(void);
 #endif
 #include <time.h>
 
+// MIR lowering diagnostics are emitted for each AST node and inferred value.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // MIR's native generator initializes mutable process-global target patterns.
 // Keep private satellite contexts isolated, but serialize their native passes.
 static pthread_mutex_t g_mir_native_codegen_mutex = PTHREAD_MUTEX_INITIALIZER;

@@ -2620,6 +2620,7 @@ typedef struct DocState {
     uint32_t pseudo_state_batch_depth; // coalesces full stylesheet recascades
     bool pseudo_state_restyle_pending;
     bool hover_styles_active; // previous hover transition matched a :hover rule
+    bool hover_styles_require_layout; // previous hover transition changed geometry
     SelectorMatcher* hover_matcher; // document-pool matcher reused across pointer transitions
     uint32_t text_control_history_guard; // undo/redo recursion guard for this document
     const char* text_edit_history_input_type; // ambient inputType for document history pushes

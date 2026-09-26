@@ -23,6 +23,9 @@
 #include <string.h>
 #include <stdio.h>
 
+// Selector and declaration traces are per-token diagnostics, not routine debug output.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // Caps nested CSS function parsing (e.g. calc(calc(calc(...)))) so pathological input
 // reports a parse failure instead of recursing until the stack overflows.
 #define MAX_CSS_FUNC_DEPTH 256

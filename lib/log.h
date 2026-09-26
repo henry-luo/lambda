@@ -53,6 +53,7 @@ extern THREAD_LOCAL int log_indent;
 
 /* Log levels */
 typedef enum {
+    LOG_LEVEL_TRACE = 10,
     LOG_LEVEL_DEBUG = 20,
     LOG_LEVEL_INFO = 40,
     LOG_LEVEL_NOTICE = 60,
@@ -103,16 +104,18 @@ int clog_notice(log_category_t *category, const char *format, ...);
 int clog_raw(log_category_t *category, const char *message);
 
 /*
- * Release build optimization: clog_debug() and clog_info() are stripped
+ * Release build optimization: clog_trace(), clog_debug(), and clog_info() are stripped
  * When NDEBUG is defined (release builds), these become no-ops.
  * LOG_IMPL is defined by log.c to prevent macro replacement of function definitions.
  */
 #if defined(NDEBUG) && !defined(LOG_IMPL)
     #define clog_info(category, ...) ((void)0)
     #define clog_debug(category, ...) ((void)0)
+    #define clog_trace(category, ...) ((void)0)
 #else
     int clog_info(log_category_t *category, const char *format, ...);
     int clog_debug(log_category_t *category, const char *format, ...);
+    int clog_trace(log_category_t *category, const char *format, ...);
 #endif
 
 /* Variadic versions with category parameter */
@@ -124,9 +127,11 @@ int clog_vnotice(log_category_t *category, const char *format, va_list args);
 #if defined(NDEBUG) && !defined(LOG_IMPL)
     #define clog_vinfo(category, format, args) ((void)0)
     #define clog_vdebug(category, format, args) ((void)0)
+    #define clog_vtrace(category, format, args) ((void)0)
 #else
     int clog_vinfo(log_category_t *category, const char *format, va_list args);
     int clog_vdebug(log_category_t *category, const char *format, va_list args);
+    int clog_vtrace(log_category_t *category, const char *format, va_list args);
 #endif
 
 /* Default category logging functions (convenient API) */
@@ -139,7 +144,7 @@ int log_notice(const char *format, ...);
 void log_mem_stage(const char *stage);
 
 /*
- * Release build optimization: log_debug() and log_info() are stripped
+ * Release build optimization: log_trace(), log_debug(), and log_info() are stripped
  * When NDEBUG is defined (release builds), these become no-ops that the
  * compiler will completely eliminate, reducing binary size and overhead.
  * LOG_IMPL is defined by log.c to prevent macro replacement of function definitions.
@@ -148,10 +153,12 @@ void log_mem_stage(const char *stage);
     /* Release build: strip debug and info logging completely */
     #define log_info(...) ((void)0)
     #define log_debug(...) ((void)0)
+    #define log_trace(...) ((void)0)
 #else
     /* Debug build: use actual logging functions */
     int log_info(const char *format, ...);
     int log_debug(const char *format, ...);
+    int log_trace(const char *format, ...);
 #endif
 
 /* Default category variadic versions */
@@ -163,9 +170,11 @@ int log_vnotice(const char *format, va_list args);
 #if defined(NDEBUG) && !defined(LOG_IMPL)
     #define log_vinfo(format, args) ((void)0)
     #define log_vdebug(format, args) ((void)0)
+    #define log_vtrace(format, args) ((void)0)
 #else
     int log_vinfo(const char *format, va_list args);
     int log_vdebug(const char *format, va_list args);
+    int log_vtrace(const char *format, va_list args);
 #endif
 
 /* Level check functions */

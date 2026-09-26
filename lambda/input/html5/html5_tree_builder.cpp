@@ -8,6 +8,9 @@
 #include "../../io/mark_editor.hpp"
 #include <string.h>
 
+// Tree construction traces once per token; keep them opt-in for normal debug views.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // JSON parser for embedded JSON-LD in <script type="application/ld+json">
 Item parse_json_to_item(Input* input, const char* json_string);
 

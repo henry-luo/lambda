@@ -6,6 +6,9 @@
 #include <assert.h>
 #include <inttypes.h>
 
+// Cascade comparisons occur for every declaration application; expose them only at trace level.
+#define log_debug(...) log_trace(__VA_ARGS__)
+
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
 static bool collect_computed_callback(AvlNode* avl_node, void* context);

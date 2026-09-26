@@ -872,14 +872,10 @@ static bool sim_extract_text_visitor(View* view, bool entering, void* context) {
 static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* out_y) {
     // Priority: selector > text > raw coordinates
     if (ev->target_selector && doc) {
-        // Script-created styles can be applied after the initial retained tree
-        // is laid out. Pointer actions must resolve against the current box
-        // geometry, just as a native input turn does.
-        if (ev->type == SIM_EVENT_CLICK || ev->type == SIM_EVENT_DBLCLICK ||
-            ev->type == SIM_EVENT_MOUSE_DOWN || ev->type == SIM_EVENT_MOUSE_UP ||
-            ev->type == SIM_EVENT_MOUSE_MOVE || ev->type == SIM_EVENT_MOUSE_DRAG) {
-            reflow_html_doc(doc);
-        }
+        // Script-created styles may leave layout pending after the retained
+        // tree is built. Settle only that pending work; a clean document's
+        // retained geometry is already valid for target resolution.
+        sim_reflow_if_pending(doc, (DocState*)doc->state);
         View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
         if (elem) {
             if (ev->has_target_offset) {

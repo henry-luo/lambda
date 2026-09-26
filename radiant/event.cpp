@@ -8502,9 +8502,81 @@ static bool mark_layout_dirty_visitor(DomNode* node, void*) {
     return true;
 }
 
-static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
+static bool css_simple_selector_uses_pseudo_state(CssSimpleSelector* simple,
+                                                  uint32_t pseudo_state) {
     if (!simple) return false;
-    if (simple->type == CSS_SELECTOR_PSEUDO_HOVER) return true;
+    bool matches_state = false;
+    switch (pseudo_state) {
+        case PSEUDO_STATE_HOVER:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_HOVER;
+            break;
+        case PSEUDO_STATE_ACTIVE:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_ACTIVE;
+            break;
+        case PSEUDO_STATE_FOCUS:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_FOCUS;
+            break;
+        case PSEUDO_STATE_FOCUS_VISIBLE:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_FOCUS_VISIBLE;
+            break;
+        case PSEUDO_STATE_FOCUS_WITHIN:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_FOCUS_WITHIN;
+            break;
+        case PSEUDO_STATE_VISITED:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_VISITED;
+            break;
+        case PSEUDO_STATE_LINK:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_LINK ||
+                simple->type == CSS_SELECTOR_PSEUDO_ANY_LINK ||
+                simple->type == CSS_SELECTOR_PSEUDO_LOCAL_LINK;
+            break;
+        case PSEUDO_STATE_ENABLED:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_ENABLED;
+            break;
+        case PSEUDO_STATE_DISABLED:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_DISABLED;
+            break;
+        case PSEUDO_STATE_CHECKED:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_CHECKED;
+            break;
+        case PSEUDO_STATE_SELECTED:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_SELECTED;
+            break;
+        case PSEUDO_STATE_INDETERMINATE:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_INDETERMINATE;
+            break;
+        case PSEUDO_STATE_VALID:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_VALID;
+            break;
+        case PSEUDO_STATE_INVALID:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_INVALID;
+            break;
+        case PSEUDO_STATE_OPEN:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_OPEN;
+            break;
+        case PSEUDO_STATE_TARGET:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_TARGET ||
+                simple->type == CSS_SELECTOR_PSEUDO_TARGET_WITHIN;
+            break;
+        case PSEUDO_STATE_REQUIRED:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_REQUIRED;
+            break;
+        case PSEUDO_STATE_OPTIONAL:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_OPTIONAL;
+            break;
+        case PSEUDO_STATE_READ_ONLY:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_READ_ONLY;
+            break;
+        case PSEUDO_STATE_READ_WRITE:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_READ_WRITE;
+            break;
+        case PSEUDO_STATE_PLACEHOLDER_SHOWN:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN;
+            break;
+        default:
+            break;
+    }
+    if (matches_state) return true;
     for (size_t i = 0; i < simple->function_selector_count; i++) {
         CssSelector* nested = simple->function_selectors ? simple->function_selectors[i] : NULL;
         if (!nested) continue;
@@ -8512,7 +8584,9 @@ static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
             CssCompoundSelector* compound = nested->compound_selectors ? nested->compound_selectors[c] : NULL;
             if (!compound) continue;
             for (size_t s = 0; s < compound->simple_selector_count; s++) {
-                if (css_simple_selector_uses_hover(compound->simple_selectors ? compound->simple_selectors[s] : NULL)) {
+                if (css_simple_selector_uses_pseudo_state(
+                        compound->simple_selectors ? compound->simple_selectors[s] : NULL,
+                        pseudo_state)) {
                     return true;
                 }
             }
@@ -8521,18 +8595,29 @@ static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
     return false;
 }
 
-static bool css_selector_uses_hover(CssSelector* selector) {
+static bool css_selector_uses_pseudo_state(CssSelector* selector,
+                                           uint32_t pseudo_state) {
     if (!selector) return false;
     for (size_t c = 0; c < selector->compound_selector_count; c++) {
         CssCompoundSelector* compound = selector->compound_selectors ? selector->compound_selectors[c] : NULL;
         if (!compound) continue;
         for (size_t s = 0; s < compound->simple_selector_count; s++) {
-            if (css_simple_selector_uses_hover(compound->simple_selectors ? compound->simple_selectors[s] : NULL)) {
+            if (css_simple_selector_uses_pseudo_state(
+                    compound->simple_selectors ? compound->simple_selectors[s] : NULL,
+                    pseudo_state)) {
                 return true;
             }
         }
     }
     return false;
+}
+
+static bool css_simple_selector_uses_hover(CssSimpleSelector* simple) {
+    return css_simple_selector_uses_pseudo_state(simple, PSEUDO_STATE_HOVER);
+}
+
+static bool css_selector_uses_hover(CssSelector* selector) {
+    return css_selector_uses_pseudo_state(selector, PSEUDO_STATE_HOVER);
 }
 
 // This fast path is deliberately narrow. A :hover condition in an ancestor
@@ -8579,31 +8664,40 @@ static bool css_declaration_is_color_background_only(CssDeclaration* declaration
     }
 }
 
-static bool css_rule_uses_hover(CssRule* rule) {
+static bool css_rule_uses_pseudo_state(CssRule* rule, uint32_t pseudo_state) {
     if (!rule) return false;
     if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING) {
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
         if (group) {
             for (size_t i = 0; i < group->selector_count; i++) {
-                if (css_selector_uses_hover(group->selectors ? group->selectors[i] : NULL)) return true;
+                if (css_selector_uses_pseudo_state(
+                        group->selectors ? group->selectors[i] : NULL, pseudo_state)) return true;
             }
-        } else if (css_selector_uses_hover(rule->data.style_rule.selector)) {
+        } else if (css_selector_uses_pseudo_state(rule->data.style_rule.selector, pseudo_state)) {
             return true;
         }
         for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
-            if (css_rule_uses_hover(rule->data.style_rule.nested_rules ? rule->data.style_rule.nested_rules[i] : NULL)) {
+            if (css_rule_uses_pseudo_state(
+                    rule->data.style_rule.nested_rules ? rule->data.style_rule.nested_rules[i] : NULL,
+                    pseudo_state)) {
                 return true;
             }
         }
     } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
                rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
         for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
-            if (css_rule_uses_hover(rule->data.conditional_rule.rules ? rule->data.conditional_rule.rules[i] : NULL)) {
+            if (css_rule_uses_pseudo_state(
+                    rule->data.conditional_rule.rules ? rule->data.conditional_rule.rules[i] : NULL,
+                    pseudo_state)) {
                 return true;
             }
         }
     }
     return false;
+}
+
+static bool css_rule_uses_hover(CssRule* rule) {
+    return css_rule_uses_pseudo_state(rule, PSEUDO_STATE_HOVER);
 }
 
 static bool css_rule_is_self_color_background_hover(CssRule* rule,
@@ -8650,13 +8744,15 @@ static bool css_rule_is_self_color_background_hover(CssRule* rule,
     return true;
 }
 
-static bool document_has_hover_rules(DomDocument* doc) {
+static bool document_has_pseudo_state_rules(DomDocument* doc,
+                                            uint32_t pseudo_state) {
     if (!doc) return false;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
         if (!stylesheet || stylesheet->disabled) continue;
         for (size_t r = 0; r < stylesheet->rule_count; r++) {
-            if (css_rule_uses_hover(stylesheet->rules ? stylesheet->rules[r] : NULL)) {
+            if (css_rule_uses_pseudo_state(
+                    stylesheet->rules ? stylesheet->rules[r] : NULL, pseudo_state)) {
                 return true;
             }
         }
@@ -8664,19 +8760,8 @@ static bool document_has_hover_rules(DomDocument* doc) {
     return false;
 }
 
-static bool document_has_self_color_background_hover_rules(DomDocument* doc) {
-    if (!doc) return false;
-    bool found_hover = false;
-    for (int i = 0; i < doc->stylesheet_count; i++) {
-        CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
-        if (!stylesheet || stylesheet->disabled) continue;
-        for (size_t r = 0; r < stylesheet->rule_count; r++) {
-            if (!css_rule_is_self_color_background_hover(
-                    stylesheet->rules ? stylesheet->rules[r] : NULL,
-                    &found_hover)) return false;
-        }
-    }
-    return found_hover;
+static bool document_has_hover_rules(DomDocument* doc) {
+    return document_has_pseudo_state_rules(doc, PSEUDO_STATE_HOVER);
 }
 
 static bool css_rule_matches_hover_on_element(CssRule* rule, SelectorMatcher* matcher,
@@ -8746,6 +8831,37 @@ static bool document_has_matched_hover_rules(DomDocument* doc, DocState* state) 
             CssRule* rule = stylesheet->rules ? stylesheet->rules[r] : NULL;
             if (css_rule_uses_hover(rule) &&
                 css_rule_matches_hover_in_tree(rule, matcher, static_cast<DomNode*>(doc->root))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Unmatched hover rules cannot affect this document's cascade. In particular,
+// UA controls may define geometry-changing :hover styles while a file tree
+// pointer is over an unrelated row with paint-only author styles.
+static bool document_has_matched_layout_hover_rules(DomDocument* doc, DocState* state) {
+    if (!doc || !state || !doc->root || !doc->document_pool || !document_has_hover_rules(doc)) {
+        return false;
+    }
+    SelectorMatcher* matcher = state->hover_matcher;
+    if (!matcher) {
+        matcher = selector_matcher_create(doc->document_pool);
+        state->hover_matcher = matcher;
+    }
+    if (!matcher) return true; // preserve the existing conservative restyle path.
+    state_configure_selector_matcher(state, matcher);
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
+        if (!stylesheet || stylesheet->disabled) continue;
+        for (size_t r = 0; r < stylesheet->rule_count; r++) {
+            CssRule* rule = stylesheet->rules ? stylesheet->rules[r] : NULL;
+            if (!css_rule_uses_hover(rule)) continue;
+            bool found_hover = false;
+            if (css_rule_is_self_color_background_hover(rule, &found_hover)) continue;
+            if (css_rule_matches_hover_in_tree(rule, matcher,
+                                               static_cast<DomNode*>(doc->root))) {
                 return true;
             }
         }
@@ -8918,7 +9034,9 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
         DocState* state = (DocState*)element->doc->state;
         DomDocument* doc = element->doc;
 
-        if (pseudo_flag == PSEUDO_STATE_HOVER && !document_has_hover_rules(doc)) {
+        // A state transition without a matching selector cannot affect the
+        // cascade. Avoid scheduling a retained full-document layout for it.
+        if (!document_has_pseudo_state_rules(doc, pseudo_flag)) {
             return;
         }
 
@@ -8959,7 +9077,8 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
     if (!doc) doc = hover_resolve_document(prev_hover);
     if (!doc) return;
 
-    bool paint_only_hover = document_has_self_color_background_hover_rules(doc);
+    bool layout_hover_active = document_has_matched_layout_hover_rules(doc, state);
+    bool paint_only_hover = !layout_hover_active && !state->hover_styles_require_layout;
     // Direct paint-only selectors can only match the changed hover path; avoid
     // walking the complete document before repainting the affected elements.
     bool hover_styles_active = paint_only_hover
@@ -8982,6 +9101,7 @@ static void sync_hover_pseudo_state_after_transition(DocState* state,
         }
     }
     state->hover_styles_active = hover_styles_active;
+    state->hover_styles_require_layout = layout_hover_active;
 
     View* node = prev_hover;
     while (node) {

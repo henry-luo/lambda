@@ -1421,7 +1421,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
                 ? map_field_ptr(map_data, field) : NULL;
             // map fields are packed by their storage width; an 8-byte debug
             // peek here crossed bool/narrow scalar fields under exact sizing.
-            log_debug("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p map_type=%p map_data=%p",
+            log_trace("_map_get_const: key='%s' semantic_type=%d storage_type=%d byte_offset=%d field_ptr=%p map_type=%p map_data=%p",
                 key, field->type->type_id, type_id, field->byte_offset, field_ptr,
                 map_type, map_data);
             Item result = map_shape_field_to_item(map_data, field);
