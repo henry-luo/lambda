@@ -45,46 +45,46 @@
   <!-- quiet connector field, kept behind the cards -->
   <g class="connector" stroke-width="1.25" opacity="0.42">
     <!-- input families converge on the Lambda / Mark model -->
-    <path d="M360 231 C401 231 423 316 480 316" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 264 C403 264 425 328 480 328" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 297 C405 297 427 340 480 340" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 330 C405 330 429 352 480 352" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 363 C407 363 431 364 480 364" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 396 C407 396 431 376 480 376" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 429 C405 429 429 388 480 388" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 462 C403 462 425 400 480 400" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 534 C403 534 425 412 480 412" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 567 C405 567 427 424 480 424" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 600 C407 600 429 436 480 436" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 633 C409 633 431 448 480 448" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 666 C409 666 433 460 480 460" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 699 C409 699 435 472 480 472" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 732 C410 732 438 484 480 484" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 765 C410 765 440 496 480 496" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 836 C409 836 435 508 480 508" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 869 C407 869 433 520 480 520" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
-    <path d="M360 902 C405 902 429 532 480 532" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 231 C294 231 306 316 340 316" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 264 C296 264 308 328 340 328" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 297 C298 297 310 340 340 340" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 330 C298 330 312 352 340 352" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 363 C300 363 314 364 340 364" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 396 C300 396 314 376 340 376" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 429 C298 429 312 388 340 388" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 462 C296 462 308 400 340 400" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 534 C296 534 308 412 340 412" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 567 C298 567 310 424 340 424" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 600 C300 600 312 436 340 436" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 633 C302 633 314 448 340 448" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 666 C302 666 316 460 340 460" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 699 C302 699 318 472 340 472" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 732 C304 732 320 484 340 484" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 765 C304 765 322 496 340 496" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 836 C302 836 318 508 340 508" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 869 C300 869 316 520 340 520" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
+    <path d="M270 902 C298 902 312 532 340 532" stroke="#3b9b9b" marker-end="url(#arrow-teal)"/>
 
     <!-- the shared model fans back out to every output family -->
-    <path d="M1120 316 C1170 316 1190 231 1240 231" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 328 C1170 328 1190 264 1240 264" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 340 C1170 340 1190 297 1240 297" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 352 C1170 352 1190 330 1240 330" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 364 C1170 364 1190 363 1240 363" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 376 C1170 376 1190 396 1240 396" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 388 C1170 388 1190 429 1240 429" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 400 C1170 400 1190 462 1240 462" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 412 C1170 412 1190 534 1240 534" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 424 C1170 424 1190 567 1240 567" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 436 C1170 436 1190 600 1240 600" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 448 C1170 448 1190 633 1240 633" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 460 C1170 460 1190 666 1240 666" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 472 C1170 472 1190 699 1240 699" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 484 C1170 484 1190 732 1240 732" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 496 C1170 496 1190 765 1240 765" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 508 C1170 508 1190 836 1240 836" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 520 C1170 520 1190 869 1240 869" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
-    <path d="M1120 532 C1170 532 1190 902 1240 902" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 316 C1006 316 1020 231 1050 231" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 328 C1006 328 1020 264 1050 264" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 340 C1006 340 1020 297 1050 297" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 352 C1006 352 1020 330 1050 330" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 364 C1006 364 1020 363 1050 363" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 376 C1006 376 1020 396 1050 396" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 388 C1006 388 1020 429 1050 429" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 400 C1006 400 1020 462 1050 462" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 412 C1006 412 1020 534 1050 534" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 424 C1006 424 1020 567 1050 567" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 436 C1006 436 1020 600 1050 600" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 448 C1006 448 1020 633 1050 633" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 460 C1006 460 1020 666 1050 666" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 472 C1006 472 1020 699 1050 699" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 484 C1006 484 1020 732 1050 732" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 496 C1006 496 1020 765 1050 765" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 508 C1006 508 1020 836 1050 836" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 520 C1006 520 1020 869 1050 869" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
+    <path d="M980 532 C1006 532 1020 902 1050 902" stroke="#6679c9" marker-end="url(#arrow-indigo)"/>
   </g>
 
   <!-- left input panel -->
@@ -287,19 +287,20 @@
     <g fill="#31466f" class="node">
       <text x="1280" y="842">SVG</text>
       <text x="1280" y="875">PDF</text>
-      <text x="1327" y="908" text-anchor="middle">PNG</text>
-      <text x="1472" y="908" text-anchor="middle">JPEG</text>
+      <text x="1308" y="908" text-anchor="middle">PNG</text>
+      <text x="1413" y="908" text-anchor="middle">JPEG</text>
     </g>
   </g>
 
   <!-- small legend -->
-  <g class="sans" transform="translate(50 952)">
+  <g class="sans" transform="translate(30 952)">
     <circle cx="6" cy="-4" r="5" fill="#3b9b9b"/>
     <text x="18" y="0" fill="#718698" font-size="12">many sources</text>
     <path d="M115 -4 H151" stroke="#96a9bb" stroke-width="1.5" marker-end="url(#arrow-teal)"/>
     <text x="163" y="0" fill="#718698" font-size="12">shared model</text>
     <path d="M270 -4 H306" stroke="#96a9bb" stroke-width="1.5" marker-end="url(#arrow-indigo)"/>
     <text x="318" y="0" fill="#718698" font-size="12">many outputs</text>
-    <text x="1550" y="0" text-anchor="end" fill="#91a2b2" font-size="12">lambda • radiant • document processing</text>
+    <text x="1270" y="0" text-anchor="end" fill="#91a2b2" font-size="12">lambda • radiant • document processing</text>
+  </g>
   </g>
 </svg>
