@@ -68,6 +68,37 @@ let again = md.import_text(written)
 let underlined = node('doc', [node('p', [text_marked("under", [{name: 'u', value: null}])])])
 "gate on unrepresentable formatting:"; [md.check_roundtrip(underlined, loaded.envelope)]
 
-// content the adapter cannot keep refuses to open, with a diagnostic
-"footnote refused:"; [md.import_text("Text[^1].\n\n[^1]: note\n") ^ { ^.message }]
+// a block the model cannot hold (one with a footnote reference), or one its
+// export would not read back the same (nested emphasis), is kept as written:
+// its source lines save byte for byte and show view-only. So are lines no
+// block claims (a link reference definition), which have no view.
+let kept_source = "Intro with *emphasis*.
+
+Text[^1] here.
+
+*Italic with **nested bold***
+
+[^1]: a note,  spaced
+
+[ref]: https://example.com
+
+Outro with [a link](https://example.com).
+"
+let kept = md.import_text(kept_source)
+let kept_nodes = [for (b in kept.doc.content where b.tag == 'md_source') b];
+"kept blocks:"; [for (b in kept.doc.content) b.tag]
+"kept source:"; [for (b in kept_nodes) attr_get(b, 'markdown')]
+"kept views:"; [for (b in kept_nodes where attr_get(b, view_attr) != null) format(attr_get(b, view_attr), 'html')]
+"kept blocks save byte for byte:"; md.export_text(kept.doc, kept.envelope) == kept_source
+"gate on kept blocks passes:"; md.check_roundtrip(kept.doc, kept.envelope) == null
+
+// an edit elsewhere leaves a kept block as written
+let edited = node('doc', [node('p', [text("Changed intro.")]), *drop(kept.doc.content, 1)])
+"edited export:"; [md.export_text(edited, kept.envelope)]
+
+// inline raw HTML is one tag per atom: a lone tag or a comment shows nothing
+// on its own, so the surface shows its source; a void tag has a view; math
+// shows its TeX source
+let atoms = md.import_text("Press <kbd>K</kbd>, <br> a <!-- c --> and $x$.\n").doc.content[0].content;
+"inline atom views:"; [for (a in atoms where a.kind == 'node') [a.tag, len(attr_get(a, view_attr))]]
 "declined commands:"; md.unsupported_input_types

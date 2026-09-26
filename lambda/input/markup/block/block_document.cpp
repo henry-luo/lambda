@@ -138,6 +138,28 @@ Item parse_block_element(MarkupParser* parser) {
 }
 
 /**
+ * record_source_position - Tag a top-level block with the lines it spans
+ *
+ * parse({sourcepos: true}) lets a caller keep a block's source as written (an
+ * editor saving a block it cannot edit). The value follows cmark: 1-based
+ * "startline:startcol-endline:endcol"; the trailing blank lines a block parser
+ * consumed are separators, not block content.
+ */
+static void record_source_position(MarkupParser* parser, Item block, int start, int end) {
+    if (get_type_id(block) != LMD_TYPE_ELEMENT) return;
+    while (end > start + 1 && is_empty_line(parser->lines[end - 1])) end--;
+    if (end <= start) end = start + 1;
+    const char* first = parser->lines[start];
+    const char* first_text = first;
+    while (*first_text == ' ' || *first_text == '\t') first_text++;
+    const char* last = parser->lines[end - 1];
+    char value[64];
+    snprintf(value, sizeof(value), "%d:%d-%d:%d", start + 1, (int)(first_text - first) + 1,
+             end, (int)strlen(last));
+    add_attribute_to_element(parser, block.element, "sourcepos", value);
+}
+
+/**
  * parse_document - Parse entire document structure
  *
  * Creates root doc element with meta and body sections,
@@ -167,12 +189,16 @@ Item parse_document(MarkupParser* parser) {
     }
 
     // Parse all blocks into body
+    bool source_positions = parser->input() && parser->input()->source_positions;
     while (parser->current_line < parser->line_count) {
         int line_before = parser->current_line;
 
         Item block = parse_block_element(parser);
 
         if (block.item != ITEM_UNDEFINED && block.item != ITEM_ERROR) {
+            if (source_positions) {
+                record_source_position(parser, block, line_before, parser->current_line);
+            }
             list_push((List*)body, block);
         }
 

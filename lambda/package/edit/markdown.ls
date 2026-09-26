@@ -5,14 +5,22 @@
 // html5_subset vocabulary the editor commands produce). Import maps the
 // Markdown parser's Mark tree onto it; export rebuilds the Mark tree the
 // Markdown formatter writes. Content the model does not edit but a save must
-// keep — raw HTML, math, YAML front matter — is carried as opaque atomic
-// nodes or in the envelope, never flattened to text.
+// keep — raw HTML, math, YAML front matter — is carried as atomic nodes shown
+// view-only (view.ls) or in the envelope, never flattened to text.
+//
+// A top-level block the model cannot hold (a footnote, say), one it only
+// shows (raw HTML, display math), or one that would not survive export and
+// re-import, is kept as written: its source lines (parse's `sourcepos`) in an
+// atomic `md_source` node, shown view-only and saved byte for byte. So are
+// source lines no block claims, such as link reference definitions.
 //
 // Round-trip contract (proposal §8): meaning, content, and supported metadata
-// survive; source spelling may normalize. `normalize` states exactly what may
-// differ, and `check_roundtrip` is the gate the loader and Save both apply.
+// survive; source spelling of edited blocks may normalize. `normalize` states
+// exactly what may differ, and `check_roundtrip` is the gate the loader and
+// Save both apply.
 
 import .model
+import .view
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import schemas: lambda.editor.mod_md_schema
@@ -33,15 +41,17 @@ pub let schema = {
   html_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
                attrs: [{name: 'html', required: true, type: 'string'}]},
   math_block: {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
-               attrs: [{name: 'tex', required: true, type: 'string'}]}
+               attrs: [{name: 'tex', required: true, type: 'string'}]},
+  md_source:  {role: 'block',  content: [], marks: 'none', atomic: true, selectable: true,
+               attrs: [{name: 'markdown', required: true, type: 'string'}]}
 }
 
 // Commands Markdown cannot represent: underline and subscript have no Markdown
 // spelling (the reader's ~x~ is strikethrough), so the profile omits them.
 pub let unsupported_input_types = ["formatUnderline", "formatSubscript"]
 
-// Element tags the importer understands. Anything else in the parsed tree is
-// reported, and the file is not opened for editing (proposal §2).
+// Element tags the importer understands. A top-level block holding anything
+// else is kept as written (proposal §2).
 let block_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol', 'li',
                   'hr', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'html-block']
 let inline_tags = ['span', 'strong', 'b', 'em', 'i', 'del', 's', 'strike', 'sup',
@@ -99,6 +109,10 @@ fn doc_body(parsed) {
 
 fn inline_children(item, marks) => [for (c in content(item)) for (x in inline_items(c, marks)) x]
 
+// Raw HTML and math keep their source text; raw HTML also shows its
+// rendering view-only, math its source (view.ls).
+fn kept_atom(tag, key, text, shown) => node_attrs(tag, attr_list([[key, text], [view_attr, shown]]), [])
+
 fn marked(item, marks, mark) any => inline_children(item, with_mark(marks, mark, true))
 
 fn inline_items(item, marks) {
@@ -122,8 +136,8 @@ fn inline_items(item, marks) {
       [node_attrs('img', attr_list([['src', item.src], ['alt', item.alt], ['title', item.title]]), [])]
     }
     else if (tag == 'br') { [node('br', [])] }
-    else if (tag == 'raw-html') { [node_attrs('raw_html', [{name: 'html', value: plain_text(item)}], [])] }
-    else if (tag == 'math') { [node_attrs('math', [{name: 'tex', value: plain_text(item)}], [])] }
+    else if (tag == 'raw-html') { [kept_atom('raw_html', 'html', plain_text(item), html_view(plain_text(item)))] }
+    else if (tag == 'math') { [kept_atom('math', 'tex', plain_text(item), null)] }
     else { [] }
   }
 }
@@ -180,8 +194,8 @@ fn block_nodes(item) {
     else if (tag == 'table') {
       [node('table', [for (p in content(item) where type(p) == element) table_part(p)])]
     }
-    else if (tag == 'html-block') { [node_attrs('html_block', [{name: 'html', value: plain_text(item)}], [])] }
-    else if (tag == 'math') { [node_attrs('math_block', [{name: 'tex', value: plain_text(item)}], [])] }
+    else if (tag == 'html-block') { [kept_atom('html_block', 'html', plain_text(item), html_view(plain_text(item)))] }
+    else if (tag == 'math') { [kept_atom('math_block', 'tex', plain_text(item), null)] }
     else if (member(inline_tags, tag)) { [node('p', inline_items(item, []))] }
     else { [] }
   }
@@ -189,18 +203,85 @@ fn block_nodes(item) {
 
 fn blocks_of(item) => [for (c in content(item)) for (b in block_nodes(c)) b]
 
-// Parse Markdown source into an editor document, or raise a diagnostic that
-// names the constructs the editor cannot keep.
+// ---------------------------------------------------------------------------
+// Blocks kept as written
+// ---------------------------------------------------------------------------
+
+// Source lines kept byte for byte, with their view-only rendering (none for
+// lines no block claims).
+fn kept_block(text, shown) =>
+  node_attrs('md_source', attr_list([['markdown', text], [view_attr, shown]]), [])
+
+fn is_kept(n) => (is_node(n) and n.tag == 'md_source') or false
+
+// A block's source lines from parse's `sourcepos` ("L:C-L:C", 1-based).
+fn source_range(item) {
+  let pos = item.sourcepos
+  if (pos == null) null
+  else {
+    let ends = split(string(pos), "-");
+    {first: int(split(ends[0], ":")[0]), last: int(split(ends[1], ":")[0])}
+  }
+}
+
+fn blank(line) => trim(line) == ""
+
+fn first_filled(lines, i, stop) => if (i >= stop) null else if (blank(lines[i])) first_filled(lines, i + 1, stop) else i
+fn last_filled(lines, i, stop) => if (stop <= i) null else if (blank(lines[stop - 1])) last_filled(lines, i, stop - 1) else stop - 1
+
+// lines[i .. stop) without the blank lines around them, or null when blank.
+fn filled_text(lines, i, stop) {
+  let first = first_filled(lines, i, stop)
+  if (first == null) null
+  else join(take(drop(lines, first), last_filled(lines, first, stop) - first + 1), "\n")
+}
+
+// A block the model holds, provided its export reads back the same.
+fn survives(nodes) {
+  let back = parse(format(<doc <body *export_blocks(nodes)>>, 'markdown'), 'markdown') ^ { null };
+  (back != null and norm_blocks(nodes) == norm_blocks(blocks_of(doc_body(back)))) or false
+}
+
+// A block the editor only shows — raw HTML, display math — is kept as
+// written rather than as an atom the formatter would respell.
+fn shown_only(item) => name(item) == 'html-block' or (name(item) == 'math' and item.type == "block")
+
+fn item_blocks(item, lines, span) {
+  let nodes = if (len(unsupported_in(item)) > 0 or shown_only(item)) null else block_nodes(item)
+  if (nodes != null and survives(nodes)) nodes
+  else [kept_block(join(take(drop(lines, span.first - 1), span.last - span.first + 1), "\n"),
+                    markdown_view(item))]
+}
+
+// Top-level blocks in source order; `from` is the first line no block claimed.
+fn import_items(items, lines, i, from, acc) {
+  if (i >= len(items)) {
+    let tail = filled_text(lines, from, len(lines));
+    if (tail == null) acc else [*acc, kept_block(tail, null)]
+  }
+  else {
+    let span = source_range(items[i])
+    let gap = filled_text(lines, from, span.first - 1)
+    let kept_gap = if (gap == null) [] else [kept_block(gap, null)]
+    import_items(items, lines, i + 1, span.last, [*acc, *kept_gap, *item_blocks(items[i], lines, span)])
+  }
+}
+
+// Parse Markdown source into an editor document.
 pub fn import_text(source) map^ {
   let parts = split_front_matter(source)
-  let parsed = parse(parts.body, 'markdown') ^ { raise error("the Markdown source could not be parsed", ^) }
-  let body = doc_body(parsed)
-  let unknown = unique([for (c in content(body)) for (t in unsupported_in(c)) t]) or []
-  if (len(unknown) > 0) {
-    raise error("the Markdown editor cannot keep " ++ join([for (t in unknown) "<" ++ string(t) ++ ">"], ", ") ++
-                " content yet; open it with 'lambda view' instead")
+  let parsed = parse(parts.body, {type: 'markdown', sourcepos: true}) ^ {
+    raise error("the Markdown source could not be parsed", ^)
   }
-  else { {doc: node('doc', blocks_of(body)), envelope: {front_matter: parts.front_matter}} }
+  let items = [for (c in content(doc_body(parsed)) where type(c) == element) c]
+  // without its lines a block could be neither kept as written nor checked
+  if (any([for (it in items) it.sourcepos == null]) or false) {
+    raise error("the Markdown parser did not report where each block is")
+  }
+  else {
+    let blocks = import_items(items, split(parts.body, "\n"), 0, 0, []);
+    {doc: node('doc', blocks), envelope: {front_matter: parts.front_matter}}
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,9 +389,26 @@ fn export_block(n) {
 
 fn export_blocks(nodes) => [for (n in nodes) for (b in export_block(n)) b]
 
+fn drop_final_newlines(s) => if (ends_with(s, "\n")) drop_final_newlines(slice(s, 0, len(s) - 1)) else s
+
+// A run of editable blocks as the formatter writes it, or nothing.
+fn run_text(run) {
+  let md = if (len(run) == 0) "" else drop_final_newlines(format(<doc <body *export_blocks(run)>>, 'markdown'))
+  if (md == "") [] else [md]
+}
+
+// Editable runs go through the formatter; a kept block is its source lines as
+// read. Top-level blocks are separated by one blank line.
+fn export_parts(nodes, i, run, acc) {
+  if (i >= len(nodes)) { [*acc, *run_text(run)] }
+  else if (is_kept(nodes[i])) { export_parts(nodes, i + 1, [], [*acc, *run_text(run), attr_get(nodes[i], 'markdown')]) }
+  else { export_parts(nodes, i + 1, [*run, nodes[i]], acc) }
+}
+
 // Serialize an editor document (plus its envelope) to Markdown source.
 pub fn export_text(doc, envelope) {
-  let md = format(<doc <body *export_blocks(doc.content)>>, 'markdown')
+  let parts = export_parts(doc.content, 0, [], [])
+  let md = if (len(parts) == 0) "" else join(parts, "\n\n") ++ "\n"
   let front = if (envelope != null and envelope.front_matter != null) envelope.front_matter else ""
   front ++ md
 }
@@ -425,7 +523,9 @@ fn norm_block(n) {
       [node_attrs('pre', attr_list([['language', if (lang == "") null else lang]]), [text(body)])]
     }
     else if (tag == 'table') { [node('table', [for (p in n.content) norm_table_part(p)])] }
-    else if (tag == 'hr' or tag == 'html_block' or tag == 'math_block') { [node_attrs(tag, sorted_attrs(n), [])] }
+    else if (tag == 'hr' or tag == 'html_block' or tag == 'math_block' or tag == 'md_source') {
+      [node_attrs(tag, sorted_attrs(n), [])]
+    }
     else if (is_inline_model(n)) { norm_block(node('p', [n])) }
     else { norm_blocks(n.content) }
   }
@@ -455,6 +555,8 @@ pub let descriptor = {
   id: 'markdown', name: "Markdown", suffixes: [".md", ".markdown"],
   surface: 'rich_text', schema: schema, schema_preset: 'html5_subset',
   unsupported_input_types: unsupported_input_types,
+  // kept as written: shown view-only, never written into (proposal §2)
+  view_only_tags: ['md_source', 'raw_html', 'html_block', 'math', 'math_block'],
   import_text: import_text, export_text: export_text, check_roundtrip: check_roundtrip,
   toolbar: 'markdown'
 }

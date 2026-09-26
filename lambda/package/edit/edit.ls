@@ -5,7 +5,8 @@
 // selection has one owner, the registry below (proposal §4). Opening is an
 // effectful procedure (S12.1.1v2): read the source once, import it through the
 // format adapter, prove the adapter can write it back without loss, and only
-// then build the editing page. A document the editor cannot keep is refused
+// then build the editing page. A part the editor cannot edit is kept as
+// written and shown view-only; a document it still cannot keep is refused
 // with a diagnostic instead of opening as a lossy editor (proposal §2).
 
 import md: lambda.edit.markdown

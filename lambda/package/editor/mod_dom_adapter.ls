@@ -73,6 +73,9 @@ fn target_selection(editor, snapshot) {
   else event_selection(editor, snapshot)
 }
 
+// The selection a DOM action applies to, as handle_event resolves it.
+pub fn action_selection(editor, evt) => target_selection(editor, evt)
+
 fn with_selection(editor, selection, revision, preserve_marks) =>
   { *: editor, selection: selection,
     stored_marks: if (preserve_marks) editor.stored_marks else null,

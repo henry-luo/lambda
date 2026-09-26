@@ -1,0 +1,25 @@
+{
+  "name": "a view-only part is never typed into; Delete removes it as a unit and undo restores it",
+  "command": "edit",
+  "html": "test/ui/edit/kept.md",
+  "working_copy": "temp/edit-ui/edit_md_view_only_keys.md",
+  "viewport": {"width": 1000, "height": 900},
+  "events": [
+    {"type": "click", "target": {"text": "raw"}},
+    {"type": "type", "text": "Q"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "Q"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-view-only b"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "view-only"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-view-only b"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-view-only"}, "count": 4},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Text with a footnote"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "E = mc^2"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-view-only b"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_view_only_keys.md", "contains": "<div class=\"box\">\n<b>raw</b> block\n</div>"}
+  ]
+}

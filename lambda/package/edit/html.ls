@@ -7,7 +7,8 @@
 // the body's flow content becomes the lambda.editor model. An element outside
 // the editable profile keeps its parsed subtree in an atomic `raw_html` /
 // `html_block` node, so a save writes it back untouched instead of flattening
-// it (proposal §2). Scripts and event-handler attributes are data: the surface
+// it, and the surface shows it view-only through view.ls's sanitizing writer
+// (proposal §2). Scripts and event-handler attributes are data: the surface
 // never projects the head, and model attributes reach the surface only where
 // editing needs them (a link's address, an image's source).
 //
@@ -17,6 +18,7 @@
 // the loader and Save both apply.
 
 import .model
+import .view
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import schemas: lambda.editor.mod_md_schema
@@ -144,13 +146,16 @@ fn child_kind(c) {
   else 'block'
 }
 
-fn opaque_block(source) => node_attrs('html_block', [{name: 'source', value: source}], [])
+// Retained source shows view-only, through the sanitizing writer (view.ls).
+fn kept_attrs(source) => [{name: 'source', value: source}, {name: view_attr, value: html_view(source)}]
+
+fn opaque_block(source) => node_attrs('html_block', kept_attrs(source), [])
 
 fn with_marks_attr(attrs, marks) =>
   if (len(marks) == 0) attrs else [*attrs, {name: node_marks_attr, value: marks}]
 
 // A retained inline element keeps the marks around it (node_marks_attr).
-fn opaque_inline(el, marks) any => node_attrs('raw_html', with_marks_attr([{name: 'source', value: el}], marks), [])
+fn opaque_inline(el, marks) any => node_attrs('raw_html', with_marks_attr(kept_attrs(el), marks), [])
 
 fn inline_children(el, marks) => [for (c in content(el)) for (x in inline_items(c, marks)) x]
 
@@ -378,9 +383,6 @@ fn import_parsed(source, parsed) map {
 // Export: editor model -> HTML text
 // ---------------------------------------------------------------------------
 
-fn escape_text(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
-fn escape_attr(s) => replace(replace(s, "&", "&amp;"), "\"", "&quot;")
-
 // Source attributes; the adapter's own bookkeeping names hold a space.
 fn attrs_html(attrs) =>
   join([for (a in attrs where a.value != null and not contains(string(a.name), " "))
@@ -549,6 +551,8 @@ pub let descriptor = {
   id: 'html', name: "HTML", suffixes: [".html", ".htm"],
   surface: 'rich_text', schema: schema, schema_preset: 'html5_subset',
   unsupported_input_types: [], underline: true,
+  // retained source: shown view-only, never written into (proposal §2)
+  view_only_tags: ['raw_html', 'html_block'],
   import_text: import_text, export_text: export_text, check_roundtrip: check_roundtrip,
   toolbar: 'html'
 }

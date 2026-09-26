@@ -1,7 +1,7 @@
 "envelope keeps the front matter:"
 ["---\ntitle: Adapter sample\ntags: [a, b]\n---\n\n"]
 "blocks:"
-['h1', 'p', 'ol', 'ul', 'blockquote', 'pre', 'table', 'html_block', 'math_block']
+['h1', 'p', 'ol', 'ul', 'blockquote', 'pre', 'table', 'md_source', 'md_source']
 "heading content:"
 [{
     kind: 'text',
@@ -27,12 +27,24 @@
 "gate on the loaded model passes:"
 true
 "written:"
-["---\ntitle: Adapter sample\ntags: [a, b]\n---\n\n# Heading with *emphasis*\n\nText with **bold**, `code`, ~~struck~~, x^2^, a [link](https://example.com \"Example\"),\nan ![image](pic.png), inline <span class=\"k\">HTML</span>, and $e^x$ math.\nLine with a hard break\\\nafter it.\n\n1. first\n\n2. second\n\n3. five\n\n4. six\n\n- [x] done\n\n- [ ] open\n\n- loose one\n\n- loose two\n\n> A quote\n>\n> - with a list\n\n```python\nprint(\"hi\")\n```\n\n| left | right |\n| :-- | --: |\n| a | b |\n\n<div class=\"note\">kept as is</div>\n\n$$x = y$$\n"]
+["---\ntitle: Adapter sample\ntags: [a, b]\n---\n\n# Heading with *emphasis*\n\nText with **bold**, `code`, ~~struck~~, x^2^, a [link](https://example.com \"Example\"),\nan ![image](pic.png), inline <span class=\"k\">HTML</span>, and $e^x$ math.\nLine with a hard break\\\nafter it.\n\n1. first\n\n2. second\n\n3. five\n\n4. six\n\n- [x] done\n\n- [ ] open\n\n- loose one\n\n- loose two\n\n> A quote\n>\n> - with a list\n\n```python\nprint(\"hi\")\n```\n\n| left | right |\n| :-- | --: |\n| a | b |\n\n<div class=\"note\">kept as is</div>\n\n$$\nx = y\n$$\n"]
 "written again is unchanged:"
 true
 "gate on unrepresentable formatting:"
 ["block 1 <p> \"under\" would change"]
-"footnote refused:"
-["the Markdown editor cannot keep <footnote-ref> content yet; open it with 'lambda view' instead"]
+"kept blocks:"
+['p', 'md_source', 'md_source', 'md_source', 'md_source', 'p']
+"kept source:"
+["Text[^1] here.", "*Italic with **nested bold***", "[^1]: a note,  spaced", "[ref]: https://example.com"]
+"kept views:"
+["<p>Text<sup class=\"edit-view-note\">[1]</sup> here.</p>", "<p><em>Italic with <strong>nested bold</strong></em></p>", "<p><sup class=\"edit-view-note\">[1]</sup>: a note,  spaced</p>"]
+"kept blocks save byte for byte:"
+true
+"gate on kept blocks passes:"
+true
+"edited export:"
+["Changed intro.\n\nText[^1] here.\n\n*Italic with **nested bold***\n\n[^1]: a note,  spaced\n\n[ref]: https://example.com\n\nOutro with [a link](https://example.com).\n"]
+"inline atom views:"
+[['raw_html', 0], ['raw_html', 0], ['raw_html', 1], ['raw_html', 0], ['math', 0]]
 "declined commands:"
 ["formatUnderline", "formatSubscript"]
