@@ -76,7 +76,9 @@ The MIME detector uses a sophisticated multi-layered approach with priority-base
 
 3. **Filename-based detection** features:
    - **Case-insensitive matching**: Handles mixed-case file extensions
-   - **Glob pattern support**: Uses `*` and `?` wildcards for flexible matching
+   - **Glob pattern support**: Uses `*` and `?` wildcards for flexible matching;
+     `*` backtracks, so `*.xml` matches a full path such as
+     `/home/me/.config/app/data.xml` even when a directory name holds a `.`
    - **Comprehensive extension database**: 80+ file extensions mapped to MIME types
 
 4. **Intelligent fallback chain**:

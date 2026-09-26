@@ -68,6 +68,39 @@ TEST_F(MimeDetectTest, FilenameDetection) {
     EXPECT_NE(strstr(mime, "pdf"), nullptr) << "Expected MIME type to contain 'pdf', got: " << mime;
 }
 
+// Filename detection sees absolute paths: a '.' in a directory name (".claude",
+// ".config", "john.doe") must not hide the file's extension.
+TEST_F(MimeDetectTest, FilenameDetectionThroughDottedDirectories) {
+    const char* mime = detect_mime_from_filename(detector,
+        "/Users/me/Lambda-opus/.claude/worktrees/wt/test/input/test_markup.xml");
+    ASSERT_NE(mime, nullptr) << "XML under a dotted directory should be detected by extension";
+    EXPECT_STREQ(mime, "application/xml");
+
+    mime = detect_mime_from_filename(detector, "/home/john.doe/.config/app/settings.json");
+    ASSERT_NE(mime, nullptr);
+    EXPECT_NE(strstr(mime, "json"), nullptr) << "got: " << mime;
+
+    // the content sniffer cannot tell XML without a declaration from text
+    mime = detect_mime_type(detector, "/srv/site.v2/data/feed.xml", "<root><item/></root>", 20);
+    ASSERT_NE(mime, nullptr);
+    EXPECT_STREQ(mime, "application/xml");
+}
+
+// '*' backtracks to a later match; the pattern must still end where the string does.
+TEST_F(MimeDetectTest, GlobBacktracking) {
+    EXPECT_EQ(match_glob("*.xml", "/a/.claude/b/test.xml"), 1);
+    EXPECT_EQ(match_glob("*.xml", "a.x.xml"), 1);
+    EXPECT_EQ(match_glob("*.tar.gz", "/p.q/archive.tar.gz"), 1);
+    EXPECT_EQ(match_glob("*.XML", "Test.Xml"), 1);
+    EXPECT_EQ(match_glob("*.xml", "a.xmlx"), 0);
+    EXPECT_EQ(match_glob("*.xml", "/b.xml/readme.txt"), 0);
+    EXPECT_EQ(match_glob("a*b*c", "axxbyyc"), 1);
+    EXPECT_EQ(match_glob("a*b*c", "axxbyyd"), 0);
+    EXPECT_EQ(match_glob("*.?s", "main.ts"), 1);
+    EXPECT_EQ(match_glob("*", ""), 1);
+    EXPECT_EQ(match_glob("*.md", ""), 0);
+}
+
 // Test content-based detection without filename
 TEST_F(MimeDetectTest, ContentDetection) {
     const char* mime = detect_mime_type(detector, "unknown", "<html>", 6);

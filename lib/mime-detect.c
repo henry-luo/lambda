@@ -30,38 +30,40 @@ void* memmem(const void* haystack, size_t haystack_len, const void* needle, size
 }
 #endif
 
-// Helper function to match glob patterns
+// Helper function to match glob patterns (case-insensitive; '*' any run, '?' one char).
+// A '*' must be able to backtrack: the first place its successor matches is not
+// always the right one. "*.xml" against ".../.claude/x/test.xml" first meets the
+// '.' of ".claude", and without backtracking every file under a dotted directory
+// lost its extension-based type.
 int match_glob(const char* pattern, const char* string) {
     if (!pattern || !string) return 0;
-    
+
     const char* p = pattern;
     const char* s = string;
-    
-    while (*p && *s) {
+    const char* star_p = NULL;  // pattern just after the last '*'
+    const char* star_s = NULL;  // string position that '*' currently extends to
+
+    while (*s) {
         if (*p == '*') {
-            // Skip multiple asterisks
             while (*p == '*') p++;
-            if (!*p) return 1; // Pattern ends with *, matches everything
-            
-            // Find the next character after *
-            while (*s && *s != *p) s++;
-            if (!*s) return 0;
-        } else if (*p == '?') {
-            // ? matches any single character
+            if (!*p) return 1;  // a trailing '*' matches the rest
+            star_p = p;
+            star_s = s;
+        } else if (*p && (*p == '?' || tolower((unsigned char)*p) == tolower((unsigned char)*s))) {
             p++;
             s++;
-        } else if (tolower(*p) == tolower(*s)) {
-            p++;
-            s++;
+        } else if (star_p) {
+            // mismatch after a '*': let it absorb one more character and retry
+            p = star_p;
+            s = ++star_s;
         } else {
             return 0;
         }
     }
-    
-    // Skip trailing asterisks in pattern
+
+    // the string is consumed: only '*'s may remain in the pattern
     while (*p == '*') p++;
-    
-    return (*p == '\0' && *s == '\0');
+    return *p == '\0';
 }
 
 // Helper function to match magic patterns
