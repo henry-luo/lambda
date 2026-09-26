@@ -427,6 +427,27 @@ static const TierParityFixture kTune27TierParity[] = {
     // LR03-30: a one-literal alias is a type value (S11.2.1); `type T = 1` had
     // published the literal Type's address as an int on both tiers.
     {"test/lambda/type_literal_alias.ls", "test/lambda/type_literal_alias.txt"},
+    // S16.6.7v2: a procedure arrow is an anonymous AST_NODE_PROC; each tier
+    // must create, call, pass, refuse and promote it as a named nested `pn`.
+    {"test/lambda/proc/pn_arrow.ls", "test/lambda/proc/pn_arrow.txt"},
+    // S1.6 (LR03-19): an object type strides its fields by storage size; a
+    // union- or range-typed field overlapped the next and read back `inf`.
+    {"test/lambda/object_boxed_field_layout.ls", "test/lambda/object_boxed_field_layout.txt"},
+    {"test/lambda/proc/object_boxed_field_write.ls",
+     "test/lambda/proc/object_boxed_field_write.txt"},
+    // S5.5.2 (LR03-29): type equality compares normalized forms, and the hash
+    // agrees with it; every compound type had compared equal by its tag.
+    {"test/lambda/type_repr_equality.ls", "test/lambda/type_repr_equality.txt"},
+    // S11.1.4v2 (LR03-21): a union's arms may split a range under `<:`.
+    {"test/lambda/range_subtype_union.ls", "test/lambda/range_subtype_union.txt"},
+    // S11.4.6 (LR03-26): an inline pattern island admits as a constrained
+    // base, a union arm or a field; the JIT's `case \(d+):` never matched.
+    {"test/lambda/pattern_island_type.ls", "test/lambda/pattern_island_type.txt"},
+    // S2.5.1v2: `is` against `type(x)` tests the kind; `type((1, 2))` crashed.
+    {"test/lambda/type_of_kind_is.ls", "test/lambda/type_of_kind_is.txt"},
+    // S12.3.2 (LR07-19): a method's named arguments bind by name, as a direct
+    // call's do; both tiers had bound them by position.
+    {"test/lambda/object_method_named_args.ls", "test/lambda/object_method_named_args.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

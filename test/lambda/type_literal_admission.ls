@@ -7,5 +7,7 @@ fn one(x: 1) { x }
 fn pick(x: "a" | "b") { x }
 let member = [3 is T, 2 is T, 1.0 is 1, "c" is ("a" | "b"), "a" is ("a" | "b")]
 let admitted = [g(dyn(2)), one(dyn(1.0)), type(one(dyn(1.0))), pick(dyn("b"))]
-let r = [member, admitted]
+// a literal union's members admit by `==` as a lone literal does (LR13-13)
+let across = [1.0 is T, 2.0 is (1 | 2), 3.0 is T, 1.0 is (1 | "a"), [1.0] is [1 | 2]]
+let r = [member, admitted, across]
 r

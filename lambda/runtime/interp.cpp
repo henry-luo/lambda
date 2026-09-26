@@ -2167,6 +2167,11 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         uint64_t* words = method_args.words();
         int index = 0;
         for (AstNode* argument = node->argument; argument; argument = argument->next) {
+            // a parameter the named arguments skip is absent, not null (LR07-19)
+            if (ast_is_omitted_argument(argument)) {
+                words[index++] = ITEM_MISSING_ARGUMENT;
+                continue;
+            }
             words[index++] = eval_expr(f, argument).item;
             if (interp_frame_pending(f)) return ItemNull;
         }

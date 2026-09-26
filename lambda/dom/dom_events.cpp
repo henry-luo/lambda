@@ -609,7 +609,8 @@ static NodeListeners* find_listeners(void* key) {
 // Counts include IDL attributes and are decremented at tombstoning time, so a
 // removed or once listener never keeps a later dispatch on the slow path.
 static void note_listener_type(const char* type, int delta) {
-    if (!type || !type[0] || delta == 0) return;
+    // an empty event type is valid and must remain visible to the dispatch index.
+    if (!type || delta == 0) return;
     if (!_type_counts && delta > 0) {
         _type_counts = EventTypeCountMap::create(16);
     }
@@ -641,7 +642,7 @@ static void note_listener_type(const char* type, int delta) {
 }
 
 static bool has_listener_type(const char* type) {
-    if (!_type_counts || !type || !type[0]) return false;
+    if (!_type_counts || !type) return false;
     EventTypeCountEntry lookup = {type, 0};
     const EventTypeCountEntry* found = EventTypeCountMap::get(_type_counts, lookup);
     return found && found->count > 0;
@@ -855,12 +856,12 @@ static bool signal_is_aborted(Item signal_item) {
 // addEventListener / removeEventListener
 // ============================================================================
 
-void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
-    if (!dom_event_runtime_state_ensure()) return;
+Item dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
+    if (!dom_event_runtime_state_ensure()) return ItemNull;
     const char* type = fn_to_cstr(type_item);
     if (!type) {
         log_debug("dom_add_event_listener: invalid type");
-        return;
+        return ItemNull;
     }
 
     // Per spec the options flattening happens before any further checks; in
@@ -870,23 +871,23 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
     Item signal = ItemNull;
     Item options_result = parse_listener_options(opts_item, &capture, &once, &passive,
         &has_passive, &signal);
-    if (item_is_error(options_result)) return;
+    if (item_is_error(options_result)) return options_result;
 
     // Per spec: addEventListener with null/undefined callback is a no-op.
     TypeId cb_tid = get_type_id(cb_item);
     if (cb_item.item == 0 || cb_tid == LMD_TYPE_NULL || cb_tid == LMD_TYPE_UNDEFINED) {
-        return;
+        return ItemNull;
     }
     // Callback must be either a function or an object with handleEvent (checked
     // lazily at dispatch time). Reject obviously-bad types like numbers/booleans.
     if (cb_tid != LMD_TYPE_FUNC && cb_tid != LMD_TYPE_MAP && cb_tid != LMD_TYPE_ELEMENT) {
         log_debug("dom_add_event_listener: callback must be function or object (got tid=%d)", cb_tid);
-        return;
+        return ItemNull;
     }
 
     // Per spec: if signal is an already-aborted AbortSignal, do not add.
     if (signal_is_aborted(signal)) {
-        return;
+        return ItemNull;
     }
 
     void* key = get_event_target_key(elem_item);
@@ -932,12 +933,12 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
         if (!event_doc) event_doc = (DomDocument*)dom_get_document();
     }
     DomNodeRef event_ref = event_node ? dom_node_ref(event_node) : DomNodeRef{nullptr, 0};
-    if (event_node && (!event_doc || !dom_node_ref_validate(event_doc, event_ref))) return;
+    if (event_node && (!event_doc || !dom_node_ref_validate(event_doc, event_ref))) return ItemNull;
     NodeListeners* nl = get_or_create_listeners(
         key, event_doc, event_ref, elem_item);
     if (!nl) {
         log_error("js-dom-events: failed to retain listener target");
-        return;
+        return ItemNull;
     }
 
     // check for duplicate (same type + callback + capture); ignore tombstones
@@ -947,7 +948,7 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
         if (!el->is_idl_handler && strcmp(el->type, type) == 0 && el->capture == capture &&
             event_listener_root_item(el->callback_root).item == cb_item.item) {
             log_debug("dom_add_event_listener: duplicate listener for '%s', skipping", type);
-            return;
+            return ItemNull;
         }
     }
 
@@ -969,7 +970,7 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
         event_listener_release_roots(&listener);
         mem_free(type_copy);
         log_error("dom_add_event_listener: failed to root '%s' listener", type);
-        return;
+        return ItemNull;
     }
     listener.order = ++_event_registration_order;
     listener.capture = capture;
@@ -980,6 +981,7 @@ void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item o
     note_listener_type(listener.type, 1);
     log_debug("dom_add_event_listener: added '%s' listener (capture=%d, once=%d, passive=%d) on %p",
               type, (int)capture, (int)once, (int)passive, key);
+    return ItemNull;
 }
 
 void dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
@@ -1120,7 +1122,8 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
 
 // initCustomEvent(type, bubbles, cancelable, detail) — legacy.
 extern "C" Item js_event_init_custom_event(Item type_arg, Item b_arg, Item c_arg, Item detail_arg) {
-    js_event_init_event(type_arg, b_arg, c_arg);
+    Item init_result = js_event_init_event(type_arg, b_arg, c_arg);
+    if (item_is_error(init_result)) return init_result;
     Item ev = dom_realm_receiver();
     if (js_event_is_object(ev)) {
         // Per spec, omitted detail defaults to null (not undefined).
@@ -1136,7 +1139,8 @@ extern "C" Item js_event_init_custom_event(Item type_arg, Item b_arg, Item c_arg
 extern "C" Item js_event_init_text_event(Item type_arg, Item b_arg,
         Item c_arg, Item view_arg, Item data_arg, Item input_method_arg,
         Item locale_arg) {
-    js_event_init_event(type_arg, b_arg, c_arg);
+    Item init_result = js_event_init_event(type_arg, b_arg, c_arg);
+    if (item_is_error(init_result)) return init_result;
     Item ev = dom_realm_receiver();
     if (!js_event_is_object(ev)) return make_js_undefined();
     if (event_flag_get(ev, "__dispatch_flag")) return make_js_undefined();
@@ -1248,7 +1252,8 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
 
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts) {
     Item self = dom_realm_receiver();
-    dom_add_event_listener(self, type, callback, opts);
+    Item result = dom_add_event_listener(self, type, callback, opts);
+    if (item_is_error(result)) return result;
     return make_js_undefined();
 }
 
@@ -1264,16 +1269,22 @@ extern "C" Item js_eventtarget_dispatch(Item event_item) {
 }
 
 Item js_create_event_target(void) {
-    Item et = dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET);
+    // method allocation can collect the new target and earlier method keys.
+    RootFrame roots(3);
+    Rooted<Item> target_root(roots, dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET));
+    Rooted<Item> key_root(roots, ItemNull);
+    Rooted<Item> function_root(roots, ItemNull);
 #define JS_EVENT_TARGET_METHODS(M) \
     M("addEventListener", js_eventtarget_add_listener) \
     M("removeEventListener", js_eventtarget_remove_listener) M("dispatchEvent", js_eventtarget_dispatch)
 #define JS_EVENT_TARGET_INSTALL_METHOD(name, target) \
-    dom_realm_set(et, make_string_item(name), dom_realm_new_function(target));
+    key_root.set(make_string_item(name)); \
+    function_root.set(dom_realm_new_function(target)); \
+    dom_realm_set(target_root.get(), key_root.get(), function_root.get());
     JS_EVENT_TARGET_METHODS(JS_EVENT_TARGET_INSTALL_METHOD)
 #undef JS_EVENT_TARGET_INSTALL_METHOD
 #undef JS_EVENT_TARGET_METHODS
-    return et;
+    return target_root.get();
 }
 
 // ============================================================================

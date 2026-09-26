@@ -1,0 +1,9 @@
+"-- a union's arms may split a range --"
+[true, true, true, true, true, true, true]
+[true, true]
+"-- a member no arm admits leaves the range out --"
+[false, false, false, false]
+"-- the other direction is unchanged --"
+[true, true, true, true]
+"-- the S11.1.7 reduction splits a range the same way --"
+[none, type, type, none]

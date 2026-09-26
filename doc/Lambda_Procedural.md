@@ -566,7 +566,7 @@ The `pn` keyword declares a **procedural function** — a function that can use 
 
 ### Declaration Syntax
 
-`pn` mirrors `fn` in declaration forms — block body and expression body — but enables procedural features inside the body.
+`pn` declares like `fn`, but takes only the braced block body, and enables procedural features inside it. A procedure without a name is the procedure arrow `pn (x) => { ... }` (see [Anonymous Procedures](Lambda_Func.md#anonymous-procedures)).
 
 ```lambda
 // Block body
@@ -575,7 +575,7 @@ pn greet(name: string) {
     print(msg)
 }
 
-// A procedure body is always a braced statement block ('=>' bodies are fn-only)
+// A procedure body is always a braced statement block: a declared pn takes no '=>'
 pn double(x: int) int { return x * 2 }
 
 // With return type annotation

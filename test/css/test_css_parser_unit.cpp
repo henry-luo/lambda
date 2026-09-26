@@ -920,7 +920,7 @@ TEST_F(CssParserUnitTest, FontFace_LocalSourcesAreNotTreatedAsRemoteUrls) {
 TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeList) {
     CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
         "{ font-family: Subset; src: url(subset.woff2); "
-        "unicode-range: U +0000 -00FF, U +4E00 -9FFF, U +1F600; }", nullptr);
+        "unicode-range: U+0000-00FF, U+4E00-9FFF, U+1F600; }", nullptr);
 
     ASSERT_NE(descriptor, nullptr);
     ASSERT_EQ(descriptor->unicode_range_count, 3);
@@ -930,6 +930,17 @@ TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeList) {
     EXPECT_EQ(descriptor->unicode_ranges[1].end_codepoint, 0x9FFFu);
     EXPECT_EQ(descriptor->unicode_ranges[2].start_codepoint, 0x1F600u);
     EXPECT_EQ(descriptor->unicode_ranges[2].end_codepoint, 0x1F600u);
+    css_font_face_descriptor_free(descriptor);
+}
+
+TEST_F(CssParserUnitTest, FontFace_RejectsSpacedUnicodeRangeTokens) {
+    CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
+        "{ font-family: Subset; src: url(subset.woff2); "
+        "unicode-range: U +0000 -00FF, U +4E00 -9FFF, U +1F600; }", nullptr);
+
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->unicode_range_count, 0);
+    EXPECT_EQ(descriptor->unicode_ranges, nullptr);
     css_font_face_descriptor_free(descriptor);
 }
 

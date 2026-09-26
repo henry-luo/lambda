@@ -1412,6 +1412,16 @@ TEST_F(NegativeScriptTest, NamedArgumentsNeedStaticallyKnownCallee) {
         "error[E212]");
 }
 
+// LR07-19: named arguments cannot leave out a required parameter, on a direct
+// call or a method call; the tiers had split on the direct call, and the
+// method call had bound its arguments by position.
+TEST_F(NegativeScriptTest, NamedArgumentsCannotSkipRequiredParameter) {
+    ExpectErrorMessage("test/lambda/negative/semantic/named_arg_skips_required.ls",
+        "the named arguments leave out required parameter 'b'");
+    ExpectErrorMessage("test/lambda/negative/semantic/named_arg_method_skips_required.ls",
+        "the named arguments leave out required parameter 'b'");
+}
+
 // S16.8.6v3: the open count is `T{n+}`, not regex's trailing comma. A habit
 // that writes `{n,}` is told, rather than reading as an exact count.
 TEST_F(NegativeScriptTest, RegexOpenCountNamesTheOpenSpelling) {

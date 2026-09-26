@@ -12916,18 +12916,21 @@ extern "C" Item js_abort_signal_throwIfAborted(void);
 
 // AbortSignal constructor — creates an AbortSignal object
 static Item js_make_abort_signal() {
-    Item signal = js_new_object_with_class(JS_CLASS_ABORT_SIGNAL);
-    js_set_key_cstr(signal, "aborted", (Item){.item = b2it(false)});
-    js_set_key_cstr(signal, "reason", make_js_undefined());
-    js_set_key_cstr(signal, "__listeners__", js_array_new(0));
+    // method installation can collect before the new signal reaches its owner.
+    RootFrame roots(2);
+    Rooted<Item> signal_root(roots, js_new_object_with_class(JS_CLASS_ABORT_SIGNAL));
+    Rooted<Item> listeners_root(roots, js_array_new(0));
+    js_set_key_cstr(signal_root.get(), "aborted", (Item){.item = b2it(false)});
+    js_set_key_cstr(signal_root.get(), "reason", make_js_undefined());
+    js_set_key_cstr(signal_root.get(), "__listeners__", listeners_root.get());
     // Every AbortSignal construction path exposes the same three methods; keeping
     // them on the base builder prevents static factories and AbortController from
     // drifting into different observable signal shapes.
-    js_globals_set_native_method(signal, "addEventListener", js_abort_signal_addEventListener);
-    js_globals_set_native_method(signal, "removeEventListener", js_abort_signal_removeEventListener);
-    js_globals_set_native_method(signal, "throwIfAborted", js_abort_signal_throwIfAborted);
-    js_set_key_cstr(signal, "onabort", ItemNull);
-    return signal;
+    js_globals_set_native_method(signal_root.get(), "addEventListener", js_abort_signal_addEventListener);
+    js_globals_set_native_method(signal_root.get(), "removeEventListener", js_abort_signal_removeEventListener);
+    js_globals_set_native_method(signal_root.get(), "throwIfAborted", js_abort_signal_throwIfAborted);
+    js_set_key_cstr(signal_root.get(), "onabort", ItemNull);
+    return signal_root.get();
 }
 
 // signal.addEventListener / signal.on
@@ -13103,15 +13106,16 @@ extern "C" Item js_abort_controller_abort(Item reason);
 
 // AbortController() constructor
 extern "C" Item js_new_AbortController(void) {
-    Item controller = js_new_object_with_class(JS_CLASS_ABORT_CONTROLLER);
-
-    Item signal = js_make_abort_signal();
-    js_set_key_cstr(controller, "signal", signal);
+    // the signal constructor allocates before the controller owns its signal.
+    RootFrame roots(2);
+    Rooted<Item> controller_root(roots, js_new_object_with_class(JS_CLASS_ABORT_CONTROLLER));
+    Rooted<Item> signal_root(roots, js_make_abort_signal());
+    js_set_key_cstr(controller_root.get(), "signal", signal_root.get());
 
     // abort method directly on instance
-    js_globals_set_native_method(controller, "abort", js_abort_controller_abort);
+    js_globals_set_native_method(controller_root.get(), "abort", js_abort_controller_abort);
 
-    return controller;
+    return controller_root.get();
 }
 
 // AbortController.prototype.abort(reason)

@@ -13,6 +13,7 @@
 #include "../../core/well_known_markup_names.h"
 #include "../../js/js_class.h"
 #include "../../dom/dom.h"
+#include "../../dom/dom_core.h"
 #include "../../js/js_runtime.h"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/radiant.hpp"
@@ -1520,7 +1521,19 @@ RADIANT_C_API int radiant_dom_event_named_has(Item receiver, Item key, Item* out
         *out = (Item){.item = ITEM_TRUE};
         return 1;
     }
-    *out = (Item){.item = ITEM_FALSE};
+    // the host HasProperty hook must include the JS prototype chain, including
+    // accessors added by subclasses of Event.
+    RootFrame roots(3);
+    Rooted<Item> receiver_root(roots, receiver);
+    Rooted<Item> key_root(roots, key);
+    Rooted<Item> prototype_root(roots, js_get_prototype_of(receiver_root.get()));
+    if (!roots.valid()) {
+        *out = ItemError;
+    } else if (prototype_root.get().item == ItemNull.item) {
+        *out = (Item){.item = ITEM_FALSE};
+    } else {
+        *out = js_in(key_root.get(), prototype_root.get());
+    }
     return 1;
 }
 
@@ -1573,6 +1586,11 @@ RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
         return 1;
     }
     if (strcmp(name, "initEvent") == 0) {
+        if (argc < 1) {
+            *out = dom_raise_type_error(
+                "Failed to execute 'initEvent' on 'Event': 1 argument required, but only 0 present.");
+            return 1;
+        }
         if (!record->dispatching && argc >= 1) {
             Item ignored = ItemNull;
             radiant_dom_event_set_field(receiver, "type", args[0], &ignored);

@@ -85,16 +85,52 @@ fn square(n: int) => n ** 2
 
 ### Anonymous Functions
 
+An anonymous function is an arrow (S16.6.7v2):
+
 ```lambda
-// Arrow form — parentheses around the parameter list are required
+// parentheses around the parameter list are required
 let double = (x: int) => x * 2
 
-// fn form, unnamed
-let add = fn (x: int, y: int) { x + y }
+// a block body
+let add = (x: int, y: int) => { let s = x + y; s }
 
-// With inferred types
+// with inferred types
 let twice = (x) => x * 2
 ```
+
+The arrow is the only anonymous form. `fn` always declares a named function,
+so an unnamed `fn` is a syntax error that names the repair, `(x) => …`:
+
+```lambda error=E100
+let add = fn (x: int, y: int) { x + y }
+```
+
+### Anonymous Procedures
+
+`pn` before an arrow's parameter list makes it a procedure — a nested `pn`
+without its name:
+
+```lambda
+function apply_all(f: function, xs) => for (x in xs) f(x)
+
+pn main() {
+    let log = pn (msg) => { print("log: " ++ msg) }
+    log("started")
+    apply_all(pn (x) => { print(x) }, [1, 2, 3])
+}
+```
+
+- **The body is always braced.** It is the procedure's statement block, so
+  `var`, `while` and `return` work in it, and `pn () => {}` is the empty
+  procedure. `pn (x) => print(x)` is a syntax error.
+- **It is a `pn` value.** `is pn` is `true`; a `pn (...)` or `function`
+  parameter accepts it, and an `fn (...)` parameter refuses it. It may be
+  created anywhere, even at a script's top level, but only `pn` context may
+  call it.
+- **Captures are snapshots**, as for every closure (see
+  [Closure Captures Are Immutable Snapshots](#closure-captures-are-immutable-snapshots)).
+- **No `var` parameter.** A procedure arrow is only called through a value,
+  and such a call cannot bind one.
 
 
 ---
@@ -179,6 +215,8 @@ create_user("Bob", 25)               // active defaults to true
 - Named arguments need a statically known callee. A call through a function
   value — a `let`-bound function, a function parameter, a map field — takes
   positional arguments only, and naming one is a compile error (`E212`)
+- An object method's named arguments bind by name, as a function's do: `t.m(b: 1, a: 5)` binds `a` to 5
+- A parameter the named arguments skip takes its default, or `null` when it has none; an explicit `null` stays `null`. Only an optional parameter can be skipped: leaving out a required one is a compile error (`E206`)
 
 ### Variadic Parameters
 

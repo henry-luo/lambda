@@ -4,13 +4,13 @@
 // ===== Basic closure =====
 fn make_counter(start: int) {
     let count = start
-    fn() => count
+    () => count
 }
 let get_count = make_counter(10)
 get_count()
 
 // ===== Closure over parameter =====
-fn make_adder(n: int) => fn(x: int) => x + n
+fn make_adder(n: int) => (x: int) => x + n
 let add10 = make_adder(10)
 add10(5)
 add10(20)
@@ -26,7 +26,7 @@ hello("Alice")
 hi("Bob")
 
 // ===== Currying pattern =====
-fn curry_add(a: int) => fn(b: int) => a + b
+fn curry_add(a: int) => (b: int) => a + b
 let add3 = curry_add(3)
 add3(7)
 add3(10)
@@ -44,23 +44,23 @@ let i = m(2)
 i(3)
 
 // ===== Closure in collection pipeline =====
-fn make_multiplier(factor: int) => fn(x: int) => x * factor
+fn make_multiplier(factor: int) => (x: int) => x * factor
 let times3 = make_multiplier(3)
 [1, 2, 3, 4, 5] |> map(times3)
 
 // ===== Closure with captured collection =====
-fn make_lookup(data: map) => fn(key: string) => data.(key)
+fn make_lookup(data: map) => (key: string) => data.(key)
 let lookup = make_lookup({name: "Alice", age: 30})
 lookup("name")
 lookup("age")
 
 // ===== Closure as predicate =====
-fn greater_than(threshold: int) => fn(x: int) => x > threshold
+fn greater_than(threshold: int) => (x: int) => x > threshold
 [1, 5, 10, 15, 20] |> filter(greater_than(8))
 
 // ===== Function factory =====
 fn make_formatter(prefix: string, suffix: string) =>
-    fn(text: string) => prefix & text & suffix
+    (text: string) => prefix & text & suffix
 let bracket = make_formatter("[", "]")
 let paren = make_formatter("(", ")")
 bracket("hello")
@@ -68,7 +68,7 @@ paren("world")
 
 // ===== Closure preserving environment =====
 fn make_range_checker(low: int, high: int) =>
-    fn(x: int) => x >= low and x <= high
+    (x: int) => x >= low and x <= high
 let in_range = make_range_checker(1, 10)
 in_range(5)
 in_range(0)

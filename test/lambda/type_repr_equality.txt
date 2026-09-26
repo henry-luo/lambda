@@ -1,0 +1,27 @@
+"-- LR03-29: unions and intersections are sets of their arms --"
+[false, false, false]
+[true, true, true, true, true]
+[true, false, true, false]
+"-- a reduced operation is its result (S11.1.7) --"
+[true, true, true, false]
+"-- ranges, occurrences and arrays by their bounds --"
+[true, false, true, false, true, true, false]
+[true, true, false]
+"-- literals by value --"
+[true, true, false, false, true]
+"-- patterns by their compiled form, constrained types by their predicate site --"
+[true, false, true, false, false]
+"-- the kinds that share a TypeId --"
+[true, false, true, false, true, false]
+[true, false, false, true]
+"-- the type of a value --"
+[true, true, false, true]
+[true, false, true, true]
+[true, true, false]
+"-- a hash agrees with == --"
+[2, 3, 2, 1]
+4
+"-- LR03-15: a sized arm of a union admits its values --"
+[true, true, true, false]
+"-- LR03-16: a literal alias is a type value, not an address --"
+[true, false, true, true, false]

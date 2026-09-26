@@ -2,6 +2,10 @@
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-root-frame.hpp"
+#include "../validator/validator.hpp"
+#include "../../lib/arraylist.hpp"
+#include "../../lib/hash.h"
+#include "../../lib/hashmap_helpers.h"
 #include <mpdecimal.h>
 #include <stdio.h>
 
@@ -447,11 +451,73 @@ static bool contract_map_is_subtype(const TypeMap* candidate,
     return true;
 }
 
+// A union admits a range when its arms together admit every member, so the
+// arms may split it: `1 to 2` is below `1 | 2`, and `1 to 5` below
+// `(1 to 3) | (4 to 5)` (LR03-21). Each arm covers the part of the range it
+// admits -- a same-domain range its overlap, a literal its one member, and,
+// when `whole_domain` allows it, a type that admits the range's whole domain
+// all of it. Any other arm covers nothing, so the answer never guesses.
+struct ContractSpan {
+    int64_t start;
+    int64_t end;
+};
+
+static void contract_range_arm_spans(Type* range, int64_t start, int64_t end, Type* arm,
+        bool whole_domain, lam::ArrayList<ContractSpan>* spans, int depth) {
+    arm = contract_subtype_unwrap(arm);
+    if (!arm || depth > 64) return;
+    if (lambda_type_is_union(arm)) {
+        TypeBinary* binary = (TypeBinary*)arm;
+        contract_range_arm_spans(range, start, end, binary->left, whole_domain, spans, depth + 1);
+        contract_range_arm_spans(range, start, end, binary->right, whole_domain, spans, depth + 1);
+        return;
+    }
+    int64_t low = 0;
+    int64_t high = 0;
+    Item literal;
+    if (lambda_type_is_range(arm)) {
+        if (((TypeRange*)arm)->is_char != ((TypeRange*)range)->is_char ||
+                !lambda_range_type_bounds(arm, &low, &high)) return;
+    } else if (lambda_literal_contract_value(arm, &literal)) {
+        if (!lambda_range_type_position(range, literal, &low)) return;
+        high = low;
+    } else if (whole_domain &&
+            contract_type_is_subtype(lambda_range_type_domain(range), arm, depth + 1)) {
+        low = start;
+        high = end;
+    } else {
+        return;
+    }
+    if (low < start) low = start;
+    if (high > end) high = end;
+    if (low <= high) spans->append({low, high});
+}
+
+static bool contract_range_split_covered(Type* range, Type* union_type, bool whole_domain,
+        int depth) {
+    int64_t start = 0;
+    int64_t end = 0;
+    if (!lambda_range_type_bounds(range, &start, &end)) return false;
+    lam::ArrayList<ContractSpan> spans;
+    contract_range_arm_spans(range, start, end, union_type, whole_domain, &spans, depth);
+    // advance through the members; a member no span holds is left out
+    int64_t next = start;
+    while (next <= end) {
+        int64_t reached = next;
+        for (size_t i = 0; i < spans.length(); i++) {
+            if (spans[i].start <= next && spans[i].end >= reached) reached = spans[i].end + 1;
+        }
+        if (reached == next) return false;
+        next = reached;
+    }
+    return true;
+}
+
 // S11.1.4v2 over range types (S11.1.3). A range with no members is below every
 // type. Otherwise a range is below a same-domain range that contains its
 // bounds, and below any other type that admits its whole domain; a literal is
-// below a range that contains its value. A range spread across several union
-// arms (`1 to 2 <: 1 | 2`) is not recognised: each arm is tried whole.
+// below a range that contains its value. A union's arms may split a range
+// (contract_range_split_covered).
 static bool contract_range_is_subtype(Type* candidate, Type* expected, int depth) {
     if (!lambda_type_is_range(candidate)) {
         Item literal;
@@ -491,8 +557,13 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
     }
     if (lambda_type_is_union(expected)) {
         TypeBinary* union_type = (TypeBinary*)expected;
-        return contract_type_is_subtype(candidate, union_type->left, depth + 1) ||
-            contract_type_is_subtype(candidate, union_type->right, depth + 1);
+        if (contract_type_is_subtype(candidate, union_type->left, depth + 1) ||
+                contract_type_is_subtype(candidate, union_type->right, depth + 1)) {
+            return true;
+        }
+        // no one arm holds the whole range, but the arms together may
+        return lambda_type_is_range(candidate) &&
+            contract_range_split_covered(candidate, expected, true, depth + 1);
     }
     if (lambda_type_is_range(candidate) || lambda_type_is_range(expected)) {
         return contract_range_is_subtype(candidate, expected, depth);
@@ -581,13 +652,26 @@ static bool contract_type_is_subtype(Type* candidate, Type* expected, int depth)
             expected_nominal);
     }
 
+    // S2.1.1v4: `object` holds nominal maps, arrays and elements alike, so no
+    // one kind holds it; it wears the map tag only to route
+    if (candidate == &TYPE_OBJECT) return false;
     bool candidate_map_like = candidate->type_id == LMD_TYPE_MAP ||
         candidate->type_id == LMD_TYPE_ELEMENT;
     bool expected_map_like = expected->type_id == LMD_TYPE_MAP ||
         expected->type_id == LMD_TYPE_ELEMENT;
     if (expected_map_like) {
-        return candidate_map_like && candidate->type_id == expected->type_id &&
-            contract_map_is_subtype((TypeMap*)candidate, (TypeMap*)expected, depth);
+        if (!candidate_map_like || candidate->type_id != expected->type_id) return false;
+        // the generic kinds `map` and `element` are bare Types with no fields
+        // to walk: every map is a `map`, and the kind admits more than any
+        // shape that requires a field. Walking them read a TypeMap past the
+        // bare Type's end, so `{a: int} <: map` crashed.
+        if (!lambda_type_is_concrete_attr_shape(expected)) return true;
+        if (!lambda_type_is_concrete_attr_shape(candidate)) {
+            // only a map pattern with no field holds every map; an element
+            // pattern names a tag
+            return expected->type_id == LMD_TYPE_MAP && ((TypeMap*)expected)->length == 0;
+        }
+        return contract_map_is_subtype((TypeMap*)candidate, (TypeMap*)expected, depth);
     }
 
     return candidate->type_id == expected->type_id;
@@ -600,94 +684,389 @@ bool lambda_type_contract_is_subtype(Type* candidate, Type* expected) {
 // ---------------------------------------------------------------------------
 // S11.1.7: `none` is the canonical empty type. A type operation reduces to it
 // when its literal operands decide that nothing is admitted -- `1 & 2`,
-// `(1 | 2) ! (1 | 2)`, `int & "a"` -- and `none` is the identity of `|` and
-// `!` and absorbs `&`. What the literals cannot decide stays a binary type,
-// so a reduction is exact wherever it applies and never a guess.
+// `(1 | 2) ! (1 | 2)`, `int & "a"`, `[1] & [2]` -- and `none` is the identity
+// of `|` and `!` and absorbs `&`. A literal operand is a scalar literal, a
+// range, or a container read as the pattern its literal spells (S10.1.1v2).
+// What no literal decides stays a binary type, so a reduction is exact
+// wherever it applies and never a guess: the questions below answer
+// ADMIT_UNKNOWN whenever `is` could say otherwise.
 
-enum ScalarAdmission { SCALAR_ADMIT_NO, SCALAR_ADMIT_YES, SCALAR_ADMIT_UNKNOWN };
+// Whether a type admits every value of a set, none of them, or only some.
+enum Admission { ADMIT_NO, ADMIT_YES, ADMIT_UNKNOWN };
+
+// The work one reduction may spend. Types can be recursive -- `type T = [T, T]
+// | int` -- and comparing two of them part by part branches at every level, so
+// the walk is bounded in total as well as in depth; out of budget is UNKNOWN.
+struct ContractWalk {
+    int budget;
+};
+
+// A member of a set: a type, or the one value a pattern's value slot holds.
+struct ContractSet {
+    Item value;
+    Type* type;  // NULL when the member is `value`
+};
 
 // the type-pattern parser historically spells `&` OPERATOR_OR (validate_pattern.cpp)
 static inline bool contract_op_is_intersect(Operator op) {
     return op == OPERATOR_INTERSECT || op == OPERATOR_OR;
 }
 
-// Whether `type` admits the scalar `value`, over the scalar lattice alone:
-// literals, base scalars, `number`/`integer`, ranges, `any`, `none` and the
-// three type operators. Admission that needs more -- a predicate, a string
-// pattern, an occurrence, a container shape -- is UNKNOWN. The leaves go to
-// lambda_type_matches, the membership `is` uses, which is exact and needs no
-// runtime state for these kinds.
-static ScalarAdmission contract_scalar_admission(Item value, Type* type, int depth) {
-    type = contract_unwrap_type(type);
-    if (!type || depth > 32) return SCALAR_ADMIT_UNKNOWN;
-    if (type == &TYPE_NONE) return SCALAR_ADMIT_NO;
+// A type operator's admission of a set, from its two operands' admissions
+static Admission contract_binary_admission(Operator op, Admission left, Admission right) {
+    if (op == OPERATOR_UNION) {
+        if (left == ADMIT_YES || right == ADMIT_YES) return ADMIT_YES;
+        return left == ADMIT_NO && right == ADMIT_NO ? ADMIT_NO : ADMIT_UNKNOWN;
+    }
+    if (contract_op_is_intersect(op)) {
+        if (left == ADMIT_NO || right == ADMIT_NO) return ADMIT_NO;
+        return left == ADMIT_YES && right == ADMIT_YES ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    if (op == OPERATOR_EXCLUDE) {
+        if (left == ADMIT_NO || right == ADMIT_YES) return ADMIT_NO;
+        return left == ADMIT_YES && right == ADMIT_NO ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    return ADMIT_UNKNOWN;
+}
+
+// A numeric kind admits only some of the values `==` to a numeric literal of
+// another kind or none of them: an integer kind holds no value `==` to a
+// number with a fraction.
+static Admission contract_numeric_kind_admission(Item value, const Type* type) {
+    switch (lambda_numeric_kind_from_type(type)) {
+    case LAMBDA_NUM_INVALID: case LAMBDA_NUM_FLOAT: case LAMBDA_NUM_DECIMAL:
+    case LAMBDA_NUM_F16: case LAMBDA_NUM_F32:
+        return ADMIT_UNKNOWN;
+    default:
+        break;  // an integer kind
+    }
+    TypeId value_id = get_type_id(value);
+    if (value_id != LMD_TYPE_FLOAT && value_id != LMD_TYPE_NUM_SIZED) return ADMIT_UNKNOWN;
+    double number = value_id == LMD_TYPE_FLOAT ? it2d(value) : value.get_num_sized_as_double();
+    return number == floor(number) ? ADMIT_UNKNOWN : ADMIT_NO;
+}
+
+// Whether `type` -- neither a type operator nor `none` -- admits the scalar
+// literal `value`. A literal admits every value `==` to it (S11.2.1), which
+// spans numeric kinds (`1.0` is `1`) and datetime precisions, so a numeric
+// kind other than `number`, or `date` or `time`, admits at most some of them.
+// The other scalar leaves go to lambda_type_matches, the membership `is`
+// uses, which is exact and needs no runtime state for these kinds.
+static Admission contract_scalar_admission(Item value, Type* type) {
     if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
             !lambda_type_is_range(type)) {
-        if (type->kind != TYPE_KIND_BINARY) return SCALAR_ADMIT_UNKNOWN;
-        const TypeBinary* binary = (const TypeBinary*)type;
-        ScalarAdmission left = contract_scalar_admission(value, binary->left, depth + 1);
-        ScalarAdmission right = contract_scalar_admission(value, binary->right, depth + 1);
-        if (binary->op == OPERATOR_UNION) {
-            if (left == SCALAR_ADMIT_YES || right == SCALAR_ADMIT_YES) return SCALAR_ADMIT_YES;
-            return left == SCALAR_ADMIT_NO && right == SCALAR_ADMIT_NO
-                ? SCALAR_ADMIT_NO : SCALAR_ADMIT_UNKNOWN;
-        }
-        if (contract_op_is_intersect(binary->op)) {
-            if (left == SCALAR_ADMIT_NO || right == SCALAR_ADMIT_NO) return SCALAR_ADMIT_NO;
-            return left == SCALAR_ADMIT_YES && right == SCALAR_ADMIT_YES
-                ? SCALAR_ADMIT_YES : SCALAR_ADMIT_UNKNOWN;
-        }
-        if (binary->op == OPERATOR_EXCLUDE) {
-            if (left == SCALAR_ADMIT_NO || right == SCALAR_ADMIT_YES) return SCALAR_ADMIT_NO;
-            return left == SCALAR_ADMIT_YES && right == SCALAR_ADMIT_NO
-                ? SCALAR_ADMIT_YES : SCALAR_ADMIT_UNKNOWN;
-        }
-        return SCALAR_ADMIT_UNKNOWN;
+        // a predicate, a string pattern, an occurrence: not decided here
+        return ADMIT_UNKNOWN;
     }
+    TypeId value_id = get_type_id(value);
+    Item literal;
     switch (type->type_id) {
-    case LMD_TYPE_ANY: case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_INT:
-    case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT:
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT:
     case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_COMPLEX:
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_PATH:
-    case LMD_TYPE_BINARY: case LMD_TYPE_DTIME: case LMD_TYPE_ERROR:
+        if (IS_NUMERIC_ID(value_id) && !lambda_literal_contract_value(type, &literal)) {
+            return contract_numeric_kind_admission(value, type);
+        }
+        break;
     case LMD_TYPE_TYPE:
-        return lambda_type_matches(value, type) ? SCALAR_ADMIT_YES : SCALAR_ADMIT_NO;
+        if (type == &TYPE_INTEGER && IS_NUMERIC_ID(value_id)) {
+            return contract_numeric_kind_admission(value, type);
+        }
+        break;
+    case LMD_TYPE_DTIME:
+        if (value_id == LMD_TYPE_DTIME && (type == &TYPE_DATE || type == &TYPE_TIME)) {
+            return ADMIT_UNKNOWN;
+        }
+        break;
+    case LMD_TYPE_ANY: case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_STRING:
+    case LMD_TYPE_SYMBOL: case LMD_TYPE_PATH: case LMD_TYPE_BINARY: case LMD_TYPE_ERROR:
+        break;
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_ARRAY: case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT: case LMD_TYPE_FUNC:
+        return ADMIT_NO;  // no scalar is a container or a function
     default:
-        // shapes, nominal records and signatures are outside the scalar lattice
-        return SCALAR_ADMIT_UNKNOWN;
+        return ADMIT_UNKNOWN;
+    }
+    return lambda_type_matches(value, type) ? ADMIT_YES : ADMIT_NO;
+}
+
+// A range admits the values between its bounds (S11.1.3). Another range
+// decides it by the bounds and a literal by whether the range holds it; any
+// other type the scalar question decides treats a domain's members alike, so
+// one member answers for all.
+static Admission contract_range_admission(Type* range, Type* type) {
+    int64_t start = 0, end = 0;
+    if (!lambda_range_type_bounds(range, &start, &end) || start > end) return ADMIT_UNKNOWN;
+    Item member = ((TypeRange*)range)->start;
+    if (start == end) return contract_scalar_admission(member, type);
+    if (lambda_type_is_range(type)) {
+        int64_t other_start = 0, other_end = 0;
+        if (((TypeRange*)range)->is_char != ((TypeRange*)type)->is_char) return ADMIT_NO;
+        if (!lambda_range_type_bounds(type, &other_start, &other_end)) return ADMIT_UNKNOWN;
+        if (end < other_start || other_end < start) return ADMIT_NO;
+        return other_start <= start && end <= other_end ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    Item literal;
+    if (lambda_literal_contract_value(type, &literal)) {
+        return lambda_range_type_contains(range, literal) ? ADMIT_UNKNOWN : ADMIT_NO;
+    }
+    return contract_scalar_admission(member, type);
+}
+
+// The container kind a type admits, for answers by kind alone. A nominal
+// record is left out: an object may be either structural kind.
+enum ContainerKind { CONTAINER_NONE, CONTAINER_SEQUENCE, CONTAINER_MAP, CONTAINER_ELEMENT };
+
+static ContainerKind contract_container_kind(const Type* type) {
+    if (type_nominal_record(type)) return CONTAINER_NONE;
+    switch (type->type_id) {
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+        return CONTAINER_SEQUENCE;
+    case LMD_TYPE_MAP:
+        return type == &TYPE_OBJECT ? CONTAINER_NONE : CONTAINER_MAP;
+    case LMD_TYPE_ELEMENT:
+        return CONTAINER_ELEMENT;
+    case LMD_TYPE_TYPE:
+        return contract_type_has_unary_op(type, OPERATOR_ARRAY)
+            ? CONTAINER_SEQUENCE : CONTAINER_NONE;
+    default:
+        return CONTAINER_NONE;
     }
 }
 
-// A literal set is a literal type, the null type, or a union of literal sets.
-// Collects its values; false for any other type, or one too large to list.
-static bool contract_literal_set(Type* type, Item* values, int capacity, int* count,
+// A container literal's pattern (S10.1.1v2): a bracket pattern, a map shape or
+// an element. The bare kinds and the array family `T[]` are not literals.
+static bool contract_is_container_pattern(const Type* type) {
+    return type->type_id != LMD_TYPE_TYPE && contract_container_kind(type) != CONTAINER_NONE &&
+        type != &TYPE_ARRAY && type != &TYPE_LIST && type != &TYPE_MAP && type != &TYPE_ELMT;
+}
+
+static Admission contract_admission(ContractSet set, Type* type, ContractWalk* walk,
+        int depth);
+
+// Whether member `b` admits every value of member `a`, none, or some.
+// Disjointness is symmetric, so a literal `b` decides NO for any `a`.
+static Admission contract_member_admission(ContractSet a, ContractSet b, ContractWalk* walk,
+        int depth) {
+    if (b.type) {
+        Admission admission = contract_admission(a, b.type, walk, depth);
+        if (admission != ADMIT_UNKNOWN || !a.type) return admission;
+        if (contract_admission(b, a.type, walk, depth) == ADMIT_NO) return ADMIT_NO;
+        return contract_unwrap_type(a.type) == contract_unwrap_type(b.type)
+            ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    // `b` is a value slot: it admits the one value it holds
+    if (!a.type) {
+        return array_pattern_literal_matches(a.value, b.value) ? ADMIT_YES : ADMIT_NO;
+    }
+    if (contract_admission(b, a.type, walk, depth) == ADMIT_NO) return ADMIT_NO;
+    Item literal;
+    return lambda_literal_contract_value(contract_unwrap_type(a.type), &literal) &&
+        array_pattern_literal_matches(literal, b.value) ? ADMIT_YES : ADMIT_UNKNOWN;
+}
+
+static ContractSet contract_sequence_slot(const TypeArray* pattern, int64_t index) {
+    ContractSet slot = {pattern->item_patterns[index], NULL};
+    if (pattern->item_is_type_pattern && pattern->item_is_type_pattern[index]) {
+        slot.type = pattern->item_patterns[index].type;
+    }
+    return slot;
+}
+
+// A bracket pattern whose item count is its length: slots and no run (S11.1.6v3)
+static bool contract_sequence_is_fixed(const TypeArray* pattern) {
+    if (!pattern->item_patterns) return false;
+    for (int64_t i = 0; i < pattern->length; i++) {
+        ContractSet slot = contract_sequence_slot(pattern, i);
+        if (slot.type && contract_type_as_run(contract_unwrap_type(slot.type))) return false;
+    }
+    return true;
+}
+
+// Sequence `a` against sequence `b`, slot by slot; `b_all` is the one type
+// every item of `a` meets instead, for the array family `T[]`.
+static Admission contract_sequence_admission(const TypeArray* a, const TypeArray* b,
+        Type* b_all, ContractWalk* walk, int depth) {
+    if (!contract_sequence_is_fixed(a) || (b && !contract_sequence_is_fixed(b))) {
+        return ADMIT_UNKNOWN;
+    }
+    if (b && a->length != b->length) return ADMIT_NO;
+    Admission result = ADMIT_YES;
+    for (int64_t i = 0; i < a->length; i++) {
+        ContractSet other = b ? contract_sequence_slot(b, i) : ContractSet{ItemNull, b_all};
+        Admission slot = contract_member_admission(contract_sequence_slot(a, i), other,
+            walk, depth + 1);
+        if (slot == ADMIT_NO) return ADMIT_NO;
+        if (slot == ADMIT_UNKNOWN) result = ADMIT_UNKNOWN;
+    }
+    return result;
+}
+
+static ShapeEntry* contract_shape_field(TypeMap* shape, const ShapeEntry* field) {
+    return typemap_hash_lookup(shape, field->name->str, (int)field->name->length);
+}
+
+// A map pattern admits a map holding each of its fields with a value its type
+// admits -- absent only when optional, null only when the type is a run that
+// admits it -- and any other field. So a field `a` requires with a value
+// that is never null decides NO; YES needs every field of `b` from `a`.
+static Admission contract_map_admission(TypeMap* a, TypeMap* b, ContractWalk* walk,
+        int depth) {
+    if (a->has_spread || b->has_spread) return ADMIT_UNKNOWN;
+    Admission result = ADMIT_YES;
+    FOR_EACH_MAP_FIELD(b, b_field) {
+        if (!b_field->name || !b_field->type) return ADMIT_UNKNOWN;
+        ShapeEntry* a_field = contract_shape_field(a, b_field);
+        ContractSet a_member = {ItemNull, a_field ? a_field->type : NULL};
+        if (!a_field || contract_type_has_unary_op(contract_unwrap_type(a_field->type),
+                    OPERATOR_OPTIONAL) ||
+                contract_admission({ItemNull, NULL}, a_field->type, walk, depth + 1) != ADMIT_NO) {
+            result = ADMIT_UNKNOWN;  // absent, or null, in some value of `a`
+            continue;
+        }
+        Admission field = contract_member_admission(a_member, {ItemNull, b_field->type},
+            walk, depth + 1);
+        if (field == ADMIT_NO) return ADMIT_NO;
+        if (field == ADMIT_UNKNOWN) result = ADMIT_UNKNOWN;
+    }
+    return result;
+}
+
+// An element pattern admits its tag, content its content section matches
+// (any, without one) and attributes its types admit -- each one also absent,
+// since the validator never requires an attribute. So only the tag and the
+// content decide NO; the attributes can only confirm.
+static Admission contract_element_admission(TypeElmt* a, TypeElmt* b, ContractWalk* walk,
+        int depth) {
+    if (a->has_spread || b->has_spread) return ADMIT_UNKNOWN;
+    Admission result = ADMIT_YES;
+    if (b->name.length) {
+        if (!a->name.length) {
+            result = ADMIT_UNKNOWN;
+        } else if (a->name.length != b->name.length ||
+                memcmp(a->name.str, b->name.str, b->name.length) != 0) {
+            return ADMIT_NO;
+        }
+    }
+    if (b->content_list) {
+        Admission content = a->content_list
+            ? contract_sequence_admission(a->content_list, b->content_list, NULL, walk, depth)
+            : ADMIT_UNKNOWN;
+        if (content == ADMIT_NO) return ADMIT_NO;
+        if (content == ADMIT_UNKNOWN) result = ADMIT_UNKNOWN;
+    }
+    FOR_EACH_MAP_FIELD(b, b_field) {
+        if (!b_field->name || !b_field->type) return ADMIT_UNKNOWN;
+        ShapeEntry* a_field = contract_shape_field(a, b_field);
+        if (!a_field || contract_member_admission({ItemNull, a_field->type},
+                {ItemNull, b_field->type}, walk, depth + 1) != ADMIT_YES) {
+            result = ADMIT_UNKNOWN;
+        }
+    }
+    return result;
+}
+
+// Container pattern `a` against `type`: a scalar type or another container
+// kind admits none of it, and a pattern of its own kind is compared part by part.
+static Admission contract_container_admission(Type* a, Type* type, ContractWalk* walk,
+        int depth) {
+    if (type->type_id == LMD_TYPE_ANY) return ADMIT_YES;  // a container is no error, and no null
+    ContainerKind kind = contract_container_kind(a);
+    ContainerKind other = contract_container_kind(type);
+    if (other == CONTAINER_NONE) {
+        // the scalar kinds, ranges, functions: never a container of any kind
+        switch (type->type_id) {
+        case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_INT:
+        case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT: case LMD_TYPE_DECIMAL:
+        case LMD_TYPE_COMPLEX: case LMD_TYPE_DTIME: case LMD_TYPE_SYMBOL: case LMD_TYPE_STRING:
+        case LMD_TYPE_BINARY: case LMD_TYPE_PATH: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
+        case LMD_TYPE_ERROR:
+            return ADMIT_NO;
+        case LMD_TYPE_TYPE:
+            return type_is_global_meta_type(type) || lambda_type_is_range(type)
+                ? ADMIT_NO : ADMIT_UNKNOWN;
+        default:
+            return ADMIT_UNKNOWN;
+        }
+    }
+    if (other != kind) return ADMIT_NO;
+    switch (kind) {
+    case CONTAINER_SEQUENCE:
+        // `array` holds every sequence; `list` only some, and a counted `T[n]` one length
+        if (type == &TYPE_ARRAY) return ADMIT_YES;
+        if (type->type_id == LMD_TYPE_TYPE) {
+            int length = contract_array_fixed_length(type);
+            if (length >= 0 && contract_sequence_is_fixed((TypeArray*)a) &&
+                    ((TypeArray*)a)->length != length) return ADMIT_NO;
+            return contract_sequence_admission((TypeArray*)a, NULL,
+                ((TypeUnary*)type)->operand, walk, depth);
+        }
+        if (type->type_id != LMD_TYPE_ARRAY || !((TypeArray*)type)->item_patterns) {
+            return ADMIT_UNKNOWN;
+        }
+        return contract_sequence_admission((TypeArray*)a, (TypeArray*)type, NULL, walk, depth);
+    case CONTAINER_MAP:
+        return type == &TYPE_MAP || !((TypeMap*)type)->shape ? ADMIT_YES
+            : contract_map_admission((TypeMap*)a, (TypeMap*)type, walk, depth);
+    case CONTAINER_ELEMENT:
+        return type == &TYPE_ELMT ? ADMIT_YES
+            : contract_element_admission((TypeElmt*)a, (TypeElmt*)type, walk, depth);
+    default:
+        return ADMIT_UNKNOWN;
+    }
+}
+
+// Whether `type` admits every value of `set`, none of them, or only some.
+// Decided only when a literal decides it: `set` a scalar literal, a range or a
+// container pattern (or a union of them), or a literal inside `type` found
+// disjoint from it; a type set with no literal answers ADMIT_UNKNOWN.
+static Admission contract_admission(ContractSet set, Type* type, ContractWalk* walk,
         int depth) {
     type = contract_unwrap_type(type);
-    if (!type || depth > 32) return false;
-    Item literal;
-    if (type->type_id == LMD_TYPE_NULL) {
-        literal = ItemNull;
-    } else if (!lambda_literal_contract_value(type, &literal)) {
-        if (!lambda_type_is_union(type)) return false;
-        const TypeBinary* binary = (const TypeBinary*)type;
-        return contract_literal_set(binary->left, values, capacity, count, depth + 1) &&
-            contract_literal_set(binary->right, values, capacity, count, depth + 1);
+    if (!type || depth > 32 || --walk->budget < 0) return ADMIT_UNKNOWN;
+    if (type == &TYPE_NONE) return ADMIT_NO;
+    Type* set_type = set.type ? contract_unwrap_type(set.type) : NULL;
+    if (set.type && !set_type) return ADMIT_UNKNOWN;
+    if (lambda_type_is_union(set_type)) {
+        // a union set answers for both halves only when they agree. It splits
+        // before `type` does, so a literal is asked of the whole of `type`:
+        // `1 | 2` against `1 | 2` is 1 and 2 each admitted, not two halves in doubt
+        const TypeBinary* binary = (const TypeBinary*)set_type;
+        Admission left = contract_admission({ItemNull, binary->left}, type, walk, depth + 1);
+        Admission right = contract_admission({ItemNull, binary->right}, type, walk, depth + 1);
+        return left == right ? left : ADMIT_UNKNOWN;
     }
-    if (*count >= capacity) return false;
-    values[(*count)++] = literal;
-    return true;
+    if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
+            type->kind == TYPE_KIND_BINARY) {
+        const TypeBinary* binary = (const TypeBinary*)type;
+        Admission admission = contract_binary_admission(binary->op,
+            contract_admission(set, binary->left, walk, depth + 1),
+            contract_admission(set, binary->right, walk, depth + 1));
+        // a union's range and literal arms may admit a range between them,
+        // `(1 to 3) ! (1 | 2 | 3)` is none; only those arms decide exactly
+        if (admission == ADMIT_UNKNOWN && binary->op == OPERATOR_UNION &&
+                set_type && lambda_type_is_range(set_type) &&
+                contract_range_split_covered(set_type, type, false, depth + 1)) {
+            return ADMIT_YES;
+        }
+        return admission;
+    }
+    if (!set_type) return contract_scalar_admission(set.value, type);
+    Item literal;
+    if (set_type->type_id == LMD_TYPE_NULL) return contract_scalar_admission(ItemNull, type);
+    if (lambda_literal_contract_value(set_type, &literal)) {
+        return contract_scalar_admission(literal, type);
+    }
+    if (lambda_type_is_range(set_type)) return contract_range_admission(set_type, type);
+    if (contract_is_container_pattern(set_type)) {
+        return contract_container_admission(set_type, type, walk, depth);
+    }
+    return ADMIT_UNKNOWN;
 }
 
-// true when `set` is a literal set whose every value gets `wanted` from `other`
-static bool contract_literals_all(Type* set, Type* other, ScalarAdmission wanted) {
-    const int capacity = 64;
-    Item values[capacity];
-    int count = 0;
-    if (!contract_literal_set(set, values, capacity, &count, 0)) return false;
-    for (int i = 0; i < count; i++) {
-        if (contract_scalar_admission(values[i], other, 0) != wanted) return false;
-    }
-    return true;
+// the admission of every value of the type `set`
+static Admission contract_type_admission(Type* set, Type* type) {
+    ContractWalk walk = {1 << 16};
+    return contract_admission({ItemNull, set}, type, &walk, 0);
 }
 
 Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
@@ -701,9 +1080,9 @@ Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
     }
     if (contract_op_is_intersect(op)) {
         if (left_type == &TYPE_NONE || right_type == &TYPE_NONE) return &TYPE_NONE;
-        // no literal of one side is admitted by the other: nothing is in both
-        if (contract_literals_all(left_type, right_type, SCALAR_ADMIT_NO) ||
-                contract_literals_all(right_type, left_type, SCALAR_ADMIT_NO)) {
+        // nothing of one side is admitted by the other: nothing is in both
+        if (contract_type_admission(left_type, right_type) == ADMIT_NO ||
+                contract_type_admission(right_type, left_type) == ADMIT_NO) {
             return &TYPE_NONE;
         }
         return NULL;
@@ -711,8 +1090,8 @@ Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
     if (op == OPERATOR_EXCLUDE) {
         if (right_type == &TYPE_NONE) return left;
         if (left_type == &TYPE_NONE) return &TYPE_NONE;
-        // every literal of the left side is one the right side excludes
-        if (contract_literals_all(left_type, right_type, SCALAR_ADMIT_YES)) return &TYPE_NONE;
+        // everything of the left side is something the right side excludes
+        if (contract_type_admission(left_type, right_type) == ADMIT_YES) return &TYPE_NONE;
         return NULL;
     }
     return NULL;
@@ -1321,6 +1700,271 @@ static bool contract_union_contains(Type* haystack, Type* needle) {
     TypeBinary* binary = (TypeBinary*)haystack;
     return contract_union_contains(binary->left, needle) ||
         contract_union_contains(binary->right, needle);
+}
+
+// ---------------------------------------------------------------------------
+// S5.5.2: type equality is representational -- two type values are `==` when
+// their normalized forms are. The form peels wrappers, parameters and binders.
+// A literal type is its value (S11.2.1). `|` and `&` are the sets of their arms,
+// so order and repetition do not count, and `none` is no arm of a union
+// (S11.1.7). An occurrence is its operand and bounds (`T?` is `T{0,1}`), a
+// range its domain and bounds, a pattern its compiled regex, and a constrained
+// type its base and its predicate's definition site, as a function is its site
+// (S5.5.1). A nominal type is its record (S5.4.2v3). A container pattern and a
+// function type compare by kind: `type(x)` reports an element's or a named
+// map's own shape as its kind, which no pattern can be told apart from
+// (LR03-33). lambda_type_repr_hash agrees with the relation (S5.6.2).
+
+#define TYPE_REPR_DEPTH_MAX 64
+
+static bool type_repr_equal(Type* left, Type* right, int depth);
+
+// `|` and `&`, the operators whose arms form a set; the type-pattern parser
+// historically spells `&` OPERATOR_OR
+static bool type_repr_is_set_op(const Type* type, Operator op) {
+    if (!type || type->type_id != LMD_TYPE_TYPE || type_is_global_meta_type(type) ||
+            type->kind != TYPE_KIND_BINARY) return false;
+    Operator own = ((const TypeBinary*)type)->op;
+    return op == OPERATOR_UNION ? own == OPERATOR_UNION : contract_op_is_intersect(own);
+}
+
+// the arms of `type` under the set operator `op`, or `type` itself; `none` is
+// the identity of `|` and no arm of it
+static void type_repr_collect_arms(Type* type, Operator op,
+        lam::ArrayList<Type*>* arms, int depth) {
+    type = contract_subtype_unwrap(type);
+    if (!type || depth > TYPE_REPR_DEPTH_MAX) return;
+    if (type_repr_is_set_op(type, op)) {
+        TypeBinary* binary = (TypeBinary*)type;
+        type_repr_collect_arms(binary->left, op, arms, depth + 1);
+        type_repr_collect_arms(binary->right, op, arms, depth + 1);
+        return;
+    }
+    if (op == OPERATOR_UNION && type == &TYPE_NONE) return;
+    arms->append(type);
+}
+
+// every arm of `sub` equals some arm of `set`
+static bool type_repr_arms_within(lam::ArrayList<Type*>* sub,
+        lam::ArrayList<Type*>* set, int depth) {
+    for (size_t i = 0; i < sub->length(); i++) {
+        bool found = false;
+        for (size_t j = 0; j < set->length() && !found; j++) {
+            found = type_repr_equal((*sub)[i], (*set)[j], depth + 1);
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+// `date` and `time` share datetime's TypeId and are told apart by identity
+static int type_repr_datetime_kind(const Type* type) {
+    return type == &TYPE_DATE ? 1 : type == &TYPE_TIME ? 2 : 0;
+}
+
+// the any-tops differ by what they exclude, and are told apart by identity
+static uint8_t type_repr_top_kind(Type* type) {
+    uint8_t exclusions = contract_top_exclusions(type);
+    return exclusions == UINT8_MAX ? 0 : exclusions;
+}
+
+static bool type_repr_equal(Type* left, Type* right, int depth) {
+    if (depth > TYPE_REPR_DEPTH_MAX) return false;
+    left = contract_subtype_unwrap(left);
+    right = contract_subtype_unwrap(right);
+    if (left == right) return true;
+    if (!left || !right) return false;
+    const Operator set_ops[] = {OPERATOR_UNION, OPERATOR_INTERSECT};
+    for (Operator op : set_ops) {
+        if (!type_repr_is_set_op(left, op) && !type_repr_is_set_op(right, op)) continue;
+        lam::ArrayList<Type*> left_arms;
+        lam::ArrayList<Type*> right_arms;
+        type_repr_collect_arms(left, op, &left_arms, depth);
+        type_repr_collect_arms(right, op, &right_arms, depth);
+        return type_repr_arms_within(&left_arms, &right_arms, depth) &&
+            type_repr_arms_within(&right_arms, &left_arms, depth);
+    }
+    // the compact meta types are identities
+    if (type_is_global_meta_type(left) || type_is_global_meta_type(right)) return false;
+    Item left_value;
+    Item right_value;
+    bool left_literal = lambda_literal_contract_value(left, &left_value);
+    bool right_literal = lambda_literal_contract_value(right, &right_value);
+    if (left_literal || right_literal) {
+        return left_literal && right_literal && fn_eq(left_value, right_value) == BOOL_TRUE;
+    }
+    if (left->type_id != right->type_id) return false;
+    if (left->type_id == LMD_TYPE_TYPE) {
+        if (left->kind != right->kind) return false;
+        switch (left->kind) {
+        case TYPE_KIND_UNARY: {
+            TypeUnary* left_unary = (TypeUnary*)left;
+            TypeUnary* right_unary = (TypeUnary*)right;
+            const TypeUnary* left_run = contract_type_as_run(left);
+            const TypeUnary* right_run = contract_type_as_run(right);
+            int left_min = left_unary->min_count, left_max = left_unary->max_count;
+            int right_min = right_unary->min_count, right_max = right_unary->max_count;
+            if (left_run || right_run) {
+                if (!left_run || !right_run) return false;
+                contract_run_bounds(left_run, &left_min, &left_max);
+                contract_run_bounds(right_run, &right_min, &right_max);
+            } else if (left_unary->op != right_unary->op) {
+                return false;
+            }
+            return left_min == right_min && left_max == right_max &&
+                type_repr_equal(left_unary->operand, right_unary->operand, depth + 1);
+        }
+        case TYPE_KIND_BINARY: {
+            // `!` only: the set operators are handled above
+            TypeBinary* left_binary = (TypeBinary*)left;
+            TypeBinary* right_binary = (TypeBinary*)right;
+            return left_binary->op == right_binary->op &&
+                type_repr_equal(left_binary->left, right_binary->left, depth + 1) &&
+                type_repr_equal(left_binary->right, right_binary->right, depth + 1);
+        }
+        case TYPE_KIND_RANGE: {
+            int64_t left_start = 0, left_end = 0, right_start = 0, right_end = 0;
+            return ((TypeRange*)left)->is_char == ((TypeRange*)right)->is_char &&
+                lambda_range_type_bounds(left, &left_start, &left_end) &&
+                lambda_range_type_bounds(right, &right_start, &right_end) &&
+                left_start == right_start && left_end == right_end;
+        }
+        case TYPE_KIND_PATTERN: {
+            TypePattern* left_pattern = (TypePattern*)left;
+            TypePattern* right_pattern = (TypePattern*)right;
+            // an uncompiled pattern has no normal form yet: it is only itself
+            String* left_regex = left_pattern->regex_source;
+            String* right_regex = right_pattern->regex_source;
+            return left_pattern->is_symbol == right_pattern->is_symbol &&
+                left_regex && right_regex && left_regex->len == right_regex->len &&
+                memcmp(left_regex->chars, right_regex->chars, left_regex->len) == 0;
+        }
+        case TYPE_KIND_CONSTRAINED: {
+            TypeConstrained* left_constrained = (TypeConstrained*)left;
+            TypeConstrained* right_constrained = (TypeConstrained*)right;
+            return left_constrained->constraint == right_constrained->constraint &&
+                type_repr_equal(left_constrained->base, right_constrained->base, depth + 1);
+        }
+        default:
+            return false;
+        }
+    }
+    TypeNominal* left_nominal = type_nominal_record(left);
+    TypeNominal* right_nominal = type_nominal_record(right);
+    if (left_nominal || right_nominal) return left_nominal == right_nominal;
+    // the kinds that share one TypeId
+    switch (left->type_id) {
+    case LMD_TYPE_NUM_SIZED:
+        return type_num_sized_kind(left) == type_num_sized_kind(right);
+    case LMD_TYPE_DTIME:
+        return type_repr_datetime_kind(left) == type_repr_datetime_kind(right);
+    case LMD_TYPE_ARRAY:
+        return (left == &TYPE_LIST) == (right == &TYPE_LIST);
+    case LMD_TYPE_MAP:
+        return (left == &TYPE_OBJECT) == (right == &TYPE_OBJECT);
+    case LMD_TYPE_ANY:
+        return type_repr_top_kind(left) == type_repr_top_kind(right);
+    default:
+        return true;
+    }
+}
+
+bool lambda_type_repr_equal(Type* left, Type* right) {
+    return type_repr_equal(left, right, 0);
+}
+
+static uint64_t type_repr_hash(Type* type, uint64_t seed0, uint64_t seed1, int depth) {
+    type = contract_subtype_unwrap(type);
+    if (!type || depth > TYPE_REPR_DEPTH_MAX) return 0;
+    const Operator set_ops[] = {OPERATOR_UNION, OPERATOR_INTERSECT};
+    for (Operator op : set_ops) {
+        if (!type_repr_is_set_op(type, op)) continue;
+        // a set's hash: its distinct arms, in no order; one distinct arm is
+        // that arm, as `int | int == int`
+        lam::ArrayList<Type*> arms;
+        type_repr_collect_arms(type, op, &arms, depth);
+        uint64_t sum = 0;
+        size_t distinct = 0;
+        uint64_t single = 0;
+        for (size_t i = 0; i < arms.length(); i++) {
+            bool repeated = false;
+            for (size_t j = 0; j < i && !repeated; j++) {
+                repeated = type_repr_equal(arms[i], arms[j], depth + 1);
+            }
+            if (repeated) continue;
+            single = type_repr_hash(arms[i], seed0, seed1, depth + 1);
+            sum += single;
+            distinct++;
+        }
+        // no arm at all is `none`, the identity of `|`
+        if (distinct == 0 && op == OPERATOR_UNION) return hash_ptr(&TYPE_NONE);
+        return distinct == 1 ? single : hash_combine_u64((uint64_t)op, sum);
+    }
+    if (type_is_global_meta_type(type)) return hash_ptr(type);
+    Item value;
+    if (lambda_literal_contract_value(type, &value)) return lambda_item_hash(value, seed0, seed1);
+    uint64_t hash = hash_combine_u64(0, type->type_id);
+    if (type->type_id == LMD_TYPE_TYPE) {
+        hash = hash_combine_u64(hash, type->kind);
+        switch (type->kind) {
+        case TYPE_KIND_UNARY: {
+            TypeUnary* unary = (TypeUnary*)type;
+            int min = unary->min_count, max = unary->max_count;
+            if (const TypeUnary* run = contract_type_as_run(type)) {
+                contract_run_bounds(run, &min, &max);
+            } else {
+                hash = hash_combine_u64(hash, unary->op);
+            }
+            hash = hash_combine_u64(hash, (uint64_t)(int64_t)min);
+            hash = hash_combine_u64(hash, (uint64_t)(int64_t)max);
+            return hash_combine_u64(hash,
+                type_repr_hash(unary->operand, seed0, seed1, depth + 1));
+        }
+        case TYPE_KIND_BINARY: {
+            TypeBinary* binary = (TypeBinary*)type;
+            hash = hash_combine_u64(hash, binary->op);
+            hash = hash_combine_u64(hash, type_repr_hash(binary->left, seed0, seed1, depth + 1));
+            return hash_combine_u64(hash, type_repr_hash(binary->right, seed0, seed1, depth + 1));
+        }
+        case TYPE_KIND_RANGE: {
+            int64_t start = 0, end = 0;
+            lambda_range_type_bounds(type, &start, &end);
+            hash = hash_combine_u64(hash, ((TypeRange*)type)->is_char);
+            hash = hash_combine_u64(hash, (uint64_t)start);
+            return hash_combine_u64(hash, (uint64_t)end);
+        }
+        case TYPE_KIND_PATTERN: {
+            TypePattern* pattern = (TypePattern*)type;
+            if (!pattern->regex_source) return hash_ptr(type);
+            hash = hash_combine_u64(hash, pattern->is_symbol);
+            return hash_combine_u64(hash, hashmap_hash_bytes(pattern->regex_source->chars,
+                pattern->regex_source->len, seed0, seed1));
+        }
+        case TYPE_KIND_CONSTRAINED: {
+            TypeConstrained* constrained = (TypeConstrained*)type;
+            hash = hash_combine_u64(hash, hash_ptr(constrained->constraint));
+            return hash_combine_u64(hash,
+                type_repr_hash(constrained->base, seed0, seed1, depth + 1));
+        }
+        default:
+            return hash_ptr(type);
+        }
+    }
+    if (TypeNominal* nominal = type_nominal_record(type)) {
+        return hash_combine_u64(hash, hash_ptr(nominal));
+    }
+    switch (type->type_id) {
+    case LMD_TYPE_NUM_SIZED: return hash_combine_u64(hash, type_num_sized_kind(type));
+    case LMD_TYPE_DTIME: return hash_combine_u64(hash, type_repr_datetime_kind(type));
+    case LMD_TYPE_ARRAY: return hash_combine_u64(hash, type == &TYPE_LIST);
+    case LMD_TYPE_MAP: return hash_combine_u64(hash, type == &TYPE_OBJECT);
+    case LMD_TYPE_ANY: return hash_combine_u64(hash, type_repr_top_kind(type));
+    default: return hash;
+    }
+}
+
+uint64_t lambda_type_repr_hash(Type* type, uint64_t seed0, uint64_t seed1) {
+    return type_repr_hash(type, seed0, seed1, 0);
 }
 
 // Native-lane projection of the one resolver (SCU8): true exactly when the

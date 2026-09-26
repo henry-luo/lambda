@@ -1,0 +1,10 @@
+"-- `is` against the type of a value tests its kind --"
+[true, true, true, false, true, true, false]
+[true, false]
+"-- and the kinds print and compare as themselves --"
+[array, list, map, function, element, range]
+[true, true, false, true, true, true]
+"-- the generic kinds have no shape to read --"
+['map', 'element', 'object', 'map', 'p']
+[object, date, time, list, integer]
+[true, false, true, false, true, false]

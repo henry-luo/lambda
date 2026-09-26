@@ -1,0 +1,17 @@
+"-- a boxed field that is not last reads back its value --"
+[3, "b", 3, "b", 3, 7, 3, "b"]
+[<Obj a: 3, b: "b">, <Ranged a: 3, b: "b">, <RangedInt a: 3, b: 7>, <Last b: "b", a: 3>]
+"-- inherited fields keep the base's layout --"
+["s", "bb", 4, 2.5, 7, 3, ["s", "bb"]]
+[1, 9, 7.5, null, [1, "bb"]]
+[true, true, false]
+"-- number and integer fields are boxed too --"
+[5, "five", 1.5, 'k']
+{
+  a: "s",
+  b: "bb",
+  c: 4,
+  d: 2.5,
+  e: 7,
+  f: 3
+}

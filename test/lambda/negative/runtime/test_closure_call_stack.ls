@@ -3,24 +3,24 @@
 // Create closures that call each other
 let outer_val = 100
 
-let level5 = fn(x) { 
+let level5 = (x) => { 
     // Try to call x as a function - will fail if x is not a function
     x(1, 2)
 }
 
-let level4 = fn(x) { 
+let level4 = (x) => { 
     level5(x) 
 }
 
-let level3 = fn(x) { 
+let level3 = (x) => { 
     level4(x) 
 }
 
-let level2 = fn(x) { 
+let level2 = (x) => { 
     level3(x) 
 }
 
-let level1 = fn(x) { 
+let level1 = (x) => { 
     level2(x) 
 }
 

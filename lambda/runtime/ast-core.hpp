@@ -851,6 +851,9 @@ typedef enum AstPrimaryLiteralValueKind : uint8_t {
     AST_PRIMARY_LITERAL_VALUE_NONE = 0,
     AST_PRIMARY_LITERAL_VALUE_BOOL,
     AST_PRIMARY_LITERAL_VALUE_INT,
+    // LR07-19: the `null` placeholder a named-argument method call keeps for
+    // an optional parameter it skips (ast_is_omitted_argument)
+    AST_PRIMARY_OMITTED_ARGUMENT,
 } AstPrimaryLiteralValueKind;
 
 typedef struct AstPrimaryNode : AstNode {
@@ -861,6 +864,14 @@ typedef struct AstPrimaryNode : AstNode {
     int64_t literal_value;
     AstPrimaryLiteralValueKind literal_value_kind;
 } AstPrimaryNode;
+
+// A call passes the absent-argument marker (ITEM_MISSING_ARGUMENT) for this
+// placeholder, which the callee reads as the parameter's default or null, as
+// a direct call's skipped parameter is; evaluated anywhere else it is `null`.
+static inline bool ast_is_omitted_argument(const AstNode* node) {
+    return node && node->node_type == AST_NODE_PRIMARY &&
+        ((const AstPrimaryNode*)node)->literal_value_kind == AST_PRIMARY_OMITTED_ARGUMENT;
+}
 
 typedef struct AstLiteralNode : AstPrimaryNode {
     AstLiteralType literal_type;

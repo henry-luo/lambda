@@ -349,7 +349,8 @@ TEST_F(PathTest, RootParentAndTypedIntegerOperations) {
     EXPECT_STREQ(buf->str, "/");
     strbuf_reset(buf);
     path_to_string(relative_parent, buf);
-    EXPECT_STREQ(buf->str, ".~~");
+    // S2.4.2v5: the parent step needs the relative root to reparse as a path.
+    EXPECT_STREQ(buf->str, "\\.~~");
     strbuf_reset(buf);
     path_to_string(integer, buf);
     EXPECT_STREQ(buf->str, "/.a.1");

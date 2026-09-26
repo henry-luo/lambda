@@ -1342,29 +1342,32 @@ int main(int argc, char **argv) {
 
 // ============================================================================
 // SCU7–SCU9: one storage resolver, cached on the ShapeEntry.
-// The table below pins the descriptor for the contracts whose lanes the
-// runtime, the JIT and the collector must agree on byte for byte. Every other
-// storage decision is a projection of this record, so the projections are
-// checked against it here too.
+// The table pins scalar carriers and persistent field descriptors separately
+// where D2.5.2v3 gives them different widths. The projections are checked
+// against the corresponding record.
 // ============================================================================
 #include "../lambda/core/shape_builder.hpp"
 
-static Type* mk_optional(Pool* pool, Type* operand) {
+static Type* mk_unary(Pool* pool, Type* operand, Operator op,
+        int min_count, int max_count) {
     TypeUnary* unary = (TypeUnary*)alloc_type_kind(pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
     unary->operand = operand;
-    unary->op = OPERATOR_OPTIONAL;
-    unary->min_count = 0;
-    unary->max_count = 1;
+    unary->op = op;
+    unary->min_count = min_count;
+    unary->max_count = max_count;
     return (Type*)unary;
 }
 
+static Type* mk_optional(Pool* pool, Type* operand) {
+    return mk_unary(pool, operand, OPERATOR_OPTIONAL, 0, 1);
+}
+
+static Type* mk_array(Pool* pool, Type* operand) {
+    return mk_unary(pool, operand, OPERATOR_ARRAY, 0, -1);
+}
+
 static Type* mk_repeat(Pool* pool, Type* operand) {
-    TypeUnary* unary = (TypeUnary*)alloc_type_kind(pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
-    unary->operand = operand;
-    unary->op = OPERATOR_REPEAT;
-    unary->min_count = 0;
-    unary->max_count = -1;
-    return (Type*)unary;
+    return mk_unary(pool, operand, OPERATOR_REPEAT, 0, -1);
 }
 
 static Type* mk_union(Pool* pool, Type* left, Type* right) {
@@ -1379,6 +1382,7 @@ struct LaneExpect {
     const char* label;
     Type* contract;
     uint8_t kind, nullable, native, byte_size, value_domain;
+    uint8_t persistent_kind = 0, persistent_byte_size = 0;
 };
 
 TEST(LaneStorageResolverTests, TableAndProjectionsAgree) {
@@ -1392,9 +1396,12 @@ TEST(LaneStorageResolverTests, TableAndProjectionsAgree) {
         {"bool?",    mk_optional(pool, &TYPE_BOOL),       LANE_STORAGE_BOOL,       1, 1, 1,  LMD_TYPE_BOOL},
         {"float",    &TYPE_FLOAT,                         LANE_STORAGE_FLOAT64,    0, 1, 8,  LMD_TYPE_FLOAT},
         {"float?",   mk_optional(pool, &TYPE_FLOAT),      LANE_STORAGE_FLOAT64,    1, 1, 8,  LMD_TYPE_FLOAT},
-        // full-width ints box; only the nullable form has a native (Item) lane
+        // D2.5.2v3: the nullable scalar carrier is an Item; persistent fields own a TypedItem
         {"int64",    &TYPE_INT64,                         LANE_STORAGE_SIZED_I64,  0, 0, 8,  LMD_TYPE_INT64},
-        {"int64?",   mk_optional(pool, &TYPE_INT64),      LANE_STORAGE_ITEM,       1, 1, 8,  LMD_TYPE_INT64},
+        {"int64?",   mk_optional(pool, &TYPE_INT64),      LANE_STORAGE_ITEM,       1, 1, 8,  LMD_TYPE_INT64,
+                    LANE_STORAGE_TYPED_ITEM, 9},
+        {"uint64?",  mk_optional(pool, &TYPE_UINT64),     LANE_STORAGE_ITEM,       1, 1, 8,  LMD_TYPE_UINT64,
+                    LANE_STORAGE_TYPED_ITEM, 9},
         {"string",   &TYPE_STRING,                        LANE_STORAGE_POINTER,    0, 1, 8,  LMD_TYPE_STRING},
         {"string?",  mk_optional(pool, &TYPE_STRING),     LANE_STORAGE_POINTER,    1, 1, 8,  LMD_TYPE_STRING},
         {"map?",     mk_optional(pool, &TYPE_MAP),        LANE_STORAGE_POINTER,    1, 1, 8,  LMD_TYPE_MAP},
@@ -1404,39 +1411,47 @@ TEST(LaneStorageResolverTests, TableAndProjectionsAgree) {
         {"any",      &TYPE_ANY,                           LANE_STORAGE_TYPED_ITEM, 0, 0, 9,  LMD_TYPE_ANY},
         {"any?",     mk_optional(pool, &TYPE_ANY),        LANE_STORAGE_TYPED_ITEM, 1, 0, 9,  LMD_TYPE_ANY},
         {"int|string", mk_union(pool, &TYPE_INT, &TYPE_STRING), LANE_STORAGE_TYPED_ITEM, 0, 0, 9,  LMD_TYPE_ANY},
-        // an occurrence is a container pointer slot but not a value lane
-        {"int[]",    mk_repeat(pool, &TYPE_INT),          LANE_STORAGE_POINTER,    0, 0, 8,  LMD_TYPE_ARRAY},
-        {"int[]?",   mk_optional(pool, mk_repeat(pool, &TYPE_INT)), LANE_STORAGE_POINTER, 1, 0, 8, LMD_TYPE_ARRAY},
+        // S11.1.1v3: T[] is an array contract, not an occurrence run
+        {"int[]",    mk_array(pool, &TYPE_INT),           LANE_STORAGE_POINTER,    0, 0, 8,  LMD_TYPE_ARRAY},
+        {"int[]?",   mk_optional(pool, mk_array(pool, &TYPE_INT)), LANE_STORAGE_POINTER, 1, 0, 8, LMD_TYPE_ARRAY},
+        {"int*",     mk_repeat(pool, &TYPE_INT),          LANE_STORAGE_TYPED_ITEM, 0, 0, 9,  LMD_TYPE_ANY},
         // dynamic slot: a raw Item word the store path upgrades in place
         {"null",     &TYPE_NULL,                          LANE_STORAGE_ITEM,       0, 0, 8,  LMD_TYPE_NULL},
     };
 
     for (const LaneExpect& row : table) {
         LaneStorageDesc desc = lambda_lane_storage_desc_for(row.contract);
+        uint8_t persistent_kind = row.persistent_kind ? row.persistent_kind : row.kind;
+        uint8_t persistent_byte_size = row.persistent_byte_size
+            ? row.persistent_byte_size : row.byte_size;
+        LaneStorageDesc persistent = lambda_persistent_lane_storage_desc_for(row.contract);
         EXPECT_EQ((int)desc.kind, (int)row.kind) << row.label;
         EXPECT_EQ((int)desc.nullable, (int)row.nullable) << row.label;
         EXPECT_EQ((int)desc.native, (int)row.native) << row.label;
         EXPECT_EQ((int)desc.byte_size, (int)row.byte_size) << row.label;
         EXPECT_EQ((int)desc.value_domain, (int)row.value_domain) << row.label;
+        EXPECT_EQ((int)persistent.kind, (int)persistent_kind) << row.label;
+        EXPECT_EQ((int)persistent.byte_size, (int)persistent_byte_size) << row.label;
+        EXPECT_EQ((int)persistent.value_domain, (int)row.value_domain) << row.label;
 
         // projections read the same record
         EXPECT_EQ((int)type_field_storage_type_id(row.contract), (int)row.value_domain) << row.label;
-        EXPECT_EQ(lambda_lane_storage_size(row.contract), (int)row.byte_size) << row.label;
+        EXPECT_EQ(lambda_lane_storage_size(row.contract), (int)persistent_byte_size) << row.label;
 
         ShapeEntry entry = {};
         shape_entry_set_type(&entry, row.contract);
-        EXPECT_EQ((int)entry.storage.kind, (int)row.kind) << row.label;
+        EXPECT_EQ((int)entry.storage.kind, (int)persistent_kind) << row.label;
         EXPECT_EQ((int)shape_entry_storage_type_id(&entry), (int)row.value_domain) << row.label;
-        EXPECT_EQ(shape_entry_storage_size(&entry), (int)row.byte_size) << row.label;
+        EXPECT_EQ(shape_entry_storage_size(&entry), (int)persistent_byte_size) << row.label;
         LaneStorageDesc lane = {};
         bool nullable_native = shape_entry_uses_native_lane(&entry, &lane);
         EXPECT_EQ(nullable_native, row.native && row.nullable) << row.label;
-        if (nullable_native) EXPECT_EQ((int)lane.kind, (int)row.kind) << row.label;
+        if (nullable_native) EXPECT_EQ((int)lane.kind, (int)persistent_kind) << row.label;
 
         // the collector's view is the stored record
         uint8_t kind = 0, nullable = 0, domain = 0;
         lambda_shape_entry_lane(&entry, &kind, &nullable, &domain);
-        EXPECT_EQ((int)kind, (int)row.kind) << row.label;
+        EXPECT_EQ((int)kind, (int)persistent_kind) << row.label;
         EXPECT_EQ((int)nullable, (int)row.nullable) << row.label;
         EXPECT_EQ((int)domain, (int)row.value_domain) << row.label;
     }

@@ -557,6 +557,7 @@ Function Declaration:
 | `fn add(a: int, b: int) int { a + b }` | Statement body |
 | `fn multiply(x: int, y: int) => x * y` | Expression body |
 | `let square = (x) => x * x` | Anonymous function |
+| `let log = pn (msg) => { print(msg) }` | Anonymous procedure (body always braced) |
 | `pn f(n) { var x = 0; while (x < n) { x = x + 1 }; x }` | Procedural function |
 | `function each(f: function, xs) => for (x in xs) f(x)` | Pure iff `f` is (S12.1.4v3) |
 | `pn advance(pos: float[], vel: float[], n: int) { ... }` | Array parameters |

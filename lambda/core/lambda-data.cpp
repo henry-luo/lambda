@@ -109,6 +109,11 @@ const char* type_alias_name(Type* type) {
     if (type == &TYPE_NUMBER) return "number";
     if (type == &TYPE_NONE) return "none";
     if (type == &TYPE_LIST) return "list";
+    // `object` wears the map tag and `date`/`time` datetime's, and each is
+    // told apart by identity, as `==` tells them apart (S5.5.2)
+    if (type == &TYPE_OBJECT) return "object";
+    if (type == &TYPE_DATE) return "date";
+    if (type == &TYPE_TIME) return "time";
     return NULL;
 }
 
