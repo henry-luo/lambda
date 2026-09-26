@@ -136,7 +136,8 @@ static const EntityMapping entity_mappings[] = {
     {"&amp;", "&"},
     {"&lt;", "<"},
     {"&gt;", ">"},
-    {"&nbsp;", " "},
+    // Match numeric &#160; and literal UTF-8 NBSP without changing text semantics.
+    {"&nbsp;", "\xC2\xA0"},
     // Symbols
     {"&copy;", "\xC2\xA9"},      // ©
     {"&reg;", "\xC2\xAE"},       // ®
@@ -208,13 +209,6 @@ char* normalize_entities(const char* html) {
     char* write = result;
 
     while (*read) {
-        // Check for UTF-8 non-breaking space (U+00A0 = 0xC2 0xA0)
-        if ((unsigned char)*read == 0xC2 && (unsigned char)*(read + 1) == 0xA0) {
-            *write++ = ' ';  // Convert to regular space
-            read += 2;
-            continue;
-        }
-
         // Check for entity reference
         if (*read == '&') {
             bool matched = false;
@@ -648,17 +642,15 @@ void strip_comments_inplace(char* html) {
 
 // Remove implicit tbody wrappers: <table><tbody><tr> -> <table><tr>
 // This normalizes the HTML5 implicit tbody insertion for comparison
-// Also normalizes missing newlines between </tr><tr> to </tr> <tr>
 char* strip_implicit_tbody(const char* html) {
     if (!html) return NULL;
 
     size_t len = strlen(html);
-    char* result = (char*)malloc(len * 2);  // Extra space for potential space insertions
+    char* result = (char*)malloc(len + 1);
     if (!result) return NULL;
 
     const char* read = html;
     char* write = result;
-    char prev_char = '\0';
 
     while (*read) {
         // Look for <tbody> tag (case-insensitive)
@@ -688,22 +680,6 @@ char* strip_implicit_tbody(const char* html) {
             continue;
         }
 
-        // Normalize missing space between tags: </tr><tr> -> </tr> <tr>
-        // This handles the case where HTML formatter removes newlines
-        if (*read == '<' && prev_char == '>' && write > result) {
-            // Check if previous tag was a closing tag and current is an opening tag
-            // Look back to see if we just wrote a closing tag
-            char* check = write - 1;
-            while (check > result && *check != '<') check--;
-            if (check > result && check[1] == '/') {
-                // Previous was a closing tag, add a space before the new opening tag
-                if (!isspace(*(write - 1))) {
-                    *write++ = ' ';
-                }
-            }
-        }
-
-        prev_char = *read;
         *write++ = *read++;
     }
 
@@ -1004,10 +980,10 @@ char* normalize_unquoted_attributes(const char* html) {
             if (*read == '"' || *read == '\'') {
                 attr_quote = *read;
                 *write++ = *read++;
-            } else if (*read && *read != '>' && *read != '/') {
-                // Unquoted value - add quotes around it
+            } else if (*read && *read != '>') {
+                // A slash is part of an unquoted URL value, not its delimiter.
                 *write++ = '"';
-                while (*read && !isspace(*read) && *read != '>' && *read != '/') {
+                while (*read && !isspace(*read) && *read != '>') {
                     *write++ = *read++;
                 }
                 *write++ = '"';
@@ -1403,6 +1379,39 @@ protected:
     const char* lambda_exe = "./lambda.exe";
     const char* temp_output = "./temp/test_html_roundtrip_output.html";
 
+    bool parsed_documents_match(const char* input_file) {
+        // HTML5 tree repair can change the markup while preserving the parsed document.
+        const char* html_paths[] = {input_file, temp_output};
+        const char* json_paths[] = {
+            "./temp/test_html_roundtrip_source.json",
+            "./temp/test_html_roundtrip_result.json",
+        };
+        unlink(json_paths[0]);
+        unlink(json_paths[1]);
+        bool converted = true;
+        for (int i = 0; i < 2; i++) {
+            char command[2048];
+            int length = snprintf(command, sizeof(command),
+                "%s convert --no-log -f html -t json -o %s %s 2>&1",
+                lambda_exe, json_paths[i], html_paths[i]);
+            if (length < 0 || (size_t)length >= sizeof(command)) {
+                converted = false;
+                break;
+            }
+            char* cmd_output = NULL;
+            int exit_code = execute_command(command, &cmd_output);
+            free(cmd_output);
+            if (exit_code != 0 || !file_exists(json_paths[i])) {
+                converted = false;
+                break;
+            }
+        }
+        bool equal = converted && files_are_identical(json_paths[0], json_paths[1]);
+        unlink(json_paths[0]);
+        unlink(json_paths[1]);
+        return equal;
+    }
+
     void SetUp() override {
         // Initialize logging
         log_init(NULL);
@@ -1494,6 +1503,7 @@ protected:
         bool semantic_match = false;
         if (!exact_match) {
             semantic_match = are_semantically_equivalent(original_content, output_content);
+            if (!semantic_match) semantic_match = parsed_documents_match(input_file);
         }
 
         bool success = exact_match || semantic_match;
