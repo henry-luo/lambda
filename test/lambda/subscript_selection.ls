@@ -50,4 +50,8 @@ fn row1(i) => m[1, i];
 "-- LR07-35: fewer keys than axes select a leading-axis view --";
 [t[1, 3], t[1, 3] == t[1][3], t[1, 3, 5], t[1, 3, 5, 0]];
 "-- LR07-36: last belongs to the innermost subscript's container --";
-[a[1 to 3][last], a[2 to 4][last - 1], (a[1 to 3])[last], m[0 to 1][last]]
+[a[1 to 3][last], a[2 to 4][last - 1], (a[1 to 3])[last], m[0 to 1][last]];
+"-- a host-backed map is walked as for walks it: its values (D7.4.5v2) --";
+let vm = map(["a", 1, "b", "x", "c", 2]);
+let vn = map(["k", [1, "y"]]);
+[count(vm[int]), vm[string], count(vm?int), vn?string, vn[int], vm["b"]]

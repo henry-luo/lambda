@@ -333,97 +333,12 @@ static ValidationResult* validate_against_range_type(SchemaValidator* validator,
     return result;
 }
 
-ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
-    // A compact global meta-type (`number`, `integer`, `type`) carries ONLY the
-    // two-byte Type prefix -- there is no TypeType payload, so reading
-    // `type->type` runs off the end of the global. ASAN caught it as a
-    // global-buffer-overflow 8 bytes before TYPE_STRING, reached from admitting
-    // a `{q: number}` map field, which aborted construction outright.
-    //
-    // `type_is_global_meta_type` exists for exactly this and its comment says
-    // callers must test it before reading extended fields; both arms below
-    // instead dereferenced FIRST and only compared the UNWRAPPED result against
-    // TYPE_NUMBER/TYPE_INTEGER -- a comparison a compact global never reaches,
-    // because the deref that precedes it is already out of bounds.
-    if (type_is_global_meta_type((const Type*)type)) {
-        Type* meta = (Type*)type;
-        bool ok = false;
-        if (!validator_meta_type_admits(item, meta, &ok)) ok = item.type_id() == LMD_TYPE_TYPE;
-        if (validator->is_fast_mode()) return validation_verdict(ok);
-        ValidationResult* meta_result = create_validation_result(validator->get_pool());
-        meta_result->valid = ok;
-        if (!ok) add_type_mismatch_error_ex(meta_result, validator, meta, item);
-        return meta_result;
-    }
-    if (validator->is_fast_mode()) {
-        // This is the leaf the element walk calls once per item, so the
-        // allocation at the top of full mode is exactly what fast mode must
-        // avoid. Delegating kinds recurse into already-converted functions and
-        // return their singleton directly; anything not handled here falls
-        // through to full mode, which is correct, just allocating.
-        Type* fast_base = unwrap_type(type->type);
-        if (!fast_base) return validation_verdict(false);
-        if (fast_base->type_id == LMD_TYPE_ANY) {
-            return validation_verdict(item.type_id() != LMD_TYPE_ERROR);
-        }
-        if (fast_base->kind == TYPE_KIND_UNARY) {
-            return validate_occurrence_type(validator, item, (TypeUnary*)fast_base);
-        }
-        if (fast_base->kind == TYPE_KIND_BINARY) {
-            return validate_binary_type(validator, item, (TypeBinary*)fast_base);
-        }
-        if (lambda_type_is_range(fast_base)) {
-            return validate_against_range_type(validator, item, fast_base);
-        }
-        bool meta_admits = false;
-        if (validator_meta_type_admits(item, fast_base, &meta_admits)) {
-            return validation_verdict(meta_admits);
-        }
-        if (IS_NUMERIC_ID(fast_base->type_id)) {
-            return validation_verdict(validator_numeric_item_embeds(item, fast_base));
-        }
-        if (fast_base == &TYPE_MAP) {
-            return validation_verdict(item.type_id() == LMD_TYPE_MAP);
-        }
-        if (fast_base == &TYPE_ELMT) {
-            return validation_verdict(item.type_id() == LMD_TYPE_ELEMENT);
-        }
-        if (fast_base->type_id == LMD_TYPE_MAP) {
-            return validate_against_map_type(validator, item, (TypeMap*)fast_base);
-        }
-        if (fast_base->type_id == LMD_TYPE_ELEMENT) {
-            return validate_against_element_type(validator, item, (TypeElmt*)fast_base);
-        }
-        if (fast_base->kind != TYPE_KIND_PATTERN &&
-                fast_base->type_id != LMD_TYPE_ARRAY && !fast_base->is_literal) {
-            // plain nominal match; patterns/arrays/literals keep the full path
-            return validation_verdict(fast_base->type_id == item.type_id());
-        }
-        // fall through to full mode for the remaining kinds
-    }
-
-    ValidationResult* result = create_validation_result(validator->get_pool());
-    Type* base_type = type->type;
-
-    // Safety check for null base_type
-    if (!base_type) {
-        log_error("[VALIDATOR] Base type is null in TypeType wrapper");
-        result->valid = false;
-        return result;
-    }
-
-    log_debug("[VALIDATOR] validate_against_base_type: base_type->type_id=%d, item type_id=%d",
-              base_type->type_id, item.type_id());
-
-    // Unwrap nested TypeType wrappers
-    base_type = unwrap_type(base_type);
-
-    if (!base_type) {
-        log_error("[VALIDATOR] Base type is null after unwrapping");
-        result->valid = false;
-        return result;
-    }
-
+// A base type's own admission once any TypeType wrapper is off. The arm a type
+// operator builds from a type value is bare (`int | datetime` in an
+// expression, S10.1.1v2), and it must validate exactly as its wrapped form in
+// `type T = int | datetime` does; both reach here.
+static ValidationResult* validate_against_base_payload(SchemaValidator* validator,
+        ConstItem item, Type* base_type, ValidationResult* result) {
     // Handle 'any' type — matches everything except error
     if (base_type->type_id == LMD_TYPE_ANY) {
         result->valid = (item.type_id() != LMD_TYPE_ERROR);
@@ -433,18 +348,23 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         return result;
     }
 
+    // `kind` names a type construct only on LMD_TYPE_TYPE: a sized numeric
+    // type stores its size there, and `i16`/`i32` read as an occurrence or a
+    // union (`5i16 is (i16 | string)` was false)
+    bool is_type_construct = base_type->type_id == LMD_TYPE_TYPE;
+
     // Handle TypeUnary (occurrence operators: ?, +, *, [n], [n+], [n,m])
-    if (base_type->kind == TYPE_KIND_UNARY) {
+    if (is_type_construct && base_type->kind == TYPE_KIND_UNARY) {
         return validate_occurrence_type(validator, item, (TypeUnary*)base_type);
     }
 
     // Handle TypeBinary (union/intersection: |, &, \)
-    if (base_type->kind == TYPE_KIND_BINARY) {
+    if (is_type_construct && base_type->kind == TYPE_KIND_BINARY) {
         return validate_binary_type(validator, item, (TypeBinary*)base_type);
     }
 
     // Handle Pattern type (string/symbol pattern)
-    if (base_type->kind == TYPE_KIND_PATTERN) {
+    if (is_type_construct && base_type->kind == TYPE_KIND_PATTERN) {
         return validate_against_pattern_type(validator, item, (TypePattern*)base_type);
     }
 
@@ -526,6 +446,19 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         return validate_against_array_type(validator, item, (TypeArray*)base_type);
     }
 
+    // `date` and `time` share the datetime tag; the value's precision tells
+    // them apart, as it does for `is` (fn_is)
+    if ((base_type == &TYPE_DATE || base_type == &TYPE_TIME) &&
+            item.type_id() == LMD_TYPE_DTIME) {
+        DateTime dt = ((Item*)&item)->get_datetime();
+        result->valid = base_type == &TYPE_DATE
+            ? (dt.precision == DATETIME_PRECISION_DATE_ONLY ||
+               dt.precision == DATETIME_PRECISION_YEAR_ONLY)
+            : dt.precision == DATETIME_PRECISION_TIME_ONLY;
+        if (!result->valid) add_type_mismatch_error_ex(result, validator, base_type, item);
+        return result;
+    }
+
     // Direct type match
     if (base_type->type_id == item.type_id()) {
         result->valid = true;
@@ -534,6 +467,105 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         add_type_mismatch_error_ex(result, validator, base_type, item);
     }
     return result;
+}
+
+ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
+    // A compact global meta-type (`number`, `integer`, `type`) carries ONLY the
+    // two-byte Type prefix -- there is no TypeType payload, so reading
+    // `type->type` runs off the end of the global. ASAN caught it as a
+    // global-buffer-overflow 8 bytes before TYPE_STRING, reached from admitting
+    // a `{q: number}` map field, which aborted construction outright.
+    //
+    // `type_is_global_meta_type` exists for exactly this and its comment says
+    // callers must test it before reading extended fields; both arms below
+    // instead dereferenced FIRST and only compared the UNWRAPPED result against
+    // TYPE_NUMBER/TYPE_INTEGER -- a comparison a compact global never reaches,
+    // because the deref that precedes it is already out of bounds.
+    if (type_is_global_meta_type((const Type*)type)) {
+        Type* meta = (Type*)type;
+        bool ok = false;
+        if (!validator_meta_type_admits(item, meta, &ok)) ok = item.type_id() == LMD_TYPE_TYPE;
+        if (validator->is_fast_mode()) return validation_verdict(ok);
+        ValidationResult* meta_result = create_validation_result(validator->get_pool());
+        meta_result->valid = ok;
+        if (!ok) add_type_mismatch_error_ex(meta_result, validator, meta, item);
+        return meta_result;
+    }
+    if (validator->is_fast_mode()) {
+        // This is the leaf the element walk calls once per item, so the
+        // allocation at the top of full mode is exactly what fast mode must
+        // avoid. Delegating kinds recurse into already-converted functions and
+        // return their singleton directly; anything not handled here falls
+        // through to full mode, which is correct, just allocating.
+        Type* fast_base = unwrap_type(type->type);
+        if (!fast_base) return validation_verdict(false);
+        if (fast_base->type_id == LMD_TYPE_ANY) {
+            return validation_verdict(item.type_id() != LMD_TYPE_ERROR);
+        }
+        // `kind` is a type construct only on LMD_TYPE_TYPE; a sized numeric
+        // stores its size there (see validate_against_base_payload)
+        bool fast_construct = fast_base->type_id == LMD_TYPE_TYPE;
+        if (fast_construct && fast_base->kind == TYPE_KIND_UNARY) {
+            return validate_occurrence_type(validator, item, (TypeUnary*)fast_base);
+        }
+        if (fast_construct && fast_base->kind == TYPE_KIND_BINARY) {
+            return validate_binary_type(validator, item, (TypeBinary*)fast_base);
+        }
+        if (lambda_type_is_range(fast_base)) {
+            return validate_against_range_type(validator, item, fast_base);
+        }
+        bool meta_admits = false;
+        if (validator_meta_type_admits(item, fast_base, &meta_admits)) {
+            return validation_verdict(meta_admits);
+        }
+        if (IS_NUMERIC_ID(fast_base->type_id)) {
+            return validation_verdict(validator_numeric_item_embeds(item, fast_base));
+        }
+        if (fast_base == &TYPE_MAP) {
+            return validation_verdict(item.type_id() == LMD_TYPE_MAP);
+        }
+        if (fast_base == &TYPE_ELMT) {
+            return validation_verdict(item.type_id() == LMD_TYPE_ELEMENT);
+        }
+        if (fast_base->type_id == LMD_TYPE_MAP) {
+            return validate_against_map_type(validator, item, (TypeMap*)fast_base);
+        }
+        if (fast_base->type_id == LMD_TYPE_ELEMENT) {
+            return validate_against_element_type(validator, item, (TypeElmt*)fast_base);
+        }
+        if (!(fast_construct && fast_base->kind == TYPE_KIND_PATTERN) &&
+                fast_base->type_id != LMD_TYPE_ARRAY && !fast_base->is_literal &&
+                fast_base != &TYPE_DATE && fast_base != &TYPE_TIME) {
+            // plain nominal match; patterns/arrays/literals keep the full path,
+            // and so do `date`/`time`, whose precision the full path tests
+            return validation_verdict(fast_base->type_id == item.type_id());
+        }
+        // fall through to full mode for the remaining kinds
+    }
+
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    Type* base_type = type->type;
+
+    // Safety check for null base_type
+    if (!base_type) {
+        log_error("[VALIDATOR] Base type is null in TypeType wrapper");
+        result->valid = false;
+        return result;
+    }
+
+    log_debug("[VALIDATOR] validate_against_base_type: base_type->type_id=%d, item type_id=%d",
+              base_type->type_id, item.type_id());
+
+    // Unwrap nested TypeType wrappers
+    base_type = unwrap_type(base_type);
+
+    if (!base_type) {
+        log_error("[VALIDATOR] Base type is null after unwrapping");
+        result->valid = false;
+        return result;
+    }
+
+    return validate_against_base_payload(validator, item, base_type, result);
 }
 
 ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstItem item, TypeArray* array_type) {
@@ -956,8 +988,24 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         // schema), so a bare TYPE_PATH must validate by tag like every other
         // scalar instead of falling into the "unsupported type" arm below.
         case LMD_TYPE_PATH:
-            result = validate_against_primitive_type(validator, item, type);
+        // S10.1.1v2: a type operator's arm is bare, so every scalar kind arrives
+        // here too -- a datetime, binary or decimal arm fell into "unsupported"
+        // and admitted nothing (`t'2025-01-01' is (int | datetime)` was false)
+        case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_DECIMAL:
+        case LMD_TYPE_NUM_SIZED: case LMD_TYPE_COMPLEX: case LMD_TYPE_DTIME:
+        case LMD_TYPE_BINARY: case LMD_TYPE_ANY: case LMD_TYPE_ERROR:
+        case LMD_TYPE_RANGE: {
+            // a literal is its value's singleton (S11.2.1); a bare base type
+            // validates as its wrapped form does
+            Item literal;
+            if (lambda_literal_contract_value(type, &literal)) {
+                result = validate_against_primitive_type(validator, item, type);
+            } else {
+                result = validate_against_base_payload(validator, item, type,
+                    create_validation_result(validator->get_pool()));
+            }
             break;
+        }
 
         case LMD_TYPE_ARRAY:
             result = validate_against_array_type(validator, item, (TypeArray*)type);

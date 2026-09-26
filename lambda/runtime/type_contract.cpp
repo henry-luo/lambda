@@ -1254,6 +1254,14 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
             snprintf(buffer, capacity, "%lld", (long long)((const TypeInt64*)type)->int64_val);
             return;
         }
+        if (type->type_id == LMD_TYPE_FLOAT) {
+            lambda_double_to_shortest(((const TypeFloat*)type)->double_val, buffer, (int)capacity);
+            return;
+        }
+        if (type->type_id == LMD_TYPE_BOOL) {
+            snprintf(buffer, capacity, "%s", literal.bool_val ? "true" : "false");
+            return;
+        }
         if (type->type_id == LMD_TYPE_STRING || type->type_id == LMD_TYPE_SYMBOL) {
             const char* quote = type->type_id == LMD_TYPE_STRING ? "\"" : "'";
             snprintf(buffer, capacity, "%s%.*s%s", quote, (int)literal.get_len(),

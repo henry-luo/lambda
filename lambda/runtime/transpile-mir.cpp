@@ -7226,7 +7226,11 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
     if (lambda_type_is_union(expected) && !lambda_type_nonnull_map_contract(expected) &&
             mir_flow_find(mt, source_node, expected, MIR_FLOW_SEMANTIC)) return true;
     TypeId expected_tid = expected ? expected->type_id : LMD_TYPE_ANY;
+    // A literal contract (`x: 1`, `x: 2.5`) names one value on the int or
+    // float carrier; the lane proves the carrier only, so `let m: 1 = 2` kept
+    // 2 on the JIT while T0 rejected it (S11.2.1, S11.4.1v3).
     if (expected && expected->kind == TYPE_KIND_SIMPLE &&
+            !expected->is_literal && !expected->is_const &&
             (expected_tid == LMD_TYPE_INT || expected_tid == LMD_TYPE_FLOAT) &&
             !lambda_type_accepts_null(expected) &&
             !mir_expr_may_be_null(mt, source_node) &&
@@ -9632,7 +9636,12 @@ static MirValue transpile_primary_value(MirTranspiler* mt,
                 VALUE_REP_RAW_GC_POINTER);
         }
         case LMD_TYPE_BOOL: {
-            bool val = parse_bool_literal_span(mt->source, node->source_span);
+            // a bool literal type carries its value (LR03-31); only the value
+            // literal's LIT_BOOL marker is read back from its own token's span
+            Item literal;
+            bool val = static_literal_item_from_type(node->type, &literal)
+                ? literal.bool_val != 0
+                : parse_bool_literal_span(mt->source, node->source_span);
             MIR_reg_t r = new_reg(mt, "bool", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_int_op(mt->ctx, val ? 1 : 0)));
@@ -20334,9 +20343,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     declaration_boundary_applies && declared_array_contract &&
                     mir_fill_proves_nonempty_numeric_array_contract(mt,
                         asn->init, declared_value_type);
+                // a literal contract (`let m: 1`) checks its value, not just the
+                // lane, so it takes the general boundary below (S11.2.1)
                 bool native_scalar_declaration = declaration_boundary_applies &&
                     !declaration_boundary_redundant && declared_value_type &&
                     declared_value_type->kind == TYPE_KIND_SIMPLE &&
+                    !declared_value_type->is_literal && !declared_value_type->is_const &&
                     (declared_value_type->type_id == LMD_TYPE_INT ||
                      declared_value_type->type_id == LMD_TYPE_FLOAT) &&
                     mir_expr_proves_native_return_lane(mt, asn->init,

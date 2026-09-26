@@ -198,6 +198,12 @@ bool static_literal_item_from_type(Type* type, Item* out) {
     case LMD_TYPE_NULL:
         *out = ItemNull;
         return true;
+    case LMD_TYPE_BOOL:
+        // only the two bool literal types carry a value; the LIT_BOOL marker
+        // types a bool value and its caller reads the value from source
+        if (type != (Type*)&LIT_BOOL_TRUE && type != (Type*)&LIT_BOOL_FALSE) return false;
+        out->item = b2it(type == (Type*)&LIT_BOOL_TRUE);
+        return true;
     case LMD_TYPE_INT64: {
         TypeInt64* value = (TypeInt64*)type;
         out->item = l2it(&value->int64_val);
@@ -257,10 +263,17 @@ bool lambda_literal_contract_value(const Type* type, Item* out) {
         // a pooled int literal carries its payload (parse_type_pattern.cpp)
         out->item = i2it(((const TypeInt64*)type)->int64_val);
         return true;
+    case LMD_TYPE_BOOL:
     case LMD_TYPE_INT64: case LMD_TYPE_FLOAT: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_NUM_SIZED:
-    case LMD_TYPE_UINT64:
+    case LMD_TYPE_UINT64: case LMD_TYPE_BINARY:
         return static_literal_item_from_type((Type*)type, out);
+    case LMD_TYPE_DTIME:
+        // a datetime literal type holds its value inline; the contract reads it
+        // in place (a static collection never embeds one: see
+        // static_const_item_from_node)
+        out->item = k2it(&((TypeDateTime*)type)->datetime);
+        return true;
     default:
         return false;
     }

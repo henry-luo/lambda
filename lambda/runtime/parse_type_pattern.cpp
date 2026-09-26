@@ -192,7 +192,7 @@ AstNode* parse_island_body(Lexer* lx);
 // Every hand node shares the type-slot source span, so nothing downstream may
 // re-read source through it expecting a sub-span. The one consumer that does is the
 // literal emitter for `&LIT_INT` / `&LIT_BOOL` typed nodes — which is why
-// numeric literals here always carry value-bearing types instead (see below).
+// numeric and bool literals here always carry value-bearing types instead.
 AstNode* new_node(Lexer* lx, AstNodeType kind, size_t size, LambdaSyntaxForm form) {
     AstNode* node = alloc_ast_node_from_span(lx->tp, kind, lx->origin, size);
     node->syntax_form = form;
@@ -833,14 +833,18 @@ AstNode* parse_primary(Lexer* lx) {
     if (word_is(w, "fn")) { return parse_fn_type(lx, false); }
     if (word_is(w, "pn")) { return parse_fn_type(lx, true); }
     if (word_is(w, "true") || word_is(w, "false")) {
-        // &LIT_BOOL makes the emitter re-read source through the node's span,
-        // which is the whole token. A lone `case true:` token reads correctly;
-        // a bool inside a larger pattern would not — no corpus use exists, and
-        // the parse is still exact, only the emitted literal VALUE can drift.
-        AstNode* node = new_node(lx, AST_NODE_PRIMARY, sizeof(AstPrimaryNode),
-            LSF_TP_LIT_BOOL);
-        node->type = (Type*)&LIT_BOOL;
-        return node;
+        // S11.2.1: a bool literal type is the singleton of its value, so it
+        // carries that value (LR03-31) -- the value-less LIT_BOOL marker made
+        // `true` admit both bools. Both tiers emit the value from the type (or
+        // the node's literal value), never by re-reading this node's span,
+        // which is the whole type slot's and not the token's.
+        bool value = word_is(w, "true");
+        AstPrimaryNode* node = (AstPrimaryNode*)new_node(lx, AST_NODE_PRIMARY,
+            sizeof(AstPrimaryNode), LSF_TP_LIT_BOOL);
+        node->type = value ? (Type*)&LIT_BOOL_TRUE : (Type*)&LIT_BOOL_FALSE;
+        node->literal_value = value ? 1 : 0;
+        node->literal_value_kind = AST_PRIMARY_LITERAL_VALUE_BOOL;
+        return (AstNode*)node;
     }
     int base_index = lambda_base_type_index(w);
     if (base_index >= 0) {

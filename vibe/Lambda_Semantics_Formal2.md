@@ -363,7 +363,7 @@ standard pipe symbol.
 
 **Ruling (USER, 2026-09-26).** `|`, `&` and `!` are the type operators, and only that. A scalar operand reads as its literal type; the result is always a type. Container set algebra is `unique`, `intersect` and `except`.
 
-**Residue.** A container has no runtime literal type yet, so `[1] | 2` is an operand error rather than the type "`[1]` or `2`"; bool, decimal, datetime and binary scalars lack one too. The set functions take at most four operands and, like unary `unique`, do not walk an element (its children are `content(e)`). SO48, which asked what the value set operators return for lists, is dissolved.
+**Residue, completed the same day.** A container first had no runtime literal type, so `[1] | 2` was an operand error rather than the type "`[1]` or `2`"; it now reads as the pattern its literal spells in type position (a range as its range type), so `let t = [1, 2] | 3` and `type T = [1, 2] | 3` are one type, and bool, datetime and binary scalars have literal types too. A decimal operand still has none: its libmpdec coefficient needs an owner that a runtime type value lacks. The set functions take any number of operands (a longer call nests at build time) and, like unary `unique`, do not walk an element (its children are `content(e)`). SO48, which asked what the value set operators return for lists, is dissolved.
 
 #### C6.5 The empty type is `none` (2026-09-26) — RESOLVED, ratified as S11.1.7
 
@@ -414,7 +414,7 @@ The unit type is the other thing a reader may mean: `void` in C, Java and TypeSc
 
 **Cost.** `none` becomes a base-type word (S16.10.1v2), so it no longer names a binding; eight sites in six fixtures were renamed. `never` and `empty` stay free identifiers (the editor fixture's `fn never(_)` is untouched).
 
-**Implementation and residue** (spec Appendix A, S11.1.7 row). The reduction is one function over the scalar lattice, three-valued, so anything that needs a predicate, a pattern, an occurrence or a shape answers *unknown* and never reduces. Two older defects surfaced and were fixed with it: type equality compared a payload tag, so `number == integer` held; and `is` tested a bare numeric literal type by its tag. Structural type equality beyond the compact meta types is still open ([LR03-29](Lambda_Issue_Ledger.md#lr03-29)). A one-literal alias `type T = 1`, which was not a type value, was fixed the same day ([LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>)); a bool literal type still carries no value ([LR03-31](Lambda_Issue_Ledger.md#lr03-31)).
+**Implementation and residue** (spec Appendix A, S11.1.7 row). The reduction is one function over the scalar lattice, three-valued, so anything that needs a predicate, a pattern, an occurrence or a shape answers *unknown* and never reduces. Two older defects surfaced and were fixed with it: type equality compared a payload tag, so `number == integer` held; and `is` tested a bare numeric literal type by its tag. `!none` reduces to `any` in every position. Only scalar literal sets decide emptiness, so a container literal operand (`[1] & [2]`) is not reduced. Structural type equality beyond the compact meta types is still open ([LR03-29](Lambda_Issue_Ledger.md#lr03-29)). A one-literal alias `type T = 1`, which was not a type value, was fixed the same day ([LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>)); a bool literal type still carries no value ([LR03-31](Lambda_Issue_Ledger.md#lr03-31)).
 
 #### C6a. Pending: file write/append syntax
 

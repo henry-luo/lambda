@@ -299,5 +299,9 @@ static inline LambdaNumericComparison lambda_numeric_compare(Item left, Item rig
 // `items` and misread an admitted `int?[]` (sum/min/max/avg crashed).
 int64_t vector_length(Item item);
 Item vector_get(Item item, int64_t index);
+// An N-D ArrayNum is a sequence of its leading-axis rows (S1.6); the flat walk
+// above sees its leaves, so a caller that wants rows unstacks first.
+bool vector_is_ndim(Item item);
+Item vector_unstack_rows(Item item);
 
 #endif

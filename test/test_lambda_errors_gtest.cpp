@@ -1690,6 +1690,30 @@ TEST_F(NegativeScriptTest, StringLiteralParameterKeepsItsCheckOnEveryTier) {
         false, "failed: expected \"a\", got string 'c'");
 }
 
+// S11.2.1 / S11.4.1v3 (LR07-38): a one-value numeric literal contract names a
+// value on the int or float carrier. The JIT took a native lane as its proof,
+// so declarations and arguments bound the wrong number there.
+TEST_F(NegativeScriptTest, IntLiteralDeclarationChecksItsValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/literal_admission_int_declaration.ls",
+        false, "failed: expected 1, got int 2");
+}
+
+TEST_F(NegativeScriptTest, FloatLiteralDeclarationChecksItsValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/literal_admission_float_declaration.ls",
+        false, "failed: expected 2.5, got float 1.5");
+}
+
+TEST_F(NegativeScriptTest, IntLiteralParameterChecksItsValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/literal_admission_int_param.ls",
+        false, "failed: expected 1, got int 2");
+}
+
+// S11.2.1 (LR03-31): `true` in type position is the singleton {true}.
+TEST_F(NegativeScriptTest, BoolLiteralDeclarationChecksItsValueOnEveryTier) {
+    ExpectRejectedOnEveryTier("test/lambda/negative/runtime/literal_admission_bool_declaration.ls",
+        false, "failed: expected true, got bool false");
+}
+
 // S11.1.3 (LR03-14, LR03-18): a range type admits its members only. It wore
 // the range VALUE tag (D3.1.1v4), so a range-typed parameter rejected every
 // int statically while the JIT admitted a range value, and a range-typed map

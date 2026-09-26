@@ -9,3 +9,6 @@
 ["T", "Y", "S", "other"]
 "-- the type of a type value is type --"
 [true, true, true, true, true]
+"-- LR03-31: a bool literal type is its value's singleton --"
+[type, true, false, true, false, false, true]
+["tf", "other", "other", "T", "F", "other"]

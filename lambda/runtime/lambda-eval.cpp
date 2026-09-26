@@ -725,6 +725,17 @@ static Type* type_op_payload(Type* type) {
     return type;
 }
 
+// a String copied into the runtime pool, which a type value may hold
+static String* type_op_pool_string(const char* chars, uint32_t len) {
+    String* copy = (String*)pool_alloc(context->pool, sizeof(String) + len + 1);
+    copy->len = len;
+    copy->flags = 0;
+    copy->is_ascii = str_is_ascii(chars, len);
+    memcpy(copy->chars, chars, len);
+    copy->chars[len] = 0;
+    return copy;
+}
+
 // A scalar's literal type -- the type admitting exactly that value, as the
 // builder makes for a literal in type position -- allocated in the runtime pool,
 // since a type value is not GC-managed and must outlive the value it came from.
@@ -734,6 +745,29 @@ static Type* type_op_literal_type(Item value) {
     switch (type_id) {
     case LMD_TYPE_NULL:
         return &TYPE_NULL;
+    case LMD_TYPE_BOOL:
+        // the two bool literal types are static singletons (LR03-31)
+        return value.bool_val ? (Type*)&LIT_BOOL_TRUE : (Type*)&LIT_BOOL_FALSE;
+    case LMD_TYPE_DTIME: {
+        // a DateTime is a value, so the literal type holds its own copy
+        TypeDateTime* t = (TypeDateTime*)alloc_type(pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
+        t->datetime = value.get_datetime();
+        t->const_index = -1;
+        t->is_literal = 1;
+        return (Type*)t;
+    }
+    case LMD_TYPE_BINARY: {
+        // the bytes are copied into the pool, as a binary literal's are
+        Binary* source = value.get_binary();
+        if (!source) return NULL;
+        TypeBinaryConst* t = (TypeBinaryConst*)alloc_type(pool, LMD_TYPE_BINARY,
+            sizeof(TypeBinaryConst));
+        t->binary = pool_binary_from_bytes(pool, binary_data(source), binary_length(source));
+        if (!t->binary) return NULL;
+        t->const_index = -1;
+        t->is_literal = 1;
+        return (Type*)t;
+    }
     case LMD_TYPE_INT: case LMD_TYPE_INT64: {
         int64_t v = 0;
         if (!lambda_item_to_int64_exact(value, &v)) return NULL;
@@ -754,13 +788,7 @@ static Type* type_op_literal_type(Item value) {
         if (!chars) return NULL;
         TypeString* t = (TypeString*)alloc_type(pool, type_id, sizeof(TypeString));
         if (type_id == LMD_TYPE_STRING) {
-            String* copy = (String*)pool_alloc(pool, sizeof(String) + len + 1);
-            copy->len = len;
-            copy->flags = 0;
-            copy->is_ascii = str_is_ascii(chars, len);
-            memcpy(copy->chars, chars, len);
-            copy->chars[len] = 0;
-            t->string = copy;
+            t->string = type_op_pool_string(chars, len);
         } else {
             Symbol* copy = (Symbol*)pool_alloc(pool, sizeof(Symbol) + len + 1);
             memset(copy, 0, sizeof(Symbol));
@@ -785,19 +813,189 @@ static Item type_op_value(Type* payload) {
     return (Item){.item = (uint64_t)(uintptr_t)wrapper};
 }
 
-// the type an operand stands for: a type's payload, a scalar's literal type; a
-// container has no literal type yet (S10.1.1v2 residue) and is an error
+// S10.1.1v2: a container operand reads as its literal type too -- the pattern
+// its own literal spells in type position, so `let t = [1, 2] | 3` is the type
+// `type T = [1, 2] | 3` names. It is built in the runtime pool: a scalar slot
+// or field holds its literal value's pool copy, a nested container its own
+// type, a type value itself, so the type keeps nothing of the GC heap.
+static Type* type_op_operand_type(Item operand, int depth);
+
+// one slot of a sequence pattern, filled as fill_sequence_pattern_slots does
+// for type syntax: a scalar by value, anything else by type
+static bool type_op_slot(Item element, int depth, Item* pattern, uint8_t* is_type) {
+    TypeId type_id = get_type_id(element);
+    if (type_id == LMD_TYPE_NULL) {
+        *pattern = ItemNull;
+        *is_type = 0;
+        return true;
+    }
+    Type* slot = type_id == LMD_TYPE_TYPE ? element.type
+        : type_op_operand_type(element, depth + 1);
+    if (!slot) return false;
+    Item literal;
+    if (type_id != LMD_TYPE_TYPE && lambda_literal_contract_value(slot, &literal)) {
+        *pattern = literal;
+        *is_type = 0;
+        return true;
+    }
+    pattern->type = type_id == LMD_TYPE_TYPE ? slot : type_op_value(slot).type;
+    *is_type = 1;
+    return true;
+}
+
+static TypeList* type_op_sequence_pattern(int64_t count) {
+    Pool* pool = context->pool;
+    TypeList* type = (TypeList*)alloc_type(pool, LMD_TYPE_ARRAY, sizeof(TypeList));
+    type->type_index = -1;
+    type->length = count;
+    if (count > 0) {
+        type->item_patterns = (Item*)pool_calloc(pool, sizeof(Item) * (size_t)count);
+        type->item_is_type_pattern = (uint8_t*)pool_calloc(pool, (size_t)count);
+    }
+    return type;
+}
+
+// an array or list is the bracket pattern of its items, rows for an N-D array
+static Type* type_op_sequence_type(Item value, int depth) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, vector_is_ndim(value) ? vector_unstack_rows(value) : value);
+    int64_t count = vector_length(source.get());
+    if (count < 0) return NULL;
+    TypeList* type = type_op_sequence_pattern(count);
+    for (int64_t i = 0; i < count; i++) {
+        if (!type_op_slot(vector_get(source.get(), i), depth, &type->item_patterns[i],
+                &type->item_is_type_pattern[i])) return NULL;
+    }
+    return (Type*)type;
+}
+
+// a map's fields, or an element's attributes, as a shape of per-field types;
+// the names are copied, since a key list's symbols are GC values
+static bool type_op_fill_fields(TypeMap* type, Item source, int depth) {
+    SymbolKeyList* keys = item_keys(source);
+    int64_t count = keys ? symbol_key_list_len(keys) : 0;
+    bool ok = true;
+    for (int64_t i = 0; i < count && ok; i++) {
+        Symbol* key = symbol_key_list_at(keys, i);
+        Item field = item_attr(source, key->chars);
+        Type* field_type = get_type_id(field) == LMD_TYPE_NULL ? &TYPE_NULL
+            : get_type_id(field) == LMD_TYPE_TYPE ? type_op_payload(field.type)
+            : type_op_operand_type(field, depth + 1);
+        if (!field_type) { ok = false; break; }
+        String* name_chars = type_op_pool_string(key->chars, key->len);
+        StrView* name = (StrView*)pool_calloc(context->pool, sizeof(StrView));
+        ShapeEntry* entry = (ShapeEntry*)pool_calloc(context->pool, sizeof(ShapeEntry));
+        name->str = name_chars->chars;
+        name->length = key->len;
+        entry->name = name;
+        shape_entry_set_type(entry, field_type);
+        if (type->last) type->last->chain_next = entry;
+        else type->shape = entry;
+        type->last = entry;
+        type->length++;
+    }
+    if (keys) symbol_key_list_free(keys);
+    return ok;
+}
+
+static Type* type_op_map_type(Item value, int depth) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, value);
+    TypeMap* type = (TypeMap*)alloc_type(context->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    type->type_index = -1;
+    return type_op_fill_fields(type, source.get(), depth) ? (Type*)type : NULL;
+}
+
+// an element is its tag, its attributes and, as a content section, its
+// children (S11.1.6v3); with no children the content stays open, as `<br>` in
+// type position leaves it
+static Type* type_op_element_type(Item value, int depth) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, value);
+    Element* element = value.element;
+    TypeElmt* source_type = (TypeElmt*)element->type;
+    TypeElmt* type = (TypeElmt*)alloc_type(context->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    type->type_index = -1;
+    if (source_type && source_type->name.length) {
+        String* tag = type_op_pool_string(source_type->name.str, (uint32_t)source_type->name.length);
+        type->name.str = tag->chars;
+        type->name.length = source_type->name.length;
+        type->name_id = source_type->name_id;
+        type->ns = source_type->ns;
+    }
+    if (!type_op_fill_fields(type, source.get(), depth)) return NULL;
+    int64_t count = ((List*)source.get().element)->length;
+    if (count > 0) {
+        TypeList* content = type_op_sequence_pattern(count);
+        for (int64_t i = 0; i < count; i++) {
+            if (!type_op_slot(list_get((List*)source.get().element, i), depth,
+                    &content->item_patterns[i], &content->item_is_type_pattern[i])) return NULL;
+        }
+        type->content_list = content;
+    }
+    return (Type*)type;
+}
+
+// a range value is the range type of its bounds, as `is` already reads one (S11.1.3)
+static Type* type_op_range_type(Item value) {
+    Range* range = value.range;
+    TypeRange* type = (TypeRange*)alloc_type_kind(context->pool, TYPE_KIND_RANGE,
+        sizeof(TypeRange));
+    type->is_char = range->is_char;
+    if (!range->is_char) {
+        type->start = (Item){.item = i2it(range->start)};
+        type->end = (Item){.item = i2it(range->end)};
+        return (Type*)type;
+    }
+    char first[8], last[8];
+    size_t first_len = str_utf8_encode((uint32_t)range->start, first, sizeof(first));
+    size_t last_len = str_utf8_encode((uint32_t)range->end, last, sizeof(last));
+    type->start = (Item){.item = s2it(type_op_pool_string(first, (uint32_t)first_len))};
+    type->end = (Item){.item = s2it(type_op_pool_string(last, (uint32_t)last_len))};
+    return (Type*)type;
+}
+
+static Type* type_op_operand_type(Item operand, int depth) {
+    if (depth > 64) return NULL;
+    TypeId type_id = get_type_id(operand);
+    // a nominal object's identity is not a literal pattern: unruled, so refused
+    if ((type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) &&
+            lambda_value_nominal(type_id, (const void*)(uintptr_t)operand.item)) {
+        return NULL;
+    }
+    switch (type_id) {
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+        return type_op_sequence_type(operand, depth);
+    case LMD_TYPE_MAP:
+        return type_op_map_type(operand, depth);
+    case LMD_TYPE_ELEMENT:
+        return type_op_element_type(operand, depth);
+    case LMD_TYPE_RANGE:
+        return type_op_range_type(operand);
+    default:
+        return type_op_literal_type(operand);
+    }
+}
+
+// the type an operand stands for: a type's payload, any other value's literal type
 static Type* type_op_arm(Item operand) {
     if (get_type_id(operand) == LMD_TYPE_TYPE) return type_op_payload(operand.type);
-    Type* literal = type_op_literal_type(operand);
+    Type* literal = type_op_operand_type(operand, 0);
     if (!literal) {
-        log_error("type operation: an operand must be a type or a scalar, got %s",
+        log_error("type operation: no literal type for a %s operand",
             get_type_name(get_type_id(operand)));
     }
     return literal;
 }
 
-static Item type_op_binary_type(Item left, Item right, Operator op) {
+static Item type_op_binary_type(Item left_item, Item right_item, Operator op) {
+    // reading a container operand's literal type can allocate (its keys and
+    // values), so both operands stay rooted until the result is built
+    RootFrame roots(2);
+    Rooted<Item> left_root(roots, left_item);
+    Rooted<Item> right_root(roots, right_item);
+    Item left = left_root.get();
+    Item right = right_root.get();
     Type* left_arm = type_op_arm(left);
     Type* right_arm = type_op_arm(right);
     if (!left_arm || !right_arm) return ItemError;
@@ -1970,11 +2168,15 @@ static bool literal_type_matches_item(Type* expected, Item item) {
     if (!expected || !expected->is_literal) return false;
     Item literal;
     if (!lambda_literal_contract_value(expected, &literal)) return false;
-    if (expected->type_id != LMD_TYPE_STRING && expected->type_id != LMD_TYPE_SYMBOL) {
+    if (IS_NUMERIC_ID(expected->type_id)) {
         // S11.2.1: a numeric literal type is the singleton of its value, matched
         // by `==` as a literal match arm is; the TypeId alone admitted 3 into
         // `1 | 2` on every tier (LR03-11)
         return IS_NUMERIC_ID(get_type_id(item)) && fn_eq(item, literal) == BOOL_TRUE;
+    }
+    if (expected->type_id != LMD_TYPE_STRING && expected->type_id != LMD_TYPE_SYMBOL) {
+        // any other literal -- a bool (LR03-31) -- admits its own value
+        return get_type_id(item) == get_type_id(literal) && fn_eq(item, literal) == BOOL_TRUE;
     }
     // a text literal admits its own domain and spelling. A symbol literal's
     // payload is a Symbol, whose chars sit at another offset than a String's
@@ -2107,6 +2309,10 @@ static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
     }
     if (type_id == LMD_TYPE_FLOAT) {
         snprintf(buffer, capacity, "float %.17g", item.get_double());
+        return;
+    }
+    if (type_id == LMD_TYPE_BOOL) {
+        snprintf(buffer, capacity, "bool %s", item.bool_val ? "true" : "false");
         return;
     }
     if (type_id == LMD_TYPE_FUNC) {
@@ -3926,6 +4132,35 @@ static void query_push_match(Array* result, Item val, Item type_val) {
     }
 }
 
+static void query_collect(Item data, Item type_val, bool self_inclusive, Array* result, int depth);
+
+// D7.4.5v2: a host-backed carrier (VArray, Velmt, VMap) keeps its content behind
+// a vtable, out of reach of the layout arms below. `for (x in e)` walks it
+// through the iteration helpers -- attribute values then children, a map's
+// values, an array's items -- and a type query walks what `for` walks
+// (S8.2.4v3): one level for `e[T]`, every level for `e?T`.
+static bool query_walks_virtual(TypeId type_id) {
+    return type_id == LMD_TYPE_VARRAY || type_id == LMD_TYPE_VELMT ||
+        type_id == LMD_TYPE_VMAP;
+}
+
+static void query_walk_virtual(Item data, Item type_val, bool recursive,
+        Array* result, int depth) {
+    // a host value read through the vtable may be materialized fresh, so it is
+    // rooted while the walk below it allocates
+    RootFrame roots(2);
+    Rooted<Item> source(roots, data);
+    Rooted<Item> current(roots, ItemNull);
+    SymbolKeyList* keys = get_type_id(data) == LMD_TYPE_VARRAY ? NULL : item_keys(data);
+    int64_t count = iter_len(source.get(), keys, 0);
+    for (int64_t i = 0; i < count; i++) {
+        current.set(iter_val_at(source.get(), keys, i, 0));
+        if (recursive) query_collect(current.get(), type_val, true, result, depth + 1);
+        else query_push_match(result, current.get(), type_val);
+    }
+    if (keys) symbol_key_list_free(keys);
+}
+
 // recursive helper: collect all items matching type_val into result array
 static void query_collect(Item data, Item type_val, bool self_inclusive, Array* result, int depth) {
     if (depth > 1000) return;  // prevent infinite recursion
@@ -3991,6 +4226,8 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         for (int64_t i = 0; i < data.range->length; i++) {
             query_push_match(result, item_at(data, i), type_val);
         }
+    } else if (query_walks_virtual(type_id)) {
+        query_walk_virtual(data, type_val, true, result, depth);
     }
 }
 
@@ -4005,11 +4242,16 @@ Item fn_query(Item data, Item type_val, int direct) {
         log_error("query: 2nd argument must be a type, got: %s", get_type_name(type_tid));
         return ItemNull;
     }
-    // use array (not list) to avoid automatic string merging
-    Array* result = array_plain();
+    // use array (not list) to avoid automatic string merging. The walk can
+    // allocate -- a virtual carrier's keys and values, a boxed field -- so the
+    // accumulator and both operands are rooted (rule 15: precise roots only)
+    RootFrame roots(3);
+    Rooted<Item> source(roots, data);
+    Rooted<Item> type_root(roots, type_val);
+    Rooted<Array*> result(roots, array_plain());
     // direct=1 means .? (self-inclusive), direct=0 means ? (not self-inclusive)
-    query_collect(data, type_val, direct != 0, result, 0);
-    return list_collapse_value({.array = result});
+    query_collect(source.get(), type_root.get(), direct != 0, result.get(), 0);
+    return list_collapse_value({.array = result.get()});
 }
 
 // child-level query: collect direct attributes + children matching type_val (one level only)
@@ -4061,14 +4303,20 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         for (int64_t i = 0; i < data.range->length; i++) {
             query_push_match(result, item_at(data, i), type_val);
         }
+    } else if (query_walks_virtual(type_id)) {
+        query_walk_virtual(data, type_val, false, result, 0);
     }
 }
 
 // child-level query: expr[T] where T is a type
 Item fn_child_query(Item data, Item type_val) {
-    Array* result = array_plain();
-    child_query_collect(data, type_val, result);
-    return list_collapse_value({.array = result});   // the run a subscript yields (S8.2.4v3)
+    // rooted as in fn_query: the walk can allocate before the last push
+    RootFrame roots(3);
+    Rooted<Item> source(roots, data);
+    Rooted<Item> type_root(roots, type_val);
+    Rooted<Array*> result(roots, array_plain());
+    child_query_collect(source.get(), type_root.get(), result.get());
+    return list_collapse_value({.array = result.get()});   // the run a subscript yields (S8.2.4v3)
 }
 
 static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) {
@@ -5605,6 +5853,9 @@ Item fn_index(Item item, Item index_item) {
         return ItemNull;
     }
     if (item_type == LMD_TYPE_VMAP) {
+        // S8.2.4v3: a type key is a query on every container, a VMap included;
+        // taken as a map key it read `null` for `m[int]`
+        if (get_type_id(index_item) == LMD_TYPE_TYPE) return fn_child_query(item, index_item);
         // VMap integer-looking keys are still map keys, not sequence offsets.
         VMap* vm = item.vmap;
         // Host-backed VMaps resolve through their host hook without a storage

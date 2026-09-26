@@ -275,7 +275,9 @@ Probing slices, index arrays, multi-key subscripts and `last` while the query re
 
 Implementing `none`, the empty type (S11.1.7), fixed two older defects on the way (spec Appendix A, S11.1.7 row): `==` on type values compared a payload tag, so `number == integer` was `true`, and `is` tested a bare numeric literal type by its tag. It found two more:
 - [LR03-29](#lr03-29), still open: type equality compares a compound type's payload tag only, so `(1 | 2) == (3 | 4)` is `true`.
-- [LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>), fixed the same day: a one-literal alias `type T = 1` was not a type value, and a symbol alias admitted nothing. Its fix also restored `type(int) == type`, which the S11.1.7 identity comparison had made `false`, and found [LR03-31](#lr03-31): a bool literal type carries no value, so it admits both bools.
+- [LR03-30](<Lambda_Issue_Ledger (fixed).md#lr03-30>), fixed the same day: a one-literal alias `type T = 1` was not a type value, and a symbol alias admitted nothing. Its fix also restored `type(int) == type`, which the S11.1.7 identity comparison had made `false`, and found [LR03-31](<Lambda_Issue_Ledger (fixed).md#lr03-31>), also fixed that day: a bool literal type carried no value, so it admitted both bools.
+
+The audit of the day's rulings (S8.2.4v3, S10.1.1v2, S11.1.7) that followed fixed two more defects and completed the rulings' residue: [LR07-38](<Lambda_Issue_Ledger (fixed).md#lr07-38>) (the JIT skipped a one-value numeric literal contract) and [LR13-12](<Lambda_Issue_Ledger (fixed).md#lr13-12>) (the validator refused bare datetime, binary and decimal arms and misread sized types). Container, bool, datetime and binary operands now read as literal types, `unique`/`intersect` take any number of operands, `!none` reduces, and a type query walks the virtual carriers (spec Appendix A rows S10.1.1v2, S8.2.4v3, S11.1.7).
 
 ---
 
@@ -511,6 +513,10 @@ lesson is recorded in §7.24: allowing a word takes **two** changes — the
 lexer bar and `token_is_identifier_like` — or declarations are accepted while
 every use fails to parse.
 
+
+<a id="lr02-30"></a>**LR02-30 · The type-pattern parser takes only int, float, string, symbol and bool literals (S11.1.1v3, S10.1.1v2) · OPEN (found 2026-09-26, auditing S10.1.1v2)**
+A datetime (`t'2025-01-01'`), binary (`b'\xDEAD'`), decimal (`1.5m`), suffixed (`5u8`, `9n`) or negative (`-3`) literal in type position is E103 "invalid type pattern" (or E100 for `-3`), on both tiers. S11.1.1v3 lets a type position hold any value, and since S10.1.1v2 the expression form means the same type: `let t = t'2025-01-01' | 1` is a type admitting that date or 1, while `type T = t'2025-01-01' | 1` does not parse. The expression side builds these literal types at run time (`type_op_literal_type`); the type-pattern parser (`parse_type_pattern.cpp`) lexes literals itself and knows only the five kinds. A fix reads a literal token in type position with the same decoders the value builder uses (`build_lit_*_from_span`). A decimal literal type also needs its payload tracked like the script's other decimal constants.
+
 ---
 
 
@@ -589,9 +595,6 @@ Both tiers run a predicate inline where `is` names its type. T0 switches to the 
 
 <a id="lr03-29"></a>**LR03-29 · Type equality compares a compound type's payload tag only (S5.5.2) · OPEN (found 2026-09-26, while implementing S11.1.7)**
 `==` on two type values (`fn_eq_depth`, `lambda-eval.cpp`) compares the TypeId of each value's payload. Every union, intersection, exclusion, occurrence and literal type shares one tag, so all of them compare equal: `(1 | 2) == (3 | 4)`, `(int | string) == (int | bool)` and `(int & 5) == (string ! "a")` are `true` on both tiers. S5.5.2 makes type equality representational — normalized forms compare, so `int|string == string|int` holds and these do not. The S11.1.7 change made the compact meta types (`type`, `number`, `integer`, `none`) compare by identity, which fixed `number == integer`, and a reduced operation now is its result, so `(1 & 2) == none` holds for the right reason. A fix compares normalized forms structurally: literals by value, a union as the set of its arms; hashing must follow (S5.6.2).
-
-<a id="lr03-31"></a>**LR03-31 · A bool literal in type position carries no value: `false is (true | 1)` is `true` (S11.2.1) · OPEN (found 2026-09-26, while fixing LR03-30)**
-The type-pattern parser gives `true` and `false` the shared marker `&LIT_BOOL`, which has no payload (`parse_type_pattern.cpp`; the value emitter re-reads the source span instead). `lambda_literal_contract_value` finds no value in it, so `is` and the validator fall back to the bool tag and a bool literal type admits both bools: with `type B = true`, `false is B` is `true`, and `false is (true | 1)` is `true` on both tiers. S11.2.1 makes a literal type the singleton of its value. A fix gives a bool literal type its value (two literal singletons, or a payload) and teaches `lambda_literal_contract_value` to read it.
 
 <a id="lr03-26"></a>**LR03-26 · An inline pattern island never compiles as a constrained base · OPEN (found 2026-09-25)**
 An island compiles at its first evaluation (`compile_runtime_pattern`), and a constrained type's base is never evaluated, so the base of `type Digits = \(d+) that len(~) > 2` has no regex and admits nothing: `"1234" is Digits` is `false` on both tiers. A named pattern base works (`type D = \(d+); type Digits = D that len(~) > 2`). Before [LR03-22](<Lambda_Issue_Ledger (fixed).md#lr03-22>) the base's TypeId was compared, with the same answer.

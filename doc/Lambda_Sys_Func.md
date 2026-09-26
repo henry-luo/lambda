@@ -1568,8 +1568,8 @@ pn main() {                  // print is a pn: only a pn may call it
 | `any` | 1 | Any truthy |
 | `reverse` | 1 | Reverse order |
 | `sort` | 1-2 | Sort (dir, key fn, or options map) |
-| `unique` | 1-4 | Unique elements; with several operands, their union |
-| `intersect` | 2-4 | Items of the first held by every other |
+| `unique` | 1+ | Unique elements; with several operands, their union |
+| `intersect` | 2+ | Items of the first held by every other |
 | `except` | 2 | Items of the first not held by the second |
 | `take` | 2 | Take first n |
 | `drop` | 2 | Drop first n |

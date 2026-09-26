@@ -35,3 +35,5 @@
 [[42, 43, 44, 45, 46, 47], true, 47, null]
 "-- LR07-36: last belongs to the innermost subscript's container --"
 [40, 40, 40, [4, 5, 6]]
+"-- a host-backed map is walked as for walks it: its values (D7.4.5v2) --"
+[2, "x", 2, "y", null, "x"]

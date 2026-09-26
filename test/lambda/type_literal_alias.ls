@@ -3,6 +3,8 @@
 // literals were wrapped as type values, so `type T = 1` published the literal
 // type's address as an int, and a symbol literal's payload was read as a
 // String and admitted nothing. `type(x)` of a type value is `type` itself.
+// LR03-31: a bool in type position carried no value, so `true` admitted both
+// bools, and a bool inside a larger pattern emitted the wrong value.
 // Golden written from the ruling, not from the runtime.
 
 type T = 1;
@@ -25,4 +27,10 @@ fn which(x) => match x { case T: "T" case Y: "Y" case S: "S" default: "other" };
 [which(1), which('sym'), which("a"), which(2)];
 "-- the type of a type value is type --";
 let t = int;
-[type(int) == type, type(t) == type, type(T) == type, type(type) == type, T == T]
+[type(int) == type, type(t) == type, type(T) == type, type(type) == type, T == T];
+"-- LR03-31: a bool literal type is its value's singleton --";
+type B = true;
+type N = false;
+[type(B), true is B, false is B, false is N, 1 is B, false is (true | 1), true is (true | 1)];
+fn flags(x) => match x { case [true, false]: "tf" case true: "T" case false: "F" default: "other" };
+[flags([true, false]), flags([false, false]), flags([false, true]), flags(true), flags(false), flags(0)]

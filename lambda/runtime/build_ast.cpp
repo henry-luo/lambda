@@ -9212,6 +9212,34 @@ static AstCallNode* build_call_syntax(Transpiler* tp, SourceSpan span,
 }
 
 // Resolves a call under the caller's pipe-injection state.
+// S10.1.1v2: `unique(a, b, ...)` and `intersect(a, b, ...)` take any number of
+// operands, but their registry rows stop at four. Both fold in first-operand
+// order -- `unique(a, b, c, d, e)` is `unique(unique(a, b, c, d), e)`, and so
+// for `intersect` -- so a longer call nests its first four operands into one
+// call until four remain. Returns the call's operand count after the fold.
+static int fold_set_function_operands(Transpiler* tp, AstCallNode* call,
+        StrView* name, int arg_count) {
+    if (arg_count <= 4 || tp->pipe_inject_args > 0 ||
+            !(strview_equal(name, "unique") || strview_equal(name, "intersect"))) {
+        return arg_count;
+    }
+    SysFuncInfo* four = get_sys_func_info(name, 4);
+    if (!four) return arg_count;
+    while (arg_count > 4) {
+        AstNode* first = call->argument;
+        AstNode* fourth = first->next->next->next;
+        AstNode* rest = fourth->next;
+        fourth->next = NULL;
+        AstNode* inner = build_call_node_from_parts(tp, call->source_span,
+            direct_sys_function(tp, call->source_span, four), first, 4);
+        inner->next = rest;
+        call->argument = inner;
+        arg_count -= 3;
+    }
+    call->syntax_aux = arg_count;
+    return arg_count;
+}
+
 static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
     SourceSpan span = call->source_span;
     AstNode* function = call->function;
@@ -9329,7 +9357,12 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         // through to the builtin, so `sum([1,2])` silently returned 3
         // instead of the not-callable error the binding demands.
         bool user_function = ident->entry && ident->entry->node;
-        if (!user_function) info = get_sys_func_info(&name, lookup_arg_count);
+        if (!user_function) {
+            arg_count = fold_set_function_operands(tp, call, &name, arg_count);
+            arguments = call->argument;
+            lookup_arg_count = arg_count + tp->pipe_inject_args;
+            info = get_sys_func_info(&name, lookup_arg_count);
+        }
         if (!info && !user_function) {
             // Qualified imports are resolved above; bare calls need the same
             // module-prefix fallback (`sqrt` -> `math_sqrt`).
@@ -9518,23 +9551,27 @@ static void resolve_spread(AstUnaryNode* node) {
 static void resolve_type_negation(Transpiler* tp, AstBinaryNode* node) {
     SourceSpan span = node->source_span;
     AstNode* operand = node->right;
-    TypeType* type_value = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
-        sizeof(TypeType));
-    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool,
-        TYPE_KIND_BINARY, sizeof(TypeBinary));
-    type_value->type = (Type*)type;
     AstPrimaryNode* any = (AstPrimaryNode*)alloc_ast_node_from_span(tp,
         AST_NODE_PRIMARY, span, sizeof(AstPrimaryNode));
-    any->type = (Type*)alloc_type_kind(tp->pool, TYPE_KIND_SIMPLE, sizeof(Type));
+    // a TypeType: its `type` field is written next, past a bare Type's end
+    any->type = (Type*)alloc_type_kind(tp->pool, TYPE_KIND_SIMPLE, sizeof(TypeType));
     any->type->type_id = LMD_TYPE_TYPE;
     ((TypeType*)any->type)->type = set_type_any(tp, ANY_EXPLICIT);
     node->left = (AstNode*)any;
     node->right = operand;
     node->op = OPERATOR_EXCLUDE;
     node->op_str = (StrView){"!", 1};
+    Type* excluded = operand && operand->type ? operand->type : &TYPE_ANY;
+    // S11.1.7: `!none` is `any ! none`, which is `any`
+    if (reduce_binary_type_node(tp, node, any->type, excluded)) return;
+    TypeType* type_value = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
+        sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool,
+        TYPE_KIND_BINARY, sizeof(TypeBinary));
+    type_value->type = (Type*)type;
     node->type = (Type*)type_value;
     type->left = any->type;
-    type->right = operand && operand->type ? operand->type : &TYPE_ANY;
+    type->right = excluded;
     type->op = OPERATOR_EXCLUDE;
     arraylist_append(tp->type_list, node->type);
     type->type_index = tp->type_list->length - 1;

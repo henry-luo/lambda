@@ -1,0 +1,1 @@
+error[E201]: type check at declaration 'f' failed: expected 2.5, got float 1.5

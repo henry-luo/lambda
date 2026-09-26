@@ -1413,6 +1413,9 @@ extern Type CONST_STRING;
 
 extern Type LIT_NULL;
 extern Type LIT_BOOL;
+// S11.2.1: the value-carrying bool literal types (LR03-31)
+extern TypeConst LIT_BOOL_TRUE;
+extern TypeConst LIT_BOOL_FALSE;
 extern Type LIT_INT;
 extern Type LIT_INT64;
 extern Type LIT_FLOAT;

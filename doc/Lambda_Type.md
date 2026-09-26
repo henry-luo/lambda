@@ -725,13 +725,14 @@ fn process(value: int | string | null) => {
 
 ### Type Operators in Expressions
 
-`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v2). In an expression a type operand is itself and a scalar stands for its literal type, and the result is always a type: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`.
+`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v2). In an expression a type operand is itself and any other value stands for its literal type, and the result is always a type — the same type that type syntax names: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. A container stands for the pattern its literal spells in type position, so `let t = [1, 2] | 3` is the type `type T = [1, 2] | 3` names, and a range value for its range type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`. (A decimal value has no literal type yet and is an operand error.)
 
 ```lambda
 let choice = 1 | 2;            // a type: the literal union of 1 and 2, an enum
 let opt = int | null;          // a type: nullable int
 let nothing_fits = 1 & 2;      // none, the empty type: admits nothing
-(2 is choice, 3 is choice, null is opt, 1 is nothing_fits, nothing_fits == none)
+let pair = [1, 2] | 3;         // the array [1, 2], or 3
+(2 is choice, 3 is choice, null is opt, 1 is nothing_fits, nothing_fits == none, [1, 2] is pair)
 ```
 
 The operators do not merge containers. For set algebra on arrays, lists, ranges and text use the functions `unique(a, b, ...)`, `intersect(a, b, ...)` and `except(a, b)` (see `Lambda_Sys_Func.md`).

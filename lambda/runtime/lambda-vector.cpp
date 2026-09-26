@@ -105,7 +105,7 @@ static void array_transform_copy_cert(Item source, ArrayNum* result);
 // and `for … in` already see it (S1.6: the N-D representation is invisible).
 // The packed ArrayNum fast paths of the sequence functions below walk the flat
 // storage, so an N-D input is first unstacked into a generic array of its rows.
-static bool vector_is_ndim(Item item) {
+bool vector_is_ndim(Item item) {
     if (get_type_id(item) != LMD_TYPE_ARRAY_NUM || !item.array_num) return false;
     ArrayNum* arr = item.array_num;
     if (!arr->is_ndim || !arr->extra) return false;
@@ -113,7 +113,7 @@ static bool vector_is_ndim(Item item) {
     return shape && shape->ndim >= 2;
 }
 
-static Item vector_unstack_rows(Item item) {
+Item vector_unstack_rows(Item item) {
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, item);
     Rooted<Array*> rooted_rows(roots, array_plain());

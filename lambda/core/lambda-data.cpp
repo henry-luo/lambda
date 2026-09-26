@@ -85,6 +85,12 @@ Type CONST_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1};
 
 Type LIT_NULL = {.type_id = LMD_TYPE_NULL, .is_literal = 1, .is_const = 1};
 Type LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_literal = 1, .is_const = 1};
+// S11.2.1: the bool literal types, the singletons {true} and {false}. The
+// LIT_BOOL marker above types a bool *value* and carries none, so a bool in
+// type position used to admit both bools (LR03-31). No const slot: a bool
+// is an immediate. Filled from LIT_BOOL at startup.
+TypeConst LIT_BOOL_TRUE;
+TypeConst LIT_BOOL_FALSE;
 Type LIT_INT = {.type_id = LMD_TYPE_INT, .is_literal = 1, .is_const = 1};
 Type LIT_INT64 = {.type_id = LMD_TYPE_INT64, .is_literal = 1, .is_const = 1};
 Type LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_literal = 1, .is_const = 1};
@@ -235,6 +241,8 @@ void init_typetype() {
     *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
     TYPE_ARRAY.nested = &TYPE_ANY;  // default nested type
     TYPE_ARRAY.length = 0;  TYPE_ARRAY.type_index = -1;
+    *(Type*)(&LIT_BOOL_TRUE) = LIT_BOOL;  LIT_BOOL_TRUE.const_index = -1;
+    *(Type*)(&LIT_BOOL_FALSE) = LIT_BOOL;  LIT_BOOL_FALSE.const_index = -1;
     *(Type*)(&LIT_TYPE_NULL) = LIT_TYPE;  LIT_TYPE_NULL.type = &TYPE_NULL;
     *(Type*)(&LIT_TYPE_BOOL) = LIT_TYPE;  LIT_TYPE_BOOL.type = &TYPE_BOOL;
     *(Type*)(&LIT_TYPE_INT) = LIT_TYPE;  LIT_TYPE_INT.type = &TYPE_INT;
