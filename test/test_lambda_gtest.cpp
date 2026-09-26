@@ -427,6 +427,9 @@ static const TierParityFixture kTune27TierParity[] = {
     // LR03-30: a one-literal alias is a type value (S11.2.1); `type T = 1` had
     // published the literal Type's address as an int on both tiers.
     {"test/lambda/type_literal_alias.ls", "test/lambda/type_literal_alias.txt"},
+    // S16.6.7v2: a procedure arrow is an anonymous AST_NODE_PROC; each tier
+    // must create, call, pass, refuse and promote it as a named nested `pn`.
+    {"test/lambda/proc/pn_arrow.ls", "test/lambda/proc/pn_arrow.txt"},
     // S1.6 (LR03-19): an object type strides its fields by storage size; a
     // union- or range-typed field overlapped the next and read back `inf`.
     {"test/lambda/object_boxed_field_layout.ls", "test/lambda/object_boxed_field_layout.txt"},

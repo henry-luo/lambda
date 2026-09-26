@@ -116,7 +116,7 @@ TEST_F(ValidatorIntegrationTest, ValidateWithStrictModeAndMaxErrors) {
 
 TEST_F(ValidatorIntegrationTest, ValidateXMLDocumentWithUnwrapping) {
     // Schema for article element
-    const char* schema = "type Article = <article>;";
+    const char* schema = "type Article = <article>";
 
     int load_result = schema_validator_load_schema(validator, schema, "Article");
     ASSERT_EQ(load_result, 0);
@@ -173,7 +173,7 @@ TEST_F(ValidatorIntegrationTest, ValidateNestedStructureWithErrors) {
 // ==================== Edge Cases ====================
 
 TEST_F(ValidatorIntegrationTest, ValidateEmptyMap) {
-    const char* schema = "type Empty = {};";
+    const char* schema = "type Empty = {}";
 
     int load_result = schema_validator_load_schema(validator, schema, "Empty");
     ASSERT_EQ(load_result, 0);

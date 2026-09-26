@@ -957,7 +957,8 @@ TEST_F(DomRangeTest, SelectionModifyMoveCharacterCollapsesWhitespaceRun) {
     ASSERT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
     EXPECT_EQ(dom_selection_focus_offset(&sel), 1u);
     ASSERT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
-    EXPECT_EQ(dom_selection_focus_offset(&sel), 5u);
+    // The visible space lands after its first source space; the next step skips the run.
+    EXPECT_EQ(dom_selection_focus_offset(&sel), 2u);
     ASSERT_TRUE(dom_selection_modify(&sel, "move", "forward", "character", &exc));
     EXPECT_EQ(dom_selection_focus_offset(&sel), 6u);
     ASSERT_TRUE(dom_selection_modify(&sel, "move", "backward", "character", &exc));

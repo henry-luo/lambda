@@ -228,14 +228,25 @@ function suffix_chain(names, head, single) {
 // Every callable signature's parameter list, as C's `parse_parameter_items`
 // reads it: named parameters, then at most one rest parameter `...`, which
 // comes last, arrows included (S16.9.7); `,` is a strict separator
-// (S16.1.2v2), so `(, a)` and `(..., a)` are errors.
-function parameter_list($) {
-  const named = field('declare', alias($._named_parameter, $.parameter));
+// (S16.1.2v2), so `(, a)` and `(..., a)` are errors. A procedure arrow passes
+// `_value_parameter`, the named parameter without `var` (S16.6.7v2).
+function parameter_list($, named_parameter = $._named_parameter) {
+  const named = field('declare', alias(named_parameter, $.parameter));
   const rest = field('declare', alias($._rest_parameter, $.parameter));
   return seq('(', optional(choice(
     seq(named, repeat(seq(',', named)), optional(seq(',', rest))),
     rest,
   )), ')');
+}
+
+// A named parameter after its optional `var` marker: name, `?`, type, default.
+function parameter_body($) {
+  return [
+    field('name', choice($.identifier, $.symbol)),
+    optional(field('optional', '?')),
+    optional(seq(':', field('type', $._parameter_annotation_type))),
+    optional(seq('=', field('default', $._expr))),
+  ];
 }
 
 // The two declaration shapes, parameterized by what may name them: a binding
@@ -501,6 +512,8 @@ module.exports = grammar({
       $._for_closed,
       // PTH68v3: the transaction block ends in a braced body, like `while`.
       $.open_stam,
+      // S16.6.7v2: a procedure arrow ends in its `pn` body's `}`.
+      $.proc_expr,
     ),
 
     _open_stam: $ => choice(
@@ -749,6 +762,7 @@ module.exports = grammar({
       $.match_expr,
       $.for_expr,
       $.raise_expr,
+      $.proc_expr,
     ),
 
     // S16.6.6: an unbraced body is an expression position, so `return`,
@@ -939,13 +953,16 @@ module.exports = grammar({
     // `primary_expr`'s precedence, so that a bare name or `...` in a group is
     // a real GLR fork between parameter and item (see `conflicts`), not a
     // reduction precedence settles before `=>` is seen.
+    // The parameter's own body stays inline (`parameter_body`), not a hidden
+    // rule of its own: the fork against `primary_expr` above is declared on
+    // `_named_parameter`, and an extra rule level would move the name out of it.
     _named_parameter: $ => prec(50, seq(
       optional(field('var', alias('var', $.var_param_marker))),
-      field('name', choice($.identifier, $.symbol)),
-      optional(field('optional', '?')),
-      optional(seq(':', field('type', $._parameter_annotation_type))),
-      optional(seq('=', field('default', $._expr))),
+      ...parameter_body($),
     )),
+    // S16.6.7v2: a procedure arrow is only called through a value, which binds
+    // no `var` parameter (S12.3.2), so its list takes none.
+    _value_parameter: $ => prec(50, seq(...parameter_body($))),
     _rest_parameter: $ => prec(50, field('variadic', $.variadic)),
 
     // Spelled like a data name, as C's `token_is_key` reads it: `f(let: 1)`,
@@ -979,6 +996,16 @@ module.exports = grammar({
       parameter_list($),
       optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
     )),
+
+    // S16.6.7v2: the procedure arrow, a nested `pn` without its name. The arrow
+    // makes it anonymous; its body is the braced block every `pn` takes
+    // (S16.4.3), never an arrow's expression body. It is no primary: its `}`
+    // closes a `pn` body, which admits no postfix (S16.1.3v2), so a statement
+    // it ends is a closed tail.
+    proc_expr: $ => seq(
+      field('kind', 'pn'), parameter_list($, $._value_parameter),
+      optional(field('type', $.return_type)), '=>', field('body', $._body_block),
+    ),
 
     // ======================= Declarations and control =====================
 

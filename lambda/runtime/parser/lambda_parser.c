@@ -85,6 +85,15 @@ static const char* const error_expected_parameter_name = "expected a parameter n
 static const char* const error_expected_parameter_close = "expected ')' after parameters";
 static const char* const error_arrow_body_expression =
     "'return', 'break', and 'continue' are statements; an arrow '=>' body is an expression";
+// S16.6.7v2: the arrow is the one anonymous function, and `pn` colours it
+static const char* const error_anonymous_fn =
+    "'fn' only declares a named function; an anonymous function is an arrow - write '(x) => ...'";
+static const char* const error_procedure_arrow_arrow =
+    "expected '=>' after the procedure arrow's parameters - write 'pn (x) => { ... }'";
+static const char* const error_procedure_arrow_body =
+    "a procedure arrow's body is a statement block - write 'pn (x) => { ... }'";
+static const char* const error_procedure_arrow_var_parameter =
+    "a procedure arrow takes no 'var' parameter; it is only called through a value, which binds none";
 static const char* const error_signature_return_line_start =
     "a function type's return type starts on the line of its ')'; a name at "
     "the start of the next line could as well begin a new statement, so write "
@@ -133,7 +142,8 @@ static const char* const error_handler_value_open = "expected '{' after handler 
 static const char* const error_handler_value_close = "expected '}' after handler value";
 static const char* const error_expected_function_name = "expected a function name";
 static const char* const error_procedure_body =
-    "a procedure body is a statement block - write 'pn name() { ... }'; '=>' bodies are fn-only";
+    "a declared procedure's body is a statement block - write 'pn name() { ... }'; "
+    "only the anonymous 'pn (x) => { ... }' takes '=>'";
 static const char* const error_function_body_open = "expected '{' after function declaration";
 static const char* const error_function_body_close = "expected '}' after function body";
 static const char* const error_expected_function_body = "expected a function body";
@@ -481,8 +491,10 @@ static bool token_starts_signature_return(LambdaTokenKind kind) {
 
 // PATH_REL must be here: without it `return \.a` parsed as a bare `return`
 // followed by a separate `\.a` statement, so the procedure returned null.
+// `fn` starts no expression (S16.6.7v2), and `pn` starts one only as a
+// procedure arrow, which `parser_at_procedure_arrow` tests with its lookahead.
 static bool token_starts_expression(LambdaTokenKind kind) {
-    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
+    return token_is_literal(kind) || token_is_identifier_like(kind) || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_LPAREN || kind == LAMBDA_TOK_LBRACKET || kind == LAMBDA_TOK_LBRACE || kind == LAMBDA_TOK_LT || kind == LAMBDA_TOK_DOT || kind == LAMBDA_TOK_SLASH || kind == LAMBDA_TOK_PATH_REL || kind == LAMBDA_TOK_TILDE || kind == LAMBDA_TOK_TILDE_KEY || kind == LAMBDA_TOK_TILDE_ACCESSOR || kind == LAMBDA_TOK_PARENT || kind == LAMBDA_TOK_CARET || kind == LAMBDA_TOK_ELLIPSIS || kind == LAMBDA_TOK_NOT || kind == LAMBDA_TOK_BANG || kind == LAMBDA_TOK_MINUS || kind == LAMBDA_TOK_PLUS || kind == LAMBDA_TOK_STAR || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_RAISE;
 }
 
 typedef bool (*LambdaTokenKindPredicate)(LambdaTokenKind kind);
@@ -1149,7 +1161,7 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
     return element;
 }
 
-static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, const char* name_message, const char* close_message, LambdaParseValue* value_out, bool* variadic_out);
+static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, const char* var_message, const char* name_message, const char* close_message, LambdaParseValue* value_out, bool* variadic_out);
 
 typedef struct LambdaCallableSignature {
     LambdaParseValue parameters;
@@ -1182,7 +1194,9 @@ static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* 
     return true;
 }
 
-static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, const char* name_message, const char* close_message, LambdaParseValue* value_out, bool* variadic_out) {
+// `var_message` is NULL where a `var` parameter is legal, and otherwise the
+// diagnostic that rejects one.
+static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, const char* var_message, const char* name_message, const char* close_message, LambdaParseValue* value_out, bool* variadic_out) {
     LambdaParseValue parameters = 0;
     if (variadic_out) *variadic_out = false;
     if (parser_accept(parser, LAMBDA_TOK_RPAREN)) {
@@ -1193,6 +1207,10 @@ static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, c
         if (allow_variadic && parser_accept(parser, LAMBDA_TOK_ELLIPSIS)) {
             if (variadic_out) *variadic_out = true;
             break;
+        }
+        if (var_message && parser->current.kind == LAMBDA_TOK_VAR) {
+            parser_set_error(parser, var_message, LAMBDA_TOK_IDENTIFIER);
+            return false;
         }
         bool is_var = parser_accept(parser, LAMBDA_TOK_VAR);
         LambdaToken name;
@@ -1225,10 +1243,10 @@ static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, c
     return true;
 }
 
-static bool parser_parse_callable_signature(LambdaRdParser* parser, bool opener_consumed, bool allow_variadic, const char* name_message, const char* close_message, LambdaCallableSignature* signature) {
+static bool parser_parse_callable_signature(LambdaRdParser* parser, bool opener_consumed, bool allow_variadic, const char* var_message, const char* name_message, const char* close_message, LambdaCallableSignature* signature) {
     memset(signature, 0, sizeof(*signature));
     if (!opener_consumed && !parser_expect(parser, LAMBDA_TOK_LPAREN)) return false;
-    if (!parse_parameter_items(parser, allow_variadic, name_message, close_message,
+    if (!parse_parameter_items(parser, allow_variadic, var_message, name_message, close_message,
             &signature->parameters, &signature->variadic)) return false;
     return parser_parse_return_types(parser, signature->return_types,
         &signature->return_count, &signature->raised);
@@ -1239,7 +1257,7 @@ static bool parser_parse_callable_signature(LambdaRdParser* parser, bool opener_
 static bool arrow_head_candidate(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
     LambdaCallableSignature signature;
-    if (!parser_parse_callable_signature(&probe, true, true,
+    if (!parser_parse_callable_signature(&probe, true, true, NULL,
             error_expected_arrow_parameter_name,
             error_expected_arrow_parameter_close, &signature)) return false;
     return probe.current.kind == LAMBDA_TOK_ARROW;
@@ -1261,7 +1279,7 @@ static LambdaParseValue parse_group_or_arrow_into(LambdaRdParser* parser, Parser
     if (arrow_head_candidate(parser)) {
         parser_context(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN, first.span, first);
         LambdaCallableSignature signature;
-        if (!parser_parse_callable_signature(parser, true, true,
+        if (!parser_parse_callable_signature(parser, true, true, NULL,
                 error_expected_arrow_parameter_name,
                 error_expected_arrow_parameter_close, &signature)) return 0;
         if (!parser_push_child(parser, children, signature.parameters)) return 0;
@@ -1299,6 +1317,50 @@ static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
     LambdaParseValue group = parse_group_or_arrow_into(parser, &children);
     parser_grow_release(&children);
     return group;
+}
+
+// S16.6.7v2: `pn (params) => { body }` is the anonymous procedure, a nested
+// `pn` without its name. `pn (` begins nothing else in value position.
+static bool parser_at_procedure_arrow(const LambdaRdParser* parser) {
+    return parser->current.kind == LAMBDA_TOK_PN && parser->next.kind == LAMBDA_TOK_LPAREN;
+}
+
+// The arrow makes it anonymous; its body is the braced block every procedure
+// takes, so it is a `pn` body (S16.4.3) and never an arrow's expression body.
+// It takes no `var` parameter: it is only called through a value, and such a
+// call binds none (S12.3.2).
+static LambdaParseValue parse_procedure_arrow(LambdaRdParser* parser) {
+    LambdaToken first = parser->current;
+    parser_advance(parser);
+    parser_context_ex(parser, LAMBDA_REDUCTION_FORM_FUNCTION_BEGIN, first.span, first,
+        (LambdaToken){0}, LAMBDA_REDUCTION_FLAG_PROC, NULL, 0);
+    LambdaCallableSignature signature;
+    if (!parser_parse_callable_signature(parser, false, true,
+            error_procedure_arrow_var_parameter, error_expected_arrow_parameter_name,
+            error_expected_arrow_parameter_close, &signature)) return 0;
+    if (!parser_expect_message(parser, LAMBDA_TOK_ARROW, error_procedure_arrow_arrow)) return 0;
+    if (parser->current.kind != LAMBDA_TOK_LBRACE) {
+        return parser_fail(parser, error_procedure_arrow_body, LAMBDA_TOK_LBRACE);
+    }
+    LambdaParseValue children[4];
+    uint32_t child_count = 0;
+    if (signature.parameters) children[child_count++] = signature.parameters;
+    for (uint32_t i = 0; i < signature.return_count; i++) {
+        children[child_count++] = signature.return_types[i];
+    }
+    LambdaParseValue body = 0;
+    if (!parser_parse_scoped_braced(parser, parser->procedural_depth + 1,
+            error_procedure_arrow_body, error_function_body_close, &body)) return 0;
+    children[child_count++] = body;
+    uint32_t flags = LAMBDA_REDUCTION_FLAG_PROC | LAMBDA_REDUCTION_FLAG_BODY_BLOCK |
+        (signature.variadic ? LAMBDA_REDUCTION_FLAG_VARIADIC : 0u) |
+        (signature.raised ? LAMBDA_REDUCTION_FLAG_RAISED : 0u);
+    SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
+    LambdaParseValue result = parser_reduce_tokens(parser, LAMBDA_REDUCE_FUNCTION,
+        LAMBDA_REDUCTION_FORM_FUNCTION, span, first, (LambdaToken){0}, flags,
+        children, child_count);
+    parser_context(parser, LAMBDA_REDUCTION_FORM_FUNCTION_END, first.span, first);
+    return result;
 }
 
 static bool braced_expression_is_map(const LambdaRdParser* parser) {
@@ -1676,7 +1738,7 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
     if (!parser_enter(parser)) return 0;
     LambdaToken first = parser->current;
     LambdaParseValue value = 0;
-    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_FN || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
+    if (token_is_literal(first.kind) || token_is_identifier_like(first.kind) || first.kind == LAMBDA_TOK_LAST || first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY || first.kind == LAMBDA_TOK_PARENT || first.kind == LAMBDA_TOK_CARET || first.kind == LAMBDA_TOK_ELLIPSIS) {
         if (parser->pipe_rhs_depth && (first.kind == LAMBDA_TOK_TILDE || first.kind == LAMBDA_TOK_TILDE_KEY)) {
             parser->pipe_rhs_has_current = true;
         }
@@ -1726,6 +1788,12 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         value = parse_prefix_operator(parser, first, 0);
     } else if (first.kind == LAMBDA_TOK_TILDE_ACCESSOR) {
         parser_set_error(parser, error_unknown_focal_accessor, LAMBDA_TOK_TILDE_KEY);
+    } else if (parser_at_procedure_arrow(parser)) {
+        value = parse_procedure_arrow(parser);
+    } else if (first.kind == LAMBDA_TOK_FN) {
+        // S16.6.7v2: `fn (x) { ... }` and `fn (x) => e` are not expressions;
+        // `fn` was read as an atom here, then a call and a juxtaposed block.
+        parser_set_error(parser, error_anonymous_fn, LAMBDA_TOK_LPAREN);
     } else {
         parser_set_error(parser, error_expected_expression, LAMBDA_TOK_IDENTIFIER);
     }
@@ -1911,7 +1979,9 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
         parser->expression_depth--;
         return 0;
     }
-    left = parse_postfix(parser, left, first.span.start_byte);
+    // a procedure arrow ends in a `pn` body's `}`, which admits no postfix
+    // (S16.1.3v2); the reference grammar's `proc_expr` is no primary either
+    if (first.kind != LAMBDA_TOK_PN) left = parse_postfix(parser, left, first.span.start_byte);
     while (parser->status == LAMBDA_PARSE_OK) {
         if (parser->current.nl_before && token_is_dual_role(parser->current.kind)) {
             break;
@@ -1984,7 +2054,7 @@ static bool parser_parse_parameter_list(LambdaRdParser* parser, LambdaParseValue
     if (parameters_out) *parameters_out = 0;
     if (variadic_out) *variadic_out = false;
     if (!parser_expect(parser, LAMBDA_TOK_LPAREN)) return false;
-    return parse_parameter_items(parser, true, error_expected_parameter_name,
+    return parse_parameter_items(parser, true, NULL, error_expected_parameter_name,
         error_expected_parameter_close, parameters_out, variadic_out);
 }
 
@@ -2027,7 +2097,7 @@ static LambdaParseValue parse_function_declaration(LambdaRdParser* parser, bool 
         (SourceSpan){first.span.start_byte, name.span.end_byte}, first, name,
         function_flags | LAMBDA_REDUCTION_FLAG_FUNCTION_HEADER, NULL, 0);
     LambdaCallableSignature signature;
-    if (!parser_parse_callable_signature(parser, false, true,
+    if (!parser_parse_callable_signature(parser, false, true, NULL,
             error_expected_parameter_name,
             error_expected_parameter_close, &signature)) return 0;
     LambdaParseValue children[5];
@@ -2079,7 +2149,7 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
     uint32_t view_child_count = 2;
     if (parser->current.kind == LAMBDA_TOK_LPAREN) {
         LambdaCallableSignature signature;
-        if (!parser_parse_callable_signature(parser, false, true,
+        if (!parser_parse_callable_signature(parser, false, true, NULL,
                 error_expected_parameter_name,
                 error_expected_parameter_close, &signature)) return 0;
         parameters = signature.parameters;
@@ -2476,7 +2546,10 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         if (is_public && parser->current.kind == LAMBDA_TOK_IDENTIFIER) {
             return parser_fail(parser, error_pub_declaration, LAMBDA_TOK_LET);
         }
-        if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN ||
+        // `fn (` and `pn (` declare nothing: the expression path reports the
+        // one and parses the other as a procedure arrow (S16.6.7v2)
+        if (((parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN) &&
+                parser->next.kind != LAMBDA_TOK_LPAREN) ||
                 parser_at_colour_poly_declaration(parser)) {
             return parse_function_declaration(parser, is_public);
         }
@@ -2557,7 +2630,8 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
             LambdaToken control = parser->current;
             parser_advance(parser);
             LambdaParseValue value = 0;
-            if (control.kind == LAMBDA_TOK_RETURN && token_starts_expression(parser->current.kind)) {
+            if (control.kind == LAMBDA_TOK_RETURN && (token_starts_expression(parser->current.kind) ||
+                    parser_at_procedure_arrow(parser))) {
                 if (!parser_parse_expression_value(parser, 0, &value)) return 0;
             }
             LambdaReductionForm form = control.kind == LAMBDA_TOK_RETURN

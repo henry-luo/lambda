@@ -281,6 +281,10 @@ The audit of the day's rulings (S8.2.4v3, S10.1.1v2, S11.1.7) that followed fixe
 
 The user then clarified S11.1.7 (spec 47.2.0): literal operands include containers, and its `int & string` sentence is implementation status, not a ruling. Container literals now decide (`[1] & [2]` is `none`). The pass fixed [LR03-32](<Lambda_Issue_Ledger (fixed).md#lr03-32>) (the reduction asked only a literal's own value, so `1 ! int` was `none` though `1.0 is 1`) and [LR13-13](<Lambda_Issue_Ledger (fixed).md#lr13-13>) (`1.0 is (1 | 2)` was `false`). It found two validator defects, still open: [LR13-14](#lr13-14) (`[]` admits every array) and [LR13-15](#lr13-15) (`{a: null} is {a: null}` is `false`).
 
+### Procedure arrow pass — 2026-09-26
+
+The user ruled the unnamed form of [LR02-21](#lr02-21) as S16.6.7v2 (spec 48.0.0): `fn` never begins an anonymous function, and the procedure arrow `pn (x) => { … }` is the anonymous procedure ([Design_Syntax §7.30](Lambda_Design_Syntax.md)). Both front ends implement it; the S16 harnesses stand at C 372/372 and Tree-sitter 358/358, and `test/lambda/proc/pn_arrow.ls` is pinned in `kTune27TierParity`. LR02-21 is now PARTIAL: C still reads `view`, `edit`, `state` and `apply` as values. Probing the arrow found [LR10-13](#lr10-13): a value-producing handler over a `pn` call yields `null`, where S7.6.7v3 makes it a compile error. A named `pn` does the same.
+
 ### Type-value fix pass — 2026-09-26
 
 Seven records were closed on both tiers and archived, each with a fixture pinned in `kTune27TierParity`:
@@ -437,7 +441,7 @@ change that lets bare member access fall through to the registry silently
 breaks that guarantee. Recorded as an observation, not a defect: nothing to
 fix, but the property must not regress. [OB5, [Type_Object §16](Lambda_Type_Object.md)]
 
-<a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · OPEN (found 2026-09-24)**
+<a id="lr02-21"></a>**LR02-21 · The C parser reads the barred words `fn`, `view`, `edit`, `state` and `apply` as values (S16.10.1v2) · PARTIAL (found 2026-09-24; `fn` fixed 2026-09-26)**
 `token_is_identifier_like` (`lambda_parser.c:429`) has counted `state`,
 `apply`, `view` and `edit` as identifiers since the parser's first version
 (2026-08-20), a week before S16.10.1v2 barred all four as binding names, and
@@ -459,6 +463,22 @@ named arguments and a juxtaposed block, and it fails at run time with
 `error` lines from that misparse, and `test/std/core/statements/higher_order.ls`
 passes the arrow-bodied variant `fn(x) => x * 2`. Both forms need a ruling
 (legal, or dropped from `Lambda_Func.md`) before either parser changes.
+*Ruled 2026-09-26 (USER; S16.6.7v2, spec 48.0.0):* neither form is legal.
+`fn` never begins an anonymous function, and the rejection names the repair,
+`(x) => e`. The same ruling adds the procedure arrow `pn (x) => { … }`, so a
+procedure no longer needs a name to be a value
+([Design_Syntax §7.30](Lambda_Design_Syntax.md)).
+*Fixed 2026-09-26 (the `fn` half):* `parse_prefix` no longer reduces `fn` as
+an atom. `fn` in value position is E100 naming the repair `(x) => e`, and a
+line-start `fn (` reaches that diagnostic instead of "expected a function
+name". `pn (` in value position is the procedure arrow
+(`parse_procedure_arrow`): it takes no `var` parameter, requires a braced
+body, and admits no postfix; the reference grammar's `proc_expr` is a closed
+tail. The C script now mirrors "no fn as a value". The `fn(x) => …` sites in
+`test/std/core/statements/` and both negative fixtures were migrated to
+arrows, so `test_closure_call_stack.ls` now fails as written, calling `42`
+through five closures.
+*Residue:* `view`, `edit`, `state` and `apply` (first paragraph).
 
 <a id="lr02-22"></a>**LR02-22 · The reference grammar never reads a force-step fragment (PTH33) · OPEN (found 2026-09-24)**
 `force_expr` takes an optional fragment after `#`, but the operand-only form
@@ -947,6 +967,17 @@ T0 prints `after error` and exits 0; the JIT stops with `error[E308]: Stack over
 
 <a id="lr10-12"></a>**LR10-12 · A proviso answers null for an error operand when its predicate touches `~` (S10.1.5v3, S7.9) · OPEN (found 2026-09-25, waiting on a ruling)**
 `x that p` binds `~` to `x` whatever it is. With `let e = error("boom")`, `e that true` is the error, but `e that ~ > 3` is `null`: the comparison propagates the error (S7.9.3), an error is falsy, so the proviso fails. S10.1.5v3 rules a failed proviso absence and says nothing of an error operand. S7.9 asks whether a result can be mistaken for a successful computation, and a null proviso can. Both tiers agree.
+
+<a id="lr10-13"></a>**LR10-13 · A value-producing handler over a `pn` call yields `null` (S7.6.7v3) · OPEN (found 2026-09-26)**
+```
+pn p(x: int) int^ { if (x < 0) { raise error("negative") } return x + 1 }
+pn main() {
+    let a = p(1) ^ { -1 }
+    let b = p(-5) ^ { -1 }
+    print([a, b])      // [null, null] on both tiers
+}
+```
+S7.6.7v3 says `pn` handlers are statement-only, so a value-producing postfix handler over a `pn` call is a compile error (the ruling names the possibly-suspending case). Both tiers instead compile it and bind `null`, on success as on failure: a wrong value with no error. Over an `fn` the same handler gives `2` and `-1`, `p(1)^` gives `2`, and the statement form `p(-5) ^ { … }` runs its body. Found while probing the procedure arrow (S16.6.7v2), which behaves the same way.
 
 ## 11. Mark data API (LR_11)
 

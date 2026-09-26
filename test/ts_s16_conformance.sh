@@ -378,9 +378,9 @@ run R "no while as a value"                'let a = while\n'
 run R "no pn as a value"                   'let a = pn\n'
 run R "no var as an array item"            'let a = [var, 1]\n'
 run R "an arrow body cannot break"         'let f = (x) => break\n'
-# C still reads these four as values (Lambda_Issue_Ledger LR02-21), so they
-# are not mirrored in c_s16_conformance.sh yet.
 run R "no fn as a value"                   'let a = fn\n'
+# C still reads these three as values (Lambda_Issue_Ledger LR02-21), so they
+# are not mirrored in c_s16_conformance.sh yet.
 run R "no view as a value"                 'let a = view\n'
 run R "no state as a value"                'let a = state\n'
 run R "no apply as a value"                'let a = apply\n'
@@ -418,6 +418,25 @@ run A "keyword map-type field"             'type M = {if: int}\n1\n'
 run A "keyword method names"               'type T { a: int, fn if() => 1, fn state() => a, pn open() { 1 } }\n1\n'
 run A "keyword module segment"             'import .lib.string\n1\n'
 run A "base-type loop index type"          'let a = [1]\nlet z = for (i: int, x in a) x\nz\n'
+
+echo "--- S16.6.7v2 the arrow is the one anonymous function ---"
+run A "procedure arrow"                     'pn main() {\nlet p = pn (x) => { print(x) }\np(1)\n}\n'
+run A "procedure arrow at top level"        'let p = pn (x) => { x }\np\n'
+run A "procedure arrow empty body"          'let p = pn () => {}\np\n'
+run A "procedure arrow statements"          'let p = pn (n) => { var i = 0\nwhile (i < n) { i = i + 1 }\nreturn i }\np\n'
+run A "procedure arrow return type"         'let p = pn (x: int) int => { x }\np\n'
+run A "procedure arrow raised return"       'let p = pn (x: int) int^ => { x }\np\n'
+run A "procedure arrow rest parameter"      'let p = pn (a, ...) => { a }\np\n'
+run A "procedure arrow as an argument"      'fn f(g, v) => v\nlet r = f(pn (x) => { x }, 1)\nr\n'
+run A "return a procedure arrow"            'pn main() {\nreturn pn (x) => { x }\n}\n'
+run A "closed: procedure arrow then [ line" 'pn (x) => { x }\n[1]\n'
+run R "procedure arrow expression body"     'let p = pn (x) => x\n'
+run R "procedure arrow var parameter"       'let p = pn (var x) => { x }\n'
+run R "procedure arrow needs =>"            'let p = pn (x) { x }\n'
+run R "no postfix after a procedure arrow"  'let v = pn () => { 1 }()\n'
+run R "fn arrow is not an expression"       'let f = fn (x) => x\n'
+run R "unnamed fn is not an expression"     'let f = fn (x) { x }\n'
+run R "fn is no arrow at a line start"      'fn (x) => x\n'
 
 echo "--- LR02-20/26: C parser gaps ---"
 # S16.2.2v2: `?` only continues, so a line-start `?` extends a complete type

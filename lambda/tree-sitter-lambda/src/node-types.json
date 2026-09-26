@@ -51,6 +51,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -105,6 +109,10 @@
         },
         {
           "type": "primary_expr",
+          "named": true
+        },
+        {
+          "type": "proc_expr",
           "named": true
         },
         {
@@ -210,6 +218,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -334,6 +346,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -563,6 +579,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -720,6 +740,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -950,6 +974,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -1343,6 +1371,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -1413,6 +1445,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -1462,6 +1498,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -1518,6 +1558,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -1586,6 +1630,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -1673,6 +1721,10 @@
         },
         {
           "type": "primary_expr",
+          "named": true
+        },
+        {
+          "type": "proc_expr",
           "named": true
         },
         {
@@ -1785,6 +1837,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -2076,6 +2132,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -2145,6 +2205,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -2502,6 +2566,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -2600,6 +2668,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -2649,6 +2721,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -2711,6 +2787,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -2779,6 +2859,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -2935,6 +3019,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -2978,6 +3066,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3036,6 +3128,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3122,6 +3218,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3258,6 +3358,10 @@
           "named": true
         },
         {
+          "type": "proc_expr",
+          "named": true
+        },
+        {
           "type": "raise_expr",
           "named": true
         },
@@ -3333,6 +3437,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3413,6 +3521,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3504,6 +3616,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3656,6 +3772,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -3738,6 +3858,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -3787,6 +3911,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -3920,6 +4048,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -3990,6 +4122,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -4259,6 +4395,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -4355,6 +4495,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -4404,6 +4548,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -4650,6 +4798,10 @@
           "named": true
         },
         {
+          "type": "proc_expr",
+          "named": true
+        },
+        {
           "type": "propagate_expr",
           "named": true
         },
@@ -4780,6 +4932,56 @@
     }
   },
   {
+    "type": "proc_expr",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "empty_braces",
+            "named": true
+          }
+        ]
+      },
+      "declare": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "parameter",
+            "named": true
+          }
+        ]
+      },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "pn",
+            "named": false
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "return_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "propagate_expr",
     "named": true,
     "fields": {
@@ -4858,6 +5060,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -4904,6 +5110,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -4947,6 +5157,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -5039,6 +5253,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -5267,6 +5485,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -5395,6 +5617,10 @@
             "named": true
           },
           {
+            "type": "proc_expr",
+            "named": true
+          },
+          {
             "type": "raise_expr",
             "named": true
           },
@@ -5444,6 +5670,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -5522,6 +5752,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {
@@ -5774,6 +6008,10 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "proc_expr",
             "named": true
           },
           {

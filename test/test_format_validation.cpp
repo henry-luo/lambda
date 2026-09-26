@@ -186,7 +186,7 @@ TEST_F(FormatValidationTest, UnwrapHTMLHandlesHTMLWithoutBody) {
 
 TEST_F(FormatValidationTest, ValidateWithXMLFormat) {
     // load a simple schema
-    const char* schema = "type Article = <article>;";
+    const char* schema = "type Article = <article>";
     int load_result = schema_validator_load_schema(validator, schema, "Article");
     ASSERT_EQ(load_result, 0);
 
@@ -209,7 +209,7 @@ TEST_F(FormatValidationTest, ValidateWithXMLFormat) {
 
 TEST_F(FormatValidationTest, ValidateWithAutoDetectedFormat) {
     // load a simple schema
-    const char* schema = "type Doc = <document>;";
+    const char* schema = "type Doc = <document>";
     int load_result = schema_validator_load_schema(validator, schema, "Doc");
     ASSERT_EQ(load_result, 0);
 

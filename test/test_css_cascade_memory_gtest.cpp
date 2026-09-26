@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 #define CSS_MEMORY_BASELINE "test/css_cascade_memory_baseline.tsv"
-#define CSS_MEMORY_LOG "log.txt"
+#define CSS_MEMORY_LOG "./temp/test_css_cascade_memory.log"
 #define CSS_MEMORY_TIMEOUT_MS 60000
 #define CSS_MEMORY_TOLERANCE_PERCENT 15ULL
 
@@ -209,6 +209,7 @@ static ShellResult css_memory_run_page(const char* path) {
     const ShellEnvEntry env[] = {
         {"LAMBDA_AUTO_CLOSE", "1"},
         {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"LAMBDA_LOG_FILE", CSS_MEMORY_LOG},
         {"RADIANT_CSS_CASCADE_MEMORY_PROFILE", "1"},
         {"RADIANT_CSS_CASCADE_MEMORY_FORCE_RECASCADE", "1"},
         {nullptr, nullptr},
@@ -272,6 +273,8 @@ TEST(CssCascadeMemory, PageLoadAndRecascadeStayWithinBaseline) {
         ASSERT_TRUE(css_memory_file_exists(test_case->path))
             << "missing fixture " << test_case->path;
 
+        // A fresh private log keeps parallel Lambda tests from replacing this sample.
+        remove(CSS_MEMORY_LOG);
         ShellResult result = css_memory_run_page(test_case->path);
         bool child_ok = result.exit_code == 0 && !result.timed_out;
         shell_result_free(&result);
