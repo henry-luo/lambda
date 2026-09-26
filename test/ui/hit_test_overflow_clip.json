@@ -1,0 +1,17 @@
+{
+  "name": "Hit-test respects overflow clipping",
+  "html": "test/ui/hit_test_overflow_clip.html",
+  "description": "Content an overflow clip hides is not painted, so it must not take the hit: the scroller's 1000px child overflows under the tab bar (y 220..260) and the hidden box's 400px child extends past its 200px clip. Visible content inside each clip still hits.",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== hit_test_overflow_clip ==="},
+    {"type": "assert_hit_test", "x": 80, "y": 100, "expected_selector": "#content"},
+    {"type": "assert_hit_test", "x": 80, "y": 240, "expected_selector": "#tab"},
+    {"type": "assert_hit_test", "x": 120, "y": 310, "expected_selector": "#wide"},
+    {"type": "assert_hit_test", "x": 300, "y": 310, "expected_tag": "body"},
+    {"type": "click", "x": 80, "y": 240},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "tab", "assert_timeout": 500},
+    {"type": "click", "x": 300, "y": 310},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "tab", "assert_timeout": 500}
+  ]
+}

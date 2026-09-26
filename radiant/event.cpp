@@ -1121,6 +1121,16 @@ static bool event_translate_only_transform(View* view, float* out_dx, float* out
     return true;
 }
 
+// The top-level root's clip is the window edge, not an element overflow clip:
+// real pointer input only lands past it under capture, and synthetic input
+// aims at offscreen content in document space, so neither is clipped there.
+// An embedded document's root still clips to its iframe viewport.
+static bool event_block_is_top_level_viewport(ViewBlock* block) {
+    DomDocument* doc = block->doc;
+    return doc && doc->view_tree && doc->view_tree->root == static_cast<View*>(block) &&
+        !dom_document_embedding_element(doc);
+}
+
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     log_enter();
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
@@ -1141,6 +1151,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // clip is in unscrolled block space, so test it before the scroll offset.
     Bound overflow_clip;
     bool clipped_out = layout_block_overflow_clip(block, &overflow_clip) &&
+        !event_block_is_top_level_viewport(block) &&
         !(evcon->block.x + overflow_clip.left <= event->x &&
           event->x < evcon->block.x + overflow_clip.right &&
           evcon->block.y + overflow_clip.top <= event->y &&

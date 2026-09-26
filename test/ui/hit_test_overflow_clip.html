@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Hit-test overflow clip</title>
+<style>
+  body {
+    margin: 0;
+    font-family: sans-serif;
+    font-size: 16px;
+  }
+  /* a scroller over a tab bar: the scroller's content overflows far below it */
+  #panel {
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+    height: 240px;
+    margin: 20px;
+  }
+  #scroller {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background: #f4f4f4;
+  }
+  #content {
+    height: 1000px;
+    background: #dde6f5;
+  }
+  #bar {
+    flex: 0 0 40px;
+    background: #cfd8e3;
+  }
+  #tab {
+    width: 120px;
+    height: 40px;
+    background: #247a42;
+  }
+  /* an overflow:hidden box whose child is wider than it */
+  #box {
+    width: 200px;
+    height: 60px;
+    margin: 20px;
+    overflow: hidden;
+    background: #eeeeee;
+  }
+  #wide {
+    width: 400px;
+    height: 60px;
+    background: #9b2f2f;
+  }
+  #status {
+    margin: 12px 20px;
+  }
+</style>
+<script>
+function mark(value) {
+  document.getElementById('status').textContent = value;
+}
+</script>
+</head>
+<body>
+  <div id="panel">
+    <div id="scroller"><div id="content" onclick="mark('content')"></div></div>
+    <div id="bar"><div id="tab" onclick="mark('tab')"></div></div>
+  </div>
+  <div id="box"><div id="wide" onclick="mark('wide')"></div></div>
+  <p id="status">none</p>
+</body>
+</html>
