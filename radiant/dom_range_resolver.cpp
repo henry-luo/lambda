@@ -1131,9 +1131,8 @@ extern "C" void dom_range_for_each_rect(DomRange* range, UiContext* uicon,
 }
 
 // Variant: emit selection rects only for the given text view (DomText).
-// Used by the inline text painter so the selection background can be drawn
-// just before the glyphs of each fragment, ensuring text appears on top of
-// the highlight (instead of underneath it as with the overlay approach).
+// Used by the inline text painter so selection follows each fragment's
+// stacking order and overflow clips instead of painting above later content.
 //
 // If `target_rect` is non-NULL, emission is further restricted to just that
 // single TextRect (one fragment), so the painter can interleave per-fragment

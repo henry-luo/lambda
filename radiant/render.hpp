@@ -3560,6 +3560,8 @@ bool graph_path_is_graph(const char* graph_file);
 // ===== render_overlay.hpp =====
 struct RenderContext;
 
+void render_text_selection_rect(struct RenderContext* rdcon, ViewText* text_view,
+                                TextRect* text_rect);
 void render_ui_overlays(struct RenderContext* rdcon, DocState* state);
 
 // ===== render_pdf.hpp =====

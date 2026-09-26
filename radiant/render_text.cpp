@@ -455,6 +455,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         }
         x = render_text_trailing_marks(rdcon, text_rect, x, y);
         render_text_decorations(rdcon, str, text_rect);
+        render_text_selection_rect(rdcon, text_view, text_rect);
         text_rect = text_rect->next;
     }
 

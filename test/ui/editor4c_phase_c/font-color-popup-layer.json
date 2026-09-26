@@ -1,0 +1,16 @@
+{
+  "name": "editor4c-phase-c: font color popup covers selection and stays within the editor",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface h1"}},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "click", "target": {"selector": ".rdt-toolbar button[title=\"Text color\"]"}},
+    {"type": "render_pending"},
+    {"type": "assert_position", "element_a": {"selector": ".rdt-palette"}, "element_b": {"selector": ".rdt-shell"}, "relation": "inside"},
+    {"type": "assert_pixel", "target": {"selector": ".rdt-palette", "offset_x": 22, "offset_y": 88}, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "click", "target": {"selector": ".rdt-palette .rdt-clear"}},
+    {"type": "assert_count", "target": {"selector": ".rdt-palette"}, "equals": 0}
+  ]
+}
