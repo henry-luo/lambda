@@ -722,6 +722,13 @@ let tempfile = sys.temp ++ "output.txt"
 // Result: /tmp.'output.txt'
 ```
 
+#### Lambda Runtime Paths (`sys.lambda.*`)
+
+```lambda
+sys.lambda.version       // Lambda runtime version
+sys.lambda.home          // Package and runtime asset directory
+```
+
 #### Time Information (`sys.time.*`)
 
 ```lambda

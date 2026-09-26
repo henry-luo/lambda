@@ -15,6 +15,7 @@
 #include "../input/input.hpp"
 #include "../io/mark_builder.hpp"
 #include "context_capsule.h"
+#include "transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
@@ -823,6 +824,8 @@ static Item resolve_lambda(void) {
     MapBuilder lambda = builder.map();
 
     lambda.put("version", "0.1.0");  // TODO: get from config
+    // Keep package resources aligned with the import resolver's asset root.
+    lambda.put("home", g_lambda_home);
 
     cache->lambda_info = lambda.final();
     cache->lambda_time = time(nullptr);

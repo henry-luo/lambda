@@ -65,10 +65,12 @@ fn erase_forwards(value, evt) {
 
 fn entry_is_visible(entry) {
   let entry_name = lower(entry["name"])
-  // Hide implementation artefacts without preventing normal source browsing.
+  // Hide implementation artefacts without preventing normal source browsing:
+  // dot entries, build/release output directories, and *.exe binaries.
   not starts_with(entry_name, ".") and
     (not entry["is_dir"] or
-      (not starts_with(entry_name, "build") and not starts_with(entry_name, "release")))
+      (not starts_with(entry_name, "build") and not starts_with(entry_name, "release"))) and
+    (entry["is_dir"] or not ends_with(entry_name, ".exe"))
 }
 
 fn entry_matches_filter(entry, filter_text) {

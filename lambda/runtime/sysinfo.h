@@ -66,7 +66,7 @@ void sysinfo_shutdown(void);
  *   sys.proc.self.env → Map of environment variables
  *   sys.proc.self.env.PATH → String (environment variable)
  *   sys.time         → Map{now, uptime}
- *   sys.lambda       → Map{version}
+ *   sys.lambda       → Map{version, home}
  *   sys.home         → String (user home directory)
  *   sys.temp         → String (temp directory)
  */
