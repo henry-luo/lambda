@@ -147,10 +147,18 @@ on blur(evt) { keyboard_activation_armed = false }
 // with form control" in state_machine.cpp — form_control_prop_release now
 // closes a dropdown owning the prop being released, the single point that both
 // release paths share (ESO28).
+pn notify_select_change(select) {
+    dom.dispatch(select, { type: "input", bubbles: true, cancelable: false })
+    dom.dispatch(select, { type: "change", bubbles: true, cancelable: false })
+}
+
 // One commit path for the pointer, Enter, and the harness's select_option.
 pn commit_option(elem, index) {
+    let before = dom.selected_index(elem);
     dom.set_selected_index(elem, index)
     dom.set_dropdown_open(elem, false)
+    // A user choice notifies listeners only when selectedness actually moved.
+    if (dom.selected_index(elem) != before) { notify_select_change(elem) }
 }
 
 // Open-dropdown routing is an ordinary keydown default: author listeners see
@@ -212,8 +220,6 @@ pn typeahead(select, letter) {
     if (len(matches) == 0) { 'pass' }
     else {
         commit_option(select, matches[0])
-        dom.dispatch(select, { type: "input", bubbles: true, cancelable: false })
-        dom.dispatch(select, { type: "change", bubbles: true, cancelable: false })
         'prevent-default'
     }
 }
@@ -332,8 +338,7 @@ on click(evt) {
     if (not extending) { listbox_anchor = index }
     listbox_active = index
     if (moved) {
-        dom.dispatch(~, { type: "input", bubbles: true, cancelable: false })
-        dom.dispatch(~, { type: "change", bubbles: true, cancelable: false })
+        notify_select_change(~)
     }
     'prevent-default'
 }
@@ -363,8 +368,7 @@ on keydown(evt) {
             listbox_anchor = 0
             listbox_active = count - 1
             if (took) {
-                dom.dispatch(~, { type: "input", bubbles: true, cancelable: false })
-                dom.dispatch(~, { type: "change", bubbles: true, cancelable: false })
+                notify_select_change(~)
             }
             return 'prevent-default'
         }
@@ -384,8 +388,7 @@ on keydown(evt) {
             listbox_active = target
             dom.scroll_into_view(options[target])
             if (moved) {
-                dom.dispatch(~, { type: "input", bubbles: true, cancelable: false })
-                dom.dispatch(~, { type: "change", bubbles: true, cancelable: false })
+                notify_select_change(~)
             }
             return 'prevent-default'
         }

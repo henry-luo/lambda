@@ -1,0 +1,24 @@
+{
+  "name": "editor4c-phase-c: block type popup survives hover and applies a heading",
+  "html": "test/html/editor-dom.html",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "wait", "ms": 250},
+    {"type": "click", "target": {"selector": ".rdt-surface p"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": ".rdt-block"}, "equals": "p"},
+    {"type": "click", "target": {"selector": ".rdt-block"}},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": ".rdt-block"}, "open_dropdown": true},
+    {"type": "mouse_move", "target": {"selector": ".rdt-block", "offset_x": 25, "offset_y": 42}},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": ".rdt-block"}, "open_dropdown": true},
+    {"type": "mouse_move", "target": {"selector": ".rdt-surface", "offset_x": 200, "offset_y": 50}},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": ".rdt-block"}, "open_dropdown": true},
+    {"type": "click", "target": {"selector": ".rdt-block", "offset_x": 25, "offset_y": 58}},
+    {"type": "render_pending"},
+    {"type": "assert_count", "target": {"selector": ".rdt-surface h1"}, "equals": 2},
+    {"type": "assert_state_store", "target": {"selector": ".rdt-block"}, "open_dropdown": false}
+  ]
+}
