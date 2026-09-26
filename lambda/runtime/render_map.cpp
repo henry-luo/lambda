@@ -24,6 +24,7 @@ typedef struct RenderMapState {
     bool owns_map;
     Item doc_root;          // top-level element tree for parent fixup
     Item source_doc_root;   // source-document path tracking
+    HashMap* source_path_index; // source item identity -> path, rebuilt with its root
     render_map_path_recorder_fn path_recorder;
     void* path_recorder_state; // recorder-private, context-owned side state
     render_map_path_recorder_state_cleanup_fn path_recorder_state_cleanup;
@@ -68,6 +69,7 @@ static void render_map_register_roots(RenderMapState* state) {
 #define s_owns_map (render_map_state()->owns_map)
 #define s_doc_root (render_map_state()->doc_root)
 #define s_source_doc_root (render_map_state()->source_doc_root)
+#define s_source_path_index (render_map_state()->source_path_index)
 #define s_path_recorder (render_map_state()->path_recorder)
 #define s_path_recorder_state (render_map_state()->path_recorder_state)
 #define s_reverse_map (render_map_state()->reverse_map)
@@ -77,6 +79,7 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth = 0
 static Item render_map_find_tree_parent(RenderMapEntry saved, int* out_child_index);
 static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_parent,
                                            int tree_child_index, Item new_result);
+static void render_map_rebuild_source_path_index(Item root);
 
 static Item render_map_invoke_template(TemplateEntry* tmpl, Item source_item) {
     if (!tmpl || !context) return ItemError;
@@ -136,6 +139,23 @@ typedef struct ReverseMapEntry {
 
 typedef TypedHashMap<ReverseMapEntry,
     HashMapIntegralMemberKeyOps<ReverseMapEntry, &ReverseMapEntry::result_item_bits>> ReverseMap;
+
+// Source paths are immutable until their source root changes. Index them once
+// so rendering external data never walks an unrelated editor document.
+typedef struct SourcePathIndexEntry {
+    uint64_t source_item_bits;
+    int* indices;
+    int depth;
+} SourcePathIndexEntry;
+
+static void source_path_index_entry_free(SourcePathIndexEntry* entry) {
+    if (entry) mem_free(entry->indices);
+}
+
+typedef TypedHashMap<SourcePathIndexEntry,
+    HashMapIntegralMemberKeyOps<SourcePathIndexEntry,
+        &SourcePathIndexEntry::source_item_bits>,
+    source_path_index_entry_free> SourcePathIndexMap;
 
 static HashMap* ensure_reverse_map(void) {
     if (!s_reverse_map) {
@@ -226,6 +246,9 @@ void render_map_destroy(void) {
     }
     if (state->reverse_map) {
         ReverseMap::destroy(state->reverse_map);
+    }
+    if (state->source_path_index) {
+        SourcePathIndexMap::destroy(state->source_path_index);
     }
     if (state->roots_registered) {
         heap_unregister_gc_root_range(&state->doc_root.item);
@@ -446,6 +469,11 @@ void render_map_reset(void) {
     if (s_reverse_map) {
         hashmap_clear(s_reverse_map, false);
     }
+    if (s_source_path_index) {
+        SourcePathIndexMap::destroy(s_source_path_index);
+        s_source_path_index = NULL;
+    }
+    s_source_doc_root = (Item){0};
     log_debug("render_map_reset: all render map entries cleared");
 }
 
@@ -673,6 +701,7 @@ static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_paren
 void render_map_set_source_doc_root(Item root) {
     render_map_register_roots(render_map_state());
     s_source_doc_root = root;
+    render_map_rebuild_source_path_index(root);
 }
 
 Item render_map_get_source_doc_root(void) {
@@ -740,65 +769,79 @@ extern "C" bool render_map_has_path_recorder(void) {
     return s_path_recorder != NULL;
 }
 
-// DFS walk of element/array containers from `node`, locating `target`.
-// On hit fills `out_indices` with the child-index path (root-relative,
-// in walk order) and returns its depth; returns -1 on miss.
-// `max_depth` bounds both recursion and output length.
-//
-// NOTE: Map descent (e.g., into a `content` field of `{kind, tag, attrs,
-// content}` mod_doc nodes) is intentionally omitted here to keep
-// render_map.cpp free of the heavyweight `item_attr` runtime dep. Most
-// editor doc trees that flow through `apply()` are element-based; if a
-// future doc-tree shape uses pure-map nesting we'll add a leaner Map
-// accessor here.
-static int find_path_to(Item node, Item target,
-                        int* out_indices, int max_depth, int depth) {
-    if (depth > max_depth || depth > 64) return -1;
-    if (node.item == target.item) return depth;  // RAW_ITEM_EQ_OK: path search matches exact render node identity.
+static HashMap* reset_source_path_index(void) {
+    if (s_source_path_index) {
+        SourcePathIndexMap::destroy(s_source_path_index);
+        s_source_path_index = NULL;
+    }
+    s_source_path_index = SourcePathIndexMap::create(64, 0x1CEB00DA, 0x51DEC0DE);
+    return s_source_path_index;
+}
+
+static bool source_path_index_contains(Item item) {
+    if (!s_source_path_index) return false;
+    SourcePathIndexEntry query = {};
+    query.source_item_bits = item.item;
+    return SourcePathIndexMap::get(s_source_path_index, query) != NULL;
+}
+
+static void source_path_index_insert(Item item, const int* indices, int depth) {
+    if (!s_source_path_index || source_path_index_contains(item)) return;
+    SourcePathIndexEntry entry = {};
+    entry.source_item_bits = item.item;
+    entry.depth = depth;
+    if (depth > 0) {
+        entry.indices = (int*)mem_alloc(sizeof(int) * (size_t)depth, MEM_CAT_EVAL);
+        if (!entry.indices) return;
+        memcpy(entry.indices, indices, sizeof(int) * (size_t)depth);
+    }
+    SourcePathIndexMap::set(s_source_path_index, entry);
+}
+
+static void source_path_index_visit(Item node, int* indices, int depth) {
+    if (depth > 64 || !s_source_path_index || source_path_index_contains(node)) return;
+    source_path_index_insert(node, indices, depth);
     TypeId tid = get_type_id(node);
     if (tid == LMD_TYPE_ELEMENT) {
         Element* elmt = it2elmt(node);
-        if (!elmt) return -1;
+        if (!elmt) return;
         for (unsigned i = 0; i < elmt->length; i++) {
-            if (depth < max_depth) out_indices[depth] = (int)i;
-            int found = find_path_to(elmt->items[i], target,
-                                     out_indices, max_depth, depth + 1);
-            if (found >= 0) return found;
+            indices[depth] = (int)i; // INT_CAST_OK: Element length is unsigned and path depth is bounded.
+            source_path_index_visit(elmt->items[i], indices, depth + 1);
         }
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* arr = it2arr(node);
-        if (!arr) return -1;
+        if (!arr) return;
         for (unsigned i = 0; i < arr->length; i++) {
-            if (depth < max_depth) out_indices[depth] = (int)i;
-            int found = find_path_to(arr->items[i], target,
-                                     out_indices, max_depth, depth + 1);
-            if (found >= 0) return found;
+            indices[depth] = (int)i; // INT_CAST_OK: Array length is unsigned and path depth is bounded.
+            source_path_index_visit(arr->items[i], indices, depth + 1);
         }
     } else if (tid == LMD_TYPE_MAP) {
         Item content_item = render_map_get_map_field(node, "content");
-        if (get_type_id(content_item) != LMD_TYPE_ARRAY) return -1;
+        if (get_type_id(content_item) != LMD_TYPE_ARRAY) return;
         Array* content = it2arr(content_item);
-        if (!content) return -1;
+        if (!content) return;
         for (unsigned i = 0; i < content->length; i++) {
-            if (depth < max_depth) out_indices[depth] = (int)i;
-            int found = find_path_to(content->items[i], target,
-                                     out_indices, max_depth, depth + 1);
-            if (found >= 0) return found;
+            indices[depth] = (int)i; // INT_CAST_OK: Array length is unsigned and path depth is bounded.
+            source_path_index_visit(content->items[i], indices, depth + 1);
         }
     }
-    return -1;
+}
+
+static void render_map_rebuild_source_path_index(Item root) {
+    if (!reset_source_path_index()) return;
+    int indices[64] = {};
+    source_path_index_visit(root, indices, 0);
 }
 
 void render_map_record_source_path(Item target, const char* template_ref) {
     if (!s_path_recorder) return;
     if (s_source_doc_root.item == 0) return;  // RAW_ITEM_EQ_OK: zero Item means no source root recorded.
-    int indices[64];
-    int depth = find_path_to(s_source_doc_root, target,
-                             indices, (int)(sizeof(indices) / sizeof(int)), 0);
-    if (depth < 0) {
-        log_debug("render_map_record_source_path: target not found under source root");
-        return;
-    }
-    s_path_recorder(target, template_ref, indices, depth);
+    if (!s_source_path_index) render_map_rebuild_source_path_index(s_source_doc_root);
+    SourcePathIndexEntry query = {};
+    query.source_item_bits = target.item;
+    const SourcePathIndexEntry* entry = SourcePathIndexMap::get(s_source_path_index, query);
+    if (!entry) return;  // Dynamic template data has no editable source path.
+    s_path_recorder(target, template_ref, entry->indices, entry->depth);
 }
 #include "runtime-state.h"
