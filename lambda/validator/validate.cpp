@@ -117,8 +117,6 @@ static TypeUnary* array_pattern_slot_run(const TypeArray* array_type, int64_t sl
     }
 }
 
-static bool array_pattern_literal_matches(Item item, Item pattern);
-
 static bool array_pattern_slot_matches(SchemaValidator* validator,
         Item child_item, const TypeArray* array_type, int64_t slot) {
     if (array_type->item_is_type_pattern && array_type->item_is_type_pattern[slot]) {
@@ -183,7 +181,7 @@ static bool array_pattern_runs_match(SchemaValidator* validator,
     return false;
 }
 
-static bool array_pattern_literal_matches(Item item, Item pattern) {
+bool array_pattern_literal_matches(Item item, Item pattern) {
     TypeId item_type = get_type_id(item);
     TypeId pattern_type = get_type_id(pattern);
     if (item_type != pattern_type) {
@@ -302,21 +300,18 @@ ValidationResult* validate_against_primitive_type(SchemaValidator* validator, Co
     log_debug("[VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id());
     ValidationResult* result = create_validation_result(validator->get_pool());
 
-    if (type->type_id == item.type_id()) {
-        Item literal = {.item = 0};
-        if (lambda_literal_contract_value(type, &literal)) {
-            // Literal-union members are value singletons, numeric ones included
-            // (S11.2.1, LR03-11); a primitive TypeId check alone would admit
-            // every value of the literal's carrier into the union.
-            Item actual = {.item = item.item};
-            result->valid = array_pattern_literal_matches(actual, literal);
-        } else {
-            result->valid = true;
-        }
-    } else {
-        result->valid = false;
-        add_type_mismatch_error_ex(result, validator, type, item);
-    }
+    // Literal-union members are value singletons, numeric ones included
+    // (S11.2.1, LR03-11): admitted by `==`, as a literal match arm is, so the
+    // literal is tested before the TypeId -- `1.0` is a member of `1 | 2` as it
+    // is of `1` -- and a primitive TypeId check alone would admit every value
+    // of the literal's carrier into the union.
+    Item literal = {.item = 0};
+    result->valid = lambda_literal_contract_value(type, &literal)
+        ? array_pattern_literal_matches({.item = item.item}, literal)
+        : type->type_id == item.type_id();
+    // a failure always carries its error: a caller may judge a merged result
+    // by its error count
+    if (!result->valid) add_type_mismatch_error_ex(result, validator, type, item);
     return result;
 }
 

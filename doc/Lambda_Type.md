@@ -214,12 +214,15 @@ The schema validator historically spells its catch-all *valid data* pattern as
 
 `none` is the type with no values — the bottom of the type lattice, as `any` is the top. It admits nothing, not even `null`: the null type has one value, `none` has none. Every type holds it (`none <: T` for any `T`), and only `none` is below it. [S11.1.7]
 
-A type operation whose literal operands leave nothing admitted *is* `none`, in an expression and in a declaration alike, and `none` drops out of `|` and `!`:
+A type operation whose literal operands leave nothing admitted *is* `none`, in an expression and in a declaration alike, and `none` drops out of `|` and `!`. A container literal counts as the pattern it spells:
 
 ```lambda
 1 & 2                 // none: no value is both 1 and 2
 (1 | 2) ! (1 | 2)     // none
 int & "a"             // none: "a" is not an int
+[1] & [2]             // none: no array is both [1] and [2]
+{a: 1} & {a: 2}       // none
+[int] & [int, int]    // none: one item, or two
 int | none            // int
 int ! none            // int
 int & none            // none
@@ -228,7 +231,7 @@ null is none          // false
 none <: string        // true
 ```
 
-Only literals decide it: `int & string` admits nothing as well, but stays as written.
+The implementation reduces only what literals decide. `int & string` admits nothing too, but for now it stays as written.
 
 As an annotation, `none` is a contract no value passes. A value known at compile time is rejected (`let x: none = 5` is error E201), and an unknown one fails at run time like any other failed contract: a declaration or argument stops the script, and a function's return becomes the call's error value. A function that only raises is declared `none^`:
 

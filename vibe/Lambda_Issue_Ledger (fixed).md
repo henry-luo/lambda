@@ -15,7 +15,7 @@
 
 ## Archive index
 
-This archive contains **159 historical records**: 154 fixed or resolved entries,
+This archive contains **161 historical records**: 156 fixed or resolved entries,
 one CLOSED design decision, and four records CLOSED by consolidation into
 [LR12-24](Lambda_Issue_Ledger.md#lr12-24). LR03-11, LR07-16, LR07-17 and LR10-7, from the
 wrong-value group, were fixed on 2026-09-25 (see the central ledger's
@@ -556,6 +556,11 @@ With `type T = 1`, `[T, type(T), 1 is T, 2 is T]` was `[4404907056, int, false, 
 The type-pattern parser gave `true` and `false` the shared marker `&LIT_BOOL`, which has no payload: the value emitter re-read the node's source span, which in a type pattern is the whole type slot's. `lambda_literal_contract_value` found no value in the marker, so `is` and the validator fell back to the bool tag and a bool literal type admitted both bools: with `type B = true`, `false is B` was `true`, and `false is (true | 1)` was `true` on both tiers. Inside a larger pattern the emitted value drifted too: `case [true, false]` read both slots from the span's first byte, `[`.
 
 *Fixed 2026-09-26.* Two value-carrying literal types, `LIT_BOOL_TRUE` and `LIT_BOOL_FALSE` (`lambda-data.cpp`), are what `true` and `false` are in type position; `static_literal_item_from_type` and `lambda_literal_contract_value` read their value, `literal_type_matches_item` admits a non-numeric, non-text literal by its own value, and the JIT emits a bool literal from its type rather than its span. They are also the runtime literal types of bool operands (S10.1.1v2). A rejected bool or float literal contract now names its value (`expected true, got bool false`). Found on the way: [LR07-38](#lr07-38). Fixtures `test/lambda/type_literal_alias.ls` (LR03-31 section, three tiers) and `negative/runtime/literal_admission_bool_declaration.ls`.
+
+<a id="lr03-32"></a>**LR03-32 · The `none` reduction asked only a literal's own value, so `1 ! int` was `none` though `1.0 is 1` (S11.1.7, S11.2.1) · FIXED 2026-09-26 (found 2026-09-26, extending S11.1.7 to container literals)**
+A literal type admits every value `==` to it (S11.2.1): `1.0 is 1` and `match 1.0 { case 1: ... }` both hold. The reduction asked the other operand about the literal's own value alone, so a kind that holds only some of those values read as holding all of them: `1 ! int` and `(1 | 2) ! int` reduced to `none`, while `1.0` is a `1` and no `int`. Datetimes have the same shape across precisions, since `t'2025-01-01' == t'2025-01-01T00:00:00'`: `t'2025-01-01' ! date` was `none`, though the midnight datetime is in it.
+
+*Fixed 2026-09-26.* A numeric literal against a numeric kind other than `number` answers *unknown*, unless the kind is an integer kind and the literal has a fraction (`1.5 & int` is still `none`); a datetime literal against `date` or `time` answers *unknown*. The answer against a literal, a range or `number` stays exact. Fixture `type_none.ls` ("a literal admits every value == to it"), three tiers.
 
 ## 4. Numbers, decimal & datetime (LR_04)
 
@@ -1641,6 +1646,11 @@ The validator enforces a constrained type's base, TE-10's interim. Reached direc
 An expression builds a union's arms bare (`int | datetime` in an expression holds the bare `TYPE_DTIME`), where type syntax wraps them, and `validate_against_type` dispatched only seven bare scalar kinds; the rest fell into "Unsupported type for validation" and admitted nothing, so `t'2025-01-01' is (int | datetime)` built in an expression was `false`, and so were a date against `date | 1` and a decimal against `decimal | 1`. Separately, a sized numeric type stores its size in `kind`, and the base-type walk tested `kind` before the tag, so `i16` read as an occurrence and `i32` as a union: `5i16 is (i16 | string)` and `7i32 is (i32 | string)` were `false` in type syntax too. And the base-type walk matched `date` and `time` by tag, so `t'10:30' is (date | int)` was `true`.
 
 *Fixed 2026-09-26.* A base type's admission once its wrapper is off is one function, `validate_against_base_payload`, which the wrapped path and every bare scalar kind share (a bare literal still compares its value); its construct tests read `kind` only on `LMD_TYPE_TYPE`; `date` and `time` test the value's precision as `fn_is` does. Fixture `type_set_operators_expr.ls` ("a type arm admits as it does in type syntax").
+
+<a id="lr13-13"></a>**LR13-13 · A literal union member tested the TypeId before the value, so `1.0 is (1 | 2)` was `false` while `1.0 is 1` was `true` (S11.2.1) · FIXED 2026-09-26 (found 2026-09-26, with LR03-32)**
+`validate_against_primitive_type` compared a literal's value only when the item's TypeId equalled the literal's. A lone literal is admitted by `==` in `lambda_type_matches` (LR03-11), so `1.0 is 1` held, but a union's members go through the validator, where the float failed the int tag: `1.0 is (1 | 2)` was `false`, as was `[1.0] is [1 | 2]`.
+
+*Fixed 2026-09-26.* The validator tests a literal type by `array_pattern_literal_matches` before any TypeId, the one literal equality the sequence-pattern slots already used, now declared in `validator.hpp`; the S11.1.7 reduction uses it too. Every primitive failure now carries its error, since a caller may judge a merged result by its error count. Fixture `type_literal_admission.ls` (`across`).
 
 ## 13.1 Verification-pass records (LR_03 and ledger hygiene)
 

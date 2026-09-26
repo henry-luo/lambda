@@ -2,6 +2,7 @@
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-root-frame.hpp"
+#include "../validator/validator.hpp"
 #include <mpdecimal.h>
 #include <stdio.h>
 
@@ -600,94 +601,381 @@ bool lambda_type_contract_is_subtype(Type* candidate, Type* expected) {
 // ---------------------------------------------------------------------------
 // S11.1.7: `none` is the canonical empty type. A type operation reduces to it
 // when its literal operands decide that nothing is admitted -- `1 & 2`,
-// `(1 | 2) ! (1 | 2)`, `int & "a"` -- and `none` is the identity of `|` and
-// `!` and absorbs `&`. What the literals cannot decide stays a binary type,
-// so a reduction is exact wherever it applies and never a guess.
+// `(1 | 2) ! (1 | 2)`, `int & "a"`, `[1] & [2]` -- and `none` is the identity
+// of `|` and `!` and absorbs `&`. A literal operand is a scalar literal, a
+// range, or a container read as the pattern its literal spells (S10.1.1v2).
+// What no literal decides stays a binary type, so a reduction is exact
+// wherever it applies and never a guess: the questions below answer
+// ADMIT_UNKNOWN whenever `is` could say otherwise.
 
-enum ScalarAdmission { SCALAR_ADMIT_NO, SCALAR_ADMIT_YES, SCALAR_ADMIT_UNKNOWN };
+// Whether a type admits every value of a set, none of them, or only some.
+enum Admission { ADMIT_NO, ADMIT_YES, ADMIT_UNKNOWN };
+
+// The work one reduction may spend. Types can be recursive -- `type T = [T, T]
+// | int` -- and comparing two of them part by part branches at every level, so
+// the walk is bounded in total as well as in depth; out of budget is UNKNOWN.
+struct ContractWalk {
+    int budget;
+};
+
+// A member of a set: a type, or the one value a pattern's value slot holds.
+struct ContractSet {
+    Item value;
+    Type* type;  // NULL when the member is `value`
+};
 
 // the type-pattern parser historically spells `&` OPERATOR_OR (validate_pattern.cpp)
 static inline bool contract_op_is_intersect(Operator op) {
     return op == OPERATOR_INTERSECT || op == OPERATOR_OR;
 }
 
-// Whether `type` admits the scalar `value`, over the scalar lattice alone:
-// literals, base scalars, `number`/`integer`, ranges, `any`, `none` and the
-// three type operators. Admission that needs more -- a predicate, a string
-// pattern, an occurrence, a container shape -- is UNKNOWN. The leaves go to
-// lambda_type_matches, the membership `is` uses, which is exact and needs no
-// runtime state for these kinds.
-static ScalarAdmission contract_scalar_admission(Item value, Type* type, int depth) {
-    type = contract_unwrap_type(type);
-    if (!type || depth > 32) return SCALAR_ADMIT_UNKNOWN;
-    if (type == &TYPE_NONE) return SCALAR_ADMIT_NO;
+// A type operator's admission of a set, from its two operands' admissions
+static Admission contract_binary_admission(Operator op, Admission left, Admission right) {
+    if (op == OPERATOR_UNION) {
+        if (left == ADMIT_YES || right == ADMIT_YES) return ADMIT_YES;
+        return left == ADMIT_NO && right == ADMIT_NO ? ADMIT_NO : ADMIT_UNKNOWN;
+    }
+    if (contract_op_is_intersect(op)) {
+        if (left == ADMIT_NO || right == ADMIT_NO) return ADMIT_NO;
+        return left == ADMIT_YES && right == ADMIT_YES ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    if (op == OPERATOR_EXCLUDE) {
+        if (left == ADMIT_NO || right == ADMIT_YES) return ADMIT_NO;
+        return left == ADMIT_YES && right == ADMIT_NO ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    return ADMIT_UNKNOWN;
+}
+
+// A numeric kind admits only some of the values `==` to a numeric literal of
+// another kind or none of them: an integer kind holds no value `==` to a
+// number with a fraction.
+static Admission contract_numeric_kind_admission(Item value, const Type* type) {
+    switch (lambda_numeric_kind_from_type(type)) {
+    case LAMBDA_NUM_INVALID: case LAMBDA_NUM_FLOAT: case LAMBDA_NUM_DECIMAL:
+    case LAMBDA_NUM_F16: case LAMBDA_NUM_F32:
+        return ADMIT_UNKNOWN;
+    default:
+        break;  // an integer kind
+    }
+    TypeId value_id = get_type_id(value);
+    if (value_id != LMD_TYPE_FLOAT && value_id != LMD_TYPE_NUM_SIZED) return ADMIT_UNKNOWN;
+    double number = value_id == LMD_TYPE_FLOAT ? it2d(value) : value.get_num_sized_as_double();
+    return number == floor(number) ? ADMIT_UNKNOWN : ADMIT_NO;
+}
+
+// Whether `type` -- neither a type operator nor `none` -- admits the scalar
+// literal `value`. A literal admits every value `==` to it (S11.2.1), which
+// spans numeric kinds (`1.0` is `1`) and datetime precisions, so a numeric
+// kind other than `number`, or `date` or `time`, admits at most some of them.
+// The other scalar leaves go to lambda_type_matches, the membership `is`
+// uses, which is exact and needs no runtime state for these kinds.
+static Admission contract_scalar_admission(Item value, Type* type) {
     if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
             !lambda_type_is_range(type)) {
-        if (type->kind != TYPE_KIND_BINARY) return SCALAR_ADMIT_UNKNOWN;
-        const TypeBinary* binary = (const TypeBinary*)type;
-        ScalarAdmission left = contract_scalar_admission(value, binary->left, depth + 1);
-        ScalarAdmission right = contract_scalar_admission(value, binary->right, depth + 1);
-        if (binary->op == OPERATOR_UNION) {
-            if (left == SCALAR_ADMIT_YES || right == SCALAR_ADMIT_YES) return SCALAR_ADMIT_YES;
-            return left == SCALAR_ADMIT_NO && right == SCALAR_ADMIT_NO
-                ? SCALAR_ADMIT_NO : SCALAR_ADMIT_UNKNOWN;
-        }
-        if (contract_op_is_intersect(binary->op)) {
-            if (left == SCALAR_ADMIT_NO || right == SCALAR_ADMIT_NO) return SCALAR_ADMIT_NO;
-            return left == SCALAR_ADMIT_YES && right == SCALAR_ADMIT_YES
-                ? SCALAR_ADMIT_YES : SCALAR_ADMIT_UNKNOWN;
-        }
-        if (binary->op == OPERATOR_EXCLUDE) {
-            if (left == SCALAR_ADMIT_NO || right == SCALAR_ADMIT_YES) return SCALAR_ADMIT_NO;
-            return left == SCALAR_ADMIT_YES && right == SCALAR_ADMIT_NO
-                ? SCALAR_ADMIT_YES : SCALAR_ADMIT_UNKNOWN;
-        }
-        return SCALAR_ADMIT_UNKNOWN;
+        // a predicate, a string pattern, an occurrence: not decided here
+        return ADMIT_UNKNOWN;
     }
+    TypeId value_id = get_type_id(value);
+    Item literal;
     switch (type->type_id) {
-    case LMD_TYPE_ANY: case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_INT:
-    case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT:
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT:
     case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_COMPLEX:
-    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_PATH:
-    case LMD_TYPE_BINARY: case LMD_TYPE_DTIME: case LMD_TYPE_ERROR:
+        if (IS_NUMERIC_ID(value_id) && !lambda_literal_contract_value(type, &literal)) {
+            return contract_numeric_kind_admission(value, type);
+        }
+        break;
     case LMD_TYPE_TYPE:
-        return lambda_type_matches(value, type) ? SCALAR_ADMIT_YES : SCALAR_ADMIT_NO;
+        if (type == &TYPE_INTEGER && IS_NUMERIC_ID(value_id)) {
+            return contract_numeric_kind_admission(value, type);
+        }
+        break;
+    case LMD_TYPE_DTIME:
+        if (value_id == LMD_TYPE_DTIME && (type == &TYPE_DATE || type == &TYPE_TIME)) {
+            return ADMIT_UNKNOWN;
+        }
+        break;
+    case LMD_TYPE_ANY: case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_STRING:
+    case LMD_TYPE_SYMBOL: case LMD_TYPE_PATH: case LMD_TYPE_BINARY: case LMD_TYPE_ERROR:
+        break;
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_ARRAY: case LMD_TYPE_MAP:
+    case LMD_TYPE_ELEMENT: case LMD_TYPE_FUNC:
+        return ADMIT_NO;  // no scalar is a container or a function
     default:
-        // shapes, nominal records and signatures are outside the scalar lattice
-        return SCALAR_ADMIT_UNKNOWN;
+        return ADMIT_UNKNOWN;
+    }
+    return lambda_type_matches(value, type) ? ADMIT_YES : ADMIT_NO;
+}
+
+// A range admits the values between its bounds (S11.1.3). Another range
+// decides it by the bounds and a literal by whether the range holds it; any
+// other type the scalar question decides treats a domain's members alike, so
+// one member answers for all.
+static Admission contract_range_admission(Type* range, Type* type) {
+    int64_t start = 0, end = 0;
+    if (!lambda_range_type_bounds(range, &start, &end) || start > end) return ADMIT_UNKNOWN;
+    Item member = ((TypeRange*)range)->start;
+    if (start == end) return contract_scalar_admission(member, type);
+    if (lambda_type_is_range(type)) {
+        int64_t other_start = 0, other_end = 0;
+        if (((TypeRange*)range)->is_char != ((TypeRange*)type)->is_char) return ADMIT_NO;
+        if (!lambda_range_type_bounds(type, &other_start, &other_end)) return ADMIT_UNKNOWN;
+        if (end < other_start || other_end < start) return ADMIT_NO;
+        return other_start <= start && end <= other_end ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    Item literal;
+    if (lambda_literal_contract_value(type, &literal)) {
+        return lambda_range_type_contains(range, literal) ? ADMIT_UNKNOWN : ADMIT_NO;
+    }
+    return contract_scalar_admission(member, type);
+}
+
+// The container kind a type admits, for answers by kind alone. A nominal
+// record is left out: an object may be either structural kind.
+enum ContainerKind { CONTAINER_NONE, CONTAINER_SEQUENCE, CONTAINER_MAP, CONTAINER_ELEMENT };
+
+static ContainerKind contract_container_kind(const Type* type) {
+    if (type_nominal_record(type)) return CONTAINER_NONE;
+    switch (type->type_id) {
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+        return CONTAINER_SEQUENCE;
+    case LMD_TYPE_MAP:
+        return type == &TYPE_OBJECT ? CONTAINER_NONE : CONTAINER_MAP;
+    case LMD_TYPE_ELEMENT:
+        return CONTAINER_ELEMENT;
+    case LMD_TYPE_TYPE:
+        return contract_type_has_unary_op(type, OPERATOR_ARRAY)
+            ? CONTAINER_SEQUENCE : CONTAINER_NONE;
+    default:
+        return CONTAINER_NONE;
     }
 }
 
-// A literal set is a literal type, the null type, or a union of literal sets.
-// Collects its values; false for any other type, or one too large to list.
-static bool contract_literal_set(Type* type, Item* values, int capacity, int* count,
+// A container literal's pattern (S10.1.1v2): a bracket pattern, a map shape or
+// an element. The bare kinds and the array family `T[]` are not literals.
+static bool contract_is_container_pattern(const Type* type) {
+    return type->type_id != LMD_TYPE_TYPE && contract_container_kind(type) != CONTAINER_NONE &&
+        type != &TYPE_ARRAY && type != &TYPE_LIST && type != &TYPE_MAP && type != &TYPE_ELMT;
+}
+
+static Admission contract_admission(ContractSet set, Type* type, ContractWalk* walk,
+        int depth);
+
+// Whether member `b` admits every value of member `a`, none, or some.
+// Disjointness is symmetric, so a literal `b` decides NO for any `a`.
+static Admission contract_member_admission(ContractSet a, ContractSet b, ContractWalk* walk,
+        int depth) {
+    if (b.type) {
+        Admission admission = contract_admission(a, b.type, walk, depth);
+        if (admission != ADMIT_UNKNOWN || !a.type) return admission;
+        if (contract_admission(b, a.type, walk, depth) == ADMIT_NO) return ADMIT_NO;
+        return contract_unwrap_type(a.type) == contract_unwrap_type(b.type)
+            ? ADMIT_YES : ADMIT_UNKNOWN;
+    }
+    // `b` is a value slot: it admits the one value it holds
+    if (!a.type) {
+        return array_pattern_literal_matches(a.value, b.value) ? ADMIT_YES : ADMIT_NO;
+    }
+    if (contract_admission(b, a.type, walk, depth) == ADMIT_NO) return ADMIT_NO;
+    Item literal;
+    return lambda_literal_contract_value(contract_unwrap_type(a.type), &literal) &&
+        array_pattern_literal_matches(literal, b.value) ? ADMIT_YES : ADMIT_UNKNOWN;
+}
+
+static ContractSet contract_sequence_slot(const TypeArray* pattern, int64_t index) {
+    ContractSet slot = {pattern->item_patterns[index], NULL};
+    if (pattern->item_is_type_pattern && pattern->item_is_type_pattern[index]) {
+        slot.type = pattern->item_patterns[index].type;
+    }
+    return slot;
+}
+
+// A bracket pattern whose item count is its length: slots and no run (S11.1.6v3)
+static bool contract_sequence_is_fixed(const TypeArray* pattern) {
+    if (!pattern->item_patterns) return false;
+    for (int64_t i = 0; i < pattern->length; i++) {
+        ContractSet slot = contract_sequence_slot(pattern, i);
+        if (slot.type && contract_type_as_run(contract_unwrap_type(slot.type))) return false;
+    }
+    return true;
+}
+
+// Sequence `a` against sequence `b`, slot by slot; `b_all` is the one type
+// every item of `a` meets instead, for the array family `T[]`.
+static Admission contract_sequence_admission(const TypeArray* a, const TypeArray* b,
+        Type* b_all, ContractWalk* walk, int depth) {
+    if (!contract_sequence_is_fixed(a) || (b && !contract_sequence_is_fixed(b))) {
+        return ADMIT_UNKNOWN;
+    }
+    if (b && a->length != b->length) return ADMIT_NO;
+    Admission result = ADMIT_YES;
+    for (int64_t i = 0; i < a->length; i++) {
+        ContractSet other = b ? contract_sequence_slot(b, i) : ContractSet{ItemNull, b_all};
+        Admission slot = contract_member_admission(contract_sequence_slot(a, i), other,
+            walk, depth + 1);
+        if (slot == ADMIT_NO) return ADMIT_NO;
+        if (slot == ADMIT_UNKNOWN) result = ADMIT_UNKNOWN;
+    }
+    return result;
+}
+
+static ShapeEntry* contract_shape_field(TypeMap* shape, const ShapeEntry* field) {
+    return typemap_hash_lookup(shape, field->name->str, (int)field->name->length);
+}
+
+// A map pattern admits a map holding each of its fields with a value its type
+// admits -- absent only when optional, null only when the type is a run that
+// admits it -- and any other field. So a field `a` requires with a value
+// that is never null decides NO; YES needs every field of `b` from `a`.
+static Admission contract_map_admission(TypeMap* a, TypeMap* b, ContractWalk* walk,
+        int depth) {
+    if (a->has_spread || b->has_spread) return ADMIT_UNKNOWN;
+    Admission result = ADMIT_YES;
+    FOR_EACH_MAP_FIELD(b, b_field) {
+        if (!b_field->name || !b_field->type) return ADMIT_UNKNOWN;
+        ShapeEntry* a_field = contract_shape_field(a, b_field);
+        ContractSet a_member = {ItemNull, a_field ? a_field->type : NULL};
+        if (!a_field || contract_type_has_unary_op(contract_unwrap_type(a_field->type),
+                    OPERATOR_OPTIONAL) ||
+                contract_admission({ItemNull, NULL}, a_field->type, walk, depth + 1) != ADMIT_NO) {
+            result = ADMIT_UNKNOWN;  // absent, or null, in some value of `a`
+            continue;
+        }
+        Admission field = contract_member_admission(a_member, {ItemNull, b_field->type},
+            walk, depth + 1);
+        if (field == ADMIT_NO) return ADMIT_NO;
+        if (field == ADMIT_UNKNOWN) result = ADMIT_UNKNOWN;
+    }
+    return result;
+}
+
+// An element pattern admits its tag, content its content section matches
+// (any, without one) and attributes its types admit -- each one also absent,
+// since the validator never requires an attribute. So only the tag and the
+// content decide NO; the attributes can only confirm.
+static Admission contract_element_admission(TypeElmt* a, TypeElmt* b, ContractWalk* walk,
+        int depth) {
+    if (a->has_spread || b->has_spread) return ADMIT_UNKNOWN;
+    Admission result = ADMIT_YES;
+    if (b->name.length) {
+        if (!a->name.length) {
+            result = ADMIT_UNKNOWN;
+        } else if (a->name.length != b->name.length ||
+                memcmp(a->name.str, b->name.str, b->name.length) != 0) {
+            return ADMIT_NO;
+        }
+    }
+    if (b->content_list) {
+        Admission content = a->content_list
+            ? contract_sequence_admission(a->content_list, b->content_list, NULL, walk, depth)
+            : ADMIT_UNKNOWN;
+        if (content == ADMIT_NO) return ADMIT_NO;
+        if (content == ADMIT_UNKNOWN) result = ADMIT_UNKNOWN;
+    }
+    FOR_EACH_MAP_FIELD(b, b_field) {
+        if (!b_field->name || !b_field->type) return ADMIT_UNKNOWN;
+        ShapeEntry* a_field = contract_shape_field(a, b_field);
+        if (!a_field || contract_member_admission({ItemNull, a_field->type},
+                {ItemNull, b_field->type}, walk, depth + 1) != ADMIT_YES) {
+            result = ADMIT_UNKNOWN;
+        }
+    }
+    return result;
+}
+
+// Container pattern `a` against `type`: a scalar type or another container
+// kind admits none of it, and a pattern of its own kind is compared part by part.
+static Admission contract_container_admission(Type* a, Type* type, ContractWalk* walk,
+        int depth) {
+    if (type->type_id == LMD_TYPE_ANY) return ADMIT_YES;  // a container is no error, and no null
+    ContainerKind kind = contract_container_kind(a);
+    ContainerKind other = contract_container_kind(type);
+    if (other == CONTAINER_NONE) {
+        // the scalar kinds, ranges, functions: never a container of any kind
+        switch (type->type_id) {
+        case LMD_TYPE_NULL: case LMD_TYPE_BOOL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_INT:
+        case LMD_TYPE_INT64: case LMD_TYPE_UINT64: case LMD_TYPE_FLOAT: case LMD_TYPE_DECIMAL:
+        case LMD_TYPE_COMPLEX: case LMD_TYPE_DTIME: case LMD_TYPE_SYMBOL: case LMD_TYPE_STRING:
+        case LMD_TYPE_BINARY: case LMD_TYPE_PATH: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
+        case LMD_TYPE_ERROR:
+            return ADMIT_NO;
+        case LMD_TYPE_TYPE:
+            return type_is_global_meta_type(type) || lambda_type_is_range(type)
+                ? ADMIT_NO : ADMIT_UNKNOWN;
+        default:
+            return ADMIT_UNKNOWN;
+        }
+    }
+    if (other != kind) return ADMIT_NO;
+    switch (kind) {
+    case CONTAINER_SEQUENCE:
+        // `array` holds every sequence; `list` only some, and a counted `T[n]` one length
+        if (type == &TYPE_ARRAY) return ADMIT_YES;
+        if (type->type_id == LMD_TYPE_TYPE) {
+            int length = contract_array_fixed_length(type);
+            if (length >= 0 && contract_sequence_is_fixed((TypeArray*)a) &&
+                    ((TypeArray*)a)->length != length) return ADMIT_NO;
+            return contract_sequence_admission((TypeArray*)a, NULL,
+                ((TypeUnary*)type)->operand, walk, depth);
+        }
+        if (type->type_id != LMD_TYPE_ARRAY || !((TypeArray*)type)->item_patterns) {
+            return ADMIT_UNKNOWN;
+        }
+        return contract_sequence_admission((TypeArray*)a, (TypeArray*)type, NULL, walk, depth);
+    case CONTAINER_MAP:
+        return type == &TYPE_MAP || !((TypeMap*)type)->shape ? ADMIT_YES
+            : contract_map_admission((TypeMap*)a, (TypeMap*)type, walk, depth);
+    case CONTAINER_ELEMENT:
+        return type == &TYPE_ELMT ? ADMIT_YES
+            : contract_element_admission((TypeElmt*)a, (TypeElmt*)type, walk, depth);
+    default:
+        return ADMIT_UNKNOWN;
+    }
+}
+
+// Whether `type` admits every value of `set`, none of them, or only some.
+// Decided only when a literal decides it: `set` a scalar literal, a range or a
+// container pattern (or a union of them), or a literal inside `type` found
+// disjoint from it; a type set with no literal answers ADMIT_UNKNOWN.
+static Admission contract_admission(ContractSet set, Type* type, ContractWalk* walk,
         int depth) {
     type = contract_unwrap_type(type);
-    if (!type || depth > 32) return false;
-    Item literal;
-    if (type->type_id == LMD_TYPE_NULL) {
-        literal = ItemNull;
-    } else if (!lambda_literal_contract_value(type, &literal)) {
-        if (!lambda_type_is_union(type)) return false;
-        const TypeBinary* binary = (const TypeBinary*)type;
-        return contract_literal_set(binary->left, values, capacity, count, depth + 1) &&
-            contract_literal_set(binary->right, values, capacity, count, depth + 1);
+    if (!type || depth > 32 || --walk->budget < 0) return ADMIT_UNKNOWN;
+    if (type == &TYPE_NONE) return ADMIT_NO;
+    Type* set_type = set.type ? contract_unwrap_type(set.type) : NULL;
+    if (set.type && !set_type) return ADMIT_UNKNOWN;
+    if (lambda_type_is_union(set_type)) {
+        // a union set answers for both halves only when they agree. It splits
+        // before `type` does, so a literal is asked of the whole of `type`:
+        // `1 | 2` against `1 | 2` is 1 and 2 each admitted, not two halves in doubt
+        const TypeBinary* binary = (const TypeBinary*)set_type;
+        Admission left = contract_admission({ItemNull, binary->left}, type, walk, depth + 1);
+        Admission right = contract_admission({ItemNull, binary->right}, type, walk, depth + 1);
+        return left == right ? left : ADMIT_UNKNOWN;
     }
-    if (*count >= capacity) return false;
-    values[(*count)++] = literal;
-    return true;
+    if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type) &&
+            type->kind == TYPE_KIND_BINARY) {
+        const TypeBinary* binary = (const TypeBinary*)type;
+        return contract_binary_admission(binary->op,
+            contract_admission(set, binary->left, walk, depth + 1),
+            contract_admission(set, binary->right, walk, depth + 1));
+    }
+    if (!set_type) return contract_scalar_admission(set.value, type);
+    Item literal;
+    if (set_type->type_id == LMD_TYPE_NULL) return contract_scalar_admission(ItemNull, type);
+    if (lambda_literal_contract_value(set_type, &literal)) {
+        return contract_scalar_admission(literal, type);
+    }
+    if (lambda_type_is_range(set_type)) return contract_range_admission(set_type, type);
+    if (contract_is_container_pattern(set_type)) {
+        return contract_container_admission(set_type, type, walk, depth);
+    }
+    return ADMIT_UNKNOWN;
 }
 
-// true when `set` is a literal set whose every value gets `wanted` from `other`
-static bool contract_literals_all(Type* set, Type* other, ScalarAdmission wanted) {
-    const int capacity = 64;
-    Item values[capacity];
-    int count = 0;
-    if (!contract_literal_set(set, values, capacity, &count, 0)) return false;
-    for (int i = 0; i < count; i++) {
-        if (contract_scalar_admission(values[i], other, 0) != wanted) return false;
-    }
-    return true;
+// the admission of every value of the type `set`
+static Admission contract_type_admission(Type* set, Type* type) {
+    ContractWalk walk = {1 << 16};
+    return contract_admission({ItemNull, set}, type, &walk, 0);
 }
 
 Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
@@ -701,9 +989,9 @@ Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
     }
     if (contract_op_is_intersect(op)) {
         if (left_type == &TYPE_NONE || right_type == &TYPE_NONE) return &TYPE_NONE;
-        // no literal of one side is admitted by the other: nothing is in both
-        if (contract_literals_all(left_type, right_type, SCALAR_ADMIT_NO) ||
-                contract_literals_all(right_type, left_type, SCALAR_ADMIT_NO)) {
+        // nothing of one side is admitted by the other: nothing is in both
+        if (contract_type_admission(left_type, right_type) == ADMIT_NO ||
+                contract_type_admission(right_type, left_type) == ADMIT_NO) {
             return &TYPE_NONE;
         }
         return NULL;
@@ -711,8 +999,8 @@ Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op) {
     if (op == OPERATOR_EXCLUDE) {
         if (right_type == &TYPE_NONE) return left;
         if (left_type == &TYPE_NONE) return &TYPE_NONE;
-        // every literal of the left side is one the right side excludes
-        if (contract_literals_all(left_type, right_type, SCALAR_ADMIT_YES)) return &TYPE_NONE;
+        // everything of the left side is something the right side excludes
+        if (contract_type_admission(left_type, right_type) == ADMIT_YES) return &TYPE_NONE;
         return NULL;
     }
     return NULL;

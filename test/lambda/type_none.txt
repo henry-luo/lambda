@@ -10,6 +10,13 @@
 [true, true, true, true, false, false]
 "-- type context reduces alike --"
 [none, true, false, string, true, true, false, true, false]
+"-- container literals decide too: the pattern each literal spells --"
+[none, none, none, none, none, none, none, none]
+"-- a container literal with a value in both stays --"
+[type, type, type]
+[none, true, false]
+"-- a literal admits every value == to it, of any kind: a kind holds only some --"
+[type, type, none, none, type, true, true]
 "-- names --"
 ["none", "none", 'none']
 "-- a none return is a contract no value passes: each call is the error --"
