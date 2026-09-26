@@ -437,6 +437,11 @@ named arguments and a juxtaposed block, and it fails at run time with
 `error` lines from that misparse, and `test/std/core/statements/higher_order.ls`
 passes the arrow-bodied variant `fn(x) => x * 2`. Both forms need a ruling
 (legal, or dropped from `Lambda_Func.md`) before either parser changes.
+*Ruled 2026-09-26 (USER; S16.6.7v2, spec 48.0.0):* neither form is legal.
+`fn` never begins an anonymous function, and the rejection names the repair,
+`(x) => e`. The same ruling adds the procedure arrow `pn (x) => { … }`, so a
+procedure no longer needs a name to be a value
+([Design_Syntax §7.30](Lambda_Design_Syntax.md)). Implementation pending.
 
 <a id="lr02-22"></a>**LR02-22 · The reference grammar never reads a force-step fragment (PTH33) · OPEN (found 2026-09-24)**
 `force_expr` takes an optional fragment after `#`, but the operand-only form

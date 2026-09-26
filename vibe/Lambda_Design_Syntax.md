@@ -7,14 +7,16 @@ mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
 (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
 (closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
 2026-08-27: handler-arm brace placement reaffirmed with rationale (§5.9,
-ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0). 2026-09-22: list/array kind rulings (§7.27 points 16–26) and the run/array type families (§7.28) ratified; spec v29.0.0. 2026-09-23: the occurrence family's open count respelled `T{n+}` (§7.28; S11.1.6v2 + S16.8.6v3, spec v30.0.0).
+ledger 16; spec v15.2.1 records it in S16.4.3). 2026-09-05: computed keys `{[expr]: val}` ratified as S16.8.9 + S16.4.1v3 (§7.26, ledger 41; spec v22.0.0). 2026-09-21: lists and blocks ratified as S2.5 and the content model generalized out of S16.7 as S2.6 (§7.27; spec v27.0.0). 2026-09-22: list/array kind rulings (§7.27 points 16–26) and the run/array type families (§7.28) ratified; spec v29.0.0. 2026-09-23: the occurrence family's open count respelled `T{n+}` (§7.28; S11.1.6v2 + S16.8.6v3, spec v30.0.0). 2026-09-26: anonymous functions — the arrow is the one form, the procedure arrow `pn (x) => { … }` is added, and unnamed `fn` forms are ruled out (§7.30; S16.6.7v2 + S16.4.2v2 + S16.6.8v2, spec v48.0.0).
 
 > **The body states current rulings only.** Superseded wording has been
 > moved out to **Appendix S — Superseded Rulings**, struck through and
 > annotated with what replaced it. Nothing there is normative. Currently
-> held: S.1 the blanket dual-role rule (§3.2/§3.3, replaced by §7.14) and
-> S.2 the `{ ... }` Options 1 and 2 (§5.9, replaced by v3), and S.3 block value =
-> last expression (§5.9/§3.2, replaced by §7.27).
+> held: S.1 the blanket dual-role rule (§3.2/§3.3, replaced by §7.14),
+> S.2 the `{ ... }` Options 1 and 2 (§5.9, replaced by v3), S.3 block value =
+> last expression (§5.9/§3.2, replaced by §7.27), S.4 `\.` as an escaped-dot
+> introducer (§7.15, replaced by the `\` root), and S.5 no `=>` after an
+> anonymous procedure (§6 point 36/§5.9, replaced by §7.30).
 >
 > **Ratification erratum (2026-08-22).** §5.9's rejected **Option 2** was
 > ratified into the spec as S16.4.1 by mistake, making `if (c) {a: 1}` a
@@ -35,7 +37,7 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
 S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v3, §7.23 → S16.7 (v2: now points to S2.6),
-§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6v2 + S16.8.6v3, §7.29 → S11.1.5v2 + S16.2.3v3.
+§7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6v2 + S16.8.6v3, §7.29 → S11.1.5v2 + S16.2.3v3, §7.30 → S16.6.7v2 + S16.4.2v2 + S16.6.8v2.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -1096,9 +1098,11 @@ rule 1 and rule 3 is a decidable test, not taste:
   (§7.27, S2.5.3), and its `let`s are block-scoped. `let x = { let y = 1 y + 1 }` is legal. This is what
   gives arrow functions block bodies — `(x) => { let y = x + 1 y }` —
   resolving the last §7 audit item with no JS `({...})` quirk.
-- **Arrow bodies are fn context by definition, even inside a `pn`**:
-  `() => {}` mid-procedure still yields the empty map — the arrow is a
-  functional value regardless of where it is written.
+- **Unprefixed arrow bodies are fn context by definition, even inside a
+  `pn`**: `() => {}` mid-procedure still yields the empty map — the arrow is
+  a functional value regardless of where it is written. A procedure arrow's
+  braces are its body instead (§7.30), so `pn () => {}` is the empty
+  procedure.
 - **`for (x in l) {}` in fn context yields one empty map per iteration** —
   legal by rule, almost never intent: a lint warns on an empty-map
   comprehension body.
@@ -1108,8 +1112,8 @@ rule 1 and rule 3 is a decidable test, not taste:
 | Braces | Reading |
 |---|---|
 | value/expression position, call args, initializers (fn **and** pn) | map or block by interior; `{}` = map |
-| `if`/`for` bodies (both spellings), `else`, colon-form match arms, arrow bodies | map or block by interior; `{}` by fn/pn context (arrows: always fn) |
-| `fn` `pn` `view` `on` bodies, braced match arms, handler arms, `while` bodies | always block; `{}` = empty body |
+| `if`/`for` bodies (both spellings), `else`, colon-form match arms, unprefixed arrow bodies | map or block by interior; `{}` by fn/pn context (arrows: always fn) |
+| `fn` `pn` `view` `on` bodies, procedure-arrow bodies (§7.30), braced match arms, handler arms, `while` bodies | always block; `{}` = empty body |
 | `match` outer braces | arm list (structural) |
 | `type` bodies | fields/constraint/methods interior (§7.11) |
 | content position | map item (`{}` = empty map item, meaningful) |
@@ -1264,7 +1268,8 @@ for scalars".
     bodies → fn: empty map, pn: empty block; bare pn statement → error
     (dead either way). Always-block (structural): fn/pn/view/on bodies,
     braced match arms, handler arms, `while` bodies (pn-only, value
-    discarded). Arrows are fn context even inside pn. Lint:
+    discarded). Unprefixed arrows are fn context even inside pn; a
+    procedure arrow's braces are its body (§7.30). Lint:
     `for (x in l) {}` empty-map comprehension. Earlier forms — ~~Option 1
     (interior-only, ambiguous `{}`)~~ and ~~Option 2 (position-only, ugly
     escapes, no arrow blocks)~~ — **OBSOLETE**. Option 2 was ratified into
@@ -1417,18 +1422,25 @@ for scalars".
     `_expr_body_start` scanner guard at the four body positions did this job,
     because 0.24 had no reserved words and the keyword fell back to
     `identifier` wherever only an identifier was valid.
-36. *(ratified 2026-08-24 as S16.6.7, spec v13.0.0)* **`pn` has one body
-    form**: `pn name() { ... }`. No `=>` after a procedure signature, named
-    or anonymous — `pn p() => expr` was redundant with `fn`, and
+36. *(ratified 2026-08-24 as S16.6.7, spec v13.0.0; revised 2026-09-26 as
+    S16.6.7v2, spec v48.0.0 — §7.30)* **A procedure's body is always the
+    braced block.** A declared procedure is `pn name() { ... }`, never
+    `=>`-bodied: `pn p() => expr` was redundant with `fn`, and
     `pn p() => { ... }` redundant with the braced form. The C parser
     accepting these was a front-end divergence (the TS grammar always
-    rejected them); corpus cost was 1 doc site, 0 tests.
+    rejected them); corpus cost was 1 doc site, 0 tests. The anonymous
+    procedure is the procedure arrow `pn (x) => { ... }` (§7.30): the arrow
+    makes it anonymous, and its body is the same braced block. The v1
+    wording, which barred `=>` after an anonymous procedure as well, is
+    Appendix S.5.
 
-37. *(ratified 2026-08-24 as S16.6.8, spec v14.0.0; IMPLEMENTED same day)*
-    **A procedural block is a statement, never an expression.** A braced
-    block whose top level contains `return`/`break`/`continue`/`var`/
-    assignment is rejected in every expression position — after `case T:`,
-    in tuples/arguments/operands, as an arrow body. Probe that decided it:
+37. *(ratified 2026-08-24 as S16.6.8, spec v14.0.0; IMPLEMENTED same day;
+    v2 2026-09-26 — §7.30)* **A procedural block is a statement, never an
+    expression.** A braced block whose top level contains
+    `return`/`break`/`continue`/`var`/assignment is rejected in every
+    expression position — after `case T:`, in tuples/arguments/operands, as
+    an unprefixed arrow's body. A procedure arrow's braces are its body, not
+    an expression position (v2). Probe that decided it:
     `let t = ({ return 99 }, 123)` returned 99 from the enclosing pn and
     `t` never existed — the expression evaporated. Explicitly KEPT:
     `case T: { <functional e> }`. Three grounds: maps after `:` force brace
@@ -3186,6 +3198,83 @@ count as the type followed by a block statement (`fn (){2}` is `fn ()` then
 without parameter names) is a separate, older disagreement: the C parser
 reads `int` as a parameter *name*, and Tree-sitter rejects the form.
 
+### 7.30 Anonymous functions: the arrow is the one form, and `pn` colours it (decided 2026-09-26 — ratified as S16.6.7v2, S16.4.2v2, S16.6.8v2)
+
+> **Not yet implemented** (2026-09-26): neither front end parses the
+> procedure arrow, and the C parser still misreads `fn (x) { … }`
+> ([LR02-21](<Lambda_Issue_Ledger.md#lr02-21>)).
+
+**Question.** `doc/Lambda_Func.md` documented an unnamed
+`fn (x: int, y: int) { x + y }`, and parts of the corpus wrote
+`fn(x) => x * 2`. No ruling covered either, and the reference grammar had no
+rule for them. The C parser read `fn` as an atom and the rest as a call and a
+juxtaposed block, so both failed at compile or run time instead of as syntax
+errors. Separately, `=>` was fn-only (S16.6.7) and arrow bodies were fn
+context (S16.4.2), so a procedure could not be written without a name.
+
+**Ruling 1 (USER): `fn` never begins an anonymous function.** `fn (x) { … }`
+and `fn (x) => e` are not expressions; the anonymous function is the arrow
+`(x) => e`. This is S16.1.3v2's "declarations are not expressions" applied to
+the unnamed spelling. The rejection names the repair.
+
+**Ruling 2 (USER, accepting the proposal below): the procedure arrow
+`pn (x) => { … }`.**
+
+*Why one is needed.* Three rulings take a procedure as a value, and each could
+only receive a named one: `start` requires a `pn` target (S13.1.1v2);
+colour-polymorphic `function`s and `call()` accept a `pn` (S12.1.4v3); and
+`pn (...)` is a first-class contract (S11.1.5v2) with no literal. The
+workaround — a nested named `pn`, then `let f = name` (Lambda_Func.md,
+"Closure Captures Are Immutable Snapshots") — works, but is ceremony.
+
+*Meaning: a nested `pn` without its name.* Nothing is new semantically.
+Captures are snapshots and captured names are read-only (S9.1.4), so
+`start`'s capture rule (S13.1.4) holds by construction. The value is a `pn`
+(S11.1.5v2): `is pn` holds, and an `fn (...)` contract refuses it. Creating
+one is legal in any context, as declaring a top-level `pn` already is; only
+calling it is `pn`-only (S12.1.1v2).
+
+*Spelling: `=>`, not `pn (x) { … }`.*
+- The arrow is what makes a function anonymous; `pn` only sets the colour.
+  `pn (x) { … }` is the unnamed-declaration shape Ruling 1 rules out for
+  `fn`.
+- `=>` keeps the procedure arrow apart from the procedure type
+  `pn (x: int) int`, should function types ever become expression values.
+  Neither front end reads them in expression position today, so this only
+  keeps that door open.
+
+*The body must be braced.*
+- S16.6.7's substance survives: a procedure has one body form, the braced
+  statement block. Only its "`=>` bodies are fn-only, named or anonymous"
+  clause changes.
+- The braces are the procedure's body (S16.4.3), not an arrow's expression
+  body. So `return`, `var` and `while` are admitted, `pn () => {}` is the
+  empty procedure (not the empty map S16.4.2 gives an unprefixed arrow), and
+  S16.6.8's rejection of a procedural arrow body does not reach it.
+- An expression body (`pn (x) => log(x) + save(x)`) nests `pn` calls inside
+  an expression, which is SO36 — deliberately open (§6 O5). Adding an
+  expression body later stays compatible; removing one would not.
+
+*No `var` parameter.* A procedure arrow is only ever called through a value,
+and S12.3.2 rejects a dynamic call to a `var` signature, so such a parameter
+could never be bound. It is rejected at the definition instead of at every
+call.
+
+**Rejected alternatives.**
+- `pn (x) { … }` — above.
+- `fn (x) => e` beside `(x) => e`, for symmetry with the procedure arrow: two
+  spellings of one thing. The unprefixed arrow already is the `fn` form; only
+  the non-default colour is spelled.
+- Inferring an arrow's colour from its body: a pure-looking arrow would
+  silently become a procedure at every call site. Colour is declared and
+  compiler-checked (S12.1.1v2), never inferred.
+
+**Migration.** `doc/Lambda_Func.md`'s unnamed `fn` example; the
+`fn(x) => …` sites in `test/std/core/statements/`, which already failed to
+parse; and two negative fixtures whose expected errors came from the
+misparse (`negative/test_stack_deep.ls`,
+`negative/runtime/test_closure_call_stack.ls`).
+
 ## Appendix S — Superseded Rulings
 
 Text that once stated a ruling and no longer does. It is kept for the
@@ -3268,6 +3357,27 @@ Replaced because a two-character `\.` introducer made `\.[1]` read as
 `\.` a complete path while `/.` is not, and gave `\.` ⏎ `b` a different
 meaning from `\. b` (S16.1.1). With `\` as the root, both roots share one
 step grammar.
+
+### S.5 No `=>` after an anonymous procedure (§6 point 36, §5.9) — SUPERSEDED 2026-09-26 by §7.30
+
+> ~~**`pn` has one body form**: `pn name() { ... }`. No `=>` after a
+> procedure signature, named or anonymous~~ (§6 point 36)
+>
+> ~~`=>` bodies are fn-only, named or anonymous — an expression-bodied
+> procedure is redundant with `fn` plus S16.6.6, and the reference grammar
+> never accepted it.~~ (as ratified in S16.6.7)
+>
+> ~~**Arrow bodies are fn context by definition, even inside a `pn`**~~
+> (§5.9; as ratified in S16.4.2)
+
+**Why it fell.** The redundancy argument held for named procedures only:
+`pn p() => { … }` duplicated the braced declaration. An anonymous procedure
+had no braced form to be redundant with, so the rule left procedures with no
+anonymous spelling at all.
+
+**Replacement:** §7.30 — the procedure arrow `pn (x) => { … }`, its body
+always braced; ratified as **S16.6.7v2, S16.4.2v2, S16.6.8v2** (spec
+v48.0.0, 2026-09-26).
 
 ## Appendix K — Keyword reference: which words may name a binding
 

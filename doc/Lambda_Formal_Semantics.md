@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 47.2.0 (2026-09-26)
+**Spec version:** 48.0.0 (2026-09-26)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2113,16 +2113,17 @@ below by its section.
   block-scoped (`let x = { let y = 1 y + 1 }`), which is what gives arrow
   functions block bodies without a JS-style `({...})` quirk.
   [Design_Syntax §5.9, §7.27]
-- **S16.4.2** **Empty `{}` resolves by context, and only where a tie
+- **S16.4.2v2*** **Empty `{}` resolves by context, and only where a tie
   exists.** Value position — initializers, call arguments, operands, in `fn`
   *and* `pn` — is the empty **map**. Content position is an empty map item,
   which is meaningful because it serializes. `if`/`for` bodies take **fn
   context → empty map, pn context → empty block**, aligning with value use:
-  fn control bodies produce values, pn control bodies discard them. Arrow
-  bodies are fn context by definition, even written inside a `pn`. A bare
-  `{}` **statement** in `pn` is a syntax error — dead code under either
-  reading — which removes the context rule from statement position entirely.
-  [Design_Syntax §5.9]
+  fn control bodies produce values, pn control bodies discard them. An
+  unprefixed arrow's body is fn context by definition, even written inside a
+  `pn`; a procedure arrow's braces are its body (S16.4.3, S16.6.7v2), so
+  `pn () => {}` is the empty procedure. A bare `{}` **statement** in `pn` is
+  a syntax error — dead code under either reading — which removes the context
+  rule from statement position entirely. [Design_Syntax §5.9, §7.30]
 - **S16.4.3** **Declaration braces are structural and never read as maps.**
   `fn`, `pn`, `view`, and `on` bodies, braced match arms (`case T { ... }`),
   handler arms (`^ { ... }`, `~ { ... }`), and `while` bodies are always
@@ -2193,23 +2194,34 @@ below by its section.
   and admits them: `if (c) { return x }`, `case T: { return x }`. Each
   rejection names the repair; the two grounds are argued in Design_Syntax
   §6 point 35. [Design_Syntax §6 point 35]
-- **S16.6.7*** A procedure has exactly **one body form**: the braced
-  statement block `pn name(...) { ... }`. `=>` bodies are fn-only, named or
-  anonymous — an expression-bodied procedure is redundant with `fn` plus
-  S16.6.6, and the reference grammar never accepted it. [Design_Syntax §6
-  point 36]
-- **S16.6.8*** A **procedural block is a statement, never an expression**.
-  A braced block whose top level contains a pn-only construct (`return`,
-  `break`, `continue`, `var`, assignment) is rejected in every expression
-  position: after `case T:`, in tuple/argument/operand position, as an `=>`
-  arrow body — an expression must produce a value, and a procedural block
-  may not (probe and grounds in Design_Syntax §6 point 37).
-  Functional blocks (`{ 1; 2 }`, `{ let r = f(x); g(r) }`) and maps remain
-  expressions everywhere, so `case T: { … }` stays legal and — by this very
-  ruling — can never conceal a statement: after `:`, braces are a map or a
-  pure block, nothing else. Classification is by interior, extending
-  S16.4.1v4's doctrine from brace-disambiguation to statement-ness.
-  [Design_Syntax §6 point 37]
+- **S16.6.7v2*** **A procedure's body is always the braced statement
+  block, and the arrow is the one anonymous function.** A declared procedure
+  is `pn name(...) { ... }`, never `=>`-bodied. An anonymous function is an
+  arrow: the unprefixed `(x) => e`, whose body is fn context (S16.4.2v2), or
+  the **procedure arrow** `pn (x) => { ... }`, whose body must be braced
+  (`pn (x) => e` is rejected): its braces are the procedure's body
+  (S16.4.3), where `return`, `var` and `while` belong. `fn` never begins an
+  anonymous function — `fn (x) { ... }` and `fn (x) => e` are not
+  expressions (S16.1.3v2), and the repair is `(x) => e`. *The arrow makes a
+  function anonymous; `pn` only sets its colour.* A procedure arrow is a
+  nested `pn` without its name: it captures by snapshot (S9.1.4), its value
+  is a `pn` (S11.1.5v2), and it may be created in any context, since only
+  calling it is `pn`-only (S12.1.1v2). It takes no `var` parameter, because
+  it is only ever called through a value (S12.3.2). [Design_Syntax §7.30,
+  §6 point 36; USER 2026-09-26]
+- **S16.6.8v2*** A **procedural block is a statement, never an
+  expression**. A braced block whose top level contains a pn-only construct
+  (`return`, `break`, `continue`, `var`, assignment) is rejected in every
+  expression position: after `case T:`, in tuple/argument/operand position,
+  as an unprefixed arrow's `=>` body — an expression must produce a value,
+  and a procedural block may not (probe and grounds in Design_Syntax §6
+  point 37). A procedure arrow's braces are its body, not an expression
+  position (S16.6.7v2). Functional blocks (`{ 1; 2 }`,
+  `{ let r = f(x); g(r) }`) and maps remain expressions everywhere, so
+  `case T: { … }` stays legal and — by this very ruling — can never conceal
+  a statement: after `:`, braces are a map or a pure block, nothing else.
+  Classification is by interior, extending S16.4.1v4's doctrine from
+  brace-disambiguation to statement-ness. [Design_Syntax §6 point 37, §7.30]
 - **S16.6.9*** **Branch homogeneity.** An `if`/`else` chain or `match` is
   either a **value form** — every branch an expression, where functional
   blocks, maps, and diverging `raise` arms all count as expressions — or a
@@ -2519,9 +2531,9 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
 | S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24** (C 123/123, Tree-sitter 118/118). S16.2.4v3 was verified on 2026-09-21 in both front ends, with S16.1.1 checked by joining each broken path line: C 197/197, Tree-sitter 180/180. S16.2.3v3's signature case landed on 2026-09-24 in both front ends (C `error_signature_return_line_start`, Tree-sitter's zero-width `_fn_return` guard): C 302/302, Tree-sitter 285/285. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Residue: O3 (sibling Tree-sitter scanners), §7.17 (comment vs line-start guard, benign), and the O4 doc sweep — all in [Design_Syntax §4.5/§6](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S16.4.1v4 | **v2 core conformant as of 2026-08-22; the v3 computed-key head (one balanced `[…]` group before the colon) is not implemented — tracked with S16.8.9.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
-| S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
-| S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. |
-| S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
+| S16.4.2v2 | **v2 (2026-09-26): the procedure-arrow clause is not implemented yet** — neither front end parses a procedure arrow (S16.6.7v2's row). The v1 rule was **conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
+| S16.6.6, S16.6.7v2 | S16.6.6 and the v1 declaration rule **conformant in both front ends as of 2026-08-24** (C 140/140, Tree-sitter 135/135, zero corpus movement). Enforcement mechanics and findings: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 35. **S16.6.7v2 (ruled 2026-09-26) is not implemented yet:** neither front end parses the procedure arrow `pn (x) => { … }`, and the C parser still reads `fn (x) { … }` as the `fn` atom, a call and a juxtaposed block, where it should reject it ([LR02-21](../vibe/Lambda_Issue_Ledger.md#lr02-21)). |
+| S16.6.8v2, S16.6.9 | v2 (2026-09-26): the exemption for a procedure arrow's body awaits the procedure arrow (S16.6.7v2's row). **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
 | S16.8.4, S16.8.8, S16.9.2 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.9.4 was probed on 2026-09-21 on both tiers and in both front ends, and ships unmarked. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
 | S12.3.7 | **Conformant as of 2026-08-27.** Module-local bindings win over same-named system functions, including non-callable shadows, and the compiler emits the required warning; explicit `lambda.sys.*` qualification remains the escape from that shadow under S17.2.2. Regression and implementation record: [LR02-15](<../vibe/Lambda_Issue_Ledger (fixed).md#lr02-15>). |
@@ -2627,7 +2639,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO36** Whether a `pn` call may appear nested inside an expression
   (`(pn_func(), 123)`, `if (exists(path)) …`), or only as a bare statement /
   the whole RHS of a binding — the A-normal-form effect-sequencing
-  discipline. Deliberately split off from S16.6.8/S16.6.9 and left open; the
+  discipline. Deliberately split off from S16.6.8v2/S16.6.9 and left open
+  (S16.6.7v2 keeps a procedure arrow's body braced so as not to prejudge it); the
   argument and cost survey live in
   [Design_Syntax §6 O5](../vibe/Lambda_Design_Syntax.md). An S12
   effect-boundary question. [S12.1]
