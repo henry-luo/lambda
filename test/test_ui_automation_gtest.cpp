@@ -47,6 +47,7 @@
 
 extern "C" {
 #include "../lib/shell.h"
+#include "../lib/file.h"
 }
 
 #ifdef _WIN32
@@ -88,6 +89,11 @@ struct UiTestInfo {
     std::vector<std::string> output_contains;
     std::vector<std::string> output_not_contains;
     bool skip_headless;      // requires native GUI window (e.g. WKWebView tests)
+    // `"command": "edit"` launches the lambda.edit application instead of the
+    // viewer. A `"working_copy"` under temp/ is refreshed from the fixture
+    // document before each run, so a Save never writes a committed file.
+    bool edit_command;
+    char working_copy[256];
     int estimated_wait_ms;   // explicit event waits, used only for launch scheduling
     int explicit_wait_count;
     int assertion_count;
@@ -484,6 +490,28 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
         return false;
     }
     if (skip_headless.isBool() && skip_headless.asBool()) info->skip_headless = true;
+    ItemReader command = root_map.get("command");
+    const char* command_name = command.isString() ? command.cstring() : nullptr;
+    if (!command.isNull() && (!command_name ||
+            (strcmp(command_name, "view") != 0 && strcmp(command_name, "edit") != 0))) {
+        g_ui_discovery_error = "fixture command must be \"view\" or \"edit\": " + json_path;
+        ui_dispose_json_input(pool, input);
+        return false;
+    }
+    info->edit_command = command_name && strcmp(command_name, "edit") == 0;
+    info->working_copy[0] = '\0';
+    ItemReader working_copy = root_map.get("working_copy");
+    if (!working_copy.isNull()) {
+        const char* copy_path = working_copy.isString() ? working_copy.cstring() : nullptr;
+        if (!copy_path || strncmp(copy_path, "temp/", 5) != 0 ||
+                !ui_safe_repo_path(copy_path) ||
+                strlen(copy_path) >= sizeof(info->working_copy)) {
+            g_ui_discovery_error = "fixture working_copy must be a relative temp/ path: " + json_path;
+            ui_dispose_json_input(pool, input);
+            return false;
+        }
+        snprintf(info->working_copy, sizeof(info->working_copy), "%s", copy_path);
+    }
     ItemReader assertions = root_map.get("assertions");
     if (!assertions.isNull()) {
         if (!assertions.isArray() && !assertions.isList()) {
@@ -799,14 +827,25 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     remove(result_path.c_str());
     result.result_path = result_path;
 
-    // Build command: ./lambda.exe view <html> --event-file <json>
+    // Build command: ./lambda.exe view|edit <document> --event-file <json>
     // The window auto-closes when simulation completes (auto_close=true in EventSimContext).
     // Exit code: 0 = all assertions passed, 1 = one or more failed.
+    const char* document_path = info.html_path.c_str();
+    if (info.working_copy[0]) {
+        FileCopyOptions copy_options = {true, false};
+        if (file_copy(info.html_path.c_str(), info.working_copy, &copy_options) != 0) {
+            result.output = "could not refresh working copy ";
+            result.output += info.working_copy;
+            result.exit_code = -1;
+            return result;
+        }
+        document_path = info.working_copy;
+    }
     const char* args[16];
     int arg_count = 0;
     args[arg_count++] = LAMBDA_EXE;
-    args[arg_count++] = "view";
-    args[arg_count++] = info.html_path.c_str();
+    args[arg_count++] = info.edit_command ? "edit" : "view";
+    args[arg_count++] = document_path;
     args[arg_count++] = "--event-file";
     args[arg_count++] = info.json_path.c_str();
     args[arg_count++] = "--event-result";

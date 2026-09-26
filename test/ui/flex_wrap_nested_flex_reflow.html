@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><style>
+  body { margin: 0; font-family: sans-serif; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; width: 300px; background: #eee; }
+  .group { display: flex; gap: 2px; padding-right: 8px; border-right: 1px solid #999; }
+  .btn { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid transparent; background: transparent; font-size: 13px; white-space: nowrap; }
+  .chip { padding: 2px 10px; border: 1px solid #999; font-size: 13px; white-space: nowrap; }
+  #probe { margin-top: 20px; }
+</style></head><body>
+<div class="bar" id="buttons">
+  <div class="group" id="g1"><button class="btn" id="b1">Save</button><button class="btn" id="b2">Save As</button><button class="btn" id="b3">Undo</button></div>
+  <div class="group" id="g2"><button class="btn" id="b4">P</button><button class="btn" id="b5">H1</button><button class="btn" id="b6">H2</button></div>
+  <div class="group" id="g3"><button class="btn" id="b7">Bold</button><button class="btn" id="b8">Italic</button><button class="btn" id="b9">Strike</button></div>
+</div>
+<div class="bar" id="chips">
+  <div class="group" id="g4"><span class="chip" id="c1">Alpha</span><span class="chip" id="c2">Beta</span><span class="chip" id="c3">Gamma</span></div>
+  <div class="group" id="g5"><span class="chip" id="c4">Delta</span><span class="chip" id="c5">Epsilon</span></div>
+</div>
+<div id="probe">click target</div>
+</body></html>

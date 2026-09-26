@@ -1,0 +1,38 @@
+"envelope keeps the front matter:"
+["---\ntitle: Adapter sample\ntags: [a, b]\n---\n\n"]
+"blocks:"
+['h1', 'p', 'ol', 'ul', 'blockquote', 'pre', 'table', 'html_block', 'math_block']
+"heading content:"
+[{
+    kind: 'text',
+    text: "Heading with ",
+    marks: []
+  }, {
+    kind: 'text',
+    text: "emphasis",
+    marks: [{
+        name: 'em',
+        value: true
+      }]
+  }]
+"ordered list (one loose list: the blank line continues it):"
+[{
+    name: 'loose',
+    value: true
+  }]
+"task items:"
+[true, false, null, null]
+"code block:"
+["python", "print(\"hi\")"]
+"gate on the loaded model passes:"
+true
+"written:"
+["---\ntitle: Adapter sample\ntags: [a, b]\n---\n\n# Heading with *emphasis*\n\nText with **bold**, `code`, ~~struck~~, x^2^, a [link](https://example.com \"Example\"),\nan ![image](pic.png), inline <span class=\"k\">HTML</span>, and $e^x$ math.\nLine with a hard break\\\nafter it.\n\n1. first\n\n2. second\n\n3. five\n\n4. six\n\n- [x] done\n\n- [ ] open\n\n- loose one\n\n- loose two\n\n> A quote\n>\n> - with a list\n\n```python\nprint(\"hi\")\n```\n\n| left | right |\n| :-- | --: |\n| a | b |\n\n<div class=\"note\">kept as is</div>\n\n$$x = y$$\n"]
+"written again is unchanged:"
+true
+"gate on unrepresentable formatting:"
+["block 1 <p> \"under\" would change"]
+"footnote refused:"
+["the Markdown editor cannot keep <footnote-ref> content yet; open it with 'lambda view' instead"]
+"declined commands:"
+["formatUnderline", "formatSubscript"]

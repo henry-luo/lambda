@@ -343,10 +343,16 @@ Item interp_run_script(Runner* runner, bool run_main);
 Item interp_run_repl_fragment(Runner* runner, AstNode* fragment);
 
 // Calls an initialized public module function from a native document loader.
-// The module's own slab and T0 dispatch state remain authoritative.
+// The module's own slab and T0 dispatch state remain authoritative; a module
+// compiled by MIR Direct is entered through its boxed `_b` export (D7.2.2).
 Item interp_call_module_export(Runtime* runtime, Script* module,
                                const char* export_name,
                                const Item* args, int argc);
+
+// Publish `entry`, the boxed (`_b`) MIR entry of `def`, as `fn`'s native entry
+// with its context ABI, procedure/function colour, and public return shape.
+void lambda_function_publish_boxed_entry(Function* fn, const AstFuncNode* def,
+                                         void* entry);
 
 // Invokes a retained Lambda callback after its original T0 activation ended.
 // The callback's defining module owns both its slab and interpreter state.

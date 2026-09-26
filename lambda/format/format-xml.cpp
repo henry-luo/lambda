@@ -139,6 +139,18 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
         }
 
     private:
+        // string children, unescaped, each after `prefix`
+        void write_children_raw(const ElementReader& elem, const char* prefix) {
+            auto child_iter = elem.children();
+            ItemReader child;
+            while (child_iter.next(&child)) {
+                String* str = child.isString() ? child.asString() : nullptr;
+                if (!str) continue;
+                ctx_.write_text(prefix);
+                stringbuf_append_str_n(ctx_.output(), str->chars, str->len);
+            }
+        }
+
         void format_element(const ElementReader& elem) {
             const char* elem_name = elem.tagName();
             if (!elem_name || elem_name[0] == '\0') {
@@ -168,6 +180,22 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
                 ctx_.write_text("?>");
                 return; // Early return for XML declaration
+            }
+
+            // The XML parser keeps a comment as a "!--" element and any other
+            // processing instruction as "?target"; both carry their text as
+            // written, so it is emitted raw rather than as an element.
+            if (strcmp(elem_name, "!--") == 0) {
+                ctx_.write_text("<!--");
+                write_children_raw(elem, "");
+                ctx_.write_text("-->");
+                return;
+            }
+            if (elem_name[0] == '?') {
+                ctx_.emit("<%N", elem_name);
+                write_children_raw(elem, " ");
+                ctx_.write_text("?>");
+                return;
             }
 
             ctx_.emit("<%N", elem_name);

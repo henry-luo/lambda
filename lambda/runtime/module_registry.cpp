@@ -3,6 +3,7 @@
 #include "module_registry.h"
 #include "ast.hpp"
 #include "transpiler.hpp"
+#include "interp.hpp"
 #include "concurrency_js.h"
 #include "lambda-root-frame.hpp"
 #include "../../lib/hashmap.h"
@@ -419,27 +420,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
                         lambda_function_set_type(fn, fn_type);
                         // Published MIR wrappers require the defining context;
                         // their v3 companion lane is not a caller-home ABI.
-                        lambda_function_mark_mir_context_abi(fn);
-                        if (node->node_type == AST_NODE_PROC) {
-                            lambda_function_mark_lambda_boxed_procedure(fn);
-                        } else {
-                            lambda_function_mark_lambda_boxed_function(fn);
-                        }
-                        FnVariantAnalysis* public_variant = fn_node->analysis
-                            ? fn_analysis_variant(fn_node->analysis,
-                                FN_ENTRY_PUBLIC_WRAPPER) : NULL;
-                        uint32_t public_shape = LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
-                        if (public_variant) {
-                            public_shape = public_variant->result.shape ==
-                                RETURN_SHAPE_ITEM
-                                ? LAMBDA_MIR_PUBLIC_RETURN_ITEM
-                                : public_variant->result.shape ==
-                                    RETURN_SHAPE_ITEM_SCALAR
-                                    ? LAMBDA_MIR_PUBLIC_RETURN_ITEM_COMPANION
-                                    : LAMBDA_MIR_PUBLIC_RETURN_UNKNOWN;
-                        }
-                        lambda_function_mark_mir_public_return_shape(fn,
-                            public_shape);
+                        lambda_function_publish_boxed_entry(fn, fn_node, func_ptr);
                     }
                     // Lambda procedures cross into JavaScript through one
                     // uniform Promise membrane, even when a particular call

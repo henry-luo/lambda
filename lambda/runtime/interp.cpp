@@ -1559,8 +1559,6 @@ static uint64_t* interp_borrow_home(InterpFrame* f, NameEntry* entry) {
 }
 static Function* interp_make_method_closure(Script* module,
         const TypeMethod* method, Item self);
-static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
-        void* entry);
 
 
 bool interp_native_sys_item_supported(const SysFuncInfo* info) {
@@ -2416,7 +2414,7 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
         void* entry = NULL;
         if (st && st->runtime && compile_ast_function_satellite(
                 st->runtime, module, fn_node, &entry) && entry) {
-            interp_upgrade_function_entry(fn, fn_node, entry);
+            lambda_function_publish_boxed_entry(fn, fn_node, entry);
         } else {
             log_error("interp: async procedure '%s' could not publish its MIR satellite",
                 fn_node->name ? fn_node->name->chars : "<anonymous>");
@@ -6476,6 +6474,7 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
     }
     AstScript* root = (AstScript*)module->ast_root;
     NameEntry* export_entry = NULL;
+    AstFuncNode* export_function = NULL;
     AstNode* node = root->child;
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) {
@@ -6488,6 +6487,7 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
             TypeFunc* signature = (TypeFunc*)function->type;
             if (signature && signature->is_public && function->name &&
                     strcmp(function->name->chars, export_name) == 0) {
+                export_function = function;
                 // Cached AST clones rebind this scope, not AstFuncNode::entry.
                 for (NameEntry* entry = root->global_vars
                         ? root->global_vars->first : NULL;
@@ -6505,9 +6505,31 @@ Item interp_call_module_export(Runtime* runtime, Script* module,
     if (!export_entry || !export_entry->storage_assigned ||
             export_entry->binding_storage != BINDING_STORAGE_MODULE ||
             export_entry->slot < 0) {
-        log_error("document-transform: module '%s' has no public function '%s'",
-            module->reference ? module->reference : "<unknown>", export_name);
-        return ItemError;
+        // A module compiled by MIR Direct (templates with handlers, for one)
+        // has no T0 module slot for its functions; its export is the boxed
+        // `_b` entry in its JIT context (D7.2.2).
+        void* boxed_entry = NULL;
+        if (export_function && module->jit_context) {
+            StrBuf* name = strbuf_new_cap(64);
+            write_fn_name_ex(name, export_function, NULL, "_b");
+            boxed_entry = find_func((MIR_context_t)module->jit_context, name->str);
+            strbuf_free(name);
+        }
+        if (!boxed_entry) {
+            log_error("document-transform: module '%s' has no public function '%s'",
+                module->reference ? module->reference : "<unknown>", export_name);
+            return ItemError;
+        }
+        TypeFunc* signature = (TypeFunc*)export_function->type;
+        RootFrame roots(1);
+        Rooted<Item> callable(roots, (Item){.function = to_fn_named(NULL,
+            signature ? signature->param_count : argc, export_function->name->chars)});
+        Function* function = callable.get().function;
+        if (!function) return ItemError;
+        function->def_module = module;
+        lambda_function_set_type(function, signature);
+        lambda_function_publish_boxed_entry(function, export_function, boxed_entry);
+        return interp_call_runtime_function(runtime, function, args, argc);
     }
     RuntimeModuleStateScope module_state(eval_context);
     if (!module_state.activate(module->module_state_id)) {
@@ -6923,7 +6945,7 @@ static bool interp_satellite_sync_enabled(void) {
     return value && strcmp(value, "1") == 0;
 }
 
-static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
+void lambda_function_publish_boxed_entry(Function* fn, const AstFuncNode* def,
         void* entry) {
     if (!fn || !def || !entry) return;
     // Publish the native pointer before the ABI byte: every later dispatcher
@@ -6998,7 +7020,7 @@ static bool interp_whole_script_publish_function(Script* script,
 
     void* entry = interp_whole_script_entry(script, def);
     if (!entry) return false;
-    interp_upgrade_function_entry(fn, def, entry);
+    lambda_function_publish_boxed_entry(fn, def, entry);
     FnPromotionCell* cell = interp_promotion_cell(script, def);
     if (!cell) return false;
     cell->state = FN_PROMOTION_COMPILED;
@@ -7022,7 +7044,7 @@ bool interp_publish_satellite_member(Script* script, AstFuncNode* def, void* ent
     FnPromotionCell* cell = interp_promotion_cell(script, def);
     if (!cell) return false;
     if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
-        interp_upgrade_function_entry(fn, def, entry);
+        lambda_function_publish_boxed_entry(fn, def, entry);
     }
     cell->state = FN_PROMOTION_COMPILED;
     cell->boxed_entry = entry;
@@ -7213,7 +7235,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     // the current activation keeps its T0 frame and never performs OSR.
     interp_satellite_publish_ready(script);
     if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
-        interp_upgrade_function_entry(fn, def, cell->boxed_entry);
+        lambda_function_publish_boxed_entry(fn, def, cell->boxed_entry);
         return true;
     }
     if (cell->state == FN_PROMOTION_PINNED_INTERP ||
@@ -7274,7 +7296,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         pthread_mutex_unlock(&queue->mutex);
         interp_satellite_publish_ready(script);
         if (cell->state == FN_PROMOTION_COMPILED && cell->boxed_entry) {
-            interp_upgrade_function_entry(fn, def, cell->boxed_entry);
+            lambda_function_publish_boxed_entry(fn, def, cell->boxed_entry);
             return true;
         }
     }

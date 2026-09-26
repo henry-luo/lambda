@@ -275,128 +275,119 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
     // Track if we encounter a setext underline at the end
     int setext_level = 0;
 
-    // Check if we should continue collecting lines for this paragraph
-    // Don't join lines that contain math expressions to avoid malformed expressions
-    bool first_line_has_math = (strstr(first_line, "$") != nullptr);
+    // Collect continuation lines. Inline math joins like any other inline:
+    // only a blank line or an interrupting block (including a `$$` math
+    // block) ends a paragraph, so a `$` in the text never splits one.
+    while (parser->current_line < parser->line_count) {
+        const char* current = parser->lines[parser->current_line];
 
-    if (!first_line_has_math) {
-        // Collect continuation lines
-        while (parser->current_line < parser->line_count) {
-            const char* current = parser->lines[parser->current_line];
-
-            // Empty line ends paragraph
-            if (is_empty_line(current)) {
-                break;
-            }
-
-            // Check if current line is a setext underline
-            // BUT: lazy continuation lines should NOT be treated as setext underlines
-            // (they were collected from outside the container and are just paragraph text)
-            int underline_level = is_setext_underline(current);
-            if (underline_level > 0) {
-                // Check if this line is a lazy continuation
-                bool is_lazy = false;
-                if (parser->state.lazy_lines &&
-                    (size_t)parser->current_line < parser->state.lazy_lines_count) {
-                    is_lazy = parser->state.lazy_lines[parser->current_line];
-                }
-
-                if (!is_lazy) {
-                    // This is a setext heading - consume the underline and stop
-                    setext_level = underline_level;
-                    parser->current_line++;
-                    break;
-                }
-                // Lazy continuation - treat as regular paragraph line, fall through
-            }
-
-            // Check if next line starts a different block type
-            // NOTE: Indented code blocks do NOT interrupt paragraphs in CommonMark
-            BlockType next_type = detect_block_type(parser, current);
-
-            // These block types interrupt paragraphs:
-            // - Headers, lists, blockquotes, thematic breaks, fenced code, HTML blocks
-            // Indented code blocks (4+ spaces) do NOT interrupt paragraphs
-            // For HEADER: we need to check if it's an ATX header (starts with #)
-            // Setext headers are handled by detecting the underline above
-            if (next_type == BlockType::HEADER) {
-                // Only ATX headers (starting with #) interrupt paragraphs
-                const char* pos = current;
-                skip_whitespace(&pos);
-                if (*pos == '#') {
-                    break;  // ATX header interrupts
-                }
-                // Otherwise this line is detected as setext due to next line being underline
-                // But we should include this line and check for underline on next iteration
-            } else if (next_type == BlockType::LIST_ITEM) {
-                // When parsing list item content, list items ALWAYS interrupt paragraphs
-                // This allows nested lists to work properly
-                if (parser->state.parsing_list_content) {
-                    break;  // Allow list items to interrupt within list content
-                }
-
-                // CommonMark rules for list items interrupting paragraphs:
-                // - Empty list items (no content after marker) CANNOT interrupt
-                // - Unordered list items (-, *, +) with content CAN interrupt
-                // - Ordered list items starting with 1 (1., 1)) with content CAN interrupt
-                // - Ordered list items NOT starting with 1 CANNOT interrupt
-                FormatAdapter* adapter = parser->adapter();
-                if (adapter) {
-                    ListItemInfo list_info = adapter->detectListItem(current);
-                    if (!list_info.valid) {
-                        // Not a valid list item, continue collecting paragraph
-                    } else {
-                        // Check if there's actual content after the marker
-                        bool has_content = list_info.text_start && *list_info.text_start &&
-                            *list_info.text_start != '\r' && *list_info.text_start != '\n';
-
-                        if (!has_content) {
-                            // Empty list item cannot interrupt paragraph
-                        } else if (!list_info.is_ordered) {
-                            // Unordered list with content CAN interrupt
-                            break;
-                        } else if (list_info.number == 1) {
-                            // Ordered list starting with 1 and content CAN interrupt
-                            break;
-                        }
-                        // Ordered list not starting with 1 cannot interrupt - continue
-                    }
-                } else {
-                    // Fallback: don't interrupt (safer default)
-                }
-            } else if (next_type == BlockType::QUOTE ||
-                       next_type == BlockType::DIVIDER ||
-                       next_type == BlockType::TABLE ||
-                       next_type == BlockType::MATH) {
-                break;  // These block types interrupt paragraphs
-            } else if (next_type == BlockType::CODE_BLOCK) {
-                // Check if it's a fenced code block (``` or ~~~)
-                const char* pos = current;
-                skip_whitespace(&pos);
-                if (*pos == '`' || *pos == '~') {
-                    break;  // Fenced code interrupts paragraphs
-                }
-                // Indented code block - doesn't interrupt, fall through
-            } else if (next_type == BlockType::RAW_HTML) {
-                // HTML block types 1-6 can interrupt paragraphs, type 7 cannot
-                if (html_block_can_interrupt_paragraph(current)) {
-                    break;  // HTML block types 1-6 interrupt paragraphs
-                }
-                // Type 7 HTML blocks don't interrupt - fall through
-            }
-
-            const char* content = current;
-            skip_whitespace(&content);
-
-            // Don't join lines that contain math expressions
-            if (strstr(content, "$") != nullptr) {
-                break;
-            }
-
-            // CommonMark: Add newline between lines (soft line break), not space
-            stringbuf_append_all(sb, 2, "\n", content);
-            parser->current_line++;
+        // Empty line ends paragraph
+        if (is_empty_line(current)) {
+            break;
         }
+
+        // Check if current line is a setext underline
+        // BUT: lazy continuation lines should NOT be treated as setext underlines
+        // (they were collected from outside the container and are just paragraph text)
+        int underline_level = is_setext_underline(current);
+        if (underline_level > 0) {
+            // Check if this line is a lazy continuation
+            bool is_lazy = false;
+            if (parser->state.lazy_lines &&
+                (size_t)parser->current_line < parser->state.lazy_lines_count) {
+                is_lazy = parser->state.lazy_lines[parser->current_line];
+            }
+
+            if (!is_lazy) {
+                // This is a setext heading - consume the underline and stop
+                setext_level = underline_level;
+                parser->current_line++;
+                break;
+            }
+            // Lazy continuation - treat as regular paragraph line, fall through
+        }
+
+        // Check if next line starts a different block type
+        // NOTE: Indented code blocks do NOT interrupt paragraphs in CommonMark
+        BlockType next_type = detect_block_type(parser, current);
+
+        // These block types interrupt paragraphs:
+        // - Headers, lists, blockquotes, thematic breaks, fenced code, HTML blocks
+        // Indented code blocks (4+ spaces) do NOT interrupt paragraphs
+        // For HEADER: we need to check if it's an ATX header (starts with #)
+        // Setext headers are handled by detecting the underline above
+        if (next_type == BlockType::HEADER) {
+            // Only ATX headers (starting with #) interrupt paragraphs
+            const char* pos = current;
+            skip_whitespace(&pos);
+            if (*pos == '#') {
+                break;  // ATX header interrupts
+            }
+            // Otherwise this line is detected as setext due to next line being underline
+            // But we should include this line and check for underline on next iteration
+        } else if (next_type == BlockType::LIST_ITEM) {
+            // When parsing list item content, list items ALWAYS interrupt paragraphs
+            // This allows nested lists to work properly
+            if (parser->state.parsing_list_content) {
+                break;  // Allow list items to interrupt within list content
+            }
+
+            // CommonMark rules for list items interrupting paragraphs:
+            // - Empty list items (no content after marker) CANNOT interrupt
+            // - Unordered list items (-, *, +) with content CAN interrupt
+            // - Ordered list items starting with 1 (1., 1)) with content CAN interrupt
+            // - Ordered list items NOT starting with 1 CANNOT interrupt
+            FormatAdapter* adapter = parser->adapter();
+            if (adapter) {
+                ListItemInfo list_info = adapter->detectListItem(current);
+                if (!list_info.valid) {
+                    // Not a valid list item, continue collecting paragraph
+                } else {
+                    // Check if there's actual content after the marker
+                    bool has_content = list_info.text_start && *list_info.text_start &&
+                        *list_info.text_start != '\r' && *list_info.text_start != '\n';
+
+                    if (!has_content) {
+                        // Empty list item cannot interrupt paragraph
+                    } else if (!list_info.is_ordered) {
+                        // Unordered list with content CAN interrupt
+                        break;
+                    } else if (list_info.number == 1) {
+                        // Ordered list starting with 1 and content CAN interrupt
+                        break;
+                    }
+                    // Ordered list not starting with 1 cannot interrupt - continue
+                }
+            } else {
+                // Fallback: don't interrupt (safer default)
+            }
+        } else if (next_type == BlockType::QUOTE ||
+                   next_type == BlockType::DIVIDER ||
+                   next_type == BlockType::TABLE ||
+                   next_type == BlockType::MATH) {
+            break;  // These block types interrupt paragraphs
+        } else if (next_type == BlockType::CODE_BLOCK) {
+            // Check if it's a fenced code block (``` or ~~~)
+            const char* pos = current;
+            skip_whitespace(&pos);
+            if (*pos == '`' || *pos == '~') {
+                break;  // Fenced code interrupts paragraphs
+            }
+            // Indented code block - doesn't interrupt, fall through
+        } else if (next_type == BlockType::RAW_HTML) {
+            // HTML block types 1-6 can interrupt paragraphs, type 7 cannot
+            if (html_block_can_interrupt_paragraph(current)) {
+                break;  // HTML block types 1-6 interrupt paragraphs
+            }
+            // Type 7 HTML blocks don't interrupt - fall through
+        }
+
+        const char* content = current;
+        skip_whitespace(&content);
+
+        // CommonMark: Add newline between lines (soft line break), not space
+        stringbuf_append_all(sb, 2, "\n", content);
+        parser->current_line++;
     }
 
     // If we found a setext underline, convert to heading instead of paragraph

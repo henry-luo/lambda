@@ -502,6 +502,13 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em);
 bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form);
 float form_button_flow_content_intrinsic_width(LayoutContext* lycon, ViewBlock* block);
+// A <button> renders its DOM children as its label, so its FormControlProp
+// intrinsic size is not a native control size: flex sizing stores the flow
+// label's content width there, and a reflow retains it with the view pool.
+// Intrinsic contributions of a <button> must measure its flow content instead.
+inline bool layout_form_control_has_native_intrinsic_size(const DomElement* element) {
+    return element && element->form_control() && element->tag() != MARKUP_NAME_BUTTON;
+}
 void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* element);
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
 float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,

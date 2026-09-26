@@ -1,0 +1,21 @@
+{
+  "name": "at 125% a press still picks the object under it, and a drag moves it by the pointer distance in user units",
+  "command": "edit",
+  "html": "test/ui/edit/sample.svg",
+  "working_copy": "temp/edit-ui/edit_svg_zoom_pick.svg",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-btn-zoom_in"}},
+    {"type": "assert_text", "target": {"selector": ".edit-zoom"}, "equals": "125%"},
+    {"type": "click", "target": {"selector": "#dot"}},
+    {"type": "assert_attribute", "target": {"selector": ".edit-frame"}, "attribute": "x", "equals": "180"},
+    {"type": "assert_attribute", "target": {"selector": ".edit-frame"}, "attribute": "width", "equals": "80"},
+    {"type": "mouse_drag", "target": {"selector": "#dot"}, "to_target": {"selector": "#dot", "offset_x": 75, "offset_y": 75}},
+    {"type": "assert_attribute", "target": {"selector": "#dot"}, "attribute": "cx", "equals": "240"},
+    {"type": "assert_attribute", "target": {"selector": "#dot"}, "attribute": "cy", "equals": "80"},
+    {"type": "assert_attribute", "target": {"selector": ".edit-frame"}, "attribute": "x", "equals": "200"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_zoom_pick.svg", "contains": "<circle id=\"dot\" cx=\"240\" cy=\"80\" r=\"40\""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_zoom_pick.svg", "contains": "width=\"400\" height=\"300\" viewBox=\"0 0 400 300\""}
+  ]
+}

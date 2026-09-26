@@ -81,6 +81,15 @@ bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
 void* dom_document_svg_element_from_point(void* dom_doc, float x, float y);
 
 /**
+ * Viewport bounds of an element drawn by an <svg> (not the outer <svg>, nor
+ * HTML inside <foreignObject>): such an element has no CSS box, so its bounds
+ * are its SVG bounding box transformed as it is painted (CSSOM View §6.1).
+ * False, leaving the outputs untouched, for any other element.
+ */
+bool dom_svg_element_client_bounds(void* dom_elem, float* x, float* y,
+                                   float* width, float* height);
+
+/**
  * Return the exact native target used by document.elementFromPoint() without
  * allocating a JavaScript wrapper. Automation assertions use this bridge so
  * their result cannot diverge from the public DOM API.

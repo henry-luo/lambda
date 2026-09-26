@@ -1,0 +1,23 @@
+{
+  "name": "an HTML document opens as rich text; its head, scripts and handlers are not projected",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_open.html",
+  "viewport": {"width": 1000, "height": 900},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-toolbar"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-btn-underline"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-name"}, "equals": "edit_html_open.html"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface h1"}, "equals": "Welcome & hello"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface p strong"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface p u"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface table td"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": "#edit-surface .edit-opaque"}, "count": 4},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "head script"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "font-family"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface [onclick]"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#edit-surface a[href]"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#edit-surface script"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

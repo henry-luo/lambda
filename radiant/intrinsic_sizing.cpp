@@ -3917,7 +3917,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             replaced_tag == MARKUP_NAME_INPUT &&
             form_button_label_text(view_block_replaced,
                                    view_block_replaced->form);
-        bool has_measurable_form_control = view_block_replaced->form &&
+        // A <button>'s form width is only a label width stashed by flex sizing (and
+        // retained by a reflow); native measurement omits its flow children, so a
+        // <button> always takes the content path below, as on a first layout.
+        bool has_measurable_form_control =
+            layout_form_control_has_native_intrinsic_size(view_block_replaced) &&
             (view_block_replaced->form->intrinsic_width > 0 ||
              input_button_has_native_label);
         // Input buttons have no DOM text child, so their native label must be measured centrally.

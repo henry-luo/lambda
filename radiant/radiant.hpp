@@ -320,6 +320,23 @@ int view_lambda_document_transform_with_events(const char* document_file,
     const LambdaDocumentTransformOption* options, int option_count,
     const char* event_file, bool headless, const char** font_dirs,
     int font_dir_count, bool enable_event_log, bool enable_state_dump);
+// Open a local document in the lambda.edit authoring application. The window
+// runs in edit app mode: Escape reaches the document, and a close request
+// consults the session's close guard (Radiant_Design_Edit_Mode §7-§8).
+int edit_doc_in_window_with_events(const char* document_file,
+    const char* event_file, bool headless, const char** font_dirs,
+    int font_dir_count, bool enable_event_log, bool enable_state_dump);
+// Edit-application window decisions. Each acts only when `doc` is the
+// presented top-level document: the session arms the close guard while it is
+// dirty, approves a close after its Save / Discard decision, and retitles the
+// window to show the file name and unsaved state.
+bool radiant_window_set_close_guard(DomDocument* doc, bool armed);
+bool radiant_window_approve_close(DomDocument* doc);
+bool radiant_window_set_title(DomDocument* doc, const char* title);
+// A platform close request (close button, application quit, simulator).
+// Returns true when the window may close now, false while an armed edit
+// session decides (it received a `closerequest` event).
+bool radiant_window_platform_close(UiContext* uicon);
 int view_doc_in_window(const char* doc_file);
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);

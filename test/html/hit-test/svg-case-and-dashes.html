@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- SVG attributes keep their case (viewBox, gradientUnits) through the DOM,
+     and a dashed stroke whose dash lengths are not exact floats is hit-tested
+     without stalling. -->
+<style>
+html, body { margin: 0; padding: 0; }
+svg { display: block; }
+#state { font: 12px monospace; }
+</style>
+<svg id="surface" width="400" height="200" viewBox="0 0 200 100">
+  <defs><linearGradient id="grad" gradientUnits="userSpaceOnUse"><stop offset="0"/></linearGradient></defs>
+  <rect id="dashed" x="10" y="10" width="120" height="60" fill="none" stroke="#369"
+        stroke-width="2" stroke-dasharray="3.2 2.4"/>
+  <rect id="solid" x="150" y="10" width="40" height="40" fill="#963"/>
+</svg>
+<div id="state">pending</div>
+<script>
+const svg = document.getElementById("surface");
+const grad = document.getElementById("grad");
+const results = [];
+results.push(svg.getAttribute("viewBox") === "0 0 200 100");
+results.push(svg.hasAttribute("viewBox"));
+results.push(grad.getAttribute("gradientUnits") === "userSpaceOnUse");
+svg.setAttribute("viewBox", "0 0 200 100");
+results.push(svg.getAttributeNames().filter(n => n.toLowerCase() === "viewbox").length === 1);
+document.getElementById("state").textContent = results.every(Boolean) ? "ok" : "fail " + JSON.stringify(results);
+</script>

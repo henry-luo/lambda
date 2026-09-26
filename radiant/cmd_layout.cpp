@@ -55,6 +55,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/interp.hpp"
 #include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_transpiler.hpp"
@@ -3639,6 +3640,23 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
     return doc;
 }
 
+// One-shot CLI diagnostic: the loader copies the message out of the error
+// value before the document Runtime that owns it is released.
+static char g_lambda_document_load_diagnostic[512];
+
+static void lambda_document_set_load_diagnostic(Item result) {
+    LambdaError* error = get_type_id(result) == LMD_TYPE_ERROR ? it2err(result) : nullptr;
+    const char* message = error && error->message && error->message[0]
+        ? error->message : "the document returned an error";
+    snprintf(g_lambda_document_load_diagnostic,
+             sizeof(g_lambda_document_load_diagnostic), "%s", message);
+    log_error("document-load: %s", g_lambda_document_load_diagnostic);
+}
+
+const char* lambda_document_load_diagnostic(void) {
+    return g_lambda_document_load_diagnostic[0] ? g_lambda_document_load_diagnostic : nullptr;
+}
+
 // Evaluate a Lambda document or configured native transform, then run its
 // result through the shared CSS/layout pipeline.
 static DomDocument* load_lambda_document_doc(Url* script_url,
@@ -3651,6 +3669,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         log_error("load_lambda_script_doc: invalid parameters");
         return nullptr;
     }
+    g_lambda_document_load_diagnostic[0] = '\0';
     if (context) {
         // Starting a second document Runtime on an occupied eval thread would
         // require the forbidden save/switch/restore lifetime pattern.
@@ -3732,6 +3751,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
 
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
+        lambda_document_set_load_diagnostic(script_output->root);
         release_layout_runtime(runtime);
         pool_destroy(result_pool);
         return nullptr;

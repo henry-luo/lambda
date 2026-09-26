@@ -13,7 +13,9 @@ import .mod_md_schema
 import .mod_source_pos
 import .mod_transaction
 import dom_adapter: lambda.editor.mod_dom_adapter
+import query: lambda.editor.mod_query
 import edit_request: lambda.dom.edit_request
+import edit_result: lambda.dom.edit_result
 import edit_registry: lambda.dom.edit_registry
 import dom
 
@@ -42,6 +44,15 @@ pub pn edit_mount(editor, surface, preset) {
                else dom.bind_model_edit_surface(surface, editor.model_revision);
   { *: editor, events: [*editor.events, {kind: 'mount', surface: surface, preset: preset}],
     mounted: true, preset: preset, surface_handle: handle }
+}
+
+// Put the native selection back where the model has it after focus left the
+// surface (a toolbar dialog took it), through the same completion bridge a
+// model edit uses; no edit is applied (Lambda DOM Editable §8.3).
+pub pn edit_restore_selection(editor) {
+  if (editor.surface_handle == null) false
+  else dom.finish_model_edit(editor.surface_handle,
+         edit_result.model_applied(false, true, false, "", editor.selection, editor.model_revision))
 }
 
 // keep this pure state transition total when its public signature crosses a module boundary.
@@ -111,6 +122,13 @@ pub fn edit_request_from_toolbar(input_type, payload) {
 }
 
 pub fn edit_descriptor(spelling) => edit_registry.descriptor(spelling)
+
+// Toolbar state is a model-facet query (Lambda DOM Editable §8.3).
+pub fn edit_mark_active(editor, mark) => query.mark_active(editor, mark)
+pub fn edit_enclosing_tag(editor, tags) => query.enclosing_tag_in(editor, tags)
+pub fn edit_inside(editor, tag) => query.inside_tag(editor, tag)
+pub fn edit_can_undo(editor) => query.history_can_undo(editor)
+pub fn edit_can_redo(editor) => query.history_can_redo(editor)
 
 pub fn edit_set_decorations(editor, decorations) =>
   { *: editor, decorations: decorations,

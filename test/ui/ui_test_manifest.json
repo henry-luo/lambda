@@ -61,6 +61,13 @@
       "tags": ["hit-test"]
     },
     {
+      "name": "edit",
+      "globs": [
+        "test/ui/edit/*.json"
+      ],
+      "tags": ["edit", "editor"]
+    },
+    {
       "name": "view",
       "globs": [
         "test/view/*.json"

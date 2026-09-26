@@ -3802,6 +3802,13 @@ typedef struct {
     GLFWcursor* sys_cursor;
 } MouseState;
 
+// Which application hosts the window. The edit application routes Escape to
+// the document and asks the document before a platform close takes effect.
+typedef enum UiAppMode {
+    UI_APP_MODE_VIEW = 0,
+    UI_APP_MODE_EDIT,
+} UiAppMode;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct UiContext {
     GLFWwindow *window;    // current window
@@ -3854,6 +3861,13 @@ typedef struct UiContext {
     bool headless;          // true if running headless (no visible window). When true, clipboard
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
+    UiAppMode app_mode;     // viewer or edit application (set after init)
+    // Edit-application close decision. The document arms the guard while it
+    // has unsaved changes; an armed guard turns a platform close into a
+    // `closerequest` event, and only `close_approved` lets the window close.
+    bool close_guard_armed;
+    bool close_approved;
+    int close_request_count; // platform close requests seen (test observable)
 
     int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
@@ -3963,6 +3977,10 @@ DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     int viewport_width, int viewport_height, Pool* pool);
+// The message of the error value a Lambda document or transform returned on
+// its most recent failed load, or null. The CLI reports it as the actionable
+// load diagnostic; a successful load clears it.
+const char* lambda_document_load_diagnostic(void);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);
 void free_document(DomDocument* doc);

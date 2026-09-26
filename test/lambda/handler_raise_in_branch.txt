@@ -1,0 +1,8 @@
+"normal path:"
+[{
+    v: 1
+  }, 2, [3], 40]
+"error arm raises:"
+["error: wrapped: negative -1", "error: then: negative -2", "error: block: negative -3", "error: two: negative -4"]
+"other branch:"
+["error: reserved", 0, 0, 0]

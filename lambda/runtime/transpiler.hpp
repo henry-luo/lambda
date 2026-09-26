@@ -182,6 +182,9 @@ void write_fn_name_for_script_ex(StrBuf *strbuf, AstFuncNode* fn_node,
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
 void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
+// A module's pub variable, qualified by the dependency that defines it, so two
+// imported modules exporting one name stay distinct symbols (as functions do).
+void write_var_name_for_script(StrBuf *strbuf, AstNode *node, const Script* import_script);
 bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 // Shared AST/MIR helpers.
@@ -253,10 +256,19 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Load and initialize a file-backed package without synthesizing an import script.
 Input* run_lambda_package_module(Runtime* runtime, const char* package_module,
                                  Script** out_package = nullptr);
+// How the transform export receives its document argument. PARSED transforms
+// get `input(target, input_type)`; PATH transforms get the resolved local path
+// and perform their own effectful read in a procedural entry (S12.1.1v2).
+enum LambdaDocumentTransformSource {
+    LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED = 0,
+    LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH,
+};
+
 struct LambdaDocumentTransformConfig {
     const char* input_type;
     const char* package_module;
     const char* function_name;
+    LambdaDocumentTransformSource source;
 };
 
 enum LambdaDocumentTransformOptionKind {

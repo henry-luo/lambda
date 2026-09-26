@@ -1,0 +1,26 @@
+{
+  "name": "typing into an HTML paragraph and saving keeps the head, attributes, and retained content",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_type_save.html",
+  "viewport": {"width": 1000, "height": 900},
+  "events": [
+    {"type": "click", "target": {"text": "Second paragraph"}},
+    {"type": "type", "text": "EDITED"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "EDITED"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<!DOCTYPE html>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<script>console.log(\"head script\");</script>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<link rel=\"stylesheet\" href=\"site.css\">"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<body class=\"page\" data-theme=\"light\">"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<div class=\"note\" onclick=\"alert(1)\">"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<form action=\"/go\"><input type=\"text\" name=\"q\"><button>Go</button></form>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<!-- a comment -->"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<kbd>Ctrl</kbd>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "contains": "<script src=\"app.js\"></script>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_type_save.html", "not_contains": "edit-"}
+  ]
+}

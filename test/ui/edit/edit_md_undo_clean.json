@@ -1,0 +1,22 @@
+{
+  "name": "undo back to the saved content clears the dirty state; redo dirties it again",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_undo_clean.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "Q"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-undo"}, "class": "disabled", "present": false},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "sQhort"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Q"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true}
+  ]
+}

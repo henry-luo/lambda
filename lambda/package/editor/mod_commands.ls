@@ -2036,8 +2036,10 @@ fn is_non_repeating_block(tag) =>
 fn split_right_tag(st, block, cut, text_len) =>
   if (is_non_repeating_block(block.tag)) { state_default_block(st) } else { block.tag }
 
+// the new half keeps the block's attributes but not its identity: an `id`
+// names one element, so a split must not clone it
 fn split_right_attrs(block, right_tag) =>
-  if (right_tag == block.tag) { block.attrs } else { [] }
+  if (right_tag == block.tag) { [for (a in block.attrs where a.name != 'id') a] } else { [] }
 
 fn first_text_marks_in(n) {
   if (is_text(n)) { n.marks }

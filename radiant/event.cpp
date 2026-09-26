@@ -151,6 +151,7 @@ static const char* rdt_event_type_name(EventType type) {
     case RDT_EVENT_FOCUS_OUT: return "focus_out";
     case RDT_EVENT_CLICK: return "click";
     case RDT_EVENT_DBL_CLICK: return "dbl_click";
+    case RDT_EVENT_CLOSE_REQUEST: return "close_request";
     default: return "unknown";
     }
 }
@@ -12814,6 +12815,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         radiant_caret_operation_extend());
                 }
             }
+        }
+        evcon.need_repaint = true;
+        break;
+    }
+    case RDT_EVENT_CLOSE_REQUEST: {
+        // The edit application decides Save / Discard / Cancel. Deliver the
+        // request like a key event: at the focused element, else at <body>,
+        // so it bubbles through (or lands on) the document's root template.
+        DocState* state = event_context_target_state(&evcon);
+        View* close_target = state ? focus_get(state) : nullptr;
+        if (!close_target) {
+            DomElement* body = dom_document_body_element(doc);
+            close_target = body ? static_cast<View*>(static_cast<DomNode*>(body)) : nullptr;
+        }
+        if (close_target) {
+            log_info("edit-close: dispatching closerequest");
+            dispatch_lambda_handler(&evcon, close_target, "closerequest");
+        } else {
+            log_error("edit-close: document has no element to receive closerequest");
         }
         evcon.need_repaint = true;
         break;

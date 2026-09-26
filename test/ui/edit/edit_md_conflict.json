@@ -1,0 +1,31 @@
+{
+  "name": "an external change is detected at save; edits stay in memory until Overwrite",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_conflict.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "MINE"},
+    {"type": "write_file", "path": "temp/edit-ui/edit_md_conflict.md", "content": "# Changed elsewhere\n\nTheirs.\n"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-changed"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "changed on disk"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_conflict.md", "contains": "Theirs."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "click", "target": {"selector": ".edit-dialog-cancel"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "MINE"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-changed"}, "count": 1},
+    {"type": "click", "target": {"selector": ".edit-dialog-overwrite"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_conflict.md", "contains": "MINE"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_conflict.md", "not_contains": "Theirs."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "type", "text": "!"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_conflict.md", "contains": "MINE!"}
+  ]
+}

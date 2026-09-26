@@ -1,0 +1,33 @@
+{
+  "name": "the Rect tool draws a rectangle in one undoable edit; undo restores the saved drawing and Delete removes a pick",
+  "command": "edit",
+  "html": "test/ui/edit/sample.svg",
+  "working_copy": "temp/edit-ui/edit_svg_create_undo.svg",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-btn-tool_rect"}},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-tool_rect"}, "class": "active"},
+    {"type": "mouse_drag", "target": {"selector": ".edit-canvas", "offset_x": 330, "offset_y": 262}, "to_target": {"selector": ".edit-canvas", "offset_x": 380, "offset_y": 290}},
+    {"type": "assert_count", "target": {"selector": "#rect-1"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#rect-1"}, "attribute": "width", "equals": "50"},
+    {"type": "assert_attribute", "target": {"selector": "#rect-1"}, "attribute": "height", "equals": "28"},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-tool_select"}, "class": "active"},
+    {"type": "assert_count", "target": {"selector": ".edit-frame"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "z", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": "#rect-1"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "key_combo", "key": "z", "mods_str": "super+shift"},
+    {"type": "assert_count", "target": {"selector": "#rect-1"}, "count": 1},
+    {"type": "click", "target": {"selector": "#rect-1"}},
+    {"type": "assert_count", "target": {"selector": ".edit-frame"}, "count": 1},
+    {"type": "key_press", "key": "Delete"},
+    {"type": "assert_count", "target": {"selector": "#rect-1"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".edit-frame"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "click", "target": {"selector": "#dot"}},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_count", "target": {"selector": ".edit-frame"}, "count": 0},
+    {"type": "assert_window_closed", "closed": false}
+  ]
+}

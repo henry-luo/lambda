@@ -16,7 +16,7 @@ FALLBACK_RE = re.compile(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)"
 # procedural ones through `lambda.exe run`.
 FUNCTIONAL_DIRS = (
     "test/lambda", "test/lambda/chart", "test/lambda/latex", "test/lambda/math",
-    "test/lambda/editor", "test/lambda/editing", "test/lambda/graph/mermaid",
+    "test/lambda/editor", "test/lambda/editing", "test/lambda/edit", "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz", "test/lambda/graph/structurizr",
 )
 PROCEDURAL_DIRS = ("test/lambda/proc", "test/lambda/conc", "test/lambda/pdf")

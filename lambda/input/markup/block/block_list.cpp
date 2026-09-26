@@ -854,17 +854,19 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             char line_marker = get_list_marker(line);
             bool line_is_ordered = is_ordered_marker(line_marker);
 
+            // Check if this item belongs to our list (same marker type)
+            // CommonMark: Different markers (-, *, +) or (., )) start new lists.
+            // Checked first: a blank line before a list that ends here does
+            // not separate two of its items, so it cannot make it loose.
+            if (!markers_compatible(marker, line_marker)) {
+                break; // Different marker type, end current list
+            }
+
             // If there was a blank line before this item, the list is loose
             if (had_blank_before_item && ((List*)list)->length > 0) {
                 is_loose = true;
             }
             had_blank_before_item = false;
-
-            // Check if this item belongs to our list (same marker type)
-            // CommonMark: Different markers (-, *, +) or (., )) start new lists
-            if (!markers_compatible(marker, line_marker)) {
-                break; // Different marker type, end current list
-            }
 
             // Use format adapter to detect task list items ([ ], [x], [X])
             ListItemInfo item_info;
@@ -1216,16 +1218,16 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             // Process as if at base_indent
             char line_marker = get_list_marker(line);
 
+            // Check if markers are compatible first (see the sibling branch above)
+            if (!markers_compatible(marker, line_marker)) {
+                break;  // Different marker type, end current list
+            }
+
             // If there was a blank line before this item, the list is loose
             if (had_blank_before_item && ((List*)list)->length > 0) {
                 is_loose = true;
             }
             had_blank_before_item = false;
-
-            // Check if markers are compatible
-            if (!markers_compatible(marker, line_marker)) {
-                break;  // Different marker type, end current list
-            }
 
             // Create new list item
             Element* item = create_element(parser, "li");

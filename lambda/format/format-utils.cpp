@@ -581,8 +581,11 @@ const MarkupOutputRules MARKDOWN_RULES = {
         .code_open   = "`",   .code_close   = "`",
         .strikethrough_open  = "~~",  .strikethrough_close = "~~",
         .underline_open      = NULL,  .underline_close     = NULL,
-        .superscript_open    = NULL,  .superscript_close   = NULL,
-        .subscript_open      = NULL,  .subscript_close     = NULL,
+        // ^sup^ is the Markdown reader's extension (inline_special.cpp); its
+        // ~x~ is GFM strikethrough, so subscript has no Markdown spelling and
+        // is written as inline HTML, which the reader keeps as raw HTML
+        .superscript_open    = "^",   .superscript_close   = "^",
+        .subscript_open      = "<sub>", .subscript_close   = "</sub>",
         .verbatim_open       = NULL,  .verbatim_close      = NULL,
     },
     // tag names
@@ -592,8 +595,8 @@ const MarkupOutputRules MARKDOWN_RULES = {
         .code_tag       = "code",
         .strike_tags    = {"s", "del", "strike", NULL},
         .underline_tags = {NULL, NULL, NULL, NULL},
-        .sup_tag        = NULL,
-        .sub_tag        = NULL,
+        .sup_tag        = "sup",
+        .sub_tag        = "sub",
         .verbatim_tag   = NULL,
     },
     // links and images
@@ -626,13 +629,15 @@ const MarkupOutputRules MARKDOWN_RULES = {
     .emit_table = emit_table_pipe,
     // escaping
     .escape_config = &MARKDOWN_ESCAPE_CONFIG,
-    // custom handler
-    .custom_element_handler = NULL,
+    // custom handler: the CommonMark block layer (format-md.cpp)
+    .custom_element_handler = markdown_custom_handler,
     // container tags
     .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
     .skip_tags      = {"meta", NULL, NULL, NULL},
     // link tag
     .link_tag = "a",
+    .escape_text = markdown_escape_text,
+    .emoji_shortcodes = true,
 };
 
 const MarkupOutputRules RST_RULES = {
