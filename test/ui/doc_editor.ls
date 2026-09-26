@@ -20,10 +20,12 @@ let PROJECT_ROOT = "."
 fn directory_entries(path) => input(path, 'dir') ^ { [] }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
 
-fn path_is_open(open_paths, path) => contains(open_paths, path)
+// an open-path list that is no sequence errors (S7.9.3): not open
+fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn remove_path(paths, path) => [for (candidate in paths where candidate != path) candidate]
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
-fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ")
+// a non-text parent class errors (S7.9.3): no hit
+fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ") or false
 
 fn bounded_text_offset(value, offset) {
   if (offset < 0) { 0 }

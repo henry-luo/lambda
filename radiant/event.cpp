@@ -1135,6 +1135,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent* event = &evcon->event.mouse_position;
     bool pointer_events_none = event_view_pointer_events_none(
         static_cast<View*>(block));
+    // Content outside the overflow clip is not painted (setup_scroller), so it
+    // must not take the hit either: an overflowing child would claim clicks on
+    // a later sibling painted over it, e.g. a tab bar under a long <pre>. The
+    // clip is in unscrolled block space, so test it before the scroll offset.
+    Bound overflow_clip;
+    bool clipped_out = layout_block_overflow_clip(block, &overflow_clip) &&
+        !(evcon->block.x + overflow_clip.left <= event->x &&
+          event->x < evcon->block.x + overflow_clip.right &&
+          evcon->block.y + overflow_clip.top <= event->y &&
+          event->y < evcon->block.y + overflow_clip.bottom);
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;
@@ -1184,6 +1194,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (block->font) {
         setup_font(evcon->ui_context, &evcon->font, block->font);
     }
+
+    // children, positioned ones included, paint inside the clip; the block's
+    // own border box stays hittable below
+    if (clipped_out) goto RETURN;
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.

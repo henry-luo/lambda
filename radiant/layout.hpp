@@ -793,6 +793,22 @@ inline BoxEdges layout_boundary_padding_edges(const BoundaryProp* bound) {
 inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
     return layout_border_width_edges(bound ? bound->border : nullptr);
 }
+
+// The block-local rect overflow clipping keeps: ScrollProp::clip is stored in
+// border-box coordinates and inset once here to the CSS padding edge. Paint,
+// the selection overlay and hit-testing share it so they clip alike. False
+// when the block does not clip its content.
+inline bool layout_block_overflow_clip(const ViewBlock* block, Bound* out) {
+    if (!block || !block->scroller || !block->scroll()->has_clip) return false;
+    BoxEdges border = layout_boundary_border_edges(
+        block->bound ? block->boundary() : nullptr);
+    Bound clip = block->scroll()->clip;
+    out->left = clip.left + border.left;
+    out->top = clip.top + border.top;
+    out->right = clip.right - border.right;
+    out->bottom = clip.bottom - border.bottom;
+    return true;
+}
 // tier-3: layout-transient, valid within pass
 typedef struct BoxMetrics {
     BoxEdges margin;

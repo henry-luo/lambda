@@ -146,20 +146,14 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->raster_scale;
-    if (block->scroll()->has_clip) {
-        // Overflow clipping uses the padding edge, inset once from the stored border box.
-        BoxEdges border = layout_boundary_border_edges(
-            block->bound ? block->boundary() : nullptr);
-        float bl = border.left;
-        float bt = border.top;
-        float br = border.right;
-        float bb = border.bottom;
+    Bound padding_clip;
+    if (layout_block_overflow_clip(block, &padding_clip)) {
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
-            block->scroll()->clip.left, block->scroll()->clip.top, block->scroll()->clip.right, block->scroll()->clip.bottom);
-        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroll()->clip.left + bl) * s);
-        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + (block->scroll()->clip.top + bt) * s);
-        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + (block->scroll()->clip.right - br) * s);
-        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + (block->scroll()->clip.bottom - bb) * s);
+            padding_clip.left, padding_clip.top, padding_clip.right, padding_clip.bottom);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + padding_clip.left * s);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + padding_clip.top * s);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + padding_clip.right * s);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + padding_clip.bottom * s);
 
         // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
         if (block->bound && block->boundary_mut()->border) {
@@ -169,8 +163,9 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
             if (corner_has_radius(&border->radius)) {
                 rdcon->block.has_clip_radius = true;
                 // Use inner radius (outer minus border width) for padding-box clipping
-                float horizontal_inset[4] = {bl, br, br, bl};
-                float vertical_inset[4] = {bt, bt, bb, bb};
+                BoxEdges inset = layout_boundary_border_edges(block->boundary());
+                float horizontal_inset[4] = {inset.left, inset.right, inset.right, inset.left};
+                float vertical_inset[4] = {inset.top, inset.top, inset.bottom, inset.bottom};
                 for (int corner = 0; corner < 4; corner++) {
                     rdcon->block.clip_radius.horizontal[corner] =
                         fmaxf(0, border->radius.horizontal[corner] - horizontal_inset[corner]) * s;

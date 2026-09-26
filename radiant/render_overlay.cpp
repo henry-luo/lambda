@@ -129,20 +129,18 @@ static int selection_paint_push_overflow_clips(SelectionPaintCtx* ctx,
     for (View* view = selection_view; view; view = view->parent) {
         if (!view->is_block()) continue;
         ViewBlock* block = lam::view_require_block(view);
-        if (!block->scroller || !block->scroll()->has_clip) continue;
+        Bound clip;
+        if (!layout_block_overflow_clip(block, &clip)) continue;
 
-        BoxEdges border = layout_boundary_border_edges(
-            block->bound ? block->boundary() : nullptr);
-        Bound clip = block->scroll()->clip;
         RdtLogicalPoint origin = view_geometry_node_viewport_origin(
             view, scroll_state_resolve_view_geometry);
         RdtLogicalPoint top_left = selection_paint_to_canvas(ctx, {
-            origin.x + clip.left + border.left,
-            origin.y + clip.top + border.top
+            origin.x + clip.left,
+            origin.y + clip.top
         });
         RdtLogicalPoint bottom_right = selection_paint_to_canvas(ctx, {
-            origin.x + clip.right - border.right,
-            origin.y + clip.bottom - border.bottom
+            origin.x + clip.right,
+            origin.y + clip.bottom
         });
         float width = (bottom_right.x - top_left.x) * ctx->scale;
         float height = (bottom_right.y - top_left.y) * ctx->scale;
