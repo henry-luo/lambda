@@ -85,6 +85,16 @@ parser/model/serializer cannot retain it, editing that file is rejected with
 the unsupported construct identified. An import that silently drops content
 does not count as support.
 
+The noneditable representation is **view-only**: the part shows as it
+renders, never as editable text, and Save writes its source as read. The
+rendering is display only — a sanitizing writer removes scripts, styles,
+event handlers, embedded browsing contexts and navigation, and disables form
+controls — and is never read back. A part that renders nothing on its own (a
+lone inline tag, a comment, a link reference definition) shows its source
+instead, so it stays visible to the reader and the caret. A view-only part is
+one atomic unit: it can be selected or deleted, not edited inside. Rejection
+remains the last resort, for a document whose round trip still fails.
+
 ## 3. Ownership and reuse
 
 The new `lambda.edit` package owns the editing application: shell, templates,
@@ -222,6 +232,17 @@ Math, raw HTML, front matter, and other extensions need explicit preservation
 adapters. Generated math layout and other view-only nodes never replace their
 source expressions. Unsupported formatting commands are hidden or disabled;
 for example, underline needs an explicit supported HTML-in-Markdown policy.
+
+A top-level block is kept as written when the model cannot hold it (a
+footnote reference, say), when the editor only shows it (raw HTML blocks,
+display math), or when its export would not read back the same. The parser's
+`sourcepos` option supplies each top-level block's source lines; the kept
+block holds those lines verbatim and its view-only rendering, and export
+writes the lines unchanged between the formatter's runs of editable blocks.
+Source lines no block claims (link reference definitions) are kept the same
+way. Inline raw HTML is one tag per token in Markdown, so a paired tag shows
+its effect only inside a kept block, where the block's HTML is sanitized
+whole; in an editable paragraph each tag is its own atom.
 
 ### HTML
 

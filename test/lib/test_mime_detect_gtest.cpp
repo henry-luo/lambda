@@ -68,17 +68,40 @@ TEST_F(MimeDetectTest, FilenameDetection) {
     EXPECT_NE(strstr(mime, "pdf"), nullptr) << "Expected MIME type to contain 'pdf', got: " << mime;
 }
 
+// Filename detection sees absolute paths: a '.' in a directory name must not
+// hide the file's extension.
 TEST_F(MimeDetectTest, FilenameDetectionThroughDottedDirectories) {
-    EXPECT_STREQ(detect_mime_from_filename(detector, "/work/v1.2/data.xml"), "application/xml");
-    EXPECT_STREQ(detect_mime_from_filename(detector, "C:\\v1.2\\data.XML"), "application/xml");
+    const char* mime = detect_mime_from_filename(detector,
+        "/Users/me/Lambda-opus/.claude/worktrees/wt/test/input/test_markup.xml");
+    ASSERT_NE(mime, nullptr);
+    EXPECT_STREQ(mime, "application/xml");
+
+    EXPECT_STREQ(detect_mime_from_filename(detector, "/home/john.doe/.config/app/settings.json"),
+                 "application/json");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "C:\\v1.2\\data.XML"),
+                 "application/xml");
+
+    // content without an XML declaration needs the filename extension.
+    mime = detect_mime_type(detector, "/srv/site.v2/data/feed.xml", "<root><item/></root>", 20);
+    EXPECT_STREQ(mime, "application/xml");
 }
 
+// '*' backtracks to a later match; the pattern must still end with the string.
 TEST_F(MimeDetectTest, GlobBacktracking) {
-    EXPECT_EQ(match_glob("*.xml", "/work/v1.2/data.xml"), 1);
+    EXPECT_EQ(match_glob("*.xml", "/a/.claude/b/test.xml"), 1);
+    EXPECT_EQ(match_glob("*.xml", "a.x.xml"), 1);
+    EXPECT_EQ(match_glob("*.tar.gz", "/p.q/archive.tar.gz"), 1);
+    EXPECT_EQ(match_glob("*.XML", "Test.Xml"), 1);
+    EXPECT_EQ(match_glob("*.xml", "a.xmlx"), 0);
+    EXPECT_EQ(match_glob("*.xml", "/b.xml/readme.txt"), 0);
+    EXPECT_EQ(match_glob("a*b*c", "axxbyyc"), 1);
+    EXPECT_EQ(match_glob("a*b*c", "axxbyyd"), 0);
     EXPECT_EQ(match_glob("*ab", "aab"), 1);
-    EXPECT_EQ(match_glob("a*b*c", "axbybc"), 1);
     EXPECT_EQ(match_glob("a*b", "ac"), 0);
     EXPECT_EQ(match_glob("file?", "file"), 0);
+    EXPECT_EQ(match_glob("*.?s", "main.ts"), 1);
+    EXPECT_EQ(match_glob("*", ""), 1);
+    EXPECT_EQ(match_glob("*.md", ""), 0);
 }
 
 TEST_F(MimeDetectTest, InputProfileMappings) {

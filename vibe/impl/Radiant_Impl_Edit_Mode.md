@@ -1,8 +1,9 @@
 # Radiant Edit Mode — Implementation Plan and Record
 
 **Date:** 2026-09-26
-**Status:** Phases 1–3 implemented (worktree `edit-mode`, uncommitted);
-open items in §5.
+**Status:** Phases 1–3 implemented (master `060763130`); view-only kept
+parts (§3.3) implemented in worktree `edit-view-only`, uncommitted; open
+items in §5.
 **Design:** [Radiant Edit Mode](../radiant/Radiant_Design_Edit_Mode.md) (proposal).
 **Scope:** Phases 1–3 of the proposal: the `lambda edit` shell and Markdown
 rich text, HTML rich text with a retained envelope, and basic SVG drawing.
@@ -68,6 +69,18 @@ instead of an empty window.
 * New simulator events: `window_close` (the platform close path),
   `write_file` (external modification, `./temp/` only), `assert_file`
   (content / existence), and `assert_window_closed`.
+
+### 2.5 Markup source positions
+
+`parse(source, {type: …, sourcepos: true})` makes the markup reader record,
+on each top-level block, the source lines it spans (`sourcepos`, cmark's
+`"L:C-L:C"`, 1-based, trailing blank lines excluded). The Markdown adapter
+needs the lines to keep a block as written (§3.3). The option is `parse()`
+only — `input()` results are cached per URL, and positions are a property of
+one reading, not of the document — and is carried on the `Input`
+(`source_positions`) from `fn_parse2` through
+`input_from_source_with_positions` to `parse_document`. Nested blocks carry no
+positions: the adapter keeps whole top-level blocks only.
 
 ### 2.4 Defects fixed on the way
 
@@ -173,8 +186,10 @@ to the editor.
   target (failure-safe replacement). The checkpoint moves only after the
   rename succeeds.
 * Opening applies the same round-trip gate before the page is built: a file
-  whose content the adapter cannot keep (footnotes today) is refused with a
-  diagnostic naming the construct, not opened as a lossy editor (proposal §2).
+  whose content the adapter still cannot keep is refused with a diagnostic
+  naming the first block that would change, not opened as a lossy editor
+  (proposal §2). Content outside the profile no longer refuses by itself: it
+  is kept as written and shown view-only (§3.3).
 * Save As (proposal §8) keeps the format. A typed name is relative to the
   document's folder, as a native save panel opens there; `.`/`..` fold so one
   file compares equal however it is spelled. A target is refused when its
@@ -235,6 +250,62 @@ to the editor.
 * A gesture runs press to release and commits one transaction; Escape before
   the release cancels it. There is no live preview (E-4).
 
+### 3.3 View-only kept parts
+
+* A part the rich-text editor cannot edit shows as it renders (proposal §2)
+  and saves as read. Its rendering is computed once at import into a
+  bookkeeping attribute `'edit view'` on the atomic node (the name holds a
+  space, like the other bookkeeping names, so no writer emits it) and is
+  excluded from the normal form (`sorted_attrs`), so the round-trip gate and
+  dirty state never depend on it. Nodes an edit creates carry no view and
+  fall back to their source.
+* `view.ls` owns the projections. HTML goes through a sanitizing writer:
+  `script style link meta base title head template noscript` and comments
+  are dropped, `iframe frame frameset object embed applet` show as a named
+  label, `on*`, `href`, `action`, `formaction`, `srcdoc`, `ping` and
+  `javascript:` values are dropped (a link's target becomes its tooltip),
+  and controls are disabled. Element literals need a static tag, so the
+  writer builds HTML text and parses it back. A view that shows nothing (no
+  text, no replaced element) is empty, and the surface shows the part's
+  source instead.
+* Math shows its TeX source, not a rendering (open item E-9). The edit
+  application runs on MIR (the toolbar's `on` handlers are not interpretable,
+  and a MIR parent demotes its whole import cone), and compiling the math
+  package's `metrics_data.ls` on MIR costs about 22 s and 4.7 GB in a debug
+  build (0.02 s interpreted). `lambda view` renders Markdown math by running
+  the package in a separate interpreted runtime, which the edit surface has
+  no hook for. The native MathML formatter is disabled.
+* Markdown keeps a top-level block as an atomic `md_source` node holding its
+  source lines verbatim (§2.5) and its view when the block holds a construct
+  outside the profile (footnote references, say), is one the editor only
+  shows (`html-block`, display math — as atoms the formatter would respell
+  them), or does not survive its own export and re-import (nested emphasis
+  such as `*a **b***`). Source lines no block claims — link reference
+  definitions — are kept the same way, without a view. Export joins the
+  formatter's output for each run of editable blocks and the kept lines with
+  one blank line. The Markdown view renders the parser's vocabulary as HTML
+  and sanitizes the whole block, so inline raw HTML tags — one token each —
+  pair up as the source pairs them.
+* Inline raw HTML and math inside editable blocks, and nested HTML blocks or
+  display math, stay atoms saved through the formatter; raw HTML carries a
+  view too. A lone inline tag or a comment shows its source.
+* HTML `raw_html`/`html_block` nodes carry the sanitized view of their parsed
+  subtree; a named anchor or an empty icon element shows its source label.
+* The surface wraps every kept part in a `contenteditable=false` element with
+  class `edit-view-only` (`edit-view-block` for blocks, `edit-view-source`
+  when it shows source), titled "… kept as written (view only)".
+* A part is edited only as a unit. A click in it does not select it: the
+  native caret stays outside the non-editable element, while the DOM action's
+  source selection lies inside the part. The shell therefore declines every
+  action whose selection ends lie in a part (descriptor family other than
+  delete, cut, copy, history, selection, setting) with a status hint. A
+  deletion with the caret in a part removes the whole part: it runs as a
+  model request on a node selection of the part, since the event's input
+  fields are host-backed and a copy of the event loses them. Toolbar
+  commands, including the Link and Image dialogs, apply the same check to
+  the model selection. `lambda.editor` gained `edit_action_selection` and
+  `edit_action_family` for this.
+
 ## 4. Progress
 
 | Phase | Item | Status |
@@ -248,6 +319,7 @@ to the editor.
 | 2 | HTML adapter with retained envelope | done |
 | 3 | SVG adapter and drawing surface | done |
 | 1–3 | tests | done: Lambda unit tests in `test/lambda/edit/` and `test/lambda/proc/edit_session_save.ls`; 16 UI fixtures in `test/ui/edit/` (suite `edit`) |
+| — | view-only kept parts (§3.3), `parse` `sourcepos` (§2.5) | done: `test/lambda/edit/view_only.ls`, kept-block cases in `markdown_adapter.ls`, `test/lambda/parse_sourcepos.ls`, UI fixture `edit_md_view_only.json` |
 
 ## 5. Open items
 
@@ -261,3 +333,6 @@ to the editor.
 | E-6 | HTML `<b>`/`<i>` stay their own marks; the Bold/Italic buttons reflect `strong`/`em` only. |
 | E-7 | The XML reader does not honor `xml:space="preserve"` for text-only elements. |
 | E-8 | Drawing: no pan tool (the canvas scrolls), no path-node editing, connectors, or layers (proposal §10 choice 2). |
+| E-9 | View-only math shows TeX source (§3.3): rendering it needs the math package, whose `metrics_data.ls` costs ~22 s / 4.7 GB to compile on MIR (debug build). Fix the MIR cost, or give the edit surface a hook to render math in a separate interpreted runtime as `lambda view` does. |
+| E-10 | A click in a view-only part does not select it (the native caret stays outside the non-editable element), so the part shows no selection highlight; typing is declined and Delete removes the part (§3.3). |
+| E-11 | The Markdown reader has no footnote-definition syntax: `[^1]: word` parses as a link reference definition and `[^1]: two words` as a paragraph holding a footnote reference. Both are kept as written. |

@@ -116,6 +116,14 @@ pub fn edit_handle_dom_action(editor, action_event) => dom_adapter.handle_event(
 pub fn edit_handle_request(editor, request) => dom_adapter.handle_request(editor, request)
 pub fn edit_accept_dom_selection(editor, evt) => dom_adapter.accept_dom_selection(editor, evt)
 
+// What an action would apply to and which command family it runs, so a host
+// can decline it before the model applies it.
+pub fn edit_action_selection(editor, action_event) => dom_adapter.action_selection(editor, action_event)
+pub fn edit_action_family(input_type) {
+  let descriptor = dom_adapter.descriptor_for_intent(input_type)
+  if (descriptor == null) null else descriptor.family
+}
+
 pub fn edit_request_from_toolbar(input_type, payload) {
   let descriptor = dom_adapter.descriptor_for_intent(input_type)
   if (descriptor == null) null else edit_request.from_toolbar(descriptor, payload)

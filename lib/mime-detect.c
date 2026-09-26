@@ -30,30 +30,39 @@ void* memmem(const void* haystack, size_t haystack_len, const void* needle, size
 }
 #endif
 
-// Helper function to match glob patterns
+// Helper function to match glob patterns (case-insensitive; '*' any run, '?' one char).
+// A '*' must be able to backtrack: the first place its successor matches is not
+// always the right one. "*.xml" against ".../.claude/x/test.xml" first meets the
+// '.' of ".claude", and without backtracking every file under a dotted directory
+// lost its extension-based type.
 int match_glob(const char* pattern, const char* string) {
     if (!pattern || !string) return 0;
 
-    const char* star = NULL;
-    const char* retry = NULL;
-    while (*string) {
-        if (*pattern == '*') {
-            star = pattern++;
-            retry = string;
-        } else if (*pattern == '?' ||
-                   tolower((unsigned char)*pattern) == tolower((unsigned char)*string)) {
-            pattern++;
-            string++;
-        } else if (star) {
-            // retry the latest star at the next byte when a later literal fails.
-            pattern = star + 1;
-            string = ++retry;
+    const char* p = pattern;
+    const char* s = string;
+    const char* star_p = NULL;  // pattern just after the last '*'
+    const char* star_s = NULL;  // string position that '*' currently extends to
+
+    while (*s) {
+        if (*p == '*') {
+            while (*p == '*') p++;
+            if (!*p) return 1;  // a trailing '*' matches the rest
+            star_p = p;
+            star_s = s;
+        } else if (*p && (*p == '?' || tolower((unsigned char)*p) == tolower((unsigned char)*s))) {
+            p++;
+            s++;
+        } else if (star_p) {
+            // mismatch after a '*': let it absorb one more character and retry
+            p = star_p;
+            s = ++star_s;
         } else {
             return 0;
         }
     }
-    while (*pattern == '*') pattern++;
-    return *pattern == '\0';
+    // the string is consumed: only '*'s may remain in the pattern
+    while (*p == '*') p++;
+    return *p == '\0';
 }
 
 // Helper function to match magic patterns

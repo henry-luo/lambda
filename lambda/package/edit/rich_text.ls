@@ -59,12 +59,28 @@ fn kept_source(n) {
   if (text != null) text else source_label(attr_get(n, 'source'))
 }
 
-// Source that the editor keeps but does not edit shows as a read-only chip.
-fn opaque_inline(cls, title, source) =>
-  <span class: "edit-opaque " ++ cls, contenteditable: "false", title: title, source>
+// What the editor keeps but cannot edit shows view-only: the rendering the
+// adapter stored (view.ls). A part without one — math, or a part that renders
+// nothing on its own: a lone tag, a comment, a link definition — shows its
+// source instead, so it never hides from the reader or the caret.
+fn kept_view(n) {
+  let shown = attr_get(n, view_attr)
+  if (shown == null or len(shown) == 0) null else shown
+}
 
-fn opaque_block(cls, title, source) =>
-  <div class: "edit-opaque edit-opaque-block " ++ cls, contenteditable: "false", title: title, source>
+fn view_inline(n, what, source) {
+  let shown = kept_view(n)
+  let title = what ++ " kept as written (view only)"
+  if (shown == null) <span class: "edit-view-only edit-view-source", contenteditable: "false", title: title, source>
+  else <span class: "edit-view-only", contenteditable: "false", title: title, *shown>
+}
+
+fn view_block(n, what, source) {
+  let shown = kept_view(n)
+  let title = what ++ " kept as written (view only)"
+  if (shown == null) <div class: "edit-view-only edit-view-block edit-view-source", contenteditable: "false", title: title, source>
+  else <div class: "edit-view-only edit-view-block", contenteditable: "false", title: title, *shown>
+}
 
 fn render_list_item(n, kids) {
   let checked = attr_get(n, 'checked')
@@ -116,11 +132,11 @@ fn render_node(n, kids) {
   else if (tag == 'sup') <sup *kids>
   else if (tag == 'code') <code *kids>
   else if (tag == 'span') <span *kids>
-  else if (tag == 'raw_html') opaque_inline("edit-raw", "Raw HTML (kept as written)", kept_source(n))
-  else if (tag == 'math') opaque_inline("edit-math", "Math (kept as written)", "$" ++ attr_get(n, 'tex') ++ "$")
-  else if (tag == 'html_block') opaque_block("edit-raw", "Raw HTML (kept as written)", kept_source(n))
-  else if (tag == 'math_block') opaque_block("edit-math", "Math (kept as written)", "$$" ++ attr_get(n, 'tex') ++ "$$")
-  else if (tag == 'opaque') opaque_block("edit-raw", "Kept as written: " ++ string(attr_get(n, 'label')), attr_get(n, 'label'))
+  else if (tag == 'raw_html') view_inline(n, "HTML", kept_source(n))
+  else if (tag == 'math') view_inline(n, "Math", "$" ++ attr_get(n, 'tex') ++ "$")
+  else if (tag == 'html_block') view_block(n, "HTML", kept_source(n))
+  else if (tag == 'math_block') view_block(n, "Math", "$$" ++ attr_get(n, 'tex') ++ "$$")
+  else if (tag == 'md_source') view_block(n, "Markdown", attr_get(n, 'markdown'))
   else <div *kids>
 }
 
@@ -169,8 +185,14 @@ pub let css = "
   .edit-surface th { background: #f6f8fa; font-weight: 600; }
   .edit-surface img { max-width: 100%; }
   .edit-surface hr { border: none; border-top: 2px solid #d8dee4; margin: 1.2em 0; }
-  .edit-opaque { background: #fff8c5; border: 1px dashed #d4a72c; border-radius: 4px;
-                 color: #6e5600; font-family: 'SF Mono', Menlo, monospace; font-size: 0.85em;
-                 padding: 0 4px; white-space: pre-wrap; }
-  .edit-opaque-block { display: block; margin: 0.6em 0; padding: 6px 8px; }
+  .edit-view-only { cursor: default; }
+  .edit-view-block { display: block; margin: 0.5em -9px; padding: 1px 8px;
+                     border: 1px dashed #d0d7de; border-radius: 6px; }
+  .edit-view-source { font-family: 'SF Mono', Menlo, monospace; font-size: 0.85em;
+                      color: #6e7781; white-space: pre-wrap; }
+  span.edit-view-source { background: #f6f8fa; border-radius: 4px; padding: 0 3px; }
+  div.edit-view-source { padding: 6px 8px; }
+  .edit-view-only a { color: #0969da; text-decoration: underline; }
+  .edit-view-note { color: #0969da; }
+  .edit-view-embed { font-family: 'SF Mono', Menlo, monospace; font-size: 0.85em; color: #6e7781; }
 "

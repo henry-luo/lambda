@@ -1531,6 +1531,7 @@ typedef struct Input {
     char* xml_stylesheet_href;  // href from <?xml-stylesheet?> processing instruction (nullable)
     int doc_count;              // number of YAML documents (0 or 1 = single doc, >1 = multi-doc array)
     bool ui_mode;               // true = allocate DomElement/DomText during parsing (layout/render/view commands)
+    bool source_positions;      // parse({sourcepos: true}): markup blocks carry the source lines they span
     void* mem_ctx;              // per-document MemContext sub-context (nullable; memory attribution)
     // A parser may legitimately produce ItemNull, so failures need a separate
     // status bit instead of being inferred from the parsed root value.

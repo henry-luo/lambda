@@ -32,8 +32,8 @@ let block_group = [
 ]
 
 let insert_group = [
-  {cmd: "link", label: "Link", title: "Insert link", dialog: 'link'},
-  {cmd: "image", label: "Image", title: "Insert image", dialog: 'image'},
+  {cmd: "link", label: "Link", title: "Insert link", dialog: 'link', input_type: "insertLink"},
+  {cmd: "image", label: "Image", title: "Insert image", dialog: 'image', input_type: "insertImage"},
   {cmd: "codeblock", label: "Code block", title: "Code block", input_type: "insertCodeBlock", payload: {data: ""}, block: 'pre'},
   {cmd: "rule", label: "Rule", title: "Horizontal rule", input_type: "insertHorizontalRule", payload: {}}
 ]

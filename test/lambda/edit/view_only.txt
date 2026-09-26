@@ -1,0 +1,16 @@
+"sanitized HTML:"
+["<div class=\"card\"><a title=\"https://example.com\">link</a> <img alt=\"pic\"><span class=\"edit-view-embed\">&lt;iframe&gt;</span><button disabled>b</button><input value=\"v\" disabled=\"disabled\"><b>bold</b></div>"]
+"nothing to show:"
+[0, 0, 0, 0, 0]
+"replaced elements show:"
+[1, 1, 1]
+"markdown block:"
+["<p>Press <kbd>K</kbd>, see <a title=\"https://example.com\">docs</a> and <img src=\"p.png\" alt=\"p\"><sup class=\"edit-view-note\">[1]</sup>.</p>"]
+"markdown block with raw script:"
+["<p>Hi  there.</p>"]
+"markdown block with math:"
+["<p>Area <span class=\"edit-view-source\">$\\pi r^2$</span> &amp; more.</p>", ""]
+"html adapter views:"
+[['raw_html', "<kbd>K</kbd>"], ['raw_html', ""], ['html_block', "<video src=\"v.mp4\"></video>"]]
+"views stay out of the saved HTML:"
+["<p>Press <kbd>K</kbd> <a name=\"top\"></a></p>\n<video src=\"v.mp4\"></video>\n"]

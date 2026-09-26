@@ -95,9 +95,6 @@ pub fn import_text(source) map^ {
 // Export: editor model -> SVG text
 // ---------------------------------------------------------------------------
 
-fn escape_text(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
-fn escape_attr(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), "\"", "&quot;")
-
 pub fn attrs_xml(attrs) =>
   join([for (a in attrs where a.value != null)
           " " ++ string(a.name) ++ "=\"" ++ escape_attr(string(a.value)) ++ "\""], "")
@@ -167,7 +164,7 @@ pub fn check_roundtrip(doc, envelope) {
 pub let descriptor = {
   id: 'svg', name: "SVG", suffixes: [".svg"],
   surface: 'drawing', schema: schema, schema_preset: null,
-  unsupported_input_types: [],
+  unsupported_input_types: [], view_only_tags: [],
   import_text: import_text, export_text: export_text, check_roundtrip: check_roundtrip,
   toolbar: 'drawing'
 }
