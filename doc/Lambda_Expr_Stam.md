@@ -585,7 +585,7 @@ div.?<div>                  // includes div itself if it matches
 el.?int                     // self + all int values in subtree
 ```
 
-Both operators traverse attributes, children, map values, and array items in **document order** (depth-first, pre-order).
+Both operators traverse attributes, children, map values, array items and range values in **document order** (depth-first, pre-order). A `null` value never matches, even when the type admits it: `[1, null, 2]?(int | null)` finds `1` and `2`.
 
 A query is an **accessor**, like `e[1]` or `e.name` — so it answers as a subscript does. The result is the run `T*` of the matches: `null` when nothing matches, the match **itself** when exactly one does, and a list when two or more do. Count matches with `count(q)`, and test for any with `if (q)`:
 
@@ -617,7 +617,18 @@ The `[T]` syntax reuses the index operator `expr[x]`. When `x` is a **type value
 | `string` or `symbol` value | Named field access |
 | Type | Child-level query |
 
-On **elements**, `[T]` searches both attribute values and direct children. On **maps**, it searches values only. On **arrays**, it searches items.
+On **elements**, `[T]` searches both attribute values and direct children. On **maps**, it searches values only. On **arrays** and **ranges**, it searches items.
+
+On a **list** — such as the result of a query with two or more matches — the step applies to **each item** and the results are joined, as an XPath location step applies to every node of a node-set. That is what makes a chain reach every match. A scalar item has no content, so it contributes nothing: `(1, "a", 2)[int]` is `null`, while the array `[1, "a", 2][int]` is `(1, 2)`. `?` on a list likewise searches each item's descendants, not the items themselves.
+
+```lambda
+type table = <table>
+type tr = <tr>
+type td = <td>
+let page = <div <table <tr <td "a"> <td "b">>> <table <tr <td "c">>>>
+page[table][tr][td]            // (<td "a">, <td "b">, <td "c">) — every cell of every table
+count(page[table][tr][td])     // 3
+```
 
 #### Chaining
 
@@ -629,7 +640,7 @@ type div  = <div>
 
 html[body][div]                // direct <div> children of <body>
 html[body][div]?<a>            // then recursive search for <a>
-html?<table>[tr][td]           // all tables → direct rows → direct cells
+html?<table>[tr][td]           // all tables → their direct rows → their direct cells
 ```
 
 #### Comparison

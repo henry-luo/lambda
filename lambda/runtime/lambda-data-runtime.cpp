@@ -614,7 +614,8 @@ double array_num_read_double(ArrayNum* arr, int64_t offset) {
 
 // Multi-dim scalar access: arr[i, j, k] on N-D ArrayNum.
 // Walks strides to compute a flat offset, then reads the scalar at that offset.
-// On any out-of-range index or dim mismatch, returns ItemNull.
+// Fewer indices than axes select a leading-axis view, as the chained arr[i][j]
+// does (Lambda_Typed_Array2.md); more, or an out-of-range index, read ItemNull.
 Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     if (!arr || ndim < 1) return ItemNull;
     // 1-D access: arr[i] when arr is 1-D
@@ -627,6 +628,19 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
     }
     // N-D access via stride dot product
     ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    if (shape && ndim < shape->ndim) {
+        // LR07-34: a partial index steps one leading axis per index, each step
+        // a view of the last; the full-rank read below stays allocation-free.
+        // Copy the keys first: the JIT passes them in a GC heap buffer, which
+        // a view allocation may collect before the next key is read.
+        int64_t keys[LAMBDA_ARRAY_NUM_MAX_NDIM];
+        memcpy(keys, indices, (size_t)ndim * sizeof(int64_t));
+        Item view = { .array_num = arr };
+        for (int ax = 0; ax < ndim && get_type_id(view) == LMD_TYPE_ARRAY_NUM; ax++) {
+            view = array_num_get(view.array_num, keys[ax]);
+        }
+        return view;
+    }
     if (!shape || shape->ndim != ndim) return ItemNull;
     int64_t* shp = array_num_shape_dims(shape);
     int64_t* str = array_num_shape_strides(shape);

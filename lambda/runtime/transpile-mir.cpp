@@ -515,6 +515,9 @@ struct MirTranspiler {
     MIR_reg_t pipe_root_reg;
     bool in_pipe;
     AstNode* last_index_object;
+    // the subscript's container already evaluated as a boxed Item, when the
+    // lowering evaluates it before its key; `last` then reads it (LR07-35)
+    MIR_reg_t last_index_item_reg;
 
     // Error arms resolve `^` against the operand's failure Item. An optional
     // value arm resolves `~` against the non-error operand without borrowing
@@ -1338,6 +1341,7 @@ static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node);
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object);
 static bool mir_is_type_value_node(AstNode* node);
 static bool mir_index_expr_is_native_int(MirTranspiler* mt, AstNode* node);
+static Type* mir_nonnull_contract_base(Type* type);
 static bool mir_expr_proves_native_float_lane_or_null(MirTranspiler* mt,
         AstNode* node);
 static MIR_reg_t emit_index_value(MirTranspiler* mt, AstNode* field,
@@ -11197,6 +11201,24 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         // index, so an ARRAY_NUM index uniquely identifies a mask.)
         TypeId field_eff = fn->field ? mir_expr_carrier_type(mt, fn->field) : LMD_TYPE_ANY;
         bool idx_is_mask = (field_eff == LMD_TYPE_ARRAY_NUM || field_eff == LMD_TYPE_ARRAY);
+        // S8.2.4v3: only a key naming a position reads an element. Mirror the
+        // emitter's routing: an int key, a native int expression or a semantic
+        // integer reaches the element paths; any other key -- a range, or one
+        // typed only at run time -- reads through fn_index, whose Item may be a
+        // collection, so claiming the element lane unboxed an array (LR07-31).
+        bool idx_is_position = fn->field && (is_integer_type_id(field_eff) ||
+            mir_index_expr_is_native_int(mt, fn->field) ||
+            lambda_numeric_kind_from_type(fn->field->type) == LAMBDA_NUM_INTEGER);
+        if (fn->field && fn->field->next) {
+            // Several keys read a scalar only at full rank; with fewer keys
+            // than axes the checker types the row, a leading-axis view.
+            Type* result = mir_nonnull_contract_base(node->type);
+            if (!result || !mir_is_native_scalar_value_type(result->type_id)) {
+                return LMD_TYPE_ANY;
+            }
+        } else if (!idx_is_type && !idx_is_mask && !idx_is_position) {
+            return LMD_TYPE_ANY;
+        }
         if (!idx_is_type && !idx_is_mask) {
             // Keep this witness aligned with transpile_index: a known typed
             // load returns its element lane, while an untracked container
@@ -25927,8 +25949,7 @@ static MIR_reg_t emit_boxed_index_call(MirTranspiler* mt, AstFieldNode* field_no
 }
 
 static MIR_reg_t emit_array_num_index_load(MirTranspiler* mt, AstFieldNode* field_node,
-        TypeId idx_tid, bool idx_use_native, bool elem_guarded,
-        MirIndexLoadPolicy policy) {
+        bool idx_use_native, bool elem_guarded, MirIndexLoadPolicy policy) {
     policy.receiver_non_null = mir_receiver_non_null(field_node->object);
     MIR_reg_t local_index = 0;
     if (mt->local_reads_assumed &&
@@ -25949,10 +25970,7 @@ static MIR_reg_t emit_array_num_index_load(MirTranspiler* mt, AstFieldNode* fiel
     bool dense_index = mt->typed_array_inbounds_guard &&
         mir_expr_proven_nonnull_under_dense_guard(mt, (AstNode*)field_node);
     MIR_reg_t idx_native;
-    if (idx_tid == LMD_TYPE_ANY) {
-        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-        idx_native = emit_unbox(mt, boxed_idx, LMD_TYPE_INT);
-    } else if (dense_index) {
+    if (dense_index) {
         idx_native = mir_emit_dense_index_expr(mt, field_node->field);
     } else {
         idx_native = emit_index_value(mt, field_node->field, idx_use_native);
@@ -26097,13 +26115,68 @@ static MIR_reg_t emit_array_num_element_address(MirTranspiler* mt,
     return em_array_element_address(&mt->em, arr_ptr, idx_int, element_width);
 }
 
+// S7.2.2: `last` belongs to the innermost enclosing subscript's container.
+// Scoped like the interpreter's InterpLastIndexGuard: transpiling a nested
+// subscript in the object (`a[1 to 3][last]`) must not leave its own container
+// behind for the outer key (LR07-35).
+struct MirLastIndexScope {
+    MirTranspiler* mt;
+    AstNode* saved;
+    MIR_reg_t saved_reg;
+    MirLastIndexScope(MirTranspiler* m, AstNode* object)
+            : mt(m), saved(m->last_index_object), saved_reg(m->last_index_item_reg) {
+        mt->last_index_object = object;
+        mt->last_index_item_reg = 0;
+    }
+    ~MirLastIndexScope() {
+        mt->last_index_object = saved;
+        mt->last_index_item_reg = saved_reg;
+    }
+};
+
+// Does `last` in this key list belong to the enclosing subscript? A nested
+// subscript binds its own key's `last`, so only its object is searched.
+static void mir_scan_own_last(AstNode* child, AstNode* parent, void* ctx) {
+    (void)parent;
+    bool* found = (bool*)ctx;
+    if (*found || !child) return;
+    if (child->node_type == AST_NODE_LAST_INDEX) { *found = true; return; }
+    if (child->node_type == AST_NODE_INDEX_EXPR) {
+        mir_scan_own_last(((AstFieldNode*)child)->object, child, ctx);
+        mir_scan_own_last(child->next, child, ctx);
+        return;
+    }
+    ast_visit_core_children(child, mir_scan_own_last, ctx);
+}
+
+static bool mir_keys_use_own_last(AstNode* keys) {
+    bool found = false;
+    mir_scan_own_last(keys, NULL, &found);
+    return found;
+}
+
 static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_node) {
     AstNode* node = (AstNode*)field_node;
     auto publish = [mt, node](MIR_reg_t reg, ValueRep rep) -> MirValue {
         return mir_value_from_reg(mt, node, reg, rep, node->type,
             mir_expr_semantic_type(node));
     };
-    mt->last_index_object = field_node->object;
+    // fn_index over boxed operands, restoring the native element lane when the
+    // carrier promises one: the generic read every specialized path falls to.
+    auto boxed_read = [mt, node, &publish](MIR_reg_t boxed_obj, MIR_reg_t boxed_idx) -> MirValue {
+        MIR_reg_t result = emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        TypeId result_tid = mir_expr_carrier_type(mt, node);
+        if (mir_is_native_scalar_value_type(result_tid) || result_tid == LMD_TYPE_STRING) {
+            // fn_index always returns an Item; an explicit read contract promises
+            // the caller its native element carrier only after that boxed lookup.
+            return publish(emit_unbox(mt, result, result_tid),
+                lambda_canonical_rep_for_type_id(result_tid));
+        }
+        return publish(result, VALUE_REP_ITEM);
+    };
+    MirLastIndexScope last_scope(mt, field_node->object);
     // Index paths mix direct scalar loads with generic runtime reads.  The
     // descriptor must record the actual producer carrier, not the indexed
     // expression's semantic element type (D2.4.1-D2.4.3).
@@ -26111,6 +26184,10 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     // to the runtime array_num_at_nd helper.  Indices are stored into a small
     // heap-data buffer and the helper computes the stride-walking offset.
     if (field_node->field && field_node->field->next) {
+        // The container is evaluated once, before its keys, as the interpreter
+        // does; a `last` among the keys reads this register (LR07-35).
+        MIR_reg_t obj_item = transpile_box_item(mt, field_node->object);
+        mt->last_index_item_reg = obj_item;
         // Count indices
         int ndim = em_linked_node_count(field_node->field);
         // Allocate a heap_data buffer for ndim * int64_t
@@ -26148,19 +26225,27 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
                 MIR_new_reg_op(mt->ctx, val)));
             slot++;
         }
-        // Get the object as ArrayNum* (unbox the container Item)
-        MIR_reg_t obj_item = transpile_box_item(mt, field_node->object);
-        MIR_reg_t arr_ptr = mir_container_item_is_pointer(
-                mir_expr_carrier_type(mt, field_node->object))
-            ? obj_item : emit_unbox_container(mt, obj_item);
-        // Call array_num_at_nd(arr, ndim, indices) → Item
-        // Returns an Item: an out-of-range or wrong-arity subscript yields
-        // null, which the element type cannot represent, so this must not be
-        // narrowed into the element's native lane.
-        return publish(emit_call_3(mt, "array_num_at_nd", MIR_T_I64,
-            MIR_T_P,   MIR_new_reg_op(mt->ctx, arr_ptr),
+        // fn_index_nd checks the runtime type first: passing an unboxed
+        // non-array payload let array_num_at_nd read its N-D flag from a
+        // String's length bytes. Returns an Item: an out-of-range or
+        // wrong-arity subscript yields null, which the element type cannot
+        // represent, so this must not be narrowed into the element's native lane.
+        return publish(emit_call_3(mt, "fn_index_nd", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_item),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
             MIR_T_P,   MIR_new_reg_op(mt->ctx, idx_buf)), VALUE_REP_ITEM);
+    }
+
+    // S7.2.2: a key that uses `last` reads its container's length. A container
+    // that is not a plain name is evaluated once, before the key, so `last`
+    // and the read share it: re-transpiling it for `last` called a procedural
+    // container twice (LR07-35).
+    AstNode* object_base = ast_unwrap_primary(field_node->object);
+    if (object_base && object_base->node_type != AST_NODE_IDENT &&
+            mir_keys_use_own_last(field_node->field)) {
+        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+        mt->last_index_item_reg = boxed_obj;
+        return boxed_read(boxed_obj, transpile_box_item(mt, field_node->field));
     }
 
     TypeId idx_tid = mir_expr_carrier_type(mt, field_node->field);
@@ -26235,8 +26320,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
     }
 
-    if (obj_tid == LMD_TYPE_STRING &&
-            (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+    if (obj_tid == LMD_TYPE_STRING && is_integer_type_id(idx_tid)) {
         // The runtime helper keeps ASCII indexing to one bounds check and one
         // byte load, while retaining item_at's UTF-8 and out-of-range fallback.
         MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
@@ -26260,8 +26344,11 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         return publish(result, VALUE_REP_ITEM);
     }
 
-    if (!is_integer_type_id(idx_tid) && idx_tid != LMD_TYPE_ANY) {
-        // range/string/type indexes have runtime semantics in fn_index; numeric fast paths corrupt them.
+    if (!is_integer_type_id(idx_tid)) {
+        // range/string/type indexes have runtime semantics in fn_index; numeric
+        // fast paths corrupt them. A key typed only at run time goes there too:
+        // the fast paths decoded it as an int whatever it held, so a bound
+        // range, a mask or a string read element 0 (S8.2.1v4, LR07-31).
         return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
     }
 
@@ -26316,7 +26403,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         }
     }
     if (obj_tid == LMD_TYPE_ARRAY_NUM && obj_elem_type == LMD_TYPE_ANY &&
-            (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+            is_integer_type_id(idx_tid)) {
         // The concrete ArrayNum lane is unavailable to the compiler, so use
         // the boxed runtime read and decode only when the enclosing AST has a
         // matching scalar result contract. This keeps an unknown Item from
@@ -26338,7 +26425,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         is_integer_type_id(obj_elem_type) &&
-        (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+        is_integer_type_id(idx_tid)) {
         MirIndexLoadPolicy policy = {
             // v5: ELEM_INT and ELEM_INT64 are BOTH i64 storage again.
             MIR_INDEX_STORAGE_ARRAY_NUM,
@@ -26351,14 +26438,14 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             (uint8_t)(obj_elem_type == LMD_TYPE_INT64 ? ELEM_INT64 : ELEM_INT),
             exact_array_contract,
         };
-        return publish(emit_array_num_index_load(mt, field_node, idx_tid,
+        return publish(emit_array_num_index_load(mt, field_node,
             idx_use_native, obj_elem_guarded, policy), VALUE_REP_INT_LANE);
     }
 
     // Full-width unsigned arrays are destination-owned, but element reads use
     // the same raw-register representation as uint64 locals and parameters.
     if (obj_tid == LMD_TYPE_ARRAY_NUM && obj_elem_type == LMD_TYPE_UINT64 &&
-        (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+        is_integer_type_id(idx_tid)) {
         MirIndexLoadPolicy policy = {
             MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_U64, 8,
             MIR_INDEX_RESULT_NATIVE_UINT64,
@@ -26368,7 +26455,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             (uint8_t)ELEM_UINT64,
             exact_array_contract,
         };
-        return publish(emit_array_num_index_load(mt, field_node, idx_tid,
+        return publish(emit_array_num_index_load(mt, field_node,
             idx_use_native, obj_elem_guarded, policy), VALUE_REP_U64);
     }
 
@@ -26381,7 +26468,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY_NUM &&
         obj_elem_type == LMD_TYPE_FLOAT &&
-        (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+        is_integer_type_id(idx_tid)) {
         MirIndexLoadPolicy policy = {
             MIR_INDEX_STORAGE_ARRAY_FLOAT, MIR_T_D, 8,
             MIR_INDEX_RESULT_NATIVE_FLOAT,
@@ -26391,7 +26478,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             (uint8_t)ELEM_FLOAT64,
             exact_array_contract,
         };
-        return publish(emit_array_num_index_load(mt, field_node, idx_tid,
+        return publish(emit_array_num_index_load(mt, field_node,
             idx_use_native, obj_elem_guarded, policy), VALUE_REP_F64);
     }
 
@@ -26404,7 +26491,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     // descriptor honest, conditions branch on it directly and boxing consumers
     // box it as a bool.
     if (obj_tid == LMD_TYPE_ARRAY_NUM && obj_elem_type == LMD_TYPE_BOOL &&
-        (is_integer_type_id(idx_tid) || idx_tid == LMD_TYPE_ANY)) {
+        is_integer_type_id(idx_tid)) {
         MirIndexLoadPolicy policy = {
             MIR_INDEX_STORAGE_ARRAY_NUM, MIR_T_U8, 1,
             MIR_INDEX_RESULT_NATIVE_BOOL,
@@ -26414,7 +26501,7 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
             (uint8_t)ELEM_BOOL,
             exact_array_contract,
         };
-        MIR_reg_t loaded = emit_array_num_index_load(mt, field_node, idx_tid,
+        MIR_reg_t loaded = emit_array_num_index_load(mt, field_node,
             idx_use_native, obj_elem_guarded, policy);
         return mir_value_from_reg(mt, node, loaded, VALUE_REP_I64, &TYPE_BOOL,
             LMD_TYPE_BOOL);
@@ -26425,20 +26512,6 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     // ======================================================================
     if (obj_tid == LMD_TYPE_ARRAY && is_integer_type_id(idx_tid)) {
         MIR_reg_t idx_native = emit_index_value(mt, field_node->field, idx_use_native);
-        return emit_generic_array_index_value(mt, field_node, idx_native);
-    }
-
-    // ======================================================================
-    // FAST PATH 1d: ARRAY + ANY index — unbox index, typed dispatch
-    // Object is generic ARRAY, index type unknown. Unbox field with it2i().
-    // P4-3.2: nested=INT returns NATIVE INT only when elem_type proven safe;
-    // otherwise returns BOXED Item (backward-compatible with pre-P4-3.2).
-    // For nested=BOOL (P4-3.1): inline items[idx], extract native bool.
-    // Otherwise: item_at(boxed_obj, idx). Returns BOXED Item.
-    // ======================================================================
-    if (obj_tid == LMD_TYPE_ARRAY && idx_tid == LMD_TYPE_ANY) {
-        MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
-        MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
         return emit_generic_array_index_value(mt, field_node, idx_native);
     }
 
@@ -26481,66 +26554,11 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
     }
 
     // ======================================================================
-    // FAST PATH 3: ANY + ANY with inner INDEX_EXPR detection (Level 3)
-    // When object is ANY and field is also ANY, check if the field expression
-    // is an INDEX_EXPR into a typed int array. If so, the field produces an
-    // integer Item and we can use item_at(obj, it2i(field)) instead of the
-    // expensive fn_index double dispatch.
-    // ======================================================================
-    if (obj_tid == LMD_TYPE_ANY && idx_tid == LMD_TYPE_ANY) {
-        bool field_known_int = false;
-        AstNode* field_expr = field_node->field;
-        // Unwrap PRIMARY wrapper
-        if (field_expr && field_expr->node_type == AST_NODE_PRIMARY) {
-            AstPrimaryNode* pri = (AstPrimaryNode*)field_expr;
-            if (pri->expr) field_expr = pri->expr;
-        }
-        if (field_expr && field_expr->node_type == AST_NODE_INDEX_EXPR) {
-            AstFieldNode* inner_idx = (AstFieldNode*)field_expr;
-            // Check inner object's effective type (handles fill() narrowing)
-            TypeId inner_obj_eff = mir_expr_carrier_type(mt, inner_idx->object);
-            if (inner_obj_eff == LMD_TYPE_ARRAY_NUM) {
-                field_known_int = true;
-            } else if (inner_obj_eff == LMD_TYPE_ARRAY) {
-                // Check AST nested type
-                Type* inner_type = inner_idx->object ? inner_idx->object->type : nullptr;
-                if (inner_type && inner_type->type_id == LMD_TYPE_ARRAY) {
-                    TypeArray* arr_type = (TypeArray*)inner_type;
-                    if (arr_type->nested && (arr_type->nested->type_id == LMD_TYPE_INT
-                        || arr_type->nested->type_id == LMD_TYPE_INT64
-                        || arr_type->nested->type_id == LMD_TYPE_UINT64)) {
-                        field_known_int = true;
-                    }
-                }
-            }
-        }
-        if (field_known_int) {
-            // Field produces an integer Item, but unknown obj may still be VMap/map.
-            MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
-            MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
-            return publish(emit_call_2(mt, "fn_index", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_field)), VALUE_REP_ITEM);
-        }
-    }
-
-    // ======================================================================
     // DEFAULT: box both operands and call fn_index
     // ======================================================================
     MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
     MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
-
-    MIR_reg_t result = emit_call_2(mt, "fn_index", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
-    TypeId result_tid = mir_expr_carrier_type(mt, (AstNode*)field_node);
-    if (mir_is_native_scalar_value_type(result_tid) || result_tid == LMD_TYPE_STRING) {
-        // fn_index always returns an Item; an explicit read contract promises
-        // the caller its native element carrier only after that boxed lookup.
-        return publish(emit_unbox(mt, result, result_tid),
-            lambda_canonical_rep_for_type_id(result_tid));
-    }
-    return publish(result, VALUE_REP_ITEM);
+    return boxed_read(boxed_obj, boxed_idx);
 }
 
 // ============================================================================
@@ -33298,7 +33316,8 @@ static MirValue transpile_contextual_value(MirTranspiler* mt, AstNode* node) {
                 MIR_new_reg_op(mt->ctx, reg), MIR_new_double_op(mt->ctx, 0.0)));
             break;
         }
-        MIR_reg_t boxed_obj = transpile_box_item(mt, mt->last_index_object);
+        MIR_reg_t boxed_obj = mt->last_index_item_reg ? mt->last_index_item_reg
+            : transpile_box_item(mt, mt->last_index_object);
         // `last` indexes CONTENT, so it counts what an IntKey can reach.
         MIR_reg_t len = emit_call_1(mt, "fn_seq_count", MIR_T_I64, MIR_T_I64,
             MIR_new_reg_op(mt->ctx, boxed_obj));
@@ -34096,6 +34115,10 @@ static MIR_reg_t transpile_compound_assignment_item(MirTranspiler* mt,
         // arr[i] = val → inline store for ArrayInt, or fn_array_set fallback
         // arr[i, j, k] = val → dispatch to array_num_set_nd runtime helper
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        // S7.2.2: `a[last] = v` resolves `last` against the target. The write
+        // had no scope of its own and read whatever container the last lowered
+        // read left behind, so it worked only after a read of that same array.
+        MirLastIndexScope last_scope(mt, ca->object);
         // S9.3.1: the stored value is captured, so writes through the source
         // binding after this statement must detach rather than alias the slot.
         // CW34: not for a borrowed handle's store-back -- the handle is dead.

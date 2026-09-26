@@ -3823,21 +3823,38 @@ static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
     return map_shape_field_to_item(data, field);
 }
 
+// S8.2.4v3: a null value never matches, even under `T | null`, so a query's
+// absence is always the run of none rather than a run holding null.
+static void query_push_match(Array* result, Item val, Item type_val) {
+    if (val.item && get_type_id(val) != LMD_TYPE_NULL &&
+            fn_is(val, type_val) == BOOL_TRUE) {
+        array_push_verbatim(result, val);
+    }
+}
+
 // recursive helper: collect all items matching type_val into result array
 static void query_collect(Item data, Item type_val, bool self_inclusive, Array* result, int depth) {
     if (depth > 1000) return;  // prevent infinite recursion
     if (!data.item) return;
 
-    // check if this item matches the type (only at root level when self-inclusive)
-    if (self_inclusive) {
-        Bool match = fn_is(data, type_val);
-        if (match == BOOL_TRUE) {
-            array_push_verbatim(result, data);
+    TypeId type_id = get_type_id(data);
+    // S8.2.4v3: a list is a sequence, not a node. The query steps through it
+    // set-at-a-time, applying itself to each item as it would to the list, so
+    // `(d1, d2)?T` searches each item's descendants and `.?T` also tests the
+    // items -- XPath's `$seq//T`. Items nested in one another are not
+    // deduplicated: values have no identity to deduplicate by (SI13).
+    if (type_id == LMD_TYPE_ARRAY && data.array->is_spreadable) {
+        Array* list = data.array;
+        for (int64_t i = 0; i < list->length; i++) {
+            query_collect(array_item_read(list, i), type_val, self_inclusive, result, depth + 1);
         }
+        return;
     }
 
+    // check if this item matches the type (only at root level when self-inclusive)
+    if (self_inclusive) query_push_match(result, data, type_val);
+
     // recurse into attributes and children (both ? and .? do this)
-    TypeId type_id = get_type_id(data);
     if (type_id == LMD_TYPE_ELEMENT) {
         Element* elmt = data.element;
         // recurse into attributes
@@ -3863,7 +3880,7 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
             }
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
-        // runtime lists and arrays share LMD_TYPE_ARRAY, so one branch must cover both.
+        // a list was stepped through above; an array is a container of its items
         Array* arr = (Array*)data.array;
         for (int64_t i = 0; i < arr->length; i++) {
             query_collect(array_item_read(arr, i), type_val, true, result, depth + 1);
@@ -3874,14 +3891,20 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
             Item val = array_num_get(arr, i);
             query_collect(val, type_val, true, result, depth + 1);
         }
+    } else if (type_id == LMD_TYPE_RANGE) {
+        // S8.2.4v3: `e?T` is `e[T]` applied recursively, and `e[T]` walks a
+        // range's values, so `(1 to 3)?int` finds them too (it found none)
+        for (int64_t i = 0; i < data.range->length; i++) {
+            query_push_match(result, item_at(data, i), type_val);
+        }
     }
 }
 
-// S8.2.4: a type subscript is an accessor, not a filter -- `e?T` extends
-// `e[1]` the way a name extends a position -- so its result is the run `T*`
-// a subscript yields: `null` for no match, the match itself for one, and a
-// list for more (S2.5.5v2). It is a value, never an item-position producer,
-// so `[e?T, 9]` with no match is `[null, 9]`, exactly like `[e[-1], 9]`.
+// S8.2.4v3: a type key answers as XPath does -- `e?T` extends `e[1]` the way
+// a name extends a position -- so its result is the run `T*` a subscript
+// yields: `null` for no match, the match itself for one, and a list for more
+// (S2.5.5v2). It is a value, never an item-position producer, so `[e?T, 9]`
+// with no match is `[null, 9]`, exactly like `[e[-1], 9]`.
 Item fn_query(Item data, Item type_val, int direct) {
     TypeId type_tid = get_type_id(type_val);
     if (type_tid != LMD_TYPE_TYPE) {
@@ -3906,71 +3929,43 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         FOR_EACH_MAP_FIELD(elmt_type, field) {
             if (field->name) {
-                Item val = _map_field_value((TypeMap*)elmt_type, elmt->data, field);
-                if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
-                    array_push_verbatim(result, val);
-                }
+                query_push_match(result,
+                    _map_field_value((TypeMap*)elmt_type, elmt->data, field), type_val);
             }
         }
         // check direct children
         for (int64_t i = 0; i < elmt->length; i++) {
-            Item child = elmt->items[i];
-            if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
-                array_push_verbatim(result, child);
-            }
+            query_push_match(result, elmt->items[i], type_val);
         }
     } else if (type_id == LMD_TYPE_MAP) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name) {
-                Item val = _map_field_value(map_type, map->data, field);
-                if (val.item && fn_is(val, type_val) == BOOL_TRUE) {
-                    array_push_verbatim(result, val);
-                }
+                query_push_match(result, _map_field_value(map_type, map->data, field), type_val);
             }
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
-        // runtime lists and arrays share LMD_TYPE_ARRAY; keep spreadable query arrays here too.
+        // runtime lists and arrays share LMD_TYPE_ARRAY. S8.2.4v3: a list is
+        // stepped set-at-a-time, as an XPath sequence is -- each item takes the
+        // child step, so `(b1, b2)[div]` is the divs of both bodies and a scalar
+        // item, which has no content, contributes nothing: `(1, "a", 2)[int]`
+        // is null while the array `[1, "a", 2][int]` is (1, 2).
         Array* arr = (Array*)data.array;
-        if (arr->is_spreadable) {
-            // A list distributes the child query over its container items; a
-            // scalar item is tested itself, so `(1, "a", 2)[int]` filters
-            // instead of querying inside scalars. (Two or more matches of a
-            // query are such a list; fewer collapse to the item or null.)
-            for (int64_t i = 0; i < arr->length; i++) {
-                Item child = array_item_read(arr, i);
-                TypeId child_type = get_type_id(child);
-                if (child_type == LMD_TYPE_ELEMENT || child_type == LMD_TYPE_MAP ||
-                        child_type == LMD_TYPE_ARRAY || child_type == LMD_TYPE_ARRAY_NUM) {
-                    child_query_collect(child, type_val, result);
-                } else if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
-                    array_push_verbatim(result, child);
-                }
-            }
-        } else {
-            for (int64_t i = 0; i < arr->length; i++) {
-                Item child = array_item_read(arr, i);
-                if (child.item && fn_is(child, type_val) == BOOL_TRUE) {
-                    array_push_verbatim(result, child);
-                }
-            }
+        for (int64_t i = 0; i < arr->length; i++) {
+            Item child = array_item_read(arr, i);
+            if (arr->is_spreadable) child_query_collect(child, type_val, result);
+            else query_push_match(result, child, type_val);
         }
     } else if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = data.array_num;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_num_get(arr, i);
-            if (fn_is(val, type_val) == BOOL_TRUE) {
-                array_push_verbatim(result, val);
-            }
+            query_push_match(result, array_num_get(arr, i), type_val);
         }
     } else if (type_id == LMD_TYPE_RANGE) {
         // a range is the sequence of its values, so `(1 to 3)[int]` filters them
         for (int64_t i = 0; i < data.range->length; i++) {
-            Item val = item_at(data, i);
-            if (fn_is(val, type_val) == BOOL_TRUE) {
-                array_push_verbatim(result, val);
-            }
+            query_push_match(result, item_at(data, i), type_val);
         }
     }
 }
@@ -3979,7 +3974,7 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
 Item fn_child_query(Item data, Item type_val) {
     Array* result = array_plain();
     child_query_collect(data, type_val, result);
-    return list_collapse_value({.array = result});   // the run a subscript yields (S8.2.4)
+    return list_collapse_value({.array = result});   // the run a subscript yields (S8.2.4v3)
 }
 
 static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) {
@@ -5432,6 +5427,55 @@ Item fn_format1(Item item) {
     return fn_format2(item, ItemNull);
 }
 
+// A positional selection by array needs a sequence face. Text is left out: a
+// positional selection keeps its kind (S7.1.2) and a gather over it is unruled.
+static bool index_source_has_sequence_face(TypeId type_id) {
+    return type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_NUM ||
+        type_id == LMD_TYPE_VARRAY || type_id == LMD_TYPE_RANGE ||
+        type_id == LMD_TYPE_ELEMENT || type_id == LMD_TYPE_VELMT;
+}
+
+// A bool array is a mask; any other array key is an index array.
+static bool index_array_is_mask(Item index_array) {
+    if (get_type_id(index_array) == LMD_TYPE_ARRAY_NUM)
+        return index_array.array_num->get_elem_type() == ELEM_BOOL;
+    Array* arr = index_array.array;
+    if (!arr || arr->length == 0) return false;
+    for (int64_t i = 0; i < arr->length; i++) {
+        if (get_type_id(array_item_read(arr, i)) != LMD_TYPE_BOOL) return false;
+    }
+    return true;
+}
+
+// S8.2.4v3: a positional selection by array is NumPy's and always yields an
+// array. An index array is a batch of scalar reads that keeps its own length
+// -- `a[[1, 3, 9]]` is `[a[1], a[3], null]` -- each position reading as `a[i]`
+// does, so one out of range, negative, fractional or not a number is null
+// (S7.1.1v3, S7.2.1, S8.2.1v4); a nested index array selects again, so the
+// result keeps the index array's shape. A mask selects the positions it marks.
+static Item fn_index_select(Item source, Item index_array) {
+    bool mask = index_array_is_mask(index_array);
+    int64_t count = fn_seq_count(index_array);
+    RootFrame roots(3);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<Item> rooted_index(roots, index_array);
+    Rooted<Array*> rooted_out(roots, array_plain());
+    for (int64_t i = 0; i < count; i++) {
+        Item key = item_at(rooted_index.get(), i);
+        TypeId key_type = get_type_id(key);
+        Item value = ItemNull;
+        if (mask) {
+            if (key_type != LMD_TYPE_BOOL || !key.bool_val) continue;
+            value = fn_index(rooted_source.get(), (Item){.item = i2it(i)});
+        } else if (is_numeric_type_id(key_type) || key_type == LMD_TYPE_ARRAY ||
+                key_type == LMD_TYPE_ARRAY_NUM) {
+            value = fn_index(rooted_source.get(), key);
+        }
+        array_push_verbatim(rooted_out.get(), value);
+    }
+    return seq_finish_array({.array = rooted_out.get()});
+}
+
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
     // Quick null/error guard: indexing null returns null to propagate
@@ -5507,8 +5551,14 @@ Item fn_index(Item item, Item index_item) {
             return ItemNull;
         }
         // boolean mask index: arr[mask] — select elements where mask is true
-        if (index_type == LMD_TYPE_ARRAY_NUM && item_type == LMD_TYPE_ARRAY_NUM) {
+        if (index_type == LMD_TYPE_ARRAY_NUM && item_type == LMD_TYPE_ARRAY_NUM &&
+                index_array_is_mask(index_item)) {
             return fn_mask_index(item, index_item);
+        }
+        // S8.2.4v3: any other array key is a positional selection
+        if ((index_type == LMD_TYPE_ARRAY || index_type == LMD_TYPE_ARRAY_NUM) &&
+                index_source_has_sequence_face(item_type)) {
+            return fn_index_select(item, index_item);
         }
         log_debug("invalid index type %d", index_item._type_id);
         return ItemNull;
@@ -5613,6 +5663,15 @@ Item fn_index_set(Item item, Item key, Item value) {
 int64_t fn_int64_index(Item item) {
     int64_t value = INT64_MIN;
     return lambda_item_to_int64_exact(item, &value) ? value : INT64_MIN;
+}
+
+// A multi-key read of anything but a typed array is an invalid member read,
+// which is null (S7.1.1v3). Both tiers check here: array_num_at_nd reads the
+// N-D flag from the Container header, which a String or other non-container
+// payload does not have.
+Item fn_index_nd(Item item, int ndim, int64_t* indices) {
+    if (get_type_id(item) != LMD_TYPE_ARRAY_NUM) return ItemNull;
+    return array_num_at_nd(item.array_num, ndim, indices);
 }
 
 // S12.3.3v2: the one method walk — own methods, then the base chain. Shared by

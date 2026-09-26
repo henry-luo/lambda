@@ -5,8 +5,8 @@
 "-- two or more is a list --"
 [list, 2]
 [<img src: "a">, <img src: "b">, 9]
-"-- the child query follows --"
-[list, true, 1, list]
+"-- the child query follows; a list is stepped item by item, and a scalar item has no content --"
+[list, true, 1, type.null]
 "-- a value, never a producer: absence lands as null; the packager splices --"
 [null, 9]
 [9]

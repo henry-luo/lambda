@@ -59,6 +59,11 @@ static const char* kExtraLambdaScripts[] = {
     // its container; the shape walk must decode that lane to reach it.
     "test/lambda/gc_shape_any_lane.ls",
     "test/lambda/proc/string_builder_snapshots.ls",
+    // a gather allocates a row view or slice per position between its reads,
+    // and a partial N-D read allocates a view between its keys
+    "test/lambda/subscript_selection.ls",
+    // a container evaluated once is held across its key's allocations
+    "test/lambda/proc/subscript_last_scope.ls",
 };
 
 struct StressScript {

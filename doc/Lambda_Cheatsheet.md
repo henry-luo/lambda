@@ -204,6 +204,8 @@ Indexing & Slicing:
 | `arr[0]` | First element |
 | `arr.0` | Alt. syntax for const index |
 | `arr[1 to 3]` | Slice (indices 1, 2, 3) |
+| `arr[[1, 3, 9]]` | Index array: `[arr[1], arr[3], null]` |
+| `arr[[true, false, true]]` | Mask: the marked positions |
 | `map.key` | Map field access |
 | `map["key"]` | Map field by string |
 | `"hello"[1 to 3]` | "ell" — string slicing |
@@ -320,7 +322,7 @@ Query: type-based search
 | Form | Meaning |
 |---|---|
 | `?   .?` | recursive descendant search |
-| `expr[T]` | child-level query (direct only); a query yields `null`, the match, or a list — count with `count(q)` |
+| `expr[T]` | child-level query (direct only); a query yields `null`, the match, or a list — count with `count(q)`; on a list it steps through each item |
 
 Vector Arithmetic:
 

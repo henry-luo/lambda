@@ -400,6 +400,11 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.10 (LR03-20): an object literal admits each field against its
     // declared contract; construction stored any value unchecked.
     {"test/lambda/object_field_admission.ls", "test/lambda/object_field_admission.txt"},
+    // S8.2.4v3 (LR07-31..35): type keys step lists and drop null matches,
+    // positional selections gather; a run-time-typed key read element 0 on the
+    // JIT only, and `last` there resolved against an outer container.
+    {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt"},
+    {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

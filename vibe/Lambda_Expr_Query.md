@@ -1,6 +1,6 @@
 # Lambda Query: Type-Based Path Query Expressions
 
-> **Status (2026-09-23):** shipped — `?`, `.?` and `[T]` are in the C parser and both tiers, and the two breaking changes below landed long ago (`^` is propagation, `**` is power). The result kind was **ruled 2026-09-23 as S8.2.4**: a query is an accessor and yields the run `T*` — §4.1 records the decision and the argument.
+> **Status (2026-09-26):** shipped — `?`, `.?` and `[T]` are in the C parser and both tiers, and the two breaking changes below landed long ago (`^` is propagation, `**` is power). The result kind is **ruled as S8.2.4v3 (2026-09-26)**: a type query answers as XPath does — the run `T*` — while a positional selection (`[i to j]`, a mask, an index array) answers as NumPy does — an array; §4.1 records the ruling and the argument. **Implemented on both tiers 2026-09-26** (the list step, the null-drop rule, ranges under `?`, and the index-array gather); the spec's Appendix A row for S8.2.4v3 keeps the dates, the residue, and an array reading of the type query that was ruled on 2026-09-25 and reverted the next day.
 
 ## Overview
 
@@ -135,16 +135,10 @@ direct ancestor of Lambda's "pipe over a result set" idiom (`Lambda_Expr_Pipe.md
 | predicate language | full expression | fixed vocabulary | selector or callback | the type language itself; a constrained type `T that cond` for the rest (§10.5) |
 | union | `\|` | `,` | `,` | `?(A \| B)` — the type union (S10.1.1) |
 | iterate over result | set-at-a-time steps | caller loops | implicit iteration | the pipe: `html?<img> \|> ~.src` (§7.2) |
-| **0 / 1 / n matches** | `()` / the item / sequence — item ≡ singleton | `null` / element (`querySelector`), `NodeList` always (`querySelectorAll`) | jQuery object always; `.length` 0/1/n | **`null` / the match / a list** — the run `T*` (§4.1, S8.2.4) |
+| **0 / 1 / n matches** | `()` / the item / sequence — item ≡ singleton | `null` / element (`querySelector`), `NodeList` always (`querySelectorAll`) | jQuery object always; `.length` 0/1/n | **`null` / the match / a list** — the run `T*` (§4.1, S8.2.4v3) |
 | count | `count()` (not `string-length`) | `.length` | `.length` | `count()` (not `len`, S8.3.3v3) |
 
-The result model is where the lineages disagree, and Lambda sides with
-XPath 2.0+: a query is an **accessor** whose singleton case is the item
-itself, with `()`/`null` for absence — not the CSS/jQuery "always a
-collection" model, which needs an unwrapping step for the common single
-match and a spread to place results into content. §4.1 carries the
-argument; the tell that the XPath model fits is that `count()` versus `len`
-in Lambda is precisely XPath's `count()` versus `string-length()`.
+The result model is where the lineages disagree, and Lambda sides with XPath 2.0+: a query is an **accessor** whose singleton case is the item itself, with `()`/`null` for absence — not the CSS/jQuery "always a collection" model, which needs an unwrapping step for the common single match and a spread to place results into content (§4.1, S8.2.4v3). Steps are set-at-a-time too: a run is stepped item by item, so `html[table][tr][td]` is `//table/tr/td` (§6.5). The tell that the XPath model fits is that `count()` versus `len` in Lambda is precisely XPath's `count()` versus `string-length()`. Positional selections — `[i to j]`, a mask, an index array — are the other world and follow NumPy: always an array (§4.1).
 Attribute searching is Lambda's one deliberate departure from all three:
 an element's attribute values are in its key domain (S8.1.2v2), so `?string`
 finds `"photo.jpg"` in `src: "photo.jpg"` as readily as a text child — XPath
@@ -273,47 +267,35 @@ data?{score: (80 to 100)}     // maps where score is in 80..100
 
 ## 4. Semantics
 
-### 4.1 Return Value — a run, `T*` (RULED 2026-09-23, USER; S8.2.4)
+### 4.1 Return Value — the run `T*`; two subscript worlds (RULED 2026-09-26, USER; S8.2.4v3)
 
-A query yields the **run** `T*` (S11.1.6v2): `null` when nothing matches, the
-match **itself** when exactly one does, and a list when two or more do
-(S2.5.5v2). It is a value, never an item-position producer.
+**Definition.** For a container `e` — a range, array, map, or element — `e[T]` iterates the content exactly as `for (x in e)` does (a map's values; an element's attribute values, then its children) and keeps each `x` that `is T` **and is not `null`**. A **list** is stepped **set-at-a-time**, as an XPath sequence is: `e[T]` on a list applies the step to each item and splices the results, so `html[table][tr][td]` reads as `//table/tr/td` at any number of tables; a scalar has no content, so a scalar item contributes nothing — `(1, "a", 2)[int]` is `null`, where the array `[1, "a", 2][int]` is `(1, 2)` (an array is a container, a list a sequence, S2.5.1v2). It answers as a subscript does: the match **itself** when there is one, `null` when there is none, a list when there are two or more — the run `T*` (S11.1.6v2), collapsing by S2.5.5v2. `e?T` is `e[T]` applied recursively, in document order (§5.3), the root excluded; `e.?T` includes it (§5.2). The result is a value, never an item-position producer.
 
 ```lambda
 let imgs = html?<img>          // null | <img …> | (<img …>, <img …>, …)
-count(imgs)                     // the match count: 0, 1, or n (S8.3.3v3)
+count(imgs)                     // the match count: 0, 1, or n (S8.3.3v3) — len is not the count
 if (imgs) …                     // the absence check reads as a null check
-[*imgs, extra]                  // splice whatever there is
-(html?<img>)[0]                 // first of several; a lone match IS the value
+[*imgs, extra]                  // splice whatever there is; [*imgs] is the array form
+doc[<title>]                    // the one <title>, unwrapped
+html[table][tr][td]             // every cell of every table — XPath's //table/tr/td
+[1, null, 2][(int | null)]      // (1, 2) — a null value never matches, whatever T admits (in an expression `int?` would be a query, so spell the type as a union)
+(1 to 5)[int]                   // (1, 2, 3, 4, 5) — a range is a container too
 ```
 
-**Why a run and not an array.** `list` and `array` agree at two or more
-items; the whole question is what happens at zero and one. Two readings were
-on the table:
+**Two worlds, kept apart.** A **type key** names members and answers as an XPath node-set does: one expected match is the common case (`doc[<title>]`, `page?<h1>`) and must not need `[0]`, and a run composes as a node-set — `html[table][tr][td]` steps through every table. A **positional selection** — a range `[i to j]`, a boolean mask, an index array `[[1, 3, 5]]` — names a window and answers as NumPy does: always an array, its shape following the key (S7.1.2; S8.2.4v3 for the index array, whose out-of-range or negative position contributes `null` and whose result keeps the index array's length). Composed, `e[T][1 to 3]` slices the run — on a lone match, that value's own content — clamped, `[]` when empty, never `null`. The two models cannot be aligned without breaking one of them: an always-array type query costs the singleton case its directness, and a collapsing selection makes a window's shape depend on the data (R's `drop = TRUE`). So each keeps its own rule.
 
-*Option 1 — return an array.* `?` as a filter, the jQuery convention and that
-of most filter functions. Pros: one uniform result type (`[]` when empty), and
-`len(result)` counts directly. Cons: a single match needs unwrapping
-(`result[0]`), and placing matches into content needs a spread (`*result`).
+**Consequences.**
 
-*Option 2 — return a run (chosen).* `?` as an **accessor**, an extension of
-`e.name`, `e[1]`, `e[-1]` to selection by type — the way `e[1]` may one day
-extend to `e[1, 2, 3]` or `e[5 to 8]`. `e[1]` yields the item, not `[item]`,
-and `e[-1]` yields `null`, not `[]`; so `e[T]` and `e?T` follow: the item for
-one match, `null` for none. The static result type is `T*`. Pros: matches
-auto-spread where they land (S2.5.1v2), and `if (e?T)` is the absence idiom
-instead of `if (len(e?T) > 0)`. Cons: `T*` is sometimes less convenient to
-work with than an array, and `len(result)` is not the count — `len` of a lone
-element match is that element's own length. The count is `count(result)`
-(S8.3.3v3), the size of the run; `len([*result])` looks equivalent but counts
-a lone *array* match by its contents.
+- *Counting* is `count(q)` (S8.3.3v3); `len` of a lone element match is that element's own length.
+- *First of several* is `(q)[0]`; a lone match **is** the value, so `q[0]` on a lone element reads its first child. Code that must handle both counts tests `count(q)` or takes `[*q][0]`, since `[*q]` wraps a lone match as one item and is `[]` for none.
+- *Chaining.* Child steps chain at any match count: `html[body][div]` is the divs of every body, `html?<table>[tr][td]` every cell of every table (§6.5). `e?T` on a list searches each item's descendants — the items themselves are not tested, as with XPath's `//` — so `html?<div>?<div>` is the divs nested in divs; `.?` includes the items.
+- *Static type* is the run: the checker types a query open, since a lone match must not be unboxed as a container.
+- *`that`.* `(e?T) that cond` is the whole run or `null` (S10.1.5v3); filtering the matches is `|:`.
+- *No deduplication.* A list whose items nest within one another reaches a nested match once per enclosing item: with three divs nested in one another, `html?<div>?<div>` finds the innermost twice. XPath's node-sets deduplicate by node identity; Lambda values have none to deduplicate by (SI13), so the step is a plain concatenation.
+- *Null-valued matches are dropped* even when `T` admits `null` (`e[(int | null)]`, `e[null]` never yield a `null` item), so an absent result is always the run of none.
+- *Item position.* `[e?T, 9]` with no match is `[null, 9]`, as `[e[-1], 9]` is; with two or more matches the run splices, which `[*e?T, 9]` spells explicitly.
 
-The accessor reading won because it is the one that makes the singleton case
-*expected* rather than surprising: nobody expects `e[1]` to come back wrapped.
-`|:` and `find` remain filters and keep returning arrays (S2.5.7v2,
-S10.1.6) — the line is accessor versus function-over-a-source, not a
-special case for `?`. (`that` in expression position is now the single-value
-proviso, S10.1.5v3: `(e?T) that cond` is the whole run or `null`.)
+**Why not an array.** `list` and `array` agree at two or more items; the question is zero and one. The array reading (jQuery's, NumPy's) gives one uniform result type and a direct `len`, at the cost of unwrapping the single match (`result[0]`) and spreading to place results into content. The accessor reading makes the singleton case *expected* rather than surprising — nobody expects `e[1]` to come back wrapped — and keeps `doc[<title>]`, `html[body][div]` and `if (e?T)` direct. `|:` and `find` remain filters and return arrays (S2.5.7v4, S10.1.6): the line is a *type key* versus a *function over a source or a positional key*. Ruled 2026-09-26, after an array reading had been tried for a day and reverted.
 
 ### 4.2 Match Rules
 
@@ -360,8 +342,8 @@ page?<div>         // finds the <div class:"main"> element
 ```lambda
 html?<p>           // all <p> at any depth
 let div = <div class: "main"; <p>>
-div?<div>          // () — does NOT include self
-div?<p>            // (<p>) — finds child
+div?<div>          // null — does NOT include self
+div?<p>            // <p> — finds child (a lone match is the value)
 ```
 
 ### 5.2 Self-Inclusive Query: `.?`
@@ -370,9 +352,9 @@ The `.?` operator includes the **value itself** in addition to everything `?` se
 
 ```lambda
 let div = <div class: "main"; <p>>
-div.?<div>         // (<div class:"main" ...>) — includes self
-div.?<p>           // (<p>) — finds child (same as ?)
-42.?int            // (42) — trivial self-match
+div.?<div>         // <div class:"main" ...> — includes self
+div.?<p>           // <p> — finds child (same as ?)
+42.?int            // 42 — trivial self-match
 ```
 
 The key distinction:
@@ -405,7 +387,9 @@ Lambda attributes can hold complex values (maps, arrays, elements), so the query
 |-----------|-------------|---------------|
 | Element | attributes (recursively) + children (recursively) | self + same as `?` |
 | Map | values (recursively) | self + same as `?` |
-| Array / List | items (recursively) | self + same as `?` |
+| Array | items (recursively) | self + same as `?` |
+| Range | its values | self + same as `?` |
+| List (a run) | each item's content, recursively — the items themselves are not tested | each item, then the same as `?` |
 | Scalar | (nothing — no children) | the value itself |
 
 ```lambda
@@ -459,7 +443,7 @@ Built-in type keywords (`int`, `string`, `float`, `bool`, `null`, `element`, `ma
 
 ### 6.3 Semantics
 
-`expr[T]` returns an **array** of all direct attributes and children of `expr` that match type `T`.
+`expr[T]` returns the **run** of the direct attributes and children of `expr` that match type `T` (§4.1): the match, `null`, or a list.
 
 #### On Arrays
 
@@ -468,7 +452,7 @@ Searches array items (one level only):
 ```lambda
 [1, "hello", 3, "world", true][string]    // ("hello", "world")
 [1, 2, 3][int]                             // (1, 2, 3)
-[1, [2, 3], 4][array]                      // ([2, 3])
+[1, [2, 3], 4][array]                      // [2, 3] — the lone match is the inner array itself
 [1, "a", null, true][(int | string)]       // (1, "a")
 ```
 
@@ -477,9 +461,19 @@ Searches array items (one level only):
 Searches map **values** (one level only):
 
 ```lambda
-{name: "Alice", age: 30, active: true}[string]    // ("Alice")
-{name: "Alice", age: 30, active: true}[int]       // (30)
+{name: "Alice", age: 30, active: true}[string]    // "Alice"
+{name: "Alice", age: 30, active: true}[int]       // 30
 {x: 1, y: 2, label: "origin"}[int]                // (1, 2)
+```
+
+#### On Lists — set-at-a-time
+
+A list is a sequence, not a container: the step applies to each item and the results splice (§4.1). A run from a previous step is a list, which is what makes chains work at any count:
+
+```lambda
+type b = <b>
+(<a; <b; "1">>, <c; <b; "2">>)[b]      // (<b; "1">, <b; "2">) — the <b> child of each item
+(1, "a", 2)[int]                        // null — a scalar item has no content; [1, "a", 2][int] is (1, 2)
 ```
 
 #### On Elements
@@ -495,8 +489,8 @@ let el = <div class: "main" id: "content";
     <img src: "photo.jpg">
     "some text">
 
-el[p]            // (<p; "hello">) — direct child element
-el[img]          // (<img src: "photo.jpg">) — direct child element
+el[p]            // <p; "hello"> — direct child element
+el[img]          // <img src: "photo.jpg"> — direct child element
 el[string]       // ("main", "content", "some text") — attr values + text children
 el[element]      // (<p; "hello">, <img src: "photo.jpg">) — all child elements
 ```
@@ -511,7 +505,7 @@ Note: Unlike `?`, the child-level query does **not** recurse into children or at
 | Depth | One level | Unlimited |
 | Self-inclusive variant | N/A | `.?T` |
 | Analogy | XPath `/`, CSS `>` | XPath `//`, CSS ` ` |
-| Return type | Array | Array |
+| Return type | the run `T*` | the run `T*` |
 
 ```lambda
 type a = <a>
@@ -524,40 +518,37 @@ let doc = <root;
 doc[element]       // (<a ...>, <d>) — direct children only
 doc?element        // (<a>, <b>, <c>, <d>) — all descendants
 
-doc[a]             // (<a ...>) — direct child <a> only
-doc?<a>            // (<a ...>) — same here (only one <a>)
+doc[a]             // <a ...> — direct child <a> only
+doc?<a>            // <a ...> — same here (only one <a>)
 
-doc[c]             // () — empty, <c> is not a direct child
-doc?<c>            // (<c>) — found recursively
+doc[c]             // null — <c> is not a direct child
+doc?<c>            // <c> — found recursively
 ```
 
 ### 6.5 Chaining
 
-Child-level queries can be chained for multi-level specific traversal:
+A run is a list and a list is stepped set-at-a-time (§4.1), so child steps chain exactly as XPath location steps do, at any number of matches:
 
 ```lambda
-type body = <body>
-type div = <div>
-type input = <input>
+type table = <table>
 type tr = <tr>
 type td = <td>
+type body = <body>
+type div = <div>
 
-html[body][div]                // direct <div> children of <body>
-html[body][div]?<a>            // then recursive search for <a> inside those divs
+html[table][tr][td]            // every cell of every table — //table/tr/td
+html[body][div]?<a>            // every <a> inside the divs of every body
+html?<table>[tr][td]           // all tables (recursive), then their rows, then the cells
+html?<div>?<div>               // the divs nested inside divs — //div//div
 ```
 
-Mixed with `?`:
-
-```lambda
-html?<form>[input]             // find all <form> (recursive), then direct <input> children
-html?<table>[tr][td]           // all tables → direct rows → direct cells
-```
+A step over a list of scalars finds nothing, since a scalar has no content: `(data?int)[int]` is `null`. Narrowing a run by type is not a step but a filter — `q |: ~ is T`.
 
 ### 6.6 Design Notes
 
 **No grammar changes required.** The `[T]` child-level query reuses the existing index syntax `expr[x]`. The runtime (`fn_member()`) already dispatches on the type of the index value. When `x` is a type value, it performs the child-level query instead of positional/named access. This makes the feature purely a runtime extension.
 
-**Return type is the run `T*`, as for `?`** (S8.2.4, §4.1): `null`, the match, or a list. Chaining still works — `expr[T1][T2]` subscripts whatever came back, and a lone match is subscripted directly — and `expr[T] |> …` maps over the run.
+**Return type is the run `T*`, as for `?`** (S8.2.4v3, §4.1): `null`, the match, or a list. `expr[T1][T2]` steps through the run set-at-a-time (§6.5), and `expr[T] |> …` maps over the matches.
 
 **Values only for maps.** When querying a map, only the values are tested and returned — not key-value pairs. This keeps the result uniform (a run of matched values) regardless of the container type.
 
@@ -610,11 +601,11 @@ for (form in html?<form>)
 ### 7.4 Query in Conditions
 
 ```lambda
-// Check if any match exists — no match is null, which is falsy (S8.2.4)
+// Check if any match exists — no match is null, which is falsy (S8.2.4v3)
 if (html?<img>) "has images" else "no images"
 
-// First match or default
-let main = (html?<div id: "main">)[0]
+// The one expected match is the value itself; the first of several is (q)[0]
+let main = html?<div id: "main">
 ```
 
 ---
@@ -751,12 +742,13 @@ html?<img> | ~.src         // query binds tighter than pipe ✓
 
 ### 10.1 `?` returns all matches
 
-`?` yields the run `T*` of matching values (S8.2.4): `null`, the one match itself, or a list. `(expr?T)[0]` is the first of several; a lone match needs no subscript:
+`?` yields the run `T*` of matching values (S8.2.4v3): `null`, the one match itself, or a list. `(expr?T)[0]` is the first of several; a lone match needs no subscript, and `[*(expr?T)][0]` is the first-or-null form that works at any count:
 
 ```lambda
-html?<img>         // null, the one <img>, or a list of them (S8.2.4)
-(html?<img>)[0]    // first of several; a lone match IS the <img>
-count(html?<img>)  // count of matches: 0, 1, or n (S8.3.3v3)
+html?<img>           // null, the one <img>, or a list of them (S8.2.4v3)
+(html?<img>)[0]      // first of several; on a lone <img> this reads its first child
+[*(html?<img>)][0]   // the first match or null, at any count
+count(html?<img>)    // count of matches: 0, 1, or n (S8.3.3v3)
 ```
 
 ### 10.2 Attributes are searched
@@ -910,7 +902,7 @@ expr?T.field.subfield         // → (expr?T) | ~.field.subfield
 
 **1. Ambiguity with list properties**
 
-Since `?` returns a list, and lists have their own properties (e.g., `.length`), it becomes unclear which is intended:
+Since `?` returns a run — a list at two or more matches — and lists and arrays have their own properties (e.g., `.length`), it becomes unclear which is intended:
 
 ```lambda
 html?<div>.length             // list length (count of divs)?
@@ -922,16 +914,16 @@ html?<div>.length             // list length (count of divs)?
 Extracting a query result into a variable changes behavior:
 
 ```lambda
-html?<div>.class              // auto-maps → list of class strings
-let divs = html?<div>         // stores a list
-divs.class                    // null — list has no .class property
+html?<div>.class              // auto-maps → the class strings
+let divs = html?<div>         // stores the run
+divs.class                    // null on a list — a list has no .class property
 ```
 
 The same value produces different results depending on whether it's inlined or stored. This violates a core expectation in a functional language.
 
 **3. Not composable with existing semantics**
 
-Lambda's current model is clean: `?` finds (returns a list), `|` transforms. Two distinct, composable operations. Merging them into one overloaded operator reduces orthogonality.
+Lambda's current model is clean: `?` finds (returns the run), `|` transforms. Two distinct, composable operations. Merging them into one overloaded operator reduces orthogonality.
 
 ### Decision
 

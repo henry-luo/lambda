@@ -796,6 +796,18 @@ let arr = [0, 1, 2, 3, 4, 5];
 arr[1 to 4]      // [1, 2, 3, 4] — elements 1 to 4
 ```
 
+#### Selecting by Index Array or Mask
+
+An array of positions picks those elements, and a bool array (a mask) picks the positions it marks `true`. Like a slice, either always yields an array. An index array keeps its own length: a position that is out of range, negative or fractional reads `null`, as `arr[i]` would (**S8.2.4v3**).
+
+```lambda
+let arr = [10, 20, 30, 40, 50];
+arr[[1, 3]]                              // [20, 40]
+arr[[1, 3, 9]]                           // [20, 40, null] — one result per position
+arr[[false, true, false, true, false]]   // [20, 40] — a mask
+arr[[[0, 1], [2, 3]]]                    // [[10, 20], [30, 40]] — the index array's shape
+```
+
 #### Typed Array Contracts
 
 Use `T[]` when an array boundary must admit every logical element as `T`.

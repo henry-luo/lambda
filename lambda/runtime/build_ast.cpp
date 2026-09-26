@@ -1942,6 +1942,36 @@ static void lambda_ast_note_view_binding(AstDeclaratorNode* named) {
         ? base->entry->view_base : base->entry;
 }
 
+// S8.2.4v3: a subscript key names one position when it is a number -- or a
+// nullable one, since a null key reads as absent (S7.1.1v3) -- and then reads
+// a single element; any other key may select a collection.
+static bool ast_index_key_is_position(AstNode* key) {
+    // a literal key is a primary that carries its value (no inner expr)
+    AstNode* node = ast_unwrap_primary_to_leaf(key);
+    Type* type = node ? node->type : NULL;
+    if (type && boundary_type_is_extended(type, TYPE_KIND_UNARY) &&
+            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
+        type = ((TypeUnary*)type)->operand;
+    }
+    return type && is_numeric_type_id(type->type_id);
+}
+
+// Keys statically known to select a collection: several keys, or a range,
+// mask, index array or type. A key typed only at run time is not included, so
+// a write through it keeps the element contract and is checked at run time.
+static bool ast_index_keys_select(AstNode* field) {
+    if (!field) return false;
+    if (field->next) return true;
+    AstNode* key = ast_unwrap_primary_to_leaf(field);
+    if (!key) return false;
+    if (key->node_type == AST_NODE_BINARY && ((AstBinaryNode*)key)->op == OPERATOR_TO) {
+        return true;
+    }
+    TypeId key_type = key->type ? key->type->type_id : LMD_TYPE_ANY;
+    return key_type == LMD_TYPE_RANGE || key_type == LMD_TYPE_ARRAY ||
+        key_type == LMD_TYPE_ARRAY_NUM || key_type == LMD_TYPE_TYPE;
+}
+
 // Resolve a statically named member/index path from an explicitly annotated
 // root.  Inferred map shapes intentionally do not participate: an unannotated
 // `var` remains free to evolve its value/shape, while `var p: Person` keeps the
@@ -1990,6 +2020,8 @@ Type* declared_compound_destination_type(Transpiler* tp, AstNode* node,
                 return field ? boundary_unwrap_type(field->type) : NULL;
             }
         }
+        // a selection subscript names a collection, not the element (LR07-32)
+        if (ast_index_keys_select(index->field)) return NULL;
         if (boundary_type_is_extended(owner_type, TYPE_KIND_UNARY)) {
             TypeUnary* occurrence = (TypeUnary*)owner_type;
             if (occurrence->op == OPERATOR_ARRAY) {
@@ -8650,24 +8682,6 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
     if (node_type == AST_NODE_INDEX_EXPR) {
         if (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
                 object_type->type_id == LMD_TYPE_ARRAY) {
-            AstNode* index = unwrap_primary_node(field);
-            if (index && index->node_type == AST_NODE_BINARY &&
-                    ((AstBinaryNode*)index)->op == OPERATOR_TO) {
-                // A range index produces a sliced collection, not the
-                // element lane. Returning the nested scalar here makes a
-                // surrounding map allocate a native slot and rejects the
-                // actual array result at runtime (S7.1).
-                return set_type_any(tp, ANY_INDEX_ELEM);
-            }
-            if (index && index->type &&
-                    (index->type->type_id == LMD_TYPE_ARRAY_NUM ||
-                     index->type->type_id == LMD_TYPE_ARRAY ||
-                     index->type->type_id == LMD_TYPE_TYPE)) {
-                // A mask or type query returns a collection of matches, not a
-                // scalar element. Keep the boxed result contract before map
-                // shape construction (S7.1).
-                return set_type_any(tp, ANY_INDEX_ELEM);
-            }
             AstNode* object_base = ast_unwrap_primary(object);
             bool mutable_binding = object_base &&
                 object_base->node_type == AST_NODE_IDENT &&
@@ -8675,10 +8689,26 @@ static Type* direct_field_result_type(Transpiler* tp, AstNode* object,
                 (((AstIdentNode*)object_base)->entry->is_mutable ||
                  ((AstIdentNode*)object_base)->entry->type_widened);
             if (mutable_binding) return set_type_any(tp, ANY_INDEX_ELEM);
-            TypeArray* array = (TypeArray*)object_type;
-            return array->nested && array->nested->type_id != LMD_TYPE_ANY
-                ? lambda_type_nullable_normalized(tp->pool, array->nested)
-                : set_type_any(tp, ANY_INDEX_ELEM);
+            // S8.2.4v3: only a key naming a position reads an element; a range,
+            // mask, index array, type, or a key whose kind is known only at run
+            // time may select a collection, and typing that as the element made
+            // a surrounding map plan a native slot the array cannot fill
+            // (LR07-32). Several keys step one axis each, as chained reads do,
+            // so fewer keys than axes type as the row.
+            Type* result = object_type;
+            for (AstNode* key = field; key; key = key->next) {
+                // a global simple array type is a bare Type with no `nested`
+                if (!ast_index_key_is_position(key) || is_global_simple_type(result) ||
+                        (result->type_id != LMD_TYPE_ARRAY_NUM &&
+                         result->type_id != LMD_TYPE_ARRAY)) {
+                    return set_type_any(tp, ANY_INDEX_ELEM);
+                }
+                result = ((TypeArray*)result)->nested;
+                if (!result || result->type_id == LMD_TYPE_ANY) {
+                    return set_type_any(tp, ANY_INDEX_ELEM);
+                }
+            }
+            return lambda_type_nullable_normalized(tp->pool, result);
         }
         return set_type_any(tp, ANY_INDEX_ELEM);
     }
@@ -8862,7 +8892,12 @@ static void resolve_field(Transpiler* tp, AstFieldNode* node) {
             node->is_proc_method_reference = method && method->is_proc;
         }
     }
-    if (node_type == AST_NODE_INDEX_EXPR || node_type == AST_NODE_MEMBER_EXPR) {
+    // a read through a key typed only at run time may select a collection, so
+    // it must not claim the declared element contract (S8.2.4v3, LR07-32)
+    bool declared_path = node_type == AST_NODE_MEMBER_EXPR ||
+        (node_type == AST_NODE_INDEX_EXPR && (!object || !object->type ||
+            object->type->type_id == LMD_TYPE_MAP || ast_index_key_is_position(field)));
+    if (declared_path) {
         Type* declared = declared_compound_destination_type(tp,
             (AstNode*)node, NULL);
         if (declared) {

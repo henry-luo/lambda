@@ -240,6 +240,17 @@ Probing the fixes found [LR07-28](#lr07-28), an untyped array that keeps its inf
 
 [LR03-16](#lr03-16) gained two symptoms: an integer literal alias is not a type value, so `3 is Three` is `false`.
 
+### Subscript probe pass — 2026-09-25/26
+
+Probing slices, index arrays, multi-key subscripts and `last` while the query result shape was re-ruled (S8.2.4v2, then S8.2.4v3) found six defects, none covered by a golden — the goldens subscript with literal keys only. Five were fixed on 2026-09-26 with the S8.2.4v3 implementation (both tiers; `make test-lambda-baseline` see the spec's Appendix A row):
+- [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>): an `any`-typed key took the typed-array int fast path on the JIT.
+- [LR07-32](<Lambda_Issue_Ledger (fixed).md#lr07-32>): the checker typed `a[r]` as the element and `m[i, j]` as the row, so a map field stored `0` or `null`.
+- [LR07-33](<Lambda_Issue_Ledger (fixed).md#lr07-33>): `fn_int64_index` was emitted but not registered; with it, the interpreter's N-D key decoding and the JIT's unchecked N-D target.
+- [LR07-34](<Lambda_Issue_Ledger (fixed).md#lr07-34>): a partial N-D subscript was `null`; it is now the leading-axis view `Lambda_Typed_Array2.md` records.
+- [LR07-35](<Lambda_Issue_Ledger (fixed).md#lr07-35>): `last` resolved against an outer container on the JIT, a computed container was evaluated twice, and `a[last] = v` needed a preceding read.
+
+Still open: [LR07-36](#lr07-36), an inline `T | null` subscript key, which waits on a ruling.
+
 ---
 
 
@@ -753,6 +764,17 @@ pn main() {
 }
 ```
 A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
+
+<a id="lr07-36"></a>**LR07-36 · An inline `T | null` in expression position is a set union, not a type, so `e[(int | null)]` is no type query (S10.1.1) · OPEN — needs a ruling (found 2026-09-26)**
+```
+let u = (int | null)
+[type(u), u]                     // [array, []] on both tiers; (int | string) is a type
+[1, null, 2][(int | null)]       // [] since 2026-09-26: an empty index array (S8.2.4v3); before, null on T0 and 1 on the JIT
+type N = int | null
+[1, null, 2][N]                  // (1, 2) — the alias is a type, and a null value never matches (S8.2.4v3)
+[1, null, 2]?(int | null)        // (1, 2) — the query operand is a type position
+```
+*Root cause, located 2026-09-26:* `promote_type_union_expr` (`build_ast.cpp`) makes `A | B` a type union only when both operands are explicit type values; a `null` literal is a value, so `int | null` stays the value-level `|` — `fn_union`, a set union of a type with `null`, which is `[]`. The earlier reading (different answers per tier) came from the JIT's `any`-key fast path, [LR07-31](<Lambda_Issue_Ledger (fixed).md#lr07-31>). S10.1.1 says `|` is union everywhere with types first-class, but nothing rules whether a `null` literal beside a type means the null type in expression position — and `T?` cannot be spelled there at all (`e[(int?)]` parses `?` as the query operator), so an inline nullable type has no spelling. Needs a USER ruling; the fix, if `null` is ruled the null type beside a type operand, is a one-arm extension of `promote_type_union_expr`.
 
 ## 8. Memory management & GC (LR_08)
 

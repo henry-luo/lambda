@@ -737,7 +737,9 @@ static bool interp_eval_ndim_indices(InterpFrame* f, AstNode* first,
         }
         Item value = eval_expr(f, index);
         if (interp_frame_pending(f)) return false;
-        indices[(*count)++] = it2l(value);
+        // S8.2.1v4: only an exact integral key names a position; any other
+        // reads as absent (INT64_MIN), matching the JIT's N-D lowering
+        indices[(*count)++] = fn_int64_index(value);
     }
     return *count >= 2;
 }
@@ -5172,11 +5174,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             if (!interp_eval_ndim_indices(f, field->field, indices, &ndim)) {
                 return interp_frame_pending(f) ? ItemNull : ItemError;
             }
-            if (get_type_id(obj.get()) != LMD_TYPE_ARRAY_NUM) {
-                log_error("interp: planned N-D index target is not an ArrayNum");
-                return ItemError;
-            }
-            return array_num_at_nd(obj.get().array_num, ndim, indices);
+            return fn_index_nd(obj.get(), ndim, indices);
         }
         Item index_value = eval_expr(f, field->field);
         Scratch index_slot(f);

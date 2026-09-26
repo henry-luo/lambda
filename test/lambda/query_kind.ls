@@ -1,4 +1,4 @@
-// S8.2.4: a type subscript is an accessor -- `e[T]` and `e?T` extend `e[1]`
+// S8.2.4v3: a type subscript is an accessor -- `e[T]` and `e?T` extend `e[1]`
 // the way a name extends a position -- so a query yields the run `T*` a
 // subscript yields (S2.5.5v2): null for no match, the match itself for one,
 // a list for two or more. It is a value, not an item-position producer.
@@ -12,7 +12,7 @@ let two = <div <img src: "a"> <img src: "b">>?<img>;
 "-- two or more is a list --";
 [type(two), len(two)];
 [two, 9];
-"-- the child query follows --";
+"-- the child query follows; a list is stepped item by item, and a scalar item has no content --";
 [type(html[element]), html[int] == null, [1, "a"][int], type((1, "a", 2)[int])];
 "-- a value, never a producer: absence lands as null; the packager splices --";
 [html?<table>, 9];

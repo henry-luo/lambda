@@ -2756,6 +2756,7 @@ extern "C" {
 
     // generic field access function
     Item fn_index(Item item, Item index);
+    Item fn_index_nd(Item item, int ndim, int64_t* indices);   // item[i, j, k]: null unless an N-D array
     Item fn_index_set(Item item, Item index, Item value);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
