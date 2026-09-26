@@ -35,6 +35,7 @@ typedef struct DomNodeRegistry {
 
 // DOM-only unit targets do not link the Radiant view teardown implementation.
 __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*) {}
+__attribute__((weak)) void view_tree_release_detached_embedded_documents(ViewTree*, DomNode*) {}
 __attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
 __attribute__((weak)) void form_control_release_prop(DomElement*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
@@ -476,6 +477,12 @@ size_t dom_retire_sweep(DomDocument* doc) {
                 record->state = DOM_NODE_LIVE;
                 registry->stats.rejected_attached++;
             } else {
+                // An embedded document pins its iframe host. Release that
+                // ownership edge before testing the detached subtree's pins,
+                // otherwise iframe removal forms a retention cycle.
+                if (doc->view_tree) {
+                    view_tree_release_detached_embedded_documents(doc->view_tree, root);
+                }
                 DomNodeRecord* blocked = nullptr;
                 if (dom_subtree_can_retire(doc, root, &blocked)) {
                     if (doc->view_tree) {

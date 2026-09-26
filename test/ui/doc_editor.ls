@@ -10,8 +10,11 @@
 //   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log
 
 import latex: lambda.latex.latex
+import pdf: lambda.pdf.pdf
 
 let PROJECT_ROOT = "."
+let TREE_PAGE_SIZE = 64
+let PDF_MAX_PAGES = 48
 
 // --------------------------------------------------------------------------
 // Filesystem and selection helpers
@@ -19,10 +22,19 @@ let PROJECT_ROOT = "."
 
 fn directory_entries(path) => input(path, 'dir') ^ { [] }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
+fn absolute_file_path(path) => sys.proc.self.cwd# ++ "/" ++ path
 
 // an open-path list that is no sequence errors (S7.9.3): not open
 fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn remove_path(paths, path) => [for (candidate in paths where candidate != path) candidate]
+fn path_is_within_directory(path, directory) =>
+  path == directory or (starts_with(path, directory ++ "/") or false)
+// Closing an ancestor must discard its hidden expansion state before reopening.
+fn remove_directory_paths(paths, directory) =>
+  [for (candidate in paths where not path_is_within_directory(candidate, directory)) candidate]
+// Each matching path records one explicit request for another bounded page.
+fn tree_page_limit(page_paths, path) =>
+  TREE_PAGE_SIZE * (len([for (candidate in page_paths where candidate == path) candidate]) + 1)
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // a non-text parent class errors (S7.9.3): no hit
 fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ") or false
@@ -94,8 +106,10 @@ fn is_latex_document(extension) {
   ext == "tex" or ext == "latex"
 }
 
+fn is_pdf_document(extension) => lower(extension) == "pdf"
+
 fn is_renderable_document(extension) =>
-  document_format(extension) != null or is_latex_document(extension)
+  document_format(extension) != null or is_latex_document(extension) or is_pdf_document(extension)
 
 fn selected_source(file) {
   if (file == null) { "" }
@@ -105,11 +119,37 @@ fn selected_source(file) {
   }
 }
 
+// Render parsed pages as native SVG while keeping large documents bounded.
+fn render_pdf_document(pdf_document) {
+  let total_pages = pdf.pdf_page_count(pdf_document)
+  let rendered_pages = if (total_pages < PDF_MAX_PAGES) total_pages else PDF_MAX_PAGES
+  if (rendered_pages == 0) {
+    <p class:"preview-error", "The selected PDF has no renderable pages.">
+  } else {
+    <div id:"pdf-preview", class:"pdf-document"
+    , for (page_index in 0 to (rendered_pages - 1))
+        <div class:"pdf-page", 'data-page':(page_index + 1),
+          pdf.pdf_to_svg(pdf_document, page_index, {show_label:false})>
+      if (rendered_pages < total_pages) {
+        <p class:"pdf-page-limit", "Showing the first " ++ rendered_pages ++ " of " ++ total_pages ++ " pages.">
+      }
+    >
+  }
+}
+
 fn selected_preview(file) {
   if (file == null) { null }
   else {
     let selected_path = file["file_path"]
-    if (is_latex_document(file["extension"])) {
+    if (is_pdf_document(file["extension"])) {
+      let pdf_document = input(selected_path, 'pdf') ^ { null }
+      if (pdf_document == null) {
+        <p class:"preview-error", "Unable to render selected PDF">
+      } else {
+        render_pdf_document(pdf_document)
+      }
+    }
+    else if (is_latex_document(file["extension"])) {
       latex.render_file(selected_path) ^ { <p class:"preview-error", "Unable to render selected file"> }
     }
     else {
@@ -189,7 +229,9 @@ view <tree_entry> {
   } else {
     hit_class ++ " tree-row"
   }
-  let children = if (~.is_dir and is_open) { directory_entries(entry_path) } else { [] };
+  let children = if (~.is_dir and is_open) { directory_entries(entry_path) } else { [] }
+  let matching_children = [for (child in children where entry_matches_filter(child, ~.filter_text)) child]
+  let visible_children = take(matching_children, tree_page_limit(~.page_paths, entry_path));
 
   <div class:"tree-entry"
   , <div class:row_class, style:("padding-left:" ++ indent)
@@ -205,7 +247,7 @@ view <tree_entry> {
     >
     if (~.is_dir and is_open) {
       <div class:"tree-children"
-      , for (child in children where entry_matches_filter(child, ~.filter_text))
+      , for (child in visible_children)
           apply(<tree_entry
             // Recompute per child: retaining entry_path here appends a prior
             // sibling during reactive list reconciliation.
@@ -215,9 +257,14 @@ view <tree_entry> {
             is_dir:child.is_dir,
             depth:(~.depth + 1),
             open_paths:~.open_paths,
+            page_paths:~.page_paths,
             selected_path:~.selected_path,
             filter_text:~.filter_text
           >)
+      if (len(visible_children) < len(matching_children)) {
+        <button class:"tree-load-more",
+          "Show " ++ (len(matching_children) - len(visible_children)) ++ " more">
+      }
       >
     }
   >
@@ -230,6 +277,8 @@ on click(evt) {
   if (~.is_dir and hits_this_row and
       (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
     emit("tree_toggle", {file_path:entry_path})
+  } else if (~.is_dir and target_class == "tree-load-more") {
+    emit("tree_load_more", {file_path:entry_path})
   } else if (not ~.is_dir) {
     emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
   }
@@ -242,7 +291,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, HTML, and LaTeX files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, HTML, LaTeX, and PDF files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -255,8 +304,15 @@ view <document_pane> {
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
       if (~.preview_mode == "view") {
-        let preview = selected_preview(~.file);
-        <section id:"rendered-preview", class:"rendered-preview", apply(preview)>
+        if (document_format(~.file["extension"]) == "html") {
+          <iframe id:"html-preview", class:"html-preview",
+            src:absolute_file_path(~.file["file_path"])>
+        } else {
+          let preview = selected_preview(~.file);
+          <section id:"rendered-preview",
+            class:(if (is_pdf_document(~.file["extension"])) "rendered-preview pdf-preview" else "rendered-preview"),
+            apply(preview)>
+        }
       } else {
         let source = selected_source(~.file);
         <section class:"source-tab-panel"
@@ -294,8 +350,10 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
+edit <doc_editor_app> state root_open: true, open_paths: [], tree_page_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
   let root_entries = directory_entries(PROJECT_ROOT);
+  let matching_root_entries = [for (entry in root_entries where entry_matches_filter(entry, filter_text)) entry]
+  let visible_root_entries = take(matching_root_entries, tree_page_limit(tree_page_paths, PROJECT_ROOT));
 
   <div class:"doc-editor"
   , <aside class:"file-panel"
@@ -316,7 +374,7 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
         >
         if (root_open) {
           <div class:"tree-children"
-          , for (entry in root_entries where entry_matches_filter(entry, filter_text))
+          , for (entry in visible_root_entries)
               apply(<tree_entry
                 parent_path:PROJECT_ROOT,
                 name:entry.name,
@@ -324,9 +382,14 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
                 is_dir:entry.is_dir,
                 depth:1,
                 open_paths:open_paths,
+                page_paths:tree_page_paths,
                 selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
                 filter_text:filter_text
               >)
+          if (len(visible_root_entries) < len(matching_root_entries)) {
+            <button class:"root-load-more",
+              "Show " ++ (len(matching_root_entries) - len(visible_root_entries)) ++ " more">
+          }
           >
         }
       >
@@ -336,7 +399,18 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
   >
 }
 on click(evt) {
-  if (evt["target_class"] == "root-toggle") { root_open = not root_open }
+  if (evt["target_class"] == "root-toggle") {
+    if (root_open) {
+      root_open = false
+      open_paths = []
+      tree_page_paths = []
+    } else {
+      root_open = true
+    }
+  }
+  else if (evt["target_class"] == "root-load-more") {
+    tree_page_paths = [*tree_page_paths, PROJECT_ROOT]
+  }
 }
 on input(evt) {
   let target_class = evt.target_class
@@ -358,10 +432,14 @@ on keydown(evt) {
 on tree_toggle(entry) {
   let entry_path = entry["file_path"]
   if (path_is_open(open_paths, entry_path)) {
-    open_paths = remove_path(open_paths, entry_path)
+    open_paths = remove_directory_paths(open_paths, entry_path)
+    tree_page_paths = remove_directory_paths(tree_page_paths, entry_path)
   } else {
     open_paths = [*open_paths, entry_path]
   }
+}
+on tree_load_more(entry) {
+  tree_page_paths = [*tree_page_paths, entry["file_path"]]
 }
 on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
@@ -406,6 +484,10 @@ on preview_tab(tab) {
       .tree-toggle, .root-toggle { width: 22px; height: 24px; padding: 0; border: 0; background: transparent;
                                    color: #aeb9ca; cursor: pointer; font-size: 14px; }
       .tree-toggle:hover, .root-toggle:hover { color: #fff; }
+      .tree-load-more, .root-load-more { display: block; width: calc(100% - 8px); margin: 4px; padding: 6px 8px;
+                                            border: 1px solid #465166; border-radius: 5px; background: #292f3d;
+                                            color: #b9cae4; cursor: pointer; font-size: 12px; text-align: left; }
+      .tree-load-more:hover, .root-load-more:hover { background: #34415a; color: #fff; }
       .tree-spacer { width: 22px; height: 24px; }
       .tree-icon { width: 18px; margin-right: 4px; text-align: center; font-size: 13px; }
       .folder-icon { color: #e5bb62; }
@@ -432,6 +514,14 @@ on preview_tab(tab) {
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .html-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
+      .pdf-preview { padding: 16px; background: #f1f3f5; }
+      .pdf-document { min-height: 100%; }
+      .pdf-page { display: block; box-sizing: border-box; position: relative; overflow: hidden; max-width: 100%;
+                  margin: 0 auto 16px; padding: 0; background: #fff; border: 1px solid #d9dee3;
+                  box-shadow: 0 2px 10px rgba(15,23,42,.08); }
+      .pdf-page svg { display: block; width: 100%; height: auto; background: #fff; }
+      .pdf-page-limit { margin: 8px auto 20px; color: #607087; font-size: 12px; text-align: center; }
       .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
                        padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-tab { padding: 5px 11px; border: 0; border-radius: 5px; background: transparent;

@@ -317,6 +317,13 @@ void DomDocument::destroy() {
     // document pool, so tear it down before its registered node arena.
     dom_lifecycle_destroy(this);
 
+    // Incremental Lambda reconciliation maps backing Elements to DOM wrappers
+    // with heap storage outside the document pool.
+    if (element_dom_map) {
+        hashmap_free(element_dom_map);
+        element_dom_map = nullptr;
+    }
+
     // Note: root and all DOM nodes are allocated from arena,
     // so they will be freed when arena is destroyed
     if (node_arena) {

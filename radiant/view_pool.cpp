@@ -364,6 +364,15 @@ static void release_embedded_document(DomElement* elem) {
     free_document(embedded_doc);
 }
 
+static void release_detached_embedded_documents(DomNode* node) {
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        release_detached_embedded_documents(child);
+    }
+    release_embedded_document(elem);
+}
+
 static void release_media_prop(EmbedProp* embed) {
     if (!embed || !embed->video) {
         return;
@@ -931,6 +940,10 @@ static void view_pool_release_detached_form_props_walk(DomNode* node) {
 
 void view_pool_release_detached_form_props(DomNode* root) {
     view_pool_release_detached_form_props_walk(root);
+}
+
+void view_tree_release_detached_embedded_documents(ViewTree*, DomNode* root) {
+    release_detached_embedded_documents(root);
 }
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root) {

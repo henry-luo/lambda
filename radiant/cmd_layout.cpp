@@ -47,6 +47,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -4480,6 +4481,9 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         doc_state_clear_reflow(state);  // layout already done by rebuild
         reflow_clear(state);          // discard stale pending reflow requests
     }
+    // Replaced template subtrees are detached during the DOM patch. Retire
+    // them only after layout has finished consuming the previous view tree.
+    dom_retire_sweep(doc);
     bool has_selective = state && !state->dirty_tracker.full_repaint
                          && dirty_has_regions(&state->dirty_tracker);
     auto t_end = time_now_ns();
