@@ -233,6 +233,14 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
 
 void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform) {
+    if (rdt_picture_get_svg_root(picture)) {
+        // Replaying an SVG-DOM picture would run the SVG painter on tile
+        // workers; its drawers paint it into the recording instead
+        // (render_svg_record_picture).
+        log_error("dl_draw_picture: SVG picture reached the display list unpainted; dropped");
+        rdt_picture_free(picture);
+        return;
+    }
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_PICTURE;
     float picture_w = 0.0f;

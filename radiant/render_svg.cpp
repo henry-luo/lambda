@@ -988,6 +988,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
                               initial_paint.stroke_width);
+    subscene.id_scope = render_svg_reference_scope(dom_elem);
     paint_svg_subscene(svg_active_paint_list(ctx), &subscene);
     svg_lower_paint_list(ctx);
     if (font) ctx->font = *font;

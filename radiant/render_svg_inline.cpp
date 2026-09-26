@@ -2740,13 +2740,16 @@ static void svg_font_name_from_path(char* out, size_t out_cap, const char* path)
     str_copy(out, out_cap, base, name_len);
 }
 
+// family of SVG text that specifies none
+static const char* const SVG_DEFAULT_FONT_FAMILY = "Arial";
+
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
                                     FontContext* font_ctx = nullptr, int weight = 400,
                                     FontSlant slant = FONT_SLANT_NORMAL,
                                     bool allow_nonunicode_fontface = false) {
     if (!font_family || !*font_family) {
         // default to a common sans-serif font
-        font_family = "Arial";
+        font_family = SVG_DEFAULT_FONT_FAMILY;
     }
 
     // SVG font-family is a comma-separated list of family names (with optional
@@ -2964,8 +2967,8 @@ static void collect_svg_style_rules(SvgInlineRenderContext* ctx, Element* elem) 
 
 /**
  * Create a single ThorVG text object with specified properties
- * Note: font_size is in SVG/CSS user units. ThorVG's text size is used in
- * the same coordinate space as the surrounding SVG transform.
+ * Note: font_size_px is in SVG/CSS user units, the coordinate space of the
+ * surrounding SVG transform.
  * anchor_x: horizontal anchor (0=start, 0.5=middle, 1=end) from SVG text-anchor
  */
 static Tvg_Paint create_text_segment(const char* text, float x, float y,
@@ -2974,7 +2977,9 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
                                      float anchor_x = 0.0f) {
     if (!text || !*text || !font_path) return nullptr;
 
-    float font_size_tvg = font_size_px;
+    // tvg_text_set_size takes points and the TTF loader scales them by 96/72;
+    // passing pixels drew text 4/3 too large, with its baseline that much lower.
+    float font_size_tvg = font_size_px * 72.0f / 96.0f;
 
     Tvg_Paint tvg_text = tvg_text_new();
     if (!tvg_text) return nullptr;
@@ -3110,6 +3115,71 @@ static void draw_glyph_affine(RenderContext* rdcon, GlyphBitmap* bitmap,
     rdcon->transform = saved_transform;
 }
 
+// A Radiant font for SVG text drawn under `matrix`. The face is resolved at
+// the device size, so glyph bitmaps and advances are already device pixels.
+typedef struct SvgGlyphFont {
+    FontStyleDesc style;
+    FontHandle* handle;
+    float sx;
+    float sy;
+    bool rotated;
+    float shear_x;
+} SvgGlyphFont;
+
+static bool svg_glyph_font_open(SvgInlineRenderContext* ctx, const char* font_family,
+                                float font_size, int font_weight, FontSlant font_slant,
+                                const RdtMatrix* matrix, SvgGlyphFont* font) {
+    *font = {};
+    RenderContext* rdcon = g_svg_active_rdcon;
+    if (!rdcon || !ctx || !ctx->font_ctx || !matrix) return false;
+
+    font->sx = sqrtf(matrix->e11 * matrix->e11 + matrix->e21 * matrix->e21);
+    font->sy = sqrtf(matrix->e12 * matrix->e12 + matrix->e22 * matrix->e22);
+    if (font->sx <= 0.0f || font->sy <= 0.0f) return false;
+    font->rotated = fabsf(matrix->e21) > 0.001f;
+    font->shear_x = matrix->e12 / font->sy;
+
+    float raster_scale = rdcon->raster_scale > 0.0f ? rdcon->raster_scale : 1.0f;
+    font->style.family = font_family ? font_family : SVG_DEFAULT_FONT_FAMILY;
+    font->style.size_px = font_size * font->sy / raster_scale;
+    font->style.weight = (FontWeight)font_weight;
+    font->style.slant = font_slant;
+    font->handle = font_resolve(ctx->font_ctx, &font->style);
+    return font->handle != nullptr;
+}
+
+// Sum of glyph advances in device pixels: exactly how far the glyph drawer
+// moves the pen, since it places glyphs unkerned.
+static float svg_glyph_font_width(SvgGlyphFont* font, const char* text) {
+    float width = 0.0f;
+    const unsigned char* cursor = (const unsigned char*)text;
+    const unsigned char* end = cursor + strlen(text);
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
+        LoadedGlyph* glyph = font_load_glyph(font->handle, &font->style, codepoint, false);
+        if (glyph) width += glyph->advance_x;
+    }
+    return width;
+}
+
+// Advance of `text` in user units as render_svg_text_with_radiant_glyphs lays
+// it out (without textLength); false when that path cannot draw it.
+static bool svg_glyph_text_advance(SvgInlineRenderContext* ctx, const char* text,
+                                   const char* font_family, float font_size,
+                                   int font_weight, FontSlant font_slant,
+                                   const RdtMatrix* matrix, float* advance) {
+    SvgGlyphFont font;
+    if (!svg_glyph_font_open(ctx, font_family, font_size, font_weight, font_slant,
+                             matrix, &font)) {
+        return false;
+    }
+    // both pen paths advance by glyph advance / sy in user units
+    *advance = svg_glyph_font_width(&font, text) / font.sy;
+    font_handle_release(font.handle);
+    return true;
+}
+
 static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, const char* text,
                                                 const char* font_family, float font_size,
                                                 int font_weight, FontSlant font_slant,
@@ -3117,22 +3187,18 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
                                                 float base_x, float base_y, float text_length,
                                                 bool scale_glyphs_x) {
     RenderContext* rdcon = g_svg_active_rdcon;
-    if (!rdcon || !ctx || !ctx->font_ctx || !text || !*text || !matrix) return false;
-
-    float sx = sqrtf(matrix->e11 * matrix->e11 + matrix->e21 * matrix->e21);
-    float sy = sqrtf(matrix->e12 * matrix->e12 + matrix->e22 * matrix->e22);
-    if (sx <= 0.0f || sy <= 0.0f) return false;
-    bool rotated_text = fabsf(matrix->e21) > 0.001f;
-    float shear_x = matrix->e12 / sy;
-
-    float raster_scale = rdcon->raster_scale > 0.0f ? rdcon->raster_scale : 1.0f;
-    FontStyleDesc style = {};
-    style.family = font_family ? font_family : "Arial";
-    style.size_px = font_size * sy / raster_scale;
-    style.weight = (FontWeight)font_weight;
-    style.slant = font_slant;
-    FontHandle* handle = font_resolve(ctx->font_ctx, &style);
-    if (!handle) return false;
+    if (!text || !*text) return false;
+    SvgGlyphFont font;
+    if (!svg_glyph_font_open(ctx, font_family, font_size, font_weight, font_slant,
+                             matrix, &font)) {
+        return false;
+    }
+    FontHandle* handle = font.handle;
+    FontStyleDesc style = font.style;
+    float sx = font.sx;
+    float sy = font.sy;
+    bool rotated_text = font.rotated;
+    float shear_x = font.shear_x;
 
     float oversample = fabsf(shear_x) > 0.001f ? 2.0f : 1.0f;
     FontStyleDesc draw_style = style;
@@ -3147,15 +3213,9 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
         }
     }
 
-    float natural_width = 0.0f;
-    const unsigned char* cursor = (const unsigned char*)text;
-    const unsigned char* end = cursor + strlen(text);
-    while (cursor < end) {
-        uint32_t codepoint = 0;
-        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
-        LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
-        if (glyph) natural_width += glyph->advance_x;
-    }
+    float natural_width = svg_glyph_font_width(&font, text);
+    const unsigned char* cursor = nullptr;
+    const unsigned char* end = (const unsigned char*)text + strlen(text);
 
     // Glyph bitmaps and advances are already loaded in physical pixels for
     // font_size * sy. Only apply the residual x/y transform ratio here; using
@@ -3191,19 +3251,18 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
         LoadedGlyph* glyph = font_load_glyph(handle, &style, codepoint, false);
         if (!glyph) continue;
         float glyph_advance = glyph->advance_x;
+        // A glyph without ink (a space) moves the pen like any other; the
+        // rotated path steps in user units, glyph_advance / sy.
+        float pen_step = glyph_advance * advance_scale;
+        float local_step = rotated_text ? (glyph_advance / sy) * local_advance_scale : pen_step;
         LoadedGlyph* drawn_glyph = font_load_glyph(draw_handle, &draw_style, codepoint, true);
-        if (!drawn_glyph) {
-            pen_x += glyph_advance * advance_scale;
-            local_pen_x += glyph_advance * advance_scale;
-            continue;
-        }
-        bool has_bitmap = drawn_glyph->bitmap.buffer &&
+        bool has_bitmap = drawn_glyph && drawn_glyph->bitmap.buffer &&
             drawn_glyph->bitmap.width > 0 &&
             drawn_glyph->bitmap.height > 0 &&
             drawn_glyph->bitmap.pitch > 0;
         if (!has_bitmap) {
-            pen_x += glyph_advance * advance_scale;
-            local_pen_x += glyph_advance * advance_scale;
+            pen_x += pen_step;
+            local_pen_x += local_step;
             continue;
         }
         if (rotated_text) {
@@ -3227,10 +3286,8 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
                       glyph_scale_x / oversample, shear_x / oversample,
                       1.0f / oversample);
         }
-        pen_x += glyph_advance * advance_scale;
-        local_pen_x += rotated_text
-            ? (glyph_advance / sy) * local_advance_scale
-            : glyph_advance * advance_scale;
+        pen_x += pen_step;
+        local_pen_x += local_step;
     }
 
     rdcon->has_transform = saved_has_transform;
@@ -3240,323 +3297,461 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
     return true;
 }
 
-/**
- * Render SVG <text> element with proper tspan support
- * Each tspan gets its own color and position
- */
-static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
-    if (!elem) return;
+// ============================================================================
+// SVG Text Layout (SVG 2 §11)
+// ============================================================================
+//
+// A <text> element sets its character data, including that of nested <tspan>
+// and <a> elements, as one line: white space collapses across element
+// boundaries (CSS Text §4.1.1), each run of characters keeps the font and fill
+// of its own element, runs advance the current text position in document
+// order, an absolute x or y starts a new text chunk, and text-anchor aligns
+// each chunk as a whole (SVG 2 §11.10.1).
 
-    // parse parent text attributes (fall back to inherited from parent <g>)
-    float base_x = parse_svg_length(get_svg_attr(elem, "x"), 0);
-    float base_y = parse_svg_length(get_svg_attr(elem, "y"), 0);
+// em and % font sizes are relative to the inherited size (CSS Fonts §2.3).
+static float svg_font_size_value(const char* value, float parent_size) {
+    char* end = nullptr;
+    float number = strtof(value, &end);
+    if (end == value) return parent_size;
+    const char* unit = str_skip_ascii_space(end);
+    if (strcmp(unit, "em") == 0) return number * parent_size;
+    if (*unit == '%') return number * parent_size / 100.0f;
+    float size = parse_svg_length(value, parent_size);
+    return size >= 0.0f ? size : parent_size;
+}
 
-    const char* font_family = get_svg_attr(elem, "font-family");
-    if (!font_family) font_family = ctx->inherited_font_family;
-    const char* font_size_str = get_svg_attr(elem, "font-size");
-    float font_size;
-    if (font_size_str) {
-        font_size = parse_svg_length(font_size_str, 16);
-    } else if (ctx->inherited_font_size > 0) {
-        font_size = ctx->inherited_font_size;
-    } else {
-        font_size = 16;
+// bolder and lighter step from the inherited weight (CSS Fonts §2.2).
+static int svg_font_weight_value(const char* value, int parent_weight) {
+    if (strcmp(value, "normal") == 0) return 400;
+    if (strcmp(value, "bold") == 0) return 700;
+    if (strcmp(value, "bolder") == 0) {
+        return parent_weight < 350 ? 400 : parent_weight < 550 ? 700 : 900;
     }
+    if (strcmp(value, "lighter") == 0) {
+        return parent_weight < 550 ? 100 : parent_weight < 750 ? 400 : 700;
+    }
+    int weight = atoi(value);
+    return weight >= 1 && weight <= 1000 ? weight : parent_weight;
+}
+
+static float svg_text_anchor_value(const char* value) {
+    if (value && strcmp(value, "middle") == 0) return 0.5f;
+    if (value && strcmp(value, "end") == 0) return 1.0f;
+    return 0.0f;
+}
+
+typedef struct SvgTextStyle {
+    char font_family[256];      // empty when none is specified
+    float font_size;
+    int font_weight;
+    FontSlant font_slant;
+    Color fill;
+    float anchor;               // text-anchor: 0 start, 0.5 middle, 1 end
+    bool preserve_space;        // xml:space="preserve"
+} SvgTextStyle;
+
+// x/y/dx/dy of an element position its first addressable character (SVG 2
+// §11.5.2); only the first value of each list is used.
+typedef struct SvgTextAdjust {
+    bool pending;
+    bool has_x;
+    bool has_y;
+    float x, y, dx, dy;
+} SvgTextAdjust;
+
+typedef struct SvgTextFont {
+    bool resolved;              // resolution was attempted
+    char* path;                 // ThorVG font file; null when no font is found
+    char name[256];             // ThorVG font name (the resolvers reuse static buffers)
+    const char* family;         // family for font_resolve
+    bool free_family;
+    float ascent_ratio;
+} SvgTextFont;
+
+typedef struct SvgTextRun {
+    size_t start;               // offset of the run's NUL-terminated text
+    size_t len;
+    int style;                  // index into SvgTextLayout.styles
+    SvgTextAdjust adjust;       // applied before the run's first character
+    SvgTextFont* font;          // null: no font, not drawn
+    bool glyphs;                // drawn by the Radiant glyph path
+    float advance;              // user units
+    float x, y;                 // pen position
+} SvgTextRun;
+
+typedef struct SvgTextLayout {
+    SvgInlineRenderContext* ctx;
+    StrBuf* chars;              // run texts, each NUL-terminated
+    SvgTextStyle* styles;       // one per text content element
+    int style_count;
+    int style_capacity;
+    SvgTextFont* fonts;         // parallel to styles once collection is done
+    SvgTextRun* runs;
+    int run_count;
+    int run_capacity;
+    SvgTextAdjust adjust;       // awaiting the next addressable character
+    int open_run;               // run still taking characters, -1 when none
+    bool space_before;          // the last character was a collapsible space
+    int trailing_space_run;     // run ending in a collapsible space, -1 when none
+} SvgTextLayout;
+
+static void svg_text_style_apply(SvgInlineRenderContext* ctx, Element* elem, SvgTextStyle* style) {
+    char buf[256];
+    const char* value = get_svg_attr_or_style(ctx, elem, "font-family", buf, sizeof(buf));
+    if (value) str_copy(style->font_family, sizeof(style->font_family), value, strlen(value));
+    value = get_svg_attr_or_style(ctx, elem, "font-size", buf, sizeof(buf));
+    if (value) style->font_size = svg_font_size_value(value, style->font_size);
+    value = get_svg_attr_or_style(ctx, elem, "font-weight", buf, sizeof(buf));
+    if (value) style->font_weight = svg_font_weight_value(value, style->font_weight);
+    value = get_svg_attr_or_style(ctx, elem, "font-style", buf, sizeof(buf));
+    if (value) {
+        style->font_slant = strcmp(value, "italic") == 0 ? FONT_SLANT_ITALIC
+                          : strcmp(value, "oblique") == 0 ? FONT_SLANT_OBLIQUE
+                          : FONT_SLANT_NORMAL;
+    }
+    value = get_svg_attr_or_style(ctx, elem, "fill", buf, sizeof(buf));
+    // text is filled with plain colour only; a paint server keeps the inherited one
+    if (value && strncmp(value, "url(", 4) != 0) style->fill = svg_resolve_color_keyword(ctx, value);
+    value = get_svg_attr_or_style(ctx, elem, "text-anchor", buf, sizeof(buf));
+    if (value) style->anchor = svg_text_anchor_value(value);
+    value = get_svg_attr(elem, "xml:space");
+    if (value) style->preserve_space = strcmp(value, "preserve") == 0;
+}
+
+static bool svg_text_read_adjust(Element* elem, SvgTextAdjust* adjust) {
+    const char* x = get_svg_attr(elem, "x");
+    const char* y = get_svg_attr(elem, "y");
+    const char* dx = get_svg_attr(elem, "dx");
+    const char* dy = get_svg_attr(elem, "dy");
+    bool any = false;
+    if (x && *x) { adjust->has_x = true; adjust->x = parse_svg_length(x, 0.0f); any = true; }
+    if (y && *y) { adjust->has_y = true; adjust->y = parse_svg_length(y, 0.0f); any = true; }
+    if (dx && *dx) { adjust->dx = parse_svg_length(dx, 0.0f); any = true; }
+    if (dy && *dy) { adjust->dy = parse_svg_length(dy, 0.0f); any = true; }
+    if (any) adjust->pending = true;
+    return any;
+}
+
+static bool svg_text_push_style(SvgTextLayout* layout, const SvgTextStyle* style, int* index) {
+    if (layout->style_count >= layout->style_capacity &&
+        !lam::scratch_grow_array(layout->ctx->resource_scratch, &layout->styles,
+                                 &layout->style_capacity, layout->style_count,
+                                 layout->style_count + 1, 8)) {
+        return false;
+    }
+    layout->styles[layout->style_count] = *style;
+    *index = layout->style_count++;
+    return true;
+}
+
+static void svg_text_emit(SvgTextLayout* layout, int style, char c) {
+    bool continues = layout->open_run >= 0 && !layout->adjust.pending &&
+                     layout->runs[layout->open_run].style == style;
+    if (!continues) {
+        if (layout->run_count >= layout->run_capacity &&
+            !lam::scratch_grow_array(layout->ctx->resource_scratch, &layout->runs,
+                                     &layout->run_capacity, layout->run_count,
+                                     layout->run_count + 1, 8)) {
+            return;
+        }
+        if (layout->run_count > 0) strbuf_append_char(layout->chars, '\0');
+        SvgTextRun* run = &layout->runs[layout->run_count];
+        *run = {};
+        run->start = layout->chars->length;
+        run->style = style;
+        run->adjust = layout->adjust;
+        layout->adjust = {};
+        layout->open_run = layout->run_count++;
+    }
+    strbuf_append_char(layout->chars, c);
+    layout->runs[layout->open_run].len++;
+}
+
+// White space collapses as CSS white-space: normal (CSS Text §4.1.1): a white
+// space sequence is one space, dropped after a collapsible space even across
+// elements. xml:space="preserve" keeps every white space character as a space.
+static void svg_text_append(SvgTextLayout* layout, int style, const char* text, size_t len) {
+    bool preserve = layout->styles[style].preserve_space;
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
+        bool space = str_is_space(c);
+        if (preserve || !space) {
+            svg_text_emit(layout, style, space ? ' ' : c);
+            layout->space_before = false;
+            layout->trailing_space_run = -1;
+        } else if (!layout->space_before) {
+            svg_text_emit(layout, style, ' ');
+            layout->space_before = true;
+            layout->trailing_space_run = layout->open_run;
+        }
+    }
+}
+
+static void svg_text_collect(SvgTextLayout* layout, Element* elem, int style) {
+    SvgInlineRenderContext* ctx = layout->ctx;
+    SvgTextAdjust outer = layout->adjust;
+    bool own_adjust = svg_text_read_adjust(elem, &layout->adjust);
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        TypeId type = get_type_id(child);
+        if (type == LMD_TYPE_STRING) {
+            String* str = child.get_string();
+            if (str && str->len > 0) svg_text_append(layout, style, str->chars, str->len);
+            continue;
+        }
+        if (type != LMD_TYPE_ELEMENT || !child.element) continue;
+        Element* child_elem = child.element;
+        // text content children laid out here; textPath is not supported
+        const char* tag = get_element_tag_name(child_elem);
+        if (!tag || (strcmp(tag, "tspan") != 0 && strcmp(tag, "a") != 0)) continue;
+        char display_buf[64];
+        const char* display = get_svg_attr_or_style(ctx, child_elem, "display",
+                                                    display_buf, sizeof(display_buf));
+        if (display && strcmp(display, "none") == 0) continue;
+        SvgTextStyle child_style = layout->styles[style];
+        svg_text_style_apply(ctx, child_elem, &child_style);
+        int child_index = -1;
+        if (!svg_text_push_style(layout, &child_style, &child_index)) continue;
+        svg_text_collect(layout, child_elem, child_index);
+    }
+    // an element without addressable characters positions nothing
+    if (own_adjust && layout->adjust.pending) layout->adjust = outer;
+}
+
+// A collapsible space that ends the line is removed (CSS Text §4.1.2).
+static void svg_text_trim_end(SvgTextLayout* layout) {
+    if (layout->trailing_space_run < 0) return;
+    // the space is the last character collected, so it ends the last run
+    SvgTextRun* run = &layout->runs[layout->trailing_space_run];
+    run->len--;
+    layout->chars->length = run->start + run->len;
+    layout->chars->str[layout->chars->length] = '\0';
+    if (run->len == 0) layout->run_count--;
+}
+
+// Resolves each distinct family/weight/slant once per text element.
+static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool allow_embedded_font) {
+    const SvgTextStyle* style = &layout->styles[style_index];
+    for (int i = 0; i < layout->style_count; i++) {
+        SvgTextFont* font = &layout->fonts[i];
+        const SvgTextStyle* other = &layout->styles[i];
+        if (font->resolved && other->font_weight == style->font_weight &&
+            other->font_slant == style->font_slant &&
+            strcmp(other->font_family, style->font_family) == 0) {
+            return font->path ? font : nullptr;
+        }
+    }
+    SvgInlineRenderContext* ctx = layout->ctx;
+    SvgTextFont* font = &layout->fonts[style_index];
+    font->resolved = true;
+    // Name the default family itself: the ThorVG face key found for it (e.g.
+    // "Arial Bold") is a file name that font_resolve does not know as a family.
+    const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
+    const char* font_name = nullptr;
+    font->path = resolve_svg_font_path(family, &font_name, ctx->font_ctx, style->font_weight,
+                                       style->font_slant, allow_embedded_font);
+    if (!font->path) return nullptr;
+    if (font_name) str_copy(font->name, sizeof(font->name), font_name, strlen(font_name));
+
+    // Measure and draw with the resolved single family name (e.g. "Verdana"),
+    // not the raw comma list, which font_resolve does not parse and which
+    // would yield a generic fallback with different metrics.
+    const char* metrics_family = font->name[0] ? font->name : family;
+    font->family = resolve_svg_radiant_font_family(family, ctx->font_ctx, style->font_weight,
+                                                   style->font_slant, metrics_family,
+                                                   allow_embedded_font);
+    font->free_family = font->family && font->family != metrics_family && font->family != family;
+    font->ascent_ratio = 0.8f;
+    if (ctx->font_ctx && font->family && style->font_size > 0.0f) {
+        FontStyleDesc desc = {};
+        desc.family = font->family;
+        desc.size_px = style->font_size;
+        desc.weight = (FontWeight)style->font_weight;
+        desc.slant = style->font_slant;
+        FontHandle* handle = font_resolve(ctx->font_ctx, &desc);
+        if (handle) {
+            const FontMetrics* metrics = font_get_metrics(handle);
+            if (metrics && metrics->ascender > 0) font->ascent_ratio = metrics->ascender / style->font_size;
+            font_handle_release(handle);
+        }
+    }
+    return font;
+}
+
+static void svg_text_release_fonts(SvgTextLayout* layout) {
+    for (int i = 0; i < layout->style_count; i++) {
+        SvgTextFont* font = &layout->fonts[i];
+        if (font->path) mem_free(font->path);
+        if (font->free_family) mem_free((void*)font->family);
+    }
+}
+
+static void svg_text_measure(SvgTextLayout* layout, const RdtMatrix* m, bool allow_embedded_font) {
+    SvgInlineRenderContext* ctx = layout->ctx;
+    for (int i = 0; i < layout->run_count; i++) {
+        SvgTextRun* run = &layout->runs[i];
+        const SvgTextStyle* style = &layout->styles[run->style];
+        run->font = svg_text_font(layout, run->style, allow_embedded_font);
+        if (!run->font) continue;
+        const char* text = layout->chars->str + run->start;
+        // runs abut exactly where the glyph drawer leaves its pen
+        run->glyphs = svg_glyph_text_advance(ctx, text, run->font->family, style->font_size,
+                                             style->font_weight, style->font_slant, m,
+                                             &run->advance);
+        if (!run->glyphs) {
+            run->advance = measure_svg_text_width(text, style->font_size, ctx->font_ctx,
+                                                  run->font->family, style->font_weight);
+        }
+    }
+}
+
+// SVG 2 §11.10.1 text-anchor: shift a chunk so its extent [a, b] meets the
+// anchor at the chunk's first position, per the first character's element.
+static void svg_text_anchor_chunk(SvgTextLayout* layout, int first, int end) {
+    SvgTextRun* runs = layout->runs;
+    float a = fminf(runs[first].x, runs[first].x + runs[first].advance);
+    float b = fmaxf(runs[first].x, runs[first].x + runs[first].advance);
+    for (int i = first + 1; i < end; i++) {
+        a = fminf(a, fminf(runs[i].x, runs[i].x + runs[i].advance));
+        b = fmaxf(b, fmaxf(runs[i].x, runs[i].x + runs[i].advance));
+    }
+    float anchor = layout->styles[runs[first].style].anchor;
+    float shift = runs[first].x - (a + (b - a) * anchor);
+    if (shift == 0.0f) return;
+    for (int i = first; i < end; i++) runs[i].x += shift;
+}
+
+static void svg_text_place(SvgTextLayout* layout, float text_length) {
+    // textLength is the advance of all of the element's text (SVG 2 §11.6)
+    float natural = 0.0f;
+    for (int i = 0; i < layout->run_count; i++) natural += layout->runs[i].advance;
+    if (text_length > 0.0f && natural > 0.0f) {
+        float scale = text_length / natural;
+        for (int i = 0; i < layout->run_count; i++) layout->runs[i].advance *= scale;
+    }
+
+    float pen_x = 0.0f;
+    float pen_y = 0.0f;
+    int chunk_start = 0;
+    for (int i = 0; i < layout->run_count; i++) {
+        SvgTextRun* run = &layout->runs[i];
+        // an absolute position starts a new text chunk
+        if (i > chunk_start && (run->adjust.has_x || run->adjust.has_y)) {
+            svg_text_anchor_chunk(layout, chunk_start, i);
+            chunk_start = i;
+        }
+        if (run->adjust.has_x) pen_x = run->adjust.x;
+        if (run->adjust.has_y) pen_y = run->adjust.y;
+        pen_x += run->adjust.dx;
+        pen_y += run->adjust.dy;
+        run->x = pen_x;
+        run->y = pen_y;
+        pen_x += run->advance;
+    }
+    if (layout->run_count > chunk_start) svg_text_anchor_chunk(layout, chunk_start, layout->run_count);
+}
+
+// ThorVG fallback for runs the glyph path cannot draw (no active raster
+// context, e.g. SVG pictures). ThorVG places text by its top edge.
+static void svg_text_draw_tvg_run(SvgInlineRenderContext* ctx, const RdtMatrix* m,
+                                  const SvgTextFont* font, const SvgTextStyle* style,
+                                  const char* text, float x, float y, float fit_width) {
+    Tvg_Paint paint = create_text_segment(text, x, y, font->path,
+                                          font->name[0] ? font->name : nullptr,
+                                          style->font_size, style->fill);
+    if (!paint) return;
+    float scale_x = 1.0f;
+    if (fit_width > 0.0f) {
+        // ThorVG text cannot be respaced, so a fitted run scales its glyphs
+        float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
+        if (tvg_paint_get_aabb(paint, &bx, &by, &bw, &bh) == TVG_RESULT_SUCCESS && bw > 0.0f) {
+            scale_x = fit_width / bw;
+        }
+    }
+    RdtMatrix local = rdt_matrix_translate(x, y - style->font_size * font->ascent_ratio);
+    if (fabsf(scale_x - 1.0f) > 0.001f) {
+        RdtMatrix scale = { scale_x, 0, 0,  0, 1, 0,  0, 0, 1 };
+        local = rdt_matrix_multiply(&local, &scale);
+    }
+    RdtMatrix final_m = rdt_matrix_multiply(m, &local);
+    RdtPicture* pic = rdt_picture_take_tvg_paint(paint, 0, 0);
+    if (pic) svg_draw_picture(ctx, pic, 255, &final_m);
+}
+
+static void svg_text_draw(SvgTextLayout* layout, const RdtMatrix* m, bool fitted,
+                          bool scale_glyphs) {
+    SvgInlineRenderContext* ctx = layout->ctx;
+    for (int i = 0; i < layout->run_count; i++) {
+        SvgTextRun* run = &layout->runs[i];
+        const SvgTextStyle* style = &layout->styles[run->style];
+        const char* text = layout->chars->str + run->start;
+        // no ink: text stroke is not drawn, and white space has no glyphs
+        if (!run->font || style->fill.a == 0 || str_all(text, run->len, str_is_space)) continue;
+        // a fitted run is drawn to exactly its share of textLength
+        float fit_width = fitted ? run->advance : 0.0f;
+        if (run->glyphs &&
+            render_svg_text_with_radiant_glyphs(ctx, text, run->font->family, style->font_size,
+                                                style->font_weight, style->font_slant, style->fill,
+                                                m, run->x, run->y, fit_width, scale_glyphs)) {
+            continue;
+        }
+        svg_text_draw_tvg_run(ctx, m, run->font, style, text, run->x, run->y, fit_width);
+    }
+}
+
+static void render_svg_text(SvgInlineRenderContext* ctx, Element* elem) {
+    if (!ctx || !elem || !ctx->resource_scratch) return;
 
     // PDF-generated SVG uses textLength to preserve exact run advances when
     // embedded PDF subset fonts fall back to metric-different system fonts.
     const char* text_length_str = get_svg_attr(elem, "textLength");
-    if (!text_length_str) text_length_str = get_svg_attr(elem, "textlength");
     float text_length = text_length_str ? parse_svg_length(text_length_str, 0.0f) : 0.0f;
     const char* length_adjust_str = get_svg_attr(elem, "lengthAdjust");
-    if (!length_adjust_str) length_adjust_str = get_svg_attr(elem, "lengthadjust");
     bool spacing_and_glyphs = length_adjust_str &&
         (strcmp(length_adjust_str, "spacingAndGlyphs") == 0 || strcmp(length_adjust_str, "spacingandglyphs") == 0);
-
-    // parse text-anchor: start (default), middle, end
-    const char* text_anchor_str = get_svg_attr(elem, "text-anchor");
-    if (!text_anchor_str) text_anchor_str = ctx->inherited_text_anchor;
-    float anchor_x = 0.0f;
-    if (text_anchor_str) {
-        if (strcmp(text_anchor_str, "middle") == 0) anchor_x = 0.5f;
-        else if (strcmp(text_anchor_str, "end") == 0) anchor_x = 1.0f;
-    }
-
-    // get default fill from element, then inherited group fill
-    const char* parent_fill = get_svg_attr(elem, "fill");
-    Color default_fill;
-    if (parent_fill) {
-        default_fill = parse_svg_color(parent_fill);
-    } else if (!ctx->fill_none) {
-        default_fill = ctx->fill_color;
-    } else {
-        default_fill = parse_svg_color("black");
-    }
-
-    // parse font-weight: normal (400), bold (700), or numeric
-    const char* font_weight_str = get_svg_attr(elem, "font-weight");
-    int font_weight = ctx->inherited_font_weight > 0 ? ctx->inherited_font_weight : 400;
-    if (font_weight_str) {
-        if (strcmp(font_weight_str, "bold") == 0) font_weight = 700;
-        else if (strcmp(font_weight_str, "bolder") == 0) font_weight = 700;
-        else if (strcmp(font_weight_str, "lighter") == 0) font_weight = 300;
-        else if (strcmp(font_weight_str, "normal") == 0) font_weight = 400;
-        else font_weight = atoi(font_weight_str);
-        if (font_weight <= 0) font_weight = 400;
-    }
-
-    // parse font-style: italic / oblique / normal. SVG attribute or
-    // inherited value from parent <g>. Required so the resolved font
-    // file actually carries the italic glyphs (otherwise SVG output
-    // marked italic renders upright because the platform lookup
-    // ignores style).
-    const char* font_style_str = get_svg_attr(elem, "font-style");
-    FontSlant font_slant = FONT_SLANT_NORMAL;
-    if (font_style_str) {
-        if      (strcmp(font_style_str, "italic") == 0)  font_slant = FONT_SLANT_ITALIC;
-        else if (strcmp(font_style_str, "oblique") == 0) font_slant = FONT_SLANT_OBLIQUE;
-    }
-
     const char* raw_font_attr = get_svg_attr(elem, "data-pdf-raw-font");
     bool allow_embedded_font = raw_font_attr && strcmp(raw_font_attr, "true") == 0;
 
-    // resolve font path and name
-    const char* font_name = nullptr;
-    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx,
-                                           font_weight, font_slant, allow_embedded_font);
-    if (!font_path) {
-        return;
+    SvgTextStyle root = {};
+    if (ctx->inherited_font_family) {
+        str_copy(root.font_family, sizeof(root.font_family), ctx->inherited_font_family,
+                 strlen(ctx->inherited_font_family));
     }
+    root.font_size = ctx->inherited_font_size > 0 ? ctx->inherited_font_size : 16.0f;
+    root.font_weight = ctx->inherited_font_weight > 0 ? ctx->inherited_font_weight : 400;
+    root.font_slant = FONT_SLANT_NORMAL;
+    // text stroke is not drawn, so text under an inherited fill of none stays
+    // visible in black
+    root.fill = ctx->fill_none ? parse_svg_color("black") : ctx->fill_color;
+    root.anchor = svg_text_anchor_value(ctx->inherited_text_anchor);
+    svg_text_style_apply(ctx, elem, &root);
 
-    // compose element transform with accumulated context transform
-    RdtMatrix m = compose_element_transform(ctx, elem);
-
-    // count children to see if we have tspans
-    int text_segments = 0;
-    bool has_tspan = false;
-
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        TypeId type = get_type_id(child);
-        if (type == LMD_TYPE_STRING) {
-            text_segments++;
-        } else if (type == LMD_TYPE_ELEMENT) {
-            Element* child_elem = child.element;
-            if (child_elem && child_elem->type) {
-                TypeElmt* child_type = (TypeElmt*)child_elem->type;
-                if (child_type->name.str && strcmp(child_type->name.str, "tspan") == 0) {
-                    text_segments++;
-                    has_tspan = true;
-                }
-            }
-        }
+    ScratchMark mark = scratch_mark(ctx->resource_scratch);
+    SvgTextLayout layout = {};
+    layout.ctx = ctx;
+    layout.open_run = -1;
+    layout.trailing_space_run = -1;
+    layout.space_before = true;  // white space at the start of the line collapses away
+    layout.chars = strbuf_new_cap(64);
+    int root_index = -1;
+    if (layout.chars && svg_text_push_style(&layout, &root, &root_index)) {
+        svg_text_collect(&layout, elem, root_index);
+        svg_text_trim_end(&layout);
+        strbuf_append_char(layout.chars, '\0');
+        layout.fonts = layout.run_count > 0
+            ? (SvgTextFont*)scratch_calloc(ctx->resource_scratch,
+                                           sizeof(SvgTextFont) * (size_t)layout.style_count)
+            : nullptr;
     }
-
-    if (text_segments == 0) {
-        mem_free(font_path);
-        return;
+    if (layout.fonts) {
+        RdtMatrix m = compose_element_transform(ctx, elem);
+        svg_text_measure(&layout, &m, allow_embedded_font);
+        svg_text_place(&layout, text_length);
+        svg_text_draw(&layout, &m, text_length > 0.0f, spacing_and_glyphs && !allow_embedded_font);
+        svg_text_release_fonts(&layout);
     }
-
-    // resolve font handle once for accurate metrics. Use the resolved single
-    // font_name (e.g. "Verdana") rather than the raw comma-list font_family
-    // (e.g. "DejaVu Sans,Verdana,Geneva,sans-serif") which font_resolve does
-    // not parse — feeding it the list yields a generic fallback whose ascent
-    // ratio (e.g. Helvetica ~0.77) does not match the actually-drawn font.
-    float font_ascent_ratio = 0.8f;  // fallback
-    const char* metrics_family = font_name ? font_name : font_family;
-    const char* radiant_family = resolve_svg_radiant_font_family(font_family, ctx->font_ctx,
-                                                                 font_weight, font_slant,
-                                                                 metrics_family,
-                                                                 allow_embedded_font);
-    bool free_radiant_family = radiant_family && radiant_family != metrics_family && radiant_family != font_family;
-    metrics_family = radiant_family ? radiant_family : metrics_family;
-    if (ctx->font_ctx && metrics_family) {
-        FontStyleDesc style = {};
-        style.family = metrics_family;
-        style.size_px = font_size;
-        style.weight = (FontWeight)font_weight;
-        style.slant = font_slant;
-        FontHandle* handle = font_resolve(ctx->font_ctx, &style);
-        if (handle) {
-            const FontMetrics* fm = font_get_metrics(handle);
-            if (fm && fm->ascender > 0 && font_size > 0) {
-                font_ascent_ratio = fm->ascender / font_size;
-            }
-            font_handle_release(handle);
-        }
-    }
-
-    // helper lambda to wrap and draw a ThorVG text paint
-    // text position (tx, ty) is composed into the transform since
-    // tvg_paint_set_transform in rdt_picture_draw overwrites any prior tvg_paint_translate
-    auto draw_text_paint = [&](Tvg_Paint tvg_text, float tx, float ty, float fs_px, float scale_x = 1.0f) {
-        if (!tvg_text) return;
-        float ascent = fs_px * font_ascent_ratio;
-        float adj_y = ty - ascent;
-        RdtMatrix pos = rdt_matrix_translate(tx, adj_y);
-        RdtMatrix local = pos;
-        if (scale_x > 0.0f && fabsf(scale_x - 1.0f) > 0.001f) {
-            RdtMatrix scale = { scale_x, 0, 0,  0, 1, 0,  0, 0, 1 };
-            local = rdt_matrix_multiply(&pos, &scale);
-        }
-        RdtMatrix final_m = rdt_matrix_multiply(&m, &local);
-        RdtPicture* pic = rdt_picture_take_tvg_paint(tvg_text, 0, 0);
-        if (pic) {
-            svg_draw_picture(ctx, pic, 255, &final_m);
-        }
-    };
-
-    // Direct text and tspans differ in inherited attributes, not glyph drawing.
-    auto draw_text_segment = [&](const char* text_content, float& segment_x,
-                                 float segment_y, float segment_font_size,
-                                 Color fill, bool use_radiant_glyphs) {
-        bool rendered_with_radiant = false;
-        if (use_radiant_glyphs) {
-            rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
-                metrics_family, segment_font_size, font_weight, font_slant, fill, &m,
-                segment_x, segment_y, text_length,
-                spacing_and_glyphs && !allow_embedded_font);
-        }
-        if (rendered_with_radiant) {
-            float width = text_length > 0.0f ? text_length :
-                measure_svg_text_width(text_content, segment_font_size, ctx->font_ctx,
-                                       metrics_family, font_weight);
-            segment_x += width;
-            return;
-        }
-        Tvg_Paint text = create_text_segment(text_content, segment_x, segment_y,
-                                             font_path, font_name, segment_font_size, fill);
-        if (text) {
-            float width = measure_svg_text_width(text_content, segment_font_size,
-                                                 ctx->font_ctx, metrics_family, font_weight);
-            draw_text_paint(text, segment_x, segment_y, segment_font_size);
-            segment_x += width;
-        }
-    };
-
-    // if single text with no tspan, use simple rendering
-    if (text_segments == 1 && !has_tspan) {
-        const char* text_content = get_direct_text_content(elem);
-        if (text_content) {
-            float text_scale_x = 1.0f;
-            if (text_length > 0.0f) {
-                float measured_width = measure_svg_text_width(text_content, font_size, ctx->font_ctx, metrics_family, font_weight);
-                if (measured_width > 0.0f) {
-                    text_scale_x = text_length / measured_width;
-                }
-            }
-            bool rendered_with_radiant = false;
-            if (anchor_x >= 0.0f) {
-                float anchor_adjust = 0.0f;
-                if (anchor_x > 0.0f) {
-                    float anchor_width = text_length > 0.0f ? text_length :
-                        measure_svg_text_width(text_content, font_size, ctx->font_ctx, metrics_family, font_weight);
-                    anchor_adjust = anchor_width * anchor_x;
-                }
-                rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
-                    metrics_family, font_size, font_weight, font_slant, default_fill, &m,
-                    base_x - anchor_adjust, base_y, text_length, spacing_and_glyphs && !allow_embedded_font);
-            }
-            Tvg_Paint text = nullptr;
-            if (!rendered_with_radiant) {
-                text = create_text_segment(text_content, base_x, base_y,
-                                           font_path, font_name, font_size, default_fill,
-                                           anchor_x);
-                if (text && text_length > 0.0f) {
-                    float bounds_x = 0.0f;
-                    float bounds_y = 0.0f;
-                    float bounds_w = 0.0f;
-                    float bounds_h = 0.0f;
-                    if (tvg_paint_get_aabb(text, &bounds_x, &bounds_y, &bounds_w, &bounds_h) == TVG_RESULT_SUCCESS &&
-                        bounds_w > 0.0f) {
-                        text_scale_x = text_length / bounds_w;
-                    }
-                }
-            }
-            mem_free((void*)text_content);
-            if (!rendered_with_radiant) {
-                draw_text_paint(text, base_x, base_y, font_size, text_scale_x);
-            }
-        }
-        mem_free(font_path);
-        if (free_radiant_family) mem_free((void*)radiant_family);
-        return;
-    }
-
-    // multiple segments - draw each directly with accumulated transform
-    float cur_x = base_x;
-    float cur_y = base_y;
-
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        TypeId type = get_type_id(child);
-
-        if (type == LMD_TYPE_STRING) {
-            // direct text node
-            String* str = child.get_string();
-            if (str && str->len > 0) {
-                if (str_all(str->chars, str->len, str_is_space)) {
-                    // SVG spec: whitespace between tspans collapses to a single space
-                    if (has_tspan) {
-                        cur_x += measure_svg_text_width(" ", font_size, ctx->font_ctx, metrics_family, font_weight);
-                    }
-                    continue;
-                }
-                char* text_copy = trim_whitespace(str->chars, str->len);
-                if (text_copy) {
-                    draw_text_segment(text_copy, cur_x, cur_y, font_size, default_fill,
-                                      !has_tspan && anchor_x == 0.0f);
-                    mem_free(text_copy);
-                }
-            }
-        } else if (type == LMD_TYPE_ELEMENT) {
-            Element* child_elem = child.element;
-            if (!child_elem || !child_elem->type) continue;
-
-            TypeElmt* child_type = (TypeElmt*)child_elem->type;
-            const char* tag = child_type->name.str;
-
-            if (tag && strcmp(tag, "tspan") == 0) {
-                // get tspan-specific attributes
-                const char* tspan_x = get_svg_attr(child_elem, "x");
-                const char* tspan_y = get_svg_attr(child_elem, "y");
-                const char* tspan_dx = get_svg_attr(child_elem, "dx");
-                const char* tspan_dy = get_svg_attr(child_elem, "dy");
-
-                // update position
-                if (tspan_x) cur_x = parse_svg_length(tspan_x, cur_x);
-                if (tspan_y) cur_y = parse_svg_length(tspan_y, cur_y);
-                if (tspan_dx) cur_x += parse_svg_length(tspan_dx, 0);
-                if (tspan_dy) cur_y += parse_svg_length(tspan_dy, 0);
-
-                // get tspan fill color (inherit from parent if not specified)
-                const char* tspan_fill = get_svg_attr(child_elem, "fill");
-                Color fill = tspan_fill ? parse_svg_color(tspan_fill) : default_fill;
-
-                // check for fill="none"
-                if (tspan_fill && strcmp(tspan_fill, "none") == 0) {
-                    fill.a = 0;
-                }
-
-                // get tspan font-size (inherit from parent if not specified)
-                const char* tspan_font_size_str = get_svg_attr(child_elem, "font-size");
-                float tspan_font_size = tspan_font_size_str ?
-                    parse_svg_length(tspan_font_size_str, font_size) : font_size;
-
-                // get text content
-                const char* text_content = get_direct_text_content(child_elem);
-                if (text_content && *text_content) {
-                    draw_text_segment(text_content, cur_x, cur_y, tspan_font_size, fill,
-                                      anchor_x == 0.0f);
-                    mem_free((void*)text_content);
-                }
-            }
-        }
-    }
-
-    mem_free(font_path);
-    if (free_radiant_family) mem_free((void*)radiant_family);
-
+    if (layout.chars) strbuf_free(layout.chars);
+    scratch_restore(ctx->resource_scratch, mark);
 }
 
 // ============================================================================
@@ -3726,7 +3921,11 @@ static void render_svg_image_picture(SvgInlineRenderContext* ctx, Element* elem,
     RdtMatrix transform = compose_element_transform(ctx, elem);
     RdtMatrix translate = rdt_matrix_translate(x, y);
     RdtMatrix final_transform = rdt_matrix_multiply(&transform, &translate);
-    svg_draw_picture(ctx, picture, opacity, &final_transform);
+    // the referenced SVG document is painted into this recording now, not
+    // deferred to replay as a picture
+    render_svg_record_picture(ctx->paint_list, ctx->dl, ctx->resource_scratch, ctx->font_ctx,
+                              g_svg_active_rdcon, picture, opacity, &final_transform);
+    rdt_picture_free(picture);
 }
 
 static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
@@ -4143,55 +4342,73 @@ static RdtPath* resolve_svg_clip_path(SvgInlineRenderContext* ctx, Element* elem
 // SVG Group and Children
 // ============================================================================
 
-static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
-    if (!elem) return;
+// Inherited state a container element (<g>, or a <use> instance) scopes for
+// its content, plus its group-opacity layer.
+typedef struct SvgGroupScope {
+    Color fill_color;
+    Color stroke_color;
+    Color current_color;
+    float stroke_width;
+    float opacity;
+    bool fill_none;
+    bool stroke_none;
+    RdtMatrix transform;
+    const char* font_family;
+    float font_size;
+    int font_weight;
+    const char* text_anchor;
+    float group_opacity;
+    bool opacity_layer;
+    int op_x0, op_y0, op_w, op_h;
+} SvgGroupScope;
 
+static void svg_group_enter(SvgInlineRenderContext* ctx, Element* elem, SvgGroupScope* scope) {
     // save current inherited state
-    Color saved_fill = ctx->fill_color;
-    Color saved_stroke = ctx->stroke_color;
-    Color saved_current_color = ctx->current_color;
-    float saved_stroke_width = ctx->stroke_width;
-    float saved_opacity = ctx->opacity;
-    bool saved_fill_none = ctx->fill_none;
-    bool saved_stroke_none = ctx->stroke_none;
-    RdtMatrix saved_transform = ctx->transform;
-    const char* saved_font_family = ctx->inherited_font_family;
-    float saved_font_size = ctx->inherited_font_size;
-    int saved_font_weight = ctx->inherited_font_weight;
-    const char* saved_text_anchor = ctx->inherited_text_anchor;
+    scope->fill_color = ctx->fill_color;
+    scope->stroke_color = ctx->stroke_color;
+    scope->current_color = ctx->current_color;
+    scope->stroke_width = ctx->stroke_width;
+    scope->opacity = ctx->opacity;
+    scope->fill_none = ctx->fill_none;
+    scope->stroke_none = ctx->stroke_none;
+    scope->transform = ctx->transform;
+    scope->font_family = ctx->inherited_font_family;
+    scope->font_size = ctx->inherited_font_size;
+    scope->font_weight = ctx->inherited_font_weight;
+    scope->text_anchor = ctx->inherited_text_anchor;
 
     // apply group opacity via save/composite for correct compositing
     char opacity_buf[64];
     const char* opacity_attr = get_svg_attr_or_style(ctx, elem, "opacity", opacity_buf, sizeof(opacity_buf));
-    float group_op = 1.0f;
-    bool use_opacity_layer = false;
-    int op_x0 = 0, op_y0 = 0, op_w = 0, op_h = 0;
+    scope->group_opacity = 1.0f;
+    scope->opacity_layer = false;
+    scope->op_x0 = scope->op_y0 = scope->op_w = scope->op_h = 0;
     if (opacity_attr) {
-        group_op = strtof(opacity_attr, nullptr);
-        group_op = clamp_unit(group_op);
-        if (group_op < 1.0f) {
+        scope->group_opacity = clamp_unit(strtof(opacity_attr, nullptr));
+        if (scope->group_opacity < 1.0f) {
             // use backdrop save/composite so overlapping children composite correctly
             // compute bounds in screen coords from either an explicit PDF Form
             // bounds hint or, for general SVG, the whole viewport fallback.
             float bx = 0.0f, by = 0.0f, bw = 0.0f, bh = 0.0f;
             const char* pdf_bounds = get_svg_attr(elem, "data-pdf-bounds");
             if (parse_pdf_bounds_attr(pdf_bounds, &bx, &by, &bw, &bh)) {
-                opacity_bounds_from_rect(&ctx->transform, bx, by, bw, bh, &op_x0, &op_y0, &op_w, &op_h);
+                opacity_bounds_from_rect(&ctx->transform, bx, by, bw, bh,
+                                         &scope->op_x0, &scope->op_y0, &scope->op_w, &scope->op_h);
             }
             else {
                 opacity_bounds_from_rect(&ctx->transform, 0.0f, 0.0f,
                                          ctx->viewbox_width, ctx->viewbox_height,
-                                         &op_x0, &op_y0, &op_w, &op_h);
+                                         &scope->op_x0, &scope->op_y0, &scope->op_w, &scope->op_h);
             }
-            if (op_w > 0 && op_h > 0) {
-                use_opacity_layer = true;
-                svg_save_backdrop(ctx, op_x0, op_y0, op_w, op_h);
+            if (scope->op_w > 0 && scope->op_h > 0) {
+                scope->opacity_layer = true;
+                svg_save_backdrop(ctx, scope->op_x0, scope->op_y0, scope->op_w, scope->op_h);
             }
         }
     }
     // if not using opacity layer, fall back to inherited alpha multiply
-    if (!use_opacity_layer && group_op < 1.0f) {
-        ctx->opacity *= group_op;
+    if (!scope->opacity_layer && scope->group_opacity < 1.0f) {
+        ctx->opacity *= scope->group_opacity;
     }
 
     svg_apply_inherited_paint_attrs(ctx, elem);
@@ -4199,44 +4416,47 @@ static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
     // inherited text properties from group attributes
     const char* g_font_family = get_svg_attr(elem, "font-family");
     if (g_font_family) ctx->inherited_font_family = g_font_family;
+    float parent_font_size = ctx->inherited_font_size > 0 ? ctx->inherited_font_size : 16.0f;
     const char* g_font_size = get_svg_attr(elem, "font-size");
-    if (g_font_size) ctx->inherited_font_size = parse_svg_length(g_font_size, ctx->inherited_font_size);
+    if (g_font_size) ctx->inherited_font_size = svg_font_size_value(g_font_size, parent_font_size);
+    int parent_font_weight = ctx->inherited_font_weight > 0 ? ctx->inherited_font_weight : 400;
     const char* g_font_weight = get_svg_attr(elem, "font-weight");
-    if (g_font_weight) {
-        if (strcmp(g_font_weight, "bold") == 0) ctx->inherited_font_weight = 700;
-        else if (strcmp(g_font_weight, "normal") == 0) ctx->inherited_font_weight = 400;
-        else {
-            int w = atoi(g_font_weight);
-            if (w >= 100 && w <= 900) ctx->inherited_font_weight = w;
-        }
-    }
+    if (g_font_weight) ctx->inherited_font_weight = svg_font_weight_value(g_font_weight, parent_font_weight);
     const char* g_text_anchor = get_svg_attr(elem, "text-anchor");
     if (g_text_anchor) ctx->inherited_text_anchor = g_text_anchor;
 
     // apply group transform to accumulated transform
     ctx->transform = compose_element_transform(ctx, elem);
+}
 
-    // render children directly
-    render_svg_children(ctx, elem);
-
+static void svg_group_leave(SvgInlineRenderContext* ctx, const SvgGroupScope* scope) {
     // composite opacity layer if active
-    if (use_opacity_layer && op_w > 0 && op_h > 0) {
-        svg_composite_opacity(ctx, op_x0, op_y0, op_w, op_h, group_op);
+    if (scope->opacity_layer && scope->op_w > 0 && scope->op_h > 0) {
+        svg_composite_opacity(ctx, scope->op_x0, scope->op_y0, scope->op_w, scope->op_h,
+                              scope->group_opacity);
     }
 
     // restore inherited state
-    ctx->fill_color = saved_fill;
-    ctx->stroke_color = saved_stroke;
-    ctx->current_color = saved_current_color;
-    ctx->stroke_width = saved_stroke_width;
-    ctx->opacity = saved_opacity;
-    ctx->fill_none = saved_fill_none;
-    ctx->stroke_none = saved_stroke_none;
-    ctx->transform = saved_transform;
-    ctx->inherited_font_family = saved_font_family;
-    ctx->inherited_font_size = saved_font_size;
-    ctx->inherited_font_weight = saved_font_weight;
-    ctx->inherited_text_anchor = saved_text_anchor;
+    ctx->fill_color = scope->fill_color;
+    ctx->stroke_color = scope->stroke_color;
+    ctx->current_color = scope->current_color;
+    ctx->stroke_width = scope->stroke_width;
+    ctx->opacity = scope->opacity;
+    ctx->fill_none = scope->fill_none;
+    ctx->stroke_none = scope->stroke_none;
+    ctx->transform = scope->transform;
+    ctx->inherited_font_family = scope->font_family;
+    ctx->inherited_font_size = scope->font_size;
+    ctx->inherited_font_weight = scope->font_weight;
+    ctx->inherited_text_anchor = scope->text_anchor;
+}
+
+static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
+    if (!elem) return;
+    SvgGroupScope scope;
+    svg_group_enter(ctx, elem, &scope);
+    render_svg_children(ctx, elem);
+    svg_group_leave(ctx, &scope);
 }
 
 static void render_svg_children(SvgInlineRenderContext* ctx, Element* elem) {
@@ -4293,21 +4513,34 @@ static void process_svg_root_resources(SvgInlineRenderContext* ctx, Element* svg
 
 static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem, Element* ref, const char* href) {
     if (!ctx || !use_elem || !ref) return;
+    // SVG 2 §5.6: a reference to the <use> itself, to one of its ancestors, or
+    // to an element already being instantiated is circular; it renders nothing.
+    if (svg_element_tree_contains(ref, use_elem)) {
+        log_debug("[SVG] <use> href='%s' references its own ancestor", href ? href : "");
+        return;
+    }
+    for (int i = 0; i < ctx->use_depth; i++) {
+        if (ctx->use_chain[i] == ref) {
+            log_debug("[SVG] <use> href='%s' is a circular reference", href ? href : "");
+            return;
+        }
+    }
+    if (ctx->use_depth >= SVG_USE_DEPTH_MAX) {
+        log_debug("[SVG] <use> href='%s' exceeds nesting depth %d", href ? href : "", SVG_USE_DEPTH_MAX);
+        return;
+    }
+    ctx->use_chain[ctx->use_depth++] = ref;
+
+    // The instance renders like a <g> carrying the <use>'s transform and
+    // presentation attributes, then translate(x, y); the referenced content
+    // inherits from the <use>, not from its own ancestors (SVG 2 §5.6.3).
+    SvgGroupScope scope;
+    svg_group_enter(ctx, use_elem, &scope);
     float ux = parse_svg_length(get_svg_attr(use_elem, "x"), 0.0f);
     float uy = parse_svg_length(get_svg_attr(use_elem, "y"), 0.0f);
-    RdtMatrix saved = ctx->transform;
-    Color saved_color = ctx->current_color;
-    RdtMatrix el_m = compose_element_transform(ctx, use_elem);
     if (ux != 0.0f || uy != 0.0f) {
         RdtMatrix translate = rdt_matrix_translate(ux, uy);
-        ctx->transform = rdt_matrix_multiply(&el_m, &translate);
-    } else {
-        ctx->transform = el_m;
-    }
-
-    const char* use_color = get_svg_attr(use_elem, "color");
-    if (use_color) {
-        ctx->current_color = parse_svg_color(use_color);
+        ctx->transform = rdt_matrix_multiply(&ctx->transform, &translate);
     }
 
     const char* ref_tag = get_element_tag_name(ref);
@@ -4343,8 +4576,8 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
         render_svg_element(ctx, ref);
     }
 
-    ctx->transform = saved;
-    ctx->current_color = saved_color;
+    svg_group_leave(ctx, &scope);
+    ctx->use_depth--;
 }
 
 static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_elem, const char* href) {
@@ -4385,11 +4618,14 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     int saved_rule_count = ctx->style_rule_count;
     int saved_rule_capacity = ctx->style_rule_capacity;
     const char* saved_source_path = ctx->source_path;
+    Element* saved_id_scope = ctx->id_scope;
     ctx->defs = nullptr;
     ctx->style_rules = nullptr;
     ctx->style_rule_count = 0;
     ctx->style_rule_capacity = 0;
     ctx->source_path = rdt_picture_get_source_path(pic);  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
+    // fragment references inside the external document name its own elements
+    ctx->id_scope = root;
     process_svg_root_resources(ctx, root);
     render_svg_use_target(ctx, use_elem, ref, href);
     // Nested resource tables are pass scratch; restoring their mark leaves the
@@ -4400,6 +4636,7 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->style_rule_count = saved_rule_count;
     ctx->style_rule_capacity = saved_rule_capacity;
     ctx->source_path = saved_source_path;  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
+    ctx->id_scope = saved_id_scope;
 
     rdt_picture_free(pic);
     if (pushed_resource) svg_resource_stack_pop(resolved_href);
@@ -4558,8 +4795,12 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
         const char* href = get_svg_attr(elem, "href");
         if (!href) href = get_svg_attr(elem, "xlink:href");
         bool resolved = false;
-        if (href && href[0] == '#' && ctx->defs) {
-            Element* ref = lookup_elem_def((SvgDefTable*)ctx->defs, href + 1);
+        if (href && href[0] == '#') {
+            // SVG 2 §5.6: the fragment names any element of the document, as
+            // getElementById would; the <defs> resource table holds only the
+            // resources that paint servers and clip/mask references need.
+            Element* ref = href[1]
+                ? rdt_picture_find_element_id(ctx->id_scope, href + 1, get_svg_attr) : nullptr;
             if (ref) {
                 render_svg_use_target(ctx, elem, ref, href);
                 resolved = true;
@@ -4650,7 +4891,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list,
-                       ScratchArena* resource_scratch) {
+                       ScratchArena* resource_scratch, Element* id_scope) {
     if (!svg_element) return;
     if (!dl || !paint_list) {
         log_error("[SVG] render_svg_to_display_list requires display-list and PaintIR targets");
@@ -4670,6 +4911,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     // initialize render context
     SvgInlineRenderContext ctx = {};
     ctx.svg_root = svg_element;
+    ctx.id_scope = id_scope ? id_scope : svg_element;
     ctx.pool = pool;
     ctx.font_ctx = font_ctx;
     ctx.dl = dl;
@@ -5048,7 +5290,8 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                       subscene->stroke_none,
                       subscene->stroke_width,
                       &nested_paint,
-                      &resource_scratch);
+                      &resource_scratch,
+                      (Element*)subscene->id_scope);
 
     scratch_release(&resource_scratch);
     paint_list_destroy(&nested_paint);
@@ -5067,7 +5310,7 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list,
-                       ScratchArena* resource_scratch) {
+                       ScratchArena* resource_scratch, Element* id_scope) {
     render_svg_inline_register_paint_ir_lowerers();
     render_svg_to_display_list_primitives(svg_element,
                                           viewport_width,
@@ -5086,7 +5329,31 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                                           initial_stroke_none,
                                           initial_stroke_width,
                                           paint_list,
-                                          resource_scratch);
+                                          resource_scratch,
+                                          id_scope);
+}
+
+void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
+                               ScratchArena* scratch, FontContext* font_ctx,
+                               RenderContext* glyph_rdcon, RdtPicture* picture,
+                               uint8_t opacity, const RdtMatrix* transform) {
+    Element* svg_root = rdt_picture_get_svg_root(picture);
+    if (!svg_root || !paint_list || !dl || !scratch) return;
+    float width = 0.0f;
+    float height = 0.0f;
+    rdt_picture_get_size(picture, &width, &height);
+    RdtMatrix base = rdt_picture_compose_transform(picture, transform);
+    // glyph items go to the RenderContext recording `dl`, or, without one,
+    // text falls back to ThorVG paints
+    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    g_svg_active_rdcon = glyph_rdcon;
+    // an SVG image is its own document: no inherited paint, its own id scope
+    render_svg_to_display_list(svg_root, width, height, rdt_picture_get_pool(picture), 1.0f,
+                               font_ctx, &base, dl, nullptr, nullptr,
+                               rdt_picture_get_source_path(picture),
+                               (float)opacity / 255.0f, false, nullptr, true, -1.0f,
+                               paint_list, scratch, nullptr);
+    g_svg_active_rdcon = saved_svg_rdcon;
 }
 
 void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
@@ -5099,7 +5366,8 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
                        bool initial_fill_none,
                        const Color* initial_stroke_color,
                        bool initial_stroke_none,
-                       float initial_stroke_width) {
+                       float initial_stroke_width,
+                       Element* id_scope) {
     if (!vec || !svg_element) return;
 
     RdtVectorTarget target = {};
@@ -5123,12 +5391,16 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     paint_list_init(&paint_list, temp_arena);
     mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
 
+    // this list is private, so no RenderContext may receive its glyphs
+    RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
+    g_svg_active_rdcon = nullptr;
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
                                pool, raster_scale, font_ctx, base_transform, &dl,
                                initial_current_color, initial_fill_color, source_path,
                                initial_opacity, initial_fill_none,
                                initial_stroke_color, initial_stroke_none,
-                               initial_stroke_width, &paint_list, &scratch);
+                               initial_stroke_width, &paint_list, &scratch, id_scope);
+    g_svg_active_rdcon = saved_svg_rdcon;
 
     if (dl_validate_or_log(&dl, "render_svg_picture_display_list")) {
         ImageSurface surface = {};
@@ -5161,6 +5433,15 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 // ============================================================================
 // Render Inline SVG
 // ============================================================================
+
+Element* render_svg_reference_scope(DomElement* svg_element) {
+    if (!svg_element) return nullptr;
+    // getElementById semantics: the reference resolves in the node's tree,
+    // whose root is the document element for a connected <svg>.
+    DomNode* root = svg_element;
+    while (root->parent) root = root->parent;
+    return root->is_element() ? dom_element_backing(root->as_element()) : nullptr;
+}
 
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
@@ -5228,7 +5509,8 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
                                nullptr, 1.0f, initial_paint.fill_none,
                                initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                                initial_paint.stroke_none, initial_paint.stroke_width,
-                               rdcon->paint_list, &rdcon->scratch);
+                               rdcon->paint_list, &rdcon->scratch,
+                               render_svg_reference_scope(dom_elem));
     g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_content_clip) {
@@ -5265,6 +5547,6 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
                                pool, scale, font_ctx, &base_transform, rdcon->dl,
                                &current_color, nullptr, nullptr, 1.0f, false,
                                nullptr, true, -1.0f, rdcon->paint_list,
-                               &rdcon->scratch);
+                               &rdcon->scratch, nullptr);
     g_svg_active_rdcon = saved_svg_rdcon;
 }

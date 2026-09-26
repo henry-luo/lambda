@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Inline SVG painting of <use> and <tspan>.
+     <use> references any element of the document by id, not only <defs>
+     content, including a <symbol> in another <svg>; the instance inherits
+     from the <use>, and a circular reference renders nothing (SVG 2 §5.6).
+     <tspan> runs continue on the current text position and baseline, white
+     space collapses across element boundaries, and each run is measured and
+     drawn with its own font (SVG 2 §11). Ahem glyphs are 1em boxes (ascent
+     0.8em), so text positions are exact. -->
+<style>
+html, body { margin: 0; padding: 0; }
+svg { display: block; }
+</style>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="sprite" viewBox="0 0 10 10"><rect width="10" height="10"/></symbol>
+</svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="480" height="260" viewBox="0 0 480 260">
+  <defs><rect id="kept" width="20" height="20" fill="#963"/></defs>
+  <circle id="c" cx="30" cy="30" r="20" fill="#f80"/>
+  <use href="#c" x="80"/>
+  <use xlink:href="#c" x="160"/>
+  <use href="#kept" x="230" y="20"/>
+  <g fill="#0a0"><rect id="sq" x="280" y="10" width="40" height="40"/></g>
+  <use href="#sq" x="60" fill="#00f"/>
+  <use href="#sprite" x="410" y="10" width="40" height="40" fill="#909"/>
+  <g id="loop"><rect x="10" y="70" width="20" height="20" fill="#369"/><use href="#loop" x="40"/></g>
+
+  <!-- XX(10..50) space(50..70) red XX(70..110) space(110..130) XX(130..170);
+       box rows 164..184 -->
+  <text x="10" y="180" font-family="Ahem" font-size="20">XX <tspan fill="#f00"> XX</tspan> XX</text>
+
+  <!-- ten bold "l" advance 2.78em (111px) against 2.22em (89px) regular, so
+       the blue box after them starts at 121, not 99; box rows 208..248 -->
+  <text x="10" y="240" font-family="Liberation Sans" font-size="40"><tspan font-weight="bold">llllllllll</tspan><tspan font-family="Ahem" fill="#00f">X</tspan></text>
+</svg>

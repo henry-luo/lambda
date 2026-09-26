@@ -1,0 +1,25 @@
+{
+  "name": "SVG images with <text> paint at record time and render under tiled replay",
+  "html": "test/ui/svg_img_text_render.html",
+  "viewport": {"width": 800, "height": 520},
+  "events": [
+    {"type": "log", "message": "each image: red XX, blue tspan XX, on its light-blue background"},
+    {"type": "assert_pixel", "x": 40, "y": 44, "min_r": 190, "max_r": 215, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 80, "y": 44, "max_r": 20, "max_g": 20, "min_b": 190, "max_b": 215},
+    {"type": "assert_pixel", "x": 130, "y": 44, "min_r": 210, "max_r": 230, "min_g": 228, "max_g": 248, "min_b": 245},
+
+    {"type": "log", "message": "images straddling the 256px tile grid"},
+    {"type": "assert_pixel", "x": 230, "y": 134, "min_r": 190, "max_r": 215, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 270, "y": 134, "max_r": 20, "max_g": 20, "min_b": 190, "max_b": 215},
+    {"type": "assert_pixel", "x": 450, "y": 264, "min_r": 190, "max_r": 215, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 490, "y": 264, "max_r": 20, "max_g": 20, "min_b": 190, "max_b": 215},
+    {"type": "assert_pixel", "x": 540, "y": 264, "min_r": 210, "max_r": 230, "min_g": 228, "max_g": 248, "min_b": 245},
+    {"type": "assert_pixel", "x": 270, "y": 434, "min_r": 190, "max_r": 215, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 310, "y": 434, "max_r": 20, "max_g": 20, "min_b": 190, "max_b": 215},
+    {"type": "assert_pixel", "x": 630, "y": 474, "min_r": 190, "max_r": 215, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 670, "y": 474, "max_r": 20, "max_g": 20, "min_b": 190, "max_b": 215},
+
+    {"type": "log", "message": "text stays inside each image: nothing below its box"},
+    {"type": "assert_pixel", "x": 40, "y": 80, "min_r": 245, "min_g": 245, "min_b": 245}
+  ]
+}

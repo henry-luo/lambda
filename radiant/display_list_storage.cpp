@@ -208,7 +208,11 @@ int DisplayList::item_count() const {
 
 bool DisplayList::contains_glyphs() const {
     for (size_t i = 0; i < size(); i++) {
-        if (data()[i].op == DL_DRAW_GLYPH) return true;
+        const DisplayItem& item = data()[i];
+        if (item.op == DL_DRAW_GLYPH) return true;
+        // ThorVG text replays by re-shaping each duplicate through its font
+        // loader's shared glyph cache, which tile workers must not race on.
+        if (item.op == DL_DRAW_PICTURE && rdt_picture_is_text(item.draw_picture.picture)) return true;
     }
     return false;
 }

@@ -53,10 +53,12 @@ struct RdtPath {
 
 struct RdtPicture {
     // Two kinds of pictures:
-    //  - SVG_DOM: Radiant-parsed SVG DOM (Element*) drawn via DisplayList replay.
-    //    Used by rdt_picture_load* for file/data SVG.  Goes through the same
-    //    code path as inline <svg> in HTML, so font weight/style/family
-    //    resolution is uniform with HTML body text.
+    //  - SVG_DOM: Radiant-parsed SVG DOM (Element*). Used by rdt_picture_load*
+    //    for file/data SVG.  Goes through the same code path as inline <svg>
+    //    in HTML, so font weight/style/family resolution is uniform with HTML
+    //    body text: drawn into a page it is painted into the recording
+    //    (render_svg_record_picture); drawn off-screen it records and replays
+    //    a private DisplayList.  Never stored in a DisplayList for replay.
     //  - TVG_PAINT: a Tvg_Paint owned by ThorVG (text or image), wrapped via
     //    rdt_picture_take_tvg_paint and used internally by render_svg_inline
     //    for SVG <text>/<image> primitives.
@@ -2151,16 +2153,27 @@ void rdt_picture_set_size(RdtPicture* pic, float w, float h) {
     pic->height = h;
 }
 
+RdtMatrix rdt_picture_compose_transform(RdtPicture* pic, const RdtMatrix* transform) {
+    // Compose the explicit per-picture transform (set via set_transform) and
+    // the caller-provided transform.  Caller transform applies after.
+    RdtMatrix base = rdt_matrix_identity();
+    if (pic && pic->has_transform) base = pic->transform;
+    if (transform) base = rdt_matrix_multiply(transform, &base);
+    return base;
+}
+
+bool rdt_picture_is_text(RdtPicture* pic) {
+    if (!pic || pic->kind != RdtPicture::KIND_TVG_PAINT || !pic->paint) return false;
+    Tvg_Type type = TVG_TYPE_UNDEF;
+    return tvg_paint_get_type(pic->paint, &type) == TVG_RESULT_SUCCESS && type == TVG_TYPE_TEXT;
+}
+
 // Internal helper: render a SVG_DOM picture into vec at the picture's stored
 // w/h, applying the optional transform.  No tvg_* calls.
 static void svg_dom_picture_draw(RdtVector* vec, RdtPicture* pic,
                                  uint8_t opacity, const RdtMatrix* transform) {
     if (!pic->svg_root) return;
-    // Compose the explicit per-picture transform (set via set_transform) and
-    // the caller-provided transform.  Caller transform applies after.
-    RdtMatrix base = rdt_matrix_identity();
-    if (pic->has_transform) base = pic->transform;
-    if (transform) base = rdt_matrix_multiply(transform, &base);
+    RdtMatrix base = rdt_picture_compose_transform(pic, transform);
     render_svg_to_vec_via_display_list(vec, pic->svg_root, pic->width, pic->height,
                       pic->pool, 1.0f, g_picture_font_ctx, &base,
                       nullptr, nullptr, pic->source_path,
