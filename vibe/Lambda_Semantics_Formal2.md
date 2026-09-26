@@ -351,6 +351,18 @@ standard pipe symbol.
 - Typo safety of the new regime: writing `|` where `|>` was meant yields a union of
   non-types → compile error, caught, never a silent wrong answer.
 
+#### C6.4 Type operators over values: `1 | 2` is an enum, not a set (2026-09-26) — RESOLVED, ratified as S10.1.1v2
+
+**The question** ([LR07-37](<Lambda_Issue_Ledger (fixed).md#lr07-37>)): `e[(int | null)]` selected nothing, because `int | null` in expression position was the value set union — `fn_union` walked its operands' content, a scalar has none (S8.3.1v3), so `1 | 2`, `1 | 1` and `int | null` were all `[]`. The builder promoted `A | B` to a type only when both operands were explicit types. So the question was what `|` (and `&`, `!`) mean between a type and a value, and between two scalars — and `int?` has no expression spelling, since there `?` is the query operator.
+
+**Two readings of `1 | 2`.** As a *set* `(: 1, 2 :)` (conceptual syntax) it is a value, which would introduce a set kind Lambda does not have: arrays already are the set carrier (`[1, 2] | [2, 3]` is the deduplicated `[1, 2, 3]`, with `&` and `!` beside it), and a set value would make one spelling a type in an annotation and a value in an expression, against C6's "one symbol, one concept". As an *enum* it is a type — the literal union the type language already writes (`"a" | "b"`, the literal islands of S11.1.2v2, `match` arms) — and it needs nothing new.
+
+**Ruling (USER, 2026-09-26).** `|`, `&` and `!` are the type operators. Value ⊕ value stays a value: two containers meet as sets. A type operand, or two scalars, make a type operation, a scalar reading as its literal type. A type operation collapses to a value only in expression context, and only when a literal set decides its admitted set — `1 | 1` is `1`, `(1 | 2) & 2` is `2`, `int & 5` is `5`, an empty result (`1 & 2`) is `null`; otherwise it stays a type. In type context nothing collapses: `type t = 1 & 2` and `let v: 1 & 2` declare a type, just as `type t = 1` is the literal type and not the value `1`.
+
+**Why the context rule.** Every literal already means a type in type position and a value in expression position (`type t = 1` against `let v = 1`); a type operation follows its operands. The collapse mirrors S2.5.5v2: a union of one alternative is that alternative, as a list of one item is its item, and the empty union is absence, as the empty list is.
+
+**Residue.** A literal set decides the collapse; nothing tries to decide an infinite type (`int ! 5` and `int & string` stay types). Runtime literal types exist for `null`, int, float, string and symbol; a bool, decimal, datetime, binary or container operand of a type operation is an error until a literal type is built for it. A scalar beside a container keeps the old set path, in which the scalar contributes no items — unruled. The list kind of a set operation is SO48.
+
 #### C6a. Pending: file write/append syntax
 
 Requirements: write + append forms; procedural-only; must not visually collide with

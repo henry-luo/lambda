@@ -695,6 +695,24 @@ fn process(value: int | string | null) => {
 }
 ```
 
+### Type Operators in Expressions
+
+`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v2). What they do depends on the operands. Two containers meet as value sets over their items: `|` is the deduplicated union, `&` the intersection, `!` the exclusion. Any other pairing — a type with a value, or two scalars — is a type operation, in which a scalar stands for its literal type: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type.
+
+In an expression a type operation collapses to a value when the literals decide that it admits exactly one value, and to `null` when it admits none. Otherwise it stays a type.
+
+```lambda
+let choice = 1 | 2;            // a type: the literal union of 1 and 2, an enum
+let same = 1 | 1;              // 1: one alternative collapses to its value
+let none = 1 & 2;              // null: no value is admitted
+let five = int & 5;            // 5: the literals a type admits
+let opt = int | null;          // a type: nullable int
+let both = [1, 2] | [2, 3];    // [1, 2, 3]: two containers meet as value sets
+(2 is choice, 3 is choice, same, none, five, null is opt, both)
+```
+
+In type context — a `type` declaration, an annotation, a pattern — nothing collapses. `type t = 1 & 2` declares a type that admits no value, just as `type t = 1` declares the literal type and not the value `1`.
+
 ### Exclusion Type Patterns
 
 The exclusion operator `!` subtracts one type from another — `T1 ! T2` matches values that match `T1` but **not** `T2`:

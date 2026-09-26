@@ -417,6 +417,10 @@ static const TierParityFixture kTune27TierParity[] = {
     // JIT only, and `last` there resolved against an outer container.
     {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt"},
     {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt"},
+    // S10.1.1v2 (LR07-37): `|`, `&`, `!` with a type or two scalar operands are
+    // a type operation that collapses to a value only in expression context;
+    // `1 | 2` and `int | null` had been `[]` on both tiers.
+    {"test/lambda/type_set_operators_expr.ls", "test/lambda/type_set_operators_expr.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

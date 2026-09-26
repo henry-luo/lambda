@@ -716,8 +716,222 @@ static bool array_has_item(Array* arr, Item item) {
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// S10.1.1v2: `|`, `&` and `!` are the type operators. Two containers meet as
+// value sets (fn_union and friends below); a type operand, or two scalars, make
+// a type operation, a scalar reading as its literal type -- `1 | 2` is the enum
+// type of 1 and 2, `int | null` is `int?`. In expression context the operation
+// collapses when a literal set decides that it admits one value (`1 | 1` is 1,
+// `int & 5` is 5) or none (`1 & 2` is null); otherwise it yields the type.
+// Type context never reaches here: the type parser builds those types.
+
+static bool set_op_is_scalar(TypeId type_id) { return type_id <= LMD_TYPE_BINARY; }
+
+static bool set_op_is_type_operation(Item left, Item right) {
+    TypeId l = get_type_id(left), r = get_type_id(right);
+    return l == LMD_TYPE_TYPE || r == LMD_TYPE_TYPE ||
+        (set_op_is_scalar(l) && set_op_is_scalar(r));
+}
+
+// the payload behind a type value: a TypeType wrapper's type, else the type itself
+static Type* type_op_payload(Type* type) {
+    if (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        return ((TypeType*)type)->type;
+    }
+    return type;
+}
+
+// A scalar's literal type -- the type admitting exactly that value, as the
+// builder makes for a literal in type position -- allocated in the runtime pool,
+// since a type value is not GC-managed and must outlive the value it came from.
+static Type* type_op_literal_type(Item value) {
+    Pool* pool = context->pool;
+    TypeId type_id = get_type_id(value);
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        return &TYPE_NULL;
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: {
+        int64_t v = 0;
+        if (!lambda_item_to_int64_exact(value, &v)) return NULL;
+        TypeInt64* t = (TypeInt64*)alloc_type(pool, type_id, sizeof(TypeInt64));
+        t->int64_val = v;
+        t->is_literal = 1;
+        return (Type*)t;
+    }
+    case LMD_TYPE_FLOAT: {
+        TypeFloat* t = (TypeFloat*)alloc_type(pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
+        t->double_val = it2d(value);
+        t->is_literal = 1;
+        return (Type*)t;
+    }
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: {
+        const char* chars = value.get_chars();
+        uint32_t len = value.get_len();
+        if (!chars) return NULL;
+        TypeString* t = (TypeString*)alloc_type(pool, type_id, sizeof(TypeString));
+        if (type_id == LMD_TYPE_STRING) {
+            String* copy = (String*)pool_alloc(pool, sizeof(String) + len + 1);
+            copy->len = len;
+            copy->flags = 0;
+            copy->is_ascii = str_is_ascii(chars, len);
+            memcpy(copy->chars, chars, len);
+            copy->chars[len] = 0;
+            t->string = copy;
+        } else {
+            Symbol* copy = (Symbol*)pool_alloc(pool, sizeof(Symbol) + len + 1);
+            memset(copy, 0, sizeof(Symbol));
+            copy->len = len;
+            copy->kind = SYMBOL_LAMBDA_NAME;
+            memcpy(copy->chars, chars, len);
+            copy->chars[len] = 0;
+            t->string = (String*)copy;
+        }
+        t->is_literal = 1;
+        return (Type*)t;
+    }
+    default:
+        return NULL;
+    }
+}
+
+// The literal set a type operand denotes, when it denotes one: a scalar is its
+// own singleton, a literal type its value, `null` the null value, and a union of
+// such sets their union. Anything else (int, a map shape) is not a literal set.
+// Walks a type, never an Item made from a bare arm: a literal arm's first byte
+// is its own TypeId, so an Item wrapping it would read as that scalar.
+static bool type_op_literal_set_type(Type* type, Array* out) {
+    type = type_op_payload(type);
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_NULL) {
+        array_push_verbatim(out, ItemNull);
+        return true;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        if (binary->op != OPERATOR_UNION) return false;
+        return type_op_literal_set_type(binary->left, out) &&
+            type_op_literal_set_type(binary->right, out);
+    }
+    Item value;
+    if (!type->is_literal || !lambda_literal_contract_value(type, &value)) return false;
+    array_push_verbatim(out, value);
+    return true;
+}
+
+static bool type_op_literal_set(Item operand, Array* out) {
+    if (get_type_id(operand) == LMD_TYPE_TYPE) return type_op_literal_set_type(operand.type, out);
+    if (!set_op_is_scalar(get_type_id(operand))) return false;
+    array_push_verbatim(out, operand);
+    return true;
+}
+
+// wraps a payload type as a type value, the way the builder does for type syntax
+static Item type_op_value(Type* payload) {
+    TypeType* wrapper = (TypeType*)alloc_type(context->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    wrapper->type = payload;
+    return (Item){.item = (uint64_t)(uintptr_t)wrapper};
+}
+
+// the type an operand stands for inside a type operation: a type's payload, a
+// scalar's literal type; a container has neither
+static Type* type_op_arm(Item operand) {
+    if (get_type_id(operand) == LMD_TYPE_TYPE) return type_op_payload(operand.type);
+    Type* literal = type_op_literal_type(operand);
+    if (!literal) {
+        log_error("type operation: an operand must be a type or a scalar, got %s",
+            get_type_name(get_type_id(operand)));
+    }
+    return literal;
+}
+
+static Item type_op_binary_type(Item left, Item right, Operator op) {
+    Type* left_arm = type_op_arm(left);
+    Type* right_arm = type_op_arm(right);
+    if (!left_arm || !right_arm) return ItemError;
+    TypeBinary* binary = (TypeBinary*)alloc_type_kind(context->pool, TYPE_KIND_BINARY,
+        sizeof(TypeBinary));
+    binary->left = left_arm;
+    binary->right = right_arm;
+    binary->op = op;
+    return type_op_value((Type*)binary);
+}
+
+// the literal set as a type: the union of the literal types of its values
+static Item type_op_literal_union(Array* values) {
+    Type* result = NULL;
+    for (int64_t i = values->length - 1; i >= 0; i--) {
+        Type* literal = type_op_literal_type(array_item_read(values, i));
+        if (!literal) return ItemError;
+        if (!result) { result = literal; continue; }
+        TypeBinary* binary = (TypeBinary*)alloc_type_kind(context->pool, TYPE_KIND_BINARY,
+            sizeof(TypeBinary));
+        binary->left = literal;
+        binary->right = result;
+        binary->op = OPERATOR_UNION;
+        result = (Type*)binary;
+    }
+    return type_op_value(result);
+}
+
+static Item type_set_operation(Item left, Item right, Operator op) {
+    RootFrame roots(5);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
+    Rooted<Array*> left_set(roots, array_plain());
+    Rooted<Array*> right_set(roots, array_plain());
+    Rooted<Array*> result(roots, array_plain());
+    bool left_literal = type_op_literal_set(rooted_left.get(), left_set.get());
+    bool right_literal = type_op_literal_set(rooted_right.get(), right_set.get());
+    bool decided = false;
+    if (left_literal && right_literal) {
+        // two literal sets: the set operation, deduplicated by value equality
+        decided = true;
+        Array* l = left_set.get();
+        for (int64_t i = 0; i < l->length; i++) {
+            Item v = array_item_read(l, i);
+            bool in_right = array_has_item(right_set.get(), v);
+            bool keep = op == OPERATOR_UNION || (op == OPERATOR_INTERSECT) == in_right;
+            if (keep && !array_has_item(result.get(), v)) array_push_verbatim(result.get(), v);
+            l = left_set.get();
+        }
+        if (op == OPERATOR_UNION) {
+            Array* r = right_set.get();
+            for (int64_t i = 0; i < r->length; i++) {
+                Item v = array_item_read(r, i);
+                if (!array_has_item(result.get(), v)) array_push_verbatim(result.get(), v);
+                r = right_set.get();
+            }
+        }
+    } else if (left_literal && op != OPERATOR_UNION) {
+        // literals against a type: `&` keeps the admitted ones, `!` the others
+        decided = true;
+        Array* l = left_set.get();
+        for (int64_t i = 0; i < l->length; i++) {
+            Item v = array_item_read(l, i);
+            bool admitted = fn_is(v, rooted_right.get()) == BOOL_TRUE;
+            if (admitted == (op == OPERATOR_INTERSECT)) array_push_verbatim(result.get(), v);
+            l = left_set.get();
+        }
+    } else if (right_literal && op == OPERATOR_INTERSECT) {
+        decided = true;
+        Array* r = right_set.get();
+        for (int64_t i = 0; i < r->length; i++) {
+            Item v = array_item_read(r, i);
+            if (fn_is(v, rooted_left.get()) == BOOL_TRUE) array_push_verbatim(result.get(), v);
+            r = right_set.get();
+        }
+    }
+    if (!decided) return type_op_binary_type(rooted_left.get(), rooted_right.get(), op);
+    // the collapse: no value is null, one value is that value, more stay a type
+    Array* values = result.get();
+    if (values->length == 0) return ItemNull;
+    if (values->length == 1) return array_item_read(values, 0);
+    return type_op_literal_union(values);
+}
+
 Item fn_union(Item left, Item right) {
     GUARD_ERROR2(left, right);
+    if (set_op_is_type_operation(left, right)) return type_set_operation(left, right, OPERATOR_UNION);
     // S2.5.7: a list only when both operands are lists (decided before allocation)
     bool as_list = seq_operands_are_lists(left, right);
     Array* result = array();
@@ -743,6 +957,7 @@ Item fn_union(Item left, Item right) {
 // instead of them inventing a second notion of membership.
 Item fn_intersect(Item left, Item right) {
     GUARD_ERROR2(left, right);
+    if (set_op_is_type_operation(left, right)) return type_set_operation(left, right, OPERATOR_INTERSECT);
     bool as_list = seq_operands_are_lists(left, right);  // S2.5.7
     Array* result = array();
     int64_t left_len = fn_seq_count(left);
@@ -758,6 +973,7 @@ Item fn_intersect(Item left, Item right) {
 
 Item fn_exclude(Item left, Item right) {
     GUARD_ERROR2(left, right);
+    if (set_op_is_type_operation(left, right)) return type_set_operation(left, right, OPERATOR_EXCLUDE);
     bool as_list = seq_operands_are_lists(left, right);  // S2.5.7
     Array* result = array();
     int64_t left_len = fn_seq_count(left);
@@ -2221,6 +2437,26 @@ Bool lambda_value_type_is_exact(Item value, Type* expected) {
     return actual_id == expected->type_id ? BOOL_TRUE : BOOL_FALSE;
 }
 
+// The operand `x is T` receives for a type the graph keeps unwrapped, such as a
+// constrained base: an extended kind is its own value; a base-type word is its
+// published singleton (`list`, `date` and the sized numerics are not their
+// TypeId's type); a structural type the builder made rides in `scratch`.
+static Type* is_operand_type_value(Type* type, TypeType* scratch) {
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_TYPE && !type_is_global_meta_type(type)) {
+        return type;
+    }
+    *(Type*)scratch = LIT_TYPE;
+    scratch->type = type;
+    TypeId tid = LMD_TYPE_ANY;
+    TypeType* singleton = lambda_type_node_singleton((Type*)scratch, &tid);
+    if (singleton) return (Type*)singleton;
+    if (tid > 0 && tid < LMD_TYPE_COUNT && type_info[tid].type == type) {
+        return base_type(tid);
+    }
+    return (Type*)scratch;
+}
+
 Bool fn_is(Item a, Item b) {
     TypeId b_type_id = get_type_id(b);
     if (b_type_id == LMD_TYPE_RANGE) {
@@ -2261,21 +2497,17 @@ Bool fn_is(Item a, Item b) {
         return pattern_full_match_chars(pattern, a.get_chars(), a.get_len()) ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    // Constraints are intentionally base-type-only until validator predicate
-    // evaluation ships. `is` retains that interim rule independently from
-    // assignment-boundary matching, where runtime validation owns diagnostics.
+    // S11.4.6: a first-class constrained type value carries no predicate in
+    // reach, so this generic path admits the base only; `is` and a match arm
+    // that name the type run its predicates too (ast_constrained_type). The
+    // base must admit exactly as `x is <base>` would: the tag test this
+    // replaced skipped every union, occurrence and array base outright.
     if (b_type->kind == TYPE_KIND_CONSTRAINED) {
-        TypeConstrained* constrained = (TypeConstrained*)b_type;
-        TypeId a_type_id = get_type_id(a);
-        Type* base = constrained->base;
-        if (base->type_id != LMD_TYPE_TYPE) {
-            if (a_type_id != base->type_id) {
-                Type actual_scratch = {};
-                Type* actual_type = item_static_type_for_is(a, &actual_scratch);
-                if (!numeric_type_subsumes(actual_type, base)) return BOOL_FALSE;
-            }
-        }
-        return BOOL_TRUE;
+        TypeType scratch;
+        Type* base = is_operand_type_value(lambda_constrained_type_base(b_type),
+            &scratch);
+        return base ? fn_is(a, (Item){.item = (uint64_t)(uintptr_t)base})
+            : BOOL_FALSE;
     }
 
     if (b_type->kind == TYPE_KIND_UNARY || b_type->kind == TYPE_KIND_BINARY) {

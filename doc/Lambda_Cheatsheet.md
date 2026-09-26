@@ -40,6 +40,9 @@ Type Operators:
 |---|---|
 | `int \| string` | Union type |
 | `int & number` | Intersection |
+| `int ! string` | Exclusion |
+| `1 \| 2` | Literal union (enum) type — in an expression too; `1 \| 1` is `1` |
+| `int & 5` | Type operation collapsing to `5` in an expression |
 | `int?` | Optional (int \| null) |
 | `int*` | Zero or more |
 | `int+` | One or more |

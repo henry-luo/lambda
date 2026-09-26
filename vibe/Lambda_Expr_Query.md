@@ -278,7 +278,7 @@ if (imgs) …                     // the absence check reads as a null check
 [*imgs, extra]                  // splice whatever there is; [*imgs] is the array form
 doc[<title>]                    // the one <title>, unwrapped
 html[table][tr][td]             // every cell of every table — XPath's //table/tr/td
-[1, null, 2][(int | null)]      // (1, 2) — a null value never matches, whatever T admits (in an expression `int?` would be a query, so spell the type as a union)
+[1, null, 2][(int | null)]      // (1, 2) — a null value never matches, whatever T admits (in an expression `int?` would be a query, so spell the type as a union — a type operation by S10.1.1v2)
 (1 to 5)[int]                   // (1, 2, 3, 4, 5) — a range is a container too
 ```
 

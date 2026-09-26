@@ -1,0 +1,16 @@
+"-- two containers: the value set operation --"
+[[1, 2, 3], [2], [1]]
+"-- two scalars are literal types: a type, or its one value --"
+[type, true, false, 1, 1, null]
+[2, 2, type, 'x', type, 'x']
+"-- a type with a value --"
+[type, true, 5, null, 5, "a"]
+[type, false, true, type]
+"-- operands known only at run time --"
+[1, type, true, 1, type, "a", type]
+"-- type context never collapses: a type, as `type t = 1` is not the value 1 --"
+[type, false, false, type, true]
+"-- LR07-37: an inline null-admitting key is a type query --"
+[2, 2, 2]
+"-- a container beside a type is neither a type nor a scalar --"
+true

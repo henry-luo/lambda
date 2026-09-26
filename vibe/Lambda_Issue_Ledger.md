@@ -269,7 +269,7 @@ Probing slices, index arrays, multi-key subscripts and `last` while the query re
 - [LR07-35](<Lambda_Issue_Ledger (fixed).md#lr07-35>): a partial N-D subscript was `null`; it is now the leading-axis view `Lambda_Typed_Array2.md` records.
 - [LR07-36](<Lambda_Issue_Ledger (fixed).md#lr07-36>): `last` resolved against an outer container on the JIT, a computed container was evaluated twice, and `a[last] = v` needed a preceding read.
 
-Still open: [LR07-37](#lr07-37), an inline `T | null` subscript key, which waits on a ruling.
+[LR07-37](<Lambda_Issue_Ledger (fixed).md#lr07-37>), an inline `T | null` subscript key that was a set union rather than a type, was ruled (S10.1.1v2) and fixed the same day.
 
 ---
 
@@ -793,17 +793,6 @@ pn main() {
 }
 ```
 A range admits `4.0` as a member (S11.1.3), and a member keeps its own carrier. The JIT's `let`/`var` lowering binds a range-typed declaration on its initializer's carrier (`declared_range_contract` in `transpile_let_stam`), so the later float is stored into the int lane. A union `var` had the same fault and is boxed for it (G6, `union_contract_boxed`). Reproduces on the binary from before the [LR03-18](<Lambda_Issue_Ledger (fixed).md#lr03-18>) fix, which kept this carrier choice unchanged.
-
-<a id="lr07-37"></a>**LR07-37 · An inline `T | null` in expression position is a set union, not a type, so `e[(int | null)]` is no type query (S10.1.1) · OPEN — needs a ruling (found 2026-09-26)**
-```
-let u = (int | null)
-[type(u), u]                     // [array, []] on both tiers; (int | string) is a type
-[1, null, 2][(int | null)]       // [] since 2026-09-26: an empty index array (S8.2.4v3); before, null on T0 and 1 on the JIT
-type N = int | null
-[1, null, 2][N]                  // (1, 2) — the alias is a type, and a null value never matches (S8.2.4v3)
-[1, null, 2]?(int | null)        // (1, 2) — the query operand is a type position
-```
-*Root cause, located 2026-09-26:* `promote_type_union_expr` (`build_ast.cpp`) makes `A | B` a type union only when both operands are explicit type values; a `null` literal is a value, so `int | null` stays the value-level `|` — `fn_union`, a set union of a type with `null`, which is `[]`. The earlier reading (different answers per tier) came from the JIT's `any`-key fast path, [LR07-32](<Lambda_Issue_Ledger (fixed).md#lr07-32>). S10.1.1 says `|` is union everywhere with types first-class, but nothing rules whether a `null` literal beside a type means the null type in expression position — and `T?` cannot be spelled there at all (`e[(int?)]` parses `?` as the query operator), so an inline nullable type has no spelling. Needs a USER ruling; the fix, if `null` is ruled the null type beside a type operand, is a one-arm extension of `promote_type_union_expr`.
 
 ## 8. Memory management & GC (LR_08)
 
