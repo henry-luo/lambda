@@ -282,6 +282,56 @@ TEST(SourcePosBridgePathTable, MissOnUnknownResultItem) {
     render_map_reset();
 }
 
+TEST(SourcePosBridgePathIndex, RecordsOnlyItemsOwnedBySourceRoot) {
+    source_pos_bridge_reset();
+    render_map_reset();
+
+    Pool* pool = tu_setup_pool();
+    ASSERT_NE(pool, nullptr);
+    List* root = (List*)pool_calloc(pool, sizeof(List));
+    ASSERT_NE(root, nullptr);
+    root->type_id = LMD_TYPE_ARRAY;
+    root->items = (Item*)pool_calloc(pool, sizeof(Item) * 2);
+    ASSERT_NE(root->items, nullptr);
+    root->length = 2;
+    root->capacity = 2;
+    Item child_a = synthetic_bridge_item(0xD101);
+    Item child_b = synthetic_bridge_item(0xD102);
+    root->items[0] = child_a;
+    root->items[1] = child_b;
+    Item root_item = {.array = (Array*)root};
+    const char* tref = "path_index_template";
+
+    render_map_set_path_recorder(&render_map_record_path);
+    render_map_set_source_doc_root(root_item);
+
+    Item child_result = synthetic_bridge_item(0xD201);
+    render_map_record(child_b, tref, child_result, Item{0}, 0);
+    render_map_record_source_path(child_b, tref);
+
+    RenderMapLookup lookup;
+    SourcePathC path;
+    ASSERT_TRUE(render_map_reverse_lookup_with_path(child_result, &lookup, &path));
+    ASSERT_EQ(path.depth, 1);
+    EXPECT_EQ(path.indices[0], 1);
+    source_path_free(&path);
+
+    // Directory listings and other generated models are outside the editable
+    // source tree, so they must not trigger a root-wide source-path scan.
+    Item external = synthetic_bridge_item(0xD103);
+    Item external_result = synthetic_bridge_item(0xD202);
+    render_map_record(external, tref, external_result, Item{0}, 0);
+    render_map_record_source_path(external, tref);
+    ASSERT_TRUE(render_map_reverse_lookup_with_path(external_result, &lookup, &path));
+    EXPECT_EQ(path.depth, 0);
+    EXPECT_EQ(path.indices, nullptr);
+    source_path_free(&path);
+
+    source_pos_bridge_reset();
+    render_map_reset();
+    tu_teardown_pool(pool);
+}
+
 // ---------------------------------------------------------------------------
 // End-to-end round-trip: tiny synthetic DOM + render_map + path table.
 //

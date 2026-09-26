@@ -13,7 +13,6 @@ import latex: lambda.latex.latex
 import pdf: lambda.pdf.pdf
 
 let PROJECT_ROOT = "."
-let TREE_PAGE_SIZE = 64
 let PDF_MAX_PAGES = 48
 
 // --------------------------------------------------------------------------
@@ -24,17 +23,11 @@ fn directory_entries(path) => input(path, 'dir') ^ { [] }
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
 fn absolute_file_path(path) => sys.proc.self.cwd# ++ "/" ++ path
 
-// an open-path list that is no sequence errors (S7.9.3): not open
+// Keep the root list identity stable so document selection does not recreate
+// the mounted directory-row components.
+let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
+
 fn path_is_open(open_paths, path) => contains(open_paths, path) or false
-fn remove_path(paths, path) => [for (candidate in paths where candidate != path) candidate]
-fn path_is_within_directory(path, directory) =>
-  path == directory or (starts_with(path, directory ++ "/") or false)
-// Closing an ancestor must discard its hidden expansion state before reopening.
-fn remove_directory_paths(paths, directory) =>
-  [for (candidate in paths where not path_is_within_directory(candidate, directory)) candidate]
-// Each matching path records one explicit request for another bounded page.
-fn tree_page_limit(page_paths, path) =>
-  TREE_PAGE_SIZE * (len([for (candidate in page_paths where candidate == path) candidate]) + 1)
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // a non-text parent class errors (S7.9.3): no hit
 fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ") or false
@@ -219,9 +212,8 @@ view <td> { <td *[rendered_children(~)]> }
 // Lazy file-tree rows
 // --------------------------------------------------------------------------
 
-view <tree_entry> {
+view <tree_entry> state is_open: ~.initial_open, children: null {
   let entry_path = child_path(~.parent_path, ~.name)
-  let is_open = path_is_open(~.open_paths, entry_path)
   let indent = (~.depth * 16) ++ "px"
   let hit_class = tree_hit_class(entry_path)
   let row_class = if (~.selected_path == entry_path) {
@@ -229,9 +221,10 @@ view <tree_entry> {
   } else {
     hit_class ++ " tree-row"
   }
-  let children = if (~.is_dir and is_open) { directory_entries(entry_path) } else { [] }
-  let matching_children = [for (child in children where entry_matches_filter(child, ~.filter_text)) child]
-  let visible_children = take(matching_children, tree_page_limit(~.page_paths, entry_path));
+  let matching_children = if (~.is_dir and is_open) {
+    let current_children = if (children == null) { directory_entries(entry_path) } else { children };
+    [for (child in current_children where entry_matches_filter(child, ~.filter_text)) child]
+  } else { [] };
 
   <div class:"tree-entry"
   , <div class:row_class, style:("padding-left:" ++ indent)
@@ -247,7 +240,7 @@ view <tree_entry> {
     >
     if (~.is_dir and is_open) {
       <div class:"tree-children"
-      , for (child in visible_children)
+      , for (child in matching_children)
           apply(<tree_entry
             // Recompute per child: retaining entry_path here appends a prior
             // sibling during reactive list reconciliation.
@@ -256,15 +249,13 @@ view <tree_entry> {
             extension:child.extension,
             is_dir:child.is_dir,
             depth:(~.depth + 1),
-            open_paths:~.open_paths,
-            page_paths:~.page_paths,
+            ancestor_paths:[*~.ancestor_paths, entry_path],
+            initial_open:path_is_open(~.restored_open_paths,
+                                      child_path(entry_path, child.name)),
+            restored_open_paths:~.restored_open_paths,
             selected_path:~.selected_path,
             filter_text:~.filter_text
           >)
-      if (len(visible_children) < len(matching_children)) {
-        <button class:"tree-load-more",
-          "Show " ++ (len(matching_children) - len(visible_children)) ++ " more">
-      }
       >
     }
   >
@@ -276,11 +267,17 @@ on click(evt) {
   let hits_this_row = event_hits_tree_row(evt, hit_class)
   if (~.is_dir and hits_this_row and
       (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
-    emit("tree_toggle", {file_path:entry_path})
-  } else if (~.is_dir and target_class == "tree-load-more") {
-    emit("tree_load_more", {file_path:entry_path})
+    if (is_open) {
+      is_open = false
+    } else {
+      // Directory input performs a stat for every child, so retain the result
+      // for this row and never repeat that work while it remains mounted.
+      if (children == null) { children = directory_entries(entry_path) }
+      is_open = true
+    }
   } else if (not ~.is_dir) {
-    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
+    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
+                          ancestor_paths:~.ancestor_paths})
   }
 }
 
@@ -350,10 +347,8 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], tree_page_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
-  let root_entries = directory_entries(PROJECT_ROOT);
-  let matching_root_entries = [for (entry in root_entries where entry_matches_filter(entry, filter_text)) entry]
-  let visible_root_entries = take(matching_root_entries, tree_page_limit(tree_page_paths, PROJECT_ROOT));
+edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
+  let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
   , <aside class:"file-panel"
@@ -374,22 +369,20 @@ edit <doc_editor_app> state root_open: true, open_paths: [], tree_page_paths: []
         >
         if (root_open) {
           <div class:"tree-children"
-          , for (entry in visible_root_entries)
+          , for (entry in matching_root_entries)
               apply(<tree_entry
                 parent_path:PROJECT_ROOT,
                 name:entry.name,
                 extension:entry.extension,
                 is_dir:entry.is_dir,
                 depth:1,
-                open_paths:open_paths,
-                page_paths:tree_page_paths,
+                ancestor_paths:[],
+                initial_open:path_is_open(restored_open_paths,
+                                          child_path(PROJECT_ROOT, entry.name)),
+                restored_open_paths:restored_open_paths,
                 selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
                 filter_text:filter_text
               >)
-          if (len(visible_root_entries) < len(matching_root_entries)) {
-            <button class:"root-load-more",
-              "Show " ++ (len(matching_root_entries) - len(visible_root_entries)) ++ " more">
-          }
           >
         }
       >
@@ -399,18 +392,7 @@ edit <doc_editor_app> state root_open: true, open_paths: [], tree_page_paths: []
   >
 }
 on click(evt) {
-  if (evt["target_class"] == "root-toggle") {
-    if (root_open) {
-      root_open = false
-      open_paths = []
-      tree_page_paths = []
-    } else {
-      root_open = true
-    }
-  }
-  else if (evt["target_class"] == "root-load-more") {
-    tree_page_paths = [*tree_page_paths, PROJECT_ROOT]
-  }
+  if (evt["target_class"] == "root-toggle") { root_open = not root_open }
 }
 on input(evt) {
   let target_class = evt.target_class
@@ -429,20 +411,9 @@ on keydown(evt) {
     else if (key == "Escape") { filter_text = "" }
   }
 }
-on tree_toggle(entry) {
-  let entry_path = entry["file_path"]
-  if (path_is_open(open_paths, entry_path)) {
-    open_paths = remove_directory_paths(open_paths, entry_path)
-    tree_page_paths = remove_directory_paths(tree_page_paths, entry_path)
-  } else {
-    open_paths = [*open_paths, entry_path]
-  }
-}
-on tree_load_more(entry) {
-  tree_page_paths = [*tree_page_paths, entry["file_path"]]
-}
 on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
+  restored_open_paths = entry["ancestor_paths"]
   preview_mode = "view"
 }
 on preview_tab(tab) {
@@ -475,7 +446,9 @@ on preview_tab(tab) {
       .tree-filter:focus { border-color: #79a6ff; box-shadow: 0 0 0 2px rgba(121,166,255,.2); }
       .tree-filter::placeholder { color: #9aa5b7; }
       .project-tree { min-height: 0; flex: 1; overflow: auto; padding: 8px 6px 16px; }
-      .tree-entry, .tree-children { min-width: max-content; }
+      /* Keep long row labels scrollable without recursively measuring every
+         expanded descendant for each ancestor's max-content width. */
+      .tree-entry, .tree-children { min-width: 0; }
       .tree-row { min-height: 28px; display: flex; align-items: center; padding-right: 8px;
                   border-radius: 5px; cursor: pointer; color: #c6cedb; user-select: none; }
       .tree-row:hover { background: #2c3444; color: #fff; }
@@ -484,10 +457,6 @@ on preview_tab(tab) {
       .tree-toggle, .root-toggle { width: 22px; height: 24px; padding: 0; border: 0; background: transparent;
                                    color: #aeb9ca; cursor: pointer; font-size: 14px; }
       .tree-toggle:hover, .root-toggle:hover { color: #fff; }
-      .tree-load-more, .root-load-more { display: block; width: calc(100% - 8px); margin: 4px; padding: 6px 8px;
-                                            border: 1px solid #465166; border-radius: 5px; background: #292f3d;
-                                            color: #b9cae4; cursor: pointer; font-size: 12px; text-align: left; }
-      .tree-load-more:hover, .root-load-more:hover { background: #34415a; color: #fff; }
       .tree-spacer { width: 22px; height: 24px; }
       .tree-icon { width: 18px; margin-right: 4px; text-align: center; font-size: 13px; }
       .folder-icon { color: #e5bb62; }

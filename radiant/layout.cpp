@@ -561,14 +561,49 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
     return extent;
 }
 
-static void reset_non_inherited_style_cache(ViewSpan* view) {
+static void reset_background_style_cache(ViewSpan* view) {
     if (!view) return;
+    if (!view->bound) return;
+
+    if (view->boundary()->background) {
+        BackgroundProp* bg = view->boundary()->background;
+        bg->color = {};
+        radiant_clear_background_image(bg);
+        bg->gradient_type = GRADIENT_NONE;
+        bg->linear_gradient = NULL;
+        bg->radial_gradient = NULL;
+        bg->conic_gradient = NULL;
+        bg->linear_layers = NULL;
+        bg->linear_layer_count = 0;
+        bg->radial_layers = NULL;
+        bg->radial_layer_count = 0;
+    }
+}
+
+void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* view) {
+    if (!lycon || !view) return;
+
+    if (view->in_line) {
+        InlineProp* inline_prop = view->ensure_inline(lycon);
+        if (inline_prop) {
+            inline_prop->color = {};
+            inline_prop->has_color = false;
+        }
+    }
+
+    reset_background_style_cache(view);
+}
+
+static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view) {
+    if (!lycon || !view) return;
 
     if (view->position) {
         // Removed positioning declarations otherwise survive retained recascade
         // and leave a now-static table cell excluded from normal row sizing.
         memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
     }
+
+    reset_background_style_cache(view);
 
     if (!view->bound) return;
 
@@ -591,19 +626,6 @@ static void reset_non_inherited_style_cache(ViewSpan* view) {
         view->boundary_mut()->outline->color = {};
     }
 
-    if (view->boundary()->background) {
-        BackgroundProp* bg = view->boundary()->background;
-        bg->color = {};
-        radiant_clear_background_image(bg);
-        bg->gradient_type = GRADIENT_NONE;
-        bg->linear_gradient = NULL;
-        bg->radial_gradient = NULL;
-        bg->conic_gradient = NULL;
-        bg->linear_layers = NULL;
-        bg->linear_layer_count = 0;
-        bg->radial_layers = NULL;
-        bg->radial_layer_count = 0;
-    }
 }
 
 CssEnum layout_element_css_all_reset_keyword(DomElement* element) {
@@ -1777,7 +1799,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 radiant::layout_cache_clear(dom_elem->layout_cache);
             }
 
-            reset_non_inherited_style_cache(lam::view_require_element(lycon->view));
+            reset_non_inherited_style_cache(lycon, lam::view_require_element(lycon->view));
             DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())
                 ? dom_elem->parent->as_element() : nullptr;
             if (parent_elem && parent_elem->font) {

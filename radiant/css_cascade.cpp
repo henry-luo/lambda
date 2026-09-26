@@ -236,8 +236,9 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
     if (epoch_scope) style_epoch_cascade_end(doc);
 }
 
-void radiant_cascade_styles_for_element(DomElement* element) {
-    if (!element || !element->doc || !element->doc->document_pool) return;
+void radiant_cascade_styles_for_element_with_matcher(DomElement* element,
+                                                      SelectorMatcher* matcher) {
+    if (!element || !element->doc || !element->doc->document_pool || !matcher) return;
 
     DomDocument* doc = element->doc;
     Pool* pool = doc->document_pool;
@@ -247,8 +248,6 @@ void radiant_cascade_styles_for_element(DomElement* element) {
 
     CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
     if (!engine || doc->stylesheet_count <= 0) return;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    if (!matcher) return;
     // CSSOM reads must see the same live form and interaction state as layout.
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
@@ -260,5 +259,13 @@ void radiant_cascade_styles_for_element(DomElement* element) {
             if (rule) apply_rule_to_element(element, rule, matcher, pool, engine);
         }
     }
+}
+
+void radiant_cascade_styles_for_element(DomElement* element) {
+    if (!element || !element->doc || !element->doc->document_pool) return;
+
+    SelectorMatcher* matcher = selector_matcher_create(element->doc->document_pool);
+    if (!matcher) return;
+    radiant_cascade_styles_for_element_with_matcher(element, matcher);
     selector_matcher_destroy(matcher);
 }

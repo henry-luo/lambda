@@ -92,6 +92,9 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
 // Refresh one dynamic element's stylesheet declarations without constructing a
 // view tree; CSSOM and transition capture need the cascade, not committed layout.
 void radiant_cascade_styles_for_element(DomElement* element);
+// Reuse a caller-owned matcher for repeated element-local recascades.
+void radiant_cascade_styles_for_element_with_matcher(DomElement* element,
+                                                     SelectorMatcher* matcher);
 void radiant_apply_css_rule_to_element(DomElement* element, CssRule* rule,
                                        SelectorMatcher* matcher, Pool* pool,
                                        CssEngine* engine);
@@ -3671,6 +3674,7 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              size_t family_start_index);
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
+void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* view);
 DisplayValue resolve_display_value(void* child);
 bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
                                    DisplayValue* out_display);
