@@ -120,7 +120,8 @@ bool lambda_type_contract_semantically_compatible(Type* candidate, Type* expecte
 // compatibility, this relation never relies on a value conversion.
 bool lambda_type_contract_is_subtype(Type* candidate, Type* expected);
 // S11.1.7: the result of `left op right` for the type operators when it
-// reduces -- `&TYPE_NONE` when the literals decide nothing is admitted or an
+// reduces -- `&TYPE_NONE` when a literal operand (a scalar, a range, or a
+// container's pattern) decides nothing is admitted or an
 // operand is `none` under `&`, the other operand when one side is `none`
 // under `|` (either side) or `!` (right side) -- else NULL: it stays binary.
 Type* lambda_type_operation_reduced(Type* left, Type* right, Operator op);

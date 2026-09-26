@@ -279,6 +279,8 @@ Implementing `none`, the empty type (S11.1.7), fixed two older defects on the wa
 
 The audit of the day's rulings (S8.2.4v3, S10.1.1v2, S11.1.7) that followed fixed two more defects and completed the rulings' residue: [LR07-38](<Lambda_Issue_Ledger (fixed).md#lr07-38>) (the JIT skipped a one-value numeric literal contract) and [LR13-12](<Lambda_Issue_Ledger (fixed).md#lr13-12>) (the validator refused bare datetime, binary and decimal arms and misread sized types). Container, bool, datetime and binary operands now read as literal types, `unique`/`intersect` take any number of operands, `!none` reduces, and a type query walks the virtual carriers (spec Appendix A rows S10.1.1v2, S8.2.4v3, S11.1.7).
 
+The user then clarified S11.1.7 (spec 47.2.0): literal operands include containers, and its `int & string` sentence is implementation status, not a ruling. Container literals now decide (`[1] & [2]` is `none`). The pass fixed [LR03-32](<Lambda_Issue_Ledger (fixed).md#lr03-32>) (the reduction asked only a literal's own value, so `1 ! int` was `none` though `1.0 is 1`) and [LR13-13](<Lambda_Issue_Ledger (fixed).md#lr13-13>) (`1.0 is (1 | 2)` was `false`). It found two validator defects, still open: [LR13-14](#lr13-14) (`[]` admits every array) and [LR13-15](#lr13-15) (`{a: null} is {a: null}` is `false`).
+
 ---
 
 
@@ -1354,6 +1356,12 @@ Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the 
 
 **Consequence for the specs:** the D2.6.6v2 content-arity claim can only be read from the code, not run. `validate_against_element_type` does enforce `content_length`, and an element-kinded nominal type reaches that arm by tag, so the old "not implemented" note is wrong — but "conformant" cannot be asserted until this is fixed. Both conformance rows now say exactly that.
 
+
+<a id="lr13-14"></a>**LR13-14 · The empty bracket pattern `[]` admits every array (S11.1.6v3) · OPEN (found 2026-09-26, extending S11.1.7 to container literals)**
+`[1, 2] is []` and `[[1]] is [[]]` are `true` on both tiers. S11.1.6v3 reads `int[0]` as `[]`, the empty array. A zero-slot pattern has no `item_patterns` (`fill_sequence_pattern_slots`), and `validate_against_array_type` reads that as "no per-slot pattern", then finds no `nested` type and admits the array. A fix gives a bracket pattern its length check even with no slots, keeping the homogeneous carriers (a `TypeArray` with only `nested`) apart. Until then the S11.1.7 reduction decides `[]` by its kind only.
+
+<a id="lr13-15"></a>**LR13-15 · A present `null` map field is admitted only by a run type: `{a: null} is {a: null}` is `false` (S11.1.6v3) · OPEN (found 2026-09-26, extending S11.1.7 to container literals)**
+A map keeps a `null` field (`len({a: null})` is 1), and the validator admits it only when the field's type is a run with a zero minimum (`type_admits_null_value`, `validator_internal.hpp`). So `{a: null} is {a: int?}` is `true`, while `{a: null} is {a: int | null}` and `{a: null} is {a: null}` are `false` on both tiers, though S11.1.6v3 makes `T?` the same type as `T | null`. A fix asks the field's type whether it admits `null` (`lambda_type_matches`) and leaves absence to `f?:`. The S11.1.7 reduction does not decide on a field that may be `null`, so it is not affected.
 
 ## 13.1 Ledger hygiene observations (not issues)
 

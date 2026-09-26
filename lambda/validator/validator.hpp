@@ -351,6 +351,13 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
 ValidationResult* validate_against_primitive_type(ConstItem item, Type* type);
 
 /**
+ * Whether `item` is the value a literal pattern slot holds: `==` for numbers
+ * across kinds, the same domain and payload otherwise (S11.2.1). Shared by
+ * sequence-pattern slots, literal types, and the S11.1.7 reduction.
+ */
+bool array_pattern_literal_matches(Item item, Item pattern);
+
+/**
  * Validate against array type
  */
 ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstItem item, TypeArray* array_type);

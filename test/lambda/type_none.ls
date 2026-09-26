@@ -1,6 +1,7 @@
 // S11.1.7: `none` is the empty type -- it admits no value, `null` and errors
 // included, and it is below every type. A type operation reduces to it when
-// its literal operands decide that nothing is admitted; `none` is the identity
+// its literal operands -- scalars, and containers as the pattern their literal
+// spells (S10.1.1v2) -- decide that nothing is admitted; `none` is the identity
 // of `|` and `!` and absorbs `&`. A reduced form prints, compares and relates
 // as its result in value and type context alike.
 // Golden written from the ruling, not from the runtime.
@@ -21,6 +22,15 @@ type U = string | none;
 type M = {a: none};
 "-- type context reduces alike --";
 [E, E == none, 5 is E, U, U == string, "a" is U, {a: 1} is M, [] is none[], [1] is none[]];
+"-- container literals decide too: the pattern each literal spells --";
+[[1] & [2], [int] & [int, int], {a: 1} & {a: 2}, <p "x"> & <p "y">, [1] & int, (1 to 3) & (5 to 7), [1, 2] ! [1, 2], {a: "x"} ! {a: string}];
+"-- a container literal with a value in both stays --";
+[[1] & [1], {a: 1} & {b: 2}, (1 to 3) & 2];
+type C = [1] & [2];
+[C, C == none, [1] is C];
+"-- a literal admits every value == to it, of any kind: a kind holds only some --";
+let midnight = t'2025-01-01' ! date;
+[1 ! int, (1 | 2) ! int, 1.5 & int, 1 ! number, [1] ! [int], [1.0] is ([1] ! [int]), t'2025-01-01T00:00:00' is midnight];
 "-- names --";
 [string(none), string(1 & 2), name(none)];
 "-- a none return is a contract no value passes: each call is the error --";
