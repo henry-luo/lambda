@@ -75,6 +75,25 @@ function liMargin(host: HTMLElement, i: number): string {
 // ---------------------------------------------------------------------------
 
 describe('FullEditorDom — Tab/Shift-Tab list indent', () => {
+  it('toolbar icons indent and outdent the selected item while preserving the caret', () => {
+    const { host, ed } = mount('<doc><ul><li>a</li><li>b<cursor></cursor></li></ul></doc>', docSchema)
+    const indent = toolbarBtn(host, 'Indent list item (Tab)')
+    const outdent = toolbarBtn(host, 'Outdent list item (Shift+Tab)')
+    expect(indent.textContent).toBe('≡→')
+    expect(outdent.textContent).toBe('←≡')
+    expect(indent.getAttribute('aria-label')).toBe('Indent list item (Tab)')
+    expect(outdent.getAttribute('aria-label')).toBe('Outdent list item (Shift+Tab)')
+    const selection = ed.getState().selection
+    fireMouse(indent, 'mousedown')
+    fireMouse(indent, 'click')
+    expect(liMargin(host, 1)).toBe('1.75em')
+    expect(ed.getState().selection).toEqual(selection)
+    fireMouse(outdent, 'mousedown')
+    fireMouse(outdent, 'click')
+    expect(liMargin(host, 1)).toBe('')
+    expect(ed.getState().selection).toEqual(selection)
+  })
+
   it('Tab indents the current list item (margin applied)', () => {
     const { host, surface } = mount('<doc><ul><li>a</li><li>b<cursor></cursor></li></ul></doc>', docSchema)
     expect(liMargin(host, 1)).toBe('')
