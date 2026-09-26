@@ -11,6 +11,7 @@
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/event.hpp"
+#include "../../../radiant/radiant.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
@@ -2341,6 +2342,30 @@ RADIANT_C_API Item fn_radiant_finish_model_edit(Item surface_item,
         surface_item, result_root.get()));
 }
 
+// Application-window rows: the node names its document, and the window host
+// refuses any document other than the one it presents.
+static DomDocument* radiant_window_document_from_item(Item node_item, const char* op) {
+    DomNode* node = radiant_dom_node_from_item(node_item, op);
+    return node ? radiant_dom_document_from_node(node) : nullptr;
+}
+
+RADIANT_C_API Item fn_radiant_set_close_guard(Item node_item, Item armed_item) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "SET_CLOSE_GUARD");
+    if (!doc || get_type_id(armed_item) != LMD_TYPE_BOOL) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_window_set_close_guard(doc, is_truthy(armed_item)));
+}
+
+RADIANT_C_API Item fn_radiant_request_window_close(Item node_item) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "REQUEST_WINDOW_CLOSE");
+    return radiant_bool_item(doc && radiant_window_approve_close(doc));
+}
+
+RADIANT_C_API Item fn_radiant_set_window_title(Item node_item, Item title_item) {
+    DomDocument* doc = radiant_window_document_from_item(node_item, "SET_WINDOW_TITLE");
+    const char* title = fn_to_cstr(title_item);
+    return radiant_bool_item(doc && title && radiant_window_set_title(doc, title));
+}
+
 // The text node an editing dispatch resolved to, and its range. Three scalar
 // accessors rather than one map, matching selection_start/selection_end: the
 // module has no map-building idiom, and a template reads these once each.
@@ -3769,6 +3794,9 @@ RADIANT_PROVIDE_ENGINE_1(edit_session, fn_radiant_dom_edit_session)
 RADIANT_PROVIDE_ENGINE_2(set_edit_session, fn_radiant_dom_set_edit_session)
 RADIANT_PROVIDE_ENGINE_2(bind_model_edit_surface, fn_radiant_bind_model_edit_surface)
 RADIANT_PROVIDE_ENGINE_2(finish_model_edit, fn_radiant_finish_model_edit)
+RADIANT_PROVIDE_ENGINE_2(set_close_guard, fn_radiant_set_close_guard)
+RADIANT_PROVIDE_ENGINE_1(request_window_close, fn_radiant_request_window_close)
+RADIANT_PROVIDE_ENGINE_2(set_window_title, fn_radiant_set_window_title)
 
 // is_focusable has no radiant.* spelling to forward to: the engine keeps the
 // predicate internal and publishes only focus_candidates, the whole list. A

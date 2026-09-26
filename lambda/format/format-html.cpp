@@ -98,6 +98,22 @@ static bool format_html_special_element(HtmlContext& ctx, const ElementReader& e
             } else {
                 ctx.write_text("html");
             }
+            // legacy identifiers select the document's quirks mode, so a
+            // written document keeps them (html5_tree_builder.cpp records both)
+            ItemReader public_id = elem.get_attr("publicId");
+            ItemReader system_id = elem.get_attr("systemId");
+            if (public_id.isString()) {
+                ctx.write_text(" PUBLIC \"");
+                html_write_reader_string_raw(ctx, public_id);
+                ctx.write_char('"');
+            } else if (system_id.isString()) {
+                ctx.write_text(" SYSTEM");
+            }
+            if (system_id.isString()) {
+                ctx.write_text(" \"");
+                html_write_reader_string_raw(ctx, system_id);
+                ctx.write_char('"');
+            }
             ctx.write_char('>');
             return true;
         }

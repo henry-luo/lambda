@@ -1,0 +1,33 @@
+{
+  "name": "Inline SVG paints <use> of any document element and lays <tspan> runs out on one line",
+  "html": "test/ui/svg_use_tspan_render.html",
+  "viewport": {"width": 480, "height": 260},
+  "events": [
+    {"type": "log", "message": "<use> instances: href and xlink:href to a plain element, a <defs> entry, a <symbol> in another <svg>"},
+    {"type": "assert_pixel", "x": 30, "y": 30, "min_r": 240, "min_g": 120, "max_g": 150, "max_b": 20},
+    {"type": "assert_pixel", "x": 110, "y": 30, "min_r": 240, "min_g": 120, "max_g": 150, "max_b": 20},
+    {"type": "assert_pixel", "x": 190, "y": 30, "min_r": 240, "min_g": 120, "max_g": 150, "max_b": 20},
+    {"type": "assert_pixel", "x": 240, "y": 30, "min_r": 140, "max_r": 165, "min_g": 90, "max_g": 115, "min_b": 40, "max_b": 65},
+    {"type": "assert_pixel", "x": 430, "y": 30, "min_r": 140, "max_r": 165, "max_g": 20, "min_b": 140, "max_b": 165},
+
+    {"type": "log", "message": "the instance inherits fill from the <use>, the original from its <g>"},
+    {"type": "assert_pixel", "x": 300, "y": 30, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 360, "y": 30, "max_r": 20, "max_g": 20, "min_b": 240},
+
+    {"type": "log", "message": "a <use> of its own ancestor is circular and renders nothing"},
+    {"type": "assert_pixel", "x": 20, "y": 80, "min_r": 40, "max_r": 65, "min_g": 90, "max_g": 115, "min_b": 140, "max_b": 165},
+    {"type": "assert_pixel", "x": 60, "y": 80, "min_r": 240, "min_g": 240, "min_b": 240},
+
+    {"type": "log", "message": "XX, one collapsed space, red tspan XX on the same baseline, one space, XX"},
+    {"type": "assert_pixel", "x": 30, "y": 174, "max_r": 30, "max_g": 30, "max_b": 30},
+    {"type": "assert_pixel", "x": 60, "y": 174, "min_r": 240, "min_g": 240, "min_b": 240},
+    {"type": "assert_pixel", "x": 90, "y": 166, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 90, "y": 182, "min_r": 240, "max_g": 20, "max_b": 20},
+    {"type": "assert_pixel", "x": 120, "y": 174, "min_r": 240, "min_g": 240, "min_b": 240},
+    {"type": "assert_pixel", "x": 150, "y": 174, "max_r": 30, "max_g": 30, "max_b": 30},
+
+    {"type": "log", "message": "a bold tspan advances by bold glyph widths; the next tspan keeps its own font"},
+    {"type": "assert_pixel", "x": 105, "y": 244, "min_r": 240, "min_g": 240, "min_b": 240},
+    {"type": "assert_pixel", "x": 140, "y": 244, "max_r": 20, "max_g": 20, "min_b": 240}
+  ]
+}

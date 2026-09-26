@@ -338,6 +338,10 @@ const char* rdt_picture_get_source_path(RdtPicture* pic);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
+// the picture's own transform (set_transform), then `transform`
+RdtMatrix   rdt_picture_compose_transform(RdtPicture* pic, const RdtMatrix* transform);
+// a ThorVG text paint: its duplicates re-shape through the font loader
+bool        rdt_picture_is_text(RdtPicture* pic);
 void        rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                              uint8_t opacity, const RdtMatrix* transform);
 void        rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
@@ -868,6 +872,7 @@ void dl_end_element(DisplayList* dl, int begin_index);
 // ---------------------------------------------------------------------------
 
 int dl_item_count(const DisplayList* dl);
+// any text: glyph items or ThorVG text pictures (the list replays serially)
 bool dl_contains_glyphs(const DisplayList* dl);
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result);
 bool dl_validate_or_log(const DisplayList* dl, const char* context);
@@ -1283,6 +1288,7 @@ typedef struct PaintEffectGroup {
 // must survive lowering so inline SVG renders identically on every target.
 typedef struct PaintSvgSubscene {
     void* svg_root;          // Element* SVG DOM root (inline native or picture)
+    void* id_scope;          // Element* tree for <use href="#id">; null = svg_root
     void* pool;              // Pool* used by the owning document when available
     void* font_context;      // FontContext* for SVG text resolution
     float viewport_width;
@@ -3633,6 +3639,8 @@ struct SvgIntrinsicSize {
 // SVG Render Context (internal state during rendering)
 // ============================================================================
 
+#define SVG_USE_DEPTH_MAX 16     // nested <use> instantiations per render
+
 struct SvgInlineRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
@@ -3686,6 +3694,13 @@ struct SvgInlineRenderContext {
     // Internal guard used while repainting a source element through a resolved
     // SVG mask. Prevents recursive mask application on the same element.
     bool suppress_masks;
+
+    // Tree searched for same-document references (<use href="#id">): the DOM
+    // tree root for inline SVG, otherwise the SVG root.
+    Element* id_scope;
+    // <use> targets being instantiated; a repeat is a circular reference.
+    Element* use_chain[SVG_USE_DEPTH_MAX];
+    int use_depth;
 };
 
 extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root);
@@ -3760,7 +3775,21 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
                       bool initial_fill_none = false,
                       const Color* initial_stroke_color = nullptr,
                       bool initial_stroke_none = true,
-                      float initial_stroke_width = -1.0f);
+                      float initial_stroke_width = -1.0f,
+                      Element* id_scope = nullptr);
+
+// Tree an inline <svg>'s same-document references (<use href="#id">) resolve
+// in: its DOM tree root, which spans the whole HTML document when connected.
+Element* render_svg_reference_scope(DomElement* svg_element);
+
+// Paints an SVG-DOM picture (an SVG <img>, CSS background, or <image>) into a
+// raster recording now, on the recording thread, as inline SVG is painted.
+// glyph_rdcon, when given, receives its text as glyph items. Deferring the
+// picture to replay would run the SVG painter on tile workers (RAD_12 §3).
+void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
+                               ScratchArena* scratch, FontContext* font_ctx,
+                               RenderContext* glyph_rdcon, RdtPicture* picture,
+                               uint8_t opacity, const RdtMatrix* transform);
 
 /**
  * Render inline SVG element in document context

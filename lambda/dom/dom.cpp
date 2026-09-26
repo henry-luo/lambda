@@ -85,6 +85,7 @@ void parse_xml(Input* input, const char* xml_string);
 #include <cstring>
 #include <cctype>
 #include <cmath>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include "../../lib/mem.h"
@@ -12184,6 +12185,33 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     return matrix;
 }
 
+extern "C" bool dom_svg_element_client_bounds(void* dom_elem, float* x, float* y,
+                                              float* width, float* height) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !elem->tag_name || !dom_element_is_svg(elem)) return false;
+    // The outer <svg> is a CSS box, and so is HTML inside <foreignObject>
+    // (reached before any <svg> on the way up); only SVG content below an
+    // <svg> lacks one.
+    bool inside_svg = false;
+    for (DomNode* up = elem->parent; up; up = up->parent) {
+        if (!up->is_element()) continue;
+        DomElement* ancestor = up->as_element();
+        if (!ancestor || !ancestor->tag_name) continue;
+        if (str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0) return false;
+        if (str_icmp_cstr(ancestor->tag_name, "svg") == 0) { inside_svg = true; break; }
+    }
+    if (!inside_svg) return false;
+    JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
+    if (!bounds.valid) return false;
+    RdtMatrix screen = dom_svg_ctm(elem, true);
+    dom_svg_bounds_apply_transform(&bounds, &screen);
+    if (x) *x = bounds.left;
+    if (y) *y = bounds.top;
+    if (width) *width = bounds.right - bounds.left;
+    if (height) *height = bounds.bottom - bounds.top;
+    return true;
+}
+
 static const float JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX = 3.0f;
 static const int JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH = 10;
 
@@ -12414,7 +12442,17 @@ static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
             float remaining = 0.0f;
             float path_offset = context->subpath_stroke_length + segment_offset;
             bool dash_on = dom_svg_dash_is_on_at(context, path_offset, &remaining);
-            if (remaining <= 0.000001f) remaining = length - segment_offset;
+            // Inexact dash lengths (3.2, 2.4) put a boundary a few float steps
+            // from the offset; a step that small cannot advance an offset of
+            // this magnitude, and the walk spun forever. At a boundary the next
+            // dash's state applies, measured from just past it.
+            float min_step = LMB_MAX(0.000001f,
+                (fabsf(path_offset) + length) * 4.0f * FLT_EPSILON);
+            if (remaining <= min_step) {
+                dash_on = dom_svg_dash_is_on_at(context, path_offset + min_step, &remaining);
+                remaining += min_step;
+            }
+            if (remaining <= min_step) remaining = length - segment_offset;
             float fragment_length = LMB_MIN(remaining, length - segment_offset);
             if (dash_on) {
                 float start_fraction = segment_offset / length;

@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- SVG images (<img src=*.svg>) whose content includes <text>. Their text is
+     painted when the page is recorded, not while tile workers replay it: the
+     SVG painter resolves fonts and loads glyphs, which replay threads must not
+     do (RAD_12 §3). The page has no HTML text and the images straddle the
+     256px tile grid, so the replay of everything else would run in parallel.
+     Ahem glyphs are 1em boxes: in each image, red XX spans x 10..50 and blue
+     XX 50..90, rows 24..44 (baseline 40, ascent 16). -->
+<style>
+html, body { margin: 0; padding: 0; }
+img { position: absolute; display: block; width: 160px; height: 60px; }
+</style>
+<img id="a" src="svg_img_text.svg" style="left: 10px; top: 10px">
+<img id="b" src="svg_img_text.svg" style="left: 200px; top: 100px">
+<img id="c" src="svg_img_text.svg" style="left: 420px; top: 230px">
+<img id="d" src="svg_img_text.svg" style="left: 240px; top: 400px">
+<img id="e" src="svg_img_text.svg" style="left: 600px; top: 440px">

@@ -1,0 +1,14 @@
+"mixed content keeps its spaces:"
+["Hello ", <b
+    "big">, " world ", <i
+    "!">]
+"white space between elements is layout:"
+2
+"a text-only element is trimmed:"
+["Alice"]
+"CDATA stays as written:"
+["  a < b  "]
+"a DOCTYPE internal subset ends at its bracket:"
+['?xml', '!DOCTYPE', 'r', '!--']
+"comments and processing instructions are written as such:"
+["<?xml version=\"1.0\"?>\n<!-- note --><?pi data?><r>x</r>"]

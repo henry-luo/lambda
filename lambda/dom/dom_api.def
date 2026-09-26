@@ -678,6 +678,15 @@ DOM_OP(CORE, stylesheet_get_type, style, 1, "fn(sheet: any) -> string", dom_csso
 // undefined when omitted and defaults to centering only when scrolling is needed.
 DOM_OP(CORE, scroll_into_view_if_needed, geometry, 2, "pn(n: any, center: bool) -> null", dom_core_scroll_into_view_if_needed_op, DOM_F_NEUTRAL | DOM_F_MUTATES, "", html_element, "", "scrollIntoViewIfNeeded")
 
+// Appended application-window mechanisms for the edit application
+// (Radiant_Design_Edit_Mode §7-§8). The package decides when a session is
+// dirty and what a close request means; the host only records the guard,
+// performs an approved close, and shows the title. `n` is any node of the
+// presented top-level document; other documents are refused.
+DOM_OP(CORE, set_close_guard, window, 2, "pn(n: any, armed: bool) -> bool", dom_engine_set_close_guard, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, request_window_close, window, 1, "pn(n: any) -> bool", dom_engine_request_window_close, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, set_window_title, window, 2, "pn(n: any, title: string) -> bool", dom_engine_set_window_title, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

@@ -894,6 +894,55 @@ static void lambda_view_log_completion(int exit_code) {
     log_notice("view command completed with result: %d", exit_code);
 }
 
+// Options shared by the document-window commands (`view`, `edit`).
+struct DocWindowLaunchOptions {
+    const char* filename;
+    const char* event_file;
+    const char* event_result;
+    bool headless;
+    bool event_log;
+    bool state_dump;
+    const char* graph_view_key;
+    const char* font_dirs[16];
+    int font_dir_count;
+};
+
+// Parse argv[2..] for a document-window command. `--view-key` belongs to the
+// viewer only. Returns false after reporting a usage error.
+static bool parse_doc_window_launch_options(int argc, char** argv, bool allow_view_key,
+                                            DocWindowLaunchOptions* out) {
+    *out = DocWindowLaunchOptions{};
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
+            out->event_file = argv[++i];
+        } else if (strcmp(argv[i], "--event-result") == 0 && i + 1 < argc) {
+            out->event_result = argv[++i];
+        } else if (strcmp(argv[i], "--headless") == 0) {
+            out->headless = true;
+        } else if (strcmp(argv[i], "--event-log") == 0) {
+            out->event_log = true;
+        } else if (strcmp(argv[i], "--state-dump") == 0) {
+            out->state_dump = true;
+        } else if (allow_view_key && strcmp(argv[i], "--view-key") == 0) {
+            if (i + 1 < argc) {
+                out->graph_view_key = argv[++i];
+            } else {
+                printf("Error: --view-key requires a Structurizr view key\n");
+                return false;
+            }
+        } else if (strcmp(argv[i], "--font-dir") == 0 && i + 1 < argc) {
+            if (out->font_dir_count < 16) {
+                out->font_dirs[out->font_dir_count++] = argv[++i];
+            } else {
+                i++; // skip argument
+            }
+        } else if (argv[i][0] != '-' && out->filename == NULL) {
+            out->filename = argv[i];
+        }
+    }
+    return true;
+}
+
 // Thread-local context from runner.cpp (for error handling)
 extern __thread EvalContext* context;
 
@@ -3724,6 +3773,65 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(exit_code);
     }
 
+    // Handle edit command: open one existing local document in the lambda.edit
+    // authoring application. Format selection belongs to the package registry,
+    // so the CLI only checks that a local file exists (Radiant_Design_Edit_Mode §1).
+    if (argc >= 2 && strcmp(argv[1], "edit") == 0) {
+        default_render_cmd_to_interp();
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Document Editor\n\n");
+            printf("Usage: %s edit <document_file> [options]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'edit' command opens an existing local document in an editing\n");
+            printf("  application with a toolbar at the top, and saves it back to its file.\n");
+            printf("\nSupported Formats:\n");
+            printf("  .md/.markdown  Markdown rich text\n");
+            printf("  .html/.htm     HTML rich text (head, styles and scripts are preserved)\n");
+            printf("  .svg           SVG drawing\n");
+            printf("\nOptions:\n");
+            printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
+            printf("  --event-result <file.json> Write a machine-readable event result\n");
+            printf("  --headless                 Run without creating a window\n");
+            printf("\nKeyboard Controls:\n");
+            printf("  Cmd/Ctrl+S        Save (Shift for Save As)\n");
+            printf("  Cmd/Ctrl+Z        Undo (Shift for redo)\n");
+            printf("  ESC               Cancel the current dialog or gesture\n");
+            return lambda_main_finish(0);
+        }
+        DocWindowLaunchOptions launch;
+        if (!parse_doc_window_launch_options(argc, argv, false, &launch)) {
+            return lambda_main_finish(1);
+        }
+        event_sim_set_result_path(launch.event_result);
+        const char* filename = launch.filename;
+        if (!filename) {
+            printf("Error: 'edit' requires a document file\n");
+            printf("Usage: %s edit <document_file>\n", argv[0]);
+            return lambda_main_finish(1);
+        }
+        if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
+            printf("Error: remote documents cannot be edited yet; edit a local file\n");
+            return lambda_main_finish(1);
+        }
+        if (!file_exists(filename)) {
+            printf("Error: File '%s' does not exist\n", filename);
+            return lambda_main_finish(1);
+        }
+        log_info("Opening document for editing: %s (event_file: %s)", filename,
+                 launch.event_file ? launch.event_file : "none");
+        int exit_code = edit_doc_in_window_with_events(filename, launch.event_file,
+            launch.headless, launch.font_dirs, launch.font_dir_count,
+            launch.event_log, launch.state_dump);
+        if (exit_code < 0) {
+            const char* diagnostic = lambda_document_load_diagnostic();
+            printf("Error: cannot edit '%s': %s\n", filename,
+                   diagnostic ? diagnostic : "the document could not be loaded");
+            exit_code = 1;
+        }
+        lambda_view_log_completion(exit_code);
+        return lambda_main_finish(exit_code);
+    }
+
     // Handle view command (open PDF or HTML in window)
     log_debug("Checking for view command");
     if (argc >= 2 && strcmp(argv[1], "view") == 0) {
@@ -3788,46 +3896,20 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
 
         // Parse arguments for view command
-        const char* filename = NULL;
-        const char* event_file = NULL;
-        const char* event_result = NULL;
-        bool headless = false;
-        bool event_log = false;
-        bool state_dump = false;
-        const char* graph_view_key = NULL;
-        const char* font_dirs[16];
-        int font_dir_count = 0;
-
-        for (int i = 2; i < argc; i++) {
-            if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
-                event_file = argv[++i];
-            } else if (strcmp(argv[i], "--event-result") == 0 && i + 1 < argc) {
-                event_result = argv[++i];
-            } else if (strcmp(argv[i], "--headless") == 0) {
-                headless = true;
-            } else if (strcmp(argv[i], "--event-log") == 0) {
-                event_log = true;
-            } else if (strcmp(argv[i], "--state-dump") == 0) {
-                state_dump = true;
-            } else if (strcmp(argv[i], "--view-key") == 0) {
-                if (i + 1 < argc) {
-                    graph_view_key = argv[++i];
-                } else {
-                    printf("Error: --view-key requires a Structurizr view key\n");
-                    return lambda_main_finish(1);
-                }
-            } else if (strcmp(argv[i], "--font-dir") == 0 && i + 1 < argc) {
-                if (font_dir_count < 16) {
-                    font_dirs[font_dir_count++] = argv[++i];
-                } else {
-                    i++; // skip argument
-                }
-            } else if (argv[i][0] != '-' && filename == NULL) {
-                filename = argv[i];
-            }
+        DocWindowLaunchOptions launch;
+        if (!parse_doc_window_launch_options(argc, argv, true, &launch)) {
+            return lambda_main_finish(1);
         }
+        const char* filename = launch.filename;
+        const char* event_file = launch.event_file;
+        bool headless = launch.headless;
+        bool event_log = launch.event_log;
+        bool state_dump = launch.state_dump;
+        const char* graph_view_key = launch.graph_view_key;
+        const char** font_dirs = launch.font_dirs;
+        int font_dir_count = launch.font_dir_count;
 
-        event_sim_set_result_path(event_result);
+        event_sim_set_result_path(launch.event_result);
 
         // Default to test/html/index.html if no file specified (like radiant.exe)
         if (filename == NULL) {

@@ -1,0 +1,27 @@
+{
+  "name": "lambda edit opens a Markdown file with the toolbar and a clean session",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_open.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Opened edit_md_open.md"},
+    {"type": "assert_text", "target": {"selector": ".edit-name"}, "equals": "edit_md_open.md"},
+    {"type": "assert_count", "target": {"selector": "#edit-surface h1"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface h2"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface li"}, "count": 2},
+    {"type": "assert_count", "target": {"selector": "#edit-surface pre"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface blockquote"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface strong"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#edit-surface a.edit-link"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#edit-surface a.edit-link"}, "attribute": "href", "present": false},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "not_contains": "Edit mode sample"},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-save"}, "class": "disabled"},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-undo"}, "class": "disabled"},
+    {"type": "assert_count", "target": {"selector": ".edit-btn-underline"}, "count": 0},
+    {"type": "key_press", "key": "escape"},
+    {"type": "assert_window_closed", "closed": false},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true, "requests": 1}
+  ]
+}

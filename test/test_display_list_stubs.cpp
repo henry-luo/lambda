@@ -157,6 +157,17 @@ void rdt_picture_free(RdtPicture* pic) {
     (void)pic;
 }
 
+// test pictures are neither SVG documents nor ThorVG text
+Element* rdt_picture_get_svg_root(RdtPicture* pic) {
+    (void)pic;
+    return nullptr;
+}
+
+bool rdt_picture_is_text(RdtPicture* pic) {
+    (void)pic;
+    return false;
+}
+
 void rdt_push_clip(RdtVector* vec, RdtPath* clip, const RdtMatrix* transform) {
     (void)vec; (void)clip; (void)transform;
 }

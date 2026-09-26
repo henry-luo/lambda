@@ -11,57 +11,14 @@
 #include <stdio.h>
 
 // ==============================================================================
-// MarkupEmitter — unified markup formatter driven by MarkupOutputRules
-// ==============================================================================
-
-class MarkupEmitter : public FormatterContextCpp {
-public:
-    MarkupEmitter(const MarkupOutputRules* rules, Pool* pool, StringBuf* output)
-        : FormatterContextCpp(pool, output, 50)
-        , rules_(rules)
-        , list_depth_(0)
-    {}
-
-    void format_item(const ItemReader& item);
-    void format_element(const ElementReader& elem);
-    void format_children(const ElementReader& elem);
-    void format_children_raw(const ElementReader& elem);
-    void format_text(String* str);
-    void format_text_cstr(const char* text);
-
-    const MarkupOutputRules* rules() const { return rules_; }
-    int list_depth() const { return list_depth_; }
-
-private:
-    const MarkupOutputRules* rules_;
-    int list_depth_;
-
-    // element handlers
-    void emit_heading(const ElementReader& elem);
-    void emit_inline(const ElementReader& elem, const char* open, const char* close);
-    void emit_link(const ElementReader& elem);
-    void emit_image(const ElementReader& elem);
-    void emit_list(const ElementReader& elem, bool ordered, int depth);
-    void emit_list_item(const ElementReader& elem, bool ordered, int depth, int index);
-    void emit_code_block(const ElementReader& elem);
-    void emit_blockquote(const ElementReader& elem);
-    void emit_paragraph(const ElementReader& elem);
-    void emit_hr();
-    void emit_br();
-
-    // tag matching helpers
-    bool match_inline_tag(const char* tag, const char* open, const char* close);
-    bool is_container_tag(const char* tag) const;
-    bool is_skip_tag(const char* tag) const;
-};
-
-// ==============================================================================
 // Text formatting
 // ==============================================================================
 
 void MarkupEmitter::format_text(String* str) {
     if (!str || str->len == 0) return;
-    if (rules_->escape_config) {
+    if (rules_->escape_text) {
+        rules_->escape_text(output(), str->chars, str->len);
+    } else if (rules_->escape_config) {
         format_text_with_escape(output(), str, rules_->escape_config);
     } else {
         write_text(str);
@@ -70,7 +27,9 @@ void MarkupEmitter::format_text(String* str) {
 
 void MarkupEmitter::format_text_cstr(const char* text) {
     if (!text || text[0] == '\0') return;
-    if (rules_->escape_config) {
+    if (rules_->escape_text) {
+        rules_->escape_text(output(), text, strlen(text));
+    } else if (rules_->escape_config) {
         format_text_with_escape(output(), text, strlen(text), rules_->escape_config);
     } else {
         write_text(text);
@@ -137,6 +96,13 @@ void MarkupEmitter::format_item(const ItemReader& item) {
     } else if (item.isString()) {
         String* str = item.asString();
         if (str) format_text(str);
+    } else if (item.isSymbol() && rules_->emoji_shortcodes) {
+        Symbol* name = item.asSymbol();
+        if (name && name->len > 0) {
+            write_char(':');
+            stringbuf_append_str_n(output(), name->chars, name->len);
+            write_char(':');
+        }
     } else if (item.isElement()) {
         ElementReader elem = item.asElement();
         format_element(elem);

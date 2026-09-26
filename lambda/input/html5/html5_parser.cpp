@@ -1053,9 +1053,12 @@ bool html5_is_special_element(NameId tag_id, const char* tag_name) {
 Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) {
     MarkBuilder builder(parser->input);
 
-    // Check if we're in SVG namespace and need tag name correction
+    // Check if we're in SVG namespace and need tag name correction. The <svg>
+    // start tag itself is inserted in the SVG namespace (WHATWG "in body": adjust
+    // SVG attributes for the token), before it is on the open-element stack, so
+    // its own viewBox / preserveAspectRatio are adjusted too.
     const char* tag_name = token->tag_name->chars;
-    bool in_svg = html5_is_in_svg_namespace(parser);
+    bool in_svg = html5_is_in_svg_namespace(parser) || strcmp(tag_name, "svg") == 0;
 
     if (in_svg) {
         // Apply SVG tag name correction (e.g., "clippath" -> "clipPath")

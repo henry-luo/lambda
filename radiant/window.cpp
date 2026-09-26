@@ -537,13 +537,67 @@ static void window_request_close(GLFWwindow* window) {
     glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
-static void window_close_callback(GLFWwindow*) {
-    // GLFW invokes this at the user's close click, before document cleanup.
+// Only the presented top-level document may arm the close guard, approve a
+// close, or retitle the window; a stale or embedded document handle is refused.
+static bool window_hosts_document(DomDocument* doc) {
+    return doc && ui_context.document == doc;
+}
+
+bool radiant_window_set_close_guard(DomDocument* doc, bool armed) {
+    if (!window_hosts_document(doc) || ui_context.app_mode != UI_APP_MODE_EDIT) return false;
+    ui_context.close_guard_armed = armed;
+    return true;
+}
+
+bool radiant_window_approve_close(DomDocument* doc) {
+    if (!window_hosts_document(doc)) return false;
+    ui_context.close_approved = true;
+    log_info("edit-close: document approved closing the window");
+    // Headless runs record the approval; a GUI window leaves its loop.
+    if (ui_context.window) window_request_close(ui_context.window);
+    return true;
+}
+
+bool radiant_window_set_title(DomDocument* doc, const char* title) {
+    if (!window_hosts_document(doc) || !title) return false;
+    update_window_title(title);
+    return true;
+}
+
+bool radiant_window_platform_close(UiContext* uicon) {
+    uicon->close_request_count++;
+    if (uicon->close_approved) return true;
+    if (uicon->app_mode != UI_APP_MODE_EDIT || !uicon->close_guard_armed || !uicon->document) {
+        uicon->close_approved = true;
+        return true;
+    }
+    // Unsaved edits: the document decides Save / Discard / Cancel and approves
+    // through radiant_window_approve_close, possibly during this dispatch.
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.type = RDT_EVENT_CLOSE_REQUEST;
+    event.timestamp = glfwGetTime();
+    handle_event(uicon, uicon->document, &event);
+    do_redraw = 1;
+    return uicon->close_approved;
+}
+
+static void window_close_callback(GLFWwindow* window) {
+    // GLFW invokes this at the user's close click (and application quit),
+    // before document cleanup. A guarded edit session keeps the window open
+    // until it approves; runtime cancellation waits for that decision.
+    if (!radiant_window_platform_close(&ui_context)) {
+        glfwSetWindowShouldClose(window, GLFW_FALSE);
+        return;
+    }
     window_request_document_satellite_cancel();
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+    // The viewer closes on Escape; the edit application gives Escape to the
+    // active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS &&
+            ui_context.app_mode != UI_APP_MODE_EDIT) {
         window_request_close(window);
         return;
     }
@@ -1172,7 +1226,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    const char* event_file, bool headless,
                                                    const char** font_dirs, int font_dir_count,
                                                    bool enable_event_log,
-                                                   bool enable_state_dump) {
+                                                   bool enable_state_dump,
+                                                   UiAppMode app_mode) {
     log_init_wrapper();
     ViewPhaseTiming phase_timing = {};
     phase_timing.total_start_ns = time_now_ns();
@@ -1199,6 +1254,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     }
     ui_context.event_log_enabled = enable_event_log;
     ui_context.state_dump_enabled = enable_state_dump;
+    ui_context.app_mode = app_mode;
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < font_dir_count; i++) {
@@ -1735,7 +1791,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     return view_doc_in_window_with_events_internal(doc_file, nullptr, nullptr, 0,
                                                    event_file, headless,
                                                    font_dirs, font_dir_count, enable_event_log,
-                                                   enable_state_dump);
+                                                   enable_state_dump, UI_APP_MODE_VIEW);
 }
 
 int view_lambda_document_transform_with_events(const char* document_file,
@@ -1745,7 +1801,21 @@ int view_lambda_document_transform_with_events(const char* document_file,
         int font_dir_count, bool enable_event_log, bool enable_state_dump) {
     return view_doc_in_window_with_events_internal(document_file, transform, options,
         option_count, event_file, headless, font_dirs, font_dir_count,
-        enable_event_log, enable_state_dump);
+        enable_event_log, enable_state_dump, UI_APP_MODE_VIEW);
+}
+
+int edit_doc_in_window_with_events(const char* document_file,
+        const char* event_file, bool headless, const char** font_dirs,
+        int font_dir_count, bool enable_event_log, bool enable_state_dump) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("edit");
+    if (!transform) {
+        log_error("edit: the edit document transform is not configured");
+        return -1;
+    }
+    return view_doc_in_window_with_events_internal(document_file, transform, nullptr, 0,
+        event_file, headless, font_dirs, font_dir_count,
+        enable_event_log, enable_state_dump, UI_APP_MODE_EDIT);
 }
 
 // Wrapper for backward compatibility

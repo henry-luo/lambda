@@ -1,0 +1,10 @@
+"basename / dirname:"
+["a.md", "/docs/notes", "/", "."]
+"resolve_path:"
+["/docs/notes/b.md", "/docs/notes/c.md", "/docs/other/d.md", "/abs/e.md", "/f.md", "temp/x/a.md", "../../b.md", "a"]
+"is_relative_url:"
+[true, true, true, false, false, false, false, false, false, false, true]
+"first_relative_reference:"
+["the image pics/p.png", "raw HTML with a link or image", null]
+"is_dirty / window_title:"
+[false, true, "a.md - Lambda Edit", "* a.md - Lambda Edit"]

@@ -296,6 +296,21 @@ static bool sim_attribute_matches(const char* actual, SimEvent* ev) {
     return actual != nullptr;
 }
 
+// A fixture may create or overwrite only scratch files under ./temp/, never a
+// committed file: relative, rooted at temp/, and free of `..` components.
+static bool sim_path_is_temp_scratch(const char* path) {
+    if (!path || !path[0] || path[0] == '/' || strstr(path, "..")) return false;
+    if (strncmp(path, "./", 2) == 0) path += 2;
+    return strncmp(path, "temp/", 5) == 0 && path[5] != '\0';
+}
+
+static bool sim_create_parent_dirs(const char* path) {
+    char* dir = file_path_dirname(path);
+    bool ok = dir && create_dir(dir);
+    if (dir) mem_free(dir);
+    return ok;
+}
+
 static bool sim_text_matches(const char* assertion, const char* actual,
                              const SimEvent* ev) {
     actual = actual ? actual : "";
@@ -308,6 +323,11 @@ static bool sim_text_matches(const char* assertion, const char* actual,
     if (ev && ev->assert_contains && !strstr(actual, ev->assert_contains)) {
         log_error("event_sim: %s FAIL - expected to contain '%s', got '%s'",
                   assertion, ev->assert_contains, actual);
+        passed = false;
+    }
+    if (ev && ev->assert_not_contains && strstr(actual, ev->assert_not_contains)) {
+        log_error("event_sim: %s FAIL - expected not to contain '%s', got '%s'",
+                  assertion, ev->assert_not_contains, actual);
         passed = false;
     }
     return passed;
@@ -1149,6 +1169,8 @@ static void parse_assertion_strings(MapReader& reader, SimEvent* ev,
     if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
     const char* contains = reader.get("contains").cstring();
     if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+    const char* not_contains = reader.get("not_contains").cstring();
+    if (not_contains) ev->assert_not_contains = mem_strdup(not_contains, MEM_CAT_LAYOUT);
     if (with_target) parse_target(reader, ev);
 }
 
@@ -1830,6 +1852,39 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         const char* file = reader.get("file").cstring();
         if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         // file is optional, defaults to ./view_tree.txt
+    }
+    else if (strcmp(type_str, "window_close") == 0) {
+        ev->type = SIM_EVENT_WINDOW_CLOSE;
+    }
+    else if (strcmp(type_str, "write_file") == 0) {
+        ev->type = SIM_EVENT_WRITE_FILE;
+        const char* file = reader.get("path").cstring();
+        const char* content = reader.get("content").cstring();
+        // fixtures may only write scratch files; an edited working copy lives there
+        if (!sim_path_is_temp_scratch(file) || !content) {
+            log_error("event_sim: write_file requires a ./temp/ 'path' and 'content'");
+            return parse_sim_event_fail(ev);
+        }
+        ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
+        ev->input_text = mem_strdup(content, MEM_CAT_LAYOUT);
+    }
+    else if (strcmp(type_str, "assert_file") == 0) {
+        ev->type = SIM_EVENT_ASSERT_FILE;
+        const char* file = reader.get("path").cstring();
+        if (!file) {
+            log_error("event_sim: assert_file requires 'path'");
+            return parse_sim_event_fail(ev);
+        }
+        ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
+        parse_assertion_strings(reader, ev, false);
+        ev->has_expected_exists = reader.has("exists");
+        ev->expected_exists = !ev->has_expected_exists || reader.get("exists").asBool();
+    }
+    else if (strcmp(type_str, "assert_window_closed") == 0) {
+        ev->type = SIM_EVENT_ASSERT_WINDOW_CLOSED;
+        ev->expected_closed = !reader.has("closed") || reader.get("closed").asBool();
+        ev->expected_close_requests = reader.has("requests")
+            ? reader.get("requests").asInt32() : -1;
     }
     else if (strcmp(type_str, "assert_snapshot") == 0) {
         ev->type = SIM_EVENT_ASSERT_SNAPSHOT;
@@ -5209,6 +5264,63 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 }
             }
             break;
+
+        // ===== Edit application =====
+
+        case SIM_EVENT_WINDOW_CLOSE: {
+            // The same decision path as the platform close button. Headless
+            // runs record an approved close and keep simulating, so a fixture
+            // can assert the saved file and the decision afterwards.
+            bool closing = radiant_window_platform_close(uicon);
+            log_info("event_sim: window_close -> %s", closing ? "approved" : "deferred to document");
+            if (closing && window) glfwSetWindowShouldClose(window, GLFW_TRUE);
+            break;
+        }
+
+        case SIM_EVENT_WRITE_FILE: {
+            if (!sim_create_parent_dirs(ev->file_path) ||
+                write_text_file_atomic(ev->file_path, ev->input_text) != 0) {
+                log_error("event_sim: write_file FAIL - could not write %s", ev->file_path);
+                sim_record_assertion(ctx, false);
+            } else {
+                log_info("event_sim: write_file %s (%zu bytes)", ev->file_path,
+                         strlen(ev->input_text));
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_FILE: {
+            char* data = nullptr;
+            size_t size = 0;
+            bool exists = file_exists(ev->file_path) &&
+                file_read_all(ev->file_path, MEM_CAT_LAYOUT, &data, &size);
+            bool passed = true;
+            if (ev->has_expected_exists) {
+                passed = sim_bool_matches("assert_file", "exists", ev->expected_exists, exists);
+            } else if (!exists) {
+                log_error("event_sim: assert_file FAIL - cannot read %s", ev->file_path);
+                passed = false;
+            }
+            if (passed && exists) passed = sim_text_matches("assert_file", data, ev);
+            if (passed) log_info("event_sim: assert_file PASS (%s)", ev->file_path);
+            sim_record_assertion(ctx, passed);
+            if (data) mem_free(data);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_WINDOW_CLOSED: {
+            bool passed = sim_bool_matches("assert_window_closed", "closed",
+                                           ev->expected_closed, uicon->close_approved);
+            if (passed && ev->expected_close_requests >= 0 &&
+                    uicon->close_request_count != ev->expected_close_requests) {
+                log_error("event_sim: assert_window_closed FAIL - expected %d close requests, got %d",
+                          ev->expected_close_requests, uicon->close_request_count);
+                passed = false;
+            }
+            if (passed) log_info("event_sim: assert_window_closed PASS");
+            sim_record_assertion(ctx, passed);
+            break;
+        }
 
         // ===== Webview commands =====
 

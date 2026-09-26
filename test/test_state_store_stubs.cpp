@@ -167,6 +167,17 @@ void rdt_picture_free(RdtPicture* picture) {
     (void)picture;
 }
 
+// test pictures are neither SVG documents nor ThorVG text
+Element* rdt_picture_get_svg_root(RdtPicture* picture) {
+    (void)picture;
+    return nullptr;
+}
+
+bool rdt_picture_is_text(RdtPicture* picture) {
+    (void)picture;
+    return false;
+}
+
 void editing_surface_clear(EditingSurface* out) {
     if (out) memset(out, 0, sizeof(*out));
 }

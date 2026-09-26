@@ -29,6 +29,8 @@ StringBuf* stringbuf_new_cap(Pool *pool, size_t capacity);
 void stringbuf_free(StringBuf *sb);
 void stringbuf_reset(StringBuf *sb);
 void stringbuf_full_reset(StringBuf *sb);
+// Shorten the buffer to `length` bytes; a larger length is ignored.
+void stringbuf_truncate(StringBuf *sb, size_t length);
 bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity);
 
 // Append functions

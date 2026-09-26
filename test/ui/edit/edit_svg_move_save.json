@@ -1,0 +1,33 @@
+{
+  "name": "an SVG object is picked and dragged; the save moves only its coordinates and keeps the rest of the file",
+  "command": "edit",
+  "html": "test/ui/edit/sample.svg",
+  "working_copy": "temp/edit-ui/edit_svg_move_save.svg",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-canvas"}, "count": 1},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-tool_select"}, "class": "active"},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-delete"}, "class": "disabled"},
+    {"type": "click", "target": {"selector": "#box"}},
+    {"type": "assert_count", "target": {"selector": ".edit-frame"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-handle"}, "count": 8},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "mouse_drag", "target": {"selector": "#box"}, "to_target": {"selector": "#box", "offset_x": 90, "offset_y": 60}},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "x", "equals": "50"},
+    {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "y", "equals": "40"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "<rect id=\"box\" x=\"50\" y=\"40\" width=\"120\" height=\"80\""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<!-- Created for the edit-mode drawing tests -->\n<svg "},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "<sodipodi:namedview id=\"view\" pagecolor=\"#ffffff\"/>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "<linearGradient id=\"grad\">"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "<use xlink:href=\"#dot\" x=\"100\" y=\"150\"/>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "Hello <tspan font-weight=\"bold\">SVG</tspan>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "contains": "viewBox=\"0 0 400 300\""},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "not_contains": "data-edit-path"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "not_contains": "edit-frame"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "not_contains": "edit-handle"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_move_save.svg", "not_contains": "edit-canvas"}
+  ]
+}

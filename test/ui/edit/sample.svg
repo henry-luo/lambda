@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created for the edit-mode drawing tests -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+     width="400" height="300" viewBox="0 0 400 300" version="1.1" id="drawing">
+  <sodipodi:namedview id="view" pagecolor="#ffffff"/>
+  <defs>
+    <linearGradient id="grad">
+      <stop offset="0" stop-color="#ff0000"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+  </defs>
+  <title>Sample drawing</title>
+  <rect id="box" x="20" y="20" width="120" height="80" fill="url(#grad)" stroke="#333333" stroke-width="2"/>
+  <circle id="dot" cx="220" cy="60" r="40" style="fill:#ffcc00;stroke:#000000"/>
+  <g id="group" transform="translate(40,150)">
+    <ellipse cx="60" cy="40" rx="60" ry="30" fill="#88cc88"/>
+    <line x1="0" y1="0" x2="120" y2="80" stroke="#000000"/>
+  </g>
+  <path id="curve" d="M 250 150 C 300 100 350 200 380 150" fill="none" stroke="#aa00aa" stroke-width="3"/>
+  <text id="label" x="20" y="280" font-size="20" fill="#222222">Hello <tspan font-weight="bold">SVG</tspan></text>
+  <use xlink:href="#dot" x="100" y="150"/>
+</svg>

@@ -1,0 +1,25 @@
+{
+  "name": "Flex wrap: nested flex items keep their wrap across a retained reflow",
+  "html": "test/ui/flex_wrap_nested_flex_reflow.html",
+  "viewport": {"width": 800, "height": 400},
+  "events": [
+    {"type": "log", "message": "=== flex_wrap_nested_flex_reflow ==="},
+
+    {"type": "log", "message": "first layout: third button group and second chip group wrap to line 2"},
+    {"type": "assert_rect", "target": {"selector": "#g1"}, "x": 8, "y": 8, "width": 175.4, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#b4"}, "x": 189.4, "y": 8, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#b7"}, "x": 8, "y": 42, "width": 44, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#g4"}, "x": 8, "y": 86, "width": 185.2, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#c4"}, "x": 8, "y": 113, "tolerance": 0.5},
+
+    {"type": "log", "message": "a selector click reflows the retained view tree before hit-testing"},
+    {"type": "click", "target": {"selector": "#probe"}},
+
+    {"type": "log", "message": "reflow: nested flex groups keep their children's padding and border"},
+    {"type": "assert_rect", "target": {"selector": "#g1"}, "x": 8, "y": 8, "width": 175.4, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#b4"}, "x": 189.4, "y": 8, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#b7"}, "x": 8, "y": 42, "width": 44, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#g4"}, "x": 8, "y": 86, "width": 185.2, "tolerance": 0.5},
+    {"type": "assert_rect", "target": {"selector": "#c4"}, "x": 8, "y": 113, "tolerance": 0.5}
+  ]
+}

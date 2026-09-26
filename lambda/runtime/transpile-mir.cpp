@@ -687,6 +687,11 @@ static void mir_write_fn_name(MirTranspiler* mt, StrBuf* strbuf,
     mir_write_fn_name_ex(mt, strbuf, fn_node, import, NULL);
 }
 
+static void mir_write_var_name(MirTranspiler* mt, StrBuf* strbuf,
+        AstNode* node, AstImportNode* import) {
+    write_var_name_for_script(strbuf, node, import ? mir_import_script(mt, import) : NULL);
+}
+
 enum MirFlowFactKind { MIR_FLOW_SEMANTIC, MIR_FLOW_ADMITTED, MIR_FLOW_LAYOUT };
 
 struct MirFlowFact {
@@ -9955,7 +9960,9 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
         if (entry_node && (entry_node->node_type == AST_NODE_VARIABLE_DECLARATOR ||
             entry_node->node_type == AST_NODE_PARAM)) {
             StrBuf* var_name = strbuf_new_cap(64);
-            write_var_name(var_name, entry_node, NULL);
+            // module-qualified: an unqualified "_css" resolved every importer's
+            // `a.css` and `b.css` to whichever dependency registered last
+            mir_write_var_name(mt, var_name, entry_node, ident->entry->import);
 
             TypeId var_tid = entry_node->type ? entry_node->type->type_id : LMD_TYPE_ANY;
             log_debug("mir: loading imported variable '%s' type_id=%d", var_name->str, var_tid);
@@ -19652,7 +19659,14 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, handle), MIR_new_reg_op(mt->ctx, is_error)));
 
+    // Each arm runs only on its own path (D8.3.4), so a `raise` or `return` in
+    // one does not end the handler: the join is reachable unless every arm
+    // exits. Without this, a `raise` in the error arm marked an enclosing if
+    // branch as returned and the if-join discarded the handled value.
+    bool entry_returned = mt->block_returned;
+    bool value_arm_exits = false;
     if (handler->value_body) {
+        mt->block_returned = false;
         if (durable_fault_target) {
             emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
@@ -19669,6 +19683,7 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
         mt->pipe_root_reg = operand;
         MIR_reg_t value_body_result = transpile_box_item(mt, handler->value_body);
         mir_pipe_context_restore(mt, saved_context);
+        value_arm_exits = mt->block_returned;
         if (handler->is_statement) {
             // A statement handler discards only a normal value-body result.
             // An error created by that selected body is a fresh completion
@@ -19705,7 +19720,9 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
     bool saved_in_handler = mt->in_handler;
     mt->handler_error_reg = operand;
     mt->in_handler = true;
+    mt->block_returned = false;
     MIR_reg_t body_value = transpile_box_item(mt, handler->body);
+    bool error_arm_exits = mt->block_returned;
     mt->handler_error_reg = saved_handler_error;
     mt->in_handler = saved_in_handler;
     if (handler->is_statement) {
@@ -19720,6 +19737,9 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
             MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, body_value)));
     }
     emit_label(mt, done);
+    // the one-arm form passes a non-error operand through, which never exits
+    mt->block_returned = entry_returned ||
+        (handler->value_body && value_arm_exits && error_arm_exits);
     if (durable_fault_target) {
         MIR_label_t after_fault = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -42907,27 +42927,31 @@ static void register_module_pub_fns(AstImportNode* imp, Script* dependency) {
         } else if (mod_child->node_type == AST_NODE_PUB_STAM) {
             // Register pub variable BSS addresses.
             // MIR Direct names BSS items "_gvar_<name>" (see prepass_create_global_vars).
-            // The consuming module always imports via write_var_name ("_<name>"),
-            // so we register the lookup result under that key regardless of format.
+            // The consumer imports "m<unit>._<name>" (mir_write_var_name), so a
+            // name two dependencies both export stays two symbols.
             AstNode* declare = ((AstLetNode*)mod_child)->declare;
             while (declare) {
                 AstDeclaratorNode* named = (AstDeclaratorNode*)declare;
                 if (named->name) {
+                    // dependency-local name, for the lookup in its own context
+                    StrBuf* local_key = strbuf_new_cap(64);
+                    write_var_name(local_key, declare, NULL);  // e.g. "_pi"
                     // Import key (what the consumer's MIR_new_import uses)
                     StrBuf* import_key = strbuf_new_cap(64);
-                    write_var_name(import_key, declare, NULL);  // e.g. "_pi"
+                    write_var_name_for_script(import_key, declare, dependency);  // e.g. "m2._pi"
                     // MIR Direct BSS name: "_gvar_<rawname>"
                     char gvar[200];
                     snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);
                     MIR_item_t bss_item = find_import(dependency->jit_context, gvar);
                     if (!bss_item || !bss_item->addr) {
-                        bss_item = find_import(dependency->jit_context, import_key->str);
+                        bss_item = find_import(dependency->jit_context, local_key->str);
                     }
                     if (bss_item && bss_item->addr) {
                         register_dynamic_import(raw_strdup(import_key->str), bss_item->addr); // RAWALLOC_OK: MIR manages param name lifetime
                         log_debug("mir: registered import var BSS: %s -> %p", import_key->str, bss_item->addr);
                     }
                     strbuf_free(import_key);
+                    strbuf_free(local_key);
                 }
                 declare = declare->next;
             }
@@ -43882,10 +43906,13 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
-    {"pdf", "lambda.pdf.pdf", "pdf_to_html"},
-    {"latex", "lambda.latex.latex", "render_document"},
-    {"graph", "lambda.graph.document", "to_html"},
-    {"math", "lambda.doc.math.math", "render_math"},
+    {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    // edit mode selects the application; lambda.edit's registry selects the
+    // format adapter and reads the source itself (Radiant_Design_Edit_Mode §4).
+    {"edit", "lambda.edit.edit", "open_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH},
 };
 
 const LambdaDocumentTransformConfig* lambda_document_transform_for_input_type(
@@ -43951,7 +43978,10 @@ Input* run_lambda_document_transform_with_options(Runtime* runtime,
         (int64_t)strlen(input_target)))});
     Rooted<Item> type(roots, (Item){.item = s2it(heap_strcpy(transform->input_type,
         (int64_t)strlen(transform->input_type)))});
-    Rooted<Item> document(roots, fn_input2(target.get(), type.get()));
+    // A path-source export owns its read, so native code parses nothing here.
+    Rooted<Item> document(roots,
+        transform->source == LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH
+            ? target.get() : fn_input2(target.get(), type.get()));
     Rooted<Item> option_map(roots, ItemNull);
     Rooted<Item> option_name(roots, ItemNull);
     Rooted<Item> option_value(roots, ItemNull);

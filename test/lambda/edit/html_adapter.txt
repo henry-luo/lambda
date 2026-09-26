@@ -1,0 +1,30 @@
+"fragment:"
+["<p>One</p>\n<p>Two <b>bold</b></p>\n"]
+"full document keeps doctype, head and attributes:"
+["<!DOCTYPE html>\n<html lang=\"fr\">\n<head><title>T</title><style>p{}</style></head>\n<body id=\"b\">\n  <p>x</p>\n</body>\n</html>\n"]
+"legacy doctype identifiers:"
+["<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n<html>\n<body>\n  <p>x</p>\n</body>\n</html>\n"]
+"implied paragraph:"
+[['div'], "<div class=\"n\">Hi <i>there</i></div>\n"]
+"mixed container kept:"
+[['html_block'], "<div>text <p>para</p> more</div>\n"]
+"mixed body:"
+[['p', 'html_block', 'p'], "<p>a</p>\nstray <b>text</b>\n<p>b</p>\n"]
+"marks with attributes, icons, anchors, retained inline:"
+["<p><span class=\"hl\">x</span> <i class=\"icon\"></i> <a id=\"top\"></a> <b>k <kbd>K</kbd></b></p>\n"]
+"white space settles as rendered:"
+["<p>a b <b>c </b>d</p>\n"]
+"preformatted text is exact, a leading newline doubled:"
+["<pre>\n\nx  y\n</pre>\n", "<pre><code class=\"language-c\">int  x;</code></pre>\n"]
+"list items mix runs and blocks:"
+["<ul>\n  <li>Item\n    <ul>\n      <li>sub</li>\n    </ul>\n  </li>\n  <li></li>\n</ul>\n"]
+"a table with block cells is kept whole:"
+[['html_block'], ['table']]
+"every sample is stable:"
+[true, true, true, true, true, true, true]
+"the gate passes on loaded documents:"
+[true, true]
+"gate on an unrepresentable mark:"
+["block 1 <p> \"y\" would change"]
+"XHTML refused:"
+["XHTML documents cannot be edited yet; open it with 'lambda view' instead"]

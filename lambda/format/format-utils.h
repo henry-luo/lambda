@@ -261,6 +261,15 @@ typedef struct MarkupOutputRules {
     // ----- Link tag name -----
     const char* link_tag;             // "a" for most, "link" for Org
 
+    // ----- Context-aware text escaping -----
+    // If non-NULL, replaces escape_config for text runs. It may inspect the
+    // output written so far: Markdown block markers matter only at a line start.
+    void (*escape_text)(StringBuf* sb, const char* s, size_t len);
+
+    // The markup parser keeps a `:name:` emoji shortcode as a bare symbol
+    // child; when set, such a symbol is written back as `:name:`.
+    bool emoji_shortcodes;
+
 } MarkupOutputRules;
 
 // Pre-defined rule sets

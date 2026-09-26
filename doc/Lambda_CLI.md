@@ -333,6 +333,66 @@ lambda view diagram.mmd
 
 ---
 
+### `edit` — Document Editor
+
+Open an existing local document in an editing window with a toolbar at the
+top, and save it back to its file.
+
+```
+lambda edit <document_file> [options]
+```
+
+**Options:**
+
+| Flag | Long Form | Description | Default |
+|------|-----------|-------------|---------|
+| | `--event-file <file.json>` | Load simulated events from JSON for testing | |
+| | `--event-result <file.json>` | Write a machine-readable event result | |
+| | `--headless` | Run without creating a window | |
+| `-h` | `--help` | Show help | |
+
+**Supported formats:** the `lambda.edit` package chooses the editor from the
+file's suffix.
+
+| Suffix | Editor |
+|--------|--------|
+| `.md`, `.markdown` | Rich text; front matter, raw HTML, and math are kept as written |
+| `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
+| `.svg` | Drawing: select, move, resize, rectangle/ellipse/line/text tools, fill and stroke, duplicate, delete, paint order, zoom |
+
+A file whose content the editor cannot write back without loss (for example
+Markdown footnotes) is not opened; the error names the construct, and
+`lambda view` still shows it.
+
+**Saving:** Save writes the same format back through a temporary file that
+replaces the original only after the write succeeded. If the file changed on
+disk since it was opened, Save stops and offers Overwrite, Reload, or Save As.
+Save As takes a path relative to the document's folder, keeps the format, and
+never creates folders. Closing a window with unsaved changes asks to Save,
+Discard, or Cancel.
+
+**Keyboard controls:**
+
+| Key | Action |
+|-----|--------|
+| Cmd/Ctrl+S | Save |
+| Cmd/Ctrl+Shift+S | Save As |
+| Cmd/Ctrl+Z | Undo (Shift for redo) |
+| ESC | Cancel the current dialog or drawing gesture, then clear the selection (does not close the window) |
+| Delete, arrows | Drawing: delete or nudge the selection (Shift: by 10) |
+| Cmd/Ctrl+D | Drawing: duplicate the selection |
+| V, R, E, L, T | Drawing: Select, Rectangle, Ellipse, Line, Text tool |
+
+**Examples:**
+
+```bash
+lambda edit README.md
+lambda edit site/index.html
+lambda edit diagram.svg
+```
+
+---
+
 ### `fetch` — HTTP/HTTPS Resource Download
 
 Download a remote resource via HTTP or HTTPS.
@@ -451,8 +511,9 @@ lambda layout page.html
 # Render to SVG/PDF/PNG
 lambda render page.html -o output.svg
 
-# Open in viewer
+# Open in viewer (or edit a document)
 lambda view page.html
+lambda edit notes.md
 
 # Fetch a URL
 lambda fetch https://example.com -o page.html

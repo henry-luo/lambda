@@ -1,0 +1,48 @@
+"prologue and epilogue:"
+["<?xml version=\"1.0\"?>\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\" [\n  <!ENTITY ns \"http://www.w3.org/2000/svg\">\n]>\n", "\n<!-- trailing -->\n"]
+"top-level:"
+['defs', 'g', 'rect', 'line', 'text', 'script']
+"written back unchanged in meaning:"
+[true]
+"view box without a viewBox:"
+{
+  x: 0,
+  y: 0,
+  w: 200,
+  h: 100
+}
+"move by coordinates or translate:"
+["id=shape clip-path=url(#clip) onclick=alert(1) transform=translate(5,5)", "id=plain x=15 y=15 width=20 height=10 style=fill:red;opacity:0.5", "id=ln x1=5 y1=5 x2=15 y2=25", "id=t x=10 y=95"]
+"a second move merges the translate:"
+["id=shape clip-path=url(#clip) onclick=alert(1) transform=translate(6.5,4)"]
+"resizable:"
+[false, true, true, false]
+"a line resized by its box:"
+["id=ln x1=0 y1=0 x2=20 y2=20"]
+"a handle past the opposite edge flips the box:"
+{
+  x: 10,
+  y: 10,
+  w: 5,
+  h: 5
+}
+"duplicate:"
+[[2], "id=shape-2 clip-path=url(#clip) onclick=alert(1) transform=translate(10,10)", "id=inner-2 x=1 y=2 width=3 height=4"]
+"paint in style or attribute:"
+["id=plain x=10 y=10 width=20 height=10 style=fill:blue;opacity:0.5 stroke=black", "id=ln x1=0 y1=0 x2=10 y2=20 fill=blue stroke=black"]
+"paint values:"
+["red", ""]
+"to front:"
+[5, ['defs', 'rect', 'line', 'text', 'script', 'g']]
+"to back keeps defs first:"
+[1, ['defs', 'text', 'g', 'rect', 'line', 'script']]
+"already at the back:"
+[true]
+"text editable:"
+[false, true]
+"a click places a default shape:"
+["id=ellipse-1 cx=60 cy=40 rx=50 ry=30 fill=#dbe9f6 stroke=#1f2328 stroke-width=2"]
+"projection:"
+[true, false, false, true, true]
+"saved text never holds the editor's marks:"
+[false]

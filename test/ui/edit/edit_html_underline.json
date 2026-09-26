@@ -1,0 +1,17 @@
+{
+  "name": "toolbar Underline applies to the selection and is written as <u>",
+  "command": "edit",
+  "html": "test/ui/edit/sample.html",
+  "working_copy": "temp/edit-ui/edit_html_underline.html",
+  "viewport": {"width": 1000, "height": 900},
+  "events": [
+    {"type": "mouse_drag", "target": {"text": "Second paragraph"}, "to_target": {"text": "with an"}, "button": 0},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "click", "target": {"selector": ".edit-btn-underline"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface p u"}, "min_count": 2},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-underline"}, "class": "active"},
+    {"type": "click", "target": {"selector": ".edit-btn-save"}},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_html_underline.html", "contains": "<p><u>"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

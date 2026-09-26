@@ -1,0 +1,29 @@
+{
+  "name": "the Text tool places a text object from a dialog; a double click retypes a one-run text and leaves spanned text alone",
+  "command": "edit",
+  "html": "test/ui/edit/sample.svg",
+  "working_copy": "temp/edit-ui/edit_svg_text.svg",
+  "viewport": {"width": 1000, "height": 700},
+  "events": [
+    {"type": "click", "target": {"selector": ".edit-btn-tool_text"}},
+    {"type": "click", "target": {"selector": ".edit-canvas", "offset_x": 300, "offset_y": 30}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-words"}, "count": 1},
+    {"type": "click", "target": {"selector": "#edit-dialog-text"}},
+    {"type": "type", "text": "Note"},
+    {"type": "click", "target": {"selector": ".edit-dialog-text_ok"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": "#text-1"}, "count": 1},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-tool_select"}, "class": "active"},
+    {"type": "dblclick", "target": {"selector": "#text-1"}},
+    {"type": "assert_value", "target": {"selector": "#edit-dialog-text"}, "equals": "Note"},
+    {"type": "click", "target": {"selector": "#edit-dialog-text"}},
+    {"type": "type", "text": "Memo", "clear": true},
+    {"type": "click", "target": {"selector": ".edit-dialog-text_ok"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "dblclick", "target": {"selector": "#label"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_text.svg", "contains": "<text id=\"text-1\" x=\"300\" y=\"30\" font-size=\"20\" fill=\"#1f2328\">Memo</text>"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_svg_text.svg", "contains": "Hello <tspan font-weight=\"bold\">SVG</tspan>"}
+  ]
+}

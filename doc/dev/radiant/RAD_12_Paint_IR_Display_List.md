@@ -47,6 +47,8 @@ The recording pass runs on the main thread and walks the view tree, which is inh
 
 Self-containment is enforced at record time. `display_list_storage.cpp` deep-copies every variable-length payload into the DisplayList's own `ScratchArena`: `dl_copy_stops`/`dl_copy_dashes` (`display_list_storage.cpp:34`/`42`) for gradient stops and dashes, `dl_store_clip_shapes` (`display_list_storage.cpp:50`) for clip-shape polygons, and path cloning for fills/strokes. After recording, the list references nothing that a later mutation or a worker thread could invalidate — a prerequisite for both off-thread replay and copyable retained fragments ([§6](#6-retained-incremental-replay)).
 
+Replay must also do no work that needs the recording thread. An SVG picture (an SVG `<img>`, a CSS background, or an SVG `<image>`) is therefore painted into the recording when it is drawn — `rc_draw_picture` and `render_svg_image` call `render_svg_record_picture`, which runs the inline-SVG painter into the current list, text as glyph items — rather than stored as a `DL_DRAW_PICTURE` to paint at replay. The painter resolves fonts, loads glyphs and fetches resources, and tile workers replaying such a picture concurrently corrupted the font cache. `dl_draw_picture` refuses an SVG-DOM picture (logged and dropped); only ThorVG paints (raster images, fallback text) remain picture items, duplicated per tile under a lock.
+
 ---
 
 ## 3. Recording: view tree → PaintList → DisplayList
@@ -103,7 +105,7 @@ The retained cache lets clean subtrees survive a re-record entirely. `RetainedDi
 
 Each worker runs `dl_replay_tile` (`render.hpp`, body `tile_pool.cpp`), which replays only the items whose `bounds[4]` intersect the tile and translates page-absolute coordinates into tile-local ones. The translation is pushed down: clip shapes are offset per-tile by `tile_offset_clip_shape` (`tile_pool.cpp:32`), and glyphs are re-emitted tile-locally by `replay_tile_glyph` (`tile_pool.cpp:385`), so the shared DisplayList payloads themselves stay untranslated and reusable across every tile.
 
-The glyph gate is the practical catch: because `dl_contains_glyphs` forces the serial path, and almost every real page has text, the parallel path rarely engages in practice even though per-tile glyph rendering exists ([§9](#9-known-issues--future-improvements)).
+The glyph gate is the practical catch: because `dl_contains_glyphs` forces the serial path, and almost every real page has text, the parallel path rarely engages in practice even though per-tile glyph rendering exists ([§9](#9-known-issues--future-improvements)). The gate counts ThorVG text pictures as text too (`rdt_picture_is_text`): a ThorVG text duplicate re-shapes at render time through its font loader's shared, unlocked glyph cache.
 
 ---
 

@@ -498,8 +498,10 @@ TEST_F(MathRoundtripTest, PureMathRoundtrip) {
 }
 
 TEST_F(MathRoundtripTest, MinimalMarkdownTest) {
+    // the Markdown writer separates blocks with a blank line (CommonMark's
+    // canonical spelling), so the source is written that way too
     const char* test_cases[] = {
-        "# Simple Test\nThis is a test.\n"
+        "# Simple Test\n\nThis is a test.\n"
     };
 
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
@@ -537,8 +539,9 @@ TEST_F(MathRoundtripTest, SpacingTest) {
 }
 
 TEST_F(MathRoundtripTest, SimpleMarkdownRoundtrip) {
+    // blocks are blank-line separated, as the Markdown writer spells them
     const char* test_cases[] = {
-        "# Heading\nSome text with $x = 1$ math.\n"
+        "# Heading\n\nSome text with $x = 1$ math.\n"
     };
 
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);

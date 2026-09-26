@@ -151,6 +151,8 @@ enum SimEventType {
     SIM_EVENT_ASSERT_PIXEL,      // verify a rendered pixel's color channel ranges
     SIM_EVENT_ASSERT_STATE_DUMP, // compare in-memory Mark state dump against fixture
     SIM_EVENT_ASSERT_RECONCILE_MODE, // verify last DOM-mutation reconcile mode/reason
+    SIM_EVENT_ASSERT_FILE,       // verify a local file's existence / content (edit-mode saves)
+    SIM_EVENT_ASSERT_WINDOW_CLOSED, // verify the edit application's close decision
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
@@ -165,6 +167,8 @@ enum SimEventType {
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
     SIM_EVENT_RENDER_PENDING,  // render only if current document already has pending visual work
     SIM_EVENT_DUMP_CARET,      // dump caret state to file
+    SIM_EVENT_WINDOW_CLOSE,    // platform close request (close button / application quit)
+    SIM_EVENT_WRITE_FILE,      // write a ./temp/ file, e.g. an external change to an edited file
     // Webview commands
     SIM_EVENT_WEBVIEW_EVAL_JS,      // execute JS in a webview element
     SIM_EVENT_WEBVIEW_WAIT_LOAD,    // wait for webview navigation to complete
@@ -380,6 +384,11 @@ struct SimEvent {
     // State schema conformance fuzz fields
     int fuzz_steps;
     uint32_t fuzz_seed;
+    // assert_file / assert_window_closed fields
+    bool has_expected_exists;
+    bool expected_exists;
+    bool expected_closed;
+    int expected_close_requests; // -1 = not checked
 };
 
 // Event simulation context

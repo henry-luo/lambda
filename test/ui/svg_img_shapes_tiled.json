@@ -1,0 +1,25 @@
+{
+  "name": "Text-free SVG images replay as recorded vector items across tiles",
+  "html": "test/ui/svg_img_shapes_tiled.html",
+  "viewport": {"width": 600, "height": 520},
+  "events": [
+    {"type": "log", "message": "green circle, half-opaque blue square, apricot background"},
+    {"type": "assert_pixel", "x": 40, "y": 40, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 90, "y": 40, "min_r": 112, "max_r": 142, "min_g": 97, "max_g": 127, "min_b": 192, "max_b": 222},
+    {"type": "assert_pixel", "x": 120, "y": 65, "min_r": 245, "min_g": 214, "max_g": 234, "min_b": 150, "max_b": 170},
+
+    {"type": "log", "message": "images straddling the 256px tile grid"},
+    {"type": "assert_pixel", "x": 230, "y": 130, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 280, "y": 130, "min_r": 112, "max_r": 142, "min_g": 97, "max_g": 127, "min_b": 192, "max_b": 222},
+    {"type": "assert_pixel", "x": 470, "y": 256, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 470, "y": 250, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 520, "y": 262, "min_r": 112, "max_r": 142, "min_g": 97, "max_g": 127, "min_b": 192, "max_b": 222},
+    {"type": "assert_pixel", "x": 260, "y": 470, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 250, "y": 470, "max_r": 20, "min_g": 155, "max_g": 185, "max_b": 20},
+    {"type": "assert_pixel", "x": 310, "y": 470, "min_r": 112, "max_r": 142, "min_g": 97, "max_g": 127, "min_b": 192, "max_b": 222},
+
+    {"type": "log", "message": "nothing outside the images"},
+    {"type": "assert_pixel", "x": 70, "y": 74, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 400, "y": 200, "min_r": 245, "min_g": 245, "min_b": 245}
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "toolbar Bold applies to the selection and is written as Markdown strong emphasis",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_toolbar_marks.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "mouse_drag", "target": {"text": "short paragraph"}, "to_target": {"text": "for testing"}, "button": 0},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "click", "target": {"selector": ".edit-btn-bold"}},
+    {"type": "assert_count", "target": {"selector": "#edit-surface p strong"}, "min_count": 2},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-bold"}, "class": "active"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "click", "target": {"selector": ".edit-btn-save"}},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_toolbar_marks.md", "contains": "This is a s**"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_toolbar_marks.md", "contains": "** for testing the editor."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""}
+  ]
+}

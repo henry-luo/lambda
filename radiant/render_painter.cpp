@@ -94,6 +94,16 @@ void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
 
 void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform) {
+    if (rdcon && rdt_picture_get_svg_root(picture)) {
+        // An SVG picture is painted into the recording here, like inline SVG:
+        // its painter resolves fonts and loads resources, which replay on tile
+        // workers must never do (RAD_12 §3).
+        render_svg_record_picture(rdcon->paint_list, rdcon->dl, &rdcon->scratch,
+                                  rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr,
+                                  rdcon, picture, opacity, transform);
+        rdt_picture_free(picture);
+        return;
+    }
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_draw_picture(&target, "rc_draw_picture", picture, opacity, transform);
 }
@@ -215,16 +225,21 @@ void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
         m = rdt_matrix_multiply(current_transform, &m);
     }
 
+    Bound saved_block_clip = rdcon->block.clip;
     if (clip) {
+        Rect clip_rect = {clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top};
         RdtPath* clip_path = rdt_path_new();
-        rdt_path_add_rect(clip_path, clip->left, clip->top,
-                          clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+        rdt_path_add_rect(clip_path, clip_rect.x, clip_rect.y, clip_rect.width, clip_rect.height, 0, 0);
         rc_push_clip(rdcon, clip_path, nullptr);
         rdt_path_free(clip_path);
+        // An SVG picture's text records glyph items, which the block clip
+        // bounds rather than the vector clip stack.
+        rdcon->block.clip = view_geometry_intersect_bound_rect(rdcon->block.clip, clip_rect);
     }
 
     rc_draw_picture(rdcon, picture, opacity, &m);
 
+    rdcon->block.clip = saved_block_clip;
     if (clip) rc_pop_clip(rdcon);
 }
 

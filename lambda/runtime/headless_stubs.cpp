@@ -128,6 +128,19 @@ int view_lambda_document_transform_with_events(const char* document_file,
     return 1;
 }
 
+int edit_doc_in_window_with_events(const char* document_file,
+        const char* event_file, bool headless, const char** font_dirs,
+        int font_dir_count, bool enable_event_log, bool enable_state_dump) {
+    (void)document_file; (void)event_file; (void)headless; (void)font_dirs;
+    (void)font_dir_count; (void)enable_event_log; (void)enable_state_dump;
+    fprintf(stderr, "Error: edit command not available in headless CLI build\n");
+    return 1;
+}
+
+const char* lambda_document_load_diagnostic(void) {
+    return nullptr;
+}
+
 extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
     (void)pdf_item;
     return svg_item;

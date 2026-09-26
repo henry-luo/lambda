@@ -1,0 +1,25 @@
+{
+  "name": "typing dirties the Markdown session and Cmd+S writes the file back",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_type_save.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "XYZ"},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "XYZ"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_type_save.md", "not_contains": "XYZ"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Saved edit_md_type_save.md"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_type_save.md", "contains": "XYZ"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_type_save.md", "contains": "---\ntitle: Edit mode sample\n---\n"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_type_save.md", "contains": "**bold text** and *italic text*"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_type_save.md", "contains": "[link](https://example.com \"Example\")"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_type_save.md", "contains": "```js\nlet x = 1;\n```"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "assert_class", "target": {"selector": ".edit-btn-save"}, "class": "disabled"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": true}
+  ]
+}

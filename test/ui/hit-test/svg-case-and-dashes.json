@@ -1,0 +1,13 @@
+{
+  "name": "SVG hit-test: camel-case SVG attributes apply (viewBox scale) and inexact dash lengths terminate",
+  "html": "test/html/hit-test/svg-case-and-dashes.html",
+  "default_timeout": 0,
+  "viewport": {"width": 480, "height": 280},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#state"}, "equals": "ok"},
+    {"type": "assert_hit_test", "x": 20, "y": 20, "expected_selector": "#dashed"},
+    {"type": "assert_hit_test", "x": 140, "y": 80, "expected_selector": "#surface"},
+    {"type": "assert_hit_test", "x": 340, "y": 60, "expected_selector": "#solid"},
+    {"type": "assert_hit_test", "x": 200, "y": 150, "expected_selector": "#surface"}
+  ]
+}

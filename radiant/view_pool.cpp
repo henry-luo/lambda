@@ -3,6 +3,7 @@
 #include "event.hpp"
 #include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/escape.h"
@@ -1441,9 +1442,22 @@ void view_get_visual_bounds(View* view, float* out_x, float* out_y,
 
     float x = 0.0f;
     float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    // An element drawn by an <svg> has no CSS box of its own (its view keeps
+    // the zero geometry of its parent's origin): report the SVG geometry it
+    // is painted with, as getBoundingClientRect() and hit testing see it.
+    if (view->is_element() &&
+            dom_svg_element_client_bounds(view, &x, &y, &width, &height)) {
+        if (out_x) *out_x = x;
+        if (out_y) *out_y = y;
+        if (out_width) *out_width = width;
+        if (out_height) *out_height = height;
+        return;
+    }
     calculate_absolute_position(view, nullptr, &x, &y);
-    float width = view->width;
-    float height = view->height;
+    width = view->width;
+    height = view->height;
     if (view_chain_has_3d_transform(view)) {
         apply_3d_transform_to_bounds(view, &x, &y, &width, &height);
     } else {

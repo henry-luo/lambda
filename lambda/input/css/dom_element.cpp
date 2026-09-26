@@ -931,6 +931,21 @@ static void dom_element_attribute_did_remove(DomElement* element,
     element->set_needs_style_recompute(true);
 }
 
+// The stored key an attribute query names, lowercasing into `lower`. HTML
+// stores attribute names lowercased, so a query matches case-insensitively;
+// SVG and other foreign content keep their case (`viewBox`, `gradientUnits`,
+// as the parser and Lambda templates spell them), and DOM §4.9 lowercases a
+// queried name only for HTML elements, so a name stored exactly as asked wins.
+static const char* dom_element_attr_key(DomElement* element, const char* name,
+                                        char* lower, size_t lower_size) {
+    lowercase_attr_name(name, lower, lower_size);
+    if (strcmp(lower, name) == 0) return lower;
+    bool stored_exact = element->is_synthetic()
+        ? dom_element_find_synthetic_attribute(element, name) >= 0
+        : ElementReader(dom_element_to_element(element)).has_attr(name);
+    return stored_exact ? name : lower;
+}
+
 bool DomElement::set_attribute(const char* name, const char* value) {
     DomElement* element = this;
     if (!name || !value) {
@@ -938,9 +953,10 @@ bool DomElement::set_attribute(const char* name, const char* value) {
         return false;
     }
 
-    // HTML5: attribute names are case-insensitive, store lowercased
+    // HTML5: attribute names are case-insensitive, stored lowercased; an
+    // attribute already stored in its own case is updated in place
     char lower_name[128];
-    lowercase_attr_name(name, lower_name, sizeof(lower_name));
+    const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
     if (!element->is_synthetic() && element->doc) {
         Element* backing = dom_element_to_element(element);
@@ -952,7 +968,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
         // Update attribute via MarkEditor
         Item result = editor.elmt_update_attr(
             {.element = backing},
-            lower_name,
+            key,
             value_item
         );
 
@@ -977,7 +993,7 @@ bool DomElement::set_attribute(const char* name, const char* value) {
     }
 
     if (element->is_synthetic() &&
-        dom_element_set_synthetic_attribute(element, lower_name, value)) {
+        dom_element_set_synthetic_attribute(element, key, value)) {
         dom_element_attribute_did_set(element, lower_name, value);
         return true;
     }
@@ -998,31 +1014,23 @@ const char* DomElement::get_attribute(const char* name) {
         return nullptr;
     }
 
-    // HTML5 stores attribute names lowercased. CSS attr() may pass mixed-case.
-    // Lowercase the lookup key for case-insensitive matching per CSS spec.
+    // HTML5 stores attribute names lowercased and CSS attr() may pass
+    // mixed case, so the lookup is case-insensitive unless the name is
+    // stored exactly as asked (foreign content keeps its case).
     char lower_name[128];
-    size_t i = 0;
-    for (; name[i] && i < sizeof(lower_name) - 1; i++) {
-        lower_name[i] = (name[i] >= 'A' && name[i] <= 'Z') ? (char)(name[i] + 0x20) : name[i];
-    }
-    lower_name[i] = '\0';
+    const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
     // Use ElementReader for read-only access
     if (!element->is_synthetic()) {
         Element* backing = dom_element_to_element(element);
-        // Try shape-typed fast path first (covers fields with compile-time LMD_TYPE_STRING)
+        // get_attr_string answers for statically typed and run-time string
+        // fields alike (state-bound template attributes are the latter).
         ElementReader reader(backing);
-        const char* result = reader.get_attr_string(lower_name);
+        const char* result = reader.get_attr_string(key);
         if (result) return result;
-
-        // Fallback: check runtime Item type (handles fields where compile-time type
-        // differs from runtime type, e.g. state-bound template attributes)
-        ConstItem attr_value = backing->get_attr(lower_name);
-        String* string_value = attr_value.string();
-        if (string_value) return string_value->chars;
     }
 
-    int synthetic_index = dom_element_find_synthetic_attribute(element, lower_name);
+    int synthetic_index = dom_element_find_synthetic_attribute(element, key);
     if (synthetic_index >= 0) {
         return element->ext->synthetic_attributes[synthetic_index].value;
     }
@@ -1041,9 +1049,9 @@ bool DomElement::remove_attribute(const char* name) {
         return false;
     }
 
-    // HTML5: attribute names are case-insensitive
+    // HTML5: attribute names are case-insensitive (foreign content keeps case)
     char lower_name[128];
-    lowercase_attr_name(name, lower_name, sizeof(lower_name));
+    const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
     if (!element->is_synthetic() && element->doc) {
         Element* backing = dom_element_to_element(element);
@@ -1052,7 +1060,7 @@ bool DomElement::remove_attribute(const char* name) {
         // Delete attribute via MarkEditor
         Item result = editor.elmt_delete_attr(
             {.element = backing},
-            lower_name
+            key
         );
 
         if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
@@ -1067,7 +1075,7 @@ bool DomElement::remove_attribute(const char* name) {
     }
 
     if (element->is_synthetic() &&
-        dom_element_remove_synthetic_attribute(element, lower_name)) {
+        dom_element_remove_synthetic_attribute(element, key)) {
         dom_element_attribute_did_remove(element, lower_name);
         return true;
     }
@@ -1086,15 +1094,15 @@ bool DomElement::has_attribute(const char* name) {
         return false;
     }
 
-    // HTML5: attribute names are case-insensitive
+    // HTML5: attribute names are case-insensitive (foreign content keeps case)
     char lower_name[128];
-    lowercase_attr_name(name, lower_name, sizeof(lower_name));
+    const char* key = dom_element_attr_key(element, name, lower_name, sizeof(lower_name));
 
     if (!element->is_synthetic()) {
         ElementReader reader(dom_element_to_element(element));
-        return reader.has_attr(lower_name);
+        return reader.has_attr(key);
     }
-    return dom_element_find_synthetic_attribute(element, lower_name) >= 0;
+    return dom_element_find_synthetic_attribute(element, key) >= 0;
 }
 
 bool DomElement::has_attribute(NameId name_id) {

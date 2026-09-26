@@ -1,0 +1,18 @@
+{
+  "name": "choosing Save in the close dialog writes the file, then closes",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_close_save.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "KEPT"},
+    {"type": "window_close"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-close"}, "count": 1},
+    {"type": "assert_window_closed", "closed": false},
+    {"type": "click", "target": {"selector": ".edit-dialog-save"}},
+    {"type": "assert_window_closed", "closed": true, "requests": 1},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_close_save.md", "contains": "KEPT"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_close_save.md", "contains": "title: Edit mode sample"}
+  ]
+}

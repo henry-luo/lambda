@@ -4,6 +4,7 @@
 #include "source_tracker.hpp"
 #include "../../lib/html_entities.h"
 #include "../../lib/str.h"
+#include "../../lib/arraylist.h"
 #include "input-utils.h"
 
 using namespace lambda;
@@ -409,6 +410,9 @@ static Item parse_doctype(InputContext& ctx, const char **xml, int depth) {
         // Parse internal subset content
         while (**xml && **xml != ']') {
             skip_whitespace(xml);
+            // the subset may end after white space; stepping over its `]`
+            // made the rest of the document part of the DOCTYPE
+            if (!**xml || **xml == ']') break;
             if (**xml == '<') {
                 (*xml)++; // skip <
                 if (**xml == '!') {
@@ -470,6 +474,52 @@ static Item parse_doctype(InputContext& ctx, const char **xml, int depth) {
         }
         return parse_element(ctx, xml, depth); // parse next element
     }
+}
+
+static inline bool xml_is_space_char(char ch) {
+    return ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t';
+}
+
+static bool xml_text_is_space(const char* chars, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (!xml_is_space_char(chars[i])) return false;
+    }
+    return true;
+}
+
+// Character data between markup, with entity and character references decoded.
+static String* xml_decode_text(InputContext& ctx, const char* start, const char* end) {
+    if (end <= start) return nullptr;
+    StringBuf* sb = ctx.sb;
+    stringbuf_reset(sb);
+    while (start < end) {
+        if (*start == '&') {
+            append_xml_reference(sb, &start, end, false);
+            continue;
+        }
+        // one append per run between entity references
+        const char* amp = (const char*)memchr(start, '&', (size_t)(end - start));
+        const char* run_end = amp ? amp : end;
+        stringbuf_append_str_n(sb, start, (size_t)(run_end - start));
+        start = run_end;
+    }
+    return ctx.builder.createString(sb->str->chars, sb->length);
+}
+
+static String* xml_trim_text(MarkBuilder& builder, String* text) {
+    size_t start = 0, end = text->len;
+    while (start < end && xml_is_space_char(text->chars[start])) start++;
+    while (end > start && xml_is_space_char(text->chars[end - 1])) end--;
+    if (start == 0 && end == text->len) return text;
+    return builder.createString(text->chars + start, end - start);
+}
+
+// A comment ("!--"), DTD declaration, or processing instruction ("?target").
+static bool xml_is_markup_declaration(Item child) {
+    if (get_type_id(child) != LMD_TYPE_ELEMENT || !child.element) return false;
+    TypeElmt* type = (TypeElmt*)child.element->type;
+    return type && type->name.length > 0 &&
+        (type->name.str[0] == '!' || type->name.str[0] == '?');
 }
 
 static Item parse_element(InputContext& ctx, const char **xml, int depth) {
@@ -609,8 +659,18 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
     (*xml)++; // skip >
 
     if (!self_closing) {
-        // Parse content and add to Element's List part
-        skip_whitespace(xml);
+        // Children are collected before they are added, because whether text
+        // is significant depends on its siblings. In mixed content (text
+        // beside child elements) every character is kept as written: the space
+        // in `Hello <b>world</b>` separates words. Only white space between the
+        // elements of element-only content and the edges of a text-only
+        // element are insignificant, as data-oriented XML expects.
+        ArrayList* children = arraylist_new(8);
+        // parallel to `children`: 1 for character data (text or CDATA) that
+        // may be trimmed, 0 for CDATA and elements, which are kept as they are
+        ArrayList* trimmable = arraylist_new(8);
+        bool has_element_child = false;
+        bool has_text = false;
 
         while (**xml && !xml_closing_tag_matches(*xml, tag_name->chars, tag_name->len)) {
             if (**xml == '<') {
@@ -618,59 +678,43 @@ static Item parse_element(InputContext& ctx, const char **xml, int depth) {
                     ctx.addWarning(ctx.tracker.location(), "Mismatched XML closing tag while parsing <%s>", tag_name->chars);
                     break;
                 }
-                // Child element (could be regular element, comment, or PI)
+                // Child element (could be regular element, comment, PI, or CDATA)
                 Item child = parse_element(ctx, xml, depth + 1);
-                if (child.item != ITEM_ERROR) {
-                    element.child(child);
+                if (child.item == ITEM_ERROR) continue;
+                if (get_type_id(child) == LMD_TYPE_STRING) {
+                    // CDATA is character data, never trimmed
+                    has_text = true;
+                } else if (!xml_is_markup_declaration(child)) {
+                    // comments and processing instructions do not make content mixed
+                    has_element_child = true;
                 }
+                arraylist_append(children, (ArrayListValue)child.item);
+                arraylist_append(trimmable, (ArrayListValue)0);
             } else {
-                // Text content - trim leading/trailing whitespace for better handling
                 const char* text_start = *xml;
                 const char* next_tag = strchr(*xml, '<');
                 *xml = next_tag ? next_tag : *xml + strlen(*xml);
-
-                if (*xml > text_start) {
-                    // Create text content
-                    StringBuf* sb = ctx.sb;
-                    stringbuf_reset(sb);
-
-                    // Trim leading whitespace
-                    while (text_start < *xml && (*text_start == ' ' || *text_start == '\n' ||
-                           *text_start == '\r' || *text_start == '\t')) {
-                        text_start++;
-                    }
-
-                    const char* text_end = *xml;
-                    // Trim trailing whitespace
-                    while (text_end > text_start && (*(text_end-1) == ' ' || *(text_end-1) == '\n' ||
-                           *(text_end-1) == '\r' || *(text_end-1) == '\t')) {
-                        text_end--;
-                    }
-
-                    // Only add non-empty text content
-                    if (text_end > text_start) {
-                        while (text_start < text_end) {
-                            if (*text_start == '&') {
-                                append_xml_reference(sb, &text_start, text_end, false);
-                                continue;
-                            }
-                            // one append per run between entity references
-                            const char* amp = (const char*)memchr(text_start, '&',
-                                (size_t)(text_end - text_start));
-                            const char* run_end = amp ? amp : text_end;
-                            stringbuf_append_str_n(sb, text_start, (size_t)(run_end - text_start));
-                            text_start = run_end;
-                        }
-
-                        String* processed_text = builder.createString(sb->str->chars, sb->length);
-                        if (processed_text && processed_text->len > 0) {
-                            element.child(Item{.item = s2it(processed_text)});
-                        }
-                    }
+                String* text = xml_decode_text(ctx, text_start, *xml);
+                if (text && text->len > 0) {
+                    if (!xml_text_is_space(text->chars, text->len)) has_text = true;
+                    arraylist_append(children, (ArrayListValue)s2it(text));
+                    arraylist_append(trimmable, (ArrayListValue)1);
                 }
             }
-            skip_whitespace(xml);
         }
+
+        bool mixed = has_element_child && has_text;
+        for (int i = 0; i < arraylist_size(children); i++) {
+            Item child = {.item = (uint64_t)arraylist_get(children, i)};
+            if (!mixed && arraylist_get(trimmable, i)) {
+                String* text = child.get_string();
+                if (xml_text_is_space(text->chars, text->len)) continue;
+                child = Item{.item = s2it(xml_trim_text(builder, text))};
+            }
+            element.child(child);
+        }
+        arraylist_free(trimmable);
+        arraylist_free(children);
 
         // Skip matching closing tag
         xml_skip_closing_tag(xml);

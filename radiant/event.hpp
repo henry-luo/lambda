@@ -108,6 +108,9 @@ typedef enum  {
     RDT_EVENT_FOCUS_OUT,
     RDT_EVENT_CLICK,
     RDT_EVENT_DBL_CLICK,
+    // A platform request to close the window, delivered to an edit-app
+    // document whose close guard is armed (payload-free).
+    RDT_EVENT_CLOSE_REQUEST,
 } EventType;
 
 typedef struct Event {

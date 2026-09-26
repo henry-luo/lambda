@@ -1,0 +1,29 @@
+{
+  "name": "closing a dirty session asks Save / Don't Save / Cancel; Cancel keeps it, Don't Save discards",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_md_close_dirty.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "type", "text": "DIRTY"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "window_close"},
+    {"type": "assert_window_closed", "closed": false, "requests": 1},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-close"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-dialog-close"}, "contains": "before closing"},
+    {"type": "click", "target": {"selector": ".edit-dialog-cancel"}},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_window_closed", "closed": false},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "DIRTY"},
+    {"type": "window_close"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog-close"}, "count": 1},
+    {"type": "key_press", "key": "escape"},
+    {"type": "assert_count", "target": {"selector": ".edit-dialog"}, "count": 0},
+    {"type": "assert_window_closed", "closed": false},
+    {"type": "window_close"},
+    {"type": "click", "target": {"selector": ".edit-dialog-discard"}},
+    {"type": "assert_window_closed", "closed": true, "requests": 3},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_md_close_dirty.md", "not_contains": "DIRTY"}
+  ]
+}

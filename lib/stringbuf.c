@@ -56,6 +56,13 @@ void stringbuf_free(StringBuf *sb) {
     pool_free(sb->pool, sb);
 }
 
+void stringbuf_truncate(StringBuf *sb, size_t length) {
+    if (!sb || !sb->str || length >= sb->length) return;
+    sb->length = length;
+    sb->str->len = length;
+    sb->str->chars[length] = '\0';
+}
+
 void stringbuf_reset(StringBuf *sb) {
     if (!sb) return;
 

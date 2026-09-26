@@ -103,16 +103,20 @@ void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) 
     write_fn_name_ex(strbuf, fn_node, import, NULL);
 }
 
-void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import) {
+void write_var_name_for_script(StrBuf *strbuf, AstNode *node, const Script* import_script) {
     String* name = node && node->node_type == AST_NODE_VARIABLE_DECLARATOR
         ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
-    if (import) {
+    if (import_script) {
         strbuf_append_format(strbuf, "m%u.",
-            script_compilation_unit_id(import->script));
+            script_compilation_unit_id(import_script));
     }
     // user var name starts with '_'
     strbuf_append_char(strbuf, '_');
     strbuf_append_str_n(strbuf, name->chars, name->len);
+}
+
+void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import) {
+    write_var_name_for_script(strbuf, node, import ? import->script : NULL);
 }
 
 // A literal shape keeps a repeated key's entries in source order. The runtime

@@ -44,7 +44,7 @@ pub fn normalize_source_selection(doc, selection) {
   }
   else if (selection.kind == 'node' and node_at(doc, selection.path) != null) selection
   else if (selection.kind == 'multi-node' and
-           every([for (path in selection.paths) node_at(doc, path) != null])) selection
+           all([for (path in selection.paths) node_at(doc, path) != null])) selection
   else if (selection.kind == 'all') selection
   else null
 }
@@ -148,8 +148,8 @@ fn execute(editor, evt, descriptor, snapshot) {
           pos_equal(source_selection.anchor, source_selection.head)
       let drag_target_inside = combines_drag_move and source_selection != null and
           source_selection.kind == 'text' and drop_pos != null and
-          pos_compare(sel_lo(source_selection), drop_pos) < 1 and
-          pos_compare(drop_pos, sel_hi(source_selection)) < 1
+          pos_compare(pos_min(source_selection.anchor, source_selection.head), drop_pos) < 1 and
+          pos_compare(drop_pos, pos_max(source_selection.anchor, source_selection.head)) < 1
       let drag_source_node = if (combines_drag_move and source_selection != null)
                              node_at(editor.doc, source_selection.anchor.path) else null
       let drag_target_node = if (combines_drag_move and drop_pos != null)

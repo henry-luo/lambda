@@ -872,7 +872,8 @@ static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
                                        subscene->fill_none,
                                        stroke_color,
                                        subscene->stroke_none,
-                                       subscene->stroke_width);
+                                       subscene->stroke_width,
+                                       (Element*)subscene->id_scope);
     rdt_vector_flush_batch(&vec);
 
     float dst_x = subscene->content_clip.left;
@@ -1579,6 +1580,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
                               initial_paint.stroke_width);
+    subscene.id_scope = render_svg_reference_scope(dom_elem);
     paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
     pdf_lower_paint_list(ctx);
     (void)font;

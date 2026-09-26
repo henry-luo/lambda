@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Edit sample</title>
+  <link rel="stylesheet" href="site.css">
+  <style>
+    body { font-family: serif; }
+    .note { color: #333; }
+  </style>
+  <script>console.log("head script");</script>
+</head>
+<body class="page" data-theme="light">
+  <!-- a comment -->
+  <header class="top"><h1>Welcome &amp; hello</h1></header>
+  <main>
+    <p class="lead">This is a <strong>short</strong> paragraph with <em>emphasis</em>, <u>underline</u>,
+      a <a href="other.html" title="Other">link</a>, H<sub>2</sub>O, x<sup>2</sup> and <code>code</code>.</p>
+    <p>Second paragraph with an <img src="pic.png" alt="Picture"> image and a <kbd>Ctrl</kbd> key.</p>
+    <ul>
+      <li>One</li>
+      <li>Two <b>bold</b></li>
+    </ul>
+    <blockquote><p>Quoted.</p></blockquote>
+    <pre><code class="language-js">let a = 1;
+  indented();</code></pre>
+    <div class="note" onclick="alert(1)">A note <span class="hl">highlighted</span>.</div>
+    <form action="/go"><input type="text" name="q"><button>Go</button></form>
+    <table>
+      <thead><tr><th>A</th><th>B</th></tr></thead>
+      <tbody><tr><td>1</td><td>2</td></tr></tbody>
+    </table>
+    <hr>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

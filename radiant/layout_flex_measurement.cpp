@@ -1044,7 +1044,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                     child_min_width = child_max_width *
                                         child_width_percentage / 100.0f;
                                 }
-                            } else {
+                            } else if (layout_form_control_has_native_intrinsic_size(child_view)) {
                                 child_min_width = child_view->form->intrinsic_width;
                                 child_max_width = child_view->form->intrinsic_width;
                             }
@@ -1054,18 +1054,12 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 child_min_width = child_sizes.min_content;
                                 child_max_width = child_sizes.max_content;
                             }
-                        } else if (has_flex_item_prop(child_view)) {
-                            // Child has fi - use cached intrinsic or calculate
-                            if (!child_view->fi->has_intrinsic_width) {
-                                calculate_item_intrinsic_sizes(child_view, flex_layout);
-                            }
-                            if (child_view->fi->has_intrinsic_width) {
-                                child_min_width = child_view->fi->intrinsic_width.min_content;
-                                child_max_width = child_view->fi->intrinsic_width.max_content;
-                            }
                         } else if (lycon) {
-                            // Child doesn't have fi yet - use measure_element_intrinsic_widths
-                            // This handles the case where intrinsic sizing runs before fi is initialized
+                            // The child's own FlexItemProp intrinsic cache is not an
+                            // outer contribution: it is content-box, it belongs to the
+                            // child's container pass, and a reflow retains it from the
+                            // previous layout until that container re-collects the child.
+                            // Measuring here keeps the first layout and a reflow equal.
                             IntrinsicSizes child_sizes = flex_measure_child_intrinsic_widths(
                                 lycon, child_view, /*content_only=*/child_width_is_percentage);
                             child_min_width = child_sizes.min_content;
@@ -1084,7 +1078,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             child_height = flex_measure_row_child_height_at_estimated_share(
                                 lycon, c, item, child_view, flex_layout);
                         } else if (child_view->form_control()) {
-                            child_height = child_view->form->intrinsic_height;
+                            child_height = layout_form_control_has_native_intrinsic_size(child_view)
+                                ? child_view->form->intrinsic_height : 0.0f;
                             if (child_height <= 0.0f && lycon) {
                                 child_height = flex_measure_intrinsic_max_height(lycon, c, child_max_width);
                             }
@@ -1096,15 +1091,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             // content width so auto-min height sees wrapped text.
                             child_height = flex_measure_intrinsic_max_height(
                                 lycon, c, available_width);
-                        } else if (has_flex_item_prop(child_view)) {
-                            // Child has fi - use cached intrinsic or calculate recursively
-                            if (!child_view->fi->has_intrinsic_height) {
-                                calculate_item_intrinsic_sizes(child_view, flex_layout);
-                            }
-                            if (child_view->fi->has_intrinsic_height) {
-                                child_height = child_view->fi->intrinsic_height.max_content;
-                            }
                         }
+                        // A retained child FlexItemProp height is skipped for the
+                        // same reason as its width; the fallback below measures it.
                         // CRITICAL: If child height is still 0 without explicit height,
                         // try to measure content-based height from the DOM tree
                         if (child_height == 0.0f && !child_explicit.has_height) {

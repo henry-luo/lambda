@@ -1,9 +1,11 @@
 # Radiant Edit Mode — `lambda edit` and the `lambda.edit` Package
 
 **Date:** 2026-09-25  
-**Status:** Proposal — not ratified or implemented. The command, document
-families, script-package ownership, and top toolbar are user requirements;
-the detailed behavior below is proposed for review.  
+**Status:** Proposal, implemented for Phases 1–3 (2026-09-26) in
+[Radiant_Impl_Edit_Mode](../impl/Radiant_Impl_Edit_Mode.md), which records
+the decisions made and the open items; not yet ratified. The command,
+document families, script-package ownership, and top toolbar are user
+requirements; the detailed behavior below is proposed for review.  
 **Scope:** a document-authoring mode for Lambda/Radiant, initially Markdown
 and HTML rich text, followed by SVG drawing; an extensible template contract
 for later document types.

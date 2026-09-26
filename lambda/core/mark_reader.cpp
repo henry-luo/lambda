@@ -737,7 +737,12 @@ const char* ElementReader::get_attr_string(const char* key) const {
                 const String* str = *(const String**)data;
                 return str ? str->chars : nullptr;
             }
-            break;
+            // A slot filled at run time (an `any` field, e.g. an attribute
+            // computed by a template or a document adapter) still answers
+            // with its value when that value is a string.
+            ConstItem value = element_->get_attr(key);
+            String* string_value = value.string();
+            return string_value ? string_value->chars : nullptr;
         }
         field = lam::shape_next(map_type, field);
     }
