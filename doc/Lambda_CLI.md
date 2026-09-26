@@ -356,12 +356,23 @@ file's suffix.
 
 | Suffix | Editor |
 |--------|--------|
-| `.md`, `.markdown` | Rich text; front matter, raw HTML, and math are kept as written |
+| `.md`, `.markdown` | Rich text; front matter, raw HTML, math, and blocks the editor cannot edit (footnotes, for example) are kept as written |
 | `.html`, `.htm` | Rich text for the body; the head, attributes, scripts, and elements the editor does not edit are kept as written and never run |
 | `.svg` | Drawing: select, move, resize, rectangle/ellipse/line/text tools, fill and stroke, duplicate, delete, paint order, zoom |
 
-A file whose content the editor cannot write back without loss (for example
-Markdown footnotes) is not opened; the error names the construct, and
+**View-only parts:** a part the rich-text editor cannot edit shows as it
+renders, inside a dashed frame, and Save writes it back exactly as it was read.
+In Markdown this covers a top-level block holding something the editor has no
+model for (a footnote reference, say) or that its writer would respell, raw
+HTML blocks, and display math; lines no block claims, such as link reference
+definitions, show as their source. Inline raw HTML shows its rendering in the
+running text; a lone tag or a comment, which renders nothing on its own, shows
+as its source. Math shows its TeX source (`lambda view` renders it). The
+rendering is display only: scripts, styles, event handlers, frames, and
+navigation are removed, and form controls are disabled. Typing into a
+view-only part is refused; Delete or Backspace with the caret in it removes
+the whole part, and Undo restores it. A file the editor still cannot write
+back without loss is not opened; the error says what would change, and
 `lambda view` still shows it.
 
 **Saving:** Save writes the same format back through a temporary file that

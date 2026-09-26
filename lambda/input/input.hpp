@@ -108,6 +108,10 @@ void skip_tab_pace(const char** text);
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 Input* input_from_source_with_name_parent(const char* source, Url* url,
     String* type, String* flavor, NamePool* name_parent);
+// parse({sourcepos: true}): markup parsers tag each top-level block with the
+// source lines it spans (`sourcepos`, as in cmark)
+Input* input_from_source_with_positions(const char* source, Url* url,
+    String* type, String* flavor);
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 Input* input_from_directory_with_name_parent(const char* directory_path,
     const char* original_url, bool recursive, int max_depth, NamePool* name_parent);

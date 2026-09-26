@@ -5255,6 +5255,7 @@ Item fn_force(Item ref) {
 // Unlike input() which reads from files/URLs, parse() works on in-memory strings.
 // 2nd arg can be a format symbol ('json, 'yaml, etc.) or an options map like input().
 extern "C" Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
+extern "C" Input* input_from_source_with_positions(const char* source, Url* url, String* type, String* flavor);
 
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
@@ -5276,6 +5277,7 @@ Item fn_parse2(Item str_item, Item type) {
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
     String* flavor_str = NULL;
+    bool source_positions = false;
 
     TypeId type_id = get_type_id(type);
     if (type_id == LMD_TYPE_NULL) {
@@ -5315,6 +5317,19 @@ Item fn_parse2(Item str_item, Item type) {
                 return ItemError;
             }
         }
+
+        // extract 'sourcepos' from map: markup blocks record their source lines
+        Item input_sourcepos = _map_get((TypeMap*)options_map->type, options_map->data, "sourcepos", &is_found);
+        if (is_found && input_sourcepos.item && input_sourcepos._type_id != LMD_TYPE_NULL) {
+            TypeId sourcepos_type = get_type_id(input_sourcepos);
+            if (sourcepos_type != LMD_TYPE_BOOL) {
+                set_runtime_error(ERR_TYPE_MISMATCH,
+                    "parse: sourcepos option must be a bool, got type: %s",
+                    get_type_name(sourcepos_type));
+                return ItemError;
+            }
+            source_positions = it2b(input_sourcepos);
+        }
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -5333,7 +5348,9 @@ Item fn_parse2(Item str_item, Item type) {
 
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
-    Input* input = input_from_source(str->chars, dummy_url, type_str, flavor_str);
+    Input* input = source_positions
+        ? input_from_source_with_positions(str->chars, dummy_url, type_str, flavor_str)
+        : input_from_source(str->chars, dummy_url, type_str, flavor_str);
     if (!input) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",

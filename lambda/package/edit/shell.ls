@@ -9,6 +9,7 @@
 
 import dom
 import lambda.editor.mod_editor
+import lambda.editor.mod_source_pos
 import edit_result: lambda.dom.edit_result
 import sess: lambda.edit.session
 import tools: lambda.edit.toolbar
@@ -185,6 +186,45 @@ pn run_request(editor, input_type, payload) {
   run
 }
 
+// A view-only part is kept as written (proposal §2): an edit may remove it as
+// a unit, but never write into it or replace it. A click in a part puts the
+// action's caret inside it (or selects it), and a stray key must not
+// overwrite a block whose source the user cannot see.
+let unit_families = ["delete", "drag_delete", "cut", "copy", "history_undo", "history_redo",
+                     "selection", "setting"]
+
+// The view-only part a model path is or lies in (the outermost), or null.
+fn view_only_part(session, doc, path) {
+  let parts = if (len(path) == 0) []
+              else [for (i in 1 to len(path) where member(session.format.view_only_tags, node_tag_at(doc, take(path, i))))
+                      take(path, i)]
+  if (len(parts) == 0) null else parts[0]
+}
+
+// The paths a selection's ends lie at; a node selection's node.
+fn selection_ends(selection) {
+  if (selection == null) []
+  else if (selection.kind == 'node') [selection.path]
+  else if (selection.kind == 'text') [selection.anchor.path, selection.head.path]
+  else []
+}
+
+fn writes_view_only(session, doc, selection, input_type) =>
+  (any([for (p in selection_ends(selection)) view_only_part(session, doc, p) != null]) and
+   not member(unit_families, edit_action_family(input_type))) or false
+
+// A deletion from inside one view-only part removes the whole part: the
+// action is retargeted to the part as a node selection.
+fn deleted_part(session, doc, selection, input_type) {
+  let ends = selection_ends(selection)
+  let part = if (len(ends) == 0 or edit_action_family(input_type) != "delete") null
+             else view_only_part(session, doc, ends[0])
+  if (part != null and all([for (p in ends) view_only_part(session, doc, p) == part])) node_selection(part)
+  else null
+}
+
+let view_only_status = "This part is view-only and is saved as written; press Delete to remove it."
+
 fn primary_key(evt) => evt.metaKey == true or evt.ctrlKey == true
 
 fn key_is(evt, letter) => lower(string(evt.key)) == letter
@@ -304,7 +344,17 @@ on editaction(evt) {
     status = "Not available in " ++ session.format.name ++ " documents."
     return edit_result.decline(true, false, "unsupported", 0)
   }
-  let run = edit_handle_dom_action(editor, evt)
+  let target = edit_action_selection(editor, evt)
+  if (writes_view_only(session, editor.doc, target, evt.input_type)) {
+    status = view_only_status
+    return edit_result.decline(true, false, "view-only", 0)
+  }
+  // The caret decides (a deletion's target range runs past the part). The
+  // part's deletion runs as a model request on the part: the event's input
+  // fields are host-backed, so a copy of the event would lose them.
+  let part = deleted_part(session, editor.doc, evt.source_selection or target, evt.input_type)
+  let run = if (part == null) edit_handle_dom_action(editor, evt)
+            else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
   editor = run.editor
   if (run.result.failure != null) { status = "Could not apply " ++ evt.input_type ++ "." }
   sync_window(evt.target, session, editor.doc)
@@ -365,6 +415,7 @@ on edit_cmd(req) {
     let item = if (cmd == "undo" or cmd == "redo") tools.find_item([tools.file_group], cmd)
                else tools.find_item(format_groups(session), cmd)
     if (item == null) { status = "Unknown command " ++ cmd ++ "." }
+    else if (writes_view_only(session, editor.doc, editor.selection, item.input_type)) { status = view_only_status }
     else if (item.dialog != null) { dialog = {kind: item.dialog} }
     else {
       // quote toggles: lift when the selection is already quoted

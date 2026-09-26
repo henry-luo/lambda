@@ -27,8 +27,24 @@ pub fn member(xs, x) bool => contains(xs, x) or false
 // Order records by a string key; a malformed input sorts as empty.
 pub fn sorted_by_name(xs) any => sort(xs, (x) => string(x.name)) or []
 
+// Markup escaping for the adapters' text writers (valid in HTML and XML).
+pub fn escape_text(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+pub fn escape_attr(s) => replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), "\"", "&quot;")
+
+// A node the editor keeps but cannot edit carries its rendered, view-only
+// projection here (lambda.edit.view). It is derived from the node's source, so
+// it takes no part in comparison; like node_marks_attr, a space keeps it apart
+// from any parsed attribute name.
+pub let view_attr = 'edit view'
+
 // The text of a model node (text leaves, concatenated).
 pub fn node_plain_text(n) => doc_text(n)
+
+// The tag of the node at a model path, or null.
+pub fn node_tag_at(doc, path) {
+  let n = node_at(doc, path)
+  if (is_node(n)) n.tag else null
+}
 
 // A reference resolved against the document's folder: no scheme, not rooted,
 // not a same-document query or fragment (RFC 3986 §4.2). A colon before any
@@ -47,12 +63,20 @@ fn precedes(i, j) bool => j == null or i < j
 // What in one attribute would break if the document moved to another folder:
 // a relative link or image, or raw markup naming one (not rebased by structure).
 fn attr_reference(a) {
-  let value = string(a.value)
-  if (a.name == 'href' and is_relative_url(value)) "the link " ++ value
-  else if (a.name == 'src' and is_relative_url(value)) "the image " ++ value
-  else if (a.name == 'html' and (contains(lower(value), "href=") or contains(lower(value), "src=")))
-    "raw HTML with a link or image"
-  else null
+  if (a.name == view_attr) null
+  else {
+    let value = string(a.value)
+    let lowered = lower(value)
+    if (a.name == 'href' and is_relative_url(value)) "the link " ++ value
+    else if (a.name == 'src' and is_relative_url(value)) "the image " ++ value
+    else if (a.name == 'html' and (contains(lowered, "href=") or contains(lowered, "src=")))
+      "raw HTML with a link or image"
+    // Markdown kept as written (a view-only block) names targets by its syntax
+    else if (a.name == 'markdown' and (contains(value, "](") or contains(value, "]:") or
+                                       contains(lowered, "href=") or contains(lowered, "src=")))
+      "content kept as written with a link or image"
+    else null
+  }
 }
 
 // The first such reference in a model tree, in document order, or null.
@@ -167,8 +191,9 @@ fn merge_leaves_at(items, i, n, acc) {
   }
 }
 
-// A node's present attributes in name order; attribute order carries no meaning.
-pub fn sorted_attrs(n) => sorted_by_name([for (a in n.attrs where a.value != null) a])
+// A node's present attributes in name order; attribute order carries no
+// meaning, and a derived view is not content.
+pub fn sorted_attrs(n) => sorted_by_name([for (a in n.attrs where a.value != null and a.name != view_attr) a])
 
 // Commands can produce mark nodes (<strong> around leaves); in normal form a
 // mark node is its leaves with that mark applied.

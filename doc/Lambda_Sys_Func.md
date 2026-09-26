@@ -1066,6 +1066,19 @@ let expr = parse("x^2 + y", {type: 'math', flavor: 'latex'})^
 let csv = parse("name,age\nAlice,30\nBob,25", 'csv') ^ { [] }
 ```
 
+**Source positions** (`parse()` only): with `sourcepos: true` in the options
+map, each top-level block of a markup document (Markdown and the other
+lightweight markup formats) carries a `sourcepos` attribute naming the source
+lines it spans, as cmark writes it: `"startline:startcol-endline:endcol"`,
+1-based, trailing blank lines excluded. Nested blocks carry none, and lines no
+block claims (such as link reference definitions) are reported by no block.
+The option must be a bool.
+
+```lambda
+let doc = parse("# Title\n\nSome\ntext.\n", {type: 'markdown', sourcepos: true})^
+// <body <h1 sourcepos: "1:1-1:7", ...> <p sourcepos: "3:1-4:5", ...>>
+```
+
 > **Note**: `parse()` can raise errors. Propagate with `parse(...)^`, or handle
 > locally with `parse(...) ^ { … ~ … }` where `~` is the error.
 > Malformed input and unsupported formats return an error with a parser

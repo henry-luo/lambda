@@ -1361,7 +1361,7 @@ static const char* mime_to_parser_type(const char* mime_type) {
 
 static Input* input_from_source_n_with_name_parent(const char* source,
         size_t source_len, Url* abs_url, String* type, String* flavor,
-        NamePool* name_parent) {
+        NamePool* name_parent, bool source_positions = false) {
     log_debug("input_from_source_n: ENTRY type='%s', flavor='%s', len=%zu",
               type ? type->chars : "null",
               flavor ? flavor->chars : "null",
@@ -1419,6 +1419,7 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             log_error("input_from_source: Failed to create input for type '%s'", effective_type);
             return NULL;
         }
+        input->source_positions = source_positions;
         allocation_context.pool = input->pool;
         allocation_context.arena = input->arena;
         allocation_context.ui_mode = input->ui_mode;
@@ -1489,6 +1490,12 @@ extern "C" Input* input_from_source_with_name_parent(const char* source,
         Url* abs_url, String* type, String* flavor, NamePool* name_parent) {
     return input_from_source_n_with_name_parent(source,
         source ? strlen(source) : 0, abs_url, type, flavor, name_parent);
+}
+
+extern "C" Input* input_from_source_with_positions(const char* source,
+        Url* abs_url, String* type, String* flavor) {
+    return input_from_source_n_with_name_parent(source,
+        source ? strlen(source) : 0, abs_url, type, flavor, NULL, true);
 }
 
 // Read a local file and parse it via input_from_source_n. Detects binary
@@ -1816,6 +1823,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     input->root = (Item){.item = ITEM_NULL};
     input->doc_count = 0;
     input->ui_mode = false;
+    input->source_positions = false;
     input->parse_failed = false;
     input->parse_error_message = nullptr;
     input->xml_stylesheet_href = nullptr;
