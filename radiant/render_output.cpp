@@ -691,6 +691,8 @@ int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tr
         log_error("render_output_render_view_tree_to_target: missing output target");
         return 1;
     }
+    // a scroll since the last layout moved sticky boxes (CSS Position 3)
+    layout_resolve_scrolled_sticky(view_tree);
 
     switch (target->kind) {
         case RENDER_OUTPUT_SCREEN:

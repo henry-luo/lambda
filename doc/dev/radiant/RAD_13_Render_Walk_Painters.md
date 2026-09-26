@@ -51,11 +51,11 @@ The walker carries `struct RenderWalkState` (`render.hpp`): the accumulated abso
 
 Document-order-plus-z is the walker's responsibility, and it is deliberately three passes over the children (`render_walk.cpp`):
 
-1. `render_walk_children` walks in-flow children, **skipping** any child that is out-of-flow positioned (`absolute`/`fixed`) or positive-z positioned — those are deferred.
+1. `render_walk_children` walks in-flow children, **skipping** any child that is out-of-flow positioned (`absolute`/`fixed`) or positive-z positioned — those are deferred. Within this pass, in-flow positioned children (`relative`/`sticky`) with `z-index` auto or 0 (`radiant_stack_is_in_flow_positioned_step8`) paint in a second loop after their non-positioned siblings, in tree order — CSS 2.1 Appendix E step 8 — so a relative box pulled over a later sibling, or a sticky footer over earlier content, stays on top.
 2. `render_walk_positioned_children` asks `stacking_order.cpp` to collect the block's `first_abs_child` chain, stable-sort it by `z_index`, then paints in ascending paint order.
 3. `render_walk_positive_z_descendants` asks the same helper to collect positive-z positioned descendants (recursing through inline elements) and paints them last, again in stable ascending paint order.
 
-The shared helper uses growable `ArrayList` buffers and preserves source order for equal `z-index` entries. `event.cpp` consumes the same paint-order lists in reverse for hit-testing, so topmost targeting and render order do not carry separate sort rules.
+Stacking is resolved among siblings: a positioned box nested in a non-positioned block is lifted above that block's other children, not above the block's later siblings (full step 8 lifts it to the stacking context). Negative `z-index` boxes still paint in tree order in pass 1 (CSS paints them below in-flow content), and absolute/fixed children follow the in-flow step-8 boxes rather than interleaving with them by tree order. The shared helper uses growable `ArrayList` buffers and preserves source order for equal `z-index` entries. `event.cpp` consumes the same paint-order lists in reverse for hit-testing, and `target_children` mirrors pass 1's two loops, so topmost targeting and render order do not carry separate sort rules.
 
 ### 2.5 Per-node dispatch
 

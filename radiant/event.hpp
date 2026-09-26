@@ -2728,6 +2728,9 @@ typedef struct DocState {
     // Document-level states
     float scroll_x, scroll_y;      // document scroll position
     float zoom_level;              // document zoom level (1.0 = 100%)
+    // a scroll position moved since sticky boxes were last solved: a scroll
+    // only repaints, so paint and hit-testing re-solve them first
+    bool sticky_scroll_stale;
     
     // Visited links
     VisitedLinks* visited_links;

@@ -264,11 +264,15 @@ static void layout_collect_deferred_sticky_blocks(LayoutContext* lycon, View* vi
 }
 
 // apply CSS Position 3 sticky constraints to the nearest scroll container.
+// Solving is idempotent: it starts from the box's normal-flow position, so a
+// scroll can re-solve boxes that the last layout pass already shifted.
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
+    if (!block->position) return;
     if (lycon && lycon->defer_sticky_positioning) {
+        // layout just placed the box at its normal-flow position
+        block->position_mut()->has_sticky_offset = false;
         return;
     }
-    if (!block->position) return;
 
     ViewElement* scroll_ancestor = NULL;
     for (ViewElement* p = block->parent_view(); p; p = p->parent_view()) {
@@ -347,6 +351,19 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     if (scroller->has_pending_element_scroll_y()) {
         scroll_positions[LAYOUT_AXIS_Y] = scroller->pending_scroll_y();
     }
+    // the box sits at its normal-flow position plus the offset the last solve
+    // applied — unless layout has placed it again since, which a solver working
+    // from the shifted box could not undo (a stuck box would never unstick)
+    PositionProp* sticky = block->position_mut();
+    LayoutAxisPair<float> placed = layout_axis_pair(
+        LayoutAxisRefs(block, LAYOUT_AXIS_X).get_position(),
+        LayoutAxisRefs(block, LAYOUT_AXIS_Y).get_position());
+    LayoutAxisPair<float> applied = {};
+    if (sticky->has_sticky_offset &&
+            placed[LAYOUT_AXIS_X] == sticky->sticky_placed_x &&
+            placed[LAYOUT_AXIS_Y] == sticky->sticky_placed_y) {
+        applied = layout_axis_pair(sticky->sticky_offset_x, sticky->sticky_offset_y);
+    }
     LayoutAxisPair<float> offsets = {};
     for (LayoutAxis axis : layout_axes()) {
         LayoutAxisRefs geometry(block, axis);
@@ -359,8 +376,8 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
             *insets.insets.end.percent, scroll_end[axis]);
         // sticky constraints use the post-scroll position relative to the scrollport;
         // the visual-rect calculation applies this same scroll translation later.
-        float element_start = geometry.get_position() + offset_to_scroller[axis] -
-            scroll_positions[axis];
+        float element_start = geometry.get_position() - applied[axis] +
+            offset_to_scroller[axis] - scroll_positions[axis];
         offsets[axis] = sticky_axis_offset(
             *insets.insets.start.has, start_inset,
             *insets.insets.end.has, end_inset,
@@ -405,31 +422,38 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
             LayoutAxisRefs geometry(block, axis);
             // CSS Position 3 clamps against the containing block's padding box;
             // the cell's own zero-based coordinate would reject valid table shifts.
-            float local_start = block_to_cb_offset[axis] + geometry.get_position();
+            float local_start = block_to_cb_offset[axis] + geometry.get_position() - applied[axis];
             offsets[axis] = sticky_clamp_axis_offset(
                 offsets[axis], local_start,
                 local_start + geometry.get_size(), containing_start[axis], containing_end[axis]);
         }
     }
 
-    if (offsets[LAYOUT_AXIS_X] != 0 || offsets[LAYOUT_AXIS_Y] != 0) {
-        LayoutAxisRefs x_geometry(block, LAYOUT_AXIS_X);
-        LayoutAxisRefs y_geometry(block, LAYOUT_AXIS_Y);
-        x_geometry.set_position(x_geometry.get_position() + offsets[LAYOUT_AXIS_X]);
-        y_geometry.set_position(y_geometry.get_position() + offsets[LAYOUT_AXIS_Y]);
+    // move the box from where the last solve left it to where this one puts it
+    float delta_x = offsets[LAYOUT_AXIS_X] - applied[LAYOUT_AXIS_X];
+    float delta_y = offsets[LAYOUT_AXIS_Y] - applied[LAYOUT_AXIS_Y];
+    LayoutAxisRefs x_geometry(block, LAYOUT_AXIS_X);
+    LayoutAxisRefs y_geometry(block, LAYOUT_AXIS_Y);
+    if (delta_x != 0 || delta_y != 0) {
+        x_geometry.set_position(x_geometry.get_position() + delta_x);
+        y_geometry.set_position(y_geometry.get_position() + delta_y);
 
         if (block->view_type == RDT_VIEW_INLINE) {
             // CSS Position 3 §3.4: sticky translation moves the entire inline
             // box, including positioned descendants using that box as CB.
-            layout_shift_view_children(
-                static_cast<View*>(block), offsets[LAYOUT_AXIS_X],
-                offsets[LAYOUT_AXIS_Y]);
+            layout_shift_view_children(static_cast<View*>(block), delta_x, delta_y);
         }
     }
+    sticky->has_sticky_offset = true;
+    sticky->sticky_offset_x = offsets[LAYOUT_AXIS_X];
+    sticky->sticky_offset_y = offsets[LAYOUT_AXIS_Y];
+    sticky->sticky_placed_x = x_geometry.get_position();
+    sticky->sticky_placed_y = y_geometry.get_position();
 }
 
+// lycon may be null: a scroll re-solves outside any layout pass.
 static void layout_apply_sticky_positions_recursive(LayoutContext* lycon, View* view) {
-    if (!lycon || !view) return;
+    if (!view) return;
 
     ViewBlock* block = nullptr;
     if (view->is_block()) {
@@ -470,6 +494,28 @@ void layout_apply_sticky_positions(LayoutContext* lycon, View* root) {
         layout_apply_sticky_positions_recursive(lycon, root);
     }
     lycon->defer_sticky_positioning = saved_defer;
+
+    // the boxes are solved for the current scroll; later scrolls re-solve them
+    if (lycon->doc && lycon->doc->view_tree) {
+        // an unknown count (no candidate list) keeps scroll re-solving on
+        lycon->doc->view_tree->sticky_box_count = lycon->deferred_sticky_blocks
+            ? lycon->deferred_sticky_blocks->length : 1;
+    }
+    DocState* state = lycon->doc ? (DocState*)lycon->doc->state : nullptr;
+    if (state) state->sticky_scroll_stale = false;
+}
+
+// A scroll only repaints, but sticky offsets depend on the scroll position
+// (CSS Position 3 §3.4): paint and hit-testing re-solve them first. Outer
+// boxes solve first, so a nested sticky box sees its moved ancestors.
+void layout_resolve_scrolled_sticky(ViewTree* view_tree) {
+    if (!view_tree || !view_tree->root || !view_tree->root->is_block()) return;
+    ViewBlock* root = lam::view_require_block(view_tree->root);
+    DocState* state = root->doc ? (DocState*)root->doc->state : nullptr;
+    if (!state || !state->sticky_scroll_stale) return;
+    state->sticky_scroll_stale = false;
+    if (view_tree->sticky_box_count == 0) return;
+    layout_apply_sticky_positions_recursive(nullptr, view_tree->root);
 }
 // find the root view used for static/absolute/fixed containing-block fallback.
 ViewBlock* find_initial_containing_view_block(ViewBlock* element) {

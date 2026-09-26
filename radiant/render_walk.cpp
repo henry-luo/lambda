@@ -380,11 +380,23 @@ void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* 
 }
 
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
-    while (view) {
-        if (!radiant_stack_is_deferred_from_normal_flow(view)) {
-            render_walk_view(backend, state, view);
+    bool has_step8 = false;
+    for (View* child = view; child; child = child->next()) {
+        if (radiant_stack_is_deferred_from_normal_flow(child)) continue;
+        if (radiant_stack_is_in_flow_positioned_step8(child)) {
+            has_step8 = true;
+            continue;
         }
-        view = view->next();
+        render_walk_view(backend, state, child);
+    }
+    // CSS 2.1 Appendix E step 8: in-flow positioned siblings paint above the
+    // others, in tree order; target_children hit-tests them in reverse.
+    if (!has_step8) return;
+    for (View* child = view; child; child = child->next()) {
+        if (!radiant_stack_is_deferred_from_normal_flow(child) &&
+            radiant_stack_is_in_flow_positioned_step8(child)) {
+            render_walk_view(backend, state, child);
+        }
     }
 }
 

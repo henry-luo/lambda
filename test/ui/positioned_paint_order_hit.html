@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>In-flow positioned boxes: paint and hit order</title>
+<style>
+  /* CSS 2.1 Appendix E step 8: in-flow positioned boxes (relative, sticky)
+     with z-index auto/0 paint after the non-positioned in-flow content, in
+     tree order; positive z-index paints later still. Each 100px band below
+     overlaps two boxes by 20-30px. */
+  body { margin: 0; }
+  div { height: 50px; }
+  .rel-down { position: relative; top: 30px; background: rgb(255, 0, 0); }
+  .later { background: rgb(0, 0, 255); }
+  .earlier { background: rgb(0, 128, 0); }
+  .rel-up { position: relative; top: -20px; background: rgb(255, 165, 0); }
+  .z1 { position: relative; top: 30px; z-index: 1; background: rgb(128, 0, 128); }
+  .zauto { position: relative; background: rgb(0, 128, 128); }
+  .pa { position: relative; top: 30px; background: rgb(200, 200, 0); }
+  .pb { position: relative; background: rgb(100, 100, 255); }
+</style>
+</head>
+<body>
+  <div class="rel-down"></div>
+  <div class="later"></div>
+
+  <div class="earlier"></div>
+  <div class="rel-up"></div>
+
+  <div class="z1"></div>
+  <div class="zauto"></div>
+
+  <div class="pa"></div>
+  <div class="pb"></div>
+</body>
+</html>

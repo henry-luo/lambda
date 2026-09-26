@@ -4378,6 +4378,8 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
             h_pos, v_pos, pane->h_max_scroll, pane->v_max_scroll);
         state->is_dirty = true;
         state->needs_repaint = true;
+        // sticky offsets depend on every scroller's position (CSS Position 3)
+        if (h_pos != old_x || v_pos != old_y) state->sticky_scroll_stale = true;
         if (is_viewport) {
             state->scroll_x = h_pos;
             state->scroll_y = v_pos;

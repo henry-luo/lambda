@@ -169,6 +169,26 @@ to the editor.
   `font-family` also fell back to a serif face: the default family's face
   file name ("Arial Bold") was being used as a family. Regression:
   `test/ui/svg_use_tspan_render.json`.
+* **Sticky boxes did not follow the scroll** (the toolbar scrolled away and
+  the status line rode up). Sticky offsets were solved only during layout,
+  and a scroll only repaints, so every sticky box kept its scroll-0 offset;
+  re-running the solver from a shifted box could not unstick it either. The
+  solver now records the offset it applied and re-solves from the box's
+  normal-flow position, and a moved scroll position makes paint and
+  hit-testing re-solve first (RAD_11 §2.1). The shell also set
+  `html, body { height: 100% }`: a sticky box never leaves its containing
+  block, and a viewport-tall body carried both bars away past the first
+  screen; the body now grows with the document (`min-height`). Regressions:
+  `test/ui/sticky_scroll_follow.json`, `test/ui/edit/edit_md_scroll_chrome.json`.
+* **In-flow positioned boxes painted and hit-tested in tree order.** A relative
+  or sticky box (`z-index` auto/0) was painted among its siblings in tree
+  order, so one pulled over a later sibling went under it, while hit-testing
+  tried in-flow children first-to-last, so a sticky footer lost clicks to the
+  earlier content it covered. Both now follow CSS 2.1 Appendix E step 8 among
+  siblings: the painter's `render_walk_children` paints these boxes after
+  their non-positioned siblings, and `target_children` tries them first,
+  later sibling first (RAD_13 §2.4, RAD_15 §3). Regression:
+  `test/ui/positioned_paint_order_hit.json`.
 
 ## 3. Package decisions
 

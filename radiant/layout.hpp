@@ -4000,6 +4000,8 @@ float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float conta
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_apply_sticky_positions(LayoutContext* lycon, View* root);
+// re-solve sticky boxes after a scroll moved (paint and hit-testing call it)
+void layout_resolve_scrolled_sticky(ViewTree* view_tree);
 void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 ViewBlock* find_initial_containing_view_block(ViewBlock* element);
