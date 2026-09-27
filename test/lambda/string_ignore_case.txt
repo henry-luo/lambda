@@ -1,0 +1,27 @@
+'1. a literal folds as a pattern does'
+"1.1"
+["É"]
+"1.2"
+["É"]
+"1.3"
+["É1"]
+"1.4"
+[8]
+'2. simple folding: one code point to one'
+"2.1"
+[]
+"2.2"
+["K"]
+"2.3"
+["ς"]
+"2.4"
+[]
+'3. replace'
+"3.1"
+["ea eA"]
+"3.2"
+["eeÉ"]
+"3.3"
+["aA-"]
+"3.4"
+['eCOLE']

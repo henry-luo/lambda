@@ -17,6 +17,8 @@
 #include "../../lib/str.h"
 #include "../../lib/string.h"
 #include "../../lib/mempool.h"
+#include "../../lib/mem_grow.h"
+#include "../../lib/sort.h"
 
 #include <re2/re2.h>
 #include <stdint.h>
@@ -40,25 +42,23 @@ extern __thread EvalContext* context;
 // first two are already the regex spelling; the open form is not, so its `+`
 // becomes RE2's trailing comma. The retired `[n]`, `[n, m]` and `[n+]` no
 // longer parse.
-static void convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
+static bool convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
     if (!op_str || !op_str->str || op_str->length < 3 ||
             op_str->str[0] != '{' || op_str->str[op_str->length - 1] != '}') {
-        log_error("convert_occurrence_to_regex: expected a `{n,m}` count");
-        return;
+        return false;
     }
     for (size_t i = 0; i < op_str->length; i++) {
         char c = op_str->str[i];
         if (c == ' ' || c == '\t') continue;
         strbuf_append_char(regex, c == '+' ? ',' : c);
     }
+    return true;
 }
 
 // Escape regex metacharacters in a literal string
-void escape_regex_literal(StrBuf* regex, String* str) {
-    if (!str) return;
-
-    for (size_t i = 0; i < str->len; i++) {
-        char c = str->chars[i];
+static void escape_regex_chars(StrBuf* regex, const char* chars, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char c = chars[i];
         // RE2 metacharacters that need escaping
         switch (c) {
         case '\\': case '.': case '+': case '*': case '?':
@@ -73,266 +73,471 @@ void escape_regex_literal(StrBuf* regex, String* str) {
     }
 }
 
-// Convert character class to regex
-static void compile_char_class(StrBuf* regex, PatternCharClass char_class) {
-    switch (char_class) {
-    case PATTERN_DIGIT:
-        strbuf_append_str(regex, "[0-9]");
-        break;
-    case PATTERN_WORD:
-        strbuf_append_str(regex, "[a-zA-Z0-9_]");
-        break;
-    case PATTERN_SPACE:
-        strbuf_append_str(regex, "\\s");
-        break;
-    case PATTERN_ALPHA:
-        strbuf_append_str(regex, "[a-zA-Z]");
-        break;
-    case PATTERN_ANY:
-        strbuf_append_str(regex, ".");
-        break;
-    case PATTERN_ANY_STRING:
-        strbuf_append_str(regex, ".*");
-        break;
-    }
+void escape_regex_literal(StrBuf* regex, String* str) {
+    if (str) escape_regex_chars(regex, str->chars, str->len);
 }
 
-static bool compile_negated_char_class(StrBuf* regex, AstNode* node) {
-    if (!node || node->node_type != AST_NODE_PATTERN_CHAR_CLASS) return false;
-    AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
-    switch (cc->char_class) {
+// A named literal type reaches a pattern as a type value. The regex and
+// surface renderings of a literal union live with compile_literal_type_pattern.
+typedef enum {
+    LITERAL_TYPE_REGEX,
+    LITERAL_TYPE_SURFACE
+} LiteralTypeRender;
+
+static bool append_literal_type(StrBuf* output, Type* type, LiteralTypeRender render);
+
+static Type* literal_type_unwrap(Type* type) {
+    if (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
+        type = ((TypeType*)type)->type;
+    }
+    return type;
+}
+
+// --- single-character sets (S11.1.2v3) --------------------------------------
+//
+// Island `!` complements a set of single characters: the one negation a regex
+// engine compiles, as `[^…]`. A set is kept as code-point intervals so that
+// union and nested negation compose, and is emitted as one RE2 class. The
+// named classes are defined here once, for plain and negated uses alike.
+
+typedef struct PatternCharRange {
+    uint32_t lo;
+    uint32_t hi;
+} PatternCharRange;
+
+typedef struct PatternCharSet {
+    PatternCharRange* ranges;
+    size_t count;
+    size_t capacity;
+} PatternCharSet;
+
+static const uint32_t PATTERN_MAX_CODEPOINT = 0x10FFFF;
+// named patterns may chain; a self-reference must not recurse forever
+static const int PATTERN_MAX_DEPTH = 256;
+
+static void char_set_free(PatternCharSet* set) {
+    if (set->ranges) mem_free(set->ranges);
+    set->ranges = NULL;
+    set->count = 0;
+    set->capacity = 0;
+}
+
+static bool char_set_add(PatternCharSet* set, uint32_t lo, uint32_t hi) {
+    if (lo > hi) return true;  // an inverted range is empty (S11.1.3)
+    if (!mem_grow_array_raw((void**)&set->ranges, sizeof(PatternCharRange),
+            &set->capacity, set->count + 1, 8, MEM_CAT_PARSER)) {
+        return false;
+    }
+    set->ranges[set->count].lo = lo;
+    set->ranges[set->count].hi = hi;
+    set->count++;
+    return true;
+}
+
+static int char_range_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    uint32_t left = ((const PatternCharRange*)a)->lo;
+    uint32_t right = ((const PatternCharRange*)b)->lo;
+    return left < right ? -1 : (left > right ? 1 : 0);
+}
+
+// sort by lower bound, then merge intervals that overlap or touch
+static void char_set_normalize(PatternCharSet* set) {
+    insertion_sort(set->ranges, set->count, sizeof(PatternCharRange),
+        char_range_compare, NULL);
+    size_t kept = 0;
+    for (size_t i = 0; i < set->count; i++) {
+        PatternCharRange range = set->ranges[i];
+        if (kept && range.lo <= set->ranges[kept - 1].hi + 1) {
+            if (range.hi > set->ranges[kept - 1].hi) set->ranges[kept - 1].hi = range.hi;
+        } else {
+            set->ranges[kept++] = range;
+        }
+    }
+    set->count = kept;
+}
+
+// replace a set by the characters it leaves out, over the whole code space
+static bool char_set_complement(PatternCharSet* set) {
+    char_set_normalize(set);
+    PatternCharSet out = {};
+    uint32_t next = 0;
+    for (size_t i = 0; i < set->count; i++) {
+        if (set->ranges[i].lo > next && !char_set_add(&out, next, set->ranges[i].lo - 1)) {
+            char_set_free(&out);
+            return false;
+        }
+        next = set->ranges[i].hi + 1;
+    }
+    if (next <= PATTERN_MAX_CODEPOINT && !char_set_add(&out, next, PATTERN_MAX_CODEPOINT)) {
+        char_set_free(&out);
+        return false;
+    }
+    char_set_free(set);
+    *set = out;
+    return true;
+}
+
+// `.` is every character but a newline, as RE2's `.` reads with dot_nl off
+// (SPO10 is open); `...` is a run, never one character
+static bool char_set_add_class(PatternCharSet* set, PatternCharClass char_class) {
+    switch (char_class) {
     case PATTERN_DIGIT:
-        strbuf_append_str(regex, "[^0-9]");
-        return true;
+        return char_set_add(set, '0', '9');
     case PATTERN_WORD:
-        strbuf_append_str(regex, "[^a-zA-Z0-9_]");
-        return true;
-    case PATTERN_SPACE:
-        strbuf_append_str(regex, "[^\\s]");
-        return true;
+        return char_set_add(set, '0', '9') && char_set_add(set, 'A', 'Z') &&
+            char_set_add(set, '_', '_') && char_set_add(set, 'a', 'z');
+    case PATTERN_SPACE:  // RE2's `\s`: tab, newline, form feed, return, space
+        return char_set_add(set, '\t', '\n') && char_set_add(set, '\f', '\r') &&
+            char_set_add(set, ' ', ' ');
     case PATTERN_ALPHA:
-        strbuf_append_str(regex, "[^a-zA-Z]");
+        return char_set_add(set, 'A', 'Z') && char_set_add(set, 'a', 'z');
+    case PATTERN_ANY:
+        return char_set_add(set, 0, '\n' - 1) &&
+            char_set_add(set, '\n' + 1, PATTERN_MAX_CODEPOINT);
+    case PATTERN_ANY_STRING:
+        return false;
+    }
+    return false;
+}
+
+static bool string_single_codepoint(String* str, uint32_t* codepoint) {
+    if (!str || !str->len) return false;
+    int used = str_utf8_decode(str->chars, str->len, codepoint);
+    return used > 0 && (size_t)used == str->len;
+}
+
+// the one character a string-literal node spells
+static bool node_single_codepoint(AstNode* node, uint32_t* codepoint) {
+    return node && node->type && node->type->type_id == LMD_TYPE_STRING &&
+        string_single_codepoint(((TypeString*)node->type)->string, codepoint);
+}
+
+// S11.1.3: a range runs between two single characters
+static bool char_set_add_range(PatternCharSet* set, AstNode* start, AstNode* end) {
+    uint32_t lo, hi;
+    return node_single_codepoint(start, &lo) && node_single_codepoint(end, &hi) &&
+        char_set_add(set, lo, hi);
+}
+
+// SP5, S11.1.3: a character range type (`type Lower = "a" to "z"`) is the set
+// an island range spells. An integer range has no characters, and its bounds
+// must not be read as code points.
+static bool char_range_type_bounds(Type* type, uint32_t* lo, uint32_t* hi) {
+    int64_t start = 0, end = 0;
+    if (!lambda_type_is_range(type) || !((TypeRange*)type)->is_char ||
+            !lambda_range_type_bounds(type, &start, &end)) return false;
+    *lo = (uint32_t)start;
+    *hi = (uint32_t)end;
+    return true;
+}
+
+// SP7: a named literal union is the literal-only pattern it spells
+static bool char_set_add_literal_type(PatternCharSet* set, Type* type) {
+    type = literal_type_unwrap(type);
+    if (!type) return false;
+    uint32_t lo, hi;
+    if (char_range_type_bounds(type, &lo, &hi)) return char_set_add(set, lo, hi);
+    if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
+        uint32_t codepoint;
+        return string_single_codepoint(((TypeString*)type)->string, &codepoint) &&
+            char_set_add(set, codepoint, codepoint);
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* binary = (TypeBinary*)type;
+        return binary->op == OPERATOR_UNION &&
+            char_set_add_literal_type(set, binary->left) &&
+            char_set_add_literal_type(set, binary->right);
+    }
+    return false;
+}
+
+// Add the characters a node denotes; false when the node is not a
+// single-character set: a class, a range, a one-character string, a negated
+// set, or a union, group or named pattern built only from these.
+static bool char_set_add_node(PatternCharSet* set, AstNode* node, int depth) {
+    if (!node || depth > PATTERN_MAX_DEPTH) return false;
+    switch (node->node_type) {
+    case AST_NODE_PATTERN_CHAR_CLASS:
+        return char_set_add_class(set, ((AstPatternCharClassNode*)node)->char_class);
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        uint32_t codepoint;
+        if (primary->type && primary->type->type_id == LMD_TYPE_STRING) {
+            return node_single_codepoint(node, &codepoint) &&
+                char_set_add(set, codepoint, codepoint);
+        }
+        return char_set_add_node(set, primary->expr, depth + 1);
+    }
+    case AST_NODE_PATTERN_RANGE: {
+        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
+        return char_set_add_range(set, range->start, range->end);
+    }
+    case AST_NODE_BINARY:
+    case AST_NODE_BINARY_TYPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        if (binary->op == OPERATOR_TO) return char_set_add_range(set, binary->left, binary->right);
+        return binary->op == OPERATOR_UNION &&
+            char_set_add_node(set, binary->left, depth + 1) &&
+            char_set_add_node(set, binary->right, depth + 1);
+    }
+    case AST_NODE_UNARY:
+    case AST_NODE_UNARY_TYPE: {
+        // a repeated item is a run, not one character
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op != OPERATOR_NOT) return false;
+        PatternCharSet inner = {};
+        bool ok = char_set_add_node(&inner, unary->operand, depth + 1) &&
+            char_set_complement(&inner);
+        for (size_t i = 0; ok && i < inner.count; i++) {
+            ok = char_set_add(set, inner.ranges[i].lo, inner.ranges[i].hi);
+        }
+        char_set_free(&inner);
+        return ok;
+    }
+    case AST_NODE_LIST_TYPE: {
+        AstListNode* group = (AstListNode*)node;
+        if (!group->item) return false;
+        for (AstNode* item = group->item; item; item = item->next) {
+            if (!char_set_add_node(set, item, depth + 1)) return false;
+        }
         return true;
+    }
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        AstNode* declared = ident->entry ? ident->entry->node : NULL;
+        if (!declared) return false;
+        if (declared->node_type == AST_NODE_STRING_PATTERN ||
+                declared->node_type == AST_NODE_SYMBOL_PATTERN) {
+            return char_set_add_node(set, ((AstPatternDefNode*)declared)->as, depth + 1);
+        }
+        return char_set_add_literal_type(set, declared->type);
+    }
     default:
         return false;
     }
 }
 
-// Convert pattern AST to regex string
-void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
-    if (!node) {
-        log_error("compile_pattern_to_regex: null node");
+bool pattern_is_char_set(AstNode* node) {
+    PatternCharSet set = {};
+    bool ok = char_set_add_node(&set, node, 0);
+    char_set_free(&set);
+    return ok;
+}
+
+// class members print as themselves when alphanumeric, as \x{…} otherwise
+static void char_set_emit_codepoint(StrBuf* regex, uint32_t codepoint) {
+    if ((codepoint >= '0' && codepoint <= '9') || (codepoint >= 'A' && codepoint <= 'Z') ||
+            (codepoint >= 'a' && codepoint <= 'z')) {
+        strbuf_append_char(regex, (char)codepoint);
+    } else {
+        strbuf_append_format(regex, "\\x{%X}", codepoint);
+    }
+}
+
+// one RE2 class; an empty set becomes a class that admits nothing
+static void char_set_emit(StrBuf* regex, PatternCharSet* set) {
+    char_set_normalize(set);
+    if (!set->count) {
+        strbuf_append_str(regex, "[^\\x{0}-\\x{10FFFF}]");
         return;
     }
+    strbuf_append_char(regex, '[');
+    for (size_t i = 0; i < set->count; i++) {
+        char_set_emit_codepoint(regex, set->ranges[i].lo);
+        if (set->ranges[i].hi > set->ranges[i].lo) {
+            strbuf_append_char(regex, '-');
+            char_set_emit_codepoint(regex, set->ranges[i].hi);
+        }
+    }
+    strbuf_append_char(regex, ']');
+}
+
+// Lower a single-character set, or its complement, to one RE2 class. False
+// when the node is not a set, which the resolver has already reported.
+static bool compile_char_set(StrBuf* regex, AstNode* node, bool negate) {
+    PatternCharSet set = {};
+    bool ok = char_set_add_node(&set, node, 0) && (!negate || char_set_complement(&set));
+    if (ok) char_set_emit(regex, &set);
+    char_set_free(&set);
+    return ok;
+}
+
+// Convert character class to regex
+static void compile_char_class(StrBuf* regex, PatternCharClass char_class) {
+    if (char_class == PATTERN_ANY) {
+        strbuf_append_char(regex, '.');
+        return;
+    }
+    if (char_class == PATTERN_ANY_STRING) {
+        // S16.8.6v3: `...` is `any*`, newlines included; RE2's `.` stops at one
+        strbuf_append_str(regex, "(?s:.*)");
+        return;
+    }
+    PatternCharSet set = {};
+    if (char_set_add_class(&set, char_class)) char_set_emit(regex, &set);
+    char_set_free(&set);
+}
+
+// SP7: a named literal union is the literal-only pattern it spells. Render it
+// whole or not at all: a failed rendering stops partway through its buffer.
+static bool append_literal_pattern(StrBuf* regex, Type* type) {
+    StrBuf* literal = strbuf_new_cap(64);
+    bool ok = append_literal_type(literal, type, LITERAL_TYPE_REGEX);
+    if (ok) strbuf_append_str_n(regex, literal->str, literal->length);
+    strbuf_free(literal);
+    return ok;
+}
+
+// Why a pattern cannot be lowered to a regex. The first reason wins, and the
+// resolver reports it as a compile-time diagnostic: these were only logged,
+// leaving a pattern that silently matched nothing, or only "" (§7 #3).
+static bool pattern_lowering_failed(StrBuf* error, const char* reason) {
+    log_error("compile_pattern_to_regex: %s", reason);
+    if (error && !error->length) strbuf_append_str(error, reason);
+    return false;
+}
+
+// S11.1.2v3: an island may name a pattern definition, or a literal type that
+// is a set of strings: a literal union (SP7) or a character range (SP5).
+bool pattern_can_name(AstNode* declared) {
+    if (!declared) return false;
+    if (declared->node_type == AST_NODE_STRING_PATTERN ||
+            declared->node_type == AST_NODE_SYMBOL_PATTERN) return true;
+    StrBuf* scratch = strbuf_new_cap(64);
+    bool ok = append_literal_type(scratch, declared->type, LITERAL_TYPE_REGEX);
+    strbuf_free(scratch);
+    return ok;
+}
+
+// `depth` counts named-pattern expansions, so a definition that reaches
+// itself fails instead of expanding without end.
+static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth);
+
+// `(?:node)` followed by `suffix`
+static bool lower_pattern_group(StrBuf* regex, AstNode* node, StrBuf* error, int depth,
+        const char* suffix) {
+    strbuf_append_str(regex, "(?:");
+    if (!lower_pattern(regex, node, error, depth)) return false;
+    strbuf_append_char(regex, ')');
+    if (suffix) strbuf_append_str(regex, suffix);
+    return true;
+}
+
+bool compile_pattern_to_regex(StrBuf* regex, AstNode* node, StrBuf* error) {
+    return lower_pattern(regex, node, error, 0);
+}
+
+static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth) {
+    if (!node) return pattern_lowering_failed(error, "a pattern part is missing");
 
     switch (node->node_type) {
     case AST_NODE_PRIMARY: {
-        // String literal - escape and emit
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
         if (pri->type && pri->type->type_id == LMD_TYPE_STRING) {
             TypeString* str_type = (TypeString*)pri->type;
-            if (str_type->string) {
-                escape_regex_literal(regex, str_type->string);
-            }
-        } else if (pri->expr) {
-            // Parenthesized expression
-            compile_pattern_to_regex(regex, pri->expr);
+            if (str_type->string) escape_regex_literal(regex, str_type->string);
+            return true;
         }
-        break;
+        if (pri->expr) return lower_pattern(regex, pri->expr, error, depth);
+        return pattern_lowering_failed(error, "a pattern holds only string literals");
     }
 
-    case AST_NODE_PATTERN_CHAR_CLASS: {
-        AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
-        compile_char_class(regex, cc->char_class);
-        break;
-    }
+    case AST_NODE_PATTERN_CHAR_CLASS:
+        compile_char_class(regex, ((AstPatternCharClassNode*)node)->char_class);
+        return true;
 
-    case AST_NODE_PATTERN_RANGE: {
-        // "a" to "z" -> [a-z]
-        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
-        strbuf_append_char(regex, '[');
-
-        // Extract start character
-        if (range->start && range->start->type && range->start->type->type_id == LMD_TYPE_STRING) {
-            TypeString* start_type = (TypeString*)range->start->type;
-            if (start_type->string && start_type->string->len > 0) {
-                char c = start_type->string->chars[0];
-                // Escape if needed in character class
-                if (c == ']' || c == '\\' || c == '^' || c == '-') {
-                    strbuf_append_char(regex, '\\');
-                }
-                strbuf_append_char(regex, c);
-            }
-        }
-
-        strbuf_append_char(regex, '-');
-
-        // Extract end character
-        if (range->end && range->end->type && range->end->type->type_id == LMD_TYPE_STRING) {
-            TypeString* end_type = (TypeString*)range->end->type;
-            if (end_type->string && end_type->string->len > 0) {
-                char c = end_type->string->chars[0];
-                if (c == ']' || c == '\\' || c == '^' || c == '-') {
-                    strbuf_append_char(regex, '\\');
-                }
-                strbuf_append_char(regex, c);
-            }
-        }
-
-        strbuf_append_char(regex, ']');
-        break;
-    }
+    case AST_NODE_PATTERN_RANGE:
+        // "a" to "z" -> [a-z]; bounds are code points, never their first byte
+        return compile_char_set(regex, node, false) ||
+            pattern_lowering_failed(error, "a range in a pattern runs between two single characters");
 
     case AST_NODE_BINARY:
     case AST_NODE_BINARY_TYPE: {
         AstBinaryNode* bin = (AstBinaryNode*)node;
         if (bin->op == OPERATOR_UNION) {
-            // a | b -> (?:a|b)
+            // a | b -> (?:a|b); `|` is the island's only binary operator (S11.1.2v3)
             strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, bin->left);
+            if (!lower_pattern(regex, bin->left, error, depth)) return false;
             strbuf_append_char(regex, '|');
-            compile_pattern_to_regex(regex, bin->right);
+            if (!lower_pattern(regex, bin->right, error, depth)) return false;
             strbuf_append_char(regex, ')');
-        } else if (bin->op == OPERATOR_INTERSECT) {
-            // a & b -> positive lookahead (?=a)b
-            // Note: This is a limited intersection, may not work for all cases
-            strbuf_append_str(regex, "(?=");
-            compile_pattern_to_regex(regex, bin->left);
-            strbuf_append_char(regex, ')');
-            compile_pattern_to_regex(regex, bin->right);
-        } else if (bin->op == OPERATOR_TO) {
-            // Range operator (same as PATTERN_RANGE but from binary expression)
-            strbuf_append_char(regex, '[');
-            if (bin->left && bin->left->type && bin->left->type->type_id == LMD_TYPE_STRING) {
-                TypeString* start_type = (TypeString*)bin->left->type;
-                if (start_type->string && start_type->string->len > 0) {
-                    strbuf_append_char(regex, start_type->string->chars[0]);
-                }
-            }
-            strbuf_append_char(regex, '-');
-            if (bin->right && bin->right->type && bin->right->type->type_id == LMD_TYPE_STRING) {
-                TypeString* end_type = (TypeString*)bin->right->type;
-                if (end_type->string && end_type->string->len > 0) {
-                    strbuf_append_char(regex, end_type->string->chars[0]);
-                }
-            }
-            strbuf_append_char(regex, ']');
-        } else {
-            log_error("compile_pattern_to_regex: unknown binary operator %d", bin->op);
+            return true;
         }
-        break;
+        if (bin->op == OPERATOR_TO) {
+            return compile_char_set(regex, node, false) ||
+                pattern_lowering_failed(error, "a range in a pattern runs between two single characters");
+        }
+        return pattern_lowering_failed(error, "`|` is the only operator that joins two patterns");
     }
 
     case AST_NODE_UNARY:
     case AST_NODE_UNARY_TYPE: {
         AstUnaryNode* unary = (AstUnaryNode*)node;
-        if (unary->op == OPERATOR_OPTIONAL) {
-            // a? -> (?:a)?
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")?");
-        } else if (unary->op == OPERATOR_ONE_MORE) {
-            // a+ -> (?:a)+
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")+");
-        } else if (unary->op == OPERATOR_ZERO_MORE) {
-            // a* -> (?:a)*
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")*");
-        } else if (unary->op == OPERATOR_REPEAT) {
-            // `{n}` / `{n,}` / `{n,m}` -> (?:a){n} / (?:a){n,} / (?:a){n,m}
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")");
-            // the island carries the regex spelling; emit it verbatim
-            if (unary->op_str.str && unary->op_str.length > 0) {
-                convert_occurrence_to_regex(regex, &unary->op_str);
-            }
-        } else if (unary->op == OPERATOR_NOT) {
-            // RE2 has no look-around; negate a character class directly so `!d` retains one-codepoint complement semantics.
-            if (!compile_negated_char_class(regex, unary->operand)) {
-                log_error("compile_pattern_to_regex: negation requires a character class");
-            }
-        } else {
-            log_error("compile_pattern_to_regex: unknown unary operator %d", unary->op);
+        switch (unary->op) {
+        case OPERATOR_OPTIONAL:
+            return lower_pattern_group(regex, unary->operand, error, depth, "?");
+        case OPERATOR_ONE_MORE:
+            return lower_pattern_group(regex, unary->operand, error, depth, "+");
+        case OPERATOR_ZERO_MORE:
+            return lower_pattern_group(regex, unary->operand, error, depth, "*");
+        case OPERATOR_REPEAT:
+            // `{n}` / `{n+}` / `{n,m}` -> (?:a){n} / (?:a){n,} / (?:a){n,m}; the
+            // island parser has checked the spelling (S16.8.6v3)
+            if (!lower_pattern_group(regex, unary->operand, error, depth, NULL)) return false;
+            return convert_occurrence_to_regex(regex, &unary->op_str) ||
+                pattern_lowering_failed(error, "a count is `{n}`, `{n,m}` or `{n+}`");
+        case OPERATOR_NOT:
+            // S11.1.2v3: `!` complements a single-character set, lowered to one
+            // `[^…]`-style class; RE2 has no string complement or look-around
+            return compile_char_set(regex, unary->operand, true) ||
+                pattern_lowering_failed(error, "`!` in a pattern negates a single character");
+        default:
+            return pattern_lowering_failed(error, "unsupported pattern operator");
         }
-        break;
     }
 
-    case AST_NODE_PATTERN_SEQ: {
-        // Pattern sequence - concatenate all patterns in sequence
-        AstPatternSeqNode* seq = (AstPatternSeqNode*)node;
-        AstNode* child = seq->first;
-        while (child) {
-            compile_pattern_to_regex(regex, child);
-            child = child->next;
+    case AST_NODE_PATTERN_SEQ:
+        // whitespace concatenation (S11.1.2v3)
+        for (AstNode* child = ((AstPatternSeqNode*)node)->first; child; child = child->next) {
+            if (!lower_pattern(regex, child, error, depth)) return false;
         }
-        break;
-    }
+        return true;
 
-    case AST_NODE_LIST_TYPE: {
-        // Parenthesized type expression in pattern context: (pattern)
-        // list_type can contain one or more items separated by commas.
-        // In pattern context, a single item is a group; multiple items form alternatives.
-        AstListNode* list = (AstListNode*)node;
-        AstNode* item = list->item;
-        if (item && !item->next) {
-            // Single item — just a grouping parenthesis
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, item);
-            strbuf_append_char(regex, ')');
-        } else if (item) {
-            // Multiple items — treat as alternatives (union)
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, item);
-            item = item->next;
-            while (item) {
-                strbuf_append_char(regex, '|');
-                compile_pattern_to_regex(regex, item);
-                item = item->next;
-            }
-            strbuf_append_char(regex, ')');
-        }
-        break;
-    }
-
+    case AST_NODE_LIST_TYPE:
     case AST_NODE_ARRAY_TYPE: {
-        // Array type in pattern context: [pattern] — treat as character class or group
-        AstArrayNode* arr = (AstArrayNode*)node;
-        if (arr->item) {
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, arr->item);
-            AstNode* item = arr->item->next;
-            while (item) {
-                strbuf_append_char(regex, '|');
-                compile_pattern_to_regex(regex, item);
-                item = item->next;
-            }
-            strbuf_append_char(regex, ')');
+        // a group `( … )`; several items are alternatives
+        AstNode* first = node->node_type == AST_NODE_LIST_TYPE ?
+            ((AstListNode*)node)->item : ((AstArrayNode*)node)->item;
+        if (!first) return pattern_lowering_failed(error, "an empty group in a pattern");
+        strbuf_append_str(regex, "(?:");
+        for (AstNode* item = first; item; item = item->next) {
+            if (item != first) strbuf_append_char(regex, '|');
+            if (!lower_pattern(regex, item, error, depth)) return false;
         }
-        break;
+        strbuf_append_char(regex, ')');
+        return true;
     }
 
     case AST_NODE_IDENT: {
         AstIdentNode* ident = (AstIdentNode*)node;
-        if (ident->entry && ident->entry->node &&
-                (ident->entry->node->node_type == AST_NODE_STRING_PATTERN ||
-                 ident->entry->node->node_type == AST_NODE_SYMBOL_PATTERN)) {
-            AstPatternDefNode* definition = (AstPatternDefNode*)ident->entry->node;
-            compile_pattern_to_regex(regex, definition->as);
-        } else {
-            log_error("compile_pattern_to_regex: unresolved pattern reference '%.*s'",
-                ident->name ? (int)ident->name->len : 0,
-                ident->name ? ident->name->chars : "");
+        AstNode* declared = ident->entry ? ident->entry->node : NULL;
+        if (declared && (declared->node_type == AST_NODE_STRING_PATTERN ||
+                declared->node_type == AST_NODE_SYMBOL_PATTERN)) {
+            if (depth >= PATTERN_MAX_DEPTH) {
+                return pattern_lowering_failed(error, "a pattern cannot refer to itself");
+            }
+            return lower_pattern(regex, ((AstPatternDefNode*)declared)->as, error, depth + 1);
         }
-        break;
+        if (declared && append_literal_pattern(regex, declared->type)) return true;
+        // the resolver reports an unusable name at the name itself; this is the
+        // backstop for any path that reaches lowering without it
+        return pattern_lowering_failed(error,
+            "a pattern names only patterns, literal unions and character ranges defined before it");
     }
 
     default:
-        log_error("compile_pattern_to_regex: unknown node type %d", node->node_type);
-        break;
+        return pattern_lowering_failed(error, "unsupported pattern part");
     }
 }
 
@@ -379,8 +584,6 @@ static void render_pattern_surface(StrBuf* source, AstNode* node) {
         strbuf_append_char(source, '(');
         render_pattern_surface(source, binary->left);
         if (binary->op == OPERATOR_UNION) strbuf_append_str(source, " | ");
-        else if (binary->op == OPERATOR_INTERSECT) strbuf_append_str(source, " & ");
-        else if (binary->op == OPERATOR_EXCLUDE) strbuf_append_str(source, " ! ");
         else if (binary->op == OPERATOR_TO) strbuf_append_str(source, " to ");
         render_pattern_surface(source, binary->right);
         strbuf_append_char(source, ')');
@@ -469,8 +672,20 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     // Build regex string
     StrBuf* regex = strbuf_new_cap(256);
     strbuf_append_str(regex, "^");  // anchor start for full match
-    compile_pattern_to_regex(regex, pattern_ast);
+    StrBuf* lowering_error = strbuf_new_cap(64);
+    bool lowered = compile_pattern_to_regex(regex, pattern_ast, lowering_error);
     strbuf_append_str(regex, "$");  // anchor end
+    static char error_buffer[256];
+    if (!lowered) {
+        if (error_msg) {
+            snprintf(error_buffer, sizeof(error_buffer), "%s", lowering_error->str);
+            *error_msg = error_buffer;
+        }
+        strbuf_free(lowering_error);
+        strbuf_free(regex);
+        return nullptr;
+    }
+    strbuf_free(lowering_error);
 
     StrBuf* surface = strbuf_new_cap(256);
     strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
@@ -480,7 +695,6 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     log_debug("Compiled pattern regex: %s", regex->str);
 
     re2::RE2::Options options = lam::re2_glue_default_options();
-    static char error_buffer[256];
     re2::RE2* re2 = lam::re2_glue_compile(
         regex->str, regex->length, options, "compile_pattern_ast",
         error_msg ? error_buffer : nullptr, sizeof(error_buffer));
@@ -511,7 +725,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 }
 
 bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* pattern,
-                             AstNode* pattern_ast, bool is_symbol) {
+                             AstNode* pattern_ast, bool is_symbol, const char** error_msg) {
     if (!pool || !type_list || !pattern || !pattern_ast) return false;
     if (pattern->re2) {
         if (pattern->pattern_index >= 0) return true;
@@ -523,11 +737,11 @@ bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* patt
         return true;
     }
 
-    const char* error_msg = NULL;
-    TypePattern* compiled = compile_pattern_ast(pool, pattern_ast, is_symbol, &error_msg);
+    const char* reason = NULL;
+    TypePattern* compiled = compile_pattern_ast(pool, pattern_ast, is_symbol, &reason);
     if (!compiled) {
-        log_error("pattern compile: failed to build regex: %s",
-            error_msg ? error_msg : "unknown error");
+        log_error("pattern compile: failed to build regex: %s", reason ? reason : "unknown error");
+        if (error_msg) *error_msg = reason;
         return false;
     }
     pattern->re2 = compiled->re2;
@@ -610,17 +824,24 @@ bool compile_script_pattern_definitions(Pool* pool, ArrayList* type_list,
     return ok;
 }
 
-typedef enum {
-    LITERAL_TYPE_REGEX,
-    LITERAL_TYPE_SURFACE
-} LiteralTypeRender;
-
 static bool append_literal_type(StrBuf* output, Type* type, LiteralTypeRender render) {
+    type = literal_type_unwrap(type);
     if (!type) return false;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
-        type = ((TypeType*)type)->type;
+    uint32_t lo, hi;
+    if (char_range_type_bounds(type, &lo, &hi)) {
+        TypeRange* range = (TypeRange*)type;
+        if (render == LITERAL_TYPE_SURFACE) {
+            render_pattern_literal(output, range->start.get_safe_string());
+            strbuf_append_str(output, " to ");
+            render_pattern_literal(output, range->end.get_safe_string());
+            return true;
+        }
+        PatternCharSet set = {};
+        bool ok = char_set_add(&set, lo, hi);
+        if (ok) char_set_emit(output, &set);
+        char_set_free(&set);
+        return ok;
     }
-    if (!type) return false;
     if (type->type_id == LMD_TYPE_STRING && type->is_literal) {
         String* literal = ((TypeString*)type)->string;
         if (!literal) return false;
@@ -902,7 +1123,8 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
     RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
-    if (!pattern || !str || len == 0) return rooted_result.get();
+    // an empty subject is searched too: `find("", \(d*))` has one empty match
+    if (!pattern || !str) return rooted_result.get();
 
     bool must_release = false;
     re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
@@ -1011,20 +1233,50 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
     return result;
 }
 
-// Replace all non-overlapping matches of pattern in string
-String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_len,
-                            const char* repl, size_t repl_len) {
-    if (!pattern || !str) return nullptr;
-
-    re2::RE2* re = pattern_get_unanchored(pattern);
-    if (!re) return nullptr;
-
-    std::string input(str, str_len); // STD_CONTAINER_OK: RE2::GlobalReplace requires std::string* in/out buffer.
-    re2::StringPiece replacement(repl, repl_len);
-    RE2::GlobalReplace(&input, *re, replacement);
-
-    return make_heap_string(input.c_str(), input.size());
+// S17.7.1: literal text searched case-insensitively folds as a pattern does,
+// through RE2's Unicode simple case folding. The literal scan folded ASCII
+// only, so `find("É", "é", {ignore_case: true})` missed what `\("é" d)` found,
+// and so did the literal-only island `\("é")`, which is that literal (SP7).
+// The needle becomes a transient pattern backed only by its anchored source.
+static String* literal_regex_source(const char* needle, size_t needle_len) {
+    StrBuf* regex = strbuf_new_cap(needle_len + 8);
+    strbuf_append_char(regex, '^');
+    escape_regex_chars(regex, needle, needle_len);
+    strbuf_append_char(regex, '$');
+    String* source = (String*)mem_alloc(sizeof(String) + regex->length + 1, MEM_CAT_PARSER);
+    if (source) {
+        memcpy(source->chars, regex->str, regex->length);
+        source->chars[regex->length] = '\0';
+        source->len = (uint32_t)regex->length;
+        source->flags = 0;
+        source->is_ascii = str_is_ascii(source->chars, source->len) ? 1 : 0;
+    }
+    strbuf_free(regex);
+    return source;
 }
+
+List* literal_find_all_ignore_case(const char* str, size_t len,
+                                   const char* needle, size_t needle_len, int64_t limit) {
+    TypePattern pattern = {};
+    pattern.regex_source = literal_regex_source(needle, needle_len);
+    if (!pattern.regex_source) return nullptr;
+    List* result = pattern_find_all_options(&pattern, str, len, limit, true);
+    mem_free(pattern.regex_source);
+    return result;
+}
+
+String* literal_replace_all_ignore_case(const char* str, size_t str_len,
+                                        const char* needle, size_t needle_len,
+                                        const char* repl, size_t repl_len, int64_t limit) {
+    TypePattern pattern = {};
+    pattern.regex_source = literal_regex_source(needle, needle_len);
+    if (!pattern.regex_source) return nullptr;
+    String* result = pattern_replace_all_options(&pattern, str, str_len, repl, repl_len,
+        limit, true);
+    mem_free(pattern.regex_source);
+    return result;
+}
+
 
 static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset, size_t len) {
     String* value = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);

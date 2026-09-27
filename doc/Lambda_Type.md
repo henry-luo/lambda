@@ -728,7 +728,7 @@ fn process(value: int | string | null) => {
 
 ### Type Operators in Expressions
 
-`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v2). In an expression a type operand is itself and any other value stands for its literal type, and the result is always a type — the same type that type syntax names: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. A container stands for the pattern its literal spells in type position, so `let t = [1, 2] | 3` is the type `type T = [1, 2] | 3` names, and a range value for its range type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`. (A decimal value has no literal type yet and is an operand error.)
+`|`, `&` and `!` are type operators everywhere, expressions included (S10.1.1v3). In an expression a type operand is itself and any other value stands for its literal type, and the result is always a type — the same type that type syntax names: `1 | 2` is the type admitting 1 or 2 (an enum), and `int | null` is the nullable int type. A container stands for the pattern its literal spells in type position, so `let t = [1, 2] | 3` is the type `type T = [1, 2] | 3` names, and a range value for its range type. `1 & 2` is the empty type [`none`](#the-empty-type-none), which admits nothing — not even `null`. (A decimal value has no literal type yet and is an operand error.)
 
 ```lambda
 let choice = 1 | 2;            // a type: the literal union of 1 and 2, an enum
@@ -777,6 +777,10 @@ null is (any ! null)       // false
 42 is (number ! float)     // true (int matches)
 3.14 is (number ! float)   // false (float excluded)
 
+// Between whole string patterns: word strings that are not all digits
+"ab12" is (\(w+) ! \(d+))  // true
+"1234" is (\(w+) ! \(d+))  // false
+
 // In match expressions
 fn classify(x) => match x {
     case number ! float: "integer"
@@ -819,7 +823,9 @@ null is !null        // false
 
 > **Note:** `!T` creates a negation type value. Use `x is !T` to check that `x` does **not** match type `T`. For logical negation, use `not` (e.g., `not true`).
 
-In string patterns, `!` negates character classes:
+In string patterns, `!` negates a set of single characters and matches one
+character outside it, like regex `[^…]` (S11.1.2v3). The set can be a class,
+a range, a one-character string, or a union of these:
 
 ```lambda
 // Any character except a digit
@@ -827,7 +833,23 @@ type NotDigit = \(!d)
 
 // Any character except whitespace
 type NotSpace = \(!s)
+
+// Any character except a, b or c: regex [^abc]
+type NotABC = \(!("a" | "b" | "c"))
+
+// Any character except a closing angle bracket: regex [^>]
+type NotClose = \(!">")
 ```
+
+Negating anything longer than one character, such as `\(!"ab")` or
+`\(!(d+))`, is a compile error. To exclude a whole pattern, apply `!` to the
+pattern as a type: `"abc" is !\(d+)` is `true`.
+
+Inside a pattern `!` is only a prefix; there is no binary `!`. Since
+whitespace joins the parts of a pattern, `\(w ! d)` is a word character
+followed by a non-digit. To exclude one pattern from another, put the
+exclusion between whole patterns: `\(w+) ! \(d+)` admits word strings that are
+not all digits.
 
 ### Constrained Types (`that`)
 
@@ -989,7 +1011,7 @@ and `match`) check both domain and content.
 
 ### Pattern Definition Syntax
 
-```lambda
+```lambda no-run
 // Structural string pattern
 type PatternName = \(pattern_expression)
 
@@ -1082,6 +1104,15 @@ type Digits = \(d+)      // matches "42" — the digit class
 type LowerLetter = \("a" to "z")
 type UpperLetter = \("A" to "Z")
 type HexDigit = \("0" to "9" | "a" to "f" | "A" to "F")
+type GreekLower = \("α" to "ω")      // bounds are any single characters
+```
+
+A range type named outside a pattern is the same set inside one:
+
+```lambda
+type Lower = "a" to "z"
+"abc" is \(Lower+)                   // true
+"Abc" is \(!Lower w+)                // true: one non-lowercase, then word chars
 ```
 
 ### Occurrence Modifiers
@@ -1091,12 +1122,16 @@ type HexDigit = \("0" to "9" | "a" to "f" | "A" to "F")
 | `?` | zero or one (optional) |
 | `+` | one or more |
 | `*` | zero or more |
-| `[n]` | exactly n occurrences |
-| `[n+]` | n or more occurrences |
-| `[n, m]` | between n and m occurrences (inclusive) |
+| `{n}` | exactly n occurrences |
+| `{n+}` | n or more occurrences |
+| `{n,m}` | between n and m occurrences (inclusive) |
+
+Counts are written as for [type occurrences](#type-occurrence-modifiers). The
+open count is `{n+}`, not regex's `{n,}`.
 
 A quantifier is a pattern fragment, not a type on its own; it attaches to the
-element it repeats:
+element it repeats. A quoted string is one element, so `\("ab"+)` matches
+`"abab"`, where regex `ab+` would match `"abb"`:
 
 ```lambda
 type OptionalPrefix = \("pre"? w+)           // optional "pre" prefix
@@ -1115,15 +1150,26 @@ type FullName = \(a+ " " a+)                 // first space last
 // Union: match either pattern
 type YesNo = "yes" | "no"
 
-// Negation: exclude a character class
+// Negation: one character outside a set
 type NotDigit = \(!d)                         // any non-digit character
+type Tag = \("<" (!">")* ">")                 // "<a>": regex <[^>]*>
 ```
 
-> **Not yet supported:** pattern intersection (`\(a & w)`) does not compile.
-> The binary `&` and `!` type operators are unimplemented in the current
-> runtime (see the `SO9` open issue in
-> [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)); prefix negation
-> `!` inside a pattern, shown above, does work.
+Inside a pattern, the parts bind in this order, tightest first: an atom (a
+range `"a" to "z"` is one atom), a prefix `!`, a quantifier, concatenation,
+and `|` (S11.1.2v3). Group with parentheses to change it:
+
+```lambda
+"xy" is \(!d+)                  // true: (!d)+, one or more non-digits
+"abb" is \("a" "b"+)            // true: the quantifier repeats only "b"
+"bc" is \("a" | "b" "c")        // true: "a", or "b" followed by "c"
+"ac" is \(("a" | "b") "c")      // true: the group changes the order
+```
+
+`|` is the only operator that joins two patterns. There is no `&` inside a
+pattern, and `!` there is only a prefix. To intersect or exclude, combine
+whole patterns with the type operators (S10.1.1v3): `"abc" is (\(a+) & \(w+))`
+is `true`, and `\(w+) ! \(d+)` admits word strings that are not all digits.
 
 ### Complex Pattern Examples
 
@@ -1257,7 +1303,7 @@ split("a1b2c3", digits)               // ["a", "b", "c", ""]
 split("a1b2c3", digits, true)         // ["a", "1", "b", "2", "c", "3", ""]  — keep delimiters
 ```
 
-All three functions also accept plain strings as the match argument (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md) § String Functions).
+All three functions also accept plain strings as the match argument (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md) § String Functions). `find` and `replace` see the same matches, found as ECMAScript `replaceAll` finds them, so a pattern that can match the empty string yields empty matches too, and `replace` inserts its replacement as literal text (S17.6.1).
 
 
 ---

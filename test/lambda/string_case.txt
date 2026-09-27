@@ -1,0 +1,31 @@
+'1. ASCII'
+"1.1"
+["hello world", "HELLO WORLD"]
+"1.2"
+["abc 123", "ABC 123"]
+'2. beyond ASCII'
+"2.1"
+["école", "ÉCOLE"]
+"2.2"
+["αβγ", "ΑΒΓ"]
+"2.3"
+["дом", "ДОМ"]
+'3. special casing: a mapping may change the length'
+"3.1"
+["SS", "STRASSE"]
+"3.2"
+["FI", "FF", "ʼN"]
+"3.3"
+["i̇", 2]
+"3.4"
+["ΑΙ", "Ǆ", "ǆ"]
+'4. final sigma'
+"4.1"
+["σας", "σας ας", "σ", "ασ'β"]
+'5. symbols, null and caseless text'
+"5.1"
+['école', 'STRASSE']
+"5.2"
+[null, null]
+"5.3"
+["日本", "123 ?!"]

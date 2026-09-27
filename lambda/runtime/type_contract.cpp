@@ -1605,6 +1605,15 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
             return;
         }
     }
+    // S11.1.2v3: a pattern contract is named by its source. Its tag alone reads
+    // `type`, the type of type values, which its members are not.
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_PATTERN) {
+        const String* source = ((const TypePattern*)type)->source;
+        if (source) {
+            snprintf(buffer, capacity, "%.*s", (int)source->len, source->chars);
+            return;
+        }
+    }
     // S11.1.3: a range contract is named by its bounds. Its tag alone reads
     // `type`, and the old range-value tag read `range`, which its members are
     // not (LR03-14).

@@ -1,0 +1,1 @@
+a count is `{n}`, `{n,m}` or `{n+}`

@@ -7227,108 +7227,63 @@ Item fn_trim_end(Item str_item) {
     return {.item = s2it(result)};
 }
 
-// lower(str) - convert string to lowercase (ASCII only for now)
-Item fn_lower(Item str_item) {
+// lower/upper (S17.7.2): Unicode full case mapping, locale-independent, as
+// ECMAScript's toLowerCase/toUpperCase, shared with LambdaJS; they had mapped
+// ASCII letters only. The text is mapped into a malloc'd buffer before the
+// result is allocated, so a collection there cannot move the source mid-copy.
+static Item text_case_map(Item str_item, bool to_upper) {
     GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
-    // null lowercased is null
+    // null maps to null
     if (str_type == LMD_TYPE_NULL) return ItemNull;
 
     if (!is_text_type_id(str_type)) {
-        log_debug("fn_lower: argument must be a string or symbol");
+        log_debug("fn_%s: argument must be a string or symbol", to_upper ? "upper" : "lower");
         return ItemError;
     }
 
     const char* chars = str_item.get_chars();
     uint32_t len = str_item.get_len();
-    if (!chars || len == 0) {
+    if (!chars || len == 0) return str_item;
+
+    // no special case reaches ASCII, so ASCII text maps byte by byte
+    bool ascii = str_is_ascii(chars, len);
+    if (ascii) {
+        char first = to_upper ? 'a' : 'A';
+        uint32_t i = 0;
+        while (i < len && (chars[i] < first || chars[i] > first + 25)) i++;
+        if (i == len) return str_item;  // nothing to map
+    }
+
+    StrBuf* mapped = strbuf_new_cap(len + 1);
+    bool changed = true;
+    if (ascii) {
+        strbuf_append_str_n(mapped, chars, len);
+        if (to_upper) str_to_upper(mapped->str, chars, len);
+        else str_to_lower(mapped->str, chars, len);
+    } else {
+        changed = utf8_case_map(chars, len, to_upper, mapped);
+    }
+    if (!changed) {
+        strbuf_free(mapped);
         return str_item;
     }
-
-    // Check if any uppercase characters exist (optimization)
-    bool has_upper = false;
-    for (uint32_t i = 0; i < len; i++) {
-        if (chars[i] >= 'A' && chars[i] <= 'Z') {
-            has_upper = true;
-            break;
-        }
-    }
-    if (!has_upper) {
-        return str_item;  // already lowercase
-    }
-
-    if (str_type == LMD_TYPE_SYMBOL) {
-        // create new lowercase symbol - use stack buffer for small strings, malloc for large
-        char stack_buf[256];
-        char* lower_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
-        str_to_lower(lower_chars, chars, len);
-        lower_chars[len] = '\0';
-        Symbol* sym = heap_create_symbol(lower_chars, len);
-        if (lower_chars != stack_buf) mem_free(lower_chars);
-        return {.item = y2it(sym)};
-    }
-
-    String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-    result->len = len;
-    result->flags = 0;
-    String* src = str_item.get_safe_string();
-    result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
-    str_to_lower(result->chars, chars, len);
-    result->chars[len] = '\0';
-    return {.item = s2it(result)};
+    Item result = str_type == LMD_TYPE_SYMBOL
+        ? (Item){.item = y2it(heap_create_symbol(mapped->str, mapped->length))}
+        : (Item){.item = s2it(heap_strcpy(mapped->str, (int64_t)mapped->length))};
+    strbuf_free(mapped);
+    return result;
 }
 
-// upper(str) - convert string to uppercase (ASCII only for now)
+// lower(str) - convert string to lowercase
+Item fn_lower(Item str_item) {
+    return text_case_map(str_item, false);
+}
+
+// upper(str) - convert string to uppercase
 Item fn_upper(Item str_item) {
-    GUARD_ERROR1(str_item);
-    TypeId str_type = get_type_id(str_item);
-
-    // null uppercased is null
-    if (str_type == LMD_TYPE_NULL) return ItemNull;
-
-    if (!is_text_type_id(str_type)) {
-        log_debug("fn_upper: argument must be a string or symbol");
-        return ItemError;
-    }
-
-    const char* chars = str_item.get_chars();
-    uint32_t len = str_item.get_len();
-    if (!chars || len == 0) {
-        return str_item;
-    }
-
-    // Check if any lowercase characters exist (optimization)
-    bool has_lower = false;
-    for (uint32_t i = 0; i < len; i++) {
-        if (chars[i] >= 'a' && chars[i] <= 'z') {
-            has_lower = true;
-            break;
-        }
-    }
-    if (!has_lower) {
-        return str_item;  // already uppercase
-    }
-
-    if (str_type == LMD_TYPE_SYMBOL) {
-        // create new uppercase symbol - use stack buffer for small strings, malloc for large
-        char stack_buf[256];
-        char* upper_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)mem_alloc(len + 1, MEM_CAT_EVAL);
-        str_to_upper(upper_chars, chars, len);
-        upper_chars[len] = '\0';
-        Symbol* sym = heap_create_symbol(upper_chars, len);
-        if (upper_chars != stack_buf) mem_free(upper_chars);
-        return {.item = y2it(sym)};
-    }
-
-    String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-    result->len = len;
-    result->flags = 0;
-    String* src = str_item.get_safe_string();
-    result->is_ascii = src ? src->is_ascii : 0;  // case conversion preserves ASCII status
-    str_to_upper(result->chars, chars, len);
-    result->chars[len] = '\0';
-    return {.item = s2it(result)};
+    return text_case_map(str_item, true);
 }
 
 // url_resolve(base, relative) - resolve a relative URL against a base URL
@@ -7411,10 +7366,6 @@ static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offse
     return part;
 }
 
-static unsigned char ascii_case_fold(unsigned char c) {
-    return (c >= 'A' && c <= 'Z') ? (unsigned char)(c + ('a' - 'A')) : c;
-}
-
 // T28-5 (N5): the literal scan shared by split(), replace() and find().
 // Returns the index of the leftmost occurrence of `needle` starting at or
 // after `from`, or SIZE_MAX. The case-sensitive scan is lib's `str_find`, the
@@ -7423,26 +7374,15 @@ static unsigned char ascii_case_fold(unsigned char c) {
 // called `memcmp` at EVERY position, and paid it twice (the count pass, then
 // the split/replace pass): a quarter of three_way_merge, and four fifths of
 // revcomp, whose complement is a chain of replace() calls.
-// memchr cannot fold case, so `ignore_case` (ASCII folding) probes every
-// position. Leftmost-first like the loops it replaces; callers step past a
-// match by `needle_len`, which keeps matches non-overlapping.
+// A case-insensitive search goes to RE2 instead (S17.7.1), whose folding the
+// pattern path shares. Leftmost-first like the loops it replaces; callers step
+// past a match by `needle_len`, which keeps matches non-overlapping.
 static size_t literal_find(const char* chars, size_t chars_len, size_t from,
-        const char* needle, size_t needle_len, bool ignore_case) {
+        const char* needle, size_t needle_len) {
     if (!chars || !needle || needle_len == 0 || needle_len > chars_len) {
         return SIZE_MAX;
     }
     size_t last = chars_len - needle_len;   // last index a match may start at
-    if (ignore_case) {
-        for (; from <= last; from++) {
-            size_t i = 0;
-            while (i < needle_len && ascii_case_fold((unsigned char)chars[from + i]) ==
-                    ascii_case_fold((unsigned char)needle[i])) {
-                i++;
-            }
-            if (i == needle_len) return from;
-        }
-        return SIZE_MAX;
-    }
     if (from > last) return SIZE_MAX;
     size_t at = str_find(chars + from, chars_len - from, needle, needle_len);
     return at == STR_NPOS ? SIZE_MAX : from + at;
@@ -7452,16 +7392,15 @@ static size_t literal_find(const char* chars, size_t chars_len, size_t from,
 // and find()'s window total. A one-byte needle goes to the SWAR byte counter,
 // because a dense one ("A" in DNA) would pay a memchr call per match.
 static int64_t count_literal_matches(const char* chars, size_t chars_len,
-        const char* needle, size_t needle_len, bool ignore_case) {
+        const char* needle, size_t needle_len) {
     if (!chars || !needle || needle_len == 0 || needle_len > chars_len) return 0;
-    if (needle_len == 1 && !ignore_case) {
+    if (needle_len == 1) {
         return (int64_t)str_count_byte(chars, chars_len, needle[0]);
     }
     int64_t count = 0;
     size_t pos = 0;
     for (;;) {
-        size_t at = literal_find(chars, chars_len, pos, needle, needle_len,
-            ignore_case);
+        size_t at = literal_find(chars, chars_len, pos, needle, needle_len);
         if (at == SIZE_MAX) return count;
         count++;
         pos = at + needle_len;
@@ -7660,7 +7599,7 @@ Item fn_split(Item str_item, Item sep_item) {
     const char* source_chars = rooted_str.get().get_chars();
     const char* separator_chars = rooted_sep.get().get_chars();
     int64_t part_count = count_literal_matches(source_chars, str_len,
-        separator_chars, sep_len, false) + 1;
+        separator_chars, sep_len) + 1;
     (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
     size_t start = 0;
     size_t p = 0;
@@ -7671,7 +7610,7 @@ Item fn_split(Item str_item, Item sep_item) {
         // in indices.
         const char* str_chars = rooted_str.get().get_chars();
         const char* sep_chars = rooted_sep.get().get_chars();
-        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len, false);
+        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len);
         if (at == SIZE_MAX) break;
         String* part = split_heap_string_slice(rooted_str, start, at - start,
             source_is_ascii);
@@ -7768,7 +7707,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     bool source_is_ascii = text_item_is_ascii(rooted_str.get());
     bool separator_is_ascii = text_item_is_ascii(rooted_sep.get());
     int64_t match_count = count_literal_matches(rooted_str.get().get_chars(), str_len,
-        rooted_sep.get().get_chars(), sep_len, false);
+        rooted_sep.get().get_chars(), sep_len);
     (void)array_reserve_append_slots((Array*)rooted_result.get(),
         match_count * 2 + 1);
     size_t start = 0;
@@ -7778,7 +7717,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         // re-read after every allocating round, as in fn_split
         const char* str_chars = rooted_str.get().get_chars();
         const char* sep_chars = rooted_sep.get().get_chars();
-        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len, false);
+        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len);
         if (at == SIZE_MAX) break;
         // push part before separator
         String* part = split_heap_string_slice(rooted_str, start, at - start,
@@ -7992,7 +7931,9 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     // at Element's offsets — so the attribute face is reached by kind.
     TypeMap* options_shape = lambda_attr_shape(options_type, options_item.map);
     void* options_data = lambda_attr_data(options_type, options_item.map);
-    if (!options_shape || !options_data) return false;
+    // an empty map has no shape or buffer, and sets no option; it was
+    // rejected, so `replace(s, "a", "-", {})` returned an error
+    if (!options_shape || !options_data) return true;
     bool is_found = false;
     Item limit_item = _map_get(options_shape, options_data, "limit", &is_found);
     if (is_found && get_type_id(limit_item) != LMD_TYPE_NULL) {
@@ -8149,22 +8090,25 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
                 log_debug("fn_replace: third argument must be a string for pattern replace");
                 return ItemError;
             }
+            // an empty subject still holds an empty match, which a pattern
+            // like \(d*) replaces (S17.6.1): "" becomes "-", as in JS
             const char* str_chars = str_item.get_chars();
             uint32_t str_len = str_item.get_len();
+            if (!str_chars) { str_chars = ""; str_len = 0; }
             const char* repl_chars = new_is_null ? "" : new_item.get_chars();
             uint32_t repl_len = new_is_null ? 0 : new_item.get_len();
-
-            if (!str_chars || str_len == 0) return str_item;
 
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) return str_item;
             int64_t pattern_limit = options_legacy_pattern_limit(options);
-            String* result = (!options.ignore_case && !options.has_limit && !options.has_last)
-                ? pattern_replace_all(pattern, str_chars, str_len,
-                                      repl_chars ? repl_chars : "", repl_chars ? repl_len : 0)
-                : pattern_replace_all_options(pattern, str_chars, str_len,
-                                              repl_chars ? repl_chars : "", repl_chars ? repl_len : 0,
-                                              pattern_limit, options.ignore_case);
+            // S17.6.1: one semantics with or without options. Matches step as
+            // ECMAScript replaceAll steps them, empty ones included, and the
+            // replacement is literal text. The plain call used RE2's
+            // GlobalReplace, which skipped an empty match after a non-empty one
+            // and rewrote `\0`..`\9` in the replacement.
+            String* result = pattern_replace_all_options(pattern, str_chars, str_len,
+                repl_chars ? repl_chars : "", repl_chars ? repl_len : 0,
+                pattern_limit, options.ignore_case);
             if (!result) return str_item;
             return {.item = s2it(result)};
         }
@@ -8187,7 +8131,24 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
     if (!str_chars || str_len == 0) return str_item;
     if (!old_chars || old_len == 0) return str_item;  // nothing to replace
 
-    int64_t total = count_literal_matches(str_chars, str_len, old_chars, old_len, options.ignore_case);
+    // S17.7.1: case-insensitive literal text folds as a pattern does, in RE2
+    if (options.ignore_case) {
+        if ((options.has_limit && options.limit == 0) ||
+            (options.has_last && options.last == 0)) return str_item;
+        String* replaced = literal_replace_all_ignore_case(str_chars, str_len, old_chars,
+            old_len, new_chars ? new_chars : "", new_chars ? new_len_val : 0,
+            options_legacy_pattern_limit(options));
+        if (!replaced) return str_item;
+        if (str_type != LMD_TYPE_SYMBOL) return {.item = s2it(replaced)};
+        // copy the bytes out first: allocating the symbol may collect `replaced`
+        StrBuf* bytes = strbuf_new_cap(replaced->len + 1);
+        strbuf_append_str_n(bytes, replaced->chars, replaced->len);
+        Symbol* symbol = heap_create_symbol(bytes->str, bytes->length);
+        strbuf_free(bytes);
+        return {.item = y2it(symbol)};
+    }
+
+    int64_t total = count_literal_matches(str_chars, str_len, old_chars, old_len);
     int64_t first = 0, replace_count = 0;
     // Limit is applied before replacement so first/last-N semantics match find().
     select_match_window(total, options, &first, &replace_count);
@@ -8213,8 +8174,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         dest = result->chars;
     }
 
-    if (old_len == 1 && replacement_len == 1 && !options.ignore_case &&
-            replace_count == total) {
+    if (old_len == 1 && replacement_len == 1 && replace_count == total) {
         translate_byte(dest, str_chars, str_len, old_chars[0], new_chars[0]);
         dest += str_len;
     } else {
@@ -8225,8 +8185,7 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
         int64_t ordinal = 0;
         int64_t replaced = 0;
         while (replaced < replace_count) {
-            size_t at = literal_find(str_chars, str_len, pos, old_chars,
-                old_len, options.ignore_case);
+            size_t at = literal_find(str_chars, str_len, pos, old_chars, old_len);
             if (at == SIZE_MAX) break;
             if (ordinal >= first) {
                 memcpy(dest, str_chars + copied, at - copied);
@@ -8289,8 +8248,9 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
 
     const char* str_chars = source_item.get_chars();
     uint32_t str_len = source_item.get_len();
-
-    if (!str_chars || str_len == 0) return {.array = array()};
+    // a pattern can match the empty subject (`"" is \(d*)`), so only the
+    // literal search below may skip it
+    if (!str_chars) { str_chars = ""; str_len = 0; }
 
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
@@ -8316,6 +8276,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         log_debug("fn_find: second argument must be a string, symbol, or pattern");
         return ItemError;
     }
+    if (str_len == 0) return {.array = array()};
 
     const char* needle = pattern_item.get_chars();
     uint32_t needle_len = pattern_item.get_len();
@@ -8326,7 +8287,16 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
     if (!needle || needle_len == 0) return {.array = rooted_result.get()};
 
-    int64_t total = count_literal_matches(str_chars, str_len, needle, needle_len, options.ignore_case);
+    // S17.7.1: case-insensitive literal text folds as a pattern does, in RE2
+    if (options.ignore_case) {
+        if ((options.has_limit && options.limit == 0) ||
+            (options.has_last && options.last == 0)) return {.array = rooted_result.get()};
+        List* found = literal_find_all_ignore_case(str_chars, str_len, needle, needle_len,
+            options_legacy_pattern_limit(options));
+        return found ? (Item){.array = (Array*)found} : (Item){.array = rooted_result.get()};
+    }
+
+    int64_t total = count_literal_matches(str_chars, str_len, needle, needle_len);
     int64_t first = 0, selected_count = 0;
     // Limit selects the visible match window; replacement uses the same helper.
     select_match_window(total, options, &first, &selected_count);
@@ -8338,8 +8308,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
     size_t indexed_byte = 0;
     int64_t indexed_codepoints = 0;
     while (pushed < selected_count) {
-        size_t at = literal_find(str_chars, str_len, pos, needle, needle_len,
-            options.ignore_case);
+        size_t at = literal_find(str_chars, str_len, pos, needle, needle_len);
         if (at == SIZE_MAX) break;
         if (ordinal >= first) {
             // Match and slice offsets share the same code-point index unit.

@@ -1,0 +1,1 @@
+a count `{n,m}` in a pattern needs n no greater than m

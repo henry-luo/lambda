@@ -621,9 +621,13 @@ Type check (`is`) — full-match semantics:
 
 **Character classes inside `\(...)`:** `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string
 
+**Negation:** `!` matches one character outside a set of single characters, like regex `[^…]`: `\(!d)`, `\(!("a" | "b"))`, `\(!">")`. Negating anything longer is an error. Inside a pattern `!` is prefix-only: `\(w ! d)` is `w` followed by `!d`. Exclude whole patterns at the type level: `\(w+) ! \(d+)`.
+
 Reserved inside the island only — quote to match one literally: `\("d" w+)`.
 
-**Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `[n]` exactly n, `[n,m]` range
+**Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `{n}` exactly n, `{n,m}` n to m, `{n+}` n or more (not regex's `{n,}`)
+
+**Precedence inside `\(...)`**, tightest first: atom (`"a" to "z"` is one), prefix `!`, quantifier, concatenation, `|`. So `\(!d+)` is `(!d)+` and `\("a" | "b" "c")` matches `"a"` or `"bc"`. `|` is the only binary operator; there is no `&` inside a pattern, so intersect whole patterns: `\(a+) & \(w+)`.
 
 **Domain:** `\(...)` matches strings, `\symbol(...)` matches symbols; the tag is checked before the content, and pattern bodies always use string literals for content.
 Given `type SymIdent = \symbol(a w*)`:
@@ -685,6 +689,7 @@ Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
 | `replace("a1b2c3", digit, "X")` | `"aXbXcX"` |
 | `replace("hello   world", ws, " ")` | `"hello world"` |
 | `replace("abc", "b", "")` | `"ac"` |
+| `replace("aab", \("a"*), "-")` | `"--b-"` — empty matches count, as in JS `replaceAll`; the replacement is literal |
 
 `split(str, pattern_or_string)`
 
@@ -818,17 +823,24 @@ pn main() {                     // print is a pn: only a pn may call it
 
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` `#` `?` `.?` - Primary, force, query
-2. `-` `+` `not` `!` `&` - Unary (`not`: logical NOT, `!`: type negation, `&`: address-of)
-3. `**` - Exponentiation
+2. `-` `+` `*` `&` - Unary (`*`: spread, `&`: address-of)
+3. `**` - Exponentiation (right-associative)
 4. `*` `/` `div` `%` - Multiplicative
-5. `+` `-` - Additive
+5. `+` `-` `++` - Additive, concatenation
 6. `<` `<=` `>` `>=` - Relational
 7. `==` `!=` `===` - Equality (`===`: reference equality)
-8. `and` - Logical AND
-9. `or` - Logical OR
-10. `to` - Range
-11. `is` `in` - Type operations (`is nan` for NaN detection)
-12. `|>` `|:` `that` - Pipe, Filter and Proviso
+8. `to` - Range
+9. `&` - Type intersection
+10. `!` - Type exclusion
+11. `|` - Type union
+12. `is` `in` `at` `<:` - Type test, value and key membership, subtype (`is nan` for NaN detection)
+13. `not` - Logical NOT: `not a == b` is `not (a == b)`
+14. `and` - Logical AND
+15. `or` - Logical OR
+16. `|>` `|:` `that` - Pipe, Filter and Proviso
+
+There is no unary `!` in expressions: use `not`. In type position `!T` is
+the complement type, as in `x is !null`.
 
 ## Quick Examples
 

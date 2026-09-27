@@ -1165,6 +1165,10 @@
             "named": true
           },
           {
+            "type": "char_negation_type",
+            "named": true
+          },
+          {
             "type": "datetime",
             "named": true
           },

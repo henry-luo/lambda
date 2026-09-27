@@ -1495,8 +1495,11 @@ module.exports = grammar({
     _char_primary_type: $ => choice(
       $.range_type, $._non_null_literal, $.identifier, $.char_class,
     ),
+    // S11.1.2v3 (SP19): the island binds atom (a range is one), prefix `!`,
+    // suffix, concatenation, `|`, tightest first, so `!d+` is `(!d)+`.
     char_occurrence_type: $ => prec.right(seq(
-      field('operand', $._char_primary_type), field('operator', $.occurrence),
+      field('operand', choice($._char_primary_type, $.char_negation_type)),
+      field('operator', $.occurrence),
     )),
     char_negation_type: $ => prec.right(seq(
       '!', field('operand', $._char_primary_type),
@@ -1509,7 +1512,14 @@ module.exports = grammar({
       choice($.char_unary_type, $.char_grouped_type),
       repeat1(choice($.char_unary_type, $.char_grouped_type)),
     )),
-    char_binary_type: $ => choice(...type_operators($, $._char_pattern_expr)),
+    // S11.1.2v3 (SP18, SP20): `|` is the island's only binary operator. `!` is
+    // only a prefix there, since whitespace joins atoms (`w ! d` is `w` then
+    // `!d`), and `&` or `!` between patterns is written between whole islands.
+    char_binary_type: $ => prec.left('set_union', seq(
+      field('left', $._char_pattern_expr),
+      field('operator', '|'),
+      field('right', $._char_pattern_expr),
+    )),
     char_unary_type: $ => prec.right(choice(
       $.char_occurrence_type,
       $.char_negation_type,

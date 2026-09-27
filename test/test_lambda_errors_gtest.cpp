@@ -1385,6 +1385,71 @@ TEST_F(NegativeScriptTest, PatternClassBindingCollisionReportsReservedName) {
         "pattern class 'd' is reserved inside pattern islands");
 }
 
+// S11.1.2v3: island `!` complements a single-character set; any other operand
+// had compiled to nothing, silently changing what the pattern matched.
+TEST_F(NegativeScriptTest, PatternNegationNeedsSingleCharacterSet) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_negation_non_set.ls",
+        "`!` in a pattern negates a single character");
+}
+
+// S11.1.3: range bounds in a pattern are single characters.
+TEST_F(NegativeScriptTest, PatternRangeBoundsAreSingleCharacters) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_range_bound.ls",
+        "a range in a pattern runs between two single characters");
+}
+
+// S11.1.2v3 (SP20): `|` is an island's only binary operator; an island `&` had
+// compiled to a lookahead RE2 rejects, so the pattern silently matched nothing.
+TEST_F(NegativeScriptTest, PatternIntersectionNamesWholePatternForm) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_intersection.ls",
+        "`&` is not a pattern operator: intersect whole patterns");
+}
+
+// A name a pattern cannot use had compiled to nothing, so the pattern silently
+// matched only "". Each is now a compile error at the name.
+TEST_F(NegativeScriptTest, PatternUnknownNameHintsJoinedClasses) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_unknown_name.ls",
+        "`dw` is not defined before this pattern; separate classes with a space");
+}
+
+TEST_F(NegativeScriptTest, PatternForwardReferenceIsUndefined) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_forward_reference.ls",
+        "`B` is not defined before this pattern");
+}
+
+TEST_F(NegativeScriptTest, PatternNameMustBeAPattern) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_not_a_pattern.ls",
+        "`N` is not a pattern: a pattern names only patterns");
+}
+
+// S16.8.6v3: a count inside a pattern takes the type-position spellings; its
+// text had reached the regex unchecked.
+TEST_F(NegativeScriptTest, PatternCountSpellingIsChecked) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_count_spelling.ls",
+        "a count is `{n}`, `{n,m}` or `{n+}`");
+}
+
+TEST_F(NegativeScriptTest, PatternOpenCountNamesItsReplacement) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_open_count.ls",
+        "`T{n,}` is not the open count");
+}
+
+// Counts the regex engine refuses left the pattern silently matching nothing.
+TEST_F(NegativeScriptTest, PatternCountBoundsAreOrdered) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_count_order.ls",
+        "a count `{n,m}` in a pattern needs n no greater than m");
+}
+
+TEST_F(NegativeScriptTest, PatternCountHasEngineLimit) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_count_limit.ls",
+        "a count in a pattern is at most 1000");
+}
+
+TEST_F(NegativeScriptTest, PatternTheEngineRefusesIsACompileError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_too_large.ls",
+        "this pattern cannot be compiled");
+}
+
 // S11.1.6v2/S16.8.6v3: a count on a *run* is the occurrence family, spelled as
 // in regex. The bracket forms it replaced name their replacement rather than
 // changing meaning under the same spelling.

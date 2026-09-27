@@ -38,7 +38,7 @@ Per-kind handling:
 - **Primitives** — `int`/`float`/`string`/`bool`/`decimal`/`datetime` are checked by comparing the `Item`'s `get_type_id` against the schema primitive, with the numeric tower's promotions respected ([LR_04](LR_04_Numbers_Decimal_DateTime.md)).
 - **Maps & elements** — the schema's field list is the `ShapeEntry` chain of its `TypeMap`/`TypeElmt` ([LR_03](LR_03_Value_and_Type_Model.md)); each field is looked up in the data map and recursively validated, with optional-field and null handling per the field's occurrence/type. Element validation additionally checks the tag name and validates children.
 - **Arrays & lists** — element-count constraints followed by per-element recursion against the element type.
-- **Occurrence** — `TypeUnary` carries the `?`/`+`/`*`/`[n]` occurrence operators; `validate_pattern.cpp` implements the count semantics for repeated content.
+- **Occurrence** — `TypeUnary` carries the `?`/`+`/`*` occurrence operators and the counted run `{n}`/`{n,m}`/`{n+}` (as `min_count`/`max_count`), plus the `T[]`/`T[n]` array layer (`OPERATOR_ARRAY`, S11.1.6v3); `validate_occurrence_type` in `validate_pattern.cpp` implements the count semantics for repeated content.
 - **Union / intersection / exclusion** — `TypeBinary` is resolved in `validate_pattern.cpp`: a value validates against a union if it matches any member (bounded by `MAX_UNION_TYPES = 32`, `validate_pattern.cpp:406`).
 - **Type references** — a named-type reference resolves through the loaded type table; a `visited_nodes` hashmap detects and breaks circular references so a recursive schema terminates.
 - **Regex patterns** — `TypePattern` (a compiled RE2 regex, [LR_03](LR_03_Value_and_Type_Model.md)) is matched by `pattern_full_match_chars` in `validate_against_pattern_type` (`validate.cpp:8`), a full-string match.
@@ -83,7 +83,7 @@ The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOL
 | `lambda/validator/validator.hpp` | Public `SchemaValidator` API, `ValidationResult`/`ValidationError`, options. |
 | `lambda/validator/validator_internal.hpp` | Internal structs, `PathScope`/`DepthScope` RAII, helpers. |
 | `lambda/validator/validate.cpp` | Core `validate_against_type` dispatch; primitive/map/element/array validation; RE2 pattern entry. |
-| `lambda/validator/validate_pattern.cpp` | Occurrence (`?`/`+`/`*`/`[n]`) and union/intersection/exclusion resolution. |
+| `lambda/validator/validate_pattern.cpp` | Occurrence (`?`/`+`/`*`/`{n,m}`, and the `T[]`/`T[n]` array layer) and union/intersection/exclusion resolution. |
 | `lambda/validator/doc_validator.cpp` | `SchemaValidator::load_schema` (harvest `Type*` from a parsed `.ls`), `validate_document`, options. |
 | `lambda/validator/ast_validate.cpp` | CLI driver (`exec_validation`/`run_ast_validation`), format detection, default-schema + root-type resolution, parse-only `.ls` syntactic validation. |
 | `lambda/validator/error_reporting.cpp` | Text/JSON error formatting; path rendering; `format_type_name`. |

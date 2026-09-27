@@ -2,6 +2,7 @@
 #define LAMBDA_UTF_STRING_H
 
 #include "../lambda.h"
+#include "../../lib/strbuf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,11 @@ char* normalize_utf8proc_nfkc(const char* str, int len, int* out_len);
 char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len);
 char* normalize_utf8proc_casefold(const char* str, int len, int* out_len);
 void free_utf8proc_result(char* str);
+
+// S17.7.2: Unicode full case mapping, locale-independent, as ECMAScript's
+// toLowerCase/toUpperCase. Appends the mapped text to `out` and returns whether
+// any code point changed; bytes that are not a scalar value are kept as is.
+bool utf8_case_map(const char* chars, size_t len, bool to_upper, StrBuf* out);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,1 @@
+`N` is not a pattern: a pattern names only patterns, literal unions and character ranges
