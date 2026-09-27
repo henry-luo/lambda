@@ -9,6 +9,9 @@
 // Headless smoke:
 //   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log
 
+import pdf: lambda.pdf.pdf
+import pdf_html: lambda.pdf.html
+
 let PROJECT_ROOT = "."
 
 // --------------------------------------------------------------------------
@@ -102,7 +105,6 @@ fn is_renderable_document(extension) =>
 
 fn preview_frame_id(extension) {
   if (document_format(extension) == "html") { "html-preview" }
-  else if (is_pdf_document(extension)) { "pdf-preview" }
   else { "latex-preview" }
 }
 
@@ -119,7 +121,13 @@ fn selected_preview(file) {
   else {
     let selected_path = file["file_path"]
     let format = document_format(file["extension"])
-    if (format == null) { null }
+    if (is_pdf_document(file["extension"])) {
+      // Render in this document's runtime; a nested PDF iframe cannot start another runtime.
+      let parsed = input(selected_path, 'pdf') ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected PDF"> }
+      else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
+    }
+    else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
   }
 }
@@ -272,9 +280,12 @@ view <document_pane> {
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
       if (~.preview_mode == "view") {
-        if (document_format(~.file["extension"]) == "html" or
-            is_latex_document(~.file["extension"]) or
-            is_pdf_document(~.file["extension"])) {
+        if (is_pdf_document(~.file["extension"])) {
+          let preview = selected_preview(~.file);
+          <section id:"pdf-preview", class:"rendered-preview pdf-preview",
+            apply(preview)>
+        } else if (document_format(~.file["extension"]) == "html" or
+                   is_latex_document(~.file["extension"])) {
           // defer optional document transforms until their file is selected.
           <iframe id:preview_frame_id(~.file["extension"]), class:"document-preview",
             src:absolute_file_path(~.file["file_path"])>
@@ -401,6 +412,7 @@ on preview_tab(tab) {
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Editor — Prototype">
+    <style pdf_html.DEFAULT_CSS>
     <style "
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
