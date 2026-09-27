@@ -1,4 +1,4 @@
-let man = input('./test/input/test.man', 'man')
+let man = input('./test/input/test.man', 'man')^
 
 "Man page parsing successful!"
 

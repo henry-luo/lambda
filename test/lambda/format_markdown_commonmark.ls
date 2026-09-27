@@ -1,7 +1,7 @@
 // Markdown formatter block layer (format-md.cpp): each source is parsed and
 // written back as CommonMark; `stable` checks that writing the result again
 // changes nothing, so the output parses back to the same document.
-fn md(src) => format(parse(src, 'markdown'), 'markdown') or "(error)"
+fn md(src) => format(parse(src, 'markdown') ^ { ^ }, 'markdown') or "(error)"
 fn stable(src) => md(md(src)) == md(src)
 
 let cases = [

@@ -22,7 +22,7 @@ let source = "<?xml version=\"1.0\"?>
 <!-- trailing -->
 "
 
-let loaded = sv.import_text(source)
+let loaded = sv.import_text(source)^
 let doc = loaded.doc
 fn attrs_s(n) => join([for (a in n.attrs) string(a.name) ++ "=" ++ string(a.value)], " ")
 fn tags(d) => [for (c in d.content) c.tag]

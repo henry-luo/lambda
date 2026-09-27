@@ -27,14 +27,14 @@ import util: .util
 //
 // path: file path to the spec (e.g. @./openapi.yaml)
 // returns: parsed OpenAPI spec map
-pub fn load_spec(path) => input(path)
+pub fn load_spec(path) => input(path)^
 
 // Parse an OpenAPI spec from a raw string.
 //
 // source: YAML or JSON string
 // fmt: format hint — 'yaml' or 'json'
 // returns: parsed OpenAPI spec map
-pub fn parse_spec(source, fmt) => parse(source, fmt)
+pub fn parse_spec(source, fmt) => parse(source, fmt)^
 
 // ============================================================
 // Schema conversion

@@ -448,6 +448,28 @@ static const TierParityFixture kTune27TierParity[] = {
     // S12.3.2 (LR07-19): a method's named arguments bind by name, as a direct
     // call's do; both tiers had bound them by position.
     {"test/lambda/object_method_named_args.ls", "test/lambda/object_method_named_args.txt"},
+    // S7.4.4 (LR10-10): error(msg, source), the .source/.file/.line/.column
+    // members, and an error kept whole inside a map field.
+    {"test/lambda/error_members.ls", "test/lambda/error_members.txt"},
+    // S7.7.1 (LR10-8): a raised non-error crosses the declared return; the JIT
+    // had handed it to the handler as a success value.
+    {"test/lambda/raise_non_error.ls", "test/lambda/raise_non_error.txt"},
+    // S7.9.3 (LR12-25): print renders an error; it had printed nothing.
+    {"test/lambda/proc/print_error_value.ls", "test/lambda/proc/print_error_value.txt"},
+    // S11.4.3 (LR12-25): a system function's rejected error operand is the
+    // call's value; both tiers had returned it from the enclosing function.
+    {"test/lambda/proc/rejected_error_value_flow.ls",
+     "test/lambda/proc/rejected_error_value_flow.txt"},
+    // S11.4.3 (LR12-36): the same for an operand typed `any`, in every call
+    // form; the JIT had read `err |> len` as 0.
+    {"test/lambda/proc/rejected_error_any_operand.ls",
+     "test/lambda/proc/rejected_error_any_operand.txt"},
+    // TE-17 I3 (LR12-24): a defect-capable call's result is `T | error`; the
+    // JIT had read the error's bits as a number in lanes, slots and stores.
+    {"test/lambda/proc/defect_value_flow.ls", "test/lambda/proc/defect_value_flow.txt"},
+    // S11.4.1v3 (LR03-13): a call through a declared function-type contract
+    // checks its result; the JIT had read a string as 0.
+    {"test/lambda/contract_return_check.ls", "test/lambda/contract_return_check.txt"},
 };
 
 TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {

@@ -24,7 +24,7 @@ pn maybe_uwide(ok) u64^ {
 }
 
 pn delayed_wide() {
-    sleep(1)
+    sleep(1)^
     return 9223372036854775805i64
 }
 

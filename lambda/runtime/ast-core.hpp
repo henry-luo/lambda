@@ -792,6 +792,12 @@ typedef struct AstCallNode : AstNode {
     bool interp_has_named_args;
     bool interp_has_spread_args;
     bool interp_call_shape_planned;
+    // S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
+    // yields that error as its value; set when an argument may be one (its
+    // type admits error, or it may carry a defect), so the call is lowered as
+    // a join. It occupies the padding before the guard bits, so the node
+    // keeps its size.
+    bool rejected_error_flows;
     // S12.1.4v2(3): LAMBDA_COLOUR_GUARD_* bits for an `fn`-context call whose
     // colour must be checked at run time; 0 when statically resolved.
     uint32_t fn_colour_guard;
@@ -1016,6 +1022,10 @@ typedef struct AstRaiseNode : AstNode {
         AstNode *value;
         AstNode *argument;
     };
+    // S7.4.6: `raise v` of a non-error raises error(v), stamped with the
+    // operand's position as a written error() call would be
+    uint32_t site_line;
+    uint32_t site_column;
 } AstRaiseNode;
 
 typedef struct AstArrayNode : AstNode {

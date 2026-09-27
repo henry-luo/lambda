@@ -1,5 +1,5 @@
-"level 1fn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function value"
-212
-212
-212
-"fn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefn_call2: cannot call non-function valuefalsydefault"
+"level 1level 2level 1level 3level 2level 1level 4level 1level 5level 1"
+503
+502
+501
+"error at 3error at 2error at 1base errorfalsydefault"

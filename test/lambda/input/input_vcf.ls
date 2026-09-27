@@ -1,7 +1,7 @@
 // Test for vCard (Virtual Contact File) parsing and formatting
 // This script tests vCard input parsing and various output formats
 
-let contact_data = input('./test/input/simple.vcf', 'vcf')
+let contact_data = input('./test/input/simple.vcf', 'vcf')^
 "vCard parsing result:"
 contact_data
 

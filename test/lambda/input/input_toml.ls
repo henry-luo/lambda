@@ -1,7 +1,7 @@
 // test for TOML parsing and formatting
 // this script tests TOML input parsing and various output formats
 
-let toml_data = input('./test/input/test.toml', 'toml')
+let toml_data = input('./test/input/test.toml', 'toml')^
 
 "TOML parsing result:"
 toml_data

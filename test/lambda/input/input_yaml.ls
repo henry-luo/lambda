@@ -1,7 +1,7 @@
 // test for YAML parsing and formatting
 // this script tests YAML input parsing and various output formats
 
-let yaml_data = input('./test/input/test.yaml', 'yaml')
+let yaml_data = input('./test/input/test.yaml', 'yaml')^
 
 "YAML parsing result:"
 yaml_data
@@ -25,6 +25,6 @@ format(yaml_data, 'toml')
 format(yaml_data, 'yaml')
 
 "more comprehensive YAML test:"
-format(input("test/input/more_test.yaml", "yaml"), "yaml")
+format(input("test/input/more_test.yaml", "yaml")^, "yaml")
 
 "test completed."

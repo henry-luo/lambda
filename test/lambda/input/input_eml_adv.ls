@@ -2,12 +2,12 @@
 // Tests various email formats and edge cases
 
 "\n=== Testing basic EML parsing ==="
-let simple_eml = input('./test/input/simple.eml', 'eml')
+let simple_eml = input('./test/input/simple.eml', 'eml')^
 "Simple EML result:"
 simple_eml
 
 "\n=== Testing complex EML parsing ==="
-let complex_eml = input('./test/input/test.eml', 'eml')
+let complex_eml = input('./test/input/test.eml', 'eml')^
 "Complex EML result:"
 complex_eml
 

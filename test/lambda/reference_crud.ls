@@ -4,7 +4,7 @@
 "===== temp. DOCUMENTS (PTH44v2, PTH76) =====";
 
 // Runtime data gains identity by being PLACED IN A DOCUMENT.
-let t = temp('crud_a', {n: 1, m: {x: 1, y: 2}, rows: [{id: 1}, {id: 2}]});
+let t = temp('crud_a', {n: 1, m: {x: 1, y: 2}, rows: [{id: 1}, {id: 2}]})^;
 &t.m;
 &t.rows;
 (t.rows === temp.'crud_a'#rows);
@@ -49,7 +49,7 @@ temp.'crud_a'#rows;
 
 "===== THE open TRANSACTION (PTH66v2, PTH68v3) =====";
 
-let d = temp('crud_b', {n: 10});
+let d = temp('crud_b', {n: 10})^;
 // One bounded transaction: every edit lands at the explicit commit.
 open b = temp.'crud_b' {
     put b.n = 20;
@@ -79,6 +79,6 @@ temp.'crud_b'#n;
 
 // A commit during the iteration advances the head for later forces and leaves
 // the iteration untouched, so every row is reached.
-let e = temp('crud_c', {rows: [{id: 1}, {id: 2}, {id: 3}]});
+let e = temp('crud_c', {rows: [{id: 1}, {id: 2}, {id: 3}]})^;
 for (v in temp.'crud_c'#rows) { put v.seen = true };
 temp.'crud_c'#rows

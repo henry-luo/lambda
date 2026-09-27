@@ -13,7 +13,7 @@ pn run() {
     wr_at(vals, keys[3]) ^ { wr = "raised" }
     var wr2 = null
     wr_at(vals, keys[2]) ^ { wr2 = "raised" }
-    wr_at(vals, keys[0])
+    wr_at(vals, keys[0])^
     var m: int[] = fill(4, 2)
     var s = 0
     i = 0

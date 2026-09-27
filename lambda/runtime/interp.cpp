@@ -1162,7 +1162,6 @@ static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
 static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         Item value) {
     if (!named) return false;
-    Item source = value;
     char boundary[192];
     snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
         named->name ? (int)named->name->len : 0,
@@ -1183,11 +1182,13 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         // CW34: a borrowed handle was already decided by cow_bind_rmw_handle
         cow_mark_shared(bound);
     }
-    if (!item_is_error(source) && item_is_error(bound) && named->declared_type &&
+    if (item_is_error(bound) && named->declared_type &&
             !lambda_type_accepts_error(named->declared_type)) {
         // A failed deferred boundary must not publish ItemError into the slot:
         // MIR returns before the store, so continuing would expose a binding
         // that cannot exist and would run statements past the declaring block.
+        // An error the initializer carries as its value skips the same way
+        // (S7.7.2): `let n: int = len(mode)` had bound it (LR12-25).
         interp_signal(f, EvalSignal::ERROR_SKIP, bound);
         return false;
     }
@@ -1605,12 +1606,9 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
 
     if (sysfunc_params_reject_error(info)) {
         for (int i = 0; i < argc; i++) {
-            if (item_is_error(args[i])) {
-                // MIR returns a rejected system-call error from this activation
-                // before a local handler can turn it into ordinary content.
-                interp_signal(f, EvalSignal::RETURNED, args[i]);
-                return args[i];
-            }
+            // S11.4.3 (LR12-25, LR12-36): the call's value is the rejected
+            // error; it never returns from this activation (S7.7.3)
+            if (item_is_error(args[i])) return args[i];
         }
     }
 
@@ -1786,6 +1784,18 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
     *leaf = value_leaf ? cow_place_leaf(root_slot.get(), path_slot.get())
                        : cow_path_borrow(root_slot.get(), path_slot.get());
     return true;
+}
+
+// LR03-13: a call through a declared function-type contract crosses that
+// contract's return where it is made, as a declared return does (S7.7.1); the
+// failure is the call's value, like a rejected argument (S7.7.3).
+static Item interp_check_contract_return(InterpFrame* f, AstCallNode* node,
+        Item result) {
+    Type* contract = ast_call_contract_return(node);
+    if (!contract || item_is_error(result) || interp_frame_pending(f)) return result;
+    Scratch result_root(f);
+    result_root.set(result);
+    return lambda_type_check(result_root.get(), contract, "function return");
 }
 
 static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
@@ -2096,6 +2106,12 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         }
         Item sresult = eval_sys_call(f, sinfo, (const Item*)(void*)words, argc,
             node->type);
+        if (sinfo && (sinfo->fn == SYSFUNC_ERROR || sinfo->fn == SYSFUNC_ERROR2)) {
+            AstSysFuncNode* site = (AstSysFuncNode*)callee;
+            sresult = lambda_error_stamp_site(sresult,
+                f->module ? f->module->reference : NULL,
+                site->site_line, site->site_column);
+        }
         // floor/ceil/round/trunc/abs preserve their argument's lane: the boxed
         // helper always yields float, while lowering unboxes that result by the
         // *call node's* static type (POST_PROCESS_UNBOX, transpile-mir.cpp), so
@@ -2334,14 +2350,14 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
                 transport->mir_var_homes[index] = NULL;
             }
             if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-            return result;
+            return interp_check_contract_return(f, node, result);
         }
         Item result = interp_call_with_borrowed(fn, (const Item*)(void*)words,
             dispatch_argc, f, borrowed, borrow_homes);
         // LR12-11 (S9.1.2): the result may be (part of) an argument the caller
         // still holds; both observers must detach before a write
         if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-        return result;
+        return interp_check_contract_return(f, node, result);
     }
     // Every callee — interpreted or native — reaches its body through the
     // single dynamic dispatch point (AI7). Routing interpreted calls through it
@@ -2354,7 +2370,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     Item result = fn_call_into(fn, dispatch_argc ? &args : NULL, &result_home);
     // LR12-11: same call-site mark as the borrowed path above
     if (ast_call_may_return_argument((AstNode*)node)) cow_mark_shared(result);
-    return result;
+    return interp_check_contract_return(f, node, result);
 }
 
 // ---------------------------------------------------------------------------
@@ -5724,6 +5740,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         AstRaiseNode* raise_node = (AstRaiseNode*)node;
         Item value = raise_node->value ? eval_expr(f, raise_node->value) : ItemError;
         if (interp_frame_pending(f)) return value;
+        // S7.4.6: a non-error operand raises error(v)
+        if (raise_node->value) {
+            value = lambda_raise_operand(value, f->module ? f->module->reference : NULL,
+                raise_node->site_line, raise_node->site_column);
+        }
         interp_signal(f, EvalSignal::RETURNED, value);
         return value;
     }
@@ -5999,10 +6020,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // recursion-budget errors are ordinary rich completions; publish
             // the diagnostic mirror before the handler can inspect .code/.message
             // (S7.6.1, REH-D3).
-            if (st->ctx->last_error && st->ctx->last_error != error) {
-                err_free(st->ctx->last_error);
-            }
-            st->ctx->last_error = error;
+            eval_context_set_last_error(st->ctx, error);
         }
         return error ? err2it(error) : ItemError;
     }

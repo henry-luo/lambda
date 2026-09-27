@@ -41,6 +41,9 @@ typedef struct Heap {
     Pool *pool;  // runtime owner group for non-GC semantic allocations
     struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
     uint64_t result_root;  // stable GC root slot for the current script result
+    // EvalContext::last_error may name a GC-heap error (a published completion);
+    // this registered slot keeps it alive while it stays the diagnostic mirror.
+    uint64_t last_error_root;
     // Per-runtime caches for compiler-proven temporary-object regions.  These
     // blocks never enter gc->all_objects and are recycled only after a region
     // ends, so an ordinary heap object can never retain a region pointer.
@@ -366,6 +369,9 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void preserve_context_last_error(Item result);
+// The one writer of EvalContext::last_error: frees a replaced malloc-owned
+// error and keeps Heap::last_error_root naming a GC-heap one (LR10-10).
+void eval_context_set_last_error(EvalContext* ctx, LambdaError* error);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 void runtime_init(Runtime* runtime);
 // Non-blocking close notification: satellite workers observe this before the

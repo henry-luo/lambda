@@ -1167,16 +1167,16 @@ pn save_data() {
     let data = {name: "Alice", age: 30, scores: [95, 87, 92]}
 
     // Using Path literals
-    output(data, /.'result.json')     // Writes JSON
-    output(data, /.'result.yaml')     // Writes YAML
-    output(data, /.'result.xml')      // Writes XML
+    output(data, /.'result.json')^     // Writes JSON
+    output(data, /.'result.yaml')^     // Writes YAML
+    output(data, /.'result.xml')^      // Writes XML
 
     // Explicit format specification
-    output(data, /.'data.txt', 'json')    // Force JSON format
-    output(data, /.'data.out', 'yaml')    // Force YAML format
+    output(data, /.'data.txt', 'json')^    // Force JSON format
+    output(data, /.'data.out', 'yaml')^    // Force YAML format
 
     // With options
-    output(data, /.'pretty.json', {type: 'json', indent: 4})
+    output(data, /.'pretty.json', {type: 'json', indent: 4})^
 }
 ```
 
@@ -1204,7 +1204,7 @@ Lambda uses `output(...)` for file writing in procedural functions.
 ```lambda
 pn generate_report() {
     let report = {title: "Monthly Report", date: today(), items: [...]}
-    output(report, /.reports.'monthly.json')
+    output(report, /.reports.'monthly.json')^
 }
 ```
 
@@ -1215,12 +1215,12 @@ Pass `{mode: "append"}` as the third argument to append:
 ```lambda
 pn log_event(event) {
     let entry = format({time: now(), event: event}, 'json')
-    output(entry, /.logs.'events.jsonl', {mode: "append"})
+    output(entry, /.logs.'events.jsonl', {mode: "append"})^
 }
 
 pn process_items(items) {
     for item in items {
-        output(process(item), /.'output.txt', {mode: "append"})
+        output(process(item), /.'output.txt', {mode: "append"})^
     }
 }
 ```
@@ -1240,8 +1240,8 @@ Copy a file or directory to a new location.
 
 ```lambda
 pn backup_config() {
-    io.copy(/.'config.json', /.backup.'config.json')
-    io.copy(/.data, /.backup.data)  // Copy directory recursively
+    io.copy(/.'config.json', /.backup.'config.json')^
+    io.copy(/.data, /.backup.data)^  // Copy directory recursively
 }
 ```
 
@@ -1251,7 +1251,7 @@ Move or rename a file or directory.
 
 ```lambda
 pn archive_logs() {
-    io.move(/.logs.'current.log', /.logs.archive.'2024-01.log')
+    io.move(/.logs.'current.log', /.logs.archive.'2024-01.log')^
 }
 ```
 
@@ -1261,8 +1261,8 @@ Delete a file or directory.
 
 ```lambda
 pn cleanup() {
-    io.delete(/.'temp.txt')
-    io.delete(/.cache)  // Delete directory recursively
+    io.delete(/.'temp.txt')^
+    io.delete(/.cache)^  // Delete directory recursively
 }
 ```
 
@@ -1272,9 +1272,9 @@ Create a directory (and parent directories if needed).
 
 ```lambda
 pn setup_project() {
-    io.mkdir(/.src)
-    io.mkdir(/.tests)
-    io.mkdir(/.docs.api)  // Creates parent dirs too
+    io.mkdir(/.src)^
+    io.mkdir(/.tests)^
+    io.mkdir(/.docs.api)^  // Creates parent dirs too
 }
 ```
 
@@ -1284,7 +1284,7 @@ Create an empty file or update its modification timestamp.
 
 ```lambda
 pn mark_complete() {
-    io.touch(/.build.'.done')
+    io.touch(/.build.'.done')^
 }
 ```
 
@@ -1294,7 +1294,7 @@ Create a symbolic link.
 
 ```lambda
 pn setup_links() {
-    io.symlink(/.config.'production.json', /.'config.json')
+    io.symlink(/.config.'production.json', /.'config.json')^
 }
 ```
 
@@ -1304,8 +1304,8 @@ Change file permissions (Unix-style).
 
 ```lambda
 pn make_executable() {
-    io.chmod(/.scripts.'deploy.sh', "755")
-    io.chmod(/.'secrets.env', "600")
+    io.chmod(/.scripts.'deploy.sh', "755")^
+    io.chmod(/.'secrets.env', "600")^
 }
 ```
 
@@ -1315,7 +1315,7 @@ Rename a file or directory (alias for move within same directory).
 
 ```lambda
 pn rename_file() {
-    io.rename(/.'draft.txt', /.'final.txt')
+    io.rename(/.'draft.txt', /.'final.txt')^
 }
 ```
 
@@ -1329,14 +1329,14 @@ pn api_operations() {
     let data = io.fetch(https.'api.example.com'.users, {
         method: 'GET',
         headers: {Authorization: "Bearer token123"}
-    })
+    })^
 
     // POST request
     let result = io.fetch(https.'api.example.com'.users, {
         method: 'POST',
         headers: {'Content-Type': "application/json"},
         body: format({name: "Alice", email: "alice@example.com"}, 'json')
-    })
+    })^
 }
 ```
 
@@ -1346,8 +1346,8 @@ Execute a shell command and return the result.
 
 ```lambda
 pn run_commands() {
-    let files = cmd("ls", "-la")
-    let today_str = cmd("date", "+%Y-%m-%d")
+    let files = cmd("ls", "-la")^
+    let today_str = cmd("date", "+%Y-%m-%d")^
 
     // With multiple arguments
     cmd("git", "commit", "-m", "Update files")

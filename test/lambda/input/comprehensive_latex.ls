@@ -1,5 +1,5 @@
 // Comprehensive LaTeX test for robustness testing
-let latex = input('./test/input/comprehensive.tex', 'latex')
+let latex = input('./test/input/comprehensive.tex', 'latex')^
 
 "LaTeX parsing result:"
 latex

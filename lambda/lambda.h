@@ -498,6 +498,7 @@ typedef enum SysFunc {
     SYSFUNC_FORMAT1,
     SYSFUNC_FORMAT2,
     SYSFUNC_ERROR,
+    SYSFUNC_ERROR2,         // error(message, source) - wraps an inner error (S7.4.4)
     SYSFUNC_EXISTS,         // exists(path) - check if file/dir exists
     // PTH76: `temp(name, content)` creates the in-memory document temp.'name'
     // with `content` as its head and returns that head; `temp(name)` returns an
@@ -3290,6 +3291,10 @@ extern "C" {
     Item fn_format1(Item item);
     Item fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
+    Item fn_error2(Item message, Item source);  // an error wrapping `source` (S7.4.4)
+    // stamps an error() call site onto the error that call just constructed
+    Item lambda_error_stamp_site(Item error, const char* file, int64_t line, int64_t column);
+    Item lambda_raise_operand(Item value, const char* file, int64_t line, int64_t column);
     Symbol* fn_symbol1(Item item);  // convert to symbol
     Item fn_symbol2(Item name, Item url);  // create namespaced symbol
 

@@ -1065,6 +1065,11 @@ void set_field_value(ShapeEntry* field, void* field_ptr, Item item) {
             }
             break;
         }
+        case LMD_TYPE_ERROR:
+            // the whole Item word, so the error keeps its payload (S7.4.4);
+            // this arm was missing, and the field read back the bare sentinel
+            map_field_store_dynamic_item(field_ptr, item);
+            break;
         default:
             log_error("unknown map storage type %s", get_type_name(storage_type_id));
         }
@@ -1154,6 +1159,10 @@ Item typeditem_to_item(TypedItem *titem) {
         return {.item = x2it((String*)ptr_val)};
     case LMD_TYPE_COMPLEX:
     case LMD_TYPE_PATH:
+    // type values and functions are direct pointers too, as typeditem_store_item
+    // keeps them; an `any` slot holding `type(x)` read back as an error
+    case LMD_TYPE_TYPE:
+    case LMD_TYPE_FUNC:
         // paths also retain their direct pointer carrier in TypedItem fields.
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return ptr_val ? (Item){.item = (uint64_t)(uintptr_t)ptr_val} : ItemNull;
@@ -1170,9 +1179,10 @@ Item typeditem_to_item(TypedItem *titem) {
         }
         return {.item = item_val};
     case LMD_TYPE_ERROR:
-        // a typed slot may legitimately hold a stored error value; surface it
-        // as an Error Item rather than logging an "unknown type" warning.
-        return {.item = ITEM_ERROR};
+        // a typed slot may legitimately hold a stored error value; the store
+        // kept the whole Item word, so the error keeps its payload (S7.4.4).
+        memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
+        return {.item = item_val ? item_val : ITEM_ERROR};
     case LMD_TYPE_UNDEFINED:
         return {.item = ITEM_JS_UNDEFINED};
     default:
@@ -1381,10 +1391,15 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         result = typeditem_to_item((TypedItem*)field_ptr);
         break;
     }
-    case LMD_TYPE_ERROR:
-        // A shaped error field is a sentinel-only slot.  Returning ItemNull
-        // here erased an error propagated through an `any` map/tuple field.
-        return ItemError;
+    case LMD_TYPE_ERROR: {
+        // A shaped error field holds the whole error Item word (set_field_value),
+        // so the error keeps its payload; a never-written slot reads the
+        // sentinel. Returning ItemNull here erased an error propagated through
+        // an `any` map/tuple field.
+        uint64_t word = 0;
+        memcpy(&word, field_ptr, sizeof(word));
+        return word ? (Item){.item = word} : ItemError;
+    }
     case LMD_TYPE_UNDEFINED:
         // JS shapes may infer a sentinel-only field. Returning ItemError here
         // made an own `undefined` property indistinguishable from a failed map read.

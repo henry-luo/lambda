@@ -159,7 +159,7 @@ Lambda's scope rules say nothing about this. Guest state is isolated per evaluat
 The rule constrains *shared mutable cells*, not *effects*. Module-level `let` bindings are evaluated when the module is instantiated, and that evaluation can read the outside world — `input()` is an `fn`, so it is legal at module scope:
 
 ```lambda
-let config = input('./config.json', 'json')   // OK — but this reads a file at import time
+let config = input('./config.json', 'json')^   // OK — but this reads a file at import time
 let base    = 10                              // pure
 
 pn main() { print(config.name) }
@@ -487,13 +487,13 @@ The `output(...)` function writes data to files. It is only available in `pn` fu
 ```lambda
 pn save_report(data) {
     // Write to file (creates or overwrites)
-    output(data, "./temp/report.json")
+    output(data, "./temp/report.json")^
 
     // Append to log
-    output({event: "saved", time: now()}, "./temp/events.log", {mode: "append"})
+    output({event: "saved", time: now()}, "./temp/events.log", {mode: "append"})^
 
     // Use options for more control
-    output(data, "./temp/backup.json", {atomic: true})
+    output(data, "./temp/backup.json", {atomic: true})^
 }
 ```
 
@@ -515,8 +515,8 @@ Available anywhere (in both `fn` and `pn`):
 
 ```lambda
 // Read data
-let data = input("config.json", 'json')
-let html = input(https.example.com.page, 'html')
+let data = input("config.json", 'json')^
+let html = input(https.example.com.page, 'html')^
 
 // Check existence
 if exists(\.config.json) { ... }
@@ -539,9 +539,9 @@ Available only in `pn` functions:
 
 ```lambda
 pn setup_project() {
-    io.mkdir("./output/reports")
-    io.copy("https://example.com/template.json", "./config.json")
-    output({initialized: true}, "./output/.ready")
+    io.mkdir("./output/reports")^
+    io.copy("https://example.com/template.json", "./config.json")^
+    output({initialized: true}, "./output/.ready")^
 }
 ```
 
@@ -648,7 +648,7 @@ pn main() {
     let input = [1, 2, 3, 4, 5]
     let result = transform(input)
     print(result)                    // [2, 4, 6, 8, 10]
-    output(result, "./temp/output.json") // write to file
+    output(result, "./temp/output.json")^ // write to file
 }
 ```
 

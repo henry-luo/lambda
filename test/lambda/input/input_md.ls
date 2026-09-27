@@ -1,4 +1,4 @@
-let md = input('./test/input/comprehensive_test.md', 'markdown')  // './test/input/test.md'
+let md = input('./test/input/comprehensive_test.md', 'markdown')^  // './test/input/test.md'
 
 md
 

@@ -2,12 +2,12 @@
 // Tests various vCard formats and edge cases
 
 "\n=== Testing simple vCard parsing ==="
-let simple_contact = input('./test/input/simple.vcf', 'vcf')
+let simple_contact = input('./test/input/simple.vcf', 'vcf')^
 "Simple vCard result:"
 simple_contact
 
 "\n=== Testing complex vCard parsing ==="
-let complex_contacts = input('./test/input/contacts.vcf', 'vcf')
+let complex_contacts = input('./test/input/contacts.vcf', 'vcf')^
 "Complex vCard result (note: only first contact is parsed for now):"
 complex_contacts
 

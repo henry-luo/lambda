@@ -145,19 +145,19 @@ The validator automatically detects input formats and unwraps document wrappers:
 
 ```lambda
 // XML validation with auto-detection
-let xml_data = input("article.xml", 'xml')
+let xml_data = input("article.xml", 'xml')^
 let xml_result = validate_with_format(schema, xml_data, 'xml')
 
 // HTML validation
-let html_data = input("page.html", 'html')
+let html_data = input("page.html", 'html')^
 let html_result = validate_with_format(schema, html_data, 'html')
 
 // JSON validation
-let json_data = input("data.json", 'json')
+let json_data = input("data.json", 'json')^
 let json_result = validate_with_format(schema, json_data, 'json')
 
 // auto-detect format (validator inspects structure)
-let data = input("document", 'auto')
+let data = input("document", 'auto')^
 let auto_result = validate_with_format(schema, data, null)
 ```
 
@@ -257,7 +257,7 @@ The validator automatically unwraps XML `<document>` wrappers:
 //   </article>
 // </document>
 
-let xml = input("article.xml", 'xml')
+let xml = input("article.xml", 'xml')^
 let result = validate_with_format(schema, xml, 'xml')
 // validator automatically unwraps <document> and validates <article>
 ```
@@ -276,7 +276,7 @@ HTML validation extracts the `<body>` element:
 //   </body>
 // </html>
 
-let html = input("page.html", 'html')
+let html = input("page.html", 'html')^
 let result = validate_with_format(schema, html, 'html')
 // validator extracts <body> and validates its contents
 ```
@@ -397,11 +397,11 @@ Let the validator auto-detect format when possible:
 
 ```lambda
 // good: let validator detect format
-let data = input("document", 'auto')
+let data = input("document", 'auto')^
 let detected_result = validate_with_format(schema, data, null)
 
 // also good: explicit format when known
-let xml_data = input("article.xml", 'xml')
+let xml_data = input("article.xml", 'xml')^
 let explicit_result = validate_with_format(schema, xml_data, 'xml')
 ```
 

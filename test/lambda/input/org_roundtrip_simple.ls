@@ -1,9 +1,9 @@
 // Simple Org-mode roundtrip test
 "=== Testing Org-mode roundtrip ==="
-let org_text = input('./test/input/test.org', 'text')
+let org_text = input('./test/input/test.org', 'text')^
 
 // Parse the Org-mode file
-let org_data = input('./test/input/test.org', 'org')
+let org_data = input('./test/input/test.org', 'org')^
 
 "=== PARSED STRUCTURE ==="
 org_data

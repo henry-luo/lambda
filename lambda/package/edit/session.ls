@@ -115,8 +115,9 @@ pub pn save(session, doc, target, overwrite) {
     return outcome(false, session, basename(target) ++ " already exists.", 'exists')
   }
   // `output` is a procedure: its failure is an error value to test, since a
-  // braced handler on a pn call is a statement and yields no binding value
-  let written = output(text, target, {format: 'text', atomic: true})
+  // braced handler on a pn call is a statement and yields no binding value;
+  // the error-admitting binding acknowledges the raised channel (S7.5.1)
+  let written: any | error = output(text, target, {format: 'text', atomic: true})
   if (written is error) {
     return outcome(false, session, "Not saved: could not write " ++ target ++ ".", null)
   }

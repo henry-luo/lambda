@@ -2,7 +2,7 @@
 "=== CSS Stylesheet Parser Test ==="
 
 // Parse CSS stylesheet from file
-let stylesheet = input('./test/input/stylesheet.css', 'css')
+let stylesheet = input('./test/input/stylesheet.css', 'css')^
 "Stylesheet structure:"
 type(stylesheet)
 

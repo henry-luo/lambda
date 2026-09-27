@@ -1,4 +1,4 @@
-let rtf = input('./test/input/test.rtf', 'rtf')
+let rtf = input('./test/input/test.rtf', 'rtf')^
 rtf
 
 "\nFormat RTF:\n"

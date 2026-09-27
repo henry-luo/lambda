@@ -30,7 +30,7 @@ type Nested = any that (~ is int or (~ is array and len(~ |: ~ is Nested) == len
 
 "5 a level that answers an error fails the whole test";
 fn checked(x) int^ { if (x == 2) raise error("two") else x }
-type Guarded = int that (checked(~) > 0 and (~ <= 1 or (~ - 1) is Guarded));
+type Guarded = int that (checked(~)^ > 0 and (~ <= 1 or (~ - 1) is Guarded));
 [1 is Guarded, 3 is Guarded, 5 is Guarded];
 
 "6 the candidate starts a fresh context: `~~` is null inside the body";

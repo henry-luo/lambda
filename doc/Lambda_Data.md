@@ -577,8 +577,8 @@ let p = /.home.user.config
 let s = "/home/user/config"
 
 // Both work with input()
-let data1 = input(p, 'json')
-let data2 = input(s, 'json')
+let data1 = input(p, 'json')^
+let data2 = input(s, 'json')^
 ```
 
 ### Path Operations
@@ -589,8 +589,8 @@ exists(/.etc.hosts)           // true or false
 exists(\.config.json)         // true or false
 
 // Load content
-let content = input(/.etc.hosts, 'text')   // Load file content
-let data = input(https.api.example.com.data, 'json')  // Fetch URL
+let content = input(/.etc.hosts, 'text')^   // Load file content
+let data = input(https.api.example.com.data, 'json')^  // Fetch URL
 ```
 
 ### References and the Force Step `#`
@@ -926,6 +926,7 @@ person.address   // null (key doesn't exist)
 #### Map Operations
 
 ```lambda
+let person = {name: "Charlie", age: 25};
 len(person)               // 2
 
 // Spreading a map into a new map
@@ -1327,7 +1328,7 @@ Runtime data gains identity by being placed in a document under `temp.`, an
 in-memory provider whose documents live for the evaluation.
 
 ```lambda
-let t = temp('scratch', {rows: [1, 2]})   // create; raises if the name is taken
+let t = temp('scratch', {rows: [1, 2]})^   // create; raises if the name is taken
 t.rows === temp.'scratch'#rows            // true — the same node
 temp('scratch')                           // the existing head
 open t = temp.'scratch' { put t.rows = [3] }

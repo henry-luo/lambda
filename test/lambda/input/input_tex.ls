@@ -1,7 +1,7 @@
 // Test for LaTeX parsing and formatting
 // This script tests LaTeX input parsing and various output formats
 
-let latex = input('./test/input/test.tex', 'latex')
+let latex = input('./test/input/test.tex', 'latex')^
 
 "LaTeX parsing result:"
 latex

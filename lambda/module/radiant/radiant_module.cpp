@@ -1145,10 +1145,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     }
     // Retained callback diagnostics belong to the canonical document context
     // and are consumed at this host boundary.
-    if (callback_context && callback_context->last_error) {
-        err_free(callback_context->last_error);
-        callback_context->last_error = nullptr;
-    }
+    eval_context_set_last_error(callback_context, nullptr);
     g_radiant_velmt_active_pass_id = previous_pass_id;
     input_context = saved_input_context;
     return ok;

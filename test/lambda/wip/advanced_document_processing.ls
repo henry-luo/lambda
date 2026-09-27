@@ -46,7 +46,7 @@ pub fn analyze_document_structure(content: string, format_type: symbol) {
 // Content extraction and transformation pipeline
 pub fn process_multi_format_content(documents: [{path: string, format: symbol}]) {
     let processed_documents = for (doc_info in documents) {
-        let raw_content = input(doc_info.path, doc_info.format);
+        let raw_content = input(doc_info.path, doc_info.format)^;
         let analysis = analyze_document_structure(string(raw_content), doc_info.format);
         
         // Content transformation based on format

@@ -1,4 +1,4 @@
-let json = input('./test/input/test.json', 'json')
+let json = input('./test/input/test.json', 'json')^
 json
 
 "\nFormat JSON:\n"

@@ -45,11 +45,11 @@ See [Doc Schema](Doc_Schema.md) for the full schema reference.
 In Lambda scripts all of these are loaded with `input()`:
 
 ```lambda
-let md   = input("readme.md",    'markdown')
-let rst  = input("design.rst",   'rst')
-let wiki = input("page.wiki",    'wiki')
-let adoc = input("guide.adoc",   'asciidoc')
-let html = input("index.html",   'html')
+let md   = input("readme.md",    'markdown')^
+let rst  = input("design.rst",   'rst')^
+let wiki = input("page.wiki",    'wiki')^
+let adoc = input("guide.adoc",   'asciidoc')^
+let html = input("index.html",   'html')^
 ```
 
 ### 1.2 Unified Mark Doc Schema
@@ -266,7 +266,7 @@ Object keys become unquoted map keys; value types are preserved.
 **Loading and querying in Lambda:**
 
 ```lambda
-let data = input("users.json", 'json')
+let data = input("users.json", 'json')^
 data.name               // "Alice"
 data.tags[0]            // "dev"
 data.address.city       // "New York"
@@ -328,7 +328,7 @@ This mirrors Mark Notation exactly.
 **Querying with the `?` operator:**
 
 ```lambda
-let lib = input("library.xml", 'xml')
+let lib = input("library.xml", 'xml')^
 lib?<book>              // all book elements
 lib?<book lang:"en">    // books where lang == "en"
 lib?<book> |> ~.title    // ["Clean Code", "The Pragmatic Programmer"]
@@ -488,7 +488,7 @@ Carol,35,Chicago,9.8
 **Typical processing pipeline:**
 
 ```lambda
-let rows = input("data.csv", 'csv')
+let rows = input("data.csv", 'csv')^
 
 // filter and project
 for (r in rows where num(r.age) >= 30)
@@ -546,7 +546,7 @@ ttl  = 300
 
 ```lambda
 // app.properties:  app.name=MyApp\napp.version=2.0
-let cfg = input("app.properties", 'properties')
+let cfg = input("app.properties", 'properties')^
 cfg.'app.name'    // "MyApp"
 ```
 
@@ -557,7 +557,7 @@ or the `lambda convert` CLI command:
 
 ```lambda
 // In a Lambda script
-let data = input("config.yaml", 'yaml')
+let data = input("config.yaml", 'yaml')^
 format(data, 'json')          // → JSON string
 format(data, 'toml')          // → TOML string
 ```
@@ -581,7 +581,7 @@ closely following the Mark Doc schema, with custom elements for LaTeX-specific c
 The `lambda view` command renders `.tex` files by first converting them to HTML.
 
 ```lambda
-let doc = input("paper.tex", 'latex')
+let doc = input("paper.tex", 'latex')^
 format(doc, 'html')           // convert to HTML
 ```
 
@@ -591,7 +591,7 @@ PDF documents are parsed into a Mark element tree with best-effort text flow
 reconstruction. Binary streams inside the PDF are decompressed before parsing.
 
 ```lambda
-let report = input("annual_report.pdf", 'pdf')
+let report = input("annual_report.pdf", 'pdf')^
 report?<p> |> ~[0]             // first paragraph text
 ```
 
@@ -601,7 +601,7 @@ Rich Text Format documents are parsed into the same Mark Doc element schema, pre
 text runs, paragraph styles, and basic table structure.
 
 ```lambda
-let doc = input("letter.rtf", 'rtf')
+let doc = input("letter.rtf", 'rtf')^
 ```
 
 ### 3.4 Email (EML / RFC 822)
@@ -651,7 +651,7 @@ Hi Bob, just checking in.
 Contact cards are parsed into maps following the vCard 3.0 / 4.0 property names.
 
 ```lambda
-let contact = input("alice.vcf", 'vcf')
+let contact = input("alice.vcf", 'vcf')^
 contact.fn        // "Alice Wonderland"
 contact.email     // "alice@example.com"
 contact.tel       // "+1-555-0100"
@@ -663,7 +663,7 @@ Calendar files are parsed into a map with a `vcalendar` root and an array of `ve
 `vtodo`, and `vjournal` components.
 
 ```lambda
-let cal = input("events.ics", 'ics')
+let cal = input("events.ics", 'ics')^
 cal.vcalendar.vevent |> ~.summary    // ["Team standup", "Sprint review", …]
 ```
 
@@ -680,7 +680,7 @@ Three flavors are supported via the `graph` parser type:
 | Mermaid diagrams | `graph` / `mermaid` | `.mmd` |
 
 ```lambda
-let g = input("arch.dot", 'graph')
+let g = input("arch.dot", 'graph')^
 g?<node> |> ~.id          // list all node IDs
 g?<edge src:"a">         // edges leaving node "a"
 ```
@@ -745,7 +745,7 @@ the component name preserved as the tag, and `{expression}` slots are captured a
 `<expr>` children.
 
 ```lambda
-let page = input("Page.mdx", 'mdx')
+let page = input("Page.mdx", 'mdx')^
 page?<Card>               // all <Card> component usages
 ```
 
@@ -755,8 +755,8 @@ Mathematical notation can be parsed standalone from LaTeX math or AsciiMath sour
 a `<math>` element tree:
 
 ```lambda
-let tex_expr = input("formula.tex", 'math')   // math-only LaTeX
-let ascii_expr = input("formula.asc", 'math-ascii')
+let tex_expr = input("formula.tex", 'math')^   // math-only LaTeX
+let ascii_expr = input("formula.asc", 'math-ascii')^
 ```
 
 ### 3.11 Directory Listing
@@ -764,7 +764,7 @@ let ascii_expr = input("formula.asc", 'math-ascii')
 A local directory path can be treated as an input, producing an array of file-info maps:
 
 ```lambda
-let files = input("./src", 'dir')
+let files = input("./src", 'dir')^
 files |: ~.ext == ".cpp" |> ~.name       // list all .cpp filenames
 ```
 
@@ -776,13 +776,13 @@ All formats are accessed through the same `input()` built-in:
 
 ```lambda
 // Explicit type
-let typed_data = input("file.ext", 'format')
+let typed_data = input("file.ext", 'format')^
 
 // Auto-detect from MIME / file extension
-let auto_data = input("data.json")
+let auto_data = input("data.json")^
 
 // From a URL (HTTP/HTTPS)
-let url_data = input("https://api.example.com/data.json")
+let url_data = input("https://api.example.com/data.json")^
 
 // From a string in memory
 let str_data = input_str(raw_string, 'yaml')

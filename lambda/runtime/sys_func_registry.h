@@ -382,9 +382,10 @@ static inline TypeId sysfunc_c_ret_type_id(const SysFuncInfo* info) {
     }
 }
 
-// S7.6/S7.7 call-boundary policy shared by MIR lowering and T0. These rows
-// accept ordinary values only; an ItemError must reach the caller's handler
-// before a C helper can reinterpret it as an optional/default argument.
+// S11.4.3 call-boundary policy shared by MIR lowering and T0. These rows
+// accept ordinary values only: an ItemError operand is the call's value,
+// taken before a C helper can reinterpret it as an optional/default argument
+// (or count it, as fn_len would).
 static inline bool sysfunc_params_reject_error(const SysFuncInfo* info) {
     if (!info) return false;
     switch (info->fn) {
@@ -397,6 +398,12 @@ static inline bool sysfunc_params_reject_error(const SysFuncInfo* info) {
     default:
         return false;
     }
+}
+
+// S7.9.1: a type-family row answers for an error operand (`type(e)` is
+// `error`) instead of passing it through as every other row does (S7.9.3).
+static inline bool sysfunc_observes_error(const SysFuncInfo* info) {
+    return info && info->fn == SYSFUNC_TYPE;
 }
 
 // Search and ordinal rows return either a finite integer or semantic null.

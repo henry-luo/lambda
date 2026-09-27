@@ -1,0 +1,5 @@
+[{
+    v: error
+  }, [error, 6], error, 7, 9, error]
+[true, 201, "type check at function return failed: expected int, got string 's'"]
+[true, true, 10]

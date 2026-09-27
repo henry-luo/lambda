@@ -23,7 +23,7 @@ fn make_closure() any {
   short_circuit_closure
 }
 
-fn tail_body(steps: int, value) any {
+fn tail_body(steps: int, value) any | error {
   if (steps == 0) 333
   else tail_body(steps - 1, source_fail(0 - 1))
 }

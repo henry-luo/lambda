@@ -1,7 +1,7 @@
 // test for INI parsing and formatting
 // this script tests INI input parsing and various output formats
 
-let ini_data = input('./test/input/test.ini', 'ini')
+let ini_data = input('./test/input/test.ini', 'ini')^
 
 "INI parsing result:"
 ini_data

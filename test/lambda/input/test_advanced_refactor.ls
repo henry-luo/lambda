@@ -1,6 +1,6 @@
 "=== Advanced CSS Refactor Test ==="
 
-let css_advanced = input('./test/input/stylesheet_3_0.css', 'css')
+let css_advanced = input('./test/input/stylesheet_3_0.css', 'css')^
 
 "Testing refactored structure on complex CSS:"
 "============================================="
