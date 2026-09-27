@@ -488,15 +488,20 @@ AstNode* parse_island_body(Lexer* lx) {
         skip_space(lx);
         if (lx->p >= lx->end) { return left; }
         char c = *lx->p;
-        if (c != '|' && c != '&') { return left; }
+        // S11.1.2v3 (SP20): `|` is the island's only binary operator. RE2 cannot
+        // intersect, so an island `&` had compiled to a lookahead it rejects.
+        if (c == '&') {
+            fail_code(lx, ERR_INVALID_LITERAL,
+                "`&` is not a pattern operator: intersect whole patterns, as in `\\(A) & \\(B)`");
+            return NULL;
+        }
+        if (c != '|') { return left; }
         lx->p++;
         AstNode* right = parse_island_concat(lx);
         if (!right) { return NULL; }
         // a real union type, not a pattern placeholder: a literal-only island is
         // returned as this very AST, so its ->type becomes the annotation's type
-        left = c == '|'
-            ? make_binary_node(lx, left, right, OPERATOR_UNION, "|", 1, LSF_TP_BINARY)
-            : make_binary_node(lx, left, right, OPERATOR_INTERSECT, "&", 1, LSF_TP_BINARY);
+        left = make_binary_node(lx, left, right, OPERATOR_UNION, "|", 1, LSF_TP_BINARY);
     }
 }
 
@@ -1382,16 +1387,34 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstPatternRangeNode* range = (AstPatternRangeNode*)node;
         resolve_type_pattern(tp, range->start);
         resolve_type_pattern(tp, range->end);
+        // S11.1.3: the bounds are single characters, as in value position;
+        // the regex once took each bound's first byte instead. Symbol bounds
+        // are left to the island's content-only diagnostic.
+        if (!pattern_ast_has_symbol_literal(node) && !pattern_is_char_set(node)) {
+            record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
+                "a range in a pattern runs between two single characters");
+        }
         range->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         break;
     }
     case LSF_TP_ISLAND_GROUP:
         resolve_type_pattern(tp, ((AstListNode*)node)->item);
         break;
-    case LSF_TP_ISLAND_UNARY:
-        resolve_type_pattern(tp, ((AstUnaryNode*)node)->operand);
+    case LSF_TP_ISLAND_UNARY: {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        resolve_type_pattern(tp, unary->operand);
+        // S11.1.2v3: island `!` complements a single-character set, the one
+        // negation a regex engine compiles (`[^…]`). Any other operand was
+        // silently dropped from the regex. A symbol literal is left to the
+        // island's own content-only diagnostic.
+        if (unary->op == OPERATOR_NOT && !pattern_ast_has_symbol_literal(unary->operand) &&
+                !pattern_is_char_set(unary->operand)) {
+            record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
+                "`!` in a pattern negates a single character: a class, a range, a one-character string, or a union of these");
+        }
         node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         break;
+    }
     case LSF_TP_ISLAND_SEQ:
         for (AstNode* child = ((AstPatternSeqNode*)node)->first; child; child = child->next) {
             resolve_type_pattern(tp, child);

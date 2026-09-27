@@ -4888,6 +4888,12 @@ bool pattern_ast_has_symbol_literal(AstNode* node) {
     case AST_NODE_UNARY:
     case AST_NODE_UNARY_TYPE:
         return pattern_ast_has_symbol_literal(((AstUnaryNode*)node)->operand);
+    case AST_NODE_PATTERN_RANGE: {
+        // a range's bounds are content too: `'a' to 'z'` is a symbol literal
+        AstPatternRangeNode* range = (AstPatternRangeNode*)node;
+        return pattern_ast_has_symbol_literal(range->start) ||
+            pattern_ast_has_symbol_literal(range->end);
+    }
     case AST_NODE_PATTERN_SEQ: {
         AstNode* child = ((AstPatternSeqNode*)node)->first;
         while (child) {

@@ -1,0 +1,99 @@
+'1. named classes'
+"1.1"
+true
+"1.2"
+false
+"1.3"
+true
+"1.4"
+false
+'2. a union of one-character strings'
+"2.1"
+true
+"2.2"
+false
+"2.3"
+false
+"2.4"
+false
+"2.5"
+true
+"2.6"
+false
+'3. ranges, groups, nesting'
+"3.1"
+true
+"3.2"
+false
+"3.3"
+true
+"3.4"
+true
+"3.5"
+true
+"3.6"
+false
+"3.7"
+true
+"3.8"
+false
+'4. named patterns, literal unions and character range types'
+"4.1"
+true
+"4.2"
+false
+"4.3"
+true
+"4.4"
+false
+"4.5"
+true
+"4.6"
+true
+"4.7"
+false
+"4.8"
+true
+"4.9"
+false
+"4.10"
+true
+"4.11"
+true
+"4.12"
+true
+"4.13"
+false
+'5. code points beyond ASCII'
+"5.1"
+true
+"5.2"
+false
+"5.3"
+true
+"5.4"
+false
+"5.5"
+true
+'6. searching and the symbol domain'
+"6.1"
+["<a>", "<b>"]
+"6.2"
+["a", "b", "c"]
+"6.3"
+true
+"6.4"
+false
+"6.5"
+["a", "b"]
+"6.6"
+true
+'7. no binary `!` inside a pattern (SP18); exclusion is between whole patterns'
+"7.1"
+true
+"7.2"
+false
+"7.3"
+true
+"7.4"
+false

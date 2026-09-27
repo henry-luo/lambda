@@ -1385,6 +1385,26 @@ TEST_F(NegativeScriptTest, PatternClassBindingCollisionReportsReservedName) {
         "pattern class 'd' is reserved inside pattern islands");
 }
 
+// S11.1.2v3: island `!` complements a single-character set; any other operand
+// had compiled to nothing, silently changing what the pattern matched.
+TEST_F(NegativeScriptTest, PatternNegationNeedsSingleCharacterSet) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_negation_non_set.ls",
+        "`!` in a pattern negates a single character");
+}
+
+// S11.1.3: range bounds in a pattern are single characters.
+TEST_F(NegativeScriptTest, PatternRangeBoundsAreSingleCharacters) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_range_bound.ls",
+        "a range in a pattern runs between two single characters");
+}
+
+// S11.1.2v3 (SP20): `|` is an island's only binary operator; an island `&` had
+// compiled to a lookahead RE2 rejects, so the pattern silently matched nothing.
+TEST_F(NegativeScriptTest, PatternIntersectionNamesWholePatternForm) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_intersection.ls",
+        "`&` is not a pattern operator: intersect whole patterns");
+}
+
 // S11.1.6v2/S16.8.6v3: a count on a *run* is the occurrence family, spelled as
 // in regex. The bracket forms it replaced name their replacement rather than
 // changing meaning under the same spelling.

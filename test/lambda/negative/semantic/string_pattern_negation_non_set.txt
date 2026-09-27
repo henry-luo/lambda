@@ -1,0 +1,1 @@
+`!` in a pattern negates a single character: a class, a range, a one-character string, or a union of these

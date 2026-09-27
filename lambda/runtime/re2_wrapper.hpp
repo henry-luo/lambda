@@ -135,6 +135,16 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node);
  */
 void escape_regex_literal(StrBuf* regex, String* str);
 
+/**
+ * S11.1.2v3: true when a resolved pattern node denotes a single-character
+ * set: a class, a range, a one-character string, a negated set, or a union,
+ * group or named pattern built only from these. The resolver checks island
+ * `!` operands and range bounds with it before any regex is built.
+ *
+ * @param node Resolved pattern AST node
+ */
+bool pattern_is_char_set(AstNode* node);
+
 // -----------------------------------------------------------------------
 // One-shot RE2 helpers — the C+-convention-friendly entry point for
 // callers (rb_runtime, py_stdlib, etc.) that need an ad-hoc compiled

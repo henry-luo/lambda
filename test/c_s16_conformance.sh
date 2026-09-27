@@ -472,5 +472,15 @@ run A "65 call arguments"                     "fn f(...) => len(varg())\nf($item
 run A "70 element attributes"                 "let e = <e $attrs70>\ne\n"
 run A "70 decomposition names"                "let $names70 = [$items70]\nn0\n"
 
+echo "--- S11.1.2v3 pattern-island tiers (SP18-SP20) ---"
+run A "island ! binds before a suffix"        'type T = \\(!d+)\n'
+run A "island ! on a group takes a suffix"    'type T = \\(!(d | "-")+)\n'
+run A "island range is one atom"              'type T = \\(!"a" to "z"+)\n'
+run A "island concat binds before |"          'type T = \\("a" | "b" "c")\n'
+run A "island ! is prefix only"               'type T = \\(w ! d)\n'
+run R "island has no &"                       'type T = \\(a & w)\n'
+run R "island takes one suffix"               'type T = \\(d+*)\n'
+run A "& and ! between whole patterns"        'type T = \\(a+) & \\(w+)\ntype U = \\(w+) ! \\(d+)\n'
+
 echo
 echo "pass=$pass fail=$fail"

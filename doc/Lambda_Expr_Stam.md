@@ -1308,17 +1308,28 @@ From highest to lowest:
 | Precedence | Operators                  | Description     |
 | ---------- | -------------------------- | --------------- |
 | 1          | `()`, `[]`, `[T]`, `.`, `#`, `?`, `.?` | Primary, force, query |
-| 2          | `-`, `+`, `not`, `!`, `*`, `&` | Unary (`!`: type negation, `&`: address-of) |
-| 3          | `**`                       | Exponentiation  |
+| 2          | `-`, `+`, `*`, `&`         | Unary (`*`: spread, `&`: address-of) |
+| 3          | `**`                       | Exponentiation (right-associative) |
 | 4          | `*`, `/`, `div`, `%`       | Multiplicative  |
-| 5          | `+`, `-`                   | Additive        |
+| 5          | `+`, `-`, `++`             | Additive, concatenation |
 | 6          | `<`, `<=`, `>`, `>=`       | Relational      |
 | 7          | `==`, `!=`, `===`          | Equality (`===`: reference equality) |
-| 8          | `and`                      | Logical AND     |
-| 9          | `or`                       | Logical OR      |
-| 10         | `to`                       | Range           |
-| 11         | `is`, `in`                 | Type operations |
-| 12         | `\|>`, `\|:`, `that`       | Pipe, Filter, Proviso |
+| 8          | `to`                       | Range           |
+| 9          | `&`                        | Type intersection |
+| 10         | `!`                        | Type exclusion  |
+| 11         | `\|`                       | Type union      |
+| 12         | `is`, `in`, `at`, `<:`     | Type test, value membership, key membership, subtype |
+| 13         | `not`                      | Logical NOT     |
+| 14         | `and`                      | Logical AND     |
+| 15         | `or`                       | Logical OR      |
+| 16         | `\|>`, `\|:`, `that`       | Pipe, Filter, Proviso |
+
+`not` binds below comparisons and membership, so `not a == b` is
+`not (a == b)` and `not x is int` is `not (x is int)` (S16.8.2). There is no
+unary `!` in expressions (S16.8.1); `not` is the logical negation. In type
+position `!T` is the complement type, as in `x is !null`. The type operators
+`&`, `!` and `|` rank the same way in expressions as in type expressions
+(S10.1.1v3).
 
 ### Arithmetic Operators
 
