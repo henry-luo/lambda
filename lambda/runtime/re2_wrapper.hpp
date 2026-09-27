@@ -28,8 +28,10 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 
 // Materialize one pattern AST as a module-local TypePattern. Callers retain
 // their own syntax node but share one registration path for the type-list ABI.
+// On failure `error_msg`, when given, says why, for a compile-time diagnostic.
 bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* pattern,
-                             AstNode* pattern_ast, bool is_symbol);
+                             AstNode* pattern_ast, bool is_symbol,
+                             const char** error_msg = nullptr);
 
 // Compile named string/symbol pattern declarations and register their stable
 // TypePattern identities in the owning Script type list. Both MIR and T0 use
@@ -93,16 +95,10 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
                                int64_t limit, bool ignore_case);
 
 /**
- * Replace all non-overlapping matches of pattern in string.
- * Uses RE2::GlobalReplace with unanchored matching.
- *
- * @param pattern Compiled pattern
- * @param str Source string
- * @param replacement Replacement string
- * @return New string with all matches replaced
+ * Replace matches of pattern in string, stepping as ECMAScript replaceAll does
+ * (S17.6.1): empty matches included, the replacement inserted literally.
+ * `limit` selects the first n matches, a negative one the last n; 0 is all.
  */
-String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_len,
-                            const char* repl, size_t repl_len);
 String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_t str_len,
                                     const char* repl, size_t repl_len,
                                     int64_t limit, bool ignore_case);
@@ -124,8 +120,14 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim);
  *
  * @param regex Output string buffer for the regex
  * @param node Pattern AST node
+ * @param error Receives the first reason the pattern cannot be lowered
+ * @return false when the pattern cannot be lowered
  */
-void compile_pattern_to_regex(StrBuf* regex, AstNode* node);
+bool compile_pattern_to_regex(StrBuf* regex, AstNode* node, StrBuf* error);
+
+// S11.1.2v3: whether an island may name this declaration: a pattern
+// definition, a literal union (SP7) or a character range type (SP5).
+bool pattern_can_name(AstNode* declared);
 
 /**
  * Escape regex metacharacters in a literal string.

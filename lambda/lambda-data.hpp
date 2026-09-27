@@ -1285,6 +1285,22 @@ static inline Type* lambda_range_type_domain(const Type* type) {
     return ((const TypeRange*)type)->is_char ? &TYPE_STRING : &TYPE_INT;
 }
 
+// S11.1.2v3: a pattern admits text of its tag's domain, `string` for `\(...)`
+// and `symbol` for `\symbol(...)`, and decides membership by matching. Like a
+// range's domain it serves static carrier checks only: the pattern's own
+// LMD_TYPE_TYPE tag is the type of type values, never its members' carrier.
+static inline Type* lambda_pattern_type_domain(const Type* type) {
+    if (!type || type->type_id != LMD_TYPE_TYPE || type->kind != TYPE_KIND_PATTERN) return NULL;
+    return ((const TypePattern*)type)->is_symbol ? &TYPE_SYMBOL : &TYPE_STRING;
+}
+
+// The carrier domain of a type that admits its members by a value test, a
+// range or a pattern; NULL for every other type.
+static inline Type* lambda_member_test_type_domain(const Type* type) {
+    Type* domain = lambda_range_type_domain(type);
+    return domain ? domain : lambda_pattern_type_domain(type);
+}
+
 // S11.1.5: `function` is the compact TYPE_FUNC singleton — the signature-less
 // union of `fn` and `pn`. Every other LMD_TYPE_FUNC type is a full TypeFunc,
 // so a caller that needs a signature must ask here rather than cast on the id.

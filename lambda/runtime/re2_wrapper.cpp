@@ -42,17 +42,17 @@ extern __thread EvalContext* context;
 // first two are already the regex spelling; the open form is not, so its `+`
 // becomes RE2's trailing comma. The retired `[n]`, `[n, m]` and `[n+]` no
 // longer parse.
-static void convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
+static bool convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
     if (!op_str || !op_str->str || op_str->length < 3 ||
             op_str->str[0] != '{' || op_str->str[op_str->length - 1] != '}') {
-        log_error("convert_occurrence_to_regex: expected a `{n,m}` count");
-        return;
+        return false;
     }
     for (size_t i = 0; i < op_str->length; i++) {
         char c = op_str->str[i];
         if (c == ' ' || c == '\t') continue;
         strbuf_append_char(regex, c == '+' ? ',' : c);
     }
+    return true;
 }
 
 // Escape regex metacharacters in a literal string
@@ -111,7 +111,7 @@ typedef struct PatternCharSet {
 
 static const uint32_t PATTERN_MAX_CODEPOINT = 0x10FFFF;
 // named patterns may chain; a self-reference must not recurse forever
-static const int PATTERN_SET_MAX_DEPTH = 256;
+static const int PATTERN_MAX_DEPTH = 256;
 
 static void char_set_free(PatternCharSet* set) {
     if (set->ranges) mem_free(set->ranges);
@@ -254,7 +254,7 @@ static bool char_set_add_literal_type(PatternCharSet* set, Type* type) {
 // single-character set: a class, a range, a one-character string, a negated
 // set, or a union, group or named pattern built only from these.
 static bool char_set_add_node(PatternCharSet* set, AstNode* node, int depth) {
-    if (!node || depth > PATTERN_SET_MAX_DEPTH) return false;
+    if (!node || depth > PATTERN_MAX_DEPTH) return false;
     switch (node->node_type) {
     case AST_NODE_PATTERN_CHAR_CLASS:
         return char_set_add_class(set, ((AstPatternCharClassNode*)node)->char_class);
@@ -368,7 +368,8 @@ static void compile_char_class(StrBuf* regex, PatternCharClass char_class) {
         return;
     }
     if (char_class == PATTERN_ANY_STRING) {
-        strbuf_append_str(regex, ".*");
+        // S16.8.6v3: `...` is `any*`, newlines included; RE2's `.` stops at one
+        strbuf_append_str(regex, "(?s:.*)");
         return;
     }
     PatternCharSet set = {};
@@ -386,41 +387,68 @@ static bool append_literal_pattern(StrBuf* regex, Type* type) {
     return ok;
 }
 
-// Convert pattern AST to regex string
-void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
-    if (!node) {
-        log_error("compile_pattern_to_regex: null node");
-        return;
-    }
+// Why a pattern cannot be lowered to a regex. The first reason wins, and the
+// resolver reports it as a compile-time diagnostic: these were only logged,
+// leaving a pattern that silently matched nothing, or only "" (§7 #3).
+static bool pattern_lowering_failed(StrBuf* error, const char* reason) {
+    log_error("compile_pattern_to_regex: %s", reason);
+    if (error && !error->length) strbuf_append_str(error, reason);
+    return false;
+}
+
+// S11.1.2v3: an island may name a pattern definition, or a literal type that
+// is a set of strings: a literal union (SP7) or a character range (SP5).
+bool pattern_can_name(AstNode* declared) {
+    if (!declared) return false;
+    if (declared->node_type == AST_NODE_STRING_PATTERN ||
+            declared->node_type == AST_NODE_SYMBOL_PATTERN) return true;
+    StrBuf* scratch = strbuf_new_cap(64);
+    bool ok = append_literal_type(scratch, declared->type, LITERAL_TYPE_REGEX);
+    strbuf_free(scratch);
+    return ok;
+}
+
+// `depth` counts named-pattern expansions, so a definition that reaches
+// itself fails instead of expanding without end.
+static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth);
+
+// `(?:node)` followed by `suffix`
+static bool lower_pattern_group(StrBuf* regex, AstNode* node, StrBuf* error, int depth,
+        const char* suffix) {
+    strbuf_append_str(regex, "(?:");
+    if (!lower_pattern(regex, node, error, depth)) return false;
+    strbuf_append_char(regex, ')');
+    if (suffix) strbuf_append_str(regex, suffix);
+    return true;
+}
+
+bool compile_pattern_to_regex(StrBuf* regex, AstNode* node, StrBuf* error) {
+    return lower_pattern(regex, node, error, 0);
+}
+
+static bool lower_pattern(StrBuf* regex, AstNode* node, StrBuf* error, int depth) {
+    if (!node) return pattern_lowering_failed(error, "a pattern part is missing");
 
     switch (node->node_type) {
     case AST_NODE_PRIMARY: {
-        // String literal - escape and emit
         AstPrimaryNode* pri = (AstPrimaryNode*)node;
         if (pri->type && pri->type->type_id == LMD_TYPE_STRING) {
             TypeString* str_type = (TypeString*)pri->type;
-            if (str_type->string) {
-                escape_regex_literal(regex, str_type->string);
-            }
-        } else if (pri->expr) {
-            // Parenthesized expression
-            compile_pattern_to_regex(regex, pri->expr);
+            if (str_type->string) escape_regex_literal(regex, str_type->string);
+            return true;
         }
-        break;
+        if (pri->expr) return lower_pattern(regex, pri->expr, error, depth);
+        return pattern_lowering_failed(error, "a pattern holds only string literals");
     }
 
-    case AST_NODE_PATTERN_CHAR_CLASS: {
-        AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
-        compile_char_class(regex, cc->char_class);
-        break;
-    }
+    case AST_NODE_PATTERN_CHAR_CLASS:
+        compile_char_class(regex, ((AstPatternCharClassNode*)node)->char_class);
+        return true;
 
     case AST_NODE_PATTERN_RANGE:
         // "a" to "z" -> [a-z]; bounds are code points, never their first byte
-        if (!compile_char_set(regex, node, false)) {
-            log_error("compile_pattern_to_regex: range bounds must be single characters");
-        }
-        break;
+        return compile_char_set(regex, node, false) ||
+            pattern_lowering_failed(error, "a range in a pattern runs between two single characters");
 
     case AST_NODE_BINARY:
     case AST_NODE_BINARY_TYPE: {
@@ -428,112 +456,65 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         if (bin->op == OPERATOR_UNION) {
             // a | b -> (?:a|b); `|` is the island's only binary operator (S11.1.2v3)
             strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, bin->left);
+            if (!lower_pattern(regex, bin->left, error, depth)) return false;
             strbuf_append_char(regex, '|');
-            compile_pattern_to_regex(regex, bin->right);
+            if (!lower_pattern(regex, bin->right, error, depth)) return false;
             strbuf_append_char(regex, ')');
-        } else if (bin->op == OPERATOR_TO) {
-            // Range operator (same as PATTERN_RANGE but from binary expression)
-            if (!compile_char_set(regex, node, false)) {
-                log_error("compile_pattern_to_regex: range bounds must be single characters");
-            }
-        } else {
-            log_error("compile_pattern_to_regex: unknown binary operator %d", bin->op);
+            return true;
         }
-        break;
+        if (bin->op == OPERATOR_TO) {
+            return compile_char_set(regex, node, false) ||
+                pattern_lowering_failed(error, "a range in a pattern runs between two single characters");
+        }
+        return pattern_lowering_failed(error, "`|` is the only operator that joins two patterns");
     }
 
     case AST_NODE_UNARY:
     case AST_NODE_UNARY_TYPE: {
         AstUnaryNode* unary = (AstUnaryNode*)node;
-        if (unary->op == OPERATOR_OPTIONAL) {
-            // a? -> (?:a)?
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")?");
-        } else if (unary->op == OPERATOR_ONE_MORE) {
-            // a+ -> (?:a)+
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")+");
-        } else if (unary->op == OPERATOR_ZERO_MORE) {
-            // a* -> (?:a)*
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")*");
-        } else if (unary->op == OPERATOR_REPEAT) {
-            // `{n}` / `{n,}` / `{n,m}` -> (?:a){n} / (?:a){n,} / (?:a){n,m}
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, unary->operand);
-            strbuf_append_str(regex, ")");
-            // the island carries the regex spelling; emit it verbatim
-            if (unary->op_str.str && unary->op_str.length > 0) {
-                convert_occurrence_to_regex(regex, &unary->op_str);
-            }
-        } else if (unary->op == OPERATOR_NOT) {
+        switch (unary->op) {
+        case OPERATOR_OPTIONAL:
+            return lower_pattern_group(regex, unary->operand, error, depth, "?");
+        case OPERATOR_ONE_MORE:
+            return lower_pattern_group(regex, unary->operand, error, depth, "+");
+        case OPERATOR_ZERO_MORE:
+            return lower_pattern_group(regex, unary->operand, error, depth, "*");
+        case OPERATOR_REPEAT:
+            // `{n}` / `{n+}` / `{n,m}` -> (?:a){n} / (?:a){n,} / (?:a){n,m}; the
+            // island parser has checked the spelling (S16.8.6v3)
+            if (!lower_pattern_group(regex, unary->operand, error, depth, NULL)) return false;
+            return convert_occurrence_to_regex(regex, &unary->op_str) ||
+                pattern_lowering_failed(error, "a count is `{n}`, `{n,m}` or `{n+}`");
+        case OPERATOR_NOT:
             // S11.1.2v3: `!` complements a single-character set, lowered to one
             // `[^…]`-style class; RE2 has no string complement or look-around
-            if (!compile_char_set(regex, unary->operand, true)) {
-                log_error("compile_pattern_to_regex: `!` needs a single-character set");
-            }
-        } else {
-            log_error("compile_pattern_to_regex: unknown unary operator %d", unary->op);
+            return compile_char_set(regex, unary->operand, true) ||
+                pattern_lowering_failed(error, "`!` in a pattern negates a single character");
+        default:
+            return pattern_lowering_failed(error, "unsupported pattern operator");
         }
-        break;
     }
 
-    case AST_NODE_PATTERN_SEQ: {
-        // Pattern sequence - concatenate all patterns in sequence
-        AstPatternSeqNode* seq = (AstPatternSeqNode*)node;
-        AstNode* child = seq->first;
-        while (child) {
-            compile_pattern_to_regex(regex, child);
-            child = child->next;
+    case AST_NODE_PATTERN_SEQ:
+        // whitespace concatenation (S11.1.2v3)
+        for (AstNode* child = ((AstPatternSeqNode*)node)->first; child; child = child->next) {
+            if (!lower_pattern(regex, child, error, depth)) return false;
         }
-        break;
-    }
+        return true;
 
-    case AST_NODE_LIST_TYPE: {
-        // Parenthesized type expression in pattern context: (pattern)
-        // list_type can contain one or more items separated by commas.
-        // In pattern context, a single item is a group; multiple items form alternatives.
-        AstListNode* list = (AstListNode*)node;
-        AstNode* item = list->item;
-        if (item && !item->next) {
-            // Single item — just a grouping parenthesis
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, item);
-            strbuf_append_char(regex, ')');
-        } else if (item) {
-            // Multiple items — treat as alternatives (union)
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, item);
-            item = item->next;
-            while (item) {
-                strbuf_append_char(regex, '|');
-                compile_pattern_to_regex(regex, item);
-                item = item->next;
-            }
-            strbuf_append_char(regex, ')');
-        }
-        break;
-    }
-
+    case AST_NODE_LIST_TYPE:
     case AST_NODE_ARRAY_TYPE: {
-        // Array type in pattern context: [pattern] — treat as character class or group
-        AstArrayNode* arr = (AstArrayNode*)node;
-        if (arr->item) {
-            strbuf_append_str(regex, "(?:");
-            compile_pattern_to_regex(regex, arr->item);
-            AstNode* item = arr->item->next;
-            while (item) {
-                strbuf_append_char(regex, '|');
-                compile_pattern_to_regex(regex, item);
-                item = item->next;
-            }
-            strbuf_append_char(regex, ')');
+        // a group `( … )`; several items are alternatives
+        AstNode* first = node->node_type == AST_NODE_LIST_TYPE ?
+            ((AstListNode*)node)->item : ((AstArrayNode*)node)->item;
+        if (!first) return pattern_lowering_failed(error, "an empty group in a pattern");
+        strbuf_append_str(regex, "(?:");
+        for (AstNode* item = first; item; item = item->next) {
+            if (item != first) strbuf_append_char(regex, '|');
+            if (!lower_pattern(regex, item, error, depth)) return false;
         }
-        break;
+        strbuf_append_char(regex, ')');
+        return true;
     }
 
     case AST_NODE_IDENT: {
@@ -541,19 +522,20 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         AstNode* declared = ident->entry ? ident->entry->node : NULL;
         if (declared && (declared->node_type == AST_NODE_STRING_PATTERN ||
                 declared->node_type == AST_NODE_SYMBOL_PATTERN)) {
-            AstPatternDefNode* definition = (AstPatternDefNode*)declared;
-            compile_pattern_to_regex(regex, definition->as);
-        } else if (!declared || !append_literal_pattern(regex, declared->type)) {
-            log_error("compile_pattern_to_regex: unresolved pattern reference '%.*s'",
-                ident->name ? (int)ident->name->len : 0,
-                ident->name ? ident->name->chars : "");
+            if (depth >= PATTERN_MAX_DEPTH) {
+                return pattern_lowering_failed(error, "a pattern cannot refer to itself");
+            }
+            return lower_pattern(regex, ((AstPatternDefNode*)declared)->as, error, depth + 1);
         }
-        break;
+        if (declared && append_literal_pattern(regex, declared->type)) return true;
+        // the resolver reports an unusable name at the name itself; this is the
+        // backstop for any path that reaches lowering without it
+        return pattern_lowering_failed(error,
+            "a pattern names only patterns, literal unions and character ranges defined before it");
     }
 
     default:
-        log_error("compile_pattern_to_regex: unknown node type %d", node->node_type);
-        break;
+        return pattern_lowering_failed(error, "unsupported pattern part");
     }
 }
 
@@ -688,8 +670,20 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     // Build regex string
     StrBuf* regex = strbuf_new_cap(256);
     strbuf_append_str(regex, "^");  // anchor start for full match
-    compile_pattern_to_regex(regex, pattern_ast);
+    StrBuf* lowering_error = strbuf_new_cap(64);
+    bool lowered = compile_pattern_to_regex(regex, pattern_ast, lowering_error);
     strbuf_append_str(regex, "$");  // anchor end
+    static char error_buffer[256];
+    if (!lowered) {
+        if (error_msg) {
+            snprintf(error_buffer, sizeof(error_buffer), "%s", lowering_error->str);
+            *error_msg = error_buffer;
+        }
+        strbuf_free(lowering_error);
+        strbuf_free(regex);
+        return nullptr;
+    }
+    strbuf_free(lowering_error);
 
     StrBuf* surface = strbuf_new_cap(256);
     strbuf_append_str(surface, is_symbol ? "\\symbol(" : "\\(");
@@ -699,7 +693,6 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
     log_debug("Compiled pattern regex: %s", regex->str);
 
     re2::RE2::Options options = lam::re2_glue_default_options();
-    static char error_buffer[256];
     re2::RE2* re2 = lam::re2_glue_compile(
         regex->str, regex->length, options, "compile_pattern_ast",
         error_msg ? error_buffer : nullptr, sizeof(error_buffer));
@@ -730,7 +723,7 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 }
 
 bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* pattern,
-                             AstNode* pattern_ast, bool is_symbol) {
+                             AstNode* pattern_ast, bool is_symbol, const char** error_msg) {
     if (!pool || !type_list || !pattern || !pattern_ast) return false;
     if (pattern->re2) {
         if (pattern->pattern_index >= 0) return true;
@@ -742,11 +735,11 @@ bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* patt
         return true;
     }
 
-    const char* error_msg = NULL;
-    TypePattern* compiled = compile_pattern_ast(pool, pattern_ast, is_symbol, &error_msg);
+    const char* reason = NULL;
+    TypePattern* compiled = compile_pattern_ast(pool, pattern_ast, is_symbol, &reason);
     if (!compiled) {
-        log_error("pattern compile: failed to build regex: %s",
-            error_msg ? error_msg : "unknown error");
+        log_error("pattern compile: failed to build regex: %s", reason ? reason : "unknown error");
+        if (error_msg) *error_msg = reason;
         return false;
     }
     pattern->re2 = compiled->re2;
@@ -1128,7 +1121,8 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
     RootFrame roots(2);
     Rooted<List*> rooted_result(roots, result);
     Rooted<Map*> rooted_match(roots, (Map*)NULL);
-    if (!pattern || !str || len == 0) return rooted_result.get();
+    // an empty subject is searched too: `find("", \(d*))` has one empty match
+    if (!pattern || !str) return rooted_result.get();
 
     bool must_release = false;
     re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
@@ -1235,21 +1229,6 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
     strbuf_free(out);
     if (must_release) lam::re2_glue_release(re);
     return result;
-}
-
-// Replace all non-overlapping matches of pattern in string
-String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_len,
-                            const char* repl, size_t repl_len) {
-    if (!pattern || !str) return nullptr;
-
-    re2::RE2* re = pattern_get_unanchored(pattern);
-    if (!re) return nullptr;
-
-    std::string input(str, str_len); // STD_CONTAINER_OK: RE2::GlobalReplace requires std::string* in/out buffer.
-    re2::StringPiece replacement(repl, repl_len);
-    RE2::GlobalReplace(&input, *re, replacement);
-
-    return make_heap_string(input.c_str(), input.size());
 }
 
 static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset, size_t len) {

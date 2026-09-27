@@ -664,7 +664,17 @@ struct PrintItemVisitor {
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_TYPE> item) const {
-        TypeType* type = (TypeType*)item.ptr();
+        // D3.1.1v4: a pattern is a bare TypePattern under the TYPE tag, not the
+        // TypeType wrapper read below (whose kind is SIMPLE); reading its
+        // `type` field crashed. It prints as its canonical source.
+        Type* value = (Type*)item.ptr();
+        if (value->kind == TYPE_KIND_PATTERN) {
+            String* source = ((TypePattern*)value)->source;
+            if (source) strbuf_append_str_n(strbuf, source->chars, source->len);
+            else strbuf_append_str(strbuf, "type");
+            return;
+        }
+        TypeType* type = (TypeType*)value;
         if (const char* alias = type_alias_name(type->type)) {
             strbuf_append_str(strbuf, alias);
             return;

@@ -1,6 +1,6 @@
 # Lambda String Patterns and Regular Expressions — Compatibility Analysis
 
-> **Status:** analysis, 2026-09-27, with four rulings, all made by the user on
+> **Status:** analysis, 2026-09-27, with five rulings, all made by the user on
 > 2026-09-27 and implemented the same day. **SP17** (§10) limits island `!` to
 > single-character sets; it resolves SPO9 and is formal as S11.1.2v3.
 > **SP18** (§11) keeps `!` prefix-only inside an island; exclusion between
@@ -11,8 +11,13 @@
 > leaving `|` as its only binary operator; it resolves SPO13. Both are formal
 > in S11.1.2v3 and S10.1.1v3. The conformance defects in §7 need no new
 > ruling, because each contradicts a ruling or a user doc already in force.
-> The other open questions (SPO7's value-expression tiers, SPO10–SPO12, §8)
-> each carry a recommendation and await the user's ruling. SP17–SP20 and the
+> The other open questions (SPO7's value-expression tiers, SPO10, SPO12,
+> SPO14, §8)
+> each carry a recommendation and await the user's ruling. **SP21** (§13),
+> ruled the same day, resolves SPO11: `replace` steps through matches as
+> ECMAScript `replaceAll` does and inserts its replacement literally (formal
+> as S17.6.1). The §7 defects that needed no ruling, and #6 once SP21 settled
+> it, were fixed on 2026-09-27; #8 waits on SPO12. SP17–SP21 and the
 > SPO entries extend the series of
 > [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md) §4.3 and
 > §6. The documentation drift listed in §9 was corrected on 2026-09-27.
@@ -79,7 +84,7 @@
 - **Defects: ten.** One is a crash, four are silent miscompiles or silent
   failures (§7). Two of them, #2 and #4, were fixed with SP17. #9 turned up
   later, while checking the user docs' examples, and #10 while weighing range
-  spellings; #10 is fixed.
+  spellings. All but #8 are fixed as of 2026-09-27; #8 waits on SPO12.
 
 ---
 
@@ -184,10 +189,11 @@ RE2's `.` excludes only `\n`, which is also how Perl, PCRE, Python and Go read
 it. ECMAScript (and Java) exclude all four line terminators: `\n`, `\r`,
 U+2028 and U+2029.
 
-`...` compiles to `.*`, so it also stops at `\n`: `"a\nb" is \(...)` is false.
-That agrees with JS `.*`, but it contradicts Lambda's own definition.
+`...` compiled to `.*`, so it also stopped at `\n`: `"a\nb" is \(...)` was
+false. That agrees with JS `.*`, but it contradicts Lambda's own definition.
 S16.8.6v3 makes `...` the elided run, with `...` ≡ `any*`, and the user doc
-calls `\(...)` "any string" (§7 #7, SPO10).
+calls `\(...)` "any string". **Fixed 2026-09-27 (§7 #7):** `...` now lowers to
+`(?s:.*)` and matches newlines. `.` is unchanged until SPO10 rules on it.
 
 ### 4.3 Unicode: code points, not UTF-16 units
 
@@ -244,11 +250,12 @@ With no capture groups there are no substitution templates. JS's `$&`, `$1`
 and `$<name>` stay literal in Lambda: `replace("abc", \("b"), "[$&]")` is
 `"a[$&]c"`, where JS gives `"a[b]c"`.
 
-The plain `replace` path, however, hands the replacement to RE2's rewriter.
-It is taken whenever no `limit`, `last` or `ignore_case` option is set. The
+The plain `replace` path, however, handed the replacement to RE2's rewriter.
+It was taken whenever no `limit`, `last` or `ignore_case` option was set. The
 rewriter reads `\0`–`\9` as submatch references and `\\` as one backslash, and
 it silently drops any other backslash sequence. The options path appends the
-replacement literally:
+replacement literally. **SP21 (§13) made the options path the only one:** every
+row below now reads as the options column.
 
 | Call (replacement text as characters) | Plain path | Options path | JS |
 |---|---|---|---|
@@ -425,20 +432,20 @@ they are **not yet filed** as of 2026-09-27. Code anchors are in Appendix A.
 
 | # | Defect | Measured | Required by |
 |---|---|---|---|
-| 1 | **Crash.** Printing a pattern value segfaults, in both tiers. | `"x"; \(d+)`, `[P]` and `\symbol(a+)` each exit with status 139 | D3.1.1v4: a pattern is a `Type*` under `LMD_TYPE_TYPE`. The printer assumes every such value is a `TypeType` wrapper. |
+| 1 | **Fixed 2026-09-27.** **Crash.** Printing a pattern value segfaults, in both tiers. | `"x"; \(d+)`, `[P]` and `\symbol(a+)` each exit with status 139 | D3.1.1v4: a pattern is a `Type*` under `LMD_TYPE_TYPE`. The printer assumes every such value is a `TypeType` wrapper. |
 | 2 | **Fixed 2026-09-27 (SP17, §10).** **Silent miscompile.** `!` on anything except `d`, `w`, `s`, `a` compiles to nothing. | `"1" is \("1" !("a" to "z"))` is true and `"11"` is false; `"" is \(!"x")` is true; `"x" is \(!(d))` is false; `find("<a><b>", \("<" (!">")* ">"))` is `[]` | S11.1.2v2 applies negation in islands, and `grammar.js` admits these operands (`char_negation_type`) |
-| 3 | **Silent failure.** Errors found while building the regex are only logged: `is` answers false, `find` returns an error value, and the exit status is 0. | RE2 rejections: `d{5,2}` and `d{1001}`; every island `&` also failed this way ("invalid perl operator: (?=") until SP20 made it a parse error. Unresolved names: `\(dw)`, `\(N)` with `type N = int`, and self-reference. | A malformed pattern must be a compile-time diagnostic, as parse-stage errors already are (E103) |
+| 3 | **Fixed 2026-09-27.** **Silent failure.** Errors found while building the regex are only logged: `is` answers false, `find` returns an error value, and the exit status is 0. | RE2 rejections: `d{5,2}` and `d{1001}`; every island `&` also failed this way ("invalid perl operator: (?=") until SP20 made it a parse error. Unresolved names: `\(dw)`, `\(N)` with `type N = int`, and self-reference. | A malformed pattern must be a compile-time diagnostic, as parse-stage errors already are (E103) |
 | 4 | **Fixed 2026-09-27 (§10.2).** Non-ASCII range bounds break, and multi-code-point bounds are accepted. | `"β" is \("α" to "ω")` is false (RE2: "invalid UTF-8"), while `"β" is ("α" to "ω")` is true. `\("ab" to "z")` is accepted as `[a-z]`. | S11.1.3; SP5's single denotation |
-| 5 | Island counts are not validated. | `\(d{2,})` is accepted, where type position gives E103. `"1{,5}" is \(d{,5})` and `"1{a}" is \(d{a})` are both true. | S11.1.6v3 and S16.8.6v3. Its Appendix A row lists the islands among the conforming front ends. |
-| 6 | `replace` has two semantics, chosen by whether a `limit`, `last` or `ignore_case` option is set. | The plain call uses RE2 `GlobalReplace`: `"aab"` with `"a"*` gives `"-b-"`, `\0` is substituted and `\x` is dropped (§4.6). With an option it gives `"--b-"` and treats the replacement literally. | One call, one meaning. Plain `replace` also skips the empty match at 2 that `find` reports. SPO11 decides the target semantics. |
-| 7 | `...` stops at `\n`. | `"a\nb" is \(...)` is false | S16.8.6v3 (`...` ≡ `any*`) and the user doc's "any string". SPO10 decides `.`. |
+| 5 | **Fixed 2026-09-27.** Island counts are not validated. | `\(d{2,})` is accepted, where type position gives E103. `"1{,5}" is \(d{,5})` and `"1{a}" is \(d{a})` are both true. | S11.1.6v3 and S16.8.6v3. Its Appendix A row lists the islands among the conforming front ends. |
+| 6 | **Fixed 2026-09-27 (SP21, §13).** `replace` has two semantics, chosen by whether a `limit`, `last` or `ignore_case` option is set. | The plain call uses RE2 `GlobalReplace`: `"aab"` with `"a"*` gives `"-b-"`, `\0` is substituted and `\x` is dropped (§4.6). With an option it gives `"--b-"` and treats the replacement literally. | One call, one meaning. Plain `replace` also skips the empty match at 2 that `find` reports. SPO11 decides the target semantics. |
+| 7 | **Fixed 2026-09-27.** `...` stops at `\n`. | `"a\nb" is \(...)` is false | S16.8.6v3 (`...` ≡ `any*`) and the user doc's "any string". SPO10 decides `.`. |
 | 8 | `ignore_case` folds only ASCII on the literal path but full Unicode on the regex path. | `find("É", \("é"), {ignore_case: true})` is `[]`, while `find("É1", \("é" d), …)` matches | S11.1.2v3: a literal-only island is the literal union, so its meaning must not depend on the path. SPO12 decides the folding rule. |
-| 9 | **Found 2026-09-27, while checking doc examples.** A pattern cannot annotate a `let` binding or a parameter: the static boundary reads it as a type value. | `let code: \(a{3}) = "abc"`, and `let x: A = "abc"` with `type A = \(a+)`, give E201 ("cannot initialize … of type type with string"). `fn f(x: \(d+))` called with `"12"` gives E207 ("argument 1 expected type, got string"). The parameter form worked on a 2026-09-12 build (451b17f4c) and fails on 2026-09-22 (fc3153b3b); the `let` form fails on both. | S11.1.2v3: a pattern is a type value, usable wherever a type is. `doc/Lambda_Type.md` §Inline Patterns and §Using Patterns as Types show both forms. |
+| 9 | **Found and fixed 2026-09-27, while checking doc examples.** A pattern cannot annotate a `let` binding or a parameter: the static boundary reads it as a type value. | `let code: \(a{3}) = "abc"`, and `let x: A = "abc"` with `type A = \(a+)`, give E201 ("cannot initialize … of type type with string"). `fn f(x: \(d+))` called with `"12"` gives E207 ("argument 1 expected type, got string"). The parameter form worked on a 2026-09-12 build (451b17f4c) and fails on 2026-09-22 (fc3153b3b); the `let` form fails on both. | S11.1.2v3: a pattern is a type value, usable wherever a type is. `doc/Lambda_Type.md` §Inline Patterns and §Using Patterns as Types show both forms. |
 | 10 | **Found and fixed 2026-09-27.** An island cannot name a character range type. | With `type Lower = "a" to "z"`, `\(Lower+)` logs "unresolved pattern reference" and matches only the empty string, and `\(!Lower)` is E200; `"q" is Lower` is true. Named literal unions worked (§10.2). | SP5 and S11.1.3: `X to Y` denotes one set in type position and in an island. S11.1.2v3 lets an island reuse named patterns. |
 
 ---
 
-## 8. Open questions (SPO7–SPO13)
+## 8. Open questions (SPO7–SPO14)
 
 **SPO7 — Precedence of the type operators.** *Island half RESOLVED
 2026-09-27 → SP19 and SP20 (§12); the value-expression tiers stay open.*
@@ -482,7 +489,8 @@ where `.` excludes the four line terminators and `s` is JS `\s`, or (b)
 - `d` and `w` stay ASCII, as in JS. `a` stays ASCII too; Unicode letters wait
   for SPO1's class namespace.
 
-**SPO11 — `replace` semantics.** What does `replace` do with the replacement
+**SPO11 — RESOLVED 2026-09-27 → SP21 (§13).** `replace` semantics. What
+does `replace` do with the replacement
 text and with empty matches? **Recommendation:** follow ECMAScript
 `String.prototype.replaceAll` for empty matches, as S17.1.1 already does for
 `split` and as `find` already behaves. Treat the replacement as literal text
@@ -508,6 +516,28 @@ island only when both operands are single-code-point sets, and compile it to a
 class intersection, like the `v` flag's `&&`. Everywhere else, reject it with
 a diagnostic that points to `\(A) & \(B)`. The ruling went further: no `&`
 inside an island at all, so the diagnostic covers every island `&`.
+
+**SPO14 — An empty literal needle.** Opened 2026-09-27 with SP21 (USER: keep
+it open); formal SO47. Does an empty literal needle match at every code-point
+boundary? Today it matches nowhere in `replace` and `find`, but everywhere in
+`split`:
+
+| Call | Lambda | JS | Python |
+|---|---|---|---|
+| `replace("abc", "", "-")` | `"abc"` | `"-a-b-c-"` (`replaceAll`) | `"-a-b-c-"` |
+| `replace("abc", "", "-", {limit: 1})` | `"abc"` | `"-abc"` (`replace`) | `"-abc"` (count 1) |
+| `find("abc", "")` | `[]` | indices 0, 1, 2, 3 (`matchAll`) | n/a |
+| `split("abc", "")` | `["a", "b", "c"]` (S17.1.1) | the same | error |
+
+Two things tie it to the patterns. `\("")` is the value `""` (SP7), so it takes
+the literal path and replaces nothing, while `\(d*)`, which also matches the
+empty string everywhere, gives `"-a-b-c-"` under S17.6.1. And S17.6.1 promises
+that `find` and `replace` see the same matches, which holds for both readings.
+**The options:** (a) match at every boundary, as JS and Python do, which makes
+`replace`, `find` and `split` agree and `\("")` agree with `\(d*)`; or (b)
+keep matching nowhere, which guards against a needle that is unexpectedly
+`""`, and state the exception to S17.6.1 and SP7 explicitly. Open by the
+user's decision; the evidence points to (a).
 
 ---
 
@@ -771,26 +801,118 @@ Together with SP18, an island's operators are regex's, plus prefix `!`.
 
 ---
 
+## 13. SP21: `replace` follows ECMAScript `replaceAll` (ruled 2026-09-27)
+
+**Ruling (USER, 2026-09-27; formal text S17.6.1).** `replace` handles empty
+matches the way ECMAScript `String.prototype.replaceAll` does, and inserts its
+replacement as literal text: the SPO11 recommendation, adopted. The options
+`limit`, `last` and `ignore_case` choose among the same matches and change
+nothing else.
+
+| Call | Before | After (= JS) |
+|---|---|---|
+| `replace("aab", \("a"*), "-")` | `"-b-"` | `"--b-"` |
+| `replace("ab", \(d*), "-")` | `"-a-b-"` | `"-a-b-"` |
+| `replace("", \(d*), "-")` | `""` | `"-"` |
+| `replace("a1b", \(d), "<\\0>")` (the text `<\0>`) | `"a<1>b"` | `"a<\0>b"` |
+
+### 13.1 Why
+
+1. **One call, one meaning.** Whether an option is present must not change how
+   matches are found or what replaces them (§7 #6).
+2. **It completes a family.** `split` already follows ECMAScript (S17.1.1),
+   and `find` already steps over empty matches the same way (§4.4). With
+   `replace` following them, every match `replace` replaces is one that
+   `find` reports.
+3. **Literal text until captures exist.** With no capture groups (SO32) there
+   is nothing for `$1` or `\1` to name. RE2's rewriter also collided with
+   Lambda's own string escapes (`"\\0"`), and it silently dropped every other
+   backslash sequence (§4.6).
+
+### 13.2 Consequences
+
+- Plain `replace` uses the loop the options path already used; RE2's
+  `GlobalReplace` path is gone (`pattern_replace_all`).
+- `find` and pattern `replace` search an empty subject too, since a pattern can
+  match `""`: `find("", \(d*))` is one empty match at 0, where it was `[]`,
+  and `replace("", \(d*), "-")` is `"-"`. `split` is unchanged (S17.1.1
+  already rules its empty subject).
+- An empty options map sets no option. It was rejected, so
+  `replace("aab", "a", "-", {})` and `find("aab", "a", {})` returned errors.
+- Fixture: `test/lambda/pattern_replace.ls`, identical on the interpreter,
+  the JIT and the auto tier.
+- **Left open (SPO14, formal SO47):** an empty *literal* needle still matches
+  nothing: `replace("abc", "", "-")` is `"abc"` and `find("abc", "")` is `[]`,
+  where JS `replaceAll("", "-")` gives `"-a-b-c-"`. SP21 speaks to pattern
+  matches; the user kept the literal case open.
+- S17.6.1 is a new ruling that changes what plain `replace` calls return, so
+  the spec moves to 50.0.0 (MAJOR); 49.0.0 had been committed with SP17–SP20.
+
+---
+
+## 14. Defect fixes (2026-09-27)
+
+The §7 defects that needed no ruling, fixed the same day. Each fix is pinned by
+a golden run on all three tiers or by a negative fixture in
+`test_lambda_errors_gtest`.
+
+- **#1, printing a pattern.** The printer cast every type value to the
+  `TypeType` wrapper, but a pattern is a bare `TypePattern` under the same tag
+  (D3.1.1v4). A pattern now prints as its canonical source, `\((d)+)`, and a
+  contract diagnostic names a pattern the same way instead of as `type`.
+- **#3, silent failures.** The lowering now returns a reason instead of
+  logging and emitting nothing, and the resolver reports it:
+  - an unknown or later-defined name is E204 ("`B` is not defined before this
+    pattern"), with a hint when the name is class letters run together
+    (`dw`);
+  - a name that is no pattern, literal union or character range is E200;
+  - a pattern RE2 refuses is E200 ("this pattern cannot be compiled: …");
+  - a self-reference is caught as an undefined name, and a depth guard stops
+    any expansion that would recurse.
+- **#5, counts.** A count inside a pattern is checked by the scanner type
+  position uses: `{n}`, `{n,m}` or `{n+}`, blanks allowed as in the reference
+  grammar. `{n,}` names `{n+}`; `{,5}` and `{a}` are E103. The regex engine's
+  own bounds are checked in the pattern parser: `n ≤ m`, at most 1000.
+- **#7, `...`.** It lowers to `(?s:.*)`, so it matches newlines.
+- **#9, pattern annotations.** A pattern contract now proves only its tag's
+  domain (`string` or `symbol`) and leaves membership to the runtime check, as
+  a range contract does. So `let code: \(a{3}) = "abc"`, `fn f(x: \(d+))` and a
+  named alias all work, a non-matching string fails at run time, and an `int`
+  or a symbol is rejected at compile time. A range- or pattern-typed source
+  bound to a `type` slot defers to the runtime check: there the source may be
+  the type value itself (`let t: type = \(d+)`). That also fixed
+  `let w: type = R` for a range type alias, which had been E201.
+
+Found while fixing, not fixed: `let u: type = int` is E201. The static check
+strips the type-value wrapper, so it compares `int` with `type`. The cause
+lies outside patterns.
+
+---
+
 ## Appendix A — Implementation map
 
 Anchors are `file:line` plus the symbol, verified against the working tree
-of 2026-09-27 with SP17–SP20 applied.
+of 2026-09-27 with SP17–SP21 and the §14 fixes applied.
 
 **Island parser.** In `lambda/runtime/parse_type_pattern.cpp`:
 
-- `parse_island` (510) and `parse_island_body` (484), which has only the
-  `|` tier; it rejects an `&` at 493 (SP20).
-- `parse_island_concat` (459) implements whitespace concatenation.
-- `parse_island_unary` (411) handles prefix `!` and one suffix. The brace
-  scan at 441 copies whatever lies between `{` and `}`.
-- `parse_island_primary` (345) and `island_char_class` (323).
+- `parse_island` (535) and `parse_island_body` (509), which has only the
+  `|` tier and rejects an `&` (SP20).
+- `parse_island_concat` (484) implements whitespace concatenation.
+- `parse_island_unary` (425) handles prefix `!` and one suffix. A count goes
+  through `scan_occurrence_count` (943) and `occurrence_count_problem` (919),
+  shared with type position, then the engine bounds.
+- `parse_island_primary` (359) and `island_char_class` (337).
 
 **Resolver checks (SP17).** In `resolve_type_pattern`
 (`lambda/runtime/parse_type_pattern.cpp`):
 
-- `LSF_TP_ISLAND_UNARY` (1403) rejects a `!` operand that is not a
+- `LSF_TP_PATTERN_REF` (1447) rejects a name the pattern cannot use (E204,
+  E200), and `LSF_TP_ISLAND` (1505) reports a compile failure nothing else
+  reported.
+- `LSF_TP_ISLAND_UNARY` (1484) rejects a `!` operand that is not a
   single-character set (E200).
-- `LSF_TP_PATTERN_RANGE` (1386) rejects a range bound that is not a single
+- `LSF_TP_PATTERN_RANGE` (1467) rejects a range bound that is not a single
   character (E200, S11.1.3).
 - Both leave a symbol literal to the island's content-only diagnostic.
   `pattern_ast_has_symbol_literal` (`lambda/runtime/build_ast.cpp:4877`) now
@@ -798,38 +920,47 @@ of 2026-09-27 with SP17–SP20 applied.
 
 **Regex lowering.** In `lambda/runtime/re2_wrapper.cpp`:
 
-- `compile_pattern_ast` (668) anchors `^…$`.
-- `compile_pattern_to_regex` (376).
-- `char_set_add_node` (242) builds a single-character set as code-point
-  intervals, and fails on anything else. `pattern_is_char_set` (305) is the
-  resolver's entry to it.
+- `compile_pattern_ast` (664) anchors `^…$` and returns the lowering's reason.
+- `compile_pattern_to_regex` (425) and `lower_pattern` (429), which fail with
+  a reason (`pattern_lowering_failed`, 393); `pattern_can_name` (401).
+- `char_set_add_node` (256) builds a single-character set as code-point
+  intervals, and fails on anything else. `pattern_is_char_set` (319) is the
+  resolver's entry to it; `char_range_type_bounds` (224) reads a character
+  range type (§7 #10).
 - `char_set_add_class` (181) is the one definition of each named class.
-- `compile_char_set` (342) lowers a set, or its complement, to one RE2 class.
+- `compile_char_set` (356) lowers a set, or its complement, to one RE2 class.
   It serves `!` and every range.
-- `compile_char_class` (351) takes `d`, `w`, `s` and `a` from the class
-  table. `.` stays RE2's `.`, and `...` stays `.*`.
-- `append_literal_pattern` (367) lets an island name a literal union (SP7).
+- `compile_char_class` (365) takes `d`, `w`, `s` and `a` from the class
+  table. `.` stays RE2's `.`, and `...` is `(?s:.*)`.
+- `append_literal_pattern` (382) lets an island name a literal union (SP7).
 - `|` is the only binary operator it lowers; the `(?=…)` lookahead for `&`,
   which RE2 rejected, was removed with SP20.
-- `convert_occurrence_to_regex` (45) copies the count text and turns only a
-  `+` into `,`, which is §7 #5.
-- `escape_regex_literal` (59) and `append_literal_type` (818).
+- `convert_occurrence_to_regex` (45) copies the checked count text, turning
+  `{n+}` into `{n,}`.
+- `escape_regex_literal` (59) and `append_literal_type` (825).
 
 **RE2 options.** `lib/re2_glue.hpp` `re2_glue_default_options`: UTF-8
 encoding, Perl syntax, leftmost-first, case-sensitive, `dot_nl` off.
 
 **Search functions.** In `lambda/runtime/re2_wrapper.cpp`:
 
-- `pattern_find_all_options` (1096).
-- `pattern_replace_all_options` (1161), the literal loop.
-- `pattern_replace_all` (1212), which calls `RE2::GlobalReplace`.
+- `pattern_find_all_options` (1118).
+- `pattern_replace_all_options` (1184), the one replace loop (S17.6.1).
 
-The choice between the two replace paths is made in `fn_replace`
-(`lambda/runtime/lambda-eval.cpp:8132`), which is §7 #6.
+`fn_replace_impl` (`lambda/runtime/lambda-eval.cpp:8085`) calls that loop
+with or without options (§7 #6); `parse_find_replace_options` (7947) takes an
+empty map as no options.
 
-**Printer.** `lambda/core/print.cpp:672`,
-`PrintItemVisitor::operator()(ItemOf<LMD_TYPE_TYPE>)`, reads `->type` of a
-bare `TypePattern`, which is §7 #1.
+**Printer and contract names.** `lambda/core/print.cpp:671`,
+`PrintItemVisitor::operator()(ItemOf<LMD_TYPE_TYPE>)`, prints a bare
+`TypePattern` as its source (§7 #1); `lambda_type_format_name_inner`
+(`lambda/runtime/type_contract.cpp:1610`) names a pattern contract the same
+way.
+
+**Pattern contracts (§7 #9).** `lambda_pattern_type_domain` and
+`lambda_member_test_type_domain` (`lambda/lambda-data.hpp:1292`, 1299) give a
+pattern's or range's carrier domain; `static_boundary_relation`
+(`lambda/runtime/build_ast.cpp:1683`, 1687) uses it for targets and sources.
 
 **Expression precedence.** `lambda/runtime/parser/lambda_parser.c:1804`,
 `infix_bp`: `|`, `&`, `!` and `to` all map to `LAMBDA_BP_SET` (§6.4).

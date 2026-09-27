@@ -1677,12 +1677,18 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
     // members' domain. A source whose carrier fits the domain leaves
     // membership to the runtime check; one that cannot fit rejects. A range
     // source is never PROVEN either: its members keep their own carriers
-    // (`3.0` is in `1 to 5`), so no native lane may skip admission.
-    if (Type* domain = lambda_range_type_domain(target)) {
+    // (`3.0` is in `1 to 5`), so no native lane may skip admission. A pattern
+    // (S11.1.2v3) is the same shape over text: its tag names the domain and
+    // matching decides membership, so `let s: \(d+) = "12"` is no type value.
+    if (Type* domain = lambda_member_test_type_domain(target)) {
         return static_boundary_relation(source, domain) == STATIC_BOUNDARY_REJECTED
             ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
     }
-    if (Type* domain = lambda_range_type_domain(source)) {
+    if (Type* domain = lambda_member_test_type_domain(source)) {
+        // A source typed by a range or pattern is a member of it, except in a
+        // `type` slot: there it may be that range or pattern as a type value
+        // (`let t: type = \(d+)`), and only the value can tell which.
+        if (target == &TYPE_TYPE) return STATIC_BOUNDARY_DEFERRED;
         return static_boundary_relation(domain, target) == STATIC_BOUNDARY_REJECTED
             ? STATIC_BOUNDARY_REJECTED : STATIC_BOUNDARY_DEFERRED;
     }

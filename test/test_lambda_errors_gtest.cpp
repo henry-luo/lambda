@@ -1405,6 +1405,51 @@ TEST_F(NegativeScriptTest, PatternIntersectionNamesWholePatternForm) {
         "`&` is not a pattern operator: intersect whole patterns");
 }
 
+// A name a pattern cannot use had compiled to nothing, so the pattern silently
+// matched only "". Each is now a compile error at the name.
+TEST_F(NegativeScriptTest, PatternUnknownNameHintsJoinedClasses) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_unknown_name.ls",
+        "`dw` is not defined before this pattern; separate classes with a space");
+}
+
+TEST_F(NegativeScriptTest, PatternForwardReferenceIsUndefined) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_forward_reference.ls",
+        "`B` is not defined before this pattern");
+}
+
+TEST_F(NegativeScriptTest, PatternNameMustBeAPattern) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_not_a_pattern.ls",
+        "`N` is not a pattern: a pattern names only patterns");
+}
+
+// S16.8.6v3: a count inside a pattern takes the type-position spellings; its
+// text had reached the regex unchecked.
+TEST_F(NegativeScriptTest, PatternCountSpellingIsChecked) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_count_spelling.ls",
+        "a count is `{n}`, `{n,m}` or `{n+}`");
+}
+
+TEST_F(NegativeScriptTest, PatternOpenCountNamesItsReplacement) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_open_count.ls",
+        "`T{n,}` is not the open count");
+}
+
+// Counts the regex engine refuses left the pattern silently matching nothing.
+TEST_F(NegativeScriptTest, PatternCountBoundsAreOrdered) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_count_order.ls",
+        "a count `{n,m}` in a pattern needs n no greater than m");
+}
+
+TEST_F(NegativeScriptTest, PatternCountHasEngineLimit) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_count_limit.ls",
+        "a count in a pattern is at most 1000");
+}
+
+TEST_F(NegativeScriptTest, PatternTheEngineRefusesIsACompileError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/string_pattern_too_large.ls",
+        "this pattern cannot be compiled");
+}
+
 // S11.1.6v2/S16.8.6v3: a count on a *run* is the occurrence family, spelled as
 // in regex. The bracket forms it replaced name their replacement rather than
 // changing meaning under the same spelling.

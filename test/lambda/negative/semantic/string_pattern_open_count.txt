@@ -1,0 +1,1 @@
+`T{n,}` is not the open count: write `T{n+}` for a run of n or more

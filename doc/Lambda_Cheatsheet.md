@@ -689,6 +689,7 @@ Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
 | `replace("a1b2c3", digit, "X")` | `"aXbXcX"` |
 | `replace("hello   world", ws, " ")` | `"hello world"` |
 | `replace("abc", "b", "")` | `"ac"` |
+| `replace("aab", \("a"*), "-")` | `"--b-"` — empty matches count, as in JS `replaceAll`; the replacement is literal |
 
 `split(str, pattern_or_string)`
 

@@ -189,6 +189,10 @@ AstNode* parse_element_type(Lexer* lx);
 AstNode* parse_fn_type(Lexer* lx, bool is_proc);
 AstNode* parse_island(Lexer* lx);
 AstNode* parse_island_body(Lexer* lx);
+static bool scan_occurrence_count(Lexer* lx, StrView* op);
+
+// RE2's limit on a repeat count; a larger count left the pattern uncompiled
+static const int PATTERN_MAX_COUNT = 1000;
 
 // Every hand node shares the type-slot source span, so nothing downstream may
 // re-read source through it expecting a sub-span. The one consumer that does is the
@@ -319,6 +323,16 @@ AstNode* parse_number_literal(Lexer* lx) {
 // `compile_pattern_ast`). These build exactly the node kinds
 // `compile_pattern_to_regex` accepts.
 
+// `dw` lexes as one name; the likely intent is the classes `d w`
+static bool name_is_joined_classes(String* name) {
+    if (!name || name->len < 2) return false;
+    for (uint32_t i = 0; i < name->len; i++) {
+        char c = name->chars[i];
+        if (c != 'd' && c != 'w' && c != 's' && c != 'a') return false;
+    }
+    return true;
+}
+
 // `d`, `w`, `s`, `a`, `.`, `...` are the reserved atoms inside an island.
 bool island_char_class(StrView w, PatternCharClass* out) {
     if (w.length != 1) { return false; }
@@ -438,13 +452,24 @@ AstNode* parse_island_unary(Lexer* lx) {
         else if (c == '+') { lx->p++; un->op = OPERATOR_ONE_MORE; }
         else if (c == '*') { lx->p++; un->op = OPERATOR_ZERO_MORE; }
         else {
-            int depth = 0;
-            while (lx->p < lx->end) {
-                if (*lx->p == '{') { depth++; }
-                else if (*lx->p == '}') { depth--; if (!depth) { lx->p++; break; } }
-                lx->p++;
+            // S16.8.6v3: the spellings type position takes. The text used to
+            // reach the regex unchecked, so `{2,}` took regex's meaning and
+            // `{,5}` or `{a}` matched as literal text.
+            StrView count;
+            if (!scan_occurrence_count(lx, &count)) { return NULL; }
+            // the regex engine's own bounds; past them the pattern silently
+            // matched nothing
+            int min_count, max_count;
+            parse_occurrence_count(count, &min_count, &max_count);
+            if (max_count >= 0 && min_count > max_count) {
+                fail_code(lx, ERR_INVALID_LITERAL,
+                    "a count `{n,m}` in a pattern needs n no greater than m");
+                return NULL;
             }
-            if (depth) { fail(lx, "unterminated occurrence count"); return NULL; }
+            if (min_count > PATTERN_MAX_COUNT || max_count > PATTERN_MAX_COUNT) {
+                fail_code(lx, ERR_INVALID_LITERAL, "a count in a pattern is at most 1000");
+                return NULL;
+            }
             un->op = OPERATOR_REPEAT;
         }
         // the regex compiler re-reads the occurrence spelling for REPEAT
@@ -877,6 +902,61 @@ static bool occurrence_count_is_open_comma(StrView op) {
     return p > op.str && p[-1] == ',';
 }
 
+static const char* skip_count_digits(const char* p, const char* end, bool* any) {
+    *any = false;
+    while (p < end && *p >= '0' && *p <= '9') { p++; *any = true; }
+    return p;
+}
+
+static const char* skip_count_blanks(const char* p, const char* end) {
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+    return p;
+}
+
+// S16.8.6v3: a count is `{n}`, `{n,m}` or `{n+}`, with blanks allowed between
+// its tokens as in the reference grammar. Returns the diagnostic for any other
+// spelling, NULL for a well-formed count.
+static const char* occurrence_count_problem(StrView op) {
+    // regex's `{n,}` is the likely habit, so it names its replacement
+    if (occurrence_count_is_open_comma(op)) {
+        return "`T{n,}` is not the open count: write `T{n+}` for a run of n or more";
+    }
+    const char* malformed = "a count is `{n}`, `{n,m}` or `{n+}`";
+    if (op.length < 3 || op.str[0] != '{' || op.str[op.length - 1] != '}') return malformed;
+    const char* end = op.str + op.length - 1;        // the closing brace
+    bool digits = false;
+    const char* p = skip_count_blanks(op.str + 1, end);
+    p = skip_count_digits(p, end, &digits);
+    if (!digits) return malformed;
+    p = skip_count_blanks(p, end);
+    if (p < end && *p == '+') {
+        p++;
+    } else if (p < end && *p == ',') {
+        p = skip_count_digits(skip_count_blanks(p + 1, end), end, &digits);
+        if (!digits) return malformed;
+    }
+    return skip_count_blanks(p, end) == end ? NULL : malformed;
+}
+
+// Scan a `{…}` count at the cursor and check its spelling. On success the
+// cursor is past the closing brace and `op` spans the braces.
+static bool scan_occurrence_count(Lexer* lx, StrView* op) {
+    const char* start = lx->p;
+    int depth = 0;
+    while (lx->p < lx->end) {
+        if (*lx->p == '{') { depth++; }
+        else if (*lx->p == '}') { depth--; if (!depth) { lx->p++; break; } }
+        lx->p++;
+    }
+    if (depth) { fail(lx, "unterminated occurrence count"); return false; }
+    *op = (StrView){start, (size_t)(lx->p - start)};
+    if (const char* problem = occurrence_count_problem(*op)) {
+        fail_code(lx, ERR_INVALID_LITERAL, problem);
+        return false;
+    }
+    return true;
+}
+
 // Apply one suffix: `?`, `+`, `*`, `{n}` / `{n,m}` / `{n+}`, `[n]`, or `[]`.
 // S11.1.6v2 splits the two families by bracket: braces count a *run* (the
 // occurrence family), brackets build an *array*. Counted occurrences never
@@ -901,21 +981,8 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
         // S16.8.6v3: the counted repetition is `{n}`, `{n,m}` and `{n+}`. A
         // line-start `{` never arrives here -- the statement parser ends the
         // type at the line break (S16.2.3), so it is a fresh statement.
-        int depth = 0;
-        while (lx->p < lx->end) {
-            if (*lx->p == '{') { depth++; }
-            else if (*lx->p == '}') { depth--; if (!depth) { lx->p++; break; } }
-            lx->p++;
-        }
-        if (depth) { fail(lx, "unterminated occurrence count"); return NULL; }
-        StrView op = {op_start, (size_t)(lx->p - op_start)};
-        // The open bound is `{n+}`, not regex's trailing comma: a habit that
-        // writes `{n,}` gets told, rather than parsing as an exact count.
-        if (occurrence_count_is_open_comma(op)) {
-            fail_code(lx, ERR_INVALID_LITERAL,
-                "`T{n,}` is not the open count: write `T{n+}` for a run of n or more");
-            return NULL;
-        }
+        StrView op;
+        if (!scan_occurrence_count(lx, &op)) { return NULL; }
         ast_node->op = OPERATOR_REPEAT;
     }
     else {
@@ -1381,6 +1448,20 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         AstIdentNode* ident = (AstIdentNode*)node;
         ident->entry = lookup_name(tp, (StrView){ident->name->chars, ident->name->len});
         if (ident->entry && ident->entry->node) { ident->type = ident->entry->node->type; }
+        // A name a pattern cannot use was lowered to nothing, so the pattern
+        // silently matched what was left, often only "". A pattern names only
+        // what is defined before it, so the name is decidable here.
+        if (!ident->entry || !ident->entry->node) {
+            record_semantic_error_span(tp, node->source_span, ERR_UNDEFINED_TYPE,
+                "`%.*s` is not defined before this pattern%s",
+                (int)ident->name->len, ident->name->chars,
+                name_is_joined_classes(ident->name) ?
+                    "; separate classes with a space, as in `d w`" : "");
+        } else if (!pattern_can_name(ident->entry->node)) {
+            record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
+                "`%.*s` is not a pattern: a pattern names only patterns, literal unions and character ranges",
+                (int)ident->name->len, ident->name->chars);
+        }
         break;
     }
     case LSF_TP_PATTERN_RANGE: {
@@ -1423,6 +1504,7 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         break;
     case LSF_TP_ISLAND: {
         AstPatternIslandNode* island = (AstPatternIslandNode*)node;
+        int errors_before = tp->error_count;
         resolve_type_pattern(tp, island->pattern);
         // Pattern bodies are content-only: the domain is the island's tag, so a
         // symbol literal inside one is a mistake (S11.1.2).
@@ -1444,10 +1526,17 @@ void resolve_type_pattern(Transpiler* tp, AstNode* node) {
         // LR03-26: an island compiled only when evaluated as a value, and
         // nothing evaluates one inside a type -- a constrained base, a union
         // arm, a field -- so there it had no regex and admitted nothing.
-        // Every pattern it may name has resolved by now; a failure is left to
-        // the evaluation that reports it.
-        compile_runtime_pattern(tp->pool, tp->type_list, pattern_type,
-            island->pattern, island->is_symbol);
+        // Every pattern it may name has resolved by now. A failure the body's
+        // own checks have not reported, such as the regex engine refusing the
+        // pattern, is reported here: it was only logged, and the pattern then
+        // matched nothing.
+        const char* reason = NULL;
+        if (!compile_runtime_pattern(tp->pool, tp->type_list, pattern_type,
+                island->pattern, island->is_symbol, &reason) &&
+                tp->error_count == errors_before) {
+            record_semantic_error_span(tp, node->source_span, ERR_SEMANTIC_ERROR,
+                "this pattern cannot be compiled: %s", reason ? reason : "unknown error");
+        }
         break;
     }
     case LSF_TP_BINARY: {

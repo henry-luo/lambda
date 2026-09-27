@@ -1011,7 +1011,7 @@ and `match`) check both domain and content.
 
 ### Pattern Definition Syntax
 
-```lambda
+```lambda no-run
 // Structural string pattern
 type PatternName = \(pattern_expression)
 
@@ -1303,7 +1303,7 @@ split("a1b2c3", digits)               // ["a", "b", "c", ""]
 split("a1b2c3", digits, true)         // ["a", "1", "b", "2", "c", "3", ""]  — keep delimiters
 ```
 
-All three functions also accept plain strings as the match argument (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md) § String Functions).
+All three functions also accept plain strings as the match argument (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md) § String Functions). `find` and `replace` see the same matches, found as ECMAScript `replaceAll` finds them, so a pattern that can match the empty string yields empty matches too, and `replace` inserts its replacement as literal text (S17.6.1).
 
 
 ---

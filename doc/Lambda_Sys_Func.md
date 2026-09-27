@@ -455,6 +455,17 @@ replace("a1b2", digit, "")            // "ab" (delete matches)
 replace("abc", "b", "")               // "ac" (plain string delete)
 ```
 
+Matches are found the way ECMAScript `replaceAll` finds them (S17.6.1). A
+pattern that can match the empty string replaces its empty matches too, and
+the replacement is inserted as literal text: `$&` and `\0` are not
+substitutions, since patterns have no captures.
+
+```lambda
+replace("aab", \("a"*), "-")          // "--b-": "aa", then the empty matches before and after "b"
+replace("", \(d*), "-")               // "-": an empty string holds one empty match
+replace("a1b", \(d), "[$&]")          // "a[$&]b": the replacement is literal
+```
+
 ### split(str, pattern_or_string, keep_delimiters?)
 
 Split a string by pattern or substring. Returns an array of substrings.

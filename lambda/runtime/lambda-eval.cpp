@@ -7961,7 +7961,9 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     // at Element's offsets — so the attribute face is reached by kind.
     TypeMap* options_shape = lambda_attr_shape(options_type, options_item.map);
     void* options_data = lambda_attr_data(options_type, options_item.map);
-    if (!options_shape || !options_data) return false;
+    // an empty map has no shape or buffer, and sets no option; it was
+    // rejected, so `replace(s, "a", "-", {})` returned an error
+    if (!options_shape || !options_data) return true;
     bool is_found = false;
     Item limit_item = _map_get(options_shape, options_data, "limit", &is_found);
     if (is_found && get_type_id(limit_item) != LMD_TYPE_NULL) {
@@ -8118,22 +8120,25 @@ static Item fn_replace_impl(Item str_item, Item old_item, Item new_item, FindRep
                 log_debug("fn_replace: third argument must be a string for pattern replace");
                 return ItemError;
             }
+            // an empty subject still holds an empty match, which a pattern
+            // like \(d*) replaces (S17.6.1): "" becomes "-", as in JS
             const char* str_chars = str_item.get_chars();
             uint32_t str_len = str_item.get_len();
+            if (!str_chars) { str_chars = ""; str_len = 0; }
             const char* repl_chars = new_is_null ? "" : new_item.get_chars();
             uint32_t repl_len = new_is_null ? 0 : new_item.get_len();
-
-            if (!str_chars || str_len == 0) return str_item;
 
             if ((options.has_limit && options.limit == 0) ||
                 (options.has_last && options.last == 0)) return str_item;
             int64_t pattern_limit = options_legacy_pattern_limit(options);
-            String* result = (!options.ignore_case && !options.has_limit && !options.has_last)
-                ? pattern_replace_all(pattern, str_chars, str_len,
-                                      repl_chars ? repl_chars : "", repl_chars ? repl_len : 0)
-                : pattern_replace_all_options(pattern, str_chars, str_len,
-                                              repl_chars ? repl_chars : "", repl_chars ? repl_len : 0,
-                                              pattern_limit, options.ignore_case);
+            // S17.6.1: one semantics with or without options. Matches step as
+            // ECMAScript replaceAll steps them, empty ones included, and the
+            // replacement is literal text. The plain call used RE2's
+            // GlobalReplace, which skipped an empty match after a non-empty one
+            // and rewrote `\0`..`\9` in the replacement.
+            String* result = pattern_replace_all_options(pattern, str_chars, str_len,
+                repl_chars ? repl_chars : "", repl_chars ? repl_len : 0,
+                pattern_limit, options.ignore_case);
             if (!result) return str_item;
             return {.item = s2it(result)};
         }
@@ -8258,8 +8263,9 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
 
     const char* str_chars = source_item.get_chars();
     uint32_t str_len = source_item.get_len();
-
-    if (!str_chars || str_len == 0) return {.array = array()};
+    // a pattern can match the empty subject (`"" is \(d*)`), so only the
+    // literal search below may skip it
+    if (!str_chars) { str_chars = ""; str_len = 0; }
 
     // pattern argument: check if it's a TypePattern
     if (pattern_type == LMD_TYPE_TYPE) {
@@ -8285,6 +8291,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         log_debug("fn_find: second argument must be a string, symbol, or pattern");
         return ItemError;
     }
+    if (str_len == 0) return {.array = array()};
 
     const char* needle = pattern_item.get_chars();
     uint32_t needle_len = pattern_item.get_len();

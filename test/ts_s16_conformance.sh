@@ -463,6 +463,11 @@ run A "island ! is prefix only"               'type T = \\(w ! d)\n'
 run R "island has no &"                       'type T = \\(a & w)\n'
 run R "island takes one suffix"               'type T = \\(d+*)\n'
 run A "& and ! between whole patterns"        'type T = \\(a+) & \\(w+)\ntype U = \\(w+) ! \\(d+)\n'
+run R "island count takes no open comma"      'type T = \\(d{2,})\n'
+run R "island count needs a lower bound"     'type T = \\(d{,5})\n'
+run R "island count is a number"             'type T = \\(d{a})\n'
+run A "island count allows blanks"           'type T = \\(d{2, 5})\n'
+run A "island open count"                    'type T = \\(d{2+})\n'
 
 echo
 echo "pass=$pass fail=$fail"
